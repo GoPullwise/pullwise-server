@@ -9,7 +9,9 @@ import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+from . import github_auth
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
@@ -33,10 +35,12 @@ def load_env_file(path: str | None = None) -> None:
 SESSION_COOKIE = "pw_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30
 MAGIC_LINK_MAX_AGE = 60 * 15
+GITHUB_STATE_MAX_AGE = 60 * 10
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
 MAGIC_LINKS: dict[str, dict] = {}
+GITHUB_STATES: dict[str, dict] = {}
 SETTINGS: dict[str, dict] = {}
 
 REPOSITORIES = [
@@ -183,6 +187,55 @@ def make_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_urlsafe(8)}"
 
 
+def remember_github_state(kind: str, redirect_to: str, **extra: object) -> str:
+    state = secrets.token_urlsafe(32)
+    GITHUB_STATES[state] = {
+        "kind": kind,
+        "redirectTo": redirect_to,
+        "expiresAt": now() + GITHUB_STATE_MAX_AGE,
+        **extra,
+    }
+    return state
+
+
+def pop_github_state(kind: str, state: str) -> dict:
+    record = GITHUB_STATES.pop(state, None)
+    if not record or record.get("kind") != kind or record.get("expiresAt", 0) < now():
+        raise ValueError("GitHub authorization state is invalid or expired.")
+    return record
+
+
+def url_origin(value: str) -> str | None:
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def safe_redirect_to(value: str | None, screen: str) -> str:
+    fallback = default_redirect(screen)
+    if not value:
+        return fallback
+    if value.startswith("/") and not value.startswith("//"):
+        return env("PULLWISE_APP_URL", "http://localhost:5173").rstrip("/") + value
+
+    origin = url_origin(value)
+    allowed = allowed_origins()
+    app_origin = url_origin(env("PULLWISE_APP_URL", "http://localhost:5173"))
+    if app_origin:
+        allowed.add(app_origin)
+    if origin and (origin in allowed or "*" in allowed):
+        return value
+    return fallback
+
+
+def redirect_with_params(location: str, params: dict[str, str]) -> str:
+    parsed = urlparse(location)
+    query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+    query.update({key: value for key, value in params.items() if value})
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
 def user_public(user: dict) -> dict:
     return {
         "id": user["id"],
@@ -231,6 +284,42 @@ def get_or_create_github_user() -> dict:
     return USERS[user_id]
 
 
+def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
+    login = profile["login"]
+    github_id = str(profile.get("id") or re.sub(r"[^a-z0-9]+", "_", login.lower()).strip("_"))
+    user_id = "usr_github_" + github_id
+    email = profile.get("primaryEmail") or profile.get("email") or f"{login}@users.noreply.github.com"
+    if user_id not in USERS:
+        USERS[user_id] = {
+            "id": user_id,
+            "name": profile.get("name") or login,
+            "email": email,
+            "avatarUrl": profile.get("avatar_url"),
+            "createdAt": now(),
+            "providers": ["github"],
+            "githubRepositoryAccess": None,
+        }
+
+    user = USERS[user_id]
+    user.update(
+        {
+            "name": profile.get("name") or user.get("name") or login,
+            "email": email,
+            "avatarUrl": profile.get("avatar_url"),
+            "githubId": github_id,
+            "githubLogin": login,
+            "githubHtmlUrl": profile.get("html_url"),
+            "githubAccessToken": token_payload.get("access_token"),
+            "githubTokenType": token_payload.get("token_type"),
+            "githubOAuthScope": token_payload.get("scope"),
+            "githubAccessTokenUpdatedAt": now(),
+        }
+    )
+    if "github" not in user["providers"]:
+        user["providers"].append("github")
+    return user
+
+
 def create_session(user: dict) -> dict:
     session_id = make_id("ses")
     session = {
@@ -275,6 +364,9 @@ def session_payload(session: dict | None) -> dict:
             "repositoriesConnected": repositories_connected,
             "repositoryScope": repo_access.get("scope") if repo_access else None,
             "authorizedAt": repo_access.get("authorizedAt") if repo_access else None,
+            "installationId": repo_access.get("installationId") if repo_access else None,
+            "repositorySelection": repo_access.get("repositorySelection") if repo_access else None,
+            "repositoryCount": len(repo_access.get("repositories", [])) if repo_access else 0,
         },
         "nextStep": "choose_repositories" if repositories_connected else "connect_github_repositories",
     }
@@ -350,26 +442,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/auth/session":
             return self.json(session_payload(self.current_session()))
         if path == "/auth/github/authorize":
-            redirect_to = params.get("redirectTo") or default_redirect("oauth")
-            callback = f"{api_base_url(self)}/auth/github/callback?{urlencode({'redirectTo': redirect_to})}"
-            return self.json({"url": callback})
+            return self.handle_github_authorize(params)
         if path == "/auth/github/callback":
-            user = get_or_create_github_user()
-            session = create_session(user)
-            return self.redirect(params.get("redirectTo") or default_redirect("oauth"), cookie_header(session["id"]))
+            return self.handle_github_callback(params)
         if path == "/auth/email/callback":
             return self.handle_magic_callback(params)
         if path == "/integrations":
             return self.json(self.integrations_payload())
         if path == "/integrations/github/authorize":
-            scope = params.get("scope") or "all"
-            redirect_to = params.get("redirectTo") or default_redirect("repos")
-            callback = f"{api_base_url(self)}/integrations/github/callback?{urlencode({'scope': scope, 'redirectTo': redirect_to})}"
-            return self.json({"url": callback})
+            return self.handle_github_repository_authorize(params)
         if path == "/integrations/github/callback":
             return self.handle_github_repository_callback(params)
         if path == "/repositories":
-            return self.json({"items": REPOSITORIES, "repositories": REPOSITORIES, "needsAuthorization": not self.repositories_connected()})
+            return self.json(self.repositories_payload())
         if path == "/scans":
             return self.json({"items": SCANS, "scans": SCANS})
         if len(segments) == 2 and segments[0] == "scans":
@@ -392,7 +477,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/auth/sign-out":
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
         if path == "/repositories/sync":
-            return self.json({"ok": True, "items": REPOSITORIES, "repositories": REPOSITORIES, "syncedAt": now()})
+            payload = self.repositories_payload(refresh=True)
+            payload.update({"ok": True, "syncedAt": now()})
+            return self.json(payload)
         if path == "/scans":
             scan = {
                 "id": make_id("sc"),
@@ -444,11 +531,63 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json({"ok": True, "provider": segments[1], "connected": False})
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
+    def handle_github_authorize(self, params: dict) -> None:
+        redirect_to = safe_redirect_to(params.get("redirectTo"), "oauth")
+        if not github_auth.oauth_configured():
+            callback = f"{api_base_url(self)}/auth/github/callback?{urlencode({'redirectTo': redirect_to})}"
+            return self.json({"url": callback, "mode": "local"})
+
+        verifier = github_auth.make_code_verifier()
+        state = remember_github_state("login", redirect_to, codeVerifier=verifier)
+        callback_url = f"{api_base_url(self)}/auth/github/callback"
+        authorize_url = github_auth.build_oauth_authorize_url(
+            callback_url,
+            state,
+            github_auth.code_challenge(verifier),
+        )
+        return self.json({"url": authorize_url, "mode": "github"})
+
+    def handle_github_callback(self, params: dict) -> None:
+        if not github_auth.oauth_configured() or not params.get("code"):
+            user = get_or_create_github_user()
+            session = create_session(user)
+            return self.redirect(safe_redirect_to(params.get("redirectTo"), "oauth"), cookie_header(session["id"]))
+
+        state = params.get("state") or ""
+        record = pop_github_state("login", state)
+        redirect_to = str(record["redirectTo"])
+        if params.get("error"):
+            return self.redirect(redirect_with_params(redirect_to, {"github_error": params.get("error_description") or params["error"]}))
+
+        token_payload = github_auth.exchange_oauth_code(
+            params["code"],
+            f"{api_base_url(self)}/auth/github/callback",
+            str(record.get("codeVerifier") or ""),
+        )
+        profile = github_auth.fetch_user_profile(token_payload["access_token"])
+        user = get_or_create_real_github_user(profile, token_payload)
+        session = create_session(user)
+        return self.redirect(redirect_to, cookie_header(session["id"]))
+
+    def handle_github_repository_authorize(self, params: dict) -> None:
+        scope = params.get("scope") if params.get("scope") in {"all", "selected"} else "all"
+        redirect_to = safe_redirect_to(params.get("redirectTo"), "repos")
+        if not github_auth.app_install_configured():
+            callback = f"{api_base_url(self)}/integrations/github/callback?{urlencode({'scope': scope, 'redirectTo': redirect_to})}"
+            return self.json({"url": callback, "mode": "local"})
+
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before authorizing GitHub repositories.")
+
+        state = remember_github_state("install", redirect_to, userId=session["userId"], requestedScope=scope)
+        return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
+
     def handle_magic_link(self, body: dict) -> None:
         email = str(body.get("email") or "").strip().lower()
         if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
             return self.error(HTTPStatus.BAD_REQUEST, "A valid email is required.")
-        redirect_to = body.get("redirectTo") or default_redirect("oauth")
+        redirect_to = safe_redirect_to(body.get("redirectTo"), "oauth")
         token = secrets.token_urlsafe(24)
         MAGIC_LINKS[token] = {"email": email, "redirectTo": redirect_to, "expiresAt": now() + MAGIC_LINK_MAX_AGE}
         magic_link = f"{api_base_url(self)}/auth/email/callback?{urlencode({'token': token})}"
