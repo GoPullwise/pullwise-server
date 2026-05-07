@@ -286,6 +286,7 @@ def repo_to_pullwise(repo) -> dict:
         "defaultBranch": getattr(repo, "default_branch", None) or "main",
         "updated": str(getattr(repo, "updated_at", None) or ""),
         "htmlUrl": getattr(repo, "html_url", None),
+        "cloneUrl": getattr(repo, "clone_url", None),
         "permissions": permissions_to_dict(getattr(repo, "permissions", None)),
     }
 

@@ -47,7 +47,42 @@ SETTINGS: dict[str, dict] = {}
 STATE_LOADED = False
 STATE_DIRTY = False
 
-REPOSITORIES: list[dict] = []
+DEFAULT_REPOSITORIES: list[dict] = [
+    {
+        "id": "repo_pullwise_web",
+        "name": "pullwise-web",
+        "fullName": "pullwise/pullwise-web",
+        "desc": "Pullwise frontend",
+        "description": "Pullwise frontend",
+        "lang": "JavaScript",
+        "private": True,
+        "stars": "-",
+        "branches": "-",
+        "defaultBranch": "main",
+        "updated": "",
+        "htmlUrl": "https://github.com/pullwise/pullwise-web",
+        "cloneUrl": "https://github.com/pullwise/pullwise-web.git",
+        "permissions": {"pull": True},
+    },
+    {
+        "id": "repo_pullwise_server",
+        "name": "pullwise-server",
+        "fullName": "pullwise/pullwise-server",
+        "desc": "Pullwise local API server",
+        "description": "Pullwise local API server",
+        "lang": "Python",
+        "private": True,
+        "stars": "-",
+        "branches": "-",
+        "defaultBranch": "main",
+        "updated": "",
+        "htmlUrl": "https://github.com/pullwise/pullwise-server",
+        "cloneUrl": "https://github.com/pullwise/pullwise-server.git",
+        "permissions": {"pull": True},
+    },
+]
+
+REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
 
@@ -334,9 +369,7 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     repositories = github_access.get("repositories") or []
     if repositories:
         return full_name in repositories
-    if github_access.get("repositoryItems"):
-        return repository_item(github_access, full_name) is not None
-    return bool(github_access.get("repositoriesNeedSync"))
+    return repository_item(github_access, full_name) is not None
 
 
 def has_real_github_identity(user: dict | None) -> bool:
@@ -508,37 +541,53 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             repository = str(body.get("repo") or body.get("repository") or "").strip()
             if not repository:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
+            scan_error: tuple[int, str] | None = None
+            scan = None
             with STATE_LOCK:
                 user = USERS.get(session["userId"]) or {}
                 github_access = user.get("githubRepositoryAccess")
-                if github_access and not repository_is_authorized(github_access, repository):
-                    return self.error(HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                if not github_access:
+                    scan_error = (HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before starting a scan.")
+                elif not repository_is_authorized(github_access, repository):
+                    scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                else:
+                    repo_meta = repository_item(github_access, repository) or {}
+                    scan = {
+                        "id": make_id("sc"),
+                        "repo": repository,
+                        "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
+                        "commit": body.get("commit") or "pending",
+                        "status": "queued",
+                        "userId": session["userId"],
+                        "createdAt": now(),
+                        "progress": 0,
+                        "phase": None,
+                        "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                        "installationId": github_access.get("installationId"),
+                        "installationAccount": github_access.get("installationAccount"),
+                        "repositorySelection": github_access.get("repositorySelection"),
+                        "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
+                        "repositoryPrivate": bool(repo_meta.get("private")),
+                        "repoPath": None,
+                        "by": "you",
+                    }
+                    SCANS.insert(0, scan)
+                    mark_state_dirty()
 
-                repo_meta = repository_item(github_access, repository) or {}
-                scan = {
-                    "id": make_id("sc"),
-                    "repo": repository,
-                    "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
-                    "commit": body.get("commit") or "pending",
-                    "status": "queued",
-                    "userId": session["userId"],
-                    "createdAt": now(),
-                    "progress": 0,
-                    "phase": None,
-                    "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                    "installationId": github_access.get("installationId") if github_access else None,
-                    "repositorySelection": github_access.get("repositorySelection") if github_access else None,
-                    "repoPath": None,
-                    "by": "you",
-                }
-                SCANS.insert(0, scan)
-                mark_state_dirty()
+            if scan_error:
+                return self.error(scan_error[0], scan_error[1])
+            if scan is None:
+                return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to create scan.")
             worker.start_scan(scan["id"])
             return self.json(scan, HTTPStatus.CREATED)
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
-            scan = self.find_or_404(user_scans(self.current_session()), segments[1], "Scan")
-            scan["status"] = "cancelled"
-            mark_state_dirty()
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before cancelling a scan.")
+            with STATE_LOCK:
+                scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+                scan["status"] = "cancelled"
+                mark_state_dirty()
             return self.json(scan)
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "apply":
             issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")

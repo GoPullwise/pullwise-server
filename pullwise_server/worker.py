@@ -42,9 +42,6 @@ def start_scan(scan_id: str) -> None:
 
 
 def _run(scan_id: str) -> None:
-    # Lazy import to avoid a circular import at module load time.
-    from . import app
-
     started_at = int(time.time())
 
     snapshot = _start_running(scan_id, started_at)
@@ -118,6 +115,8 @@ def _run(scan_id: str) -> None:
     except checkout.CheckoutCancelled:
         return
     except Exception as exc:
+        if _is_cancelled(scan_id):
+            return
         traceback.print_exc()
         _patch_scan(
             scan_id,
