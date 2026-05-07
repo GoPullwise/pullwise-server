@@ -149,21 +149,33 @@ def fetch_primary_email(access_token: str) -> str | None:
 
 
 def fetch_installation(installation_id: str) -> dict:
-    installation = app_integration().get_app_installation(int(installation_id))
-    return installation_to_dict(installation)
+    integration = app_integration()
+    try:
+        installation = integration.get_app_installation(int(installation_id))
+        return installation_to_dict(installation)
+    finally:
+        integration.close()
 
 
 def create_installation_access_token(installation_id: str) -> dict:
-    token = app_integration().get_access_token(int(installation_id))
-    return {"token": token.token, "expires_at": str(token.expires_at)}
+    integration = app_integration()
+    try:
+        token = integration.get_access_token(int(installation_id))
+        return {"token": token.token, "expires_at": str(token.expires_at)}
+    finally:
+        integration.close()
 
 
 def list_installation_repositories(installation_id: str) -> list[dict]:
-    github = app_integration().get_github_for_installation(int(installation_id))
+    integration = app_integration()
+    github = None
     try:
+        github = integration.get_github_for_installation(int(installation_id))
         return [repo_to_pullwise(repo) for repo in installation_repository_source(github).get_repos()]
     finally:
-        github.close()
+        if github:
+            github.close()
+        integration.close()
 
 
 def user_can_access_installation(user_access_token: str | None, installation_id: str) -> bool | None:
