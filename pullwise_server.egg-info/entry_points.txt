@@ -1,2 +1,0 @@
-[console_scripts]
-pullwise-server = pullwise_server.app:main
