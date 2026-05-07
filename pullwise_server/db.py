@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -69,22 +70,30 @@ def save_state(state: dict[str, Any]) -> None:
                 payload = excluded.payload,
                 updated_at = excluded.updated_at
             """,
-            [(name, json.dumps(to_jsonable(payload), ensure_ascii=False)) for name, payload in state.items()],
+            [
+                (name, json.dumps(to_jsonable(payload, path=f"$.{name}"), ensure_ascii=False, allow_nan=False))
+                for name, payload in state.items()
+            ],
         )
 
 
-def to_jsonable(value: Any) -> Any:
-    if value is None or isinstance(value, str | int | float | bool):
+def to_jsonable(value: Any, *, path: str = "$") -> Any:
+    if value is None or isinstance(value, str | bool | int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise TypeError(f"State value at {path} is not a finite JSON number.")
         return value
     if isinstance(value, datetime.datetime | datetime.date):
         return value.isoformat()
     if isinstance(value, dict):
-        return {str(key): to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, list | tuple | set):
-        return [to_jsonable(item) for item in value]
+        normalized = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"State key at {path} is not a string: {type(key).__name__}.")
+            normalized[key] = to_jsonable(item, path=f"{path}.{key}")
+        return normalized
+    if isinstance(value, list):
+        return [to_jsonable(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
 
-    raw_data = getattr(value, "raw_data", None) or getattr(value, "_rawData", None)
-    if isinstance(raw_data, dict):
-        return to_jsonable(raw_data)
-
-    return str(value)
+    raise TypeError(f"State value at {path} is not JSON serializable: {type(value).__name__}.")

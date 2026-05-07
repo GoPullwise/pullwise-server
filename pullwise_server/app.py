@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from . import db, github_auth, worker
 
+
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
 
@@ -44,6 +45,7 @@ MAGIC_LINKS: dict[str, dict] = {}
 GITHUB_STATES: dict[str, dict] = {}
 SETTINGS: dict[str, dict] = {}
 STATE_LOADED = False
+STATE_DIRTY = False
 
 REPOSITORIES: list[dict] = []
 ISSUES: list[dict] = []
@@ -59,7 +61,7 @@ def env(name: str, default: str) -> str:
 
 
 def ensure_state_loaded() -> None:
-    global STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, SCANS, ISSUES
+    global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, SCANS, ISSUES
     with STATE_LOCK:
         if STATE_LOADED:
             return
@@ -73,11 +75,19 @@ def ensure_state_loaded() -> None:
         SCANS = list(state.get("scans") or [])
         ISSUES = list(state.get("issues") or [])
         STATE_LOADED = True
+        STATE_DIRTY = False
 
 
-def persist_state() -> None:
+def mark_state_dirty() -> None:
+    global STATE_DIRTY
     with STATE_LOCK:
-        if not STATE_LOADED:
+        STATE_DIRTY = True
+
+
+def persist_state(*, force: bool = False) -> None:
+    global STATE_DIRTY
+    with STATE_LOCK:
+        if not STATE_LOADED or (not force and not STATE_DIRTY):
             return
         db.save_state(
             {
@@ -90,6 +100,7 @@ def persist_state() -> None:
                 "issues": ISSUES,
             }
         )
+        STATE_DIRTY = False
 
 
 def allowed_origins() -> set[str]:
@@ -129,11 +140,14 @@ def remember_github_state(kind: str, redirect_to: str, **extra: object) -> str:
         "expiresAt": now() + GITHUB_STATE_MAX_AGE,
         **extra,
     }
+    mark_state_dirty()
     return state
 
 
 def pop_github_state(kind: str, state: str) -> dict:
     record = GITHUB_STATES.pop(state, None)
+    if record:
+        mark_state_dirty()
     if not record or record.get("kind") != kind or record.get("expiresAt", 0) < now():
         raise ValueError("GitHub authorization state is invalid or expired.")
     return record
@@ -193,8 +207,10 @@ def get_or_create_email_user(email: str) -> dict:
             "providers": ["email"],
             "githubRepositoryAccess": None,
         }
+        mark_state_dirty()
     elif "email" not in USERS[user_id]["providers"]:
         USERS[user_id]["providers"].append("email")
+        mark_state_dirty()
     return USERS[user_id]
 
 
@@ -213,8 +229,10 @@ def get_or_create_github_user() -> dict:
             "githubLogin": login,
             "githubRepositoryAccess": None,
         }
+        mark_state_dirty()
     elif "github" not in USERS[user_id]["providers"]:
         USERS[user_id]["providers"].append("github")
+        mark_state_dirty()
     return USERS[user_id]
 
 
@@ -233,6 +251,7 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
             "providers": ["github"],
             "githubRepositoryAccess": None,
         }
+        mark_state_dirty()
 
     user = USERS[user_id]
     user.update(
@@ -251,6 +270,7 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
     )
     if "github" not in user["providers"]:
         user["providers"].append("github")
+    mark_state_dirty()
     return user
 
 
@@ -263,16 +283,27 @@ def create_session(user: dict) -> dict:
         "expiresAt": now() + SESSION_MAX_AGE,
     }
     SESSIONS[session_id] = session
+    mark_state_dirty()
     return session
+
+
+def default_settings_payload(user_id: str) -> dict:
+    user = USERS[user_id]
+    return {
+        "profile": {"name": user["name"], "email": user["email"], "role": "Engineering Lead"},
+        "notifications": {"email": True, "slack": False, "criticalOnly": False},
+        "scan": {"defaultBranch": "main", "autoScan": True, "autoFixConfidence": 0.8},
+    }
+
+
+def settings_payload(user_id: str) -> dict:
+    return SETTINGS.get(user_id) or default_settings_payload(user_id)
 
 
 def default_settings(user_id: str) -> dict:
     if user_id not in SETTINGS:
-        SETTINGS[user_id] = {
-            "profile": {"name": USERS[user_id]["name"], "email": USERS[user_id]["email"], "role": "Engineering Lead"},
-            "notifications": {"email": True, "slack": False, "criticalOnly": False},
-            "scan": {"defaultBranch": "main", "autoScan": True, "autoFixConfidence": 0.8},
-        }
+        SETTINGS[user_id] = default_settings_payload(user_id)
+        mark_state_dirty()
     return SETTINGS[user_id]
 
 
@@ -303,7 +334,9 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     repositories = github_access.get("repositories") or []
     if repositories:
         return full_name in repositories
-    return repository_item(github_access, full_name) is not None
+    if github_access.get("repositoryItems"):
+        return repository_item(github_access, full_name) is not None
+    return bool(github_access.get("repositoriesNeedSync"))
 
 
 def has_real_github_identity(user: dict | None) -> bool:
@@ -325,7 +358,6 @@ def session_payload(session: dict | None) -> dict:
 
     user = USERS.get(session["userId"])
     repo_access = user.get("githubRepositoryAccess") if user else None
-    providers = user.get("providers", []) if user else []
     repositories_connected = bool(repo_access)
     return {
         "authenticated": True,
@@ -450,8 +482,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 2 and segments[0] == "issues":
             return self.json(self.find_or_404(user_issues(self.current_session()), segments[1], "Issue"))
         if path == "/settings":
-            session = self.current_or_demo_session()
-            return self.json(default_settings(session["userId"]))
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing settings.")
+            return self.json(settings_payload(session["userId"]))
         if path == "/billing/plan":
             return self.json({"plan": "free", "status": "active", "scansUsed": 12, "scansLimit": 100})
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
@@ -461,6 +495,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/auth/email/magic-link":
             return self.handle_magic_link(body)
         if path == "/auth/sign-out":
+            self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
         if path == "/repositories/sync":
             payload = self.repositories_payload(refresh=True)
@@ -497,11 +532,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "by": "you",
                 }
                 SCANS.insert(0, scan)
+                mark_state_dirty()
             worker.start_scan(scan["id"])
             return self.json(scan, HTTPStatus.CREATED)
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
             scan = self.find_or_404(user_scans(self.current_session()), segments[1], "Scan")
             scan["status"] = "cancelled"
+            mark_state_dirty()
             return self.json(scan)
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "apply":
             issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
@@ -522,11 +559,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "status":
             issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
             issue["status"] = body.get("status") or issue["status"]
+            mark_state_dirty()
             return self.json(issue)
         if len(segments) == 1 and segments[0] == "settings":
-            session = self.current_or_demo_session()
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating settings.")
             settings = default_settings(session["userId"])
             settings.update(body)
+            mark_state_dirty()
             return self.json(settings)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
@@ -535,6 +576,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if session and segments[1] == "github":
                 USERS[session["userId"]]["githubRepositoryAccess"] = None
+                mark_state_dirty()
             return self.json({"ok": True, "provider": segments[1], "connected": False})
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
@@ -603,12 +645,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         redirect_to = safe_redirect_to(body.get("redirectTo"), "oauth")
         token = secrets.token_urlsafe(24)
         MAGIC_LINKS[token] = {"email": email, "redirectTo": redirect_to, "expiresAt": now() + MAGIC_LINK_MAX_AGE}
+        mark_state_dirty()
         magic_link = f"{api_base_url(self)}/auth/email/callback?{urlencode({'token': token})}"
         return self.json({"ok": True, "email": email, "devMagicLink": magic_link, "magicLink": magic_link, "expiresInSeconds": MAGIC_LINK_MAX_AGE})
 
     def handle_magic_callback(self, params: dict) -> None:
         token = params.get("token") or ""
         record = MAGIC_LINKS.pop(token, None)
+        if record:
+            mark_state_dirty()
         if not record or record["expiresAt"] < now():
             return self.error(HTTPStatus.BAD_REQUEST, "Magic link is invalid or expired.")
         user = get_or_create_email_user(record["email"])
@@ -629,6 +674,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "repositoryItems": repository_items,
                 "repositoriesNeedSync": True,
             }
+            mark_state_dirty()
             return self.redirect(safe_redirect_to(params.get("redirectTo"), "repos"), cookie_header(session["id"]))
 
         record = pop_github_state("install", params.get("state") or "")
@@ -670,6 +716,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "repositoryItems": repository_items,
             "repositoriesNeedSync": not github_auth.app_api_configured(),
         }
+        mark_state_dirty()
         session = create_session(user)
         return self.redirect(str(record["redirectTo"]), cookie_header(session["id"]))
 
@@ -707,6 +754,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             github_access["repositories"] = [repo["fullName"] for repo in repository_items]
             github_access["repositoriesNeedSync"] = False
             github_access["syncedAt"] = now()
+            mark_state_dirty()
 
         repository_items = github_access.get("repositoryItems") or []
         return {
@@ -733,19 +781,37 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return create_session(user)
 
     def current_session(self) -> dict | None:
+        session_id = self.current_session_id()
+        if not session_id:
+            return None
+        session = SESSIONS.get(session_id)
+        if not session:
+            return None
+        if session["expiresAt"] < now():
+            SESSIONS.pop(session_id, None)
+            mark_state_dirty()
+            return None
+        user = USERS.get(session["userId"])
+        if not user:
+            SESSIONS.pop(session_id, None)
+            mark_state_dirty()
+            return None
+        if github_auth.oauth_configured() and user and "github" in user.get("providers", []) and not user.get("githubAccessToken"):
+            SESSIONS.pop(session_id, None)
+            mark_state_dirty()
+            return None
+        return session
+
+    def current_session_id(self) -> str | None:
         raw_cookie = self.headers.get("Cookie") or ""
         cookie = SimpleCookie(raw_cookie)
         morsel = cookie.get(SESSION_COOKIE)
-        if not morsel:
-            return None
-        session = SESSIONS.get(morsel.value)
-        if not session or session["expiresAt"] < now():
-            return None
-        user = USERS.get(session["userId"])
-        if github_auth.oauth_configured() and user and "github" in user.get("providers", []) and not user.get("githubAccessToken"):
-            SESSIONS.pop(morsel.value, None)
-            return None
-        return session
+        return morsel.value if morsel else None
+
+    def clear_current_session(self) -> None:
+        session_id = self.current_session_id()
+        if session_id and SESSIONS.pop(session_id, None):
+            mark_state_dirty()
 
     def find_or_404(self, collection: list[dict], item_id: str, label: str) -> dict:
         for item in collection:

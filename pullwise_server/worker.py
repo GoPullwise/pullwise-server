@@ -128,7 +128,7 @@ def _run(scan_id: str) -> None:
                 "completedAt": completed_at,
                 "durationMs": (completed_at - started_at) * 1000,
             },
-                )
+        )
 
     except ScanCancelled:
         return
@@ -160,6 +160,7 @@ def _start_running(scan_id: str, started_at: int) -> dict | None:
                 "phase": PHASES[0][0],
             }
         )
+        app.mark_state_dirty()
         app.persist_state()
         return {
             "userId": scan["userId"],
@@ -189,6 +190,7 @@ def _patch_scan(
         scan.update(patch)
         if extra_findings:
             app.ISSUES.extend(extra_findings)
+        app.mark_state_dirty()
         app.persist_state()
 
 

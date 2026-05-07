@@ -22,6 +22,9 @@ import subprocess
 import time
 
 
+CHECKOUT_PROVIDERS = {"claude_code", "codex"}
+
+
 SYSTEM_PROMPT = """\
 You are Pullwise's code review agent. Read the repository you are placed in
 and emit a structured report of issues. You are running in an isolated
@@ -134,7 +137,7 @@ def run_review(
     `userId`, `scanId`, `repo`, `status`, `createdAt` are filled here so the
     worker does not need to reshape provider output.
     """
-    chosen = provider or os.environ.get("PULLWISE_REVIEW_PROVIDER", "mock")
+    chosen = selected_provider(provider)
     if chosen == "mock":
         raw = _run_mock(repo=repo, branch=branch, commit=commit)
     elif chosen == "claude_code":
@@ -148,6 +151,14 @@ def run_review(
         _finalize_finding(finding, user_id=user_id, scan_id=scan_id, repo=repo)
         for finding in raw
     ]
+
+
+def selected_provider(provider: str | None = None) -> str:
+    return (provider or os.environ.get("PULLWISE_REVIEW_PROVIDER", "mock")).strip().lower()
+
+
+def provider_requires_checkout(provider: str | None = None) -> bool:
+    return selected_provider(provider) in CHECKOUT_PROVIDERS
 
 
 def _finalize_finding(finding: dict, *, user_id: str, scan_id: str, repo: str) -> dict:
