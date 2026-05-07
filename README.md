@@ -19,6 +19,8 @@ Then point the frontend at:
 VITE_API_BASE_URL=http://localhost:3000
 ```
 
+The server persists sessions, GitHub authorization state, selected repositories, scans, issues, and settings in SQLite by default at `.pullwise/pullwise.sqlite3`. Override it with `PULLWISE_DB_PATH=F:\path\to\pullwise.sqlite3` if needed.
+
 ## Local Flow
 
 - GitHub identity login returns a local callback URL and creates a cookie session unless real OAuth credentials are configured.

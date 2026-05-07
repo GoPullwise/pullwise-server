@@ -404,13 +404,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/repositories":
             return self.json(self.repositories_payload())
         if path == "/scans":
-            return self.json({"items": user_scans(self.current_session()), "scans": user_scans(self.current_session())})
+            scans = user_scans(self.current_session())
+            return self.json({"items": scans, "scans": scans})
         if len(segments) == 2 and segments[0] == "scans":
-            return self.json(self.find_or_404(SCANS, segments[1], "Scan"))
+            return self.json(self.find_or_404(user_scans(self.current_session()), segments[1], "Scan"))
         if path == "/issues":
-            return self.json({"items": user_issues(self.current_session()), "issues": user_issues(self.current_session())})
+            issues = user_issues(self.current_session())
+            return self.json({"items": issues, "issues": issues})
         if len(segments) == 2 and segments[0] == "issues":
-            return self.json(self.find_or_404(ISSUES, segments[1], "Issue"))
+            return self.json(self.find_or_404(user_issues(self.current_session()), segments[1], "Issue"))
         if path == "/settings":
             session = self.current_or_demo_session()
             return self.json(default_settings(session["userId"]))
@@ -429,26 +431,34 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             payload.update({"ok": True, "syncedAt": now()})
             return self.json(payload)
         if path == "/scans":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting a scan.")
+            repository = body.get("repo") or body.get("repository")
+            if not repository:
+                return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
             scan = {
                 "id": make_id("sc"),
-                "repo": body.get("repo") or body.get("repository") or "yourname/billing-service",
+                "repo": repository,
                 "branch": body.get("branch") or "main",
                 "commit": body.get("commit") or "pending",
                 "status": "queued",
+                "userId": session["userId"],
                 "createdAt": now(),
                 "issues": None,
+                "by": "you",
             }
             SCANS.insert(0, scan)
             return self.json(scan, HTTPStatus.CREATED)
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
-            scan = self.find_or_404(SCANS, segments[1], "Scan")
+            scan = self.find_or_404(user_scans(self.current_session()), segments[1], "Scan")
             scan["status"] = "cancelled"
             return self.json(scan)
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "apply":
-            issue = self.find_or_404(ISSUES, segments[1], "Issue")
+            issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
             return self.json({"ok": True, "issue": issue, "branch": body.get("branch") or f"fix/{issue['id'].lower()}"})
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "pull-requests":
-            issue = self.find_or_404(ISSUES, segments[1], "Issue")
+            issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
             return self.json({"ok": True, "issue": issue, "url": f"https://github.com/{issue['repo']}/pull/482"}, HTTPStatus.CREATED)
         if len(segments) == 2 and segments[0] == "integrations":
             return self.json({"ok": True, "provider": segments[1], "connected": True, "payload": body})
@@ -461,7 +471,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_patch(self, segments: list[str]) -> None:
         body = self.read_json()
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "status":
-            issue = self.find_or_404(ISSUES, segments[1], "Issue")
+            issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
             issue["status"] = body.get("status") or issue["status"]
             return self.json(issue)
         if len(segments) == 1 and segments[0] == "settings":
@@ -557,13 +567,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not github_auth.app_install_configured():
             session = self.current_or_demo_session()
             scope = params.get("scope") or "all"
+            repository_items = REPOSITORIES if scope == "all" else REPOSITORIES[:1]
             USERS[session["userId"]]["githubRepositoryAccess"] = {
                 "mode": "local",
                 "scope": scope,
                 "authorizedAt": now(),
                 "installationId": "dev_installation_1",
-                "repositories": [repo["fullName"] for repo in REPOSITORIES] if scope == "all" else [REPOSITORIES[0]["fullName"]],
-                "repositoryItems": REPOSITORIES if scope == "all" else [REPOSITORIES[0]],
+                "repositories": [repo["fullName"] for repo in repository_items],
+                "repositoryItems": repository_items,
+                "repositoriesNeedSync": True,
             }
             return self.redirect(safe_redirect_to(params.get("redirectTo"), "repos"), cookie_header(session["id"]))
 
