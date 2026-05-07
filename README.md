@@ -51,6 +51,25 @@ PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=F:\path\to\pullwise.private-key.pem
 
 For deployment or secret stores, use `PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64` instead of `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`.
 
+## Review Worker Setup
+
+The scan worker defaults to `PULLWISE_REVIEW_PROVIDER=mock`, which keeps the
+frontend flow fully offline. For a real agent run, install `git` plus either
+Claude Code or Codex CLI, then set:
+
+```env
+PULLWISE_REVIEW_PROVIDER=claude_code
+ANTHROPIC_API_KEY=your_key
+PULLWISE_CHECKOUT_ROOT=F:\tmp\pullwise-checkouts
+```
+
+`claude_code` and `codex` make the worker clone the selected repository during
+the `clone` phase. The clone uses `github_auth.create_installation_access_token`
+for the scan's GitHub App installation id, stores the checkout path as
+`repoPath` on the scan record, and passes that path to `review.run_review`.
+The installation token is supplied through temporary Git config, not embedded in
+the origin URL.
+
 ## Frontend Contract
 
 Identity login:

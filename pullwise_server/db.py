@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import sqlite3
@@ -68,5 +69,22 @@ def save_state(state: dict[str, Any]) -> None:
                 payload = excluded.payload,
                 updated_at = excluded.updated_at
             """,
-            [(name, json.dumps(payload, ensure_ascii=False)) for name, payload in state.items()],
+            [(name, json.dumps(to_jsonable(payload), ensure_ascii=False)) for name, payload in state.items()],
         )
+
+
+def to_jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, datetime.datetime | datetime.date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [to_jsonable(item) for item in value]
+
+    raw_data = getattr(value, "raw_data", None) or getattr(value, "_rawData", None)
+    if isinstance(raw_data, dict):
+        return to_jsonable(raw_data)
+
+    return str(value)

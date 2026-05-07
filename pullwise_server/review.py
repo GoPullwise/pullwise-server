@@ -265,8 +265,8 @@ def _run_claude_code(*, repo: str, branch: str, commit: str, repo_path: str | No
     Wire-up checklist:
       1. Install: `npm install -g @anthropic-ai/claude-code`.
       2. Provide ANTHROPIC_API_KEY in the server env.
-      3. Ensure repo_path points at a checkout of the target commit (the
-         worker is responsible for cloning before invoking review).
+      3. Ensure the worker has GitHub App credentials; it clones the selected
+         repository and passes repo_path before invoking review.
       4. Verify the CLI accepts the system prompt via `--append-system-prompt`
          on your installed version; adjust the flag if not.
     """
@@ -304,7 +304,8 @@ def _run_codex(*, repo: str, branch: str, commit: str, repo_path: str | None) ->
     Wire-up checklist:
       1. Install Codex per its docs and confirm `codex --version` works.
       2. Provide the auth token expected by Codex in the server env.
-      3. Ensure repo_path points at a checkout of the target commit.
+      3. Ensure the worker has GitHub App credentials; it clones the selected
+         repository and passes repo_path before invoking review.
       4. Confirm the exact flag name for system prompts on your build of
          Codex; adjust the cmd below as needed.
     """

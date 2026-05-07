@@ -288,6 +288,32 @@ def user_issues(session: dict | None) -> list[dict]:
     return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
 
 
+def repository_item(github_access: dict | None, full_name: str) -> dict | None:
+    if not github_access:
+        return None
+    for item in github_access.get("repositoryItems") or []:
+        if item.get("fullName") == full_name or item.get("full_name") == full_name:
+            return item
+    return None
+
+
+def repository_is_authorized(github_access: dict | None, full_name: str) -> bool:
+    if not github_access:
+        return False
+    repositories = github_access.get("repositories") or []
+    if repositories:
+        return full_name in repositories
+    return repository_item(github_access, full_name) is not None
+
+
+def has_real_github_identity(user: dict | None) -> bool:
+    if not user:
+        return False
+    if not github_auth.oauth_configured():
+        return "github" in user.get("providers", [])
+    return bool(user.get("githubAccessToken"))
+
+
 def session_payload(session: dict | None) -> dict:
     if not session:
         return {
@@ -305,7 +331,7 @@ def session_payload(session: dict | None) -> dict:
         "authenticated": True,
         "user": user_public(user),
         "github": {
-            "identityConnected": "github" in providers,
+            "identityConnected": has_real_github_identity(user),
             "login": user.get("githubLogin"),
             "repositoriesConnected": repositories_connected,
             "repositoryScope": repo_access.get("scope") if repo_access else None,
@@ -444,23 +470,32 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting a scan.")
-            repository = body.get("repo") or body.get("repository")
+            repository = str(body.get("repo") or body.get("repository") or "").strip()
             if not repository:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
-            scan = {
-                "id": make_id("sc"),
-                "repo": repository,
-                "branch": body.get("branch") or "main",
-                "commit": body.get("commit") or "pending",
-                "status": "queued",
-                "userId": session["userId"],
-                "createdAt": now(),
-                "progress": 0,
-                "phase": None,
-                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                "by": "you",
-            }
             with STATE_LOCK:
+                user = USERS.get(session["userId"]) or {}
+                github_access = user.get("githubRepositoryAccess")
+                if github_access and not repository_is_authorized(github_access, repository):
+                    return self.error(HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+
+                repo_meta = repository_item(github_access, repository) or {}
+                scan = {
+                    "id": make_id("sc"),
+                    "repo": repository,
+                    "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
+                    "commit": body.get("commit") or "pending",
+                    "status": "queued",
+                    "userId": session["userId"],
+                    "createdAt": now(),
+                    "progress": 0,
+                    "phase": None,
+                    "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                    "installationId": github_access.get("installationId") if github_access else None,
+                    "repositorySelection": github_access.get("repositorySelection") if github_access else None,
+                    "repoPath": None,
+                    "by": "you",
+                }
                 SCANS.insert(0, scan)
             worker.start_scan(scan["id"])
             return self.json(scan, HTTPStatus.CREATED)
@@ -554,6 +589,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         session = self.current_session()
         if not session:
             return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before authorizing GitHub repositories.")
+        user = USERS.get(session["userId"])
+        if github_auth.oauth_configured() and not has_real_github_identity(user):
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in with GitHub before authorizing repositories.")
 
         state = remember_github_state("install", redirect_to, userId=session["userId"], requestedScope=scope)
         return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
@@ -703,6 +741,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         session = SESSIONS.get(morsel.value)
         if not session or session["expiresAt"] < now():
             return None
+        user = USERS.get(session["userId"])
+        if github_auth.oauth_configured() and user and "github" in user.get("providers", []) and not user.get("githubAccessToken"):
+            SESSIONS.pop(morsel.value, None)
+            return None
         return session
 
     def find_or_404(self, collection: list[dict], item_id: str, label: str) -> dict:
@@ -771,4 +813,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

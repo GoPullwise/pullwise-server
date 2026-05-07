@@ -286,8 +286,29 @@ def repo_to_pullwise(repo) -> dict:
         "defaultBranch": getattr(repo, "default_branch", None) or "main",
         "updated": str(getattr(repo, "updated_at", None) or ""),
         "htmlUrl": getattr(repo, "html_url", None),
-        "permissions": getattr(repo, "permissions", None) or {},
+        "permissions": permissions_to_dict(getattr(repo, "permissions", None)),
     }
+
+
+def permissions_to_dict(permissions) -> dict:
+    if not permissions:
+        return {}
+    if isinstance(permissions, dict):
+        return permissions
+
+    raw_data = getattr(permissions, "raw_data", None) or getattr(permissions, "_rawData", None)
+    if isinstance(raw_data, dict):
+        return {str(key): bool(value) for key, value in raw_data.items()}
+
+    result = {}
+    for key in ("admin", "maintain", "push", "triage", "pull"):
+        try:
+            value = getattr(permissions, key)
+        except Exception:
+            continue
+        if isinstance(value, bool):
+            result[key] = value
+    return result
 
 
 def format_count(value: int | None) -> str:
