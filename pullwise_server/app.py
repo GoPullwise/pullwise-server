@@ -269,6 +269,18 @@ def default_settings(user_id: str) -> dict:
     return SETTINGS[user_id]
 
 
+def user_scans(session: dict | None) -> list[dict]:
+    if not session:
+        return []
+    return [scan for scan in SCANS if scan.get("userId") == session["userId"]]
+
+
+def user_issues(session: dict | None) -> list[dict]:
+    if not session:
+        return []
+    return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
+
+
 def session_payload(session: dict | None) -> dict:
     if not session:
         return {
