@@ -548,7 +548,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json({"url": authorize_url, "mode": "github"})
 
     def handle_github_callback(self, params: dict) -> None:
-        if not github_auth.oauth_configured() or not params.get("code"):
+        if not github_auth.oauth_configured():
             user = get_or_create_github_user()
             session = create_session(user)
             return self.redirect(safe_redirect_to(params.get("redirectTo"), "oauth"), cookie_header(session["id"]))
@@ -558,6 +558,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         redirect_to = str(record["redirectTo"])
         if params.get("error"):
             return self.redirect(redirect_with_params(redirect_to, {"github_error": params.get("error_description") or params["error"]}))
+        if not params.get("code"):
+            return self.redirect(redirect_with_params(redirect_to, {"github_error": "missing_oauth_code"}))
 
         token_payload = github_auth.exchange_oauth_code(
             params["code"],
@@ -603,15 +605,64 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.redirect(record["redirectTo"], cookie_header(session["id"]))
 
     def handle_github_repository_callback(self, params: dict) -> None:
-        session = self.current_or_demo_session()
-        scope = params.get("scope") or "all"
-        USERS[session["userId"]]["githubRepositoryAccess"] = {
-            "scope": scope,
+        if not github_auth.app_install_configured():
+            session = self.current_or_demo_session()
+            scope = params.get("scope") or "all"
+            USERS[session["userId"]]["githubRepositoryAccess"] = {
+                "mode": "local",
+                "scope": scope,
+                "authorizedAt": now(),
+                "installationId": "dev_installation_1",
+                "repositories": [repo["fullName"] for repo in REPOSITORIES] if scope == "all" else [REPOSITORIES[0]["fullName"]],
+                "repositoryItems": REPOSITORIES if scope == "all" else [REPOSITORIES[0]],
+            }
+            return self.redirect(safe_redirect_to(params.get("redirectTo"), "repos"), cookie_header(session["id"]))
+
+        record = pop_github_state("install", params.get("state") or "")
+        if not params.get("installation_id"):
+            return self.redirect(
+                redirect_with_params(str(record["redirectTo"]), {"github_error": "missing_installation_id"})
+            )
+        user = USERS.get(str(record["userId"]))
+        if not user:
+            raise ValueError("The GitHub installation belongs to a user session that no longer exists.")
+
+        if params.get("setup_action") == "request":
+            return self.redirect(
+                redirect_with_params(str(record["redirectTo"]), {"github_error": "github_app_installation_not_completed"})
+            )
+
+        installation_id = str(params["installation_id"])
+        user_can_access = github_auth.user_can_access_installation(user.get("githubAccessToken"), installation_id)
+        if user_can_access is False:
+            raise ValueError("The signed-in GitHub user cannot access this GitHub App installation.")
+
+        installation = {}
+        repository_items = []
+        if github_auth.app_api_configured():
+            installation = github_auth.fetch_installation(installation_id)
+            token_payload = github_auth.create_installation_access_token(installation_id)
+            repository_items = [
+                github_auth.repo_to_pullwise(repo)
+                for repo in github_auth.list_installation_repositories(token_payload["token"])
+            ]
+
+        repository_selection = installation.get("repository_selection") or params.get("scope") or record.get("requestedScope") or "selected"
+        account = installation.get("account") or {}
+        user["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "all" if repository_selection == "all" else "selected",
+            "repositorySelection": repository_selection,
             "authorizedAt": now(),
-            "installationId": "dev_installation_1",
-            "repositories": [repo["fullName"] for repo in REPOSITORIES] if scope == "all" else [REPOSITORIES[0]["fullName"]],
+            "installationId": installation_id,
+            "installationAccount": account.get("login"),
+            "installationTargetType": installation.get("target_type"),
+            "repositories": [repo["fullName"] for repo in repository_items],
+            "repositoryItems": repository_items,
+            "repositoriesNeedSync": not github_auth.app_api_configured(),
         }
-        return self.redirect(params.get("redirectTo") or default_redirect("repos"), cookie_header(session["id"]))
+        session = create_session(user)
+        return self.redirect(str(record["redirectTo"]), cookie_header(session["id"]))
 
     def integrations_payload(self) -> dict:
         session = self.current_session()
@@ -620,11 +671,48 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         github = {
             "provider": "github",
             "connected": bool(github_access),
+            "mode": github_access.get("mode") if github_access else None,
             "scope": github_access.get("scope") if github_access else None,
+            "repositorySelection": github_access.get("repositorySelection") if github_access else None,
+            "installationId": github_access.get("installationId") if github_access else None,
+            "installationAccount": github_access.get("installationAccount") if github_access else None,
             "repositories": github_access.get("repositories") if github_access else [],
+            "repositoriesNeedSync": github_access.get("repositoriesNeedSync") if github_access else False,
         }
         items = [github, {"provider": "slack", "connected": False}, {"provider": "linear", "connected": False}]
         return {"items": items, "github": github}
+
+    def repositories_payload(self, refresh: bool = False) -> dict:
+        session = self.current_session()
+        if not session:
+            return {"items": [], "repositories": [], "needsAuthorization": True}
+
+        user = USERS.get(session["userId"])
+        github_access = user.get("githubRepositoryAccess") if user else None
+        if not github_access:
+            return {"items": [], "repositories": [], "needsAuthorization": True}
+
+        if refresh and github_access.get("mode") == "github-app" and github_auth.app_api_configured():
+            token_payload = github_auth.create_installation_access_token(str(github_access["installationId"]))
+            repository_items = [
+                github_auth.repo_to_pullwise(repo)
+                for repo in github_auth.list_installation_repositories(token_payload["token"])
+            ]
+            github_access["repositoryItems"] = repository_items
+            github_access["repositories"] = [repo["fullName"] for repo in repository_items]
+            github_access["repositoriesNeedSync"] = False
+            github_access["syncedAt"] = now()
+
+        repository_items = github_access.get("repositoryItems") or []
+        return {
+            "items": repository_items,
+            "repositories": repository_items,
+            "needsAuthorization": False,
+            "installationId": github_access.get("installationId"),
+            "repositorySelection": github_access.get("repositorySelection"),
+            "installationAccount": github_access.get("installationAccount"),
+            "repositoriesNeedSync": github_access.get("repositoriesNeedSync", False),
+        }
 
     def repositories_connected(self) -> bool:
         session = self.current_session()
