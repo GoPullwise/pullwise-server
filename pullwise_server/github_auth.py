@@ -294,11 +294,11 @@ def permissions_to_dict(permissions) -> dict:
     if not permissions:
         return {}
     if isinstance(permissions, dict):
-        return permissions
+        return normalize_permission_mapping(permissions)
 
     raw_data = getattr(permissions, "raw_data", None) or getattr(permissions, "_rawData", None)
     if isinstance(raw_data, dict):
-        return {str(key): bool(value) for key, value in raw_data.items()}
+        return normalize_permission_mapping(raw_data)
 
     result = {}
     for key in ("admin", "maintain", "push", "triage", "pull"):
@@ -309,6 +309,10 @@ def permissions_to_dict(permissions) -> dict:
         if isinstance(value, bool):
             result[key] = value
     return result
+
+
+def normalize_permission_mapping(mapping: dict) -> dict:
+    return {str(key): value for key, value in mapping.items() if isinstance(value, bool)}
 
 
 def format_count(value: int | None) -> str:
