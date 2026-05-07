@@ -11,6 +11,25 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
+def project_root() -> str:
+    return os.path.dirname(os.path.dirname(__file__))
+
+
+def load_env_file(path: str | None = None) -> None:
+    env_path = path or os.path.join(project_root(), ".env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
 SESSION_COOKIE = "pw_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30
 MAGIC_LINK_MAX_AGE = 60 * 15
@@ -317,7 +336,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_get(self, path: str, params: dict, segments: list[str]) -> None:
         if path == "/health":
-            return self.json({"ok": True, "service": "pullwise-server", "time": now()})
+            return self.json({"ok": True, "service": "pullwise-server", "time": now(), "mode": env("PULLWISE_MODE", "local")})
+        if path == "/dev/magic-links":
+            links = []
+            for token, record in MAGIC_LINKS.items():
+                if record["expiresAt"] >= now():
+                    links.append({
+                        "email": record["email"],
+                        "expiresAt": record["expiresAt"],
+                        "url": f"{api_base_url(self)}/auth/email/callback?{urlencode({'token': token})}",
+                    })
+            return self.json({"items": links, "magicLinks": links})
         if path == "/auth/session":
             return self.json(session_payload(self.current_session()))
         if path == "/auth/github/authorize":
@@ -529,6 +558,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    load_env_file()
     parser = argparse.ArgumentParser(description="Run the Pullwise local API server.")
     parser.add_argument("--host", default=env("PULLWISE_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(env("PULLWISE_PORT", "3000")))
@@ -547,3 +577,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

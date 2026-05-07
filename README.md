@@ -2,12 +2,14 @@
 
 A lightweight Python development API that matches the current `pullwise-web` frontend contract.
 
-It is intentionally dependency-free and uses the Python standard library so it can run without installing packages. The auth implementation is a local development mock: GitHub OAuth and magic email links create local sessions and redirect back to the frontend.
+It is intentionally dependency-free and uses the Python standard library so it can run without installing packages. The auth implementation is a local development mock: GitHub OAuth and magic email links create local sessions and redirect back to the frontend. The server auto-loads `.env` from this directory when it starts.
 
 ## Run
 
+A local `.env` is included for development and defaults to `http://localhost:3000` -> `http://localhost:5174`.
+
 ```powershell
-python -m pullwise_server --host 0.0.0.0 --port 3000
+python -m pullwise_server
 ```
 
 Then point the frontend at:
@@ -15,6 +17,13 @@ Then point the frontend at:
 ```text
 VITE_API_BASE_URL=http://localhost:3000
 ```
+
+## Local Flow
+
+- GitHub identity login returns a local callback URL and creates a cookie session.
+- Email magic link returns `magicLink` / `devMagicLink`; the frontend shows it as a local development shortcut.
+- GitHub repository authorization is separate from login and redirects to the repository picker.
+- `GET /dev/magic-links` lists unexpired local magic links for debugging.
 
 ## Frontend Contract
 
@@ -25,6 +34,7 @@ Identity login:
 - `GET /auth/github/callback?redirectTo=...`
 - `POST /auth/email/magic-link`
 - `GET /auth/email/callback?token=...`
+- `GET /dev/magic-links` for local debugging only
 - `POST /auth/sign-out`
 
 GitHub repository authorization:
@@ -46,4 +56,4 @@ Prototype data APIs:
 
 ## Environment
 
-See `.env.example`. The server reads environment variables directly; no `.env` loader is required.
+See `.env.example`. The server reads `.env` automatically first, then falls back to process environment variables and built-in local defaults.
