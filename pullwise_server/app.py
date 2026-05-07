@@ -11,7 +11,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import github_auth
+from . import db, github_auth
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
@@ -42,120 +42,47 @@ SESSIONS: dict[str, dict] = {}
 MAGIC_LINKS: dict[str, dict] = {}
 GITHUB_STATES: dict[str, dict] = {}
 SETTINGS: dict[str, dict] = {}
+STATE_LOADED = False
 
-REPOSITORIES = [
-    {
-        "id": "r6",
-        "name": "billing-service",
-        "fullName": "yourname/billing-service",
-        "desc": "Internal billing and invoicing service",
-        "description": "Internal billing and invoicing service",
-        "lang": "Go",
-        "private": True,
-        "stars": "-",
-        "branches": 31,
-        "defaultBranch": "main",
-        "updated": "an hour ago",
-    },
-    {
-        "id": "r2",
-        "name": "frontend-app",
-        "fullName": "acme-inc/frontend-app",
-        "desc": "Customer-facing React application",
-        "description": "Customer-facing React application",
-        "lang": "TypeScript",
-        "private": True,
-        "stars": "42",
-        "branches": 18,
-        "defaultBranch": "main",
-        "updated": "today",
-    },
-    {
-        "id": "r3",
-        "name": "api-gateway",
-        "fullName": "acme-inc/api-gateway",
-        "desc": "Public API gateway and auth edge",
-        "description": "Public API gateway and auth edge",
-        "lang": "TypeScript",
-        "private": True,
-        "stars": "18",
-        "branches": 9,
-        "defaultBranch": "main",
-        "updated": "yesterday",
-    },
-    {
-        "id": "r4",
-        "name": "portfolio-2025",
-        "fullName": "yourname/portfolio-2025",
-        "desc": "Personal portfolio site",
-        "description": "Personal portfolio site",
-        "lang": "TypeScript",
-        "private": False,
-        "stars": "128",
-        "branches": 6,
-        "defaultBranch": "main",
-        "updated": "2 days ago",
-    },
-]
-
-ISSUES = [
-    {
-        "id": "PW-101",
-        "repo": "yourname/billing-service",
-        "title": "Hardcoded API key leaked into frontend bundle",
-        "summary": "A secret-looking API key is bundled in client-side code.",
-        "severity": "critical",
-        "category": "security",
-        "status": "open",
-        "file": "lib/payments.ts",
-        "line": 14,
-        "confidence": 0.97,
-        "autoFixable": True,
-    },
-    {
-        "id": "PW-102",
-        "repo": "yourname/billing-service",
-        "title": "SQL string concatenation enables injection",
-        "summary": "A query is built from unsanitized user input.",
-        "severity": "critical",
-        "category": "security",
-        "status": "open",
-        "file": "routes/search.ts",
-        "line": 42,
-        "confidence": 0.93,
-        "autoFixable": True,
-    },
-    {
-        "id": "PW-103",
-        "repo": "acme-inc/frontend-app",
-        "title": "Dashboard triggers N+1 data fetch",
-        "summary": "The dashboard fetches child resources in a render loop.",
-        "severity": "high",
-        "category": "performance",
-        "status": "open",
-        "file": "src/screens/dashboard.jsx",
-        "line": 88,
-        "confidence": 0.84,
-        "autoFixable": False,
-    },
-]
-
-SCANS = [
-    {
-        "id": "sc_demo_1",
-        "repo": "yourname/billing-service",
-        "branch": "main",
-        "commit": "a3f9c2",
-        "status": "done",
-        "createdAt": "2026-05-07T08:00:00Z",
-        "durationMs": 72148,
-        "issues": {"critical": 2, "high": 1, "medium": 0, "low": 0},
-    }
-]
+REPOSITORIES: list[dict] = []
+ISSUES: list[dict] = []
+SCANS: list[dict] = []
 
 
 def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
+
+
+def ensure_state_loaded() -> None:
+    global STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, SCANS, ISSUES
+    if STATE_LOADED:
+        return
+
+    state = db.load_state()
+    USERS = dict(state.get("users") or {})
+    SESSIONS = dict(state.get("sessions") or {})
+    MAGIC_LINKS = dict(state.get("magicLinks") or {})
+    GITHUB_STATES = dict(state.get("githubStates") or {})
+    SETTINGS = dict(state.get("settings") or {})
+    SCANS = list(state.get("scans") or [])
+    ISSUES = list(state.get("issues") or [])
+    STATE_LOADED = True
+
+
+def persist_state() -> None:
+    if not STATE_LOADED:
+        return
+    db.save_state(
+        {
+            "users": USERS,
+            "sessions": SESSIONS,
+            "magicLinks": MAGIC_LINKS,
+            "githubStates": GITHUB_STATES,
+            "settings": SETTINGS,
+            "scans": SCANS,
+            "issues": ISSUES,
+        }
+    )
 
 
 def allowed_origins() -> set[str]:
@@ -406,6 +333,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         self.route("DELETE")
 
     def route(self, method: str) -> None:
+        ensure_state_loaded()
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
@@ -425,10 +353,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         except Exception as exc:
             return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, f"Server error: {exc}")
+        finally:
+            persist_state()
 
     def handle_get(self, path: str, params: dict, segments: list[str]) -> None:
         if path == "/health":
-            return self.json({"ok": True, "service": "pullwise-server", "time": now(), "mode": env("PULLWISE_MODE", "local")})
+            return self.json({
+                "ok": True,
+                "service": "pullwise-server",
+                "time": now(),
+                "mode": env("PULLWISE_MODE", "local"),
+                "database": {"type": "sqlite", "path": db.database_path()},
+            })
         if path == "/dev/magic-links":
             links = []
             for token, record in MAGIC_LINKS.items():
@@ -456,11 +392,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/repositories":
             return self.json(self.repositories_payload())
         if path == "/scans":
-            return self.json({"items": SCANS, "scans": SCANS})
+            return self.json({"items": user_scans(self.current_session()), "scans": user_scans(self.current_session())})
         if len(segments) == 2 and segments[0] == "scans":
             return self.json(self.find_or_404(SCANS, segments[1], "Scan"))
         if path == "/issues":
-            return self.json({"items": ISSUES, "issues": ISSUES})
+            return self.json({"items": user_issues(self.current_session()), "issues": user_issues(self.current_session())})
         if len(segments) == 2 and segments[0] == "issues":
             return self.json(self.find_or_404(ISSUES, segments[1], "Issue"))
         if path == "/settings":
