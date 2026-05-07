@@ -5,13 +5,14 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import db, github_auth
+from . import db, github_auth, worker
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
@@ -48,6 +49,10 @@ REPOSITORIES: list[dict] = []
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
 
+# Re-entrant so worker mutations can call persist_state() while already holding
+# the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
+STATE_LOCK = threading.RLock()
+
 
 def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -55,34 +60,36 @@ def env(name: str, default: str) -> str:
 
 def ensure_state_loaded() -> None:
     global STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, SCANS, ISSUES
-    if STATE_LOADED:
-        return
+    with STATE_LOCK:
+        if STATE_LOADED:
+            return
 
-    state = db.load_state()
-    USERS = dict(state.get("users") or {})
-    SESSIONS = dict(state.get("sessions") or {})
-    MAGIC_LINKS = dict(state.get("magicLinks") or {})
-    GITHUB_STATES = dict(state.get("githubStates") or {})
-    SETTINGS = dict(state.get("settings") or {})
-    SCANS = list(state.get("scans") or [])
-    ISSUES = list(state.get("issues") or [])
-    STATE_LOADED = True
+        state = db.load_state()
+        USERS = dict(state.get("users") or {})
+        SESSIONS = dict(state.get("sessions") or {})
+        MAGIC_LINKS = dict(state.get("magicLinks") or {})
+        GITHUB_STATES = dict(state.get("githubStates") or {})
+        SETTINGS = dict(state.get("settings") or {})
+        SCANS = list(state.get("scans") or [])
+        ISSUES = list(state.get("issues") or [])
+        STATE_LOADED = True
 
 
 def persist_state() -> None:
-    if not STATE_LOADED:
-        return
-    db.save_state(
-        {
-            "users": USERS,
-            "sessions": SESSIONS,
-            "magicLinks": MAGIC_LINKS,
-            "githubStates": GITHUB_STATES,
-            "settings": SETTINGS,
-            "scans": SCANS,
-            "issues": ISSUES,
-        }
-    )
+    with STATE_LOCK:
+        if not STATE_LOADED:
+            return
+        db.save_state(
+            {
+                "users": USERS,
+                "sessions": SESSIONS,
+                "magicLinks": MAGIC_LINKS,
+                "githubStates": GITHUB_STATES,
+                "settings": SETTINGS,
+                "scans": SCANS,
+                "issues": ISSUES,
+            }
+        )
 
 
 def allowed_origins() -> set[str]:
@@ -410,6 +417,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(self.find_or_404(user_scans(self.current_session()), segments[1], "Scan"))
         if path == "/issues":
             issues = user_issues(self.current_session())
+            scan_id = params.get("scanId")
+            if scan_id:
+                issues = [issue for issue in issues if issue.get("scanId") == scan_id]
             return self.json({"items": issues, "issues": issues})
         if len(segments) == 2 and segments[0] == "issues":
             return self.json(self.find_or_404(user_issues(self.current_session()), segments[1], "Issue"))
@@ -445,10 +455,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "status": "queued",
                 "userId": session["userId"],
                 "createdAt": now(),
-                "issues": None,
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
                 "by": "you",
             }
-            SCANS.insert(0, scan)
+            with STATE_LOCK:
+                SCANS.insert(0, scan)
+            worker.start_scan(scan["id"])
             return self.json(scan, HTTPStatus.CREATED)
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
             scan = self.find_or_404(user_scans(self.current_session()), segments[1], "Scan")
