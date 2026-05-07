@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: pullwise-server
+Version: 0.1.0
+Summary: Local Python API server for Pullwise Web
+Requires-Python: >=3.10
+Requires-Dist: Authlib<2,>=1.6
+Requires-Dist: PyGithub<3,>=2.9
+Requires-Dist: requests<3,>=2.32

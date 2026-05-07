@@ -2,13 +2,14 @@
 
 A lightweight Python development API that matches the current `pullwise-web` frontend contract.
 
-It uses the Python standard library so it can run without installing packages. By default it keeps the local development mock for GitHub login and repository authorization. When GitHub OAuth and GitHub App environment variables are configured, those same endpoints switch to the real GitHub flows. The server auto-loads `.env` from this directory when it starts.
+By default it keeps the local development mock for GitHub login and repository authorization. When GitHub OAuth and GitHub App environment variables are configured, those same endpoints switch to the real GitHub flows through Authlib and PyGithub. The server auto-loads `.env` from this directory when it starts.
 
 ## Run
 
 A local `.env` is included for development and defaults to `http://localhost:3000` -> `http://localhost:5174`.
 
 ```powershell
+python -m pip install -e .
 python -m pullwise_server
 ```
 

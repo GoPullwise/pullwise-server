@@ -543,7 +543,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         authorize_url = github_auth.build_oauth_authorize_url(
             callback_url,
             state,
-            github_auth.code_challenge(verifier),
+            verifier,
         )
         return self.json({"url": authorize_url, "mode": "github"})
 
@@ -565,6 +565,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             params["code"],
             f"{api_base_url(self)}/auth/github/callback",
             str(record.get("codeVerifier") or ""),
+            state,
         )
         profile = github_auth.fetch_user_profile(token_payload["access_token"])
         user = get_or_create_real_github_user(profile, token_payload)
@@ -641,11 +642,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         repository_items = []
         if github_auth.app_api_configured():
             installation = github_auth.fetch_installation(installation_id)
-            token_payload = github_auth.create_installation_access_token(installation_id)
-            repository_items = [
-                github_auth.repo_to_pullwise(repo)
-                for repo in github_auth.list_installation_repositories(token_payload["token"])
-            ]
+            repository_items = github_auth.list_installation_repositories(installation_id)
 
         repository_selection = installation.get("repository_selection") or params.get("scope") or record.get("requestedScope") or "selected"
         account = installation.get("account") or {}
@@ -693,11 +690,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return {"items": [], "repositories": [], "needsAuthorization": True}
 
         if refresh and github_access.get("mode") == "github-app" and github_auth.app_api_configured():
-            token_payload = github_auth.create_installation_access_token(str(github_access["installationId"]))
-            repository_items = [
-                github_auth.repo_to_pullwise(repo)
-                for repo in github_auth.list_installation_repositories(token_payload["token"])
-            ]
+            repository_items = github_auth.list_installation_repositories(str(github_access["installationId"]))
             github_access["repositoryItems"] = repository_items
             github_access["repositories"] = [repo["fullName"] for repo in repository_items]
             github_access["repositoriesNeedSync"] = False
