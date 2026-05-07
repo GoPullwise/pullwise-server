@@ -1,0 +1,9 @@
+﻿[project]
+name = "pullwise-server"
+version = "0.1.0"
+description = "Local Python API server for Pullwise Web"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+pullwise-server = "pullwise_server.app:main"
