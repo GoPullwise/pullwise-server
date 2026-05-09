@@ -4,7 +4,7 @@ Pullwise code review agent integration.
 This module is the integration point for engineering code review. The active
 provider is selected by `PULLWISE_REVIEW_PROVIDER`:
 
-- `mock` (default): synthetic findings for end-to-end wire-up.
+- `mock`: synthetic findings for explicit local wire-up only.
 - `claude_code`: subprocess the Claude Code CLI in the working tree.
 - `codex`: subprocess the Codex CLI in the working tree.
 
@@ -23,6 +23,7 @@ import time
 
 
 CHECKOUT_PROVIDERS = {"claude_code", "codex"}
+DEFAULT_PROVIDER = "disabled"
 
 
 SYSTEM_PROMPT = """\
@@ -138,6 +139,11 @@ def run_review(
     worker does not need to reshape provider output.
     """
     chosen = selected_provider(provider)
+    if chosen == "disabled":
+        raise RuntimeError(
+            "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER "
+            "to claude_code or codex for real scans. Use mock only for explicit local wire-up."
+        )
     if chosen == "mock":
         raw = _run_mock(repo=repo, branch=branch, commit=commit)
     elif chosen == "claude_code":
@@ -154,7 +160,7 @@ def run_review(
 
 
 def selected_provider(provider: str | None = None) -> str:
-    return (provider or os.environ.get("PULLWISE_REVIEW_PROVIDER", "mock")).strip().lower()
+    return (provider or os.environ.get("PULLWISE_REVIEW_PROVIDER", DEFAULT_PROVIDER)).strip().lower()
 
 
 def provider_requires_checkout(provider: str | None = None) -> bool:

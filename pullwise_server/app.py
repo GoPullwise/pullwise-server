@@ -95,6 +95,18 @@ def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def env_flag(name: str, default: str = "false") -> bool:
+    return env(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def local_github_mocks_enabled() -> bool:
+    return env_flag("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS")
+
+
+def dev_magic_links_enabled() -> bool:
+    return env_flag("PULLWISE_ENABLE_DEV_MAGIC_LINKS")
+
+
 def ensure_state_loaded() -> None:
     global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, SCANS, ISSUES
     with STATE_LOCK:
@@ -476,6 +488,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "database": {"type": "sqlite", "path": db.database_path()},
             })
         if path == "/dev/magic-links":
+            if not dev_magic_links_enabled():
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, "Local magic links are disabled. Set PULLWISE_ENABLE_DEV_MAGIC_LINKS=true for explicit local development.")
             links = []
             for token, record in MAGIC_LINKS.items():
                 if record["expiresAt"] >= now():
@@ -520,7 +534,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing settings.")
             return self.json(settings_payload(session["userId"]))
         if path == "/billing/plan":
-            return self.json({"plan": "free", "status": "active", "scansUsed": 12, "scansLimit": 100})
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Billing is not implemented on this backend.")
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_post(self, path: str, params: dict, segments: list[str]) -> None:
@@ -590,17 +604,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 mark_state_dirty()
             return self.json(scan)
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "apply":
-            issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
-            return self.json({"ok": True, "issue": issue, "branch": body.get("branch") or f"fix/{issue['id'].lower()}"})
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Applying fixes is not implemented on this backend.")
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "pull-requests":
-            issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
-            return self.json({"ok": True, "issue": issue, "url": f"https://github.com/{issue['repo']}/pull/482"}, HTTPStatus.CREATED)
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Pull request creation is not implemented on this backend.")
         if len(segments) == 2 and segments[0] == "integrations":
-            return self.json({"ok": True, "provider": segments[1], "connected": True, "payload": body})
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, f"{segments[1]} integration writes are not implemented on this backend.")
         if path == "/billing/checkout-sessions":
-            return self.json({"url": "https://billing.stripe.test/checkout/pullwise"}, HTTPStatus.CREATED)
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Billing checkout is not implemented on this backend.")
         if path == "/billing/portal-sessions":
-            return self.json({"url": "https://billing.stripe.test/portal/pullwise"}, HTTPStatus.CREATED)
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Billing portal is not implemented on this backend.")
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_patch(self, segments: list[str]) -> None:
@@ -623,15 +635,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_delete(self, segments: list[str]) -> None:
         if len(segments) == 2 and segments[0] == "integrations":
             session = self.current_session()
-            if session and segments[1] == "github":
+            if segments[1] != "github":
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, f"{segments[1]} integration disconnect is not implemented on this backend.")
+            if session:
                 USERS[session["userId"]]["githubRepositoryAccess"] = None
                 mark_state_dirty()
-            return self.json({"ok": True, "provider": segments[1], "connected": False})
+            return self.json({"ok": True, "provider": "github", "connected": False})
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_github_authorize(self, params: dict) -> None:
         redirect_to = safe_redirect_to(params.get("redirectTo"), "oauth")
         if not github_auth.oauth_configured():
+            if not local_github_mocks_enabled():
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured. Set PULLWISE_GITHUB_CLIENT_ID and PULLWISE_GITHUB_CLIENT_SECRET.")
             callback = f"{api_base_url(self)}/auth/github/callback?{urlencode({'redirectTo': redirect_to})}"
             return self.json({"url": callback, "mode": "local"})
 
@@ -647,6 +663,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_github_callback(self, params: dict) -> None:
         if not github_auth.oauth_configured():
+            if not local_github_mocks_enabled():
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured.")
             user = get_or_create_github_user()
             session = create_session(user)
             return self.redirect(safe_redirect_to(params.get("redirectTo"), "oauth"), cookie_header(session["id"]))
@@ -674,6 +692,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         scope = params.get("scope") if params.get("scope") in {"all", "selected"} else "all"
         redirect_to = safe_redirect_to(params.get("redirectTo"), "repos")
         if not github_auth.app_install_configured():
+            if not local_github_mocks_enabled():
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub App installation is not configured. Set PULLWISE_GITHUB_APP_SLUG or PULLWISE_GITHUB_APP_INSTALL_URL.")
             callback = f"{api_base_url(self)}/integrations/github/callback?{urlencode({'scope': scope, 'redirectTo': redirect_to})}"
             return self.json({"url": callback, "mode": "local"})
 
@@ -688,6 +708,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
 
     def handle_magic_link(self, body: dict) -> None:
+        if not dev_magic_links_enabled():
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Email magic links are not implemented. Set PULLWISE_ENABLE_DEV_MAGIC_LINKS=true only for explicit local development.")
         email = str(body.get("email") or "").strip().lower()
         if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
             return self.error(HTTPStatus.BAD_REQUEST, "A valid email is required.")
@@ -711,6 +733,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_github_repository_callback(self, params: dict) -> None:
         if not github_auth.app_install_configured():
+            if not local_github_mocks_enabled():
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub App installation is not configured.")
             session = self.current_or_demo_session()
             scope = params.get("scope") or "all"
             repository_items = REPOSITORIES if scope == "all" else REPOSITORIES[:1]
@@ -784,7 +808,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "repositories": github_access.get("repositories") if github_access else [],
             "repositoriesNeedSync": github_access.get("repositoriesNeedSync") if github_access else False,
         }
-        items = [github, {"provider": "slack", "connected": False}, {"provider": "linear", "connected": False}]
+        items = [github]
         return {"items": items, "github": github}
 
     def repositories_payload(self, refresh: bool = False) -> dict:
