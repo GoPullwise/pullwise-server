@@ -1,43 +1,39 @@
-﻿# Pullwise Server
+# Pullwise Server
 
-A lightweight Python development API that matches the current `pullwise-web` frontend contract.
+A lightweight Python API for `pullwise-web`.
 
-By default it keeps the local development mock for GitHub login and repository authorization. When GitHub OAuth and GitHub App environment variables are configured, those same endpoints switch to the real GitHub flows through Authlib and PyGithub. The server auto-loads `.env` from this directory when it starts.
+By default the server does not return local mock login callbacks, local magic
+links, or synthetic review findings. Configure real GitHub OAuth, GitHub App,
+and review provider credentials for real scans. Explicit local mock switches are
+available only for development.
 
 ## Run
-
-A local `.env` is included for development and defaults to `http://localhost:3000` -> `http://localhost:5174`.
 
 ```powershell
 python -m pip install -e .
 python -m pullwise_server
 ```
 
-Then point the frontend at:
+Point the frontend at:
 
 ```text
 VITE_API_BASE_URL=http://localhost:3000
 ```
 
-The server persists sessions, GitHub authorization state, selected repositories, scans, issues, and settings in SQLite by default at `.pullwise/pullwise.sqlite3`. Override it with `PULLWISE_DB_PATH=F:\path\to\pullwise.sqlite3` if needed.
-
-## Local Flow
-
-- GitHub identity login returns a local callback URL and creates a cookie session unless real OAuth credentials are configured.
-- Email magic link returns `magicLink` / `devMagicLink`; the frontend shows it as a local development shortcut.
-- GitHub repository authorization is separate from login and redirects to the repository picker unless a real GitHub App is configured.
-- `GET /dev/magic-links` lists unexpired local magic links for debugging.
+The server persists sessions, GitHub authorization state, selected
+repositories, scans, issues, and settings in SQLite by default at
+`.pullwise/pullwise.sqlite3`. Override with `PULLWISE_DB_PATH`.
 
 ## Real GitHub Setup
 
-Create or configure a GitHub App for Pullwise. In the app settings:
+Create or configure a GitHub App for Pullwise:
 
 - Homepage URL: `http://localhost:5174`
 - Callback URL for user authorization: `http://localhost:3000/auth/github/callback`
 - Setup URL: `http://localhost:3000/integrations/github/callback`
-- Permissions: `Contents: read`, `Metadata: read`, `Pull requests: read/write`; add write permissions only for features you actually enable.
+- Required permissions for current functionality: `Contents: read`, `Metadata: read`
 
-Then set these variables in `F:\pullwise-server\.env`:
+Set these variables in `F:\pullwise-server\.env`:
 
 ```env
 PULLWISE_GITHUB_CLIENT_ID=your_oauth_or_github_app_client_id
@@ -47,14 +43,19 @@ PULLWISE_GITHUB_APP_ID=123456
 PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=F:\path\to\pullwise.private-key.pem
 ```
 
-`PULLWISE_GITHUB_CLIENT_ID` / `PULLWISE_GITHUB_CLIENT_SECRET` make `/auth/github/authorize` jump to real GitHub sign-in. `PULLWISE_GITHUB_APP_SLUG` makes `/integrations/github/authorize` jump to the GitHub App installation screen. `PULLWISE_GITHUB_APP_ID` plus the private key let the server mint an installation token and list the repositories that were authorized.
+`PULLWISE_GITHUB_CLIENT_ID` and `PULLWISE_GITHUB_CLIENT_SECRET` make
+`/auth/github/authorize` use real GitHub sign-in. `PULLWISE_GITHUB_APP_SLUG`
+makes `/integrations/github/authorize` use the GitHub App installation screen.
+`PULLWISE_GITHUB_APP_ID` plus the private key let the server mint installation
+tokens and list authorized repositories.
 
-For deployment or secret stores, use `PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64` instead of `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`.
+For deployment or secret stores, use `PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64`
+instead of `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`.
 
 ## Review Worker Setup
 
-The scan worker defaults to `PULLWISE_REVIEW_PROVIDER=mock`, which keeps the
-frontend flow fully offline. For a real agent run, install `git` plus either
+The scan worker defaults to disabled review provider mode so scans do not create
+synthetic findings by accident. For a real agent run, install `git` plus either
 Claude Code or Codex CLI, then set:
 
 ```env
@@ -63,42 +64,62 @@ ANTHROPIC_API_KEY=your_key
 PULLWISE_CHECKOUT_ROOT=F:\tmp\pullwise-checkouts
 ```
 
-`claude_code` and `codex` make the worker clone the selected repository during
-the `clone` phase. The clone uses `github_auth.create_installation_access_token`
-for the scan's GitHub App installation id, stores the checkout path as
-`repoPath` on the scan record, and passes that path to `review.run_review`.
-The installation token is supplied through temporary Git config, not embedded in
-the origin URL.
+Supported values:
+
+- `claude_code`: clone the selected repo and run Claude Code in the checkout
+- `codex`: clone the selected repo and run Codex in the checkout
+- `mock`: explicit local wire-up only; returns synthetic findings
+
+`claude_code` and `codex` clone the selected repository during the `clone`
+phase. The clone uses `github_auth.create_installation_access_token`, stores the
+checkout path as `repoPath`, and passes that path to `review.run_review`.
+
+## Explicit Local Development Mocks
+
+These switches are off by default:
+
+```env
+PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS=true
+PULLWISE_ENABLE_DEV_MAGIC_LINKS=true
+PULLWISE_REVIEW_PROVIDER=mock
+```
+
+Use them only when testing frontend wiring without real GitHub or a real review
+provider.
 
 ## Frontend Contract
 
-Identity login:
+Implemented endpoints:
 
 - `GET /auth/session`
 - `GET /auth/github/authorize?redirectTo=...`
 - `GET /auth/github/callback?redirectTo=...`
-- `POST /auth/email/magic-link`
-- `GET /auth/email/callback?token=...`
-- `GET /dev/magic-links` for local debugging only
 - `POST /auth/sign-out`
-
-GitHub repository authorization:
-
 - `GET /integrations/github/authorize?scope=all|selected&redirectTo=...`
 - `GET /integrations/github/callback?scope=all|selected&redirectTo=...`
 - `GET /integrations`
-- `POST /integrations/{provider}/connect`
-- `DELETE /integrations/{provider}`
+- `DELETE /integrations/github`
+- `GET /repositories`
+- `POST /repositories/sync`
+- `GET /scans`
+- `POST /scans`
+- `GET /scans/{id}`
+- `POST /scans/{id}/cancel`
+- `GET /issues`
+- `GET /issues/{id}`
+- `PATCH /issues/{id}/status`
+- `GET /settings`
+- `PATCH /settings`
 
-Prototype data APIs:
+Explicitly not implemented:
 
-- `GET /repositories`, `POST /repositories/sync`
-- `GET /scans`, `POST /scans`, `GET /scans/{id}`, `POST /scans/{id}/cancel`
-- `GET /issues`, `GET /issues/{id}`, `PATCH /issues/{id}/status`
-- `POST /issues/{id}/fixes/apply`, `POST /issues/{id}/pull-requests`
-- `GET /settings`, `PATCH /settings`
-- `GET /billing/plan`, `POST /billing/checkout-sessions`, `POST /billing/portal-sessions`
+- `POST /auth/email/magic-link` unless `PULLWISE_ENABLE_DEV_MAGIC_LINKS=true`
+- `GET /dev/magic-links` unless `PULLWISE_ENABLE_DEV_MAGIC_LINKS=true`
+- `POST /issues/{id}/fixes/apply`
+- `POST /issues/{id}/pull-requests`
+- `GET /billing/plan`
+- `POST /billing/checkout-sessions`
+- `POST /billing/portal-sessions`
+- Slack or Linear integration writes
 
-## Environment
-
-See `.env.example`. The server reads `.env` automatically first, then falls back to process environment variables and built-in local defaults.
+Those endpoints return `501 Not Implemented` instead of fake success payloads.

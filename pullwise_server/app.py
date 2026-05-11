@@ -337,9 +337,7 @@ def create_session(user: dict) -> dict:
 def default_settings_payload(user_id: str) -> dict:
     user = USERS[user_id]
     return {
-        "profile": {"name": user["name"], "email": user["email"], "role": "Engineering Lead"},
-        "notifications": {"email": True, "slack": False, "criticalOnly": False},
-        "scan": {"defaultBranch": "main", "autoScan": True, "autoFixConfidence": 0.8},
+        "profile": {"name": user["name"], "email": user["email"]},
     }
 
 
