@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+import os
+import unittest
+
+
+def project_root() -> str:
+    return os.path.dirname(os.path.dirname(__file__))
+
+
+def env_example_values() -> dict[str, str]:
+    values: dict[str, str] = {}
+    with open(os.path.join(project_root(), ".env.example"), "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+    return values
+
+
+class ConfigurationContractsTest(unittest.TestCase):
+    def test_env_example_does_not_enable_local_mocks_by_default(self) -> None:
+        values = env_example_values()
+
+        self.assertNotEqual(values.get("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS"), "true")
+        self.assertNotEqual(values.get("PULLWISE_ENABLE_DEV_MAGIC_LINKS"), "true")
+        self.assertNotEqual(values.get("PULLWISE_REVIEW_PROVIDER"), "mock")
+
+
+if __name__ == "__main__":
+    unittest.main()

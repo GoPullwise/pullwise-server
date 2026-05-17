@@ -12,7 +12,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import db, github_auth, worker
+from . import db, email_delivery, github_auth, worker
 
 
 def project_root() -> str:
@@ -706,8 +706,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
 
     def handle_magic_link(self, body: dict) -> None:
-        if not dev_magic_links_enabled():
-            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Email magic links are not implemented. Set PULLWISE_ENABLE_DEV_MAGIC_LINKS=true only for explicit local development.")
+        dev_mode = dev_magic_links_enabled()
+        if not dev_mode and not email_delivery.email_delivery_configured():
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Email magic links require SMTP configuration. Set PULLWISE_EMAIL_PROVIDER=smtp, PULLWISE_SMTP_HOST, and PULLWISE_EMAIL_FROM.")
         email = str(body.get("email") or "").strip().lower()
         if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
             return self.error(HTTPStatus.BAD_REQUEST, "A valid email is required.")
@@ -716,7 +717,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         MAGIC_LINKS[token] = {"email": email, "redirectTo": redirect_to, "expiresAt": now() + MAGIC_LINK_MAX_AGE}
         mark_state_dirty()
         magic_link = f"{api_base_url(self)}/auth/email/callback?{urlencode({'token': token})}"
-        return self.json({"ok": True, "email": email, "devMagicLink": magic_link, "magicLink": magic_link, "expiresInSeconds": MAGIC_LINK_MAX_AGE})
+        if dev_mode:
+            return self.json({"ok": True, "email": email, "devMagicLink": magic_link, "magicLink": magic_link, "expiresInSeconds": MAGIC_LINK_MAX_AGE})
+
+        try:
+            email_delivery.send_magic_link_email(email, magic_link)
+        except Exception:
+            MAGIC_LINKS.pop(token, None)
+            mark_state_dirty()
+            raise
+        return self.json({"ok": True, "email": email, "sent": True, "expiresInSeconds": MAGIC_LINK_MAX_AGE})
 
     def handle_magic_callback(self, params: dict) -> None:
         token = params.get("token") or ""
