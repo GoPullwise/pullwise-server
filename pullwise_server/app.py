@@ -873,6 +873,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         user_can_access = github_auth.user_can_access_installation(user.get("githubAccessToken"), installation_id)
         if user_can_access is False:
             raise ValueError("The signed-in GitHub user cannot access this GitHub App installation.")
+        if github_auth.oauth_configured() and user_can_access is not True:
+            raise ValueError("Unable to verify access to this GitHub App installation. Try signing in with GitHub again.")
 
         installation = {}
         repository_items = []
