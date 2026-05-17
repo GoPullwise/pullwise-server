@@ -204,14 +204,42 @@ Checkout URLs are created server-side. Webhooks verify Stripe
 `Stripe-Signature` or Creem `creem-signature` before updating account billing
 state.
 
-## Cloudflare Deployment Boundary
+## Cloudflare Worker Boundary
 
-`pullwise-web` can deploy to Cloudflare Pages as a static Vite app.
-`pullwise-server` cannot run as a normal Cloudflare Worker because real scans
-require Python, SQLite or another persistent store, `git clone`, subprocesses,
-and the Codex/Claude CLI. Deploy the backend on a server/container platform, or
-Cloudflare Containers when available, and point `VITE_API_BASE_URL` plus
-`PULLWISE_ALLOWED_ORIGINS` at those production URLs.
+`pullwise-web` is a good fit for Cloudflare Pages. `pullwise-server` is not a
+good fit for a normal Cloudflare Worker as currently implemented.
+
+Cloudflare's own docs describe Workers as an edge runtime with CPU, memory,
+startup, environment variable, and subrequest limits:
+https://developers.cloudflare.com/workers/platform/limits/
+
+Cloudflare Python Workers are beta and run through Pyodide:
+https://developers.cloudflare.com/workers/languages/python/
+
+Python Workers support pure Python and Pyodide-supported packages, but not a
+full Linux/Python process environment:
+https://developers.cloudflare.com/workers/languages/python/packages/
+
+The Python Workers standard library page also lists modules that are unavailable
+or non-functional in that WebAssembly VM:
+https://developers.cloudflare.com/workers/languages/python/stdlib/
+
+Pullwise scans currently require capabilities that belong on a server/container:
+
+- `git clone` into a checkout directory
+- subprocess execution for Git, Codex CLI, or Claude Code
+- persistent SQLite state unless replaced by an external database
+- persistent checkout storage
+- long-running review work with provider CLIs and network access
+
+To run this backend on Workers, it would need a redesign around Workers-native
+storage and execution primitives, for example D1 or external Postgres for state,
+R2 for artifacts, Queues or Workflows for background work, and a separate
+containerized scanner for Git/Codex execution. The current deployable path is:
+
+```text
+Cloudflare Pages web app -> Pages Function /api proxy -> Python server/container
+```
 
 ## Explicit Local Development Mocks
 
