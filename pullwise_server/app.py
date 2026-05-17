@@ -541,6 +541,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_post(self, path: str, params: dict, segments: list[str]) -> None:
+        if path == "/webhooks/stripe":
+            return self.handle_stripe_webhook()
+        if path == "/webhooks/creem":
+            return self.handle_creem_webhook()
         body = self.read_json()
         if path == "/auth/email/magic-link":
             return self.handle_magic_link(body)
@@ -929,13 +933,61 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raise ValueError(f"{label} not found: {item_id}")
 
     def read_json(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
-        if length == 0:
+        raw_bytes = self.read_raw_body()
+        if not raw_bytes:
             return {}
-        raw = self.rfile.read(length).decode("utf-8")
+        raw = raw_bytes.decode("utf-8")
         if not raw.strip():
             return {}
         return json.loads(raw)
+
+    def read_raw_body(self) -> bytes:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length == 0:
+            return b""
+        return self.rfile.read(length)
+
+    def handle_creem_webhook(self) -> None:
+        raw = self.read_raw_body()
+        if not billing.verify_creem_webhook(raw, self.headers.get("creem-signature")):
+            return self.error(HTTPStatus.BAD_REQUEST, "Invalid Creem webhook signature.")
+        event = json.loads(raw.decode("utf-8") or "{}")
+        update = billing.billing_update_from_creem_event(event)
+        if update:
+            self.apply_billing_update(update)
+        return self.json({"received": True})
+
+    def handle_stripe_webhook(self) -> None:
+        raw = self.read_raw_body()
+        if not billing.verify_stripe_webhook(raw, self.headers.get("Stripe-Signature")):
+            return self.error(HTTPStatus.BAD_REQUEST, "Invalid Stripe webhook signature.")
+        event = json.loads(raw.decode("utf-8") or "{}")
+        update = billing.billing_update_from_stripe_event(event)
+        if update:
+            self.apply_billing_update(update)
+        return self.json({"received": True})
+
+    def apply_billing_update(self, update: dict) -> None:
+        user = USERS.get(update.get("userId") or "")
+        if not user and update.get("customerId"):
+            for candidate in USERS.values():
+                if (candidate.get("billing") or {}).get("customerId") == update.get("customerId"):
+                    user = candidate
+                    break
+        if not user:
+            return
+        current = user.get("billing") or {}
+        user["billing"] = {
+            **current,
+            "provider": update.get("provider") or current.get("provider"),
+            "customerId": update.get("customerId") or current.get("customerId"),
+            "customerEmail": update.get("customerEmail") or current.get("customerEmail"),
+            "subscriptionId": update.get("subscriptionId") or current.get("subscriptionId"),
+            "status": update.get("status") or current.get("status") or "active",
+            "updatedAt": now(),
+            "lastEventType": update.get("eventType"),
+        }
+        mark_state_dirty()
 
     def send_cors_headers(self) -> None:
         origin = self.headers.get("Origin")
