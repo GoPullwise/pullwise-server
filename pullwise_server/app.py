@@ -501,6 +501,125 @@ def session_payload(session: dict | None) -> dict:
     }
 
 
+def billing_event_id(update: dict) -> str:
+    return str(update.get("eventId") or "")
+
+
+def billing_event_created(update: dict) -> int | None:
+    value = update.get("eventCreated")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def billing_event_processed(update: dict) -> bool:
+    event_id = billing_event_id(update)
+    return bool(event_id and event_id in BILLING_EVENTS)
+
+
+def remember_billing_event(update: dict, *, applied: bool, stale: bool = False) -> None:
+    event_id = billing_event_id(update)
+    if not event_id:
+        return
+    BILLING_EVENTS[event_id] = {
+        "eventType": update.get("eventType"),
+        "eventCreated": billing_event_created(update),
+        "processedAt": now(),
+        "applied": applied,
+        "stale": stale,
+    }
+    prune_billing_events()
+    mark_state_dirty()
+
+
+def prune_billing_events() -> None:
+    if len(BILLING_EVENTS) <= MAX_BILLING_EVENT_RECORDS:
+        return
+    ordered = sorted(BILLING_EVENTS.items(), key=lambda item: item[1].get("processedAt") or 0)
+    for event_id, _record in ordered[: len(BILLING_EVENTS) - MAX_BILLING_EVENT_RECORDS]:
+        BILLING_EVENTS.pop(event_id, None)
+
+
+def remember_pending_billing_update(update: dict) -> None:
+    if not (update.get("customerId") or update.get("subscriptionId")):
+        return
+    event_id = billing_event_id(update)
+    if event_id and any(billing_event_id(candidate) == event_id for candidate in BILLING_PENDING_UPDATES):
+        return
+    if billing_event_processed(update):
+        return
+    BILLING_PENDING_UPDATES.append(dict(update))
+    if len(BILLING_PENDING_UPDATES) > MAX_BILLING_PENDING_UPDATES:
+        del BILLING_PENDING_UPDATES[: len(BILLING_PENDING_UPDATES) - MAX_BILLING_PENDING_UPDATES]
+    mark_state_dirty()
+
+
+def billing_user_for_update(update: dict) -> dict | None:
+    user = USERS.get(update.get("userId") or "")
+    if user:
+        return user
+    for candidate in USERS.values():
+        if billing_update_matches_user(update, candidate):
+            return candidate
+    return None
+
+
+def billing_update_matches_user(update: dict, user: dict) -> bool:
+    current = user.get("billing") or {}
+    if update.get("customerId") and current.get("customerId") == update.get("customerId"):
+        return True
+    if update.get("subscriptionId") and current.get("subscriptionId") == update.get("subscriptionId"):
+        return True
+    return bool(update.get("userId") and update.get("userId") == user.get("id"))
+
+
+def apply_billing_update_to_user(user: dict, update: dict) -> bool:
+    current = user.get("billing") or {}
+    incoming_created = billing_event_created(update)
+    current_created = billing_event_created({"eventCreated": current.get("lastEventCreated")})
+    if incoming_created is not None and current_created is not None and incoming_created < current_created:
+        remember_billing_event(update, applied=False, stale=True)
+        return False
+
+    user["billing"] = {
+        **current,
+        "provider": update.get("provider") or current.get("provider"),
+        "customerId": update.get("customerId") or current.get("customerId"),
+        "customerEmail": update.get("customerEmail") or current.get("customerEmail"),
+        "subscriptionId": update.get("subscriptionId") or current.get("subscriptionId"),
+        "status": update.get("status") or current.get("status") or "active",
+        "updatedAt": now(),
+        "lastEventType": update.get("eventType"),
+        "lastEventId": update.get("eventId") or current.get("lastEventId"),
+        "lastEventCreated": incoming_created if incoming_created is not None else current.get("lastEventCreated"),
+    }
+    remember_billing_event(update, applied=True)
+    mark_state_dirty()
+    return True
+
+
+def apply_pending_billing_updates_for_user(user: dict) -> None:
+    matching = []
+    remaining = []
+    for update in BILLING_PENDING_UPDATES:
+        if billing_update_matches_user(update, user):
+            matching.append(update)
+        else:
+            remaining.append(update)
+    if not matching:
+        return
+
+    BILLING_PENDING_UPDATES[:] = remaining
+    mark_state_dirty()
+    for update in sorted(matching, key=lambda item: billing_event_created(item) or 0):
+        if not billing_event_processed(update):
+            apply_billing_update_to_user(user, update)
+
+
 def cookie_header(session_id: str) -> str:
     return f"{SESSION_COOKIE}={session_id}; {cookie_attributes()}; Max-Age={SESSION_MAX_AGE}"
 
@@ -1117,26 +1236,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json({"received": True})
 
     def apply_billing_update(self, update: dict) -> None:
-        user = USERS.get(update.get("userId") or "")
-        if not user and update.get("customerId"):
-            for candidate in USERS.values():
-                if (candidate.get("billing") or {}).get("customerId") == update.get("customerId"):
-                    user = candidate
-                    break
-        if not user:
+        if billing_event_processed(update):
             return
-        current = user.get("billing") or {}
-        user["billing"] = {
-            **current,
-            "provider": update.get("provider") or current.get("provider"),
-            "customerId": update.get("customerId") or current.get("customerId"),
-            "customerEmail": update.get("customerEmail") or current.get("customerEmail"),
-            "subscriptionId": update.get("subscriptionId") or current.get("subscriptionId"),
-            "status": update.get("status") or current.get("status") or "active",
-            "updatedAt": now(),
-            "lastEventType": update.get("eventType"),
-        }
-        mark_state_dirty()
+        user = billing_user_for_update(update)
+        if not user:
+            remember_pending_billing_update(update)
+            return
+        apply_billing_update_to_user(user, update)
+        apply_pending_billing_updates_for_user(user)
 
     def send_cors_headers(self) -> None:
         origin = self.headers.get("Origin")
