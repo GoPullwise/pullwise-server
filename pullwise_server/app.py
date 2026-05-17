@@ -461,7 +461,7 @@ def cookie_attributes() -> str:
 
 
 def cookie_secure_enabled() -> bool:
-    if "PULLWISE_COOKIE_SECURE" in os.environ:
+    if os.environ.get("PULLWISE_COOKIE_SECURE", "").strip():
         return env_flag("PULLWISE_COOKIE_SECURE")
     public_base = os.environ.get("PULLWISE_API_BASE_URL") or os.environ.get("PULLWISE_APP_URL") or ""
     return public_base.startswith("https://")
