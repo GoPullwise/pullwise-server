@@ -511,6 +511,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        except billing.BillingProviderConflict as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        except billing.BillingConfigurationError as exc:
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, str(exc))
         except Exception as exc:
             return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, f"Server error: {exc}")
         finally:
@@ -688,7 +692,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_patch(self, segments: list[str]) -> None:
         body = self.read_json()
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "status":
-            issue = self.find_or_404(user_issues(self.current_session()), segments[1], "Issue")
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating issue status.")
+            issue = self.find_or_404(user_issues(session), segments[1], "Issue")
             issue["status"] = body.get("status") or issue["status"]
             mark_state_dirty()
             return self.json(issue)
@@ -707,9 +714,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if segments[1] != "github":
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, f"{segments[1]} integration disconnect is not implemented on this backend.")
-            if session:
-                USERS[session["userId"]]["githubRepositoryAccess"] = None
-                mark_state_dirty()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before disconnecting GitHub.")
+            USERS[session["userId"]]["githubRepositoryAccess"] = None
+            mark_state_dirty()
             return self.json({"ok": True, "provider": "github", "connected": False})
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
