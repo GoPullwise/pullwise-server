@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import os
 import re
 import secrets
@@ -14,6 +15,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from . import billing, db, email_delivery, github_auth, worker
 
+logger = logging.getLogger(__name__)
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
@@ -516,7 +518,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         except billing.BillingConfigurationError as exc:
             return self.error(HTTPStatus.NOT_IMPLEMENTED, str(exc))
         except Exception as exc:
-            return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, f"Server error: {exc}")
+            logger.exception("Unhandled server error while handling %s %s", method, self.path)
+            return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Server error.")
         finally:
             persist_state()
 

@@ -80,6 +80,21 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_unhandled_errors_do_not_echo_internal_exception_details(self) -> None:
+        handler = RouteHarness("/boom")
+
+        def boom(_path, _params, _segments):
+            raise RuntimeError("secret-token-path")
+
+        handler.handle_get = boom
+
+        with patch.object(app.logger, "exception") as log_exception:
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.INTERNAL_SERVER_ERROR)
+        self.assertEqual(handler.payload["message"], "Server error.")
+        log_exception.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
