@@ -155,7 +155,7 @@ def allowed_origins() -> set[str]:
         "PULLWISE_ALLOWED_ORIGINS",
         "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
     )
-    return {item.strip() for item in raw.split(",") if item.strip()}
+    return {item.strip() for item in raw.split(",") if item.strip() and item.strip() != "*"}
 
 
 def api_base_url(handler: BaseHTTPRequestHandler) -> str:
@@ -245,7 +245,7 @@ def safe_redirect_to(value: str | None, screen: str) -> str:
     app_origin = url_origin(env("PULLWISE_APP_URL", "http://localhost:5173"))
     if app_origin:
         allowed.add(app_origin)
-    if origin and (origin in allowed or "*" in allowed):
+    if origin and origin in allowed:
         return value
     return fallback
 
@@ -1032,7 +1032,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def send_cors_headers(self) -> None:
         origin = self.headers.get("Origin")
         allowed = allowed_origins()
-        if origin and (origin in allowed or "*" in allowed):
+        if origin and origin in allowed:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Credentials", "true")
             self.send_header("Vary", "Origin")
