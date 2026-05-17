@@ -50,6 +50,8 @@ class BillingWebhookTest(unittest.TestCase):
 
     def test_stripe_checkout_completed_maps_to_active_billing(self) -> None:
         event = {
+            "id": "evt_checkout_1",
+            "created": 1710000000,
             "type": "checkout.session.completed",
             "data": {
                 "object": {
@@ -67,6 +69,30 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["customerId"], "cus_1")
         self.assertEqual(update["subscriptionId"], "sub_1")
         self.assertEqual(update["status"], "active")
+        self.assertEqual(update["eventId"], "evt_checkout_1")
+        self.assertEqual(update["eventCreated"], 1710000000)
+
+    def test_stripe_subscription_event_includes_event_metadata_for_idempotency(self) -> None:
+        event = {
+            "id": "evt_subscription_1",
+            "created": 1710000100,
+            "type": "customer.subscription.updated",
+            "data": {
+                "object": {
+                    "id": "sub_1",
+                    "customer": "cus_1",
+                    "status": "past_due",
+                }
+            },
+        }
+
+        update = billing.billing_update_from_stripe_event(event)
+
+        self.assertEqual(update["customerId"], "cus_1")
+        self.assertEqual(update["subscriptionId"], "sub_1")
+        self.assertEqual(update["status"], "past_due")
+        self.assertEqual(update["eventId"], "evt_subscription_1")
+        self.assertEqual(update["eventCreated"], 1710000100)
 
 
 if __name__ == "__main__":
