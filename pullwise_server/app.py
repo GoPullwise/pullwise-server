@@ -12,7 +12,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import db, email_delivery, github_auth, worker
+from . import billing, db, email_delivery, github_auth, worker
 
 
 def project_root() -> str:
@@ -532,7 +532,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing settings.")
             return self.json(settings_payload(session["userId"]))
         if path == "/billing/plan":
-            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Billing is not implemented on this backend.")
+            payload = billing.public_plan()
+            session = self.current_session()
+            user = USERS.get(session["userId"]) if session else None
+            if user:
+                payload["account"] = user.get("billing") or {"status": "none"}
+            return self.json(payload)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_post(self, path: str, params: dict, segments: list[str]) -> None:
@@ -608,9 +613,32 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 2 and segments[0] == "integrations":
             return self.error(HTTPStatus.NOT_IMPLEMENTED, f"{segments[1]} integration writes are not implemented on this backend.")
         if path == "/billing/checkout-sessions":
-            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Billing checkout is not implemented on this backend.")
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting checkout.")
+            user = USERS[session["userId"]]
+            checkout = billing.create_checkout_session(
+                user,
+                success_url=safe_redirect_to(body.get("successUrl"), "settings"),
+                cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
+            )
+            user["billingCheckout"] = {
+                "provider": checkout.get("provider"),
+                "id": checkout.get("id"),
+                "requestId": checkout.get("requestId"),
+                "createdAt": now(),
+            }
+            mark_state_dirty()
+            return self.json(checkout)
         if path == "/billing/portal-sessions":
-            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Billing portal is not implemented on this backend.")
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before opening the billing portal.")
+            portal = billing.create_portal_session(
+                USERS[session["userId"]],
+                return_url=safe_redirect_to(body.get("returnUrl"), "settings"),
+            )
+            return self.json(portal)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_patch(self, segments: list[str]) -> None:
