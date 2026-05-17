@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import hmac
+import json
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -9,14 +12,18 @@ from pullwise_server import app
 
 
 class HandlerHarness(app.PullwiseHandler):
-    def __init__(self, body: dict | None = None, cookie: str = "") -> None:
+    def __init__(self, body: dict | None = None, cookie: str = "", raw_body: bytes | None = None, headers: dict | None = None) -> None:
         self._body = body or {}
-        self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie}
+        self._raw_body = raw_body if raw_body is not None else json.dumps(self._body).encode("utf-8")
+        self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie, **(headers or {})}
         self.payload = None
         self.status = None
 
     def read_json(self) -> dict:
         return self._body
+
+    def read_raw_body(self) -> bytes:
+        return self._raw_body
 
     def json(self, payload: dict, status: int = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
         self.payload = payload
@@ -95,6 +102,30 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["url"], "https://checkout.stripe.com/cs/test")
         create.assert_called_once()
         self.assertEqual(create.call_args.args[0]["id"], "usr_1")
+
+    def test_creem_webhook_updates_user_billing_after_signature_verification(self) -> None:
+        seed_session()
+        raw = json.dumps(
+            {
+                "eventType": "checkout.completed",
+                "object": {
+                    "customer": {"id": "cust_1", "email": "dev@example.com"},
+                    "subscription": {"id": "sub_1", "status": "active"},
+                    "metadata": {"userId": "usr_1"},
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(raw_body=raw, headers={"creem-signature": signature})
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test"}, clear=True):
+            app.PullwiseHandler.handle_post(handler, "/webhooks/creem", {}, ["webhooks", "creem"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(app.USERS["usr_1"]["billing"]["provider"], "creem")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["customerId"], "cust_1")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import hmac
 import secrets
+import time
 from urllib.parse import urljoin
 
 import requests
@@ -192,3 +195,114 @@ def creem_api_base_url() -> str:
         "PULLWISE_CREEM_API_BASE_URL",
         "https://test-api.creem.io" if env_flag("PULLWISE_CREEM_TEST_MODE") else "https://api.creem.io",
     ).rstrip("/")
+
+
+def verify_creem_webhook(raw_body: bytes, signature: str | None) -> bool:
+    secret = env("PULLWISE_CREEM_WEBHOOK_SECRET")
+    if not secret or not signature:
+        return False
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return timing_safe_hex_equal(expected, signature.strip())
+
+
+def verify_stripe_webhook(raw_body: bytes, signature_header: str | None) -> bool:
+    secret = env("PULLWISE_STRIPE_WEBHOOK_SECRET")
+    if not secret or not signature_header:
+        return False
+    parts: dict[str, list[str]] = {}
+    for item in signature_header.split(","):
+        if "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        parts.setdefault(key, []).append(value)
+    timestamp = (parts.get("t") or [""])[0]
+    if not timestamp or not (parts.get("v1") or []):
+        return False
+    try:
+        if abs(int(time.time()) - int(timestamp)) > int(env("PULLWISE_STRIPE_WEBHOOK_TOLERANCE_SECONDS", "300")):
+            return False
+    except ValueError:
+        return False
+    signed_payload = timestamp.encode("utf-8") + b"." + raw_body
+    expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
+    return any(timing_safe_hex_equal(expected, candidate) for candidate in parts.get("v1") or [])
+
+
+def timing_safe_hex_equal(expected: str, actual: str) -> bool:
+    try:
+        return hmac.compare_digest(bytes.fromhex(expected), bytes.fromhex(actual))
+    except ValueError:
+        return False
+
+
+def billing_update_from_creem_event(event: dict) -> dict | None:
+    event_type = event.get("eventType") or event.get("type")
+    obj = event.get("object") or {}
+    if event_type not in {
+        "checkout.completed",
+        "subscription.active",
+        "subscription.paid",
+        "subscription.canceled",
+        "subscription.scheduled_cancel",
+        "subscription.past_due",
+        "subscription.expired",
+        "subscription.paused",
+    }:
+        return None
+
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    user_id = metadata.get("userId") or metadata.get("internal_customer_id")
+    customer = obj.get("customer") if isinstance(obj.get("customer"), dict) else {}
+    subscription = obj.get("subscription") if isinstance(obj.get("subscription"), dict) else obj
+    if not user_id:
+        return None
+
+    return {
+        "userId": user_id,
+        "provider": "creem",
+        "customerId": customer.get("id") or subscription.get("customer"),
+        "customerEmail": customer.get("email"),
+        "subscriptionId": subscription.get("id") if isinstance(subscription, dict) else None,
+        "status": normalize_subscription_status(subscription.get("status") if isinstance(subscription, dict) else "active"),
+        "eventType": event_type,
+    }
+
+
+def billing_update_from_stripe_event(event: dict) -> dict | None:
+    event_type = event.get("type") or ""
+    obj = ((event.get("data") or {}).get("object") or {})
+    if event_type == "checkout.session.completed":
+        user_id = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("userId")
+        if not user_id:
+            return None
+        return {
+            "userId": user_id,
+            "provider": "stripe",
+            "customerId": obj.get("customer"),
+            "customerEmail": (obj.get("customer_details") or {}).get("email") or obj.get("customer_email"),
+            "subscriptionId": obj.get("subscription"),
+            "status": "active",
+            "eventType": event_type,
+        }
+    if event_type.startswith("customer.subscription."):
+        return {
+            "provider": "stripe",
+            "customerId": obj.get("customer"),
+            "subscriptionId": obj.get("id"),
+            "status": normalize_subscription_status(obj.get("status")),
+            "eventType": event_type,
+        }
+    return None
+
+
+def normalize_subscription_status(status: str | None) -> str:
+    normalized = (status or "active").strip().lower()
+    if normalized in {"active", "trialing", "paid"}:
+        return "active"
+    if normalized in {"scheduled_cancel"}:
+        return "canceling"
+    if normalized in {"past_due", "unpaid", "paused"}:
+        return normalized
+    if normalized in {"canceled", "cancelled", "expired", "incomplete_expired"}:
+        return "canceled"
+    return normalized or "active"
