@@ -58,6 +58,7 @@ PULLWISE_ALLOWED_ORIGINS=https://app.your-domain.com
 PULLWISE_API_BASE_URL=https://app.your-domain.com/api
 PULLWISE_DB_PATH=/data/pullwise.sqlite3
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
+PULLWISE_COOKIE_SECURE=true
 ```
 
 Use `PULLWISE_API_BASE_URL=https://app.your-domain.com/api` when the web app is
