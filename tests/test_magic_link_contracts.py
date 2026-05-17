@@ -66,6 +66,40 @@ class MagicLinkContractsTest(unittest.TestCase):
         self.assertEqual(sent_to, "dev@example.com")
         self.assertTrue(sent_link.startswith("https://api.pullwise.dev/auth/email/callback?token="))
 
+    def test_magic_link_uses_forwarded_proxy_base_url(self) -> None:
+        handler = HandlerHarness()
+        handler.headers = {
+            "Host": "api.internal",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "app.pullwise.dev",
+            "X-Forwarded-Prefix": "/api",
+        }
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_EMAIL_PROVIDER": "smtp",
+                    "PULLWISE_SMTP_HOST": "smtp.example.com",
+                    "PULLWISE_EMAIL_FROM": "Pullwise <login@pullwise.dev>",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.email_delivery.send_magic_link_email") as send_email,
+        ):
+            app.PullwiseHandler.handle_magic_link(
+                handler,
+                {
+                    "email": "dev@example.com",
+                    "redirectTo": "https://app.pullwise.dev/?screen=dashboard",
+                },
+            )
+
+        sent_link = send_email.call_args.args[1]
+        self.assertTrue(sent_link.startswith("https://app.pullwise.dev/api/auth/email/callback?token="))
+
 
 if __name__ == "__main__":
     unittest.main()
