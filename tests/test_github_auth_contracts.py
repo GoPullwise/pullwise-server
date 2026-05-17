@@ -7,6 +7,21 @@ from pullwise_server import github_auth
 
 
 class GitHubAuthContractsTest(unittest.TestCase):
+    def test_authlib_rest_requests_use_official_github_headers(self) -> None:
+        response = Mock()
+        response.json.return_value = {"login": "octocat"}
+        response.raise_for_status.return_value = None
+        client = Mock()
+        client.get.return_value = response
+
+        payload = github_auth.authlib_get_json(client, "/user")
+
+        self.assertEqual(payload["login"], "octocat")
+        headers = client.get.call_args.kwargs["headers"]
+        self.assertEqual(headers["Accept"], "application/vnd.github+json")
+        self.assertIn("X-GitHub-Api-Version", headers)
+        self.assertIn("User-Agent", headers)
+
     def test_list_installation_repositories_uses_official_installation_repositories_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {
