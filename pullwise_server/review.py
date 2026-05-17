@@ -313,7 +313,7 @@ def _run_claude_code(*, repo: str, branch: str, commit: str, repo_path: str | No
     return _parse_findings_json(completed.stdout)
 
 
-# ── codex provider (stub — wire when ready) ───────────────────────────────
+# ── codex provider ────────────────────────────────────────────────────────
 
 
 def _run_codex(*, repo: str, branch: str, commit: str, repo_path: str | None) -> list[dict]:
