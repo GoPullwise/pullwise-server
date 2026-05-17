@@ -96,6 +96,23 @@ class BillingContractsTest(unittest.TestCase):
         self.assertNotIn("id", json_payload["customer"])
         self.assertEqual(json_payload["metadata"]["userId"], "usr_1")
 
+    def test_creem_subscription_event_can_update_by_customer_id_without_metadata(self) -> None:
+        update = billing.billing_update_from_creem_event(
+            {
+                "eventType": "subscription.canceled",
+                "object": {
+                    "id": "sub_123",
+                    "status": "canceled",
+                    "customer": {"id": "cust_123", "email": "dev@example.com"},
+                },
+            }
+        )
+
+        self.assertIsNotNone(update)
+        self.assertEqual(update["customerId"], "cust_123")
+        self.assertEqual(update["subscriptionId"], "sub_123")
+        self.assertEqual(update["status"], "canceled")
+
 
 if __name__ == "__main__":
     unittest.main()
