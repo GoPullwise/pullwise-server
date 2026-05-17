@@ -92,6 +92,53 @@ Supported values:
 phase. The clone uses `github_auth.create_installation_access_token`, stores the
 checkout path as `repoPath`, and passes that path to `review.run_review`.
 
+The Codex provider uses official non-interactive `codex exec` mode with a
+read-only sandbox, `--output-schema`, and `--output-last-message` so the worker
+can parse structured findings.
+
+## Billing Setup
+
+Pullwise supports either Stripe or Creem. Configure one provider, or set
+`PULLWISE_BILLING_PROVIDER=stripe|creem` if both providers are present.
+
+Stripe:
+
+```env
+PULLWISE_STRIPE_SECRET_KEY=sk_live_or_test
+PULLWISE_STRIPE_PRICE_ID=price_...
+PULLWISE_STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+Creem:
+
+```env
+PULLWISE_CREEM_API_KEY=creem_key
+PULLWISE_CREEM_PRODUCT_ID=prod_...
+PULLWISE_CREEM_WEBHOOK_SECRET=whsec_...
+PULLWISE_CREEM_TEST_MODE=false
+```
+
+Implemented billing routes:
+
+- `GET /billing/plan`
+- `POST /billing/checkout-sessions`
+- `POST /billing/portal-sessions`
+- `POST /webhooks/stripe`
+- `POST /webhooks/creem`
+
+Checkout URLs are created server-side. Webhooks verify Stripe
+`Stripe-Signature` or Creem `creem-signature` before updating account billing
+state.
+
+## Cloudflare Deployment Boundary
+
+`pullwise-web` can deploy to Cloudflare Pages as a static Vite app.
+`pullwise-server` cannot run as a normal Cloudflare Worker because real scans
+require Python, SQLite or another persistent store, `git clone`, subprocesses,
+and the Codex/Claude CLI. Deploy the backend on a server/container platform, or
+Cloudflare Containers when available, and point `VITE_API_BASE_URL` plus
+`PULLWISE_ALLOWED_ORIGINS` at those production URLs.
+
 ## Explicit Local Development Mocks
 
 These switches are off by default:
@@ -128,6 +175,11 @@ Implemented endpoints:
 - `PATCH /issues/{id}/status`
 - `GET /settings`
 - `PATCH /settings`
+- `GET /billing/plan`
+- `POST /billing/checkout-sessions`
+- `POST /billing/portal-sessions`
+- `POST /webhooks/stripe`
+- `POST /webhooks/creem`
 
 Explicitly not implemented:
 
@@ -135,9 +187,6 @@ Explicitly not implemented:
 - `GET /dev/magic-links` unless `PULLWISE_ENABLE_DEV_MAGIC_LINKS=true`
 - `POST /issues/{id}/fixes/apply`
 - `POST /issues/{id}/pull-requests`
-- `GET /billing/plan`
-- `POST /billing/checkout-sessions`
-- `POST /billing/portal-sessions`
 - Slack or Linear integration writes
 
 Those endpoints return `501 Not Implemented` instead of fake success payloads.
