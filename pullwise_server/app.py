@@ -561,18 +561,30 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/repositories":
             return self.json(self.repositories_payload())
         if path == "/scans":
-            scans = user_scans(self.current_session())
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
+            scans = user_scans(session)
             return self.json({"items": scans, "scans": scans})
         if len(segments) == 2 and segments[0] == "scans":
-            return self.json(self.find_or_404(user_scans(self.current_session()), segments[1], "Scan"))
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
+            return self.json(self.find_or_404(user_scans(session), segments[1], "Scan"))
         if path == "/issues":
-            issues = user_issues(self.current_session())
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing issues.")
+            issues = user_issues(session)
             scan_id = params.get("scanId")
             if scan_id:
                 issues = [issue for issue in issues if issue.get("scanId") == scan_id]
             return self.json({"items": issues, "issues": issues})
         if len(segments) == 2 and segments[0] == "issues":
-            return self.json(self.find_or_404(user_issues(self.current_session()), segments[1], "Issue"))
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing issues.")
+            return self.json(self.find_or_404(user_issues(session), segments[1], "Issue"))
         if path == "/settings":
             session = self.current_session()
             if not session:
