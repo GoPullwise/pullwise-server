@@ -49,6 +49,14 @@ class SecurityContractsTest(unittest.TestCase):
                 "title": "Example",
             }
         ]
+        app.SCANS = [
+            {
+                "id": "sc_1",
+                "userId": "usr_1",
+                "status": "done",
+                "repo": "owner/repo",
+            }
+        ]
         app.STATE_LOADED = True
         app.STATE_DIRTY = False
 
@@ -72,6 +80,24 @@ class SecurityContractsTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "PATCH")
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_issue_reads_require_sign_in(self) -> None:
+        for path in ["/issues", "/issues/iss_1"]:
+            with self.subTest(path=path):
+                handler = RouteHarness(path)
+
+                app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_scan_reads_require_sign_in(self) -> None:
+        for path in ["/scans", "/scans/sc_1"]:
+            with self.subTest(path=path):
+                handler = RouteHarness(path)
+
+                app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
     def test_github_disconnect_requires_sign_in(self) -> None:
         handler = RouteHarness("/integrations/github")
