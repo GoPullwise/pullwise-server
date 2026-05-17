@@ -32,6 +32,8 @@ class BillingWebhookTest(unittest.TestCase):
 
     def test_creem_checkout_completed_maps_to_active_billing(self) -> None:
         event = {
+            "id": "evt_creem_checkout_1",
+            "created": 1710000200,
             "eventType": "checkout.completed",
             "object": {
                 "customer": {"id": "cust_1", "email": "dev@example.com"},
@@ -47,6 +49,8 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["customerId"], "cust_1")
         self.assertEqual(update["subscriptionId"], "sub_1")
         self.assertEqual(update["status"], "active")
+        self.assertEqual(update["eventId"], "evt_creem_checkout_1")
+        self.assertEqual(update["eventCreated"], 1710000200)
 
     def test_stripe_checkout_completed_maps_to_active_billing(self) -> None:
         event = {

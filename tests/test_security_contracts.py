@@ -210,6 +210,41 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.FOUND)
         self.assertEqual(app.USERS["usr_1"]["githubRepositoryAccess"]["installationId"], "999")
 
+    def test_github_installation_callback_without_state_fails_closed_when_session_user_cannot_access_installation(self) -> None:
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/callback?installation_id=999&setup_action=install",
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.user_can_access_installation", return_value=False),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
+
     def test_api_base_url_rejects_untrusted_host_header_for_magic_links(self) -> None:
         handler = RouteHarness("/", headers={"Host": "evil.example"})
 
