@@ -256,16 +256,28 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         return None
 
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
-    user_id = metadata.get("userId") or metadata.get("internal_customer_id")
     customer = obj.get("customer") if isinstance(obj.get("customer"), dict) else {}
     subscription = obj.get("subscription") if isinstance(obj.get("subscription"), dict) else obj
-    if not user_id:
+    subscription_metadata = subscription.get("metadata") if isinstance(subscription.get("metadata"), dict) else {}
+    user_id = (
+        metadata.get("userId")
+        or metadata.get("internal_customer_id")
+        or subscription_metadata.get("userId")
+        or subscription_metadata.get("internal_customer_id")
+    )
+    subscription_customer = subscription.get("customer") if isinstance(subscription, dict) else None
+    if isinstance(subscription_customer, dict):
+        subscription_customer_id = subscription_customer.get("id")
+    else:
+        subscription_customer_id = subscription_customer
+    customer_id = customer.get("id") or subscription_customer_id
+    if not user_id and not customer_id:
         return None
 
     return {
         "userId": user_id,
         "provider": "creem",
-        "customerId": customer.get("id") or subscription.get("customer"),
+        "customerId": customer_id,
         "customerEmail": customer.get("email"),
         "subscriptionId": subscription.get("id") if isinstance(subscription, dict) else None,
         "status": normalize_subscription_status(subscription.get("status") if isinstance(subscription, dict) else "active"),
