@@ -121,6 +121,7 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
     return {
         "provider": "stripe",
         "id": payload.get("id"),
+        "customerId": payload.get("customer") or customer_id,
         "url": checkout_url,
     }
 
@@ -290,6 +291,8 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         "subscriptionId": subscription.get("id") if isinstance(subscription, dict) else None,
         "status": normalize_subscription_status(subscription.get("status") if isinstance(subscription, dict) else "active"),
         "eventType": event_type,
+        "eventId": event.get("id") or event.get("eventId"),
+        "eventCreated": event_created(event),
     }
 
 
@@ -308,6 +311,8 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             "subscriptionId": obj.get("subscription"),
             "status": "active",
             "eventType": event_type,
+            "eventId": event.get("id"),
+            "eventCreated": event_created(event),
         }
     if event_type.startswith("customer.subscription."):
         return {
@@ -316,7 +321,20 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             "subscriptionId": obj.get("id"),
             "status": normalize_subscription_status(obj.get("status")),
             "eventType": event_type,
+            "eventId": event.get("id"),
+            "eventCreated": event_created(event),
         }
+    return None
+
+
+def event_created(event: dict) -> int | None:
+    value = event.get("created") or event.get("createdAt")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
     return None
 
 

@@ -863,6 +863,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 success_url=safe_redirect_to(body.get("successUrl"), "settings"),
                 cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
             )
+            if checkout.get("customerId"):
+                current_billing = user.get("billing") or {}
+                user["billing"] = {
+                    **current_billing,
+                    "provider": checkout.get("provider") or current_billing.get("provider"),
+                    "customerId": checkout.get("customerId"),
+                    "updatedAt": now(),
+                }
             user["billingCheckout"] = {
                 "provider": checkout.get("provider"),
                 "id": checkout.get("id"),
