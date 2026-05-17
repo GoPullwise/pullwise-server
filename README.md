@@ -24,6 +24,13 @@ The server persists sessions, GitHub authorization state, selected
 repositories, scans, issues, and settings in SQLite by default at
 `.pullwise/pullwise.sqlite3`. Override with `PULLWISE_DB_PATH`.
 
+Current storage is intentionally lightweight: the app stores logical state as
+JSON payloads in SQLite, and scan/issue listing endpoints read the in-process
+state. This is suitable for small deployments and trials. For high-volume or
+multi-tenant production use, move sessions, scans, issues, and billing events to
+dedicated tables with pagination and retention policies before relying on this
+backend as an unbounded system of record.
+
 ## Production Deployment
 
 Deploy this service on infrastructure that can run a normal Python process with
