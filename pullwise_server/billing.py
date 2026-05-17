@@ -121,17 +121,22 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
 
 def create_creem_checkout_session(user: dict, *, success_url: str) -> dict:
     request_id = f"pw_{user['id']}_{secrets.token_urlsafe(8)}"
+    customer = {}
+    if user.get("email"):
+        customer["email"] = user["email"]
+    payload = {
+        "product_id": env("PULLWISE_CREEM_PRODUCT_ID"),
+        "request_id": request_id,
+        "units": 1,
+        "success_url": success_url,
+        "metadata": {"userId": user["id"]},
+    }
+    if customer:
+        payload["customer"] = customer
     response = requests.post(
         urljoin(creem_api_base_url() + "/", "v1/checkouts"),
         headers={"x-api-key": env("PULLWISE_CREEM_API_KEY"), "Content-Type": "application/json"},
-        json={
-            "product_id": env("PULLWISE_CREEM_PRODUCT_ID"),
-            "request_id": request_id,
-            "units": 1,
-            "customer": {"email": user.get("email") or "", "id": user.get("billing", {}).get("customerId")},
-            "success_url": success_url,
-            "metadata": {"userId": user["id"]},
-        },
+        json=payload,
         timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
     )
     response.raise_for_status()
