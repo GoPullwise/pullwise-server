@@ -92,19 +92,25 @@ def create_checkout_session(
 
 
 def create_stripe_checkout_session(user: dict, *, success_url: str | None, cancel_url: str | None) -> dict:
+    data = {
+        "mode": env("PULLWISE_STRIPE_CHECKOUT_MODE", "subscription"),
+        "line_items[0][price]": env("PULLWISE_STRIPE_PRICE_ID"),
+        "line_items[0][quantity]": "1",
+        "success_url": success_url or default_success_url(),
+        "cancel_url": cancel_url or default_cancel_url(),
+        "client_reference_id": user["id"],
+        "metadata[userId]": user["id"],
+    }
+    customer_id = (user.get("billing") or {}).get("customerId")
+    if customer_id:
+        data["customer"] = customer_id
+    elif user.get("email"):
+        data["customer_email"] = user["email"]
+
     response = requests.post(
         "https://api.stripe.com/v1/checkout/sessions",
         auth=(env("PULLWISE_STRIPE_SECRET_KEY"), ""),
-        data={
-            "mode": env("PULLWISE_STRIPE_CHECKOUT_MODE", "subscription"),
-            "line_items[0][price]": env("PULLWISE_STRIPE_PRICE_ID"),
-            "line_items[0][quantity]": "1",
-            "customer_email": user.get("email") or "",
-            "success_url": success_url or default_success_url(),
-            "cancel_url": cancel_url or default_cancel_url(),
-            "client_reference_id": user["id"],
-            "metadata[userId]": user["id"],
-        },
+        data=data,
         timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
     )
     response.raise_for_status()
