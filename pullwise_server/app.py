@@ -109,6 +109,17 @@ def env_flag(name: str, default: str = "false") -> bool:
     return env(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(env(name, str(default)))
+    except ValueError:
+        return default
+
+
+def max_body_bytes() -> int:
+    return max(0, env_int("PULLWISE_MAX_BODY_BYTES", 1024 * 1024))
+
+
 def local_github_mocks_enabled() -> bool:
     return env_flag("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS")
 
@@ -545,6 +556,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         segments = [part for part in path.split("/") if part]
 
         try:
+            self.enforce_body_size_limit(method)
             if method == "GET":
                 return self.handle_get(path, params, segments)
             if method == "POST":
@@ -554,6 +566,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if method == "DELETE":
                 return self.handle_delete(segments)
             return self.error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
+        except RequestBodyTooLarge as exc:
+            return self.error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         except billing.BillingProviderConflict as exc:
@@ -898,7 +912,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             mark_state_dirty()
             return self.redirect(safe_redirect_to(params.get("redirectTo"), "repos"), cookie_header(session["id"]))
 
-        record = pop_github_state("install", params.get("state") or "")
+        record = self.github_install_record_from_callback(params)
         if not params.get("installation_id"):
             return self.redirect(
                 redirect_with_params(str(record["redirectTo"]), {"github_error": "missing_installation_id"})
@@ -942,6 +956,22 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         mark_state_dirty()
         session = create_session(user)
         return self.redirect(str(record["redirectTo"]), cookie_header(session["id"]))
+
+    def github_install_record_from_callback(self, params: dict) -> dict:
+        state = params.get("state") or ""
+        if state:
+            return pop_github_state("install", state)
+
+        session = self.current_session()
+        if not session:
+            raise ValueError("GitHub authorization state is invalid or expired.")
+        return {
+            "kind": "install",
+            "redirectTo": safe_redirect_to(params.get("redirectTo"), "repos"),
+            "userId": session["userId"],
+            "requestedScope": params.get("scope") or "selected",
+            "stateFallback": True,
+        }
 
     def integrations_payload(self) -> dict:
         session = self.current_session()
@@ -1055,7 +1085,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length == 0:
             return b""
+        if length > max_body_bytes():
+            raise RequestBodyTooLarge("Request body is too large.")
         return self.rfile.read(length)
+
+    def enforce_body_size_limit(self, method: str) -> None:
+        if method not in {"POST", "PATCH"}:
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > max_body_bytes():
+            raise RequestBodyTooLarge("Request body is too large.")
 
     def handle_creem_webhook(self) -> None:
         raw = self.read_raw_body()
