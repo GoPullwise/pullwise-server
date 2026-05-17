@@ -19,6 +19,7 @@ class EmailDeliveryTest(unittest.TestCase):
         smtp_class = Mock(return_value=smtp)
         smtp.__enter__ = Mock(return_value=smtp)
         smtp.__exit__ = Mock(return_value=None)
+        tls_context = object()
 
         with (
             patch.dict(
@@ -35,6 +36,7 @@ class EmailDeliveryTest(unittest.TestCase):
                 clear=True,
             ),
             patch("pullwise_server.email_delivery.smtplib.SMTP", smtp_class),
+            patch("pullwise_server.email_delivery.ssl.create_default_context", return_value=tls_context) as create_context,
         ):
             email_delivery.send_magic_link_email(
                 "dev@example.com",
@@ -42,7 +44,8 @@ class EmailDeliveryTest(unittest.TestCase):
             )
 
         smtp_class.assert_called_once_with("smtp.example.com", 587, timeout=15)
-        smtp.starttls.assert_called_once()
+        create_context.assert_called_once()
+        smtp.starttls.assert_called_once_with(context=tls_context)
         smtp.login.assert_called_once_with("apikey", "secret")
         sent_message = smtp.send_message.call_args.args[0]
         self.assertIsInstance(sent_message, EmailMessage)

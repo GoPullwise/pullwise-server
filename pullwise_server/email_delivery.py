@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import ssl
 import smtplib
 from email.message import EmailMessage
 
@@ -56,7 +57,7 @@ def send_magic_link_email(email: str, magic_link: str) -> None:
 
     with smtplib.SMTP(host, port, timeout=timeout) as smtp:
         if env_flag("PULLWISE_SMTP_STARTTLS", "true"):
-            smtp.starttls()
+            smtp.starttls(context=ssl.create_default_context())
         if username or password:
             smtp.login(username, password)
         smtp.send_message(message)
