@@ -446,11 +446,25 @@ def session_payload(session: dict | None) -> dict:
 
 
 def cookie_header(session_id: str) -> str:
-    return f"{SESSION_COOKIE}={session_id}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE}"
+    return f"{SESSION_COOKIE}={session_id}; {cookie_attributes()}; Max-Age={SESSION_MAX_AGE}"
 
 
 def clear_cookie_header() -> str:
-    return f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+    return f"{SESSION_COOKIE}=; {cookie_attributes()}; Max-Age=0"
+
+
+def cookie_attributes() -> str:
+    attributes = ["Path=/", "HttpOnly", "SameSite=Lax"]
+    if cookie_secure_enabled():
+        attributes.append("Secure")
+    return "; ".join(attributes)
+
+
+def cookie_secure_enabled() -> bool:
+    if "PULLWISE_COOKIE_SECURE" in os.environ:
+        return env_flag("PULLWISE_COOKIE_SECURE")
+    public_base = os.environ.get("PULLWISE_API_BASE_URL") or os.environ.get("PULLWISE_APP_URL") or ""
+    return public_base.startswith("https://")
 
 
 class PullwiseHandler(BaseHTTPRequestHandler):
