@@ -238,7 +238,7 @@ def oauth_session(**kwargs):
 def authlib_get_json(client, path: str):
     response = client.get(
         f"{github_api_url()}{path}",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": DEFAULT_USER_AGENT},
+        headers=github_api_headers(),
         timeout=request_timeout(),
     )
     try:
