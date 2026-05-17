@@ -93,6 +93,7 @@ class BillingContractsTest(unittest.TestCase):
         json_payload = post.call_args.kwargs["json"]
         self.assertEqual(json_payload["product_id"], "prod_123")
         self.assertEqual(json_payload["customer"]["email"], "dev@example.com")
+        self.assertNotIn("id", json_payload["customer"])
         self.assertEqual(json_payload["metadata"]["userId"], "usr_1")
 
 
