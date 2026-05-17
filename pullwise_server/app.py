@@ -162,8 +162,34 @@ def api_base_url(handler: BaseHTTPRequestHandler) -> str:
     configured = os.environ.get("PULLWISE_API_BASE_URL")
     if configured:
         return configured.rstrip("/")
+    if env_flag("PULLWISE_TRUST_PROXY_HEADERS"):
+        forwarded = forwarded_api_base_url(handler)
+        if forwarded:
+            return forwarded
     host = handler.headers.get("Host", "localhost:3000")
     return f"http://{host}"
+
+
+def forwarded_api_base_url(handler: BaseHTTPRequestHandler) -> str | None:
+    proto = first_header_value(handler, "X-Forwarded-Proto")
+    host = first_header_value(handler, "X-Forwarded-Host")
+    prefix = first_header_value(handler, "X-Forwarded-Prefix") or ""
+
+    if proto not in {"http", "https"} or not host:
+        return None
+    if any(char in host for char in "/\r\n") or not re.match(r"^[A-Za-z0-9.:-]+$", host):
+        return None
+    if prefix and (not prefix.startswith("/") or prefix.startswith("//") or any(char in prefix for char in "\r\n")):
+        return None
+
+    return f"{proto}://{host}{prefix.rstrip('/')}"
+
+
+def first_header_value(handler: BaseHTTPRequestHandler, name: str) -> str | None:
+    value = handler.headers.get(name)
+    if not value:
+        return None
+    return value.split(",", 1)[0].strip()
 
 
 def default_redirect(screen: str) -> str:

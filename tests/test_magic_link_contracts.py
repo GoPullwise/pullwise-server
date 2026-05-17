@@ -84,6 +84,7 @@ class MagicLinkContractsTest(unittest.TestCase):
                     "PULLWISE_EMAIL_FROM": "Pullwise <login@pullwise.dev>",
                     "PULLWISE_APP_URL": "https://app.pullwise.dev",
                     "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                    "PULLWISE_TRUST_PROXY_HEADERS": "true",
                 },
                 clear=True,
             ),
