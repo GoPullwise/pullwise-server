@@ -106,6 +106,13 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_repository_sync_requires_sign_in(self) -> None:
+        handler = RouteHarness("/repositories/sync")
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+
     def test_unhandled_errors_do_not_echo_internal_exception_details(self) -> None:
         handler = RouteHarness("/boom")
 

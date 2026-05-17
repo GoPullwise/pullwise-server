@@ -611,6 +611,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
         if path == "/repositories/sync":
+            if not self.current_session():
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before syncing repositories.")
             payload = self.repositories_payload(refresh=True)
             payload.update({"ok": True, "syncedAt": now()})
             return self.json(payload)
