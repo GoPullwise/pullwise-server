@@ -6,6 +6,7 @@ import math
 import os
 import sqlite3
 import threading
+from contextlib import closing
 from typing import Any
 
 
@@ -40,41 +41,43 @@ def connect() -> sqlite3.Connection:
 
 
 def initialize() -> None:
-    with _LOCK, connect() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS app_state (
-                name TEXT PRIMARY KEY,
-                payload TEXT NOT NULL,
-                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_state (
+                    name TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                """
             )
-            """
-        )
 
 
 def load_state() -> dict[str, Any]:
     initialize()
-    with _LOCK, connect() as connection:
+    with _LOCK, closing(connect()) as connection:
         rows = connection.execute("SELECT name, payload FROM app_state").fetchall()
     return {name: json.loads(payload) for name, payload in rows}
 
 
 def save_state(state: dict[str, Any]) -> None:
     initialize()
-    with _LOCK, connect() as connection:
-        connection.executemany(
-            """
-            INSERT INTO app_state (name, payload, updated_at)
-            VALUES (?, ?, strftime('%s', 'now'))
-            ON CONFLICT(name) DO UPDATE SET
-                payload = excluded.payload,
-                updated_at = excluded.updated_at
-            """,
-            [
-                (name, json.dumps(to_jsonable(payload, path=f"$.{name}"), ensure_ascii=False, allow_nan=False))
-                for name, payload in state.items()
-            ],
-        )
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            connection.executemany(
+                """
+                INSERT INTO app_state (name, payload, updated_at)
+                VALUES (?, ?, strftime('%s', 'now'))
+                ON CONFLICT(name) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (name, json.dumps(to_jsonable(payload, path=f"$.{name}"), ensure_ascii=False, allow_nan=False))
+                    for name, payload in state.items()
+                ],
+            )
 
 
 def to_jsonable(value: Any, *, path: str = "$") -> Any:

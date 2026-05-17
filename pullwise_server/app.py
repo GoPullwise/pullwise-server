@@ -46,6 +46,8 @@ SESSIONS: dict[str, dict] = {}
 MAGIC_LINKS: dict[str, dict] = {}
 GITHUB_STATES: dict[str, dict] = {}
 SETTINGS: dict[str, dict] = {}
+BILLING_EVENTS: dict[str, dict] = {}
+BILLING_PENDING_UPDATES: list[dict] = []
 STATE_LOADED = False
 STATE_DIRTY = False
 
@@ -91,6 +93,12 @@ SCANS: list[dict] = []
 # Re-entrant so worker mutations can call persist_state() while already holding
 # the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
 STATE_LOCK = threading.RLock()
+MAX_BILLING_EVENT_RECORDS = 5000
+MAX_BILLING_PENDING_UPDATES = 1000
+
+
+class RequestBodyTooLarge(ValueError):
+    pass
 
 
 def env(name: str, default: str) -> str:
@@ -110,7 +118,7 @@ def dev_magic_links_enabled() -> bool:
 
 
 def ensure_state_loaded() -> None:
-    global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, SCANS, ISSUES
+    global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, BILLING_EVENTS, BILLING_PENDING_UPDATES, SCANS, ISSUES
     with STATE_LOCK:
         if STATE_LOADED:
             return
@@ -121,6 +129,8 @@ def ensure_state_loaded() -> None:
         MAGIC_LINKS = dict(state.get("magicLinks") or {})
         GITHUB_STATES = dict(state.get("githubStates") or {})
         SETTINGS = dict(state.get("settings") or {})
+        BILLING_EVENTS = dict(state.get("billingEvents") or {})
+        BILLING_PENDING_UPDATES = list(state.get("billingPendingUpdates") or [])
         SCANS = list(state.get("scans") or [])
         ISSUES = list(state.get("issues") or [])
         STATE_LOADED = True
@@ -145,6 +155,8 @@ def persist_state(*, force: bool = False) -> None:
                 "magicLinks": MAGIC_LINKS,
                 "githubStates": GITHUB_STATES,
                 "settings": SETTINGS,
+                "billingEvents": BILLING_EVENTS,
+                "billingPendingUpdates": BILLING_PENDING_UPDATES,
                 "scans": SCANS,
                 "issues": ISSUES,
             }
@@ -168,8 +180,37 @@ def api_base_url(handler: BaseHTTPRequestHandler) -> str:
         forwarded = forwarded_api_base_url(handler)
         if forwarded:
             return forwarded
-    host = handler.headers.get("Host", "localhost:3000")
-    return f"http://{host}"
+    host = trusted_host_header(handler)
+    if host:
+        return f"http://{host}"
+    return "http://localhost:3000"
+
+
+def trusted_host_header(handler: BaseHTTPRequestHandler) -> str | None:
+    host = first_header_value(handler, "Host") or "localhost:3000"
+    if any(char in host for char in "/\r\n") or not re.match(r"^[A-Za-z0-9.:-]+$", host):
+        return None
+    if is_local_host(host):
+        return host
+    explicit_hosts = {
+        item.strip().lower()
+        for item in env("PULLWISE_API_ALLOWED_HOSTS", "").split(",")
+        if item.strip()
+    }
+    if host.lower() in explicit_hosts:
+        return host
+    allowed = allowed_origins()
+    app_origin = url_origin(env("PULLWISE_APP_URL", "http://localhost:5173"))
+    if app_origin:
+        allowed.add(app_origin)
+    if f"http://{host}" in allowed or f"https://{host}" in allowed:
+        return host
+    return None
+
+
+def is_local_host(host: str) -> bool:
+    name = host.rsplit(":", 1)[0].lower()
+    return name in {"localhost", "127.0.0.1"}
 
 
 def forwarded_api_base_url(handler: BaseHTTPRequestHandler) -> str | None:
@@ -238,6 +279,8 @@ def url_origin(value: str) -> str | None:
 def safe_redirect_to(value: str | None, screen: str) -> str:
     fallback = default_redirect(screen)
     if not value:
+        return fallback
+    if any(char in value for char in "\r\n"):
         return fallback
     if value.startswith("/") and not value.startswith("//"):
         return env("PULLWISE_APP_URL", "http://localhost:5173").rstrip("/") + value
