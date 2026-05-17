@@ -24,6 +24,74 @@ The server persists sessions, GitHub authorization state, selected
 repositories, scans, issues, and settings in SQLite by default at
 `.pullwise/pullwise.sqlite3`. Override with `PULLWISE_DB_PATH`.
 
+## Production Deployment
+
+Deploy this service on infrastructure that can run a normal Python process with
+OS-level tools. Suitable targets include a VPS, a container platform, Render,
+Railway, Fly.io, ECS, Cloud Run, or Cloudflare Containers when available. The
+host needs:
+
+- Python 3.10 or newer
+- `git` on `PATH`
+- outbound HTTPS access to GitHub, Stripe, Creem, SMTP, and the review provider
+- persistent storage for `PULLWISE_DB_PATH` and `PULLWISE_CHECKOUT_ROOT`
+- Codex CLI or Claude Code installed when `PULLWISE_REVIEW_PROVIDER` uses them
+
+Install and run:
+
+```bash
+python -m pip install -e .
+python -m pullwise_server --host 0.0.0.0 --port 3000
+```
+
+On platforms that inject `$PORT`, pass that value to `--port` or set
+`PULLWISE_PORT`.
+
+Minimum production environment:
+
+```env
+PULLWISE_HOST=0.0.0.0
+PULLWISE_PORT=3000
+PULLWISE_MODE=production
+PULLWISE_APP_URL=https://app.your-domain.com
+PULLWISE_ALLOWED_ORIGINS=https://app.your-domain.com
+PULLWISE_API_BASE_URL=https://app.your-domain.com/api
+PULLWISE_DB_PATH=/data/pullwise.sqlite3
+PULLWISE_CHECKOUT_ROOT=/data/checkouts
+```
+
+Use `PULLWISE_API_BASE_URL=https://app.your-domain.com/api` when the web app is
+deployed to Cloudflare Pages with the included `/api` proxy. OAuth callbacks and
+magic links then return through the Pages domain, so browser session cookies are
+set on the same origin used by the frontend.
+
+If a trusted reverse proxy supplies `X-Forwarded-Proto`, `X-Forwarded-Host`, and
+`X-Forwarded-Prefix`, you may omit `PULLWISE_API_BASE_URL` and set:
+
+```env
+PULLWISE_TRUST_PROXY_HEADERS=true
+```
+
+Only enable that flag behind a proxy you control.
+
+Health check:
+
+```text
+GET /health
+```
+
+Expected shape:
+
+```json
+{"ok": true, "service": "pullwise-server"}
+```
+
+Run verification before deploying:
+
+```bash
+python -m unittest discover -s tests
+```
+
 ## Real GitHub Setup
 
 Create or configure a GitHub App for Pullwise:
@@ -32,6 +100,12 @@ Create or configure a GitHub App for Pullwise:
 - Callback URL for user authorization: `http://localhost:3000/auth/github/callback`
 - Setup URL: `http://localhost:3000/integrations/github/callback`
 - Required permissions for current functionality: `Contents: read`, `Metadata: read`
+
+For Cloudflare Pages production with the `/api` proxy, use:
+
+- Homepage URL: `https://app.your-domain.com`
+- Callback URL for user authorization: `https://app.your-domain.com/api/auth/github/callback`
+- Setup URL: `https://app.your-domain.com/api/integrations/github/callback`
 
 Set these variables in `F:\pullwise-server\.env`:
 
