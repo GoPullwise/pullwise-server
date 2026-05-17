@@ -12,7 +12,15 @@ from pullwise_server import app
 
 
 class HandlerHarness(app.PullwiseHandler):
-    def __init__(self, body: dict | None = None, cookie: str = "", raw_body: bytes | None = None, headers: dict | None = None) -> None:
+    def __init__(
+        self,
+        body: dict | None = None,
+        cookie: str = "",
+        raw_body: bytes | None = None,
+        headers: dict | None = None,
+        path: str = "/",
+    ) -> None:
+        self.path = path
         self._body = body or {}
         self._raw_body = raw_body if raw_body is not None else json.dumps(self._body).encode("utf-8")
         self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie, **(headers or {})}
@@ -102,6 +110,16 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["url"], "https://checkout.stripe.com/cs/test")
         create.assert_called_once()
         self.assertEqual(create.call_args.args[0]["id"], "usr_1")
+
+    def test_checkout_returns_not_implemented_when_billing_is_disabled(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(path="/billing/checkout-sessions", cookie=cookie)
+
+        with patch.dict(os.environ, {}, clear=True):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.NOT_IMPLEMENTED)
+        self.assertIn("Billing is not configured", handler.payload["message"])
 
     def test_creem_webhook_updates_user_billing_after_signature_verification(self) -> None:
         seed_session()
