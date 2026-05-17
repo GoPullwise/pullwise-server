@@ -4,6 +4,8 @@ import base64
 import os
 from urllib.parse import urlencode
 
+import requests
+
 
 DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_USER_AGENT = "PullwiseDevAPI/0.1"
@@ -55,6 +57,10 @@ def github_web_url() -> str:
 
 def github_api_url() -> str:
     return env_any(["PULLWISE_GITHUB_API_URL", "GITHUB_API_URL"], DEFAULT_API_URL).rstrip("/")
+
+
+def github_api_version() -> str:
+    return env_any(["PULLWISE_GITHUB_API_VERSION"], "2022-11-28")
 
 
 def request_timeout() -> int:
@@ -167,15 +173,41 @@ def create_installation_access_token(installation_id: str) -> dict:
 
 
 def list_installation_repositories(installation_id: str) -> list[dict]:
-    integration = app_integration()
-    github = None
-    try:
-        github = integration.get_github_for_installation(int(installation_id))
-        return [repo_to_pullwise(repo) for repo in installation_repository_source(github).get_repos()]
-    finally:
-        if github:
-            github.close()
-        integration.close()
+    token_payload = create_installation_access_token(installation_id)
+    token = token_payload.get("token")
+    if not token:
+        raise GitHubError("GitHub did not return an installation access token.")
+
+    repositories = []
+    url = f"{github_api_url()}/installation/repositories"
+    params = {"per_page": 100}
+    while url:
+        response = requests.get(
+            url,
+            headers=github_api_headers(token),
+            params=params,
+            timeout=request_timeout(),
+        )
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            raise GitHubError(f"GitHub installation repositories request failed: {exc}") from exc
+        payload = response.json()
+        repositories.extend(repo_to_pullwise(repo) for repo in payload.get("repositories") or [])
+        url = ((getattr(response, "links", {}) or {}).get("next") or {}).get("url")
+        params = None
+    return repositories
+
+
+def github_api_headers(token: str | None = None) -> dict[str, str]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": github_api_version(),
+        "User-Agent": DEFAULT_USER_AGENT,
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def user_can_access_installation(user_access_token: str | None, installation_id: str) -> bool | None:
@@ -272,6 +304,8 @@ def installation_repository_source(github):
 
 
 def repo_to_pullwise(repo) -> dict:
+    if isinstance(repo, dict):
+        return repo_payload_to_pullwise(repo)
     full_name = getattr(repo, "full_name", None) or getattr(repo, "name", "") or ""
     return {
         "id": str(getattr(repo, "id", None) or full_name),
@@ -288,6 +322,26 @@ def repo_to_pullwise(repo) -> dict:
         "htmlUrl": getattr(repo, "html_url", None),
         "cloneUrl": getattr(repo, "clone_url", None),
         "permissions": permissions_to_dict(getattr(repo, "permissions", None)),
+    }
+
+
+def repo_payload_to_pullwise(repo: dict) -> dict:
+    full_name = repo.get("full_name") or repo.get("name") or ""
+    return {
+        "id": str(repo.get("id") or full_name),
+        "name": repo.get("name") or full_name,
+        "fullName": full_name,
+        "desc": repo.get("description") or "",
+        "description": repo.get("description") or "",
+        "lang": repo.get("language") or "-",
+        "private": bool(repo.get("private", False)),
+        "stars": format_count(repo.get("stargazers_count")),
+        "branches": "-",
+        "defaultBranch": repo.get("default_branch") or "main",
+        "updated": str(repo.get("updated_at") or ""),
+        "htmlUrl": repo.get("html_url"),
+        "cloneUrl": repo.get("clone_url"),
+        "permissions": normalize_permission_mapping(repo.get("permissions") or {}),
     }
 
 
