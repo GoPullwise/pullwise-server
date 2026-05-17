@@ -17,6 +17,14 @@ class CookieContractsTest(unittest.TestCase):
         with patch.dict(os.environ, {"PULLWISE_API_BASE_URL": "http://localhost:3000"}, clear=True):
             self.assertNotIn("Secure", app.cookie_header("ses_1"))
 
+    def test_blank_cookie_secure_override_keeps_https_auto_detection(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"PULLWISE_API_BASE_URL": "https://app.pullwise.dev/api", "PULLWISE_COOKIE_SECURE": ""},
+            clear=True,
+        ):
+            self.assertIn("Secure", app.cookie_header("ses_1"))
+
 
 if __name__ == "__main__":
     unittest.main()
