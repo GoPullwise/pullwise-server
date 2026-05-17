@@ -61,6 +61,8 @@ def seed_session() -> str:
         }
     }
     app.SETTINGS = {}
+    app.BILLING_EVENTS = {}
+    app.BILLING_PENDING_UPDATES = []
     app.STATE_LOADED = True
     app.STATE_DIRTY = False
     return "pw_session=ses_1"
@@ -144,6 +146,113 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(app.USERS["usr_1"]["billing"]["provider"], "creem")
         self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
         self.assertEqual(app.USERS["usr_1"]["billing"]["customerId"], "cust_1")
+
+    def test_billing_updates_are_idempotent_by_event_id(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "active",
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_1",
+                "eventCreated": 200,
+            },
+        )
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "canceled",
+                "eventType": "customer.subscription.deleted",
+                "eventId": "evt_1",
+                "eventCreated": 300,
+            },
+        )
+
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
+        self.assertIn("evt_1", app.BILLING_EVENTS)
+
+    def test_billing_updates_ignore_events_older_than_current_billing_state(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "active",
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_new",
+                "eventCreated": 200,
+            },
+        )
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "canceled",
+                "eventType": "customer.subscription.deleted",
+                "eventId": "evt_old",
+                "eventCreated": 100,
+            },
+        )
+
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
+        self.assertIn("evt_old", app.BILLING_EVENTS)
+
+    def test_stripe_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "past_due",
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_subscription",
+                "eventCreated": 300,
+            },
+        )
+
+        self.assertNotIn("billing", app.USERS["usr_1"])
+        self.assertEqual(len(app.BILLING_PENDING_UPDATES), 1)
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "customerEmail": "dev@example.com",
+                "subscriptionId": "sub_1",
+                "status": "active",
+                "eventType": "checkout.session.completed",
+                "eventId": "evt_checkout",
+                "eventCreated": 200,
+            },
+        )
+
+        self.assertEqual(app.BILLING_PENDING_UPDATES, [])
+        self.assertEqual(app.USERS["usr_1"]["billing"]["customerId"], "cus_1")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "past_due")
 
 
 if __name__ == "__main__":
