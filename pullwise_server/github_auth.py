@@ -295,14 +295,6 @@ def installation_to_dict(installation) -> dict:
     }
 
 
-def installation_repository_source(github):
-    try:
-        from github.Installation import Installation
-    except ImportError as exc:
-        raise GitHubError("Install PyGithub to list GitHub App repositories: python -m pip install -e .") from exc
-    return Installation(github.requester, {}, {})
-
-
 def repo_to_pullwise(repo) -> dict:
     if isinstance(repo, dict):
         return repo_payload_to_pullwise(repo)
