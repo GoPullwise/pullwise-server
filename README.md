@@ -66,6 +66,9 @@ deployed to Cloudflare Pages with the included `/api` proxy. OAuth callbacks and
 magic links then return through the Pages domain, so browser session cookies are
 set on the same origin used by the frontend.
 
+Keep `PULLWISE_ALLOWED_ORIGINS` to exact trusted origins. Wildcard `*` is
+ignored because the API uses credentialed browser requests.
+
 If a trusted reverse proxy supplies `X-Forwarded-Proto`, `X-Forwarded-Host`, and
 `X-Forwarded-Prefix`, you may omit `PULLWISE_API_BASE_URL` and set:
 
