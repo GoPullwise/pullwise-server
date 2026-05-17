@@ -9,15 +9,26 @@ from pullwise_server import app
 
 
 class RouteHarness(app.PullwiseHandler):
-    def __init__(self, path: str, body: dict | None = None, cookie: str = "") -> None:
+    def __init__(
+        self,
+        path: str,
+        body: dict | None = None,
+        cookie: str = "",
+        headers: dict | None = None,
+        raw_body: bytes | None = None,
+    ) -> None:
         self.path = path
         self._body = body or {}
-        self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie}
+        self._raw_body = raw_body
+        self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie, **(headers or {})}
         self.payload = None
         self.status = None
 
     def read_json(self) -> dict:
         return self._body
+
+    def read_raw_body(self) -> bytes:
+        return self._raw_body if self._raw_body is not None else super().read_raw_body()
 
     def json(self, payload: dict, status: int = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
         self.payload = payload
@@ -163,6 +174,73 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
+
+    def test_github_installation_callback_can_bind_without_state_when_session_user_matches_installation(self) -> None:
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/callback?installation_id=999&setup_action=install",
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertEqual(app.USERS["usr_1"]["githubRepositoryAccess"]["installationId"], "999")
+
+    def test_api_base_url_rejects_untrusted_host_header_for_magic_links(self) -> None:
+        handler = RouteHarness("/", headers={"Host": "evil.example"})
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+            },
+            clear=True,
+        ):
+            self.assertEqual(app.api_base_url(handler), "http://localhost:3000")
+
+    def test_root_relative_redirect_rejects_control_characters(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_APP_URL": "https://app.pullwise.dev"}, clear=True):
+            self.assertEqual(
+                app.safe_redirect_to("/repos\r\nSet-Cookie:pw=bad", "dashboard"),
+                "https://app.pullwise.dev/?screen=dashboard",
+            )
+
+    def test_request_body_size_is_limited(self) -> None:
+        handler = RouteHarness(
+            "/auth/email/magic-link",
+            headers={"Content-Length": "8"},
+            raw_body=b"12345678",
+        )
+
+        with patch.dict(os.environ, {"PULLWISE_MAX_BODY_BYTES": "4"}, clear=True):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
 
 
 if __name__ == "__main__":
