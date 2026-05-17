@@ -19,6 +19,7 @@ import json
 import os
 import secrets
 import subprocess
+import tempfile
 import time
 
 
@@ -323,31 +324,79 @@ def _run_codex(*, repo: str, branch: str, commit: str, repo_path: str | None) ->
       2. Provide the auth token expected by Codex in the server env.
       3. Ensure the worker has GitHub App credentials; it clones the selected
          repository and passes repo_path before invoking review.
-      4. Confirm the exact flag name for system prompts on your build of
-         Codex; adjust the cmd below as needed.
+      4. Uses official non-interactive `codex exec` mode with read-only
+         sandboxing plus a JSON schema for the final response.
     """
     if not repo_path:
         raise ValueError("Codex provider requires repo_path (a checked-out working tree).")
 
-    cmd = [
-        "codex",
-        "--quiet",
-        "--system-prompt", SYSTEM_PROMPT,
-        USER_PROMPT_TEMPLATE.format(repo=repo, branch=branch, commit=commit, repo_path=repo_path),
-    ]
-    completed = subprocess.run(
-        cmd,
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        timeout=int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600")),
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"Codex review failed (exit {completed.returncode}): {completed.stderr.strip()[:500]}"
+    with tempfile.TemporaryDirectory(prefix="pullwise-codex-") as tmpdir:
+        schema_path = os.path.join(tmpdir, "findings.schema.json")
+        output_path = os.path.join(tmpdir, "findings.json")
+        with open(schema_path, "w", encoding="utf-8") as schema_file:
+            json.dump(_findings_schema(), schema_file)
+
+        prompt = "\n\n".join(
+            [
+                SYSTEM_PROMPT,
+                USER_PROMPT_TEMPLATE.format(repo=repo, branch=branch, commit=commit, repo_path=repo_path),
+            ]
         )
-    return _parse_findings_json(completed.stdout)
+        cmd = [
+            "codex",
+            "exec",
+            "--sandbox",
+            "read-only",
+            "--output-schema",
+            schema_path,
+            "--output-last-message",
+            output_path,
+            prompt,
+        ]
+        completed = subprocess.run(
+            cmd,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600")),
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"Codex review failed (exit {completed.returncode}): {completed.stderr.strip()[:500]}"
+            )
+        if os.path.exists(output_path):
+            with open(output_path, "r", encoding="utf-8") as output_file:
+                return _parse_findings_json(output_file.read())
+        return _parse_findings_json(completed.stdout)
+
+
+def _findings_schema() -> dict:
+    finding = {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "id": {"type": "string"},
+            "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+            "category": {"type": "string"},
+            "title": {"type": "string"},
+            "summary": {"type": "string"},
+            "impact": {"type": "string"},
+            "file": {"type": "string"},
+            "line": {"type": "integer"},
+            "confidence": {"type": "number"},
+            "autoFix": {"type": "boolean"},
+            "effort": {"type": "string"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "steps": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    return {
+        "type": "object",
+        "required": ["findings"],
+        "additionalProperties": False,
+        "properties": {"findings": {"type": "array", "items": finding, "maxItems": 25}},
+    }
 
 
 def _parse_findings_json(raw: str) -> list[dict]:
