@@ -140,6 +140,24 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(update["subscriptionId"], "sub_123")
         self.assertEqual(update["status"], "canceled")
 
+    def test_creem_subscription_trialing_and_update_events_are_supported(self) -> None:
+        for event_type, status in [("subscription.trialing", "trialing"), ("subscription.update", "active")]:
+            with self.subTest(event_type=event_type):
+                update = billing.billing_update_from_creem_event(
+                    {
+                        "eventType": event_type,
+                        "object": {
+                            "id": "sub_123",
+                            "status": status,
+                            "customer": {"id": "cust_123", "email": "dev@example.com"},
+                        },
+                    }
+                )
+
+                self.assertIsNotNone(update)
+                self.assertEqual(update["customerId"], "cust_123")
+                self.assertEqual(update["subscriptionId"], "sub_123")
+
 
 if __name__ == "__main__":
     unittest.main()

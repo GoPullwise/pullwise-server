@@ -257,7 +257,9 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         "subscription.scheduled_cancel",
         "subscription.past_due",
         "subscription.expired",
+        "subscription.trialing",
         "subscription.paused",
+        "subscription.update",
     }:
         return None
 
