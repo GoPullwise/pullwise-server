@@ -146,6 +146,49 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_sign_out_clears_current_session_and_cookie(self) -> None:
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + app.SESSION_MAX_AGE,
+            }
+        }
+        handler = RouteHarness("/auth/sign-out", cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertNotIn("ses_1", app.SESSIONS)
+        self.assertIn("Max-Age=0", handler.headers_out["Set-Cookie"])
+
+    def test_auth_session_remains_valid_until_expiry_then_requires_login(self) -> None:
+        app.SESSIONS = {
+            "active": {
+                "id": "active",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 60,
+            },
+            "expired": {
+                "id": "expired",
+                "userId": "usr_1",
+                "createdAt": app.now() - app.SESSION_MAX_AGE - 1,
+                "expiresAt": app.now() - 1,
+            },
+        }
+
+        active_handler = RouteHarness("/auth/session", cookie="pw_session=active")
+        app.PullwiseHandler.route(active_handler, "GET")
+
+        expired_handler = RouteHarness("/auth/session", cookie="pw_session=expired")
+        app.PullwiseHandler.route(expired_handler, "GET")
+
+        self.assertTrue(active_handler.payload["authenticated"])
+        self.assertFalse(expired_handler.payload["authenticated"])
+        self.assertNotIn("expired", app.SESSIONS)
+
     def test_repository_sync_requires_sign_in(self) -> None:
         handler = RouteHarness("/repositories/sync")
 

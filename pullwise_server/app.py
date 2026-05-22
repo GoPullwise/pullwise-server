@@ -37,7 +37,7 @@ def load_env_file(path: str | None = None) -> None:
                 os.environ[key] = value
 
 SESSION_COOKIE = "pw_session"
-SESSION_MAX_AGE = 60 * 60 * 24 * 30
+SESSION_MAX_AGE = 60 * 60 * 24 * 7
 MAGIC_LINK_MAX_AGE = 60 * 15
 GITHUB_STATE_MAX_AGE = 60 * 10
 

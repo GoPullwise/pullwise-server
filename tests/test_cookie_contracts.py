@@ -8,6 +8,12 @@ from pullwise_server import app
 
 
 class CookieContractsTest(unittest.TestCase):
+    def test_session_cookie_lasts_seven_days(self) -> None:
+        cookie = app.cookie_header("ses_1")
+
+        self.assertIn("Max-Age=604800", cookie)
+        self.assertEqual(app.SESSION_MAX_AGE, 60 * 60 * 24 * 7)
+
     def test_session_cookie_is_secure_for_https_public_api_base(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_API_BASE_URL": "https://app.pullwise.dev/api"}, clear=True):
             self.assertIn("Secure", app.cookie_header("ses_1"))
