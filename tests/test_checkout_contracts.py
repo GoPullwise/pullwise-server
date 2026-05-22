@@ -70,6 +70,8 @@ class CheckoutContractsTest(unittest.TestCase):
             command = run_git.call_args.args[0]
             extra_env = run_git.call_args.kwargs["extra_env"]
             self.assertTrue(path.startswith(tmpdir))
+            self.assertEqual(command[:2], ["git", "clone"])
+            self.assertNotIn("push", command)
             self.assertNotIn("ghs_secret_token", " ".join(command))
             self.assertNotIn("ghs_secret_token", " ".join(extra_env.values()))
             self.assertIn("http.extraHeader", extra_env.values())

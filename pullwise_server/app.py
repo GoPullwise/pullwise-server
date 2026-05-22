@@ -464,9 +464,9 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     return repository_item(github_access, full_name) is not None
 
 
-def installation_has_repository_contents_read(installation: dict) -> bool:
+def installation_has_read_only_repository_contents(installation: dict) -> bool:
     permissions = installation.get("permissions") or {}
-    return permissions.get("contents") in {"read", "write"}
+    return permissions.get("contents") == "read"
 
 
 def has_real_github_identity(user: dict | None) -> bool:
@@ -987,7 +987,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         user = USERS.get(session["userId"])
         if github_auth.oauth_configured() and not has_real_github_identity(user):
             return self.error(HTTPStatus.UNAUTHORIZED, "Sign in with GitHub before authorizing repositories.")
-        if github_auth.app_visibility_check_enabled() and not github_auth.app_install_url_override():
+        if github_auth.app_visibility_check_enabled():
+            if not github_auth.app_slug():
+                return self.error(
+                    HTTPStatus.NOT_IMPLEMENTED,
+                    "PULLWISE_GITHUB_APP_SLUG is required for user repository installs so Pullwise can verify the GitHub App is public.",
+                )
             public_installable = github_auth.app_slug_publicly_installable()
             if public_installable is False:
                 return self.error(
@@ -995,7 +1000,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     (
                         f"GitHub App '{github_auth.app_slug()}' is private or not publicly visible. "
                         "Make the GitHub App public before connecting repositories from user accounts, "
-                        "or disable PULLWISE_GITHUB_APP_VISIBILITY_CHECK for owner-only installs."
+                        "and keep PULLWISE_GITHUB_APP_VISIBILITY_CHECK enabled for user repository installs."
                     ),
                 )
             if public_installable is None:
@@ -1003,7 +1008,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     (
                         f"Unable to verify GitHub App '{github_auth.app_slug()}' is public before repository authorization. "
-                        "Try again after GitHub API access is available, or disable PULLWISE_GITHUB_APP_VISIBILITY_CHECK only for owner-only installs."
+                        "Try again after GitHub API access is available, and keep PULLWISE_GITHUB_APP_VISIBILITY_CHECK enabled for user repository installs."
                     ),
                 )
 
@@ -1088,9 +1093,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         repository_items = []
         if github_auth.app_api_configured():
             installation = github_auth.fetch_installation(installation_id)
-            if not installation_has_repository_contents_read(installation):
+            if not installation_has_read_only_repository_contents(installation):
                 raise ValueError(
-                    "GitHub App installation must grant Contents: read access so Pullwise can scan private repositories."
+                    "GitHub App installation must grant Contents: read-only access so Pullwise can scan private repositories without write permission."
                 )
             repository_items = github_auth.list_installation_repositories(installation_id)
 

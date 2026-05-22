@@ -132,7 +132,7 @@ Create or configure a GitHub App for Pullwise:
 - Homepage URL: `http://localhost:5174`
 - Callback URL for user authorization: `http://localhost:3000/auth/github/callback`
 - Setup URL: `http://localhost:3000/integrations/github/callback`
-- Required permissions for current functionality: `Contents: read`, `Metadata: read`
+- Required permissions for current functionality: `Contents: read-only`, `Metadata: read`
 - App visibility: `Public` / `Any account`
 
 The repository connection flow must install Pullwise on the signed-in user's
@@ -141,7 +141,8 @@ the GitHub App is public. If the app is private, GitHub limits installation to
 the app owner account, so the repository picker will only show owner-account
 repositories such as `GoPullwise/*`. Private repositories are supported after a
 public app is installed on the user's account or organization and granted
-`Contents: read` access.
+`Contents: read-only` access. Do not grant `Contents: write`; the backend
+rejects write-level repository content permission.
 
 For Cloudflare Pages production with the `/api` proxy, use:
 
@@ -172,6 +173,9 @@ and the server refuses to continue instead of sending the user to a GoPullwise
 owner-only repository picker. If the check cannot be completed because GitHub's
 API is unavailable or rate-limited, the server also fails closed rather than
 opening an installation page that may only expose owner-account repositories.
+Keep this visibility check enabled for real user repository installs.
+If you set `PULLWISE_GITHUB_APP_INSTALL_URL`, you must still set
+`PULLWISE_GITHUB_APP_SLUG`; the custom URL does not bypass the public-app check.
 
 For deployment or secret stores, use `PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64`
 instead of `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`.

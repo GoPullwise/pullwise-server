@@ -165,6 +165,7 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.CONFLICT)
         self.assertIn("GitHub App 'gopullwise' is private", handler.payload["message"])
+        self.assertIn("keep PULLWISE_GITHUB_APP_VISIBILITY_CHECK enabled", handler.payload["message"])
         self.assertEqual(app.GITHUB_STATES, {})
 
     def test_github_repository_authorize_fails_closed_when_app_visibility_is_unknown(self) -> None:
@@ -202,6 +203,79 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
         self.assertIn("Unable to verify GitHub App 'gopullwise' is public", handler.payload["message"])
+        self.assertIn("keep PULLWISE_GITHUB_APP_VISIBILITY_CHECK enabled", handler.payload["message"])
+        self.assertEqual(app.GITHUB_STATES, {})
+
+    def test_github_repository_authorize_requires_slug_even_with_install_url_override(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/authorize?redirectTo=https%3A%2F%2Fapp.pullwise.dev%2F%3Fscreen%3Drepos",
+            cookie="pw_session=ses_1",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                "PULLWISE_GITHUB_APP_INSTALL_URL": "https://github.com/apps/gopullwise/installations/new",
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.NOT_IMPLEMENTED)
+        self.assertIn("PULLWISE_GITHUB_APP_SLUG is required", handler.payload["message"])
+        self.assertEqual(app.GITHUB_STATES, {})
+
+    def test_github_repository_authorize_checks_public_slug_even_with_install_url_override(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/authorize?redirectTo=https%3A%2F%2Fapp.pullwise.dev%2F%3Fscreen%3Drepos",
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "gopullwise",
+                    "PULLWISE_GITHUB_APP_INSTALL_URL": "https://github.com/apps/gopullwise/installations/new",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_slug_publicly_installable", return_value=False),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.CONFLICT)
+        self.assertIn("GitHub App 'gopullwise' is private", handler.payload["message"])
         self.assertEqual(app.GITHUB_STATES, {})
 
     def test_github_repository_authorize_returns_install_url_for_public_app_slug(self) -> None:
@@ -241,6 +315,19 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["mode"], "github-app")
         self.assertIn("https://github.com/apps/pullwise/installations/new?state=", handler.payload["url"])
         self.assertEqual(len(app.GITHUB_STATES), 1)
+
+    def test_github_repository_content_permission_must_be_read_only(self) -> None:
+        self.assertTrue(
+            app.installation_has_read_only_repository_contents(
+                {"permissions": {"metadata": "read", "contents": "read"}}
+            )
+        )
+        self.assertFalse(
+            app.installation_has_read_only_repository_contents(
+                {"permissions": {"metadata": "read", "contents": "write"}}
+            )
+        )
+        self.assertFalse(app.installation_has_read_only_repository_contents({"permissions": {"metadata": "read"}}))
 
     def test_unhandled_errors_do_not_echo_internal_exception_details(self) -> None:
         handler = RouteHarness("/boom")
