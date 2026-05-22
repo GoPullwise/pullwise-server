@@ -39,12 +39,21 @@ def app_slug() -> str:
     return env_any(["PULLWISE_GITHUB_APP_SLUG", "GITHUB_APP_SLUG"])
 
 
+def app_install_url_override() -> str:
+    return env_any(["PULLWISE_GITHUB_APP_INSTALL_URL", "GITHUB_APP_INSTALL_URL"])
+
+
 def app_id() -> str:
     return env_any(["PULLWISE_GITHUB_APP_ID", "GITHUB_APP_ID"])
 
 
 def app_install_configured() -> bool:
-    return bool(app_slug() or env_any(["PULLWISE_GITHUB_APP_INSTALL_URL", "GITHUB_APP_INSTALL_URL"]))
+    return bool(app_slug() or app_install_url_override())
+
+
+def app_visibility_check_enabled() -> bool:
+    raw = env_any(["PULLWISE_GITHUB_APP_VISIBILITY_CHECK"], "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def app_api_configured() -> bool:
@@ -99,10 +108,33 @@ def build_oauth_authorize_url(redirect_uri: str, state: str, code_verifier: str)
 
 
 def build_app_install_url(state: str) -> str:
-    configured = env_any(["PULLWISE_GITHUB_APP_INSTALL_URL", "GITHUB_APP_INSTALL_URL"])
+    configured = app_install_url_override()
     base_url = configured.rstrip("/") if configured else f"{github_web_url()}/apps/{app_slug()}/installations/new"
     separator = "&" if "?" in base_url else "?"
     return f"{base_url}{separator}{urlencode({'state': state})}"
+
+
+def app_slug_publicly_installable() -> bool | None:
+    slug = app_slug()
+    if not slug:
+        return None
+
+    try:
+        response = requests.get(
+            f"{github_api_url()}/apps/{slug}",
+            headers=github_api_headers(),
+            timeout=request_timeout(),
+        )
+    except Exception:
+        return None
+
+    if response.status_code == 404:
+        return False
+    try:
+        response.raise_for_status()
+    except Exception:
+        return None
+    return True
 
 
 def exchange_oauth_code(code: str, redirect_uri: str, code_verifier: str, state: str) -> dict:
@@ -292,7 +324,30 @@ def installation_to_dict(installation) -> dict:
         "repository_selection": getattr(installation, "repository_selection", None),
         "target_type": getattr(installation, "target_type", None),
         "account": {"login": getattr(account, "login", None)} if account else {},
+        "app_slug": getattr(installation, "app_slug", None),
+        "permissions": permission_levels_to_dict(getattr(installation, "permissions", None)),
     }
+
+
+def permission_levels_to_dict(permissions) -> dict:
+    if not permissions:
+        return {}
+    if isinstance(permissions, dict):
+        return {str(key): str(value) for key, value in permissions.items() if value is not None}
+
+    raw_data = getattr(permissions, "raw_data", None) or getattr(permissions, "_rawData", None)
+    if isinstance(raw_data, dict):
+        return {str(key): str(value) for key, value in raw_data.items() if value is not None}
+
+    result = {}
+    for key in ("metadata", "contents", "issues", "pull_requests", "checks", "statuses"):
+        try:
+            value = getattr(permissions, key)
+        except Exception:
+            continue
+        if value is not None:
+            result[key] = str(value)
+    return result
 
 
 def repo_to_pullwise(repo) -> dict:

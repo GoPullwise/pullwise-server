@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -20,7 +21,57 @@ class GitHubAuthContractsTest(unittest.TestCase):
         headers = client.get.call_args.kwargs["headers"]
         self.assertEqual(headers["Accept"], "application/vnd.github+json")
         self.assertIn("X-GitHub-Api-Version", headers)
+
+    def test_app_slug_public_visibility_uses_official_get_app_endpoint(self) -> None:
+        response = Mock()
+        response.status_code = 200
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_GITHUB_APP_SLUG": "pullwise"}, clear=True),
+            patch("pullwise_server.github_auth.requests.get", return_value=response) as get,
+        ):
+            public_installable = github_auth.app_slug_publicly_installable()
+
+        self.assertTrue(public_installable)
+        get.assert_called_once()
+        self.assertEqual(get.call_args.args[0], "https://api.github.com/apps/pullwise")
+        headers = get.call_args.kwargs["headers"]
+        self.assertEqual(headers["Accept"], "application/vnd.github+json")
+        self.assertIn("X-GitHub-Api-Version", headers)
         self.assertIn("User-Agent", headers)
+
+    def test_app_slug_public_visibility_returns_false_on_private_or_missing_slug(self) -> None:
+        response = Mock()
+        response.status_code = 404
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_GITHUB_APP_SLUG": "gopullwise"}, clear=True),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            public_installable = github_auth.app_slug_publicly_installable()
+
+        self.assertFalse(public_installable)
+        response.raise_for_status.assert_not_called()
+
+    def test_installation_to_dict_preserves_app_slug_and_permission_levels(self) -> None:
+        account = Mock()
+        account.login = "octocat"
+        permissions = Mock()
+        permissions.raw_data = {"metadata": "read", "contents": "read"}
+        installation = Mock()
+        installation.id = 123
+        installation.repository_selection = "selected"
+        installation.target_type = "User"
+        installation.account = account
+        installation.app_slug = "pullwise"
+        installation.permissions = permissions
+
+        payload = github_auth.installation_to_dict(installation)
+
+        self.assertEqual(payload["account"]["login"], "octocat")
+        self.assertEqual(payload["app_slug"], "pullwise")
+        self.assertEqual(payload["permissions"]["contents"], "read")
 
     def test_list_installation_repositories_uses_official_installation_repositories_endpoint(self) -> None:
         response = Mock()

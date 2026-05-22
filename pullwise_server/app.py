@@ -464,6 +464,11 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     return repository_item(github_access, full_name) is not None
 
 
+def installation_has_repository_contents_read(installation: dict) -> bool:
+    permissions = installation.get("permissions") or {}
+    return permissions.get("contents") in {"read", "write"}
+
+
 def has_real_github_identity(user: dict | None) -> bool:
     if not user:
         return False
@@ -982,6 +987,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         user = USERS.get(session["userId"])
         if github_auth.oauth_configured() and not has_real_github_identity(user):
             return self.error(HTTPStatus.UNAUTHORIZED, "Sign in with GitHub before authorizing repositories.")
+        if github_auth.app_visibility_check_enabled() and not github_auth.app_install_url_override():
+            public_installable = github_auth.app_slug_publicly_installable()
+            if public_installable is False:
+                return self.error(
+                    HTTPStatus.CONFLICT,
+                    (
+                        f"GitHub App '{github_auth.app_slug()}' is private or not publicly visible. "
+                        "Make the GitHub App public before connecting repositories from user accounts, "
+                        "or disable PULLWISE_GITHUB_APP_VISIBILITY_CHECK for owner-only installs."
+                    ),
+                )
 
         state = remember_github_state("install", redirect_to, userId=session["userId"], requestedScope=scope)
         return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
@@ -1064,6 +1080,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         repository_items = []
         if github_auth.app_api_configured():
             installation = github_auth.fetch_installation(installation_id)
+            if not installation_has_repository_contents_read(installation):
+                raise ValueError(
+                    "GitHub App installation must grant Contents: read access so Pullwise can scan private repositories."
+                )
             repository_items = github_auth.list_installation_repositories(installation_id)
 
         repository_selection = installation.get("repository_selection") or params.get("scope") or record.get("requestedScope") or "selected"
@@ -1076,6 +1096,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "installationId": installation_id,
             "installationAccount": account.get("login"),
             "installationTargetType": installation.get("target_type"),
+            "installationAppSlug": installation.get("app_slug"),
+            "installationPermissions": installation.get("permissions") or {},
             "repositories": [repo["fullName"] for repo in repository_items],
             "repositoryItems": repository_items,
             "repositoriesNeedSync": not github_auth.app_api_configured(),

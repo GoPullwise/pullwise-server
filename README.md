@@ -9,7 +9,25 @@ switches are available only for development.
 
 ## Run
 
+Use a project-local virtual environment so this server does not share packages
+with the system Python. The target runtime is Python 3.10.12.
+
+Windows PowerShell:
+
 ```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -m pullwise_server
+```
+
+Linux/macOS/server:
+
+```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e .
 python -m pullwise_server
 ```
@@ -38,7 +56,7 @@ OS-level tools. Suitable targets include a VPS, a container platform, Render,
 Railway, Fly.io, ECS, Cloud Run, or Cloudflare Containers when available. The
 host needs:
 
-- Python 3.10 or newer
+- Python 3.10.12
 - `git` on `PATH`
 - outbound HTTPS access to GitHub, Stripe, Creem, SMTP, and the review provider
 - persistent storage for `PULLWISE_DB_PATH` and `PULLWISE_CHECKOUT_ROOT`
@@ -47,6 +65,9 @@ host needs:
 Install and run:
 
 ```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e .
 python -m pullwise_server --host 0.0.0.0 --port 3000
 ```
@@ -100,6 +121,7 @@ Expected shape:
 Run verification before deploying:
 
 ```bash
+. .venv/bin/activate
 python -m unittest discover -s tests
 ```
 
