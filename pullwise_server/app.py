@@ -1069,6 +1069,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.redirect(safe_redirect_to(params.get("redirectTo"), "repos"), cookie_header(session["id"]))
 
         record = self.github_install_record_from_callback(params)
+        if params.get("setup_action") == "request":
+            return self.redirect(
+                redirect_with_params(str(record["redirectTo"]), {"github_error": "github_app_installation_not_completed"})
+            )
         if not params.get("installation_id"):
             return self.redirect(
                 redirect_with_params(str(record["redirectTo"]), {"github_error": "missing_installation_id"})
@@ -1076,11 +1080,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         user = USERS.get(str(record["userId"]))
         if not user:
             raise ValueError("The GitHub installation belongs to a user session that no longer exists.")
-
-        if params.get("setup_action") == "request":
-            return self.redirect(
-                redirect_with_params(str(record["redirectTo"]), {"github_error": "github_app_installation_not_completed"})
-            )
 
         installation_id = str(params["installation_id"])
         user_can_access = github_auth.user_can_access_installation(user.get("githubAccessToken"), installation_id)

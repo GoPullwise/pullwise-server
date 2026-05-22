@@ -374,6 +374,62 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
 
+    def test_github_installation_request_without_installation_id_reports_not_completed(self) -> None:
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        state = app.remember_github_state(
+            "install",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            requestedScope="selected",
+        )
+        handler = RouteHarness(f"/integrations/github/callback?state={state}&setup_action=request")
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertIn("github_error=github_app_installation_not_completed", handler.location)
+        self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
+
+    def test_github_installation_callback_without_request_or_installation_id_reports_missing_installation_id(self) -> None:
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        state = app.remember_github_state(
+            "install",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            requestedScope="selected",
+        )
+        handler = RouteHarness(f"/integrations/github/callback?state={state}&setup_action=install")
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertIn("github_error=missing_installation_id", handler.location)
+        self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
+
     def test_github_installation_callback_can_bind_without_state_when_session_user_matches_installation(self) -> None:
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
         app.USERS["usr_1"]["githubRepositoryAccess"] = None
