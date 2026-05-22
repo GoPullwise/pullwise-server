@@ -167,6 +167,43 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIn("GitHub App 'gopullwise' is private", handler.payload["message"])
         self.assertEqual(app.GITHUB_STATES, {})
 
+    def test_github_repository_authorize_fails_closed_when_app_visibility_is_unknown(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/authorize?redirectTo=https%3A%2F%2Fapp.pullwise.dev%2F%3Fscreen%3Drepos",
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "gopullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_slug_publicly_installable", return_value=None),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertIn("Unable to verify GitHub App 'gopullwise' is public", handler.payload["message"])
+        self.assertEqual(app.GITHUB_STATES, {})
+
     def test_github_repository_authorize_returns_install_url_for_public_app_slug(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
@@ -284,6 +321,110 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.FOUND)
         self.assertEqual(app.USERS["usr_1"]["githubRepositoryAccess"]["installationId"], "999")
+
+    def test_github_installation_callback_records_selected_private_repo_access(self) -> None:
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        state = app.remember_github_state(
+            "install",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            requestedScope="selected",
+        )
+        handler = RouteHarness(f"/integrations/github/callback?state={state}&installation_id=999")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_GITHUB_APP_ID": "123",
+                    "PULLWISE_GITHUB_APP_PRIVATE_KEY": "private-key",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
+            patch(
+                "pullwise_server.github_auth.fetch_installation",
+                return_value={
+                    "repository_selection": "selected",
+                    "target_type": "User",
+                    "account": {"login": "octocat"},
+                    "app_slug": "pullwise",
+                    "permissions": {"metadata": "read", "contents": "read"},
+                },
+            ),
+            patch(
+                "pullwise_server.github_auth.list_installation_repositories",
+                return_value=[
+                    {
+                        "id": "repo_private",
+                        "name": "private-repo",
+                        "fullName": "octocat/private-repo",
+                        "private": True,
+                        "cloneUrl": "https://github.com/octocat/private-repo.git",
+                    }
+                ],
+            ),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertEqual(github_access["installationAccount"], "octocat")
+        self.assertEqual(github_access["installationTargetType"], "User")
+        self.assertEqual(github_access["installationPermissions"]["contents"], "read")
+        self.assertEqual(github_access["repositories"], ["octocat/private-repo"])
+        self.assertTrue(github_access["repositoryItems"][0]["private"])
+
+    def test_github_installation_callback_rejects_installation_without_contents_read(self) -> None:
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        state = app.remember_github_state(
+            "install",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            requestedScope="selected",
+        )
+        handler = RouteHarness(f"/integrations/github/callback?state={state}&installation_id=999")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_GITHUB_APP_ID": "123",
+                    "PULLWISE_GITHUB_APP_PRIVATE_KEY": "private-key",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
+            patch(
+                "pullwise_server.github_auth.fetch_installation",
+                return_value={
+                    "repository_selection": "selected",
+                    "target_type": "User",
+                    "account": {"login": "octocat"},
+                    "app_slug": "pullwise",
+                    "permissions": {"metadata": "read"},
+                },
+            ),
+            patch("pullwise_server.github_auth.list_installation_repositories") as list_repositories,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("Contents: read", handler.payload["message"])
+        self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
+        list_repositories.assert_not_called()
 
     def test_github_installation_callback_without_state_fails_closed_when_session_user_cannot_access_installation(self) -> None:
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"

@@ -998,6 +998,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "or disable PULLWISE_GITHUB_APP_VISIBILITY_CHECK for owner-only installs."
                     ),
                 )
+            if public_installable is None:
+                return self.error(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    (
+                        f"Unable to verify GitHub App '{github_auth.app_slug()}' is public before repository authorization. "
+                        "Try again after GitHub API access is available, or disable PULLWISE_GITHUB_APP_VISIBILITY_CHECK only for owner-only installs."
+                    ),
+                )
 
         state = remember_github_state("install", redirect_to, userId=session["userId"], requestedScope=scope)
         return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
