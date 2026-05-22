@@ -928,7 +928,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_github_authorize(self, params: dict) -> None:
-        redirect_to = safe_redirect_to(params.get("redirectTo"), "oauth")
+        redirect_to = safe_redirect_to(params.get("redirectTo"), "dashboard")
         if not github_auth.oauth_configured():
             if not local_github_mocks_enabled():
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured. Set PULLWISE_GITHUB_CLIENT_ID and PULLWISE_GITHUB_CLIENT_SECRET.")
@@ -951,7 +951,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured.")
             user = get_or_create_github_user()
             session = create_session(user)
-            return self.redirect(safe_redirect_to(params.get("redirectTo"), "oauth"), cookie_header(session["id"]))
+            return self.redirect(safe_redirect_to(params.get("redirectTo"), "dashboard"), cookie_header(session["id"]))
 
         state = params.get("state") or ""
         record = pop_github_state("login", state)
@@ -1022,7 +1022,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         email = str(body.get("email") or "").strip().lower()
         if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
             return self.error(HTTPStatus.BAD_REQUEST, "A valid email is required.")
-        redirect_to = safe_redirect_to(body.get("redirectTo"), "oauth")
+        redirect_to = safe_redirect_to(body.get("redirectTo"), "dashboard")
         token = secrets.token_urlsafe(24)
         MAGIC_LINKS[token] = {"email": email, "redirectTo": redirect_to, "expiresAt": now() + MAGIC_LINK_MAX_AGE}
         mark_state_dirty()

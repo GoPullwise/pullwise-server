@@ -91,6 +91,29 @@ class SecurityContractsTest(unittest.TestCase):
                 "https://app.pullwise.dev/?screen=dashboard",
             )
 
+    def test_github_login_authorize_defaults_to_dashboard_redirect(self) -> None:
+        handler = RouteHarness("/auth/github/authorize")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.build_oauth_authorize_url", return_value="https://github.com/login/oauth/authorize"),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["url"], "https://github.com/login/oauth/authorize")
+        record = next(iter(app.GITHUB_STATES.values()))
+        self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/?screen=dashboard")
+
     def test_issue_status_update_requires_sign_in(self) -> None:
         handler = RouteHarness("/issues/iss_1/status", {"status": "ignored"})
 
