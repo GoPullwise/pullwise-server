@@ -78,6 +78,69 @@ class CheckoutContractsTest(unittest.TestCase):
             self.assertNotIn("ghs_secret_token", " ".join(extra_env.values()))
             self.assertIn("http.extraHeader", extra_env.values())
 
+    def test_checkout_root_defaults_inside_server_state_directory(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            root = os.path.abspath(checkout.checkout_root())
+
+        self.assertEqual(
+            root,
+            os.path.abspath(os.path.join(checkout.project_root(), ".pullwise", "checkouts")),
+        )
+
+    def test_git_auth_env_disables_system_and_user_git_config(self) -> None:
+        git_env = checkout.git_auth_env("ghs_secret_token")
+
+        self.assertEqual(git_env["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(os.path.normcase(git_env["GIT_CONFIG_GLOBAL"]), os.path.normcase(os.devnull))
+        self.assertEqual(git_env["GIT_CONFIG_KEY_0"], "http.extraHeader")
+
+    def test_prepare_checkout_runs_clone_from_server_managed_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scan = {
+                "userId": "usr_1",
+                "repo": "owner/repo",
+                "branch": "main",
+                "commit": "pending",
+                "installationId": "123",
+                "cloneUrl": "https://github.com/owner/repo.git",
+            }
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "PULLWISE_CHECKOUT_ROOT": tmpdir,
+                        "PULLWISE_GITHUB_WEB_URL": "https://github.com",
+                    },
+                    clear=False,
+                ),
+                patch.object(checkout.github_auth, "app_api_configured", return_value=True),
+                patch.object(
+                    checkout.github_auth,
+                    "create_installation_access_token",
+                    return_value={"token": "ghs_secret_token"},
+                ),
+                patch.object(checkout, "run_git") as run_git,
+            ):
+                checkout.prepare_checkout("sc_123", scan, lambda: False)
+                expected_cwd = checkout.workspace_path_for("usr_1", "sc_123")
+                cwd_in_workspace = checkout.path_in_scan_workspace(expected_cwd, "usr_1", "sc_123")
+
+            clone_cwd = run_git.call_args.kwargs["cwd"]
+            self.assertEqual(clone_cwd, expected_cwd)
+            self.assertTrue(cwd_in_workspace)
+
+    def test_run_git_rejects_cwd_outside_checkout_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "checkout root"):
+                    checkout.run_git(
+                        ["git", "status"],
+                        cwd=os.path.dirname(tmpdir),
+                        extra_env={},
+                        is_cancelled=lambda: False,
+                        action="status",
+                    )
+
     def test_repository_authorization_requires_explicit_repo_match(self) -> None:
         self.assertFalse(app.repository_is_authorized(None, "owner/repo"))
         self.assertFalse(app.repository_is_authorized({"repositoriesNeedSync": True}, "owner/repo"))

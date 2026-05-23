@@ -43,6 +43,7 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
 
     checkout_path = checkout_path_for(user_id, scan_id, repo)
     remove_existing_checkout(checkout_path)
+    workspace = workspace_path_for(user_id, scan_id)
 
     git_env = git_auth_env(token)
     run_git(
@@ -59,7 +60,7 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
             clone_url_for(repo, scan.get("cloneUrl")),
             checkout_path,
         ],
-        cwd=None,
+        cwd=workspace,
         extra_env=git_env,
         is_cancelled=is_cancelled,
         action="clone repository",
@@ -114,6 +115,17 @@ def run_git(
     is_cancelled: Callable[[], bool],
     action: str,
 ) -> None:
+    if not cwd:
+        raise RuntimeError("Git command cwd must be inside the checkout root.")
+    root_abs = os.path.abspath(checkout_root())
+    cwd_abs = os.path.abspath(cwd)
+    try:
+        common = os.path.commonpath([root_abs, cwd_abs])
+    except ValueError:
+        common = ""
+    if os.path.normcase(common) != os.path.normcase(root_abs):
+        raise RuntimeError("Git command cwd must be inside the checkout root.")
+
     env = os.environ.copy()
     env.update(extra_env)
     env["GIT_TERMINAL_PROMPT"] = "0"
@@ -151,6 +163,8 @@ def terminate_process(process: subprocess.Popen) -> None:
 def git_auth_env(token: str) -> dict[str, str]:
     basic = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
     return {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "http.extraHeader",
         "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
@@ -194,7 +208,11 @@ def remove_existing_checkout(path: str) -> None:
 
 
 def checkout_root() -> str:
-    return os.environ.get("PULLWISE_CHECKOUT_ROOT") or os.path.join(tempfile.gettempdir(), "pullwise-scans")
+    return os.environ.get("PULLWISE_CHECKOUT_ROOT") or os.path.join(project_root(), ".pullwise", "checkouts")
+
+
+def project_root() -> str:
+    return os.path.dirname(os.path.dirname(__file__))
 
 
 def safe_path_segment(value: str, fallback: str) -> str:
