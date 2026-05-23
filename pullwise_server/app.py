@@ -188,11 +188,11 @@ def api_base_url(handler: BaseHTTPRequestHandler) -> str:
     host = trusted_host_header(handler)
     if host:
         return f"http://{host}"
-    return "http://localhost:3000"
+    return "http://localhost:8080"
 
 
 def trusted_host_header(handler: BaseHTTPRequestHandler) -> str | None:
-    host = first_header_value(handler, "Host") or "localhost:3000"
+    host = first_header_value(handler, "Host") or "localhost:8080"
     if any(char in host for char in "/\r\n") or not re.match(r"^[A-Za-z0-9.:-]+$", host):
         return None
     if is_local_host(host):
@@ -1915,7 +1915,7 @@ def main() -> None:
     logging_config.configure_logging(project_root=project_root())
     parser = argparse.ArgumentParser(description="Run the Pullwise local API server.")
     parser.add_argument("--host", default=env("PULLWISE_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(env("PULLWISE_PORT", "3000")))
+    parser.add_argument("--port", type=int, default=int(env("PULLWISE_PORT", "8080")))
     args = parser.parse_args()
 
     ensure_state_loaded()

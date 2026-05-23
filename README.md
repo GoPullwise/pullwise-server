@@ -35,7 +35,7 @@ python -m pullwise_server
 Point the frontend at:
 
 ```text
-VITE_API_BASE_URL=http://localhost:3000
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
 The server persists sessions, GitHub authorization state, selected
@@ -74,7 +74,7 @@ python3.10 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-python -m pullwise_server --host 0.0.0.0 --port 3000
+python -m pullwise_server --host 0.0.0.0 --port 8080
 ```
 
 On platforms that inject `$PORT`, pass that value to `--port` or set
@@ -84,7 +84,7 @@ Minimum production environment:
 
 ```env
 PULLWISE_HOST=0.0.0.0
-PULLWISE_PORT=3000
+PULLWISE_PORT=8080
 PULLWISE_MODE=production
 PULLWISE_APP_URL=https://app.your-domain.com
 PULLWISE_ALLOWED_ORIGINS=https://app.your-domain.com
@@ -231,8 +231,8 @@ is set, and renders the systemd service file.
 Create or configure a GitHub App for Pullwise:
 
 - Homepage URL: `http://localhost:5174`
-- Callback URL for user authorization: `http://localhost:3000/auth/github/callback`
-- Setup URL: `http://localhost:3000/integrations/github/callback`
+- Callback URL for user authorization: `http://localhost:8080/auth/github/callback`
+- Setup URL: `http://localhost:8080/integrations/github/callback`
 - Required permissions for current functionality: `Contents: read-only`, `Metadata: read`
 - App visibility: `Public` / `Any account`
 

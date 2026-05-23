@@ -2628,7 +2628,7 @@ class SecurityContractsTest(unittest.TestCase):
             },
             clear=True,
         ):
-            self.assertEqual(app.api_base_url(handler), "http://localhost:3000")
+            self.assertEqual(app.api_base_url(handler), "http://localhost:8080")
 
     def test_root_relative_redirect_rejects_control_characters(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_APP_URL": "https://app.pullwise.dev"}, clear=True):

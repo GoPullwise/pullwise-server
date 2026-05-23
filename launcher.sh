@@ -244,7 +244,7 @@ host_value() {
 }
 
 port_value() {
-  env_value PULLWISE_PORT "3000"
+  env_value PULLWISE_PORT "8080"
 }
 
 python_bin() {
@@ -798,7 +798,7 @@ cmd_config() {
   say "MANAGER=$(manager_mode)"
   print_config_key PULLWISE_MODE "local"
   print_config_key PULLWISE_HOST "0.0.0.0"
-  print_config_key PULLWISE_PORT "3000"
+  print_config_key PULLWISE_PORT "8080"
   print_config_key PULLWISE_APP_URL "http://localhost:5173"
   print_config_key PULLWISE_ALLOWED_ORIGINS ""
   print_config_key PULLWISE_API_BASE_URL ""
