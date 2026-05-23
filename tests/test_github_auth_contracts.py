@@ -65,12 +65,14 @@ class GitHubAuthContractsTest(unittest.TestCase):
         installation.target_type = "User"
         installation.account = account
         installation.app_slug = "pullwise"
+        installation.html_url = "https://github.com/settings/installations/123"
         installation.permissions = permissions
 
         payload = github_auth.installation_to_dict(installation)
 
         self.assertEqual(payload["account"]["login"], "octocat")
         self.assertEqual(payload["app_slug"], "pullwise")
+        self.assertEqual(payload["html_url"], "https://github.com/settings/installations/123")
         self.assertEqual(payload["permissions"]["contents"], "read")
 
     def test_list_installation_repositories_uses_official_installation_repositories_endpoint(self) -> None:
@@ -109,6 +111,42 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(get.call_args.kwargs["params"], {"per_page": 100})
         headers = get.call_args.kwargs["headers"]
         self.assertEqual(headers["Authorization"], "Bearer ghs_123")
+        self.assertEqual(headers["Accept"], "application/vnd.github+json")
+        self.assertIn("X-GitHub-Api-Version", headers)
+
+    def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "repositories": [
+                {
+                    "id": 1296269,
+                    "name": "Hello-World",
+                    "full_name": "octocat/Hello-World",
+                    "description": "This is your first repo!",
+                    "language": "Python",
+                    "private": False,
+                    "stargazers_count": 80,
+                    "default_branch": "main",
+                    "updated_at": "2026-05-17T00:00:00Z",
+                    "html_url": "https://github.com/octocat/Hello-World",
+                    "clone_url": "https://github.com/octocat/Hello-World.git",
+                    "permissions": {"admin": False, "push": False, "pull": True},
+                }
+            ]
+        }
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with patch("pullwise_server.github_auth.requests.get", return_value=response) as get:
+            repositories = github_auth.list_user_installation_repositories("ghu_user", "123")
+
+        self.assertEqual(repositories[0]["fullName"], "octocat/Hello-World")
+        self.assertEqual(repositories[0]["cloneUrl"], "https://github.com/octocat/Hello-World.git")
+        get.assert_called_once()
+        self.assertEqual(get.call_args.args[0], "https://api.github.com/user/installations/123/repositories")
+        self.assertEqual(get.call_args.kwargs["params"], {"per_page": 100})
+        headers = get.call_args.kwargs["headers"]
+        self.assertEqual(headers["Authorization"], "Bearer ghu_user")
         self.assertEqual(headers["Accept"], "application/vnd.github+json")
         self.assertIn("X-GitHub-Api-Version", headers)
 

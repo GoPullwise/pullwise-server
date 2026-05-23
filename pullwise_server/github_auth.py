@@ -57,7 +57,12 @@ def app_visibility_check_enabled() -> bool:
 
 
 def app_api_configured() -> bool:
-    return bool(app_id() and app_private_key())
+    if not app_id():
+        return False
+    try:
+        return bool(app_private_key())
+    except OSError:
+        return False
 
 
 def github_web_url() -> str:
@@ -231,6 +236,31 @@ def list_installation_repositories(installation_id: str) -> list[dict]:
     return repositories
 
 
+def list_user_installation_repositories(user_access_token: str | None, installation_id: str) -> list[dict]:
+    if not user_access_token:
+        return []
+
+    repositories = []
+    url = f"{github_api_url()}/user/installations/{installation_id}/repositories"
+    params = {"per_page": 100}
+    while url:
+        response = requests.get(
+            url,
+            headers=github_api_headers(user_access_token),
+            params=params,
+            timeout=request_timeout(),
+        )
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            raise GitHubError(f"GitHub user installation repositories request failed: {exc}") from exc
+        payload = response.json()
+        repositories.extend(repo_to_pullwise(repo) for repo in payload.get("repositories") or [])
+        url = ((getattr(response, "links", {}) or {}).get("next") or {}).get("url")
+        params = None
+    return repositories
+
+
 def github_api_headers(token: str | None = None) -> dict[str, str]:
     headers = {
         "Accept": "application/vnd.github+json",
@@ -260,6 +290,45 @@ def user_can_access_installation(user_access_token: str | None, installation_id:
         return None
     finally:
         github.close()
+
+
+def list_current_app_installations_for_user(user_access_token: str | None) -> list[dict]:
+    if not user_access_token:
+        return []
+
+    configured_slug = app_slug()
+    configured_app_id = app_id()
+    if not configured_slug and not configured_app_id:
+        return []
+
+    github = github_client(token=user_access_token)
+    try:
+        user = github.get_user()
+        get_installations = getattr(user, "get_installations", None)
+        if callable(get_installations):
+            installations = [installation_to_dict(installation) for installation in get_installations()]
+        else:
+            _, payload = github.requester.requestJsonAndCheck("GET", "/user/installations")
+            raw_installations = payload.get("installations", []) if isinstance(payload, dict) else []
+            installations = [installation_payload_to_dict(installation) for installation in raw_installations]
+    except Exception:
+        return []
+    finally:
+        github.close()
+
+    return [
+        installation
+        for installation in installations
+        if installation_matches_configured_app(installation, configured_slug, configured_app_id)
+    ]
+
+
+def installation_matches_configured_app(installation: dict, configured_slug: str, configured_app_id: str) -> bool:
+    installation_slug = str(installation.get("app_slug") or "")
+    installation_app_id = str(installation.get("app_id") or "")
+    if configured_slug and installation_slug == configured_slug:
+        return True
+    return bool(configured_app_id and installation_app_id == str(configured_app_id))
 
 
 def oauth_session(**kwargs):
@@ -325,7 +394,22 @@ def installation_to_dict(installation) -> dict:
         "target_type": getattr(installation, "target_type", None),
         "account": {"login": getattr(account, "login", None)} if account else {},
         "app_slug": getattr(installation, "app_slug", None),
+        "html_url": getattr(installation, "html_url", None),
         "permissions": permission_levels_to_dict(getattr(installation, "permissions", None)),
+    }
+
+
+def installation_payload_to_dict(installation: dict) -> dict:
+    account = installation.get("account") or {}
+    return {
+        "id": installation.get("id"),
+        "repository_selection": installation.get("repository_selection"),
+        "target_type": installation.get("target_type"),
+        "account": {"login": account.get("login")} if isinstance(account, dict) else {},
+        "app_slug": installation.get("app_slug"),
+        "app_id": installation.get("app_id"),
+        "html_url": installation.get("html_url"),
+        "permissions": permission_levels_to_dict(installation.get("permissions")),
     }
 
 
