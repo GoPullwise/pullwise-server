@@ -21,6 +21,12 @@ def env_example_values() -> dict[str, str]:
 
 
 class ConfigurationContractsTest(unittest.TestCase):
+    def test_env_example_declares_runtime_mode(self) -> None:
+        values = env_example_values()
+
+        self.assertIn("PULLWISE_MODE", values)
+        self.assertIn(values["PULLWISE_MODE"], {"local", "production"})
+
     def test_env_example_does_not_enable_local_mocks_by_default(self) -> None:
         values = env_example_values()
 

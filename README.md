@@ -134,6 +134,98 @@ Run verification before deploying:
 python -m unittest discover -s tests
 ```
 
+### Ubuntu 22.04 launcher
+
+For a single Ubuntu 22.04 host, manage the server through `launcher.sh` from
+the repository root:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3.10 python3.10-venv git curl
+id -u pullwise >/dev/null 2>&1 || sudo useradd --system --create-home --shell /usr/sbin/nologin pullwise
+sudo install -d -o root -g pullwise -m 0750 /etc/pullwise /etc/pullwise/secrets
+sudo install -d -o pullwise -g pullwise -m 0750 /var/lib/pullwise /var/log/pullwise
+cp .env.example .env.local
+$EDITOR .env.local
+chmod +x launcher.sh
+./launcher.sh setup
+sudo ./launcher.sh sync-env
+sudo ./launcher.sh install-service
+sudo ./launcher.sh doctor
+sudo ./launcher.sh start
+./launcher.sh status
+```
+
+Keep the repository in a service-readable path, for example
+`/opt/pullwise-server`, so the `pullwise` system user can enter the working
+directory and execute `.venv/bin/python`.
+
+The launcher treats `.env.local` as the editable project-local source of truth
+and copies it to `/etc/pullwise/server.env`. The systemd unit reads that file
+with `EnvironmentFile=/etc/pullwise/server.env` and starts:
+
+```text
+python -m pullwise_server
+```
+
+Set `PULLWISE_MODE=production` before running `doctor`. A typical single-host
+production storage layout is:
+
+```env
+PULLWISE_DB_PATH=/var/lib/pullwise/pullwise.sqlite3
+PULLWISE_LOG_DIR=/var/log/pullwise
+PULLWISE_CHECKOUT_ROOT=/var/lib/pullwise/checkouts
+PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=/etc/pullwise/secrets/github-app-private-key.pem
+```
+
+Keep the GitHub App private key outside the repository. The recommended path is
+`/etc/pullwise/secrets/github-app-private-key.pem` with directory permissions
+`root:pullwise 0750` and file permissions `root:pullwise 0640`, while the
+service runs as `User=pullwise` and `Group=pullwise`.
+
+The production audit expects exact HTTPS origins, secure cookies, writable
+persistent paths for the SQLite database, logs, and checkouts, real GitHub
+OAuth/App credentials, and a real review provider (`codex` or `claude_code`)
+with its CLI installed for the same OS user that runs Pullwise.
+
+Common operations:
+
+```bash
+sudo ./launcher.sh stop
+sudo ./launcher.sh restart
+./launcher.sh health
+sudo ./launcher.sh logs journal
+sudo ./launcher.sh logs app
+sudo ./launcher.sh logs error
+sudo ./launcher.sh config
+sudo ./launcher.sh audit
+```
+
+`launcher.sh start`, `stop`, `restart`, and `status` use systemd automatically
+after `install-service` has written the unit file. Set `PULLWISE_MANAGER=direct`
+only when you deliberately want the older PID-file background mode.
+
+For server migration or backup, export the runtime state:
+
+```bash
+sudo ./launcher.sh export /tmp/pullwise-server-$(date +%Y%m%d).tar.gz
+```
+
+The archive includes `server.env`, the SQLite database plus WAL/SHM sidecars
+when present, logs, checkouts, the configured GitHub App private key PEM, and
+other `.pullwise` generated state. On a new host, copy the archive into the
+repository directory and import it:
+
+```bash
+sudo ./launcher.sh import /tmp/pullwise-server-20260523.tar.gz
+sudo ./launcher.sh doctor
+sudo ./launcher.sh start
+```
+
+Import restores `/etc/pullwise/server.env`, places artifacts at the paths named
+inside that env file, restores the PEM file when `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`
+is set, and renders the systemd service file.
+
 ## Real GitHub Setup
 
 Create or configure a GitHub App for Pullwise:

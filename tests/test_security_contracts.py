@@ -889,6 +889,150 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["mode"], "github-app-existing-manage")
         self.assertEqual(handler.payload["url"], "https://github.com/settings/installations/999")
+        self.assertEqual(app.GITHUB_STATES, {})
+
+    def test_github_repository_authorize_manage_lists_existing_aggregate_installations(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "mixed",
+            "repositorySelection": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": None,
+            "installationIds": ["111", "222"],
+            "installationAccounts": ["octocat", "acme"],
+            "repositories": ["octocat/private-repo", "acme/service"],
+            "repositoryItems": [
+                {"fullName": "octocat/private-repo", "installationId": "111"},
+                {"fullName": "acme/service", "installationId": "222"},
+            ],
+            "installations": [
+                {
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                    "installationHtmlUrl": "https://github.com/settings/installations/111",
+                    "repositorySelection": "selected",
+                    "repositoryCount": 1,
+                },
+                {
+                    "installationId": "222",
+                    "installationAccount": "acme",
+                    "installationHtmlUrl": "https://github.com/organizations/acme/settings/installations/222",
+                    "repositorySelection": "all",
+                    "repositoryCount": 1,
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/authorize?manage=1&redirectTo=https%3A%2F%2Fapp.pullwise.dev%2F%3Fscreen%3Drepos",
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_slug_publicly_installable", return_value=True),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["connected"])
+        self.assertEqual(handler.payload["mode"], "github-app-existing-manage-list")
+        self.assertNotIn("url", handler.payload)
+        self.assertEqual(
+            [installation["installationAccount"] for installation in handler.payload["installations"]],
+            ["octocat", "acme"],
+        )
+        self.assertEqual(app.GITHUB_STATES, {})
+
+    def test_github_repository_authorize_add_returns_install_url_for_existing_aggregate_installations(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "mixed",
+            "repositorySelection": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationIds": ["111", "222"],
+            "installationAccounts": ["octocat", "acme"],
+            "repositories": ["octocat/private-repo", "acme/service"],
+            "repositoryItems": [
+                {"fullName": "octocat/private-repo", "installationId": "111"},
+                {"fullName": "acme/service", "installationId": "222"},
+            ],
+            "installations": [
+                {
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                    "installationHtmlUrl": "https://github.com/settings/installations/111",
+                    "repositorySelection": "selected",
+                    "repositoryCount": 1,
+                },
+                {
+                    "installationId": "222",
+                    "installationAccount": "acme",
+                    "installationHtmlUrl": "https://github.com/organizations/acme/settings/installations/222",
+                    "repositorySelection": "all",
+                    "repositoryCount": 1,
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/authorize?add=1&redirectTo=https%3A%2F%2Fapp.pullwise.dev%2F%3Fscreen%3Drepos",
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_slug_publicly_installable", return_value=True),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["mode"], "github-app-add")
+        self.assertIn("https://github.com/apps/pullwise/installations/new?state=", handler.payload["url"])
         self.assertEqual(len(app.GITHUB_STATES), 1)
 
     def test_github_repository_authorize_does_not_return_cached_configure_url_for_manage(self) -> None:

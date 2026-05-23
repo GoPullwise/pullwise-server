@@ -1475,6 +1475,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_github_repository_authorize(self, params: dict) -> None:
         scope = params.get("scope") if params.get("scope") in {"all", "selected"} else "all"
         manage = str(params.get("manage") or "").lower() in {"1", "true", "yes", "on"}
+        add_installation = str(params.get("add") or "").lower() in {"1", "true", "yes", "on"}
         redirect_to = safe_redirect_to(params.get("redirectTo"), "repos")
         if not github_auth.app_install_configured():
             if not local_github_mocks_enabled():
@@ -1514,14 +1515,34 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 )
 
         existing_access = try_bind_existing_github_repository_access(user)
+        if add_installation:
+            state = remember_github_repository_authorization(user, redirect_to, scope)
+            return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app-add"})
+
         if manage:
-            state = remember_github_repository_authorization(user, redirect_to, scope, manage=True)
             if github_repository_access_connected(existing_access) and existing_access.get("installationHtmlUrl"):
                 return self.json({
+                    "ok": True,
+                    "connected": True,
                     "url": existing_access.get("installationHtmlUrl"),
                     "mode": "github-app-existing-manage",
                     "installationId": existing_access.get("installationId"),
                 })
+            existing_installations = existing_access.get("installations") if existing_access else []
+            if github_repository_access_connected(existing_access) and any(
+                installation.get("installationHtmlUrl") for installation in existing_installations or []
+            ):
+                return self.json({
+                    "ok": True,
+                    "connected": True,
+                    "mode": "github-app-existing-manage-list",
+                    "installationId": existing_access.get("installationId"),
+                    "installationIds": existing_access.get("installationIds") or [],
+                    "installationAccount": existing_access.get("installationAccount"),
+                    "installationAccounts": existing_access.get("installationAccounts") or [],
+                    "installations": existing_installations or [],
+                })
+            state = remember_github_repository_authorization(user, redirect_to, scope, manage=True)
             return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
 
         if github_repository_access_connected(existing_access):
