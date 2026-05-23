@@ -6,10 +6,12 @@ The worker walks a fixed phase progression so the frontend can render a
 progress bar, calls into `review.run_review()` during the `ai` phase,
 appends findings to the ISSUES blob, and marks the scan done.
 
-Concurrency note: this worker mutates the same in-memory blobs (SCANS,
-ISSUES) that request handlers read. The worker takes `app.STATE_LOCK` for
-each mutation; readers see eventually-consistent state. Pre-existing race
-windows in handler-handler interleaving are not addressed here.
+Concurrency note: actual scan work is processed by a fixed worker pool and
+claimed from queued scans only when global and per-user limits allow it. The
+worker mutates the same in-memory blobs (SCANS, ISSUES) that request handlers
+read, and takes `app.STATE_LOCK` for each mutation; readers see
+eventually-consistent state. Pre-existing race windows in handler-handler
+interleaving are not addressed here.
 """
 
 from __future__ import annotations
@@ -31,23 +33,86 @@ PHASES: list[tuple[str, float | None]] = [
     ("report",  0.3),
 ]
 _AI_WEIGHT = 4.0
+_QUEUE_CONDITION = threading.Condition()
+_WORKER_THREADS: list[threading.Thread] = []
+_WORKER_CONFIG: int | None = None
 
 
 def start_scan(scan_id: str) -> None:
-    """Spawn a daemon thread to process the scan with the given id."""
-    thread = threading.Thread(
-        target=_run, args=(scan_id,), name=f"scan-{scan_id}", daemon=True
-    )
-    thread.start()
+    """Ensure the fixed worker pool is running and wake it for queued work."""
+    ensure_workers()
+    notify_queue_changed()
+
+
+def ensure_workers() -> None:
+    global _WORKER_CONFIG
+    desired = _env_limit("PULLWISE_MAX_CONCURRENT_SCANS", 1)
+    with _QUEUE_CONDITION:
+        if _WORKER_CONFIG != desired:
+            _WORKER_CONFIG = desired
+        while len(_WORKER_THREADS) < desired:
+            index = len(_WORKER_THREADS) + 1
+            thread = threading.Thread(
+                target=_worker_loop,
+                name=f"scan-worker-{index}",
+                daemon=True,
+            )
+            _WORKER_THREADS.append(thread)
+            thread.start()
+        _QUEUE_CONDITION.notify_all()
+
+
+def notify_queue_changed() -> None:
+    with _QUEUE_CONDITION:
+        _QUEUE_CONDITION.notify_all()
+
+
+def _worker_loop() -> None:
+    while True:
+        snapshot = _wait_for_next_scan()
+        _execute_scan(snapshot["id"], snapshot, int(snapshot["startedAt"]))
+        notify_queue_changed()
+
+
+def _wait_for_next_scan() -> dict:
+    while True:
+        snapshot = _claim_next_scan()
+        if snapshot:
+            return snapshot
+        with _QUEUE_CONDITION:
+            _QUEUE_CONDITION.wait(timeout=1)
+
+
+def _claim_next_scan() -> dict | None:
+    from . import app
+
+    with app.STATE_LOCK:
+        running = [scan for scan in app.SCANS if scan.get("status") == "running"]
+        if len(running) >= _env_limit("PULLWISE_MAX_CONCURRENT_SCANS", 1):
+            return None
+
+        per_user_limit = _env_limit("PULLWISE_MAX_CONCURRENT_SCANS_PER_USER", 1)
+        running_by_user: dict[str, int] = {}
+        for scan in running:
+            user_id = str(scan.get("userId") or "")
+            running_by_user[user_id] = running_by_user.get(user_id, 0) + 1
+
+        for scan in sorted(_queued_scans(app.SCANS), key=_scan_queue_sort_key):
+            user_id = str(scan.get("userId") or "")
+            if running_by_user.get(user_id, 0) >= per_user_limit:
+                continue
+            return _mark_running_locked(scan)
+    return None
 
 
 def _run(scan_id: str) -> None:
     started_at = int(time.time())
-
     snapshot = _start_running(scan_id, started_at)
-    if snapshot is None:
-        return
+    if snapshot:
+        _execute_scan(scan_id, snapshot, started_at)
 
+
+def _execute_scan(scan_id: str, snapshot: dict, started_at: int) -> None:
     try:
         cumulative = 0.0
         total_weight = sum(w for _, w in PHASES if w is not None) + _AI_WEIGHT
@@ -129,6 +194,64 @@ def _run(scan_id: str) -> None:
         )
 
 
+def _mark_running_locked(scan: dict) -> dict:
+    from . import app
+
+    started_at = int(time.time())
+    scan.update(
+        {
+            "status": "running",
+            "startedAt": started_at,
+            "progress": 0,
+            "phase": PHASES[0][0],
+        }
+    )
+    app.mark_state_dirty()
+    app.persist_state()
+    return _scan_snapshot(scan, started_at)
+
+
+def _scan_snapshot(scan: dict, started_at: int) -> dict:
+    return {
+        "id": scan["id"],
+        "userId": scan["userId"],
+        "repo": scan.get("repo", ""),
+        "branch": scan.get("branch", "main"),
+        "commit": scan.get("commit", "pending"),
+        "installationId": scan.get("installationId"),
+        "cloneUrl": scan.get("cloneUrl"),
+        "repoPath": scan.get("repoPath"),
+        "startedAt": started_at,
+    }
+
+
+def _queued_scans(scans: list[dict]) -> list[dict]:
+    return [scan for scan in scans if scan.get("status") == "queued"]
+
+
+def _scan_queue_sort_key(scan: dict) -> tuple[int, str]:
+    return (
+        int(scan.get("queuedAt") or scan.get("createdAt") or 0),
+        str(scan.get("id") or ""),
+    )
+
+
+def _env_limit(name: str, default: int) -> int:
+    from . import app
+
+    return max(1, app.env_int(name, default))
+
+
+def _scan_user_id(scan_id: str) -> str | None:
+    from . import app
+
+    with app.STATE_LOCK:
+        scan = _find_scan(app.SCANS, scan_id)
+        if scan is None or scan.get("status") == "cancelled":
+            return None
+        return str(scan.get("userId") or "") or None
+
+
 def _start_running(scan_id: str, started_at: int) -> dict | None:
     from . import app
 
@@ -195,10 +318,15 @@ def _find_scan(scans: list[dict], scan_id: str) -> dict | None:
 
 
 def _prepare_checkout_if_needed(scan_id: str, snapshot: dict) -> str | None:
-    if snapshot.get("repoPath"):
-        return str(snapshot["repoPath"])
     if not review.provider_requires_checkout():
         return None
+    repo_path = snapshot.get("repoPath")
+    if repo_path and checkout.path_in_scan_workspace(
+        str(repo_path),
+        str(snapshot.get("userId") or ""),
+        scan_id,
+    ):
+        return str(repo_path)
     return checkout.prepare_checkout(scan_id, snapshot, lambda: _is_cancelled(scan_id))
 
 

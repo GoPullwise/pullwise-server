@@ -13,9 +13,10 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import billing, db, email_delivery, github_auth, worker
+from . import billing, db, email_delivery, github_auth, logging_config, worker
 
 logger = logging.getLogger(__name__)
+access_logger = logging.getLogger("pullwise_server.access")
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
@@ -440,6 +441,108 @@ def user_scans(session: dict | None) -> list[dict]:
     return [scan for scan in SCANS if scan.get("userId") == session["userId"]]
 
 
+def scan_payload(scan: dict) -> dict:
+    payload = dict(scan)
+    queue = scan_queue_payload(scan)
+    if queue:
+        payload["queue"] = queue
+    else:
+        payload.pop("queue", None)
+    return payload
+
+
+def scan_queue_payload(scan: dict) -> dict | None:
+    status = scan.get("status")
+    if status not in {"queued", "running"}:
+        return None
+
+    user_id = str(scan.get("userId") or "")
+    limits = {
+        "global": max_scan_concurrency(),
+        "perUser": max_scan_concurrency_per_user(),
+    }
+    running = [item for item in SCANS if item.get("status") == "running"]
+    running_for_user = [item for item in running if str(item.get("userId") or "") == user_id]
+    running_counts = {
+        "global": len(running),
+        "user": len(running_for_user),
+    }
+
+    if status == "running":
+        return {
+            "position": 0,
+            "ahead": 0,
+            "userPosition": 0,
+            "userAhead": 0,
+            "reason": "running",
+            "message": "Your scan is running now.",
+            "limits": limits,
+            "running": running_counts,
+        }
+
+    queued = sorted(
+        [item for item in SCANS if item.get("status") == "queued"],
+        key=scan_queue_sort_key,
+    )
+    queue_index = next((index for index, item in enumerate(queued) if item.get("id") == scan.get("id")), -1)
+    position = queue_index + 1 if queue_index >= 0 else 0
+    ahead = max(0, position - 1)
+
+    user_queued = [item for item in queued if str(item.get("userId") or "") == user_id]
+    user_index = next((index for index, item in enumerate(user_queued) if item.get("id") == scan.get("id")), -1)
+    user_position = user_index + 1 if user_index >= 0 else 0
+    user_ahead = max(0, user_position - 1)
+
+    if running_counts["user"] >= limits["perUser"]:
+        reason = "user_limit"
+        message = (
+            f"You already have {plural(running_counts['user'], 'scan')} running; "
+            "this scan is queued and will start when one finishes."
+        )
+    elif running_counts["global"] >= limits["global"]:
+        reason = "global_limit"
+        message = (
+            f"Server is running {running_counts['global']} of {limits['global']} scans; "
+            f"{plural(ahead, 'scan')} ahead."
+        )
+    elif ahead > 0:
+        reason = "waiting_for_turn"
+        message = f"Queued with {plural(ahead, 'scan')} ahead."
+    else:
+        reason = "ready"
+        message = "Queued and waiting for the next available worker."
+
+    return {
+        "position": position,
+        "ahead": ahead,
+        "userPosition": user_position,
+        "userAhead": user_ahead,
+        "reason": reason,
+        "message": message,
+        "limits": limits,
+        "running": running_counts,
+    }
+
+
+def scan_queue_sort_key(scan: dict) -> tuple[int, str]:
+    return (
+        int(scan.get("queuedAt") or scan.get("createdAt") or 0),
+        str(scan.get("id") or ""),
+    )
+
+
+def max_scan_concurrency() -> int:
+    return max(1, env_int("PULLWISE_MAX_CONCURRENT_SCANS", 1))
+
+
+def max_scan_concurrency_per_user() -> int:
+    return max(1, env_int("PULLWISE_MAX_CONCURRENT_SCANS_PER_USER", 1))
+
+
+def plural(count: int, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
 def user_issues(session: dict | None) -> list[dict]:
     if not session:
         return []
@@ -464,9 +567,155 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     return repository_item(github_access, full_name) is not None
 
 
+def repository_item_from_full_name(full_name: str) -> dict:
+    name = full_name.split("/", 1)[1] if "/" in full_name else full_name
+    web_url = github_auth.github_web_url().rstrip("/")
+    return {
+        "id": full_name,
+        "name": name,
+        "fullName": full_name,
+        "desc": "",
+        "description": "",
+        "lang": "-",
+        "private": False,
+        "stars": "-",
+        "branches": "-",
+        "defaultBranch": "main",
+        "updated": "",
+        "htmlUrl": f"{web_url}/{full_name}",
+        "cloneUrl": f"{web_url}/{full_name}.git",
+        "permissions": {},
+    }
+
+
+def repository_items_for_payload(github_access: dict | None) -> list[dict]:
+    if not github_access:
+        return []
+    repository_items = github_access.get("repositoryItems") or []
+    if repository_items:
+        return repository_items
+    if github_access.get("mode") != "github-app" and not github_access.get("installationId"):
+        return []
+    return [
+        repository_item_from_full_name(str(full_name))
+        for full_name in github_access.get("repositories") or []
+        if str(full_name)
+    ]
+
+
+def github_repository_access_connected(github_access: dict | None) -> bool:
+    if not github_access or github_access.get("repositoriesNeedSync"):
+        return False
+    return bool(repository_items_for_payload(github_access))
+
+
+def unavailable_repositories_payload(github_access: dict) -> dict:
+    payload = {
+        "items": [],
+        "repositories": [],
+        "needsAuthorization": True,
+        "installationId": github_access.get("installationId"),
+        "repositorySelection": github_access.get("repositorySelection"),
+        "installationAccount": github_access.get("installationAccount"),
+        "repositoriesNeedSync": github_access.get("repositoriesNeedSync", False),
+    }
+    if github_access.get("repositoriesNeedSync") and not github_auth.app_api_configured():
+        payload.update({
+            "authorizationIssue": "github_app_api_unconfigured",
+            "message": (
+                "GitHub App API is not configured, so Pullwise cannot sync authorized repositories. "
+                "Set PULLWISE_GITHUB_APP_ID and a valid GitHub App private key path or base64 private key, then restart the server."
+            ),
+        })
+    return payload
+
+
 def installation_has_read_only_repository_contents(installation: dict) -> bool:
     permissions = installation.get("permissions") or {}
     return permissions.get("contents") == "read"
+
+
+def github_repository_access_for_installation(
+    installation_id: str,
+    requested_scope: str = "selected",
+    user_access_token: str | None = None,
+    installation_hint: dict | None = None,
+) -> dict:
+    installation = dict(installation_hint or {})
+    repository_items = []
+    app_api_configured = github_auth.app_api_configured()
+    if app_api_configured:
+        installation = github_auth.fetch_installation(installation_id)
+        if not installation_has_read_only_repository_contents(installation):
+            raise ValueError(
+                "GitHub App installation must grant Contents: read-only access so Pullwise can scan private repositories without write permission."
+            )
+        repository_items = github_auth.list_installation_repositories(installation_id)
+    elif user_access_token:
+        if installation.get("permissions") and not installation_has_read_only_repository_contents(installation):
+            raise ValueError(
+                "GitHub App installation must grant Contents: read-only access so Pullwise can scan private repositories without write permission."
+            )
+        try:
+            repository_items = github_auth.list_user_installation_repositories(user_access_token, installation_id)
+        except Exception:
+            repository_items = []
+
+    repository_selection = installation.get("repository_selection") or requested_scope or "selected"
+    account = installation.get("account") or {}
+    return {
+        "mode": "github-app",
+        "scope": "all" if repository_selection == "all" else "selected",
+        "repositorySelection": repository_selection,
+        "authorizedAt": now(),
+        "installationId": installation_id,
+        "installationAccount": account.get("login"),
+        "installationTargetType": installation.get("target_type"),
+        "installationAppSlug": installation.get("app_slug"),
+        "installationHtmlUrl": installation.get("html_url"),
+        "installationPermissions": installation.get("permissions") or {},
+        "repositories": [repo["fullName"] for repo in repository_items],
+        "repositoryItems": repository_items,
+        "repositoriesNeedSync": not app_api_configured and not repository_items,
+    }
+
+
+def bind_github_repository_access(
+    user: dict,
+    installation_id: str,
+    requested_scope: str = "selected",
+    installation_hint: dict | None = None,
+) -> dict:
+    github_access = github_repository_access_for_installation(
+        installation_id,
+        requested_scope,
+        user.get("githubAccessToken"),
+        installation_hint,
+    )
+    user["githubRepositoryAccess"] = github_access
+    mark_state_dirty()
+    return github_access
+
+
+def try_bind_existing_github_repository_access(user: dict | None) -> dict | None:
+    if not user or user.get("githubRepositoryAccess"):
+        return user.get("githubRepositoryAccess") if user else None
+    if not github_auth.app_install_configured():
+        return None
+    if not has_real_github_identity(user):
+        return None
+
+    installations = github_auth.list_current_app_installations_for_user(user.get("githubAccessToken"))
+    for installation in installations:
+        installation_id = str(installation.get("id") or "")
+        if installation_id:
+            return bind_github_repository_access(
+                user,
+                installation_id,
+                installation.get("repository_selection") or "selected",
+                installation,
+            )
+    return None
 
 
 def has_real_github_identity(user: dict | None) -> bool:
@@ -488,7 +737,7 @@ def session_payload(session: dict | None) -> dict:
 
     user = USERS.get(session["userId"])
     repo_access = user.get("githubRepositoryAccess") if user else None
-    repositories_connected = bool(repo_access)
+    repositories_connected = github_repository_access_connected(repo_access)
     return {
         "authenticated": True,
         "user": user_public(user),
@@ -651,7 +900,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
     def log_message(self, fmt: str, *args) -> None:
-        print(f"{self.address_string()} - {fmt % args}")
+        access_logger.info("%s - %s", self.address_string(), fmt % args)
 
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -745,13 +994,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scans = user_scans(session)
+            scans = [scan_payload(scan) for scan in user_scans(session)]
             return self.json({"items": scans, "scans": scans})
         if len(segments) == 2 and segments[0] == "scans":
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            return self.json(self.find_or_404(user_scans(session), segments[1], "Scan"))
+            return self.json(scan_payload(self.find_or_404(user_scans(session), segments[1], "Scan")))
         if path == "/issues":
             session = self.current_session()
             if not session:
@@ -823,6 +1072,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "status": "queued",
                         "userId": session["userId"],
                         "createdAt": now(),
+                        "queuedAt": now(),
                         "progress": 0,
                         "phase": None,
                         "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
@@ -842,7 +1092,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if scan is None:
                 return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to create scan.")
             worker.start_scan(scan["id"])
-            return self.json(scan, HTTPStatus.CREATED)
+            return self.json(scan_payload(scan), HTTPStatus.CREATED)
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
             session = self.current_session()
             if not session:
@@ -850,8 +1100,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 scan = self.find_or_404(user_scans(session), segments[1], "Scan")
                 scan["status"] = "cancelled"
+                scan["completedAt"] = now()
                 mark_state_dirty()
-            return self.json(scan)
+            worker.notify_queue_changed()
+            return self.json(scan_payload(scan))
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "apply":
             return self.error(HTTPStatus.NOT_IMPLEMENTED, "Applying fixes is not implemented on this backend.")
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "pull-requests":
@@ -1012,6 +1264,22 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     ),
                 )
 
+        existing_access = try_bind_existing_github_repository_access(user)
+        if github_repository_access_connected(existing_access):
+            return self.json({
+                "ok": True,
+                "connected": True,
+                "mode": "github-app-existing",
+                "installationId": existing_access.get("installationId"),
+            })
+        if existing_access and existing_access.get("installationHtmlUrl"):
+            return self.json({
+                "ok": True,
+                "url": existing_access.get("installationHtmlUrl"),
+                "mode": "github-app-existing-pending",
+                "installationId": existing_access.get("installationId"),
+            })
+
         state = remember_github_state("install", redirect_to, userId=session["userId"], requestedScope=scope)
         return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
 
@@ -1088,33 +1356,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if github_auth.oauth_configured() and user_can_access is not True:
             raise ValueError("Unable to verify access to this GitHub App installation. Try signing in with GitHub again.")
 
-        installation = {}
-        repository_items = []
-        if github_auth.app_api_configured():
-            installation = github_auth.fetch_installation(installation_id)
-            if not installation_has_read_only_repository_contents(installation):
-                raise ValueError(
-                    "GitHub App installation must grant Contents: read-only access so Pullwise can scan private repositories without write permission."
-                )
-            repository_items = github_auth.list_installation_repositories(installation_id)
-
-        repository_selection = installation.get("repository_selection") or params.get("scope") or record.get("requestedScope") or "selected"
-        account = installation.get("account") or {}
-        user["githubRepositoryAccess"] = {
-            "mode": "github-app",
-            "scope": "all" if repository_selection == "all" else "selected",
-            "repositorySelection": repository_selection,
-            "authorizedAt": now(),
-            "installationId": installation_id,
-            "installationAccount": account.get("login"),
-            "installationTargetType": installation.get("target_type"),
-            "installationAppSlug": installation.get("app_slug"),
-            "installationPermissions": installation.get("permissions") or {},
-            "repositories": [repo["fullName"] for repo in repository_items],
-            "repositoryItems": repository_items,
-            "repositoriesNeedSync": not github_auth.app_api_configured(),
-        }
-        mark_state_dirty()
+        bind_github_repository_access(
+            user,
+            installation_id,
+            params.get("scope") or record.get("requestedScope") or "selected",
+        )
         session = create_session(user)
         return self.redirect(str(record["redirectTo"]), cookie_header(session["id"]))
 
@@ -1140,12 +1386,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         github_access = user.get("githubRepositoryAccess") if user else None
         github = {
             "provider": "github",
-            "connected": bool(github_access),
+            "connected": github_repository_access_connected(github_access),
             "mode": github_access.get("mode") if github_access else None,
             "scope": github_access.get("scope") if github_access else None,
             "repositorySelection": github_access.get("repositorySelection") if github_access else None,
             "installationId": github_access.get("installationId") if github_access else None,
             "installationAccount": github_access.get("installationAccount") if github_access else None,
+            "installationHtmlUrl": github_access.get("installationHtmlUrl") if github_access else None,
             "repositories": github_access.get("repositories") if github_access else [],
             "repositoriesNeedSync": github_access.get("repositoriesNeedSync") if github_access else False,
         }
@@ -1159,18 +1406,37 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
         user = USERS.get(session["userId"])
         github_access = user.get("githubRepositoryAccess") if user else None
+        bound_existing_access = False
+        if not github_access:
+            github_access = try_bind_existing_github_repository_access(user)
+            bound_existing_access = bool(github_access)
         if not github_access:
             return {"items": [], "repositories": [], "needsAuthorization": True}
 
-        if refresh and github_access.get("mode") == "github-app" and github_auth.app_api_configured():
-            repository_items = github_auth.list_installation_repositories(str(github_access["installationId"]))
-            github_access["repositoryItems"] = repository_items
-            github_access["repositories"] = [repo["fullName"] for repo in repository_items]
-            github_access["repositoriesNeedSync"] = False
-            github_access["syncedAt"] = now()
-            mark_state_dirty()
+        if refresh and not bound_existing_access and github_access.get("mode") == "github-app":
+            repository_items = None
+            if github_auth.app_api_configured():
+                repository_items = github_auth.list_installation_repositories(str(github_access["installationId"]))
+            elif user and user.get("githubAccessToken"):
+                try:
+                    repository_items = github_auth.list_user_installation_repositories(
+                        user.get("githubAccessToken"),
+                        str(github_access["installationId"]),
+                    )
+                except Exception:
+                    repository_items = []
 
-        repository_items = github_access.get("repositoryItems") or []
+            if repository_items is not None:
+                github_access["repositoryItems"] = repository_items
+                github_access["repositories"] = [repo["fullName"] for repo in repository_items]
+                github_access["repositoriesNeedSync"] = not repository_items
+                github_access["syncedAt"] = now()
+                mark_state_dirty()
+
+        repository_items = repository_items_for_payload(github_access)
+        if not github_repository_access_connected(github_access):
+            return unavailable_repositories_payload(github_access)
+
         return {
             "items": repository_items,
             "repositories": repository_items,
@@ -1185,7 +1451,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         session = self.current_session()
         if not session:
             return False
-        return bool(USERS[session["userId"]].get("githubRepositoryAccess"))
+        return github_repository_access_connected(USERS[session["userId"]].get("githubRepositoryAccess"))
 
     def current_or_demo_session(self) -> dict:
         session = self.current_session()
@@ -1320,18 +1586,21 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     load_env_file()
+    logging_config.configure_logging(project_root=project_root())
     parser = argparse.ArgumentParser(description="Run the Pullwise local API server.")
     parser.add_argument("--host", default=env("PULLWISE_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(env("PULLWISE_PORT", "3000")))
     args = parser.parse_args()
 
+    ensure_state_loaded()
+    worker.ensure_workers()
     httpd = ThreadingHTTPServer((args.host, args.port), PullwiseHandler)
-    print(f"Pullwise API listening on http://{args.host}:{args.port}")
-    print("Press Ctrl+C to stop.")
+    logger.info("Pullwise API listening on http://%s:%s", args.host, args.port)
+    logger.info("Press Ctrl+C to stop.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nShutting down.")
+        logger.info("Shutting down.")
     finally:
         httpd.server_close()
 
