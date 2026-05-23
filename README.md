@@ -42,6 +42,11 @@ The server persists sessions, GitHub authorization state, selected
 repositories, scans, issues, and settings in SQLite by default at
 `.pullwise/pullwise.sqlite3`. Override with `PULLWISE_DB_PATH`.
 
+The server writes application and request logs to daily dated files by default
+at `.pullwise/logs/pullwise-YYYY-MM-DD.log`. The day boundary is midnight in
+the server's local time. Override with `PULLWISE_LOG_DIR`,
+`PULLWISE_LOG_LEVEL`, and `PULLWISE_LOG_ROTATION_TIME=HH:MM`.
+
 Current storage is intentionally lightweight: the app stores logical state as
 JSON payloads in SQLite, and scan/issue listing endpoints read the in-process
 state. This is suitable for small deployments and trials. For high-volume or
@@ -85,6 +90,10 @@ PULLWISE_APP_URL=https://app.your-domain.com
 PULLWISE_ALLOWED_ORIGINS=https://app.your-domain.com
 PULLWISE_API_BASE_URL=https://app.your-domain.com/api
 PULLWISE_DB_PATH=/data/pullwise.sqlite3
+PULLWISE_LOG_DIR=/data/logs
+PULLWISE_LOG_ROTATION_TIME=00:00
+PULLWISE_MAX_CONCURRENT_SCANS=1
+PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=1
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
 PULLWISE_COOKIE_SECURE=true
 ```
@@ -229,10 +238,31 @@ Supported values:
 `claude_code` and `codex` clone the selected repository during the `clone`
 phase. The clone uses `github_auth.create_installation_access_token`, stores the
 checkout path as `repoPath`, and passes that path to `review.run_review`.
+Checkouts are namespaced by user and scan under
+`PULLWISE_CHECKOUT_ROOT/<user-id>/<scan-id>/...`, so one user's working tree is
+not reused for another user's scan.
 
 The Codex provider uses official non-interactive `codex exec` mode with a
 read-only sandbox, `--output-schema`, and `--output-last-message` so the worker
 can parse structured findings.
+
+On a single machine, keep scan concurrency conservative because Git plus Codex
+or Claude CLI can consume significant CPU and RAM. By default the worker runs
+only one real scan at a time globally and one per user:
+
+```env
+PULLWISE_MAX_CONCURRENT_SCANS=1
+PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=1
+```
+
+These values limit running scans, not scan creation. If 500 users submit work
+while the global limit is 3, three scans run and the rest remain `queued`.
+Queued scan payloads include `queue.position`, `queue.ahead`, `queue.reason`,
+`queue.message`, and the active limits so the frontend can explain why a scan is
+waiting and when it moves to running.
+
+Raise those values only after sizing CPU, RAM, checkout storage, and provider
+rate limits.
 
 ## Billing Setup
 

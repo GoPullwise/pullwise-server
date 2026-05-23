@@ -14,3 +14,6 @@ dist/
 .pullwise/
 .omx/
 Python-3.10.12.tgz
+.tmp-copy.sqlite3
+.tmp-sqlite-test.db
+.tmp-state-read.sqlite3
