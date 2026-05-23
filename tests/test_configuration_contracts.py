@@ -25,8 +25,19 @@ class ConfigurationContractsTest(unittest.TestCase):
         values = env_example_values()
 
         self.assertNotEqual(values.get("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS"), "true")
-        self.assertNotEqual(values.get("PULLWISE_ENABLE_DEV_MAGIC_LINKS"), "true")
         self.assertNotEqual(values.get("PULLWISE_REVIEW_PROVIDER"), "mock")
+
+    def test_env_example_does_not_include_magic_link_configuration(self) -> None:
+        values = env_example_values()
+
+        self.assertNotIn("PULLWISE_ENABLE_DEV_MAGIC_LINKS", values)
+        self.assertNotIn("PULLWISE_EMAIL_PROVIDER", values)
+        self.assertNotIn("PULLWISE_EMAIL_FROM", values)
+        self.assertNotIn("PULLWISE_SMTP_HOST", values)
+        self.assertNotIn("PULLWISE_SMTP_PORT", values)
+        self.assertNotIn("PULLWISE_SMTP_USERNAME", values)
+        self.assertNotIn("PULLWISE_SMTP_PASSWORD", values)
+        self.assertNotIn("PULLWISE_SMTP_STARTTLS", values)
 
     def test_env_example_does_not_require_cli_api_keys(self) -> None:
         values = env_example_values()

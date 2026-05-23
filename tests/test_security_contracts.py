@@ -139,6 +139,21 @@ class SecurityContractsTest(unittest.TestCase):
 
                 self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_magic_link_routes_are_not_available(self) -> None:
+        cases = [
+            ("GET", "/dev/magic-links"),
+            ("GET", "/auth/email/callback?token=tok_1"),
+            ("POST", "/auth/email/magic-link"),
+        ]
+
+        for method, path in cases:
+            with self.subTest(method=method, path=path):
+                handler = RouteHarness(path, {"email": "dev@example.com"})
+
+                app.PullwiseHandler.route(handler, method)
+
+                self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+
     def test_scan_creation_rejects_disabled_review_provider(self) -> None:
         app.SESSIONS = {
             "ses_1": {
@@ -1401,7 +1416,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
 
-    def test_api_base_url_rejects_untrusted_host_header_for_magic_links(self) -> None:
+    def test_api_base_url_rejects_untrusted_host_header(self) -> None:
         handler = RouteHarness("/", headers={"Host": "evil.example"})
 
         with patch.dict(
@@ -1423,7 +1438,7 @@ class SecurityContractsTest(unittest.TestCase):
 
     def test_request_body_size_is_limited(self) -> None:
         handler = RouteHarness(
-            "/auth/email/magic-link",
+            "/repositories/sync",
             headers={"Content-Length": "8"},
             raw_body=b"12345678",
         )

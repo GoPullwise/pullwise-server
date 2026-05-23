@@ -2,10 +2,10 @@
 
 A lightweight Python API for `pullwise-web`.
 
-By default the server does not return local mock login callbacks, local magic
-links, or synthetic review findings. Configure real GitHub OAuth, SMTP email,
-GitHub App, and review provider credentials for real scans. Explicit local mock
-switches are available only for development.
+By default the server does not return local mock login callbacks or synthetic
+review findings. Configure real GitHub OAuth, GitHub App, and review provider
+credentials for real scans. Explicit local mock switches are available only for
+development.
 
 ## Run
 
@@ -63,7 +63,7 @@ host needs:
 
 - Python 3.10.12
 - `git` on `PATH`
-- outbound HTTPS access to GitHub, Stripe, Creem, SMTP, and the review provider
+- outbound HTTPS access to GitHub, Stripe, Creem, and the review provider
 - persistent storage for `PULLWISE_DB_PATH` and `PULLWISE_CHECKOUT_ROOT`
 - Codex CLI or Claude Code installed when `PULLWISE_REVIEW_PROVIDER` uses them
 
@@ -99,9 +99,9 @@ PULLWISE_COOKIE_SECURE=true
 ```
 
 Use `PULLWISE_API_BASE_URL=https://app.your-domain.com/api` when the web app is
-deployed to Cloudflare Pages with the included `/api` proxy. OAuth callbacks and
-magic links then return through the Pages domain, so browser session cookies are
-set on the same origin used by the frontend.
+deployed to Cloudflare Pages with the included `/api` proxy. OAuth callbacks
+then return through the Pages domain, so browser session cookies are set on the
+same origin used by the frontend.
 
 Keep `PULLWISE_ALLOWED_ORIGINS` to exact trusted origins. Wildcard `*` is
 ignored because the API uses credentialed browser requests.
@@ -188,24 +188,6 @@ If you set `PULLWISE_GITHUB_APP_INSTALL_URL`, you must still set
 
 For deployment or secret stores, use `PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64`
 instead of `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`.
-
-## Email Magic Link Setup
-
-Set these variables to enable real email sign-in:
-
-```env
-PULLWISE_EMAIL_PROVIDER=smtp
-PULLWISE_EMAIL_FROM=Pullwise <login@your-domain.com>
-PULLWISE_SMTP_HOST=smtp.your-provider.com
-PULLWISE_SMTP_PORT=587
-PULLWISE_SMTP_USERNAME=your_username
-PULLWISE_SMTP_PASSWORD=your_password
-PULLWISE_SMTP_STARTTLS=true
-```
-
-`POST /auth/email/magic-link` sends a short-lived login link and does not return
-the token in the API response. The only exception is explicit local development
-mode with `PULLWISE_ENABLE_DEV_MAGIC_LINKS=true`.
 
 ## Review Worker Setup
 
@@ -340,7 +322,6 @@ These switches are off by default:
 
 ```env
 PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS=true
-PULLWISE_ENABLE_DEV_MAGIC_LINKS=true
 PULLWISE_REVIEW_PROVIDER=mock
 ```
 
@@ -378,8 +359,6 @@ Implemented endpoints:
 
 Explicitly not implemented:
 
-- `POST /auth/email/magic-link` unless SMTP is configured or `PULLWISE_ENABLE_DEV_MAGIC_LINKS=true`
-- `GET /dev/magic-links` unless `PULLWISE_ENABLE_DEV_MAGIC_LINKS=true`
 - `POST /issues/{id}/fixes/apply`
 - `POST /issues/{id}/pull-requests`
 - Slack or Linear integration writes

@@ -13,7 +13,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import billing, db, email_delivery, github_auth, logging_config, review, worker
+from . import billing, db, github_auth, logging_config, review, worker
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -39,12 +39,10 @@ def load_env_file(path: str | None = None) -> None:
 
 SESSION_COOKIE = "pw_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7
-MAGIC_LINK_MAX_AGE = 60 * 15
 GITHUB_STATE_MAX_AGE = 60 * 10
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
-MAGIC_LINKS: dict[str, dict] = {}
 GITHUB_STATES: dict[str, dict] = {}
 SETTINGS: dict[str, dict] = {}
 BILLING_EVENTS: dict[str, dict] = {}
@@ -125,12 +123,8 @@ def local_github_mocks_enabled() -> bool:
     return env_flag("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS")
 
 
-def dev_magic_links_enabled() -> bool:
-    return env_flag("PULLWISE_ENABLE_DEV_MAGIC_LINKS")
-
-
 def ensure_state_loaded() -> None:
-    global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, MAGIC_LINKS, GITHUB_STATES, SETTINGS, BILLING_EVENTS, BILLING_PENDING_UPDATES, SCANS, ISSUES
+    global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, GITHUB_STATES, SETTINGS, BILLING_EVENTS, BILLING_PENDING_UPDATES, SCANS, ISSUES
     with STATE_LOCK:
         if STATE_LOADED:
             return
@@ -138,7 +132,6 @@ def ensure_state_loaded() -> None:
         state = db.load_state()
         USERS = dict(state.get("users") or {})
         SESSIONS = dict(state.get("sessions") or {})
-        MAGIC_LINKS = dict(state.get("magicLinks") or {})
         GITHUB_STATES = dict(state.get("githubStates") or {})
         SETTINGS = dict(state.get("settings") or {})
         BILLING_EVENTS = dict(state.get("billingEvents") or {})
@@ -164,7 +157,6 @@ def persist_state(*, force: bool = False) -> None:
             {
                 "users": USERS,
                 "sessions": SESSIONS,
-                "magicLinks": MAGIC_LINKS,
                 "githubStates": GITHUB_STATES,
                 "settings": SETTINGS,
                 "billingEvents": BILLING_EVENTS,
@@ -323,25 +315,6 @@ def user_public(user: dict) -> dict:
         "createdAt": user["createdAt"],
         "providers": user.get("providers", []),
     }
-
-
-def get_or_create_email_user(email: str) -> dict:
-    user_id = "usr_email_" + re.sub(r"[^a-z0-9]+", "_", email.lower()).strip("_")
-    if user_id not in USERS:
-        USERS[user_id] = {
-            "id": user_id,
-            "name": email.split("@")[0].replace(".", " ").title(),
-            "email": email,
-            "avatarUrl": None,
-            "createdAt": now(),
-            "providers": ["email"],
-            "githubRepositoryAccess": None,
-        }
-        mark_state_dirty()
-    elif "email" not in USERS[user_id]["providers"]:
-        USERS[user_id]["providers"].append("email")
-        mark_state_dirty()
-    return USERS[user_id]
 
 
 def get_or_create_github_user() -> dict:
@@ -962,26 +935,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "mode": env("PULLWISE_MODE", "local"),
                 "database": {"type": "sqlite", "path": db.database_path()},
             })
-        if path == "/dev/magic-links":
-            if not dev_magic_links_enabled():
-                return self.error(HTTPStatus.NOT_IMPLEMENTED, "Local magic links are disabled. Set PULLWISE_ENABLE_DEV_MAGIC_LINKS=true for explicit local development.")
-            links = []
-            for token, record in MAGIC_LINKS.items():
-                if record["expiresAt"] >= now():
-                    links.append({
-                        "email": record["email"],
-                        "expiresAt": record["expiresAt"],
-                        "url": f"{api_base_url(self)}/auth/email/callback?{urlencode({'token': token})}",
-                    })
-            return self.json({"items": links, "magicLinks": links})
         if path == "/auth/session":
             return self.json(session_payload(self.current_session()))
         if path == "/auth/github/authorize":
             return self.handle_github_authorize(params)
         if path == "/auth/github/callback":
             return self.handle_github_callback(params)
-        if path == "/auth/email/callback":
-            return self.handle_magic_callback(params)
         if path == "/integrations":
             return self.json(self.integrations_payload())
         if path == "/integrations/github/authorize":
@@ -1035,8 +994,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/webhooks/creem":
             return self.handle_creem_webhook()
         body = self.read_json()
-        if path == "/auth/email/magic-link":
-            return self.handle_magic_link(body)
         if path == "/auth/sign-out":
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
@@ -1292,40 +1249,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         state = remember_github_state("install", redirect_to, userId=session["userId"], requestedScope=scope)
         return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
 
-    def handle_magic_link(self, body: dict) -> None:
-        dev_mode = dev_magic_links_enabled()
-        if not dev_mode and not email_delivery.email_delivery_configured():
-            return self.error(HTTPStatus.NOT_IMPLEMENTED, "Email magic links require SMTP configuration. Set PULLWISE_EMAIL_PROVIDER=smtp, PULLWISE_SMTP_HOST, and PULLWISE_EMAIL_FROM.")
-        email = str(body.get("email") or "").strip().lower()
-        if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
-            return self.error(HTTPStatus.BAD_REQUEST, "A valid email is required.")
-        redirect_to = safe_redirect_to(body.get("redirectTo"), "dashboard")
-        token = secrets.token_urlsafe(24)
-        MAGIC_LINKS[token] = {"email": email, "redirectTo": redirect_to, "expiresAt": now() + MAGIC_LINK_MAX_AGE}
-        mark_state_dirty()
-        magic_link = f"{api_base_url(self)}/auth/email/callback?{urlencode({'token': token})}"
-        if dev_mode:
-            return self.json({"ok": True, "email": email, "devMagicLink": magic_link, "magicLink": magic_link, "expiresInSeconds": MAGIC_LINK_MAX_AGE})
-
-        try:
-            email_delivery.send_magic_link_email(email, magic_link)
-        except Exception:
-            MAGIC_LINKS.pop(token, None)
-            mark_state_dirty()
-            raise
-        return self.json({"ok": True, "email": email, "sent": True, "expiresInSeconds": MAGIC_LINK_MAX_AGE})
-
-    def handle_magic_callback(self, params: dict) -> None:
-        token = params.get("token") or ""
-        record = MAGIC_LINKS.pop(token, None)
-        if record:
-            mark_state_dirty()
-        if not record or record["expiresAt"] < now():
-            return self.error(HTTPStatus.BAD_REQUEST, "Magic link is invalid or expired.")
-        user = get_or_create_email_user(record["email"])
-        session = create_session(user)
-        return self.redirect(record["redirectTo"], cookie_header(session["id"]))
-
     def handle_github_repository_callback(self, params: dict) -> None:
         if not github_auth.app_install_configured():
             if not local_github_mocks_enabled():
@@ -1465,7 +1388,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         session = self.current_session()
         if session:
             return session
-        user = get_or_create_email_user(env("PULLWISE_DEV_EMAIL", "taylor@acme.io"))
+        user = get_or_create_github_user()
         return create_session(user)
 
     def current_session(self) -> dict | None:
