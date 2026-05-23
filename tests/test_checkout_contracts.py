@@ -42,6 +42,7 @@ class CheckoutContractsTest(unittest.TestCase):
     def test_prepare_checkout_uses_installation_token_without_putting_it_in_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             scan = {
+                "userId": "usr_1",
                 "repo": "owner/repo",
                 "branch": "main",
                 "commit": "pending",
@@ -70,6 +71,7 @@ class CheckoutContractsTest(unittest.TestCase):
             command = run_git.call_args.args[0]
             extra_env = run_git.call_args.kwargs["extra_env"]
             self.assertTrue(path.startswith(tmpdir))
+            self.assertIn(os.path.join("usr_1", "sc_123"), path)
             self.assertEqual(command[:2], ["git", "clone"])
             self.assertNotIn("push", command)
             self.assertNotIn("ghs_secret_token", " ".join(command))

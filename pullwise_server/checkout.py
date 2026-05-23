@@ -28,6 +28,9 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
     if not github_auth.app_api_configured():
         raise RuntimeError("Repository checkout requires GitHub App API credentials.")
 
+    user_id = str(scan.get("userId") or "")
+    if not user_id:
+        raise RuntimeError("Scan is missing a user id.")
     repo = validate_repo_full_name(str(scan.get("repo") or ""))
     installation_id = str(scan.get("installationId") or "")
     if not installation_id:
@@ -38,7 +41,7 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
     if not token:
         raise RuntimeError("GitHub App did not return an installation access token.")
 
-    checkout_path = checkout_path_for(scan_id, repo)
+    checkout_path = checkout_path_for(user_id, scan_id, repo)
     remove_existing_checkout(checkout_path)
 
     git_env = git_auth_env(token)
@@ -154,11 +157,31 @@ def git_auth_env(token: str) -> dict[str, str]:
     }
 
 
-def checkout_path_for(scan_id: str, repo: str) -> str:
+def checkout_path_for(user_id: str, scan_id: str, repo: str) -> str:
     root = checkout_root()
     os.makedirs(root, exist_ok=True)
+    workspace = workspace_path_for(user_id, scan_id)
+    os.makedirs(workspace, exist_ok=True)
     repo_slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", repo).strip("_")
-    return os.path.join(root, f"{scan_id}-{repo_slug}")
+    return os.path.join(workspace, repo_slug)
+
+
+def workspace_path_for(user_id: str, scan_id: str) -> str:
+    return os.path.join(
+        checkout_root(),
+        safe_path_segment(user_id, "user"),
+        safe_path_segment(scan_id, "scan"),
+    )
+
+
+def path_in_scan_workspace(path: str, user_id: str, scan_id: str) -> bool:
+    workspace_abs = os.path.abspath(workspace_path_for(user_id, scan_id))
+    path_abs = os.path.abspath(path)
+    try:
+        common = os.path.commonpath([workspace_abs, path_abs])
+    except ValueError:
+        return False
+    return os.path.normcase(common) == os.path.normcase(workspace_abs)
 
 
 def remove_existing_checkout(path: str) -> None:
@@ -172,6 +195,11 @@ def remove_existing_checkout(path: str) -> None:
 
 def checkout_root() -> str:
     return os.environ.get("PULLWISE_CHECKOUT_ROOT") or os.path.join(tempfile.gettempdir(), "pullwise-scans")
+
+
+def safe_path_segment(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._-")
+    return slug or fallback
 
 
 def clone_depth() -> str:
