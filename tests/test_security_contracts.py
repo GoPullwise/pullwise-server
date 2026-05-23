@@ -270,6 +270,86 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertFalse(handler.payload["github"]["repositoriesConnected"])
         self.assertEqual(handler.payload["nextStep"], "connect_github_repositories")
 
+    def test_auth_session_does_not_report_stale_repository_access_connected_while_authorization_is_pending(self) -> None:
+        app.USERS["usr_1"]["githubLogin"] = "DFerryman"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "installationId": "111",
+            "installationAccount": "SanChai20",
+            "repositories": ["SanChai20/private-repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_sanchai20_private",
+                    "name": "private-repo",
+                    "fullName": "SanChai20/private-repo",
+                }
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.USERS["usr_1"]["githubRepositoryAccessPending"] = {
+            "state": "pending_state",
+            "startedAt": app.now(),
+            "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+            "previousInstallationId": "111",
+            "manage": True,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/auth/session", cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertFalse(handler.payload["github"]["repositoriesConnected"])
+        self.assertEqual(handler.payload["nextStep"], "connect_github_repositories")
+
+    def test_auth_session_treats_legacy_install_state_as_pending_repository_authorization(self) -> None:
+        app.USERS["usr_1"]["githubLogin"] = "DFerryman"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "installationId": "111",
+            "installationAccount": "SanChai20",
+            "repositories": ["SanChai20/private-repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_sanchai20_private",
+                    "name": "private-repo",
+                    "fullName": "SanChai20/private-repo",
+                }
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.GITHUB_STATES = {
+            "legacy_state": {
+                "kind": "install",
+                "redirectTo": "https://app.pullwise.dev/?screen=repos",
+                "userId": "usr_1",
+                "requestedScope": "all",
+                "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+            }
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/auth/session", cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertFalse(handler.payload["github"]["repositoriesConnected"])
+        self.assertTrue(handler.payload["github"]["repositoriesAuthorizationPending"])
+
     def test_repository_sync_requires_sign_in(self) -> None:
         handler = RouteHarness("/repositories/sync")
 
@@ -1059,6 +1139,189 @@ class SecurityContractsTest(unittest.TestCase):
         list_user_repositories.assert_called_once_with("gho_user", "999")
         fetch_installation.assert_not_called()
         list_repositories.assert_not_called()
+
+    def test_repositories_sync_rebinds_pending_manage_to_current_user_installation(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubLogin"] = "DFerryman"
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "installationId": "111",
+            "installationAccount": "SanChai20",
+            "installationTargetType": "User",
+            "repositories": ["SanChai20/private-repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_sanchai20_private",
+                    "name": "private-repo",
+                    "fullName": "SanChai20/private-repo",
+                    "private": True,
+                    "cloneUrl": "https://github.com/SanChai20/private-repo.git",
+                }
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.USERS["usr_1"]["githubRepositoryAccessPending"] = {
+            "state": "pending_state",
+            "startedAt": app.now(),
+            "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+            "previousInstallationId": "111",
+            "manage": True,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/repositories/sync", cookie="pw_session=ses_1")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_api_configured", return_value=False),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 111,
+                        "repository_selection": "all",
+                        "target_type": "User",
+                        "account": {"login": "SanChai20"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "read"},
+                    },
+                    {
+                        "id": 222,
+                        "repository_selection": "all",
+                        "target_type": "User",
+                        "account": {"login": "DFerryman"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "read"},
+                    },
+                ],
+            ),
+            patch(
+                "pullwise_server.github_auth.list_user_installation_repositories",
+                return_value=[
+                    {
+                        "id": "repo_dferryman_private",
+                        "name": "private-repo",
+                        "fullName": "DFerryman/private-repo",
+                        "private": True,
+                        "cloneUrl": "https://github.com/DFerryman/private-repo.git",
+                    }
+                ],
+            ) as list_user_repositories,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["needsAuthorization"])
+        self.assertEqual(handler.payload["installationAccount"], "DFerryman")
+        self.assertEqual(handler.payload["items"][0]["fullName"], "DFerryman/private-repo")
+        self.assertEqual(github_access["installationId"], "222")
+        self.assertEqual(github_access["installationAccount"], "DFerryman")
+        self.assertNotIn("githubRepositoryAccessPending", app.USERS["usr_1"])
+        list_user_repositories.assert_called_once_with("gho_user", "222")
+
+    def test_repositories_sync_repairs_stale_personal_installation_for_current_github_login(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubLogin"] = "DFerryman"
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "installationId": "111",
+            "installationAccount": "SanChai20",
+            "installationTargetType": "User",
+            "repositories": ["SanChai20/private-repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_sanchai20_private",
+                    "name": "private-repo",
+                    "fullName": "SanChai20/private-repo",
+                    "private": True,
+                    "cloneUrl": "https://github.com/SanChai20/private-repo.git",
+                }
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/repositories/sync", cookie="pw_session=ses_1")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_api_configured", return_value=False),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 111,
+                        "repository_selection": "all",
+                        "target_type": "User",
+                        "account": {"login": "SanChai20"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "read"},
+                    },
+                    {
+                        "id": 222,
+                        "repository_selection": "all",
+                        "target_type": "User",
+                        "account": {"login": "DFerryman"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "read"},
+                    },
+                ],
+            ),
+            patch(
+                "pullwise_server.github_auth.list_user_installation_repositories",
+                return_value=[
+                    {
+                        "id": "repo_dferryman_private",
+                        "name": "private-repo",
+                        "fullName": "DFerryman/private-repo",
+                        "private": True,
+                        "cloneUrl": "https://github.com/DFerryman/private-repo.git",
+                    }
+                ],
+            ),
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["installationAccount"], "DFerryman")
+        self.assertEqual(handler.payload["items"][0]["fullName"], "DFerryman/private-repo")
+        self.assertEqual(github_access["installationId"], "222")
 
     def test_github_repository_content_permission_must_be_read_only(self) -> None:
         self.assertTrue(
