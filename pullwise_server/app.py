@@ -13,7 +13,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import billing, db, email_delivery, github_auth, logging_config, worker
+from . import billing, db, email_delivery, github_auth, logging_config, review, worker
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -1053,6 +1053,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             repository = str(body.get("repo") or body.get("repository") or "").strip()
             if not repository:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
+            if review.selected_provider() == "disabled":
+                return self.error(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
+                )
             scan_error: tuple[int, str] | None = None
             scan = None
             with STATE_LOCK:
@@ -1226,6 +1231,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_github_repository_authorize(self, params: dict) -> None:
         scope = params.get("scope") if params.get("scope") in {"all", "selected"} else "all"
+        manage = str(params.get("manage") or "").lower() in {"1", "true", "yes", "on"}
         redirect_to = safe_redirect_to(params.get("redirectTo"), "repos")
         if not github_auth.app_install_configured():
             if not local_github_mocks_enabled():
@@ -1237,8 +1243,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not session:
             return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before authorizing GitHub repositories.")
         user = USERS.get(session["userId"])
-        if github_auth.oauth_configured() and not has_real_github_identity(user):
-            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in with GitHub before authorizing repositories.")
         if github_auth.app_visibility_check_enabled():
             if not github_auth.app_slug():
                 return self.error(
@@ -1264,14 +1268,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     ),
                 )
 
+        if manage:
+            state = remember_github_state("install", redirect_to, userId=session["userId"], requestedScope=scope)
+            return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
+
         existing_access = try_bind_existing_github_repository_access(user)
         if github_repository_access_connected(existing_access):
-            return self.json({
+            payload = {
                 "ok": True,
                 "connected": True,
                 "mode": "github-app-existing",
                 "installationId": existing_access.get("installationId"),
-            })
+            }
+            return self.json(payload)
         if existing_access and existing_access.get("installationHtmlUrl"):
             return self.json({
                 "ok": True,
@@ -1350,11 +1359,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             raise ValueError("The GitHub installation belongs to a user session that no longer exists.")
 
         installation_id = str(params["installation_id"])
-        user_can_access = github_auth.user_can_access_installation(user.get("githubAccessToken"), installation_id)
-        if user_can_access is False:
-            raise ValueError("The signed-in GitHub user cannot access this GitHub App installation.")
-        if github_auth.oauth_configured() and user_can_access is not True:
-            raise ValueError("Unable to verify access to this GitHub App installation. Try signing in with GitHub again.")
+        if record.get("stateFallback"):
+            user_can_access = github_auth.user_can_access_installation(user.get("githubAccessToken"), installation_id)
+            if user_can_access is not True:
+                raise ValueError("Unable to verify access to this GitHub App installation.")
 
         bind_github_repository_access(
             user,
