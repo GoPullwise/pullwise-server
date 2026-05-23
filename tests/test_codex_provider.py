@@ -8,6 +8,24 @@ from pullwise_server import review
 
 
 class CodexProviderTest(unittest.TestCase):
+    def test_codex_output_schema_matches_strict_structured_output_subset(self) -> None:
+        def assert_strict_object_schema(schema: dict) -> None:
+            schema_type = schema.get("type")
+            if isinstance(schema_type, list):
+                return
+            if schema_type == "object":
+                properties = schema.get("properties", {})
+                self.assertIs(schema.get("additionalProperties"), False)
+                self.assertEqual(set(schema.get("required", [])), set(properties))
+                for child in properties.values():
+                    assert_strict_object_schema(child)
+            elif schema_type == "array":
+                assert_strict_object_schema(schema.get("items", {}))
+            for child in schema.get("anyOf", []):
+                assert_strict_object_schema(child)
+
+        assert_strict_object_schema(review._findings_schema())
+
     def test_codex_provider_uses_official_non_interactive_exec_mode(self) -> None:
         captured = {}
 
@@ -35,6 +53,9 @@ class CodexProviderTest(unittest.TestCase):
         self.assertEqual(cmd[:2], ["codex", "exec"])
         self.assertIn("--sandbox", cmd)
         self.assertIn("read-only", cmd)
+        self.assertIn("--ignore-user-config", cmd)
+        self.assertNotIn("--model", cmd)
+        self.assertEqual(cmd[cmd.index("--config") + 1], 'model_reasoning_effort="xhigh"')
         self.assertIn("--output-last-message", cmd)
         self.assertIn("--output-schema", cmd)
         self.assertEqual(captured["kwargs"]["cwd"], "F:\\tmp\\repo")

@@ -120,6 +120,50 @@ def max_body_bytes() -> int:
     return max(0, env_int("PULLWISE_MAX_BODY_BYTES", 1024 * 1024))
 
 
+def rate_limit_enabled() -> bool:
+    configured = os.environ.get("PULLWISE_RATE_LIMIT_ENABLED")
+    if configured is not None:
+        return env_flag("PULLWISE_RATE_LIMIT_ENABLED")
+    return env("PULLWISE_MODE", "local").strip().lower() == "production"
+
+
+def rate_limit_requests() -> int:
+    return max(0, env_int("PULLWISE_RATE_LIMIT_REQUESTS", 600))
+
+
+def rate_limit_window_seconds() -> int:
+    return max(1, env_int("PULLWISE_RATE_LIMIT_WINDOW_SECONDS", 60))
+
+
+def rate_limit_exempt_path(method: str, path: str) -> bool:
+    return method == "OPTIONS" or path == "/health"
+
+
+def request_header(handler: BaseHTTPRequestHandler, name: str) -> str | None:
+    value = handler.headers.get(name)
+    if value:
+        return value
+    target = name.lower()
+    if isinstance(handler.headers, dict):
+        for key, candidate in handler.headers.items():
+            if key.lower() == target and candidate:
+                return candidate
+    return None
+
+
+def bearer_token(handler: BaseHTTPRequestHandler) -> str | None:
+    authorization = first_header_value(handler, "Authorization")
+    if not authorization:
+        return None
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+    if not token or any(char in token for char in "\r\n"):
+        return None
+    return token
+
+
 def local_github_mocks_enabled() -> bool:
     return env_flag("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS")
 
@@ -234,7 +278,7 @@ def forwarded_api_base_url(handler: BaseHTTPRequestHandler) -> str | None:
 
 
 def first_header_value(handler: BaseHTTPRequestHandler, name: str) -> str | None:
-    value = handler.headers.get(name)
+    value = request_header(handler, name)
     if not value:
         return None
     return value.split(",", 1)[0].strip()
@@ -512,6 +556,84 @@ def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
         if scan.get("userId") == user_id and scan.get("requestId") == request_id:
             return scan
     return None
+
+
+def current_review_usage_period(timestamp: int | None = None) -> str:
+    return time.strftime("%Y-%m", time.gmtime(timestamp or now()))
+
+
+def effective_billing_plan(user: dict | None) -> str:
+    if not user:
+        return "free"
+    current = user.get("billing") or {}
+    status = str(current.get("status") or "").lower()
+    plan = billing.normalize_plan(current.get("plan"))
+    if plan == "pro" and status in {"active", "trialing", "canceling"}:
+        return "pro"
+    return "free"
+
+
+def billing_usage_for_user(user: dict, plan_id: str, *, timestamp: int | None = None, mutate: bool = False) -> dict:
+    period = current_review_usage_period(timestamp)
+    current = user.get("billingUsage") if isinstance(user.get("billingUsage"), dict) else {}
+    try:
+        used = max(0, int(current.get("used") or 0))
+    except (TypeError, ValueError):
+        used = 0
+    if current.get("period") != period or current.get("plan") != plan_id:
+        usage = {"period": period, "plan": plan_id, "used": 0}
+    else:
+        usage = {"period": period, "plan": plan_id, "used": used}
+    if mutate:
+        user["billingUsage"] = usage
+        mark_state_dirty()
+        return user["billingUsage"]
+    return usage
+
+
+def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = None, mutate: bool = False) -> dict:
+    plan_id = effective_billing_plan(user)
+    limit = billing.review_limit(plan_id)
+    usage = billing_usage_for_user(user or {}, plan_id, timestamp=timestamp, mutate=mutate) if user else {"period": current_review_usage_period(timestamp), "plan": plan_id, "used": 0}
+    used = max(0, int(usage.get("used") or 0))
+    return {
+        "plan": plan_id,
+        "interval": (user.get("billing") or {}).get("interval") if user and plan_id == "pro" else "month",
+        "period": usage["period"],
+        "used": used,
+        "limit": limit,
+        "remaining": max(0, limit - used),
+    }
+
+
+def consume_review_quota(user: dict) -> tuple[bool, dict]:
+    entitlement = billing_entitlement_for_user(user, mutate=True)
+    if entitlement["remaining"] <= 0:
+        return False, entitlement
+    usage = billing_usage_for_user(user, entitlement["plan"], mutate=True)
+    usage["used"] = int(usage.get("used") or 0) + 1
+    mark_state_dirty()
+    return True, billing_entitlement_for_user(user)
+
+
+def billing_account_payload(user: dict) -> dict:
+    current = dict(user.get("billing") or {})
+    entitlement = billing_entitlement_for_user(user)
+    status = current.get("status") or "none"
+    return {
+        **current,
+        "status": status,
+        "plan": entitlement["plan"],
+        "interval": entitlement["interval"],
+        "reviewLimit": entitlement["limit"],
+        "usage": {
+            "period": entitlement["period"],
+            "used": entitlement["used"],
+            "limit": entitlement["limit"],
+            "remaining": entitlement["remaining"],
+            "plan": entitlement["plan"],
+        },
+    }
 
 
 def scan_payload(scan: dict) -> dict:
@@ -1134,7 +1256,14 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         "customerId": update.get("customerId") or current.get("customerId"),
         "customerEmail": update.get("customerEmail") or current.get("customerEmail"),
         "subscriptionId": update.get("subscriptionId") or current.get("subscriptionId"),
+        "subscriptionItemId": update.get("subscriptionItemId") or current.get("subscriptionItemId"),
         "status": update.get("status") or current.get("status") or "active",
+        "plan": update.get("plan") or current.get("plan") or "pro",
+        "interval": update.get("interval") or current.get("interval") or "month",
+        "currentPeriodStart": update.get("currentPeriodStart") or current.get("currentPeriodStart"),
+        "currentPeriodEnd": update.get("currentPeriodEnd") or current.get("currentPeriodEnd"),
+        "cancelAtPeriodEnd": update.get("cancelAtPeriodEnd") if update.get("cancelAtPeriodEnd") is not None else current.get("cancelAtPeriodEnd"),
+        "canceledAt": update.get("canceledAt") or current.get("canceledAt"),
         "updatedAt": now(),
         "lastEventType": update.get("eventType"),
         "lastEventId": update.get("eventId") or current.get("lastEventId"),
@@ -1191,6 +1320,55 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         access_logger.info("%s - %s", self.address_string(), fmt % args)
 
+    def apply_rate_limit(self, method: str, path: str) -> bool:
+        if not rate_limit_enabled() or rate_limit_exempt_path(method, path):
+            self._rate_limit_headers = {}
+            return False
+        limit = rate_limit_requests()
+        if limit <= 0:
+            self._rate_limit_headers = {}
+            return False
+
+        rate = db.record_rate_limit_hit(
+            self.rate_limit_subject(),
+            limit=limit,
+            window_seconds=rate_limit_window_seconds(),
+        )
+        headers = {
+            "X-RateLimit-Limit": str(rate["limit"]),
+            "X-RateLimit-Remaining": str(rate["remaining"]),
+            "X-RateLimit-Reset": str(rate["resetAt"]),
+        }
+        self._rate_limit_headers = headers
+        if rate["allowed"]:
+            return False
+
+        retry_after = str(rate["retryAfter"])
+        self.json(
+            {"message": "API rate limit exceeded. Try again later."},
+            HTTPStatus.TOO_MANY_REQUESTS,
+            headers={**headers, "Retry-After": retry_after},
+        )
+        return True
+
+    def rate_limit_subject(self) -> str:
+        session = self.current_session()
+        if session:
+            return f"user:{session['userId']}"
+        return f"ip:{self.client_ip_address()}"
+
+    def client_ip_address(self) -> str:
+        if env_flag("PULLWISE_TRUST_PROXY_HEADERS"):
+            forwarded = first_header_value(self, "X-Forwarded-For")
+            if forwarded:
+                candidate = forwarded.split(",", 1)[0].strip()
+                if candidate and not any(char in candidate for char in "\r\n"):
+                    return candidate[:128]
+        address = getattr(self, "client_address", None)
+        if isinstance(address, tuple | list) and address:
+            return str(address[0])[:128]
+        return "unknown"
+
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_cors_headers()
@@ -1216,8 +1394,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/") or "/"
         params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
         segments = [part for part in path.split("/") if part]
+        self._rate_limit_headers = {}
 
         try:
+            if self.apply_rate_limit(method, path):
+                return
             self.enforce_body_size_limit(method)
             if method == "GET":
                 return self.handle_get(path, params, segments)
@@ -1300,7 +1481,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             user = USERS.get(session["userId"]) if session else None
             if user:
-                payload["account"] = user.get("billing") or {"status": "none"}
+                payload["account"] = billing_account_payload(user)
             return self.json(payload)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
@@ -1351,32 +1532,48 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 else:
                     scan = user_scan_by_request_id(session["userId"], request_id)
                     if scan is None:
-                        repo_meta = repository_item(github_access, repository) or {}
-                        scan = {
-                            "id": make_id("sc"),
-                            "repo": repository,
-                            "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
-                            "commit": body.get("commit") or "pending",
-                            "status": "queued",
-                            "userId": session["userId"],
-                            "createdAt": now(),
-                            "queuedAt": now(),
-                            "progress": 0,
-                            "phase": None,
-                            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                            "installationId": repo_meta.get("installationId") or github_access.get("installationId"),
-                            "installationAccount": repo_meta.get("installationAccount") or github_access.get("installationAccount"),
-                            "repositorySelection": repo_meta.get("repositorySelection") or github_access.get("repositorySelection"),
-                            "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
-                            "repositoryPrivate": bool(repo_meta.get("private")),
-                            "repoPath": None,
-                            "by": "you",
-                        }
-                        if request_id:
-                            scan["requestId"] = request_id
-                        SCANS.insert(0, scan)
-                        scan_created = True
-                        mark_state_dirty()
+                        quota_allowed, entitlement = consume_review_quota(user)
+                        if not quota_allowed:
+                            scan_error = (
+                                HTTPStatus.PAYMENT_REQUIRED,
+                                (
+                                    f"Monthly review limit reached for the {entitlement['plan']} plan "
+                                    f"({entitlement['used']}/{entitlement['limit']} reviews used)."
+                                ),
+                            )
+                        else:
+                            repo_meta = repository_item(github_access, repository) or {}
+                            scan = {
+                                "id": make_id("sc"),
+                                "repo": repository,
+                                "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
+                                "commit": body.get("commit") or "pending",
+                                "status": "queued",
+                                "userId": session["userId"],
+                                "createdAt": now(),
+                                "queuedAt": now(),
+                                "progress": 0,
+                                "phase": None,
+                                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                                "installationId": repo_meta.get("installationId") or github_access.get("installationId"),
+                                "installationAccount": repo_meta.get("installationAccount") or github_access.get("installationAccount"),
+                                "repositorySelection": repo_meta.get("repositorySelection") or github_access.get("repositorySelection"),
+                                "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
+                                "repositoryPrivate": bool(repo_meta.get("private")),
+                                "repoPath": None,
+                                "billingUsage": {
+                                    "period": entitlement["period"],
+                                    "plan": entitlement["plan"],
+                                    "used": entitlement["used"],
+                                    "limit": entitlement["limit"],
+                                },
+                                "by": "you",
+                            }
+                            if request_id:
+                                scan["requestId"] = request_id
+                            SCANS.insert(0, scan)
+                            scan_created = True
+                            mark_state_dirty()
 
             if scan_error:
                 return self.error(scan_error[0], scan_error[1])
@@ -1411,6 +1608,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 user,
                 success_url=safe_redirect_to(body.get("successUrl"), "settings"),
                 cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
+                plan=str(body.get("plan") or "pro"),
+                interval=str(body.get("interval") or "month"),
             )
             if checkout.get("customerId"):
                 current_billing = user.get("billing") or {}
@@ -1424,6 +1623,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "provider": checkout.get("provider"),
                 "id": checkout.get("id"),
                 "requestId": checkout.get("requestId"),
+                "plan": checkout.get("plan"),
+                "interval": checkout.get("interval"),
                 "createdAt": now(),
             }
             mark_state_dirty()
@@ -1437,6 +1638,33 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return_url=safe_redirect_to(body.get("returnUrl"), "settings"),
             )
             return self.json(portal)
+        if path == "/billing/change-interval":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before changing your subscription.")
+            result = billing.change_subscription_interval(
+                USERS[session["userId"]],
+                interval=str(body.get("interval") or "year"),
+                return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
+            )
+            if result.get("alreadyActive"):
+                return self.json(result)
+            if result.get("provider") == "creem" and result.get("interval") == "year":
+                user = USERS[session["userId"]]
+                current_billing = user.get("billing") or {}
+                user["billing"] = {
+                    **current_billing,
+                    "provider": "creem",
+                    "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
+                    "status": result.get("status") or current_billing.get("status") or "active",
+                    "plan": "pro",
+                    "interval": "year",
+                    "currentPeriodStart": result.get("currentPeriodStart") or current_billing.get("currentPeriodStart"),
+                    "currentPeriodEnd": result.get("currentPeriodEnd") or current_billing.get("currentPeriodEnd"),
+                    "updatedAt": now(),
+                }
+                mark_state_dirty()
+            return self.json(result)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_patch(self, segments: list[str]) -> None:
@@ -1809,7 +2037,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return session
 
     def current_session_id(self) -> str | None:
-        raw_cookie = self.headers.get("Cookie") or ""
+        authorization_token = bearer_token(self)
+        if authorization_token:
+            return authorization_token
+        raw_cookie = request_header(self, "Cookie") or ""
         cookie = SimpleCookie(raw_cookie)
         morsel = cookie.get(SESSION_COOKIE)
         return morsel.value if morsel else None
@@ -1893,7 +2124,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        for key, value in (headers or {}).items():
+        response_headers = {**getattr(self, "_rate_limit_headers", {}), **(headers or {})}
+        for key, value in response_headers.items():
             self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)

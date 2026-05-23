@@ -804,6 +804,9 @@ cmd_config() {
   print_config_key PULLWISE_API_BASE_URL ""
   print_config_key PULLWISE_TRUST_PROXY_HEADERS "false"
   print_config_key PULLWISE_COOKIE_SECURE ""
+  print_config_key PULLWISE_RATE_LIMIT_ENABLED ""
+  print_config_key PULLWISE_RATE_LIMIT_REQUESTS "600"
+  print_config_key PULLWISE_RATE_LIMIT_WINDOW_SECONDS "60"
   print_config_key PULLWISE_DB_PATH "$(db_path)"
   print_config_key PULLWISE_LOG_DIR "$(log_dir)"
   print_config_key PULLWISE_CHECKOUT_ROOT "$(checkout_root)"
@@ -1002,6 +1005,26 @@ check_production_env() {
   else
     fail "PULLWISE_COOKIE_SECURE must be true in production."
   fi
+
+  if is_true "$(env_value PULLWISE_RATE_LIMIT_ENABLED "")"; then
+    ok "PULLWISE_RATE_LIMIT_ENABLED=true"
+  else
+    fail "PULLWISE_RATE_LIMIT_ENABLED must be true in production."
+  fi
+
+  rate_limit_requests=$(env_value PULLWISE_RATE_LIMIT_REQUESTS "600")
+  if is_positive_int "$rate_limit_requests"; then
+    ok "PULLWISE_RATE_LIMIT_REQUESTS=$rate_limit_requests"
+  else
+    fail "PULLWISE_RATE_LIMIT_REQUESTS must be a positive integer."
+  fi
+
+  rate_limit_window=$(env_value PULLWISE_RATE_LIMIT_WINDOW_SECONDS "60")
+  if is_positive_int "$rate_limit_window"; then
+    ok "PULLWISE_RATE_LIMIT_WINDOW_SECONDS=$rate_limit_window"
+  else
+    fail "PULLWISE_RATE_LIMIT_WINDOW_SECONDS must be a positive integer."
+  fi
 }
 
 check_storage() {
@@ -1088,10 +1111,14 @@ check_review_provider() {
 check_billing_config() {
   stripe=false
   creem=false
-  if [ -n "$(env_value PULLWISE_STRIPE_SECRET_KEY "")" ] || [ -n "$(env_value PULLWISE_STRIPE_PRICE_ID "")" ]; then
+  stripe_monthly=$(env_value PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID "$(env_value PULLWISE_STRIPE_PRICE_ID "")")
+  stripe_yearly=$(env_value PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID "$(env_value PULLWISE_STRIPE_YEARLY_PRICE_ID "")")
+  creem_monthly=$(env_value PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID "$(env_value PULLWISE_CREEM_PRODUCT_ID "")")
+  creem_yearly=$(env_value PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID "$(env_value PULLWISE_CREEM_YEARLY_PRODUCT_ID "")")
+  if [ -n "$(env_value PULLWISE_STRIPE_SECRET_KEY "")" ] || [ -n "$stripe_monthly" ] || [ -n "$stripe_yearly" ]; then
     stripe=true
   fi
-  if [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || [ -n "$(env_value PULLWISE_CREEM_PRODUCT_ID "")" ]; then
+  if [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || [ -n "$creem_monthly" ] || [ -n "$creem_yearly" ]; then
     creem=true
   fi
   provider=$(env_value PULLWISE_BILLING_PROVIDER "")
@@ -1109,6 +1136,28 @@ check_billing_config() {
     esac
   else
     warn "billing provider is not configured; billing routes will not create checkout sessions"
+  fi
+
+  validate_stripe=false
+  validate_creem=false
+  if [ "$provider" = "stripe" ]; then
+    validate_stripe=true
+  elif [ "$provider" = "creem" ]; then
+    validate_creem=true
+  else
+    [ "$stripe" = true ] && validate_stripe=true
+    [ "$creem" = true ] && validate_creem=true
+  fi
+
+  if [ "$validate_stripe" = true ]; then
+    [ -n "$(env_value PULLWISE_STRIPE_SECRET_KEY "")" ] || fail "PULLWISE_STRIPE_SECRET_KEY is required for Stripe billing."
+    [ -n "$stripe_monthly" ] || fail "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID is required for Stripe monthly Pro."
+    [ -n "$stripe_yearly" ] || fail "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID is required for Stripe yearly Pro."
+  fi
+  if [ "$validate_creem" = true ]; then
+    [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || fail "PULLWISE_CREEM_API_KEY is required for Creem billing."
+    [ -n "$creem_monthly" ] || fail "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID is required for Creem monthly Pro."
+    [ -n "$creem_yearly" ] || fail "PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID is required for Creem yearly Pro."
   fi
 }
 

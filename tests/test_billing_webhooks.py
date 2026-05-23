@@ -98,6 +98,68 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["eventId"], "evt_subscription_1")
         self.assertEqual(update["eventCreated"], 1710000100)
 
+    def test_stripe_subscription_event_maps_plan_interval_period_and_item(self) -> None:
+        event = {
+            "id": "evt_subscription_2",
+            "created": 1710000200,
+            "type": "customer.subscription.updated",
+            "data": {
+                "object": {
+                    "id": "sub_1",
+                    "customer": "cus_1",
+                    "status": "active",
+                    "current_period_start": 1710000000,
+                    "current_period_end": 1712592000,
+                    "cancel_at_period_end": True,
+                    "metadata": {"userId": "usr_1", "plan": "pro", "interval": "year"},
+                    "items": {
+                        "data": [
+                            {
+                                "id": "si_1",
+                                "price": {"id": "price_yearly"},
+                            }
+                        ]
+                    },
+                }
+            },
+        }
+
+        update = billing.billing_update_from_stripe_event(event)
+
+        self.assertEqual(update["userId"], "usr_1")
+        self.assertEqual(update["plan"], "pro")
+        self.assertEqual(update["interval"], "year")
+        self.assertEqual(update["subscriptionItemId"], "si_1")
+        self.assertEqual(update["currentPeriodStart"], 1710000000)
+        self.assertEqual(update["currentPeriodEnd"], 1712592000)
+        self.assertTrue(update["cancelAtPeriodEnd"])
+
+    def test_creem_expired_subscription_is_not_mapped_to_canceled(self) -> None:
+        event = {
+            "id": "evt_creem_expired_1",
+            "created": 1710000300,
+            "eventType": "subscription.expired",
+            "object": {
+                "id": "sub_1",
+                "status": "active",
+                "current_period_start_date": "2024-03-01T00:00:00.000Z",
+                "current_period_end_date": "2024-04-01T00:00:00.000Z",
+                "product": {
+                    "id": "prod_yearly",
+                    "billing_period": "every-year",
+                },
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+                "metadata": {"userId": "usr_1", "plan": "pro"},
+            },
+        }
+
+        update = billing.billing_update_from_creem_event(event)
+
+        self.assertEqual(update["status"], "past_due")
+        self.assertEqual(update["interval"], "year")
+        self.assertEqual(update["currentPeriodStart"], "2024-03-01T00:00:00.000Z")
+        self.assertEqual(update["currentPeriodEnd"], "2024-04-01T00:00:00.000Z")
+
 
 if __name__ == "__main__":
     unittest.main()

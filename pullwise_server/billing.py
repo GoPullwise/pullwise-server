@@ -26,12 +26,47 @@ def env_flag(name: str, default: str = "false") -> bool:
     return env(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(env(name, str(default)))
+    except ValueError:
+        return default
+
+
+def billing_currency() -> str:
+    return env("PULLWISE_BILLING_CURRENCY", "USD").upper()
+
+
+def review_limit(plan: str) -> int:
+    if plan == "pro":
+        return max(0, env_int("PULLWISE_PRO_REVIEW_LIMIT", 100))
+    return max(0, env_int("PULLWISE_FREE_REVIEW_LIMIT", 5))
+
+
+def pro_amount(interval: str) -> str:
+    if interval == "year":
+        return env("PULLWISE_PRO_YEARLY_AMOUNT", "290")
+    return env("PULLWISE_PRO_MONTHLY_AMOUNT", env("PULLWISE_BILLING_AMOUNT", "29"))
+
+
+def stripe_price_id(interval: str) -> str:
+    if interval == "year":
+        return env("PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID", env("PULLWISE_STRIPE_YEARLY_PRICE_ID"))
+    return env("PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID", env("PULLWISE_STRIPE_PRICE_ID"))
+
+
+def creem_product_id(interval: str) -> str:
+    if interval == "year":
+        return env("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID", env("PULLWISE_CREEM_YEARLY_PRODUCT_ID"))
+    return env("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID", env("PULLWISE_CREEM_PRODUCT_ID"))
+
+
 def stripe_configured() -> bool:
-    return bool(env("PULLWISE_STRIPE_SECRET_KEY") and env("PULLWISE_STRIPE_PRICE_ID"))
+    return bool(env("PULLWISE_STRIPE_SECRET_KEY") and (stripe_price_id("month") or stripe_price_id("year")))
 
 
 def creem_configured() -> bool:
-    return bool(env("PULLWISE_CREEM_API_KEY") and env("PULLWISE_CREEM_PRODUCT_ID"))
+    return bool(env("PULLWISE_CREEM_API_KEY") and (creem_product_id("month") or creem_product_id("year")))
 
 
 def selected_provider() -> str:
@@ -58,15 +93,65 @@ def selected_provider() -> str:
 
 def public_plan() -> dict:
     provider = selected_provider()
+    currency = billing_currency()
+    pro_name = env("PULLWISE_BILLING_PLAN_NAME", "Pullwise Pro")
+    pro_description = env("PULLWISE_BILLING_PLAN_DESCRIPTION", "Repository review for production teams.")
+    pro_prices = {
+        "month": {
+            "amount": pro_amount("month"),
+            "currency": currency,
+            "interval": "month",
+            "configured": provider_price_configured(provider, "month"),
+        },
+        "year": {
+            "amount": pro_amount("year"),
+            "currency": currency,
+            "interval": "year",
+            "configured": provider_price_configured(provider, "year"),
+        },
+    }
     return {
         "provider": provider,
         "enabled": provider != "disabled",
-        "name": env("PULLWISE_BILLING_PLAN_NAME", "Pullwise Pro"),
-        "description": env("PULLWISE_BILLING_PLAN_DESCRIPTION", "Repository review for production teams."),
-        "currency": env("PULLWISE_BILLING_CURRENCY", "USD"),
-        "interval": env("PULLWISE_BILLING_INTERVAL", "month"),
-        "amount": env("PULLWISE_BILLING_AMOUNT", ""),
+        "currency": currency,
+        "name": pro_name,
+        "description": pro_description,
+        "interval": "month",
+        "amount": pro_prices["month"]["amount"],
+        "plans": [
+            {
+                "id": "free",
+                "name": "Free",
+                "description": "Try Pullwise with a small monthly review allowance.",
+                "currency": currency,
+                "reviewLimit": review_limit("free"),
+                "prices": {
+                    "month": {
+                        "amount": "0",
+                        "currency": currency,
+                        "interval": "month",
+                        "configured": True,
+                    }
+                },
+            },
+            {
+                "id": "pro",
+                "name": pro_name,
+                "description": pro_description,
+                "currency": currency,
+                "reviewLimit": review_limit("pro"),
+                "prices": pro_prices,
+            },
+        ],
     }
+
+
+def provider_price_configured(provider: str, interval: str) -> bool:
+    if provider == "stripe":
+        return bool(stripe_price_id(interval))
+    if provider == "creem":
+        return bool(creem_product_id(interval))
+    return False
 
 
 def default_success_url() -> str:
@@ -82,24 +167,45 @@ def create_checkout_session(
     *,
     success_url: str | None = None,
     cancel_url: str | None = None,
+    plan: str = "pro",
+    interval: str = "month",
 ) -> dict:
+    plan, interval = validate_checkout_selection(plan, interval)
     provider = selected_provider()
     if provider == "stripe":
-        return create_stripe_checkout_session(user, success_url=success_url, cancel_url=cancel_url)
+        return create_stripe_checkout_session(user, success_url=success_url, cancel_url=cancel_url, plan=plan, interval=interval)
     if provider == "creem":
-        return create_creem_checkout_session(user, success_url=success_url or default_success_url())
+        return create_creem_checkout_session(user, success_url=success_url or default_success_url(), plan=plan, interval=interval)
     raise BillingConfigurationError("Billing is not configured.")
 
 
-def create_stripe_checkout_session(user: dict, *, success_url: str | None, cancel_url: str | None) -> dict:
+def validate_checkout_selection(plan: str, interval: str) -> tuple[str, str]:
+    normalized_plan = (plan or "pro").strip().lower()
+    normalized_interval = (interval or "month").strip().lower()
+    if normalized_plan != "pro":
+        raise BillingConfigurationError("Only the Pro plan can be purchased.")
+    if normalized_interval not in {"month", "year"}:
+        raise BillingConfigurationError("Billing interval must be month or year.")
+    return normalized_plan, normalized_interval
+
+
+def create_stripe_checkout_session(user: dict, *, success_url: str | None, cancel_url: str | None, plan: str, interval: str) -> dict:
+    price_id = stripe_price_id(interval)
+    if not price_id:
+        raise BillingConfigurationError(f"Stripe Pro {interval} price is not configured.")
     data = {
         "mode": env("PULLWISE_STRIPE_CHECKOUT_MODE", "subscription"),
-        "line_items[0][price]": env("PULLWISE_STRIPE_PRICE_ID"),
+        "line_items[0][price]": price_id,
         "line_items[0][quantity]": "1",
         "success_url": success_url or default_success_url(),
         "cancel_url": cancel_url or default_cancel_url(),
         "client_reference_id": user["id"],
         "metadata[userId]": user["id"],
+        "metadata[plan]": plan,
+        "metadata[interval]": interval,
+        "subscription_data[metadata][userId]": user["id"],
+        "subscription_data[metadata][plan]": plan,
+        "subscription_data[metadata][interval]": interval,
     }
     customer_id = (user.get("billing") or {}).get("customerId")
     if customer_id:
@@ -120,23 +226,28 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
         raise RuntimeError("Stripe did not return a Checkout URL.")
     return {
         "provider": "stripe",
+        "plan": plan,
+        "interval": interval,
         "id": payload.get("id"),
         "customerId": payload.get("customer") or customer_id,
         "url": checkout_url,
     }
 
 
-def create_creem_checkout_session(user: dict, *, success_url: str) -> dict:
+def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, interval: str) -> dict:
+    product_id = creem_product_id(interval)
+    if not product_id:
+        raise BillingConfigurationError(f"Creem Pro {interval} product is not configured.")
     request_id = f"pw_{user['id']}_{secrets.token_urlsafe(8)}"
     customer = {}
     if user.get("email"):
         customer["email"] = user["email"]
     payload = {
-        "product_id": env("PULLWISE_CREEM_PRODUCT_ID"),
+        "product_id": product_id,
         "request_id": request_id,
         "units": 1,
         "success_url": success_url,
-        "metadata": {"userId": user["id"]},
+        "metadata": {"userId": user["id"], "plan": plan, "interval": interval},
     }
     if customer:
         payload["customer"] = customer
@@ -153,6 +264,8 @@ def create_creem_checkout_session(user: dict, *, success_url: str) -> dict:
         raise RuntimeError("Creem did not return a Checkout URL.")
     return {
         "provider": "creem",
+        "plan": plan,
+        "interval": interval,
         "id": payload.get("id"),
         "requestId": request_id,
         "url": checkout_url,
@@ -200,6 +313,111 @@ def create_creem_portal_session(customer_id: str) -> dict:
     if not portal_url:
         raise RuntimeError("Creem did not return a portal URL.")
     return {"provider": "creem", "url": portal_url}
+
+
+def change_subscription_interval(user: dict, *, interval: str, return_url: str | None = None) -> dict:
+    target_interval = (interval or "").strip().lower()
+    if target_interval != "year":
+        raise BillingConfigurationError("Only switching Pro monthly subscriptions to yearly is supported.")
+    billing = user.get("billing") or {}
+    if (billing.get("plan") or "pro") != "pro":
+        raise BillingConfigurationError("Only Pro subscriptions can be changed.")
+    if billing.get("interval") == "year":
+        return {"provider": billing.get("provider") or selected_provider(), "plan": "pro", "interval": "year", "alreadyActive": True}
+    if billing.get("interval") not in {None, "", "month"}:
+        raise BillingConfigurationError("Only monthly Pro subscriptions can switch to yearly.")
+    if (billing.get("status") or "").lower() not in {"active", "trialing"}:
+        raise BillingConfigurationError("Only active subscriptions can switch to yearly.")
+
+    provider = selected_provider()
+    billing_provider = (billing.get("provider") or provider).lower()
+    if billing_provider and billing_provider != provider:
+        raise BillingConfigurationError("Configured billing provider does not match this subscription.")
+    if provider == "stripe":
+        return create_stripe_interval_change_session(billing, return_url=return_url or default_success_url())
+    if provider == "creem":
+        return create_creem_interval_change(billing)
+    raise BillingConfigurationError("Billing is not configured.")
+
+
+def create_stripe_interval_change_session(billing: dict, *, return_url: str) -> dict:
+    customer_id = billing.get("customerId")
+    subscription_id = billing.get("subscriptionId")
+    subscription_item_id = billing.get("subscriptionItemId")
+    yearly_price = stripe_price_id("year")
+    if not customer_id or not subscription_id:
+        raise BillingConfigurationError("No active Stripe subscription is linked to this account.")
+    if not yearly_price:
+        raise BillingConfigurationError("Stripe Pro yearly price is not configured.")
+    if not subscription_item_id:
+        subscription_item_id = fetch_stripe_subscription_item_id(subscription_id)
+    if not subscription_item_id:
+        raise BillingConfigurationError("Stripe subscription item is unavailable.")
+
+    data = {
+        "customer": customer_id,
+        "return_url": return_url,
+        "flow_data[type]": "subscription_update_confirm",
+        "flow_data[after_completion][type]": "redirect",
+        "flow_data[after_completion][redirect][return_url]": return_url,
+        "flow_data[subscription_update_confirm][subscription]": subscription_id,
+        "flow_data[subscription_update_confirm][items][0][id]": subscription_item_id,
+        "flow_data[subscription_update_confirm][items][0][price]": yearly_price,
+        "flow_data[subscription_update_confirm][items][0][quantity]": "1",
+    }
+    response = requests.post(
+        "https://api.stripe.com/v1/billing_portal/sessions",
+        auth=(env("PULLWISE_STRIPE_SECRET_KEY"), ""),
+        data=data,
+        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    portal_url = payload.get("url")
+    if not portal_url:
+        raise RuntimeError("Stripe did not return a portal URL.")
+    return {"provider": "stripe", "plan": "pro", "interval": "year", "id": payload.get("id"), "url": portal_url}
+
+
+def fetch_stripe_subscription_item_id(subscription_id: str) -> str | None:
+    response = requests.get(
+        f"https://api.stripe.com/v1/subscriptions/{subscription_id}",
+        auth=(env("PULLWISE_STRIPE_SECRET_KEY"), ""),
+        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    item = first_subscription_item(payload)
+    return item.get("id") if item else None
+
+
+def create_creem_interval_change(billing: dict) -> dict:
+    subscription_id = billing.get("subscriptionId")
+    yearly_product = creem_product_id("year")
+    if not subscription_id:
+        raise BillingConfigurationError("No active Creem subscription is linked to this account.")
+    if not yearly_product:
+        raise BillingConfigurationError("Creem Pro yearly product is not configured.")
+    response = requests.post(
+        urljoin(creem_api_base_url() + "/", f"v1/subscriptions/{subscription_id}/upgrade"),
+        headers={"x-api-key": env("PULLWISE_CREEM_API_KEY"), "Content-Type": "application/json"},
+        json={
+            "product_id": yearly_product,
+            "update_behavior": env("PULLWISE_CREEM_UPGRADE_BEHAVIOR", "proration-charge-immediately"),
+        },
+        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return {
+        "provider": "creem",
+        "plan": "pro",
+        "interval": "year",
+        "subscriptionId": payload.get("id") or subscription_id,
+        "status": normalize_subscription_status(payload.get("status")),
+        "currentPeriodStart": payload.get("current_period_start_date"),
+        "currentPeriodEnd": payload.get("current_period_end_date"),
+    }
 
 
 def creem_api_base_url() -> str:
@@ -268,6 +486,9 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     customer = obj.get("customer") if isinstance(obj.get("customer"), dict) else {}
     subscription = obj.get("subscription") if isinstance(obj.get("subscription"), dict) else obj
     subscription_metadata = subscription.get("metadata") if isinstance(subscription.get("metadata"), dict) else {}
+    product = obj.get("product") if isinstance(obj.get("product"), dict) else None
+    if not product and isinstance(subscription, dict) and isinstance(subscription.get("product"), dict):
+        product = subscription.get("product")
     user_id = (
         metadata.get("userId")
         or metadata.get("internal_customer_id")
@@ -283,13 +504,25 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     if not user_id and not customer_id:
         return None
 
+    plan = normalize_plan(metadata.get("plan") or subscription_metadata.get("plan") or "pro")
+    interval = normalize_interval(
+        metadata.get("interval")
+        or subscription_metadata.get("interval")
+        or interval_from_creem_product(product)
+        or "month"
+    )
     return {
         "userId": user_id,
         "provider": "creem",
         "customerId": customer_id,
         "customerEmail": customer.get("email"),
         "subscriptionId": subscription.get("id") if isinstance(subscription, dict) else None,
-        "status": normalize_subscription_status(subscription.get("status") if isinstance(subscription, dict) else "active"),
+        "status": normalize_creem_subscription_status(event_type, subscription.get("status") if isinstance(subscription, dict) else "active"),
+        "plan": plan,
+        "interval": interval,
+        "currentPeriodStart": subscription.get("current_period_start_date") if isinstance(subscription, dict) else None,
+        "currentPeriodEnd": subscription.get("current_period_end_date") if isinstance(subscription, dict) else None,
+        "canceledAt": subscription.get("canceled_at") if isinstance(subscription, dict) else None,
         "eventType": event_type,
         "eventId": event.get("id") or event.get("eventId"),
         "eventCreated": event_created(event),
@@ -300,7 +533,8 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
     event_type = event.get("type") or ""
     obj = ((event.get("data") or {}).get("object") or {})
     if event_type == "checkout.session.completed":
-        user_id = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("userId")
+        metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+        user_id = obj.get("client_reference_id") or metadata.get("userId")
         if not user_id:
             return None
         return {
@@ -310,16 +544,39 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             "customerEmail": (obj.get("customer_details") or {}).get("email") or obj.get("customer_email"),
             "subscriptionId": obj.get("subscription"),
             "status": "active",
+            "plan": normalize_plan(metadata.get("plan") or "pro"),
+            "interval": normalize_interval(metadata.get("interval") or "month"),
             "eventType": event_type,
             "eventId": event.get("id"),
             "eventCreated": event_created(event),
         }
     if event_type.startswith("customer.subscription."):
+        metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+        item = first_subscription_item(obj)
+        price = item.get("price") if item and isinstance(item.get("price"), dict) else {}
+        price_id = price.get("id") if isinstance(price, dict) else None
+        interval = normalize_interval(
+            metadata.get("interval")
+            or interval_from_stripe_price(price)
+            or interval_from_provider_price("stripe", price_id)
+            or "month"
+        )
+        status = normalize_subscription_status(obj.get("status"))
+        if obj.get("cancel_at_period_end") and status == "active":
+            status = "canceling"
         return {
+            "userId": metadata.get("userId") or metadata.get("internal_customer_id"),
             "provider": "stripe",
             "customerId": obj.get("customer"),
             "subscriptionId": obj.get("id"),
-            "status": normalize_subscription_status(obj.get("status")),
+            "subscriptionItemId": item.get("id") if item else None,
+            "status": status,
+            "plan": normalize_plan(metadata.get("plan") or "pro"),
+            "interval": interval,
+            "currentPeriodStart": obj.get("current_period_start") or (item or {}).get("current_period_start"),
+            "currentPeriodEnd": obj.get("current_period_end") or (item or {}).get("current_period_end"),
+            "cancelAtPeriodEnd": bool(obj.get("cancel_at_period_end")),
+            "canceledAt": obj.get("canceled_at"),
             "eventType": event_type,
             "eventId": event.get("id"),
             "eventCreated": event_created(event),
@@ -349,3 +606,72 @@ def normalize_subscription_status(status: str | None) -> str:
     if normalized in {"canceled", "cancelled", "expired", "incomplete_expired"}:
         return "canceled"
     return normalized or "active"
+
+
+def normalize_creem_subscription_status(event_type: str | None, status: str | None) -> str:
+    if event_type == "subscription.expired":
+        return "past_due"
+    return normalize_subscription_status(status)
+
+
+def normalize_plan(plan: str | None) -> str:
+    normalized = (plan or "pro").strip().lower()
+    return normalized if normalized in {"free", "pro"} else "pro"
+
+
+def normalize_interval(interval: str | None) -> str:
+    normalized = (interval or "month").strip().lower()
+    return normalized if normalized in {"month", "year"} else "month"
+
+
+def first_subscription_item(subscription: dict) -> dict | None:
+    items = subscription.get("items") if isinstance(subscription, dict) else None
+    if not isinstance(items, dict):
+        return None
+    data = items.get("data")
+    if not isinstance(data, list) or not data:
+        return None
+    item = data[0]
+    return item if isinstance(item, dict) else None
+
+
+def interval_from_stripe_price(price: dict | None) -> str | None:
+    if not isinstance(price, dict):
+        return None
+    recurring = price.get("recurring")
+    if isinstance(recurring, dict):
+        interval = recurring.get("interval")
+        if interval in {"month", "year"}:
+            return interval
+    return interval_from_provider_price("stripe", price.get("id"))
+
+
+def interval_from_provider_price(provider: str, identifier: str | None) -> str | None:
+    if not identifier:
+        return None
+    if provider == "stripe":
+        if identifier == stripe_price_id("year"):
+            return "year"
+        if identifier == stripe_price_id("month"):
+            return "month"
+    if provider == "creem":
+        if identifier == creem_product_id("year"):
+            return "year"
+        if identifier == creem_product_id("month"):
+            return "month"
+    return None
+
+
+def interval_from_creem_product(product: dict | None) -> str | None:
+    if not isinstance(product, dict):
+        return None
+    product_id = product.get("id")
+    inferred = interval_from_provider_price("creem", product_id)
+    if inferred:
+        return inferred
+    period = str(product.get("billing_period") or "").strip().lower()
+    if period in {"every-year", "year", "yearly", "annual", "annually"}:
+        return "year"
+    if period in {"every-month", "month", "monthly"}:
+        return "month"
+    return None

@@ -6,6 +6,7 @@ import math
 import os
 import sqlite3
 import threading
+import time
 from contextlib import closing
 from typing import Any
 
@@ -52,6 +53,24 @@ def initialize() -> None:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_rate_limits (
+                    key TEXT PRIMARY KEY,
+                    subject TEXT NOT NULL,
+                    route TEXT NOT NULL,
+                    window_start INTEGER NOT NULL,
+                    request_count INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_api_rate_limits_subject
+                ON api_rate_limits(subject, route, window_start)
+                """
+            )
 
 
 def load_state() -> dict[str, Any]:
@@ -78,6 +97,65 @@ def save_state(state: dict[str, Any]) -> None:
                     for name, payload in state.items()
                 ],
             )
+
+
+def record_rate_limit_hit(
+    subject: str,
+    *,
+    limit: int,
+    window_seconds: int,
+    route: str = "api",
+    timestamp: int | None = None,
+) -> dict[str, Any]:
+    initialize()
+    current_time = int(timestamp if timestamp is not None else time.time())
+    window = max(1, int(window_seconds))
+    window_start = current_time - (current_time % window)
+    reset_at = window_start + window
+    key = f"{subject}:{route}:{window_start}"
+
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                "DELETE FROM api_rate_limits WHERE window_start < ?",
+                (window_start - window,),
+            )
+            row = connection.execute(
+                "SELECT request_count FROM api_rate_limits WHERE key = ?",
+                (key,),
+            ).fetchone()
+            request_count = int(row[0]) + 1 if row else 1
+            if row:
+                connection.execute(
+                    """
+                    UPDATE api_rate_limits
+                    SET request_count = ?, updated_at = ?
+                    WHERE key = ?
+                    """,
+                    (request_count, current_time, key),
+                )
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO api_rate_limits
+                        (key, subject, route, window_start, request_count, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (key, subject, route, window_start, request_count, current_time),
+                )
+
+    allowed = request_count <= limit
+    return {
+        "allowed": allowed,
+        "subject": subject,
+        "route": route,
+        "limit": limit,
+        "remaining": max(0, limit - request_count),
+        "resetAt": reset_at,
+        "retryAfter": max(0, reset_at - current_time),
+        "windowSeconds": window,
+        "count": request_count,
+    }
 
 
 def to_jsonable(value: Any, *, path: str = "$") -> Any:

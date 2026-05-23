@@ -63,9 +63,35 @@ def seed_session() -> str:
     app.SETTINGS = {}
     app.BILLING_EVENTS = {}
     app.BILLING_PENDING_UPDATES = []
+    app.SCANS = []
+    app.ISSUES = []
     app.STATE_LOADED = True
     app.STATE_DIRTY = False
     return "pw_session=ses_1"
+
+
+def authorize_repo_for_seed_user() -> None:
+    app.USERS["usr_1"].update({"githubLogin": "dev"})
+    app.USERS["usr_1"]["githubRepositoryAccess"] = {
+        "mode": "github-app",
+        "authorizedUserId": "usr_1",
+        "authorizedGithubLogin": "dev",
+        "repositories": ["owner/repo"],
+        "repositoriesNeedSync": False,
+        "repositoryItems": [
+            {
+                "id": "owner/repo",
+                "name": "repo",
+                "fullName": "owner/repo",
+                "defaultBranch": "main",
+                "installationId": "123",
+                "installationAccount": "dev",
+                "repositorySelection": "selected",
+                "cloneUrl": "https://github.com/owner/repo.git",
+                "private": True,
+            }
+        ],
+    }
 
 
 class BillingRoutesTest(unittest.TestCase):
@@ -117,6 +143,65 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["url"], "https://checkout.stripe.com/cs/test")
         create.assert_called_once()
         self.assertEqual(create.call_args.args[0]["id"], "usr_1")
+
+    def test_checkout_session_passes_selected_billing_interval(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(
+            {
+                "interval": "year",
+                "successUrl": "https://app.pullwise.dev/?screen=billing&billing=success",
+                "cancelUrl": "https://app.pullwise.dev/?screen=billing&billing=cancel",
+            },
+            cookie=cookie,
+        )
+
+        with patch("pullwise_server.billing.create_checkout_session", return_value={"provider": "stripe", "id": "cs_1", "url": "https://checkout.stripe.com/cs/test"}) as create:
+            app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(create.call_args.kwargs["interval"], "year")
+
+    def test_change_interval_requires_signed_in_user_and_returns_provider_result(self) -> None:
+        cookie = seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "stripe",
+            "customerId": "cus_1",
+            "subscriptionId": "sub_1",
+            "subscriptionItemId": "si_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+        }
+        handler = HandlerHarness(
+            {"interval": "year", "returnUrl": "https://app.pullwise.dev/?screen=billing"},
+            cookie=cookie,
+        )
+
+        with patch("pullwise_server.billing.change_subscription_interval", return_value={"provider": "stripe", "url": "https://billing.stripe.com/session", "interval": "year"}) as change:
+            app.PullwiseHandler.handle_post(handler, "/billing/change-interval", {}, ["billing", "change-interval"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["url"], "https://billing.stripe.com/session")
+        self.assertEqual(change.call_args.kwargs["interval"], "year")
+
+    def test_free_plan_blocks_scans_after_monthly_review_limit(self) -> None:
+        cookie = seed_session()
+        authorize_repo_for_seed_user()
+        first = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_1"}, cookie=cookie)
+        second = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_2"}, cookie=cookie)
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_FREE_REVIEW_LIMIT": "1"}, clear=True),
+            patch("pullwise_server.review.selected_provider", return_value="codex"),
+            patch.object(app.worker, "start_scan"),
+        ):
+            app.PullwiseHandler.handle_post(first, "/scans", {}, ["scans"])
+            app.PullwiseHandler.handle_post(second, "/scans", {}, ["scans"])
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
+        self.assertIn("review limit", second.payload["message"].lower())
+        self.assertEqual(app.USERS["usr_1"]["billingUsage"]["used"], 1)
 
     def test_checkout_returns_not_implemented_when_billing_is_disabled(self) -> None:
         cookie = seed_session()

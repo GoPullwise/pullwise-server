@@ -84,8 +84,9 @@ trailing prose. Schema:
   ]
 }
 
-`badCode`, `goodCode`, `references` are optional. Include `badCode`/`goodCode`
-only when `autoFix` is true and you can produce a deterministic patch.
+Always include `badCode`, `goodCode`, and `references` as arrays; use empty
+arrays when not applicable. Populate `badCode`/`goodCode` only when `autoFix`
+is true and you can produce a deterministic patch.
 
 # Severity rubric
 
@@ -346,6 +347,9 @@ def _run_codex(*, repo: str, branch: str, commit: str, repo_path: str | None) ->
         cmd = [
             "codex",
             "exec",
+            "--ignore-user-config",
+            "--config",
+            'model_reasoning_effort="xhigh"',
             "--sandbox",
             "read-only",
             "--output-schema",
@@ -443,24 +447,48 @@ def _looks_like_cli_auth_failure(text: str) -> bool:
 
 
 def _findings_schema() -> dict:
+    code_line = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "ln": {"type": "integer"},
+            "code": {"type": "string"},
+            "t": {"type": ["string", "null"], "enum": ["del", "add", None]},
+        },
+        "required": ["ln", "code", "t"],
+    }
+    reference = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "label": {"type": "string"},
+            "url": {"type": "string"},
+        },
+        "required": ["label", "url"],
+    }
+    finding_properties = {
+        "id": {"type": "string"},
+        "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+        "category": {"type": "string"},
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "impact": {"type": "string"},
+        "file": {"type": "string"},
+        "line": {"type": "integer"},
+        "confidence": {"type": "number"},
+        "autoFix": {"type": "boolean"},
+        "effort": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "steps": {"type": "array", "items": {"type": "string"}},
+        "badCode": {"type": "array", "items": code_line},
+        "goodCode": {"type": "array", "items": code_line},
+        "references": {"type": "array", "items": reference},
+    }
     finding = {
         "type": "object",
-        "additionalProperties": True,
-        "properties": {
-            "id": {"type": "string"},
-            "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
-            "category": {"type": "string"},
-            "title": {"type": "string"},
-            "summary": {"type": "string"},
-            "impact": {"type": "string"},
-            "file": {"type": "string"},
-            "line": {"type": "integer"},
-            "confidence": {"type": "number"},
-            "autoFix": {"type": "boolean"},
-            "effort": {"type": "string"},
-            "tags": {"type": "array", "items": {"type": "string"}},
-            "steps": {"type": "array", "items": {"type": "string"}},
-        },
+        "additionalProperties": False,
+        "properties": finding_properties,
+        "required": list(finding_properties),
     }
     return {
         "type": "object",

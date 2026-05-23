@@ -139,6 +139,9 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_LOG_DIR={shell_path(root / "logs")}
                 PULLWISE_CHECKOUT_ROOT={shell_path(root / "checkouts")}
                 PULLWISE_COOKIE_SECURE=true
+                PULLWISE_RATE_LIMIT_ENABLED=true
+                PULLWISE_RATE_LIMIT_REQUESTS=600
+                PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
                 PULLWISE_GITHUB_CLIENT_ID=client_id
                 PULLWISE_GITHUB_CLIENT_SECRET=client_secret
                 PULLWISE_GITHUB_APP_SLUG=pullwise
@@ -171,6 +174,9 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_LOG_DIR=logs
                 PULLWISE_CHECKOUT_ROOT=checkouts
                 PULLWISE_COOKIE_SECURE=true
+                PULLWISE_RATE_LIMIT_ENABLED=true
+                PULLWISE_RATE_LIMIT_REQUESTS=600
+                PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
                 PULLWISE_GITHUB_CLIENT_ID=client_id
                 PULLWISE_GITHUB_CLIENT_SECRET=client_secret
                 PULLWISE_GITHUB_APP_SLUG=pullwise
@@ -268,6 +274,18 @@ class LauncherContractsTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
         self.assertIn("PULLWISE_ALLOWED_ORIGINS", result.stderr + result.stdout)
         self.assertIn("must not contain wildcard", result.stderr + result.stdout)
+
+    def test_doctor_rejects_disabled_api_rate_limit_in_production(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            env["PULLWISE_RATE_LIMIT_ENABLED"] = "false"
+            self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
+
+            result = self.run_launcher(["doctor"], env)
+
+        self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("PULLWISE_RATE_LIMIT_ENABLED", result.stderr + result.stdout)
 
     def test_config_loads_env_values_with_spaces_without_sourcing_as_shell(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

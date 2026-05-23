@@ -51,6 +51,13 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("ANTHROPIC_API_KEY", values)
         self.assertNotIn("CODEX_API_KEY", values)
 
+    def test_env_example_declares_database_backed_api_rate_limits(self) -> None:
+        values = env_example_values()
+
+        self.assertEqual(values.get("PULLWISE_RATE_LIMIT_ENABLED"), "true")
+        self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
+        self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -92,6 +92,9 @@ PULLWISE_API_BASE_URL=https://app.your-domain.com/api
 PULLWISE_DB_PATH=/data/pullwise.sqlite3
 PULLWISE_LOG_DIR=/data/logs
 PULLWISE_LOG_ROTATION_TIME=00:00
+PULLWISE_RATE_LIMIT_ENABLED=true
+PULLWISE_RATE_LIMIT_REQUESTS=600
+PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
 PULLWISE_MAX_CONCURRENT_SCANS=1
 PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=1
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
@@ -133,6 +136,24 @@ Run verification before deploying:
 . .venv/bin/activate
 python -m unittest discover -s tests
 ```
+
+## API Authentication and Limits
+
+Browser requests use the `pw_session` HTTP-only session cookie. The same opaque
+session id is also accepted as `Authorization: Bearer <session-id>` for REST API
+clients or proxies that prefer bearer forwarding. Existing frontend requests do
+not need to send this header because `pullwise-web` uses credentialed requests.
+
+Endpoints that read or mutate account data require a valid session, whether it
+arrives by cookie or bearer header. Public OAuth callback routes, billing
+webhooks, and `/health` stay callable without a user session, with webhook
+signature verification enforced by the billing provider integration.
+
+When `PULLWISE_RATE_LIMIT_ENABLED=true`, each request is counted in SQLite in
+the `api_rate_limits` table. The limiter keys by signed-in user id when a valid
+session is present, otherwise by client IP address. Defaults are `600` requests
+per `60` seconds. In production mode the limiter is enabled by default unless
+explicitly disabled; local mode leaves it off unless configured.
 
 ### Ubuntu 22.04 launcher
 
@@ -316,8 +337,10 @@ Checkouts are namespaced by user and scan under
 not reused for another user's scan.
 
 The Codex provider uses official non-interactive `codex exec` mode with a
-read-only sandbox, `--output-schema`, and `--output-last-message` so the worker
-can parse structured findings.
+read-only sandbox, `model_reasoning_effort="xhigh"`, `--output-schema`, and
+`--output-last-message` so the worker can parse structured findings. Codex
+continues to own login state and model selection through the CLI account/session
+configuration used by the service account.
 
 On a single machine, keep scan concurrency conservative because Git plus Codex
 or Claude CLI can consume significant CPU and RAM. By default the worker runs
@@ -341,12 +364,16 @@ rate limits.
 
 Pullwise supports either Stripe or Creem. Configure one provider, or set
 `PULLWISE_BILLING_PROVIDER=stripe|creem` if both providers are present.
+The built-in catalog is Free plus Pro. Free defaults to 5 reviews/month.
+Pro defaults to $29/month or $290/year with 100 reviews/month. Monthly review
+allowance resets each calendar month and does not roll over.
 
 Stripe:
 
 ```env
 PULLWISE_STRIPE_SECRET_KEY=sk_live_or_test
-PULLWISE_STRIPE_PRICE_ID=price_...
+PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID=price_...
+PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID=price_...
 PULLWISE_STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
@@ -354,7 +381,8 @@ Creem:
 
 ```env
 PULLWISE_CREEM_API_KEY=creem_key
-PULLWISE_CREEM_PRODUCT_ID=prod_...
+PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID=prod_...
+PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID=prod_...
 PULLWISE_CREEM_WEBHOOK_SECRET=whsec_...
 PULLWISE_CREEM_TEST_MODE=false
 ```
@@ -364,12 +392,37 @@ Implemented billing routes:
 - `GET /billing/plan`
 - `POST /billing/checkout-sessions`
 - `POST /billing/portal-sessions`
+- `POST /billing/change-interval`
 - `POST /webhooks/stripe`
 - `POST /webhooks/creem`
 
 Checkout URLs are created server-side. Webhooks verify Stripe
 `Stripe-Signature` or Creem `creem-signature` before updating account billing
-state.
+state. Stripe monthly-to-yearly changes open a Billing Portal confirmation flow;
+Creem monthly-to-yearly changes use the subscription upgrade endpoint.
+
+## User and Billing State
+
+Runtime state is persisted in SQLite. The current lightweight deployment stores
+logical records in `app_state` JSON payloads plus `api_rate_limits` rows for the
+database-backed limiter. User records contain:
+
+- Basic account: `id`, `name`, `email`, `avatarUrl`, `createdAt`, `providers`
+- GitHub identity: `githubId`, `githubLogin`, `githubHtmlUrl`,
+  `githubAccessToken`, `githubOAuthScope`, `githubAccessTokenUpdatedAt`
+- Repository access: GitHub App installation ids/accounts, repository
+  selection, authorized repository names/items, permission summary, pending
+  authorization state, and sync status
+- Billing: provider, customer id, subscription id/item id, plan, interval,
+  status, period start/end, cancel flags, last processed event metadata, and
+  checkout/session metadata
+- Usage: monthly review usage period, plan, used count, configured limit, and
+  remaining entitlement
+
+The frontend-facing account surface is `GET /auth/session` for login/GitHub
+state and `GET /billing/plan` for plan catalog plus current billing account
+status. Webhooks update billing state idempotently by event id and can queue
+subscription updates until the checkout/customer mapping exists.
 
 ## Cloudflare Worker Boundary
 
@@ -446,6 +499,7 @@ Implemented endpoints:
 - `GET /billing/plan`
 - `POST /billing/checkout-sessions`
 - `POST /billing/portal-sessions`
+- `POST /billing/change-interval`
 - `POST /webhooks/stripe`
 - `POST /webhooks/creem`
 
