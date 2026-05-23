@@ -40,6 +40,7 @@ def load_env_file(path: str | None = None) -> None:
 SESSION_COOKIE = "pw_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7
 GITHUB_STATE_MAX_AGE = 60 * 10
+ISSUE_STATUSES = {"open", "fixed", "snoozed"}
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
@@ -355,6 +356,19 @@ def url_origin(value: str) -> str | None:
     if not parsed.scheme or not parsed.netloc:
         return None
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def trusted_github_web_url(value: object) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    allowed = urlparse(github_auth.github_web_url())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if allowed.netloc and parsed.netloc.lower() != allowed.netloc.lower():
+        return None
+    return raw
 
 
 def safe_redirect_to(value: str | None, screen: str) -> str:
@@ -739,7 +753,7 @@ def unavailable_repositories_payload(github_access: dict) -> dict:
         "repositorySelection": github_access.get("repositorySelection"),
         "installationAccount": github_access.get("installationAccount"),
         "installationAccounts": github_access.get("installationAccounts") or [],
-        "installations": github_access.get("installations") or [],
+        "installations": safe_installation_summaries(github_access.get("installations") or []),
         "repositoriesNeedSync": github_access.get("repositoriesNeedSync", False),
     }
     if github_access.get("repositoriesNeedSync") and not github_auth.app_api_configured():
@@ -764,12 +778,26 @@ def installation_summary_from_access(github_access: dict) -> dict:
         "installationAccount": github_access.get("installationAccount"),
         "installationTargetType": github_access.get("installationTargetType"),
         "installationAppSlug": github_access.get("installationAppSlug"),
-        "installationHtmlUrl": github_access.get("installationHtmlUrl"),
+        "installationHtmlUrl": trusted_github_web_url(github_access.get("installationHtmlUrl")),
         "repositorySelection": github_access.get("repositorySelection"),
         "scope": github_access.get("scope"),
         "repositoryCount": len(github_access.get("repositories") or []),
         "repositoriesNeedSync": bool(github_access.get("repositoriesNeedSync")),
     }
+
+
+def safe_installation_summaries(installations: list[dict]) -> list[dict]:
+    summaries = []
+    for installation in installations:
+        item = dict(installation)
+        safe_url = trusted_github_web_url(
+            item.get("installationHtmlUrl") or item.get("htmlUrl") or item.get("html_url")
+        )
+        item["installationHtmlUrl"] = safe_url
+        item["htmlUrl"] = safe_url
+        item["html_url"] = safe_url
+        summaries.append(item)
+    return summaries
 
 
 def repository_item_with_installation_context(repository_item: dict, github_access: dict) -> dict:
@@ -828,7 +856,7 @@ def github_repository_access_for_installation(
         "installationAccount": account.get("login"),
         "installationTargetType": installation.get("target_type"),
         "installationAppSlug": installation.get("app_slug"),
-        "installationHtmlUrl": installation.get("html_url"),
+        "installationHtmlUrl": trusted_github_web_url(installation.get("html_url")),
         "installationPermissions": installation.get("permissions") or {},
         "repositories": [repo["fullName"] for repo in repository_items],
         "repositoriesNeedSync": not app_api_configured and not repository_items,
@@ -879,7 +907,7 @@ def aggregate_github_repository_access(user: dict, installation_accesses: list[d
         "installationAccounts": unique_accounts,
         "installationTargetType": single_access.get("installationTargetType") if single_access else None,
         "installationAppSlug": single_access.get("installationAppSlug") if single_access else None,
-        "installationHtmlUrl": single_access.get("installationHtmlUrl") if single_access else None,
+        "installationHtmlUrl": trusted_github_web_url(single_access.get("installationHtmlUrl")) if single_access else None,
         "installationPermissions": single_access.get("installationPermissions") if single_access else {},
         "installations": installation_summaries,
         "repositories": [item["fullName"] for item in repository_items],
@@ -1401,7 +1429,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating issue status.")
             issue = self.find_or_404(user_issues(session), segments[1], "Issue")
-            issue["status"] = body.get("status") or issue["status"]
+            next_status = str(body.get("status") or issue["status"])
+            if next_status not in ISSUE_STATUSES:
+                return self.error(HTTPStatus.BAD_REQUEST, "Issue status must be open, fixed, or snoozed.")
+            issue["status"] = next_status
             mark_state_dirty()
             return self.json(issue)
         if len(segments) == 1 and segments[0] == "settings":
@@ -1520,17 +1551,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app-add"})
 
         if manage:
-            if github_repository_access_connected(existing_access) and existing_access.get("installationHtmlUrl"):
+            existing_url = trusted_github_web_url(existing_access.get("installationHtmlUrl") if existing_access else None)
+            if github_repository_access_connected(existing_access) and existing_url:
                 return self.json({
                     "ok": True,
                     "connected": True,
-                    "url": existing_access.get("installationHtmlUrl"),
+                    "url": existing_url,
                     "mode": "github-app-existing-manage",
                     "installationId": existing_access.get("installationId"),
                 })
             existing_installations = existing_access.get("installations") if existing_access else []
+            safe_existing_installations = safe_installation_summaries(existing_installations or [])
             if github_repository_access_connected(existing_access) and any(
-                installation.get("installationHtmlUrl") for installation in existing_installations or []
+                installation.get("installationHtmlUrl") for installation in safe_existing_installations
             ):
                 return self.json({
                     "ok": True,
@@ -1540,7 +1573,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "installationIds": existing_access.get("installationIds") or [],
                     "installationAccount": existing_access.get("installationAccount"),
                     "installationAccounts": existing_access.get("installationAccounts") or [],
-                    "installations": existing_installations or [],
+                    "installations": safe_existing_installations,
                 })
             state = remember_github_repository_authorization(user, redirect_to, scope, manage=True)
             return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
@@ -1553,10 +1586,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "installationId": existing_access.get("installationId"),
             }
             return self.json(payload)
-        if existing_access and existing_access.get("installationHtmlUrl"):
+        existing_url = trusted_github_web_url(existing_access.get("installationHtmlUrl") if existing_access else None)
+        if existing_access and existing_url:
             return self.json({
                 "ok": True,
-                "url": existing_access.get("installationHtmlUrl"),
+                "url": existing_url,
                 "mode": "github-app-existing-pending",
                 "installationId": existing_access.get("installationId"),
             })
@@ -1655,8 +1689,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "installationIds": visible_access.get("installationIds") if visible_access else [],
             "installationAccount": visible_access.get("installationAccount") if visible_access else None,
             "installationAccounts": visible_access.get("installationAccounts") if visible_access else [],
-            "installationHtmlUrl": visible_access.get("installationHtmlUrl") if visible_access else None,
-            "installations": visible_access.get("installations") if visible_access else [],
+            "installationHtmlUrl": trusted_github_web_url(visible_access.get("installationHtmlUrl")) if visible_access else None,
+            "installations": safe_installation_summaries(visible_access.get("installations") if visible_access else []),
             "repositories": visible_access.get("repositories") if visible_access else [],
             "repositoriesNeedSync": visible_access.get("repositoriesNeedSync") if visible_access else False,
         }
@@ -1718,7 +1752,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "repositorySelection": github_access.get("repositorySelection"),
             "installationAccount": github_access.get("installationAccount"),
             "installationAccounts": github_access.get("installationAccounts") or [],
-            "installations": github_access.get("installations") or [],
+            "installations": safe_installation_summaries(github_access.get("installations") or []),
             "repositoriesNeedSync": github_access.get("repositoriesNeedSync", False),
         }
 

@@ -126,6 +126,50 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_issue_status_update_rejects_unknown_status(self) -> None:
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/issues/iss_1/status", {"status": "archived"}, cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "PATCH")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(app.ISSUES[0]["status"], "open")
+
+    def test_github_installation_html_url_must_match_configured_github_host(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            self.assertEqual(
+                app.trusted_github_web_url("https://github.com/settings/installations/123"),
+                "https://github.com/settings/installations/123",
+            )
+            self.assertIsNone(app.trusted_github_web_url("javascript:alert(1)"))
+            self.assertIsNone(app.trusted_github_web_url("https://evil.example/settings/installations/123"))
+
+    def test_installation_summary_drops_untrusted_html_url(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            summary = app.installation_summary_from_access({
+                "installationId": "123",
+                "installationHtmlUrl": "javascript:alert(1)",
+            })
+
+        self.assertIsNone(summary["installationHtmlUrl"])
+
+    def test_safe_installation_summaries_sanitize_legacy_url_aliases(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            summaries = app.safe_installation_summaries([
+                {"installationId": "123", "htmlUrl": "javascript:alert(1)", "html_url": "https://evil.example/install"}
+            ])
+
+        self.assertIsNone(summaries[0]["installationHtmlUrl"])
+        self.assertIsNone(summaries[0]["htmlUrl"])
+        self.assertIsNone(summaries[0]["html_url"])
+
     def test_issue_reads_require_sign_in(self) -> None:
         for path in ["/issues", "/issues/iss_1"]:
             with self.subTest(path=path):

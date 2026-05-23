@@ -111,6 +111,19 @@ class LauncherContractsTest(unittest.TestCase):
         )
         return venv_python, fake_git, fake_codex
 
+    def write_fake_chgrp(self, root: Path) -> tuple[Path, Path]:
+        fake_chgrp = root / "bin" / "chgrp"
+        fake_chgrp.parent.mkdir(parents=True, exist_ok=True)
+        log_file = root / "chgrp.log"
+        write_executable(
+            fake_chgrp,
+            """
+            #!/usr/bin/env sh
+            printf '%s\\n' "$*" >> "$PULLWISE_CHGRP_LOG"
+            """,
+        )
+        return fake_chgrp, log_file
+
     def write_production_env(self, root: Path, *, allowed_origins: str = "https://app.example.com") -> Path:
         env_file = root / "server.env"
         env_file.write_text(
@@ -288,6 +301,25 @@ class LauncherContractsTest(unittest.TestCase):
             self.assertEqual(local_env.read_text(encoding="utf-8"), system_env.read_text(encoding="utf-8"))
             self.assertIn("server.env", result.stdout)
 
+    def test_sync_env_sets_system_env_group_for_service_user(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            fake_chgrp, chgrp_log = self.write_fake_chgrp(root)
+            local_env = root / ".env.local"
+            system_env = root / "etc" / "pullwise" / "server.env"
+            local_env.write_text("PULLWISE_MODE=production\n", encoding="utf-8", newline="\n")
+            env["PULLWISE_LOCAL_ENV_FILE"] = shell_path(local_env)
+            env["PULLWISE_SYSTEM_ENV_FILE"] = shell_path(system_env)
+            env["PULLWISE_CHGRP_BIN"] = shell_path(fake_chgrp)
+            env["PULLWISE_CHGRP_LOG"] = shell_path(chgrp_log)
+            env["PULLWISE_SERVICE_GROUP"] = "pullwise"
+
+            result = self.run_launcher(["sync-env"], env)
+
+            self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+            self.assertIn(f"pullwise {shell_path(system_env)}", chgrp_log.read_text(encoding="utf-8"))
+
     def test_render_service_uses_system_environment_file_and_python_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -420,6 +452,10 @@ class LauncherContractsTest(unittest.TestCase):
             dest_env["PULLWISE_APP_DIR"] = shell_path(dest)
             dest_env["PULLWISE_SYSTEM_ENV_FILE"] = shell_path(dest / "etc" / "pullwise" / "server.env")
             dest_env["PULLWISE_SYSTEMD_DIR"] = shell_path(dest / "systemd")
+            fake_chgrp, chgrp_log = self.write_fake_chgrp(dest)
+            dest_env["PULLWISE_CHGRP_BIN"] = shell_path(fake_chgrp)
+            dest_env["PULLWISE_CHGRP_LOG"] = shell_path(chgrp_log)
+            dest_env["PULLWISE_SERVICE_GROUP"] = "pullwise"
 
             import_result = self.run_launcher(["import", shell_path(archive)], dest_env)
 
@@ -430,6 +466,9 @@ class LauncherContractsTest(unittest.TestCase):
             self.assertEqual("repo", (dest / "checkouts" / "usr" / "scan" / "repo.txt").read_text(encoding="utf-8"))
             self.assertEqual("pem", (dest / "secrets" / "github-app-private-key.pem").read_text(encoding="utf-8"))
             self.assertTrue((dest / "systemd" / "pullwise-server.service").exists())
+            chgrp_calls = chgrp_log.read_text(encoding="utf-8")
+            self.assertIn(f"pullwise {shell_path(dest / 'etc' / 'pullwise' / 'server.env')}", chgrp_calls)
+            self.assertIn(f"pullwise {shell_path(dest / 'secrets' / 'github-app-private-key.pem')}", chgrp_calls)
 
     def test_import_rejects_archive_with_path_traversal_members(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

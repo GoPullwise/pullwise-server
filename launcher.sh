@@ -290,6 +290,21 @@ tar_bin() {
   tool_bin PULLWISE_TAR_BIN tar || printf '%s' tar
 }
 
+chgrp_bin() {
+  tool_bin PULLWISE_CHGRP_BIN chgrp || true
+}
+
+set_service_group_readable_file() {
+  file=$1
+  chgrp_cmd=$(chgrp_bin)
+  if [ -n "$chgrp_cmd" ]; then
+    "$chgrp_cmd" "$SERVICE_GROUP" "$file" 2>/dev/null || warn "could not set group $SERVICE_GROUP on $file"
+  else
+    warn "chgrp not found; could not set group $SERVICE_GROUP on $file"
+  fi
+  chmod 640 "$file" 2>/dev/null || warn "could not chmod 640 $file"
+}
+
 ensure_runtime_dirs() {
   mkdir -p "$RUN_DIR" || die "Unable to create run directory: $RUN_DIR"
   mkdir -p "$(dirname -- "$(db_path)")" || die "Unable to create database directory: $(dirname -- "$(db_path)")"
@@ -431,7 +446,7 @@ cmd_sync_env() {
 
   mkdir -p "$(dirname -- "$SYSTEM_ENV_FILE")" || die "Unable to create $(dirname -- "$SYSTEM_ENV_FILE")"
   cp "$LOCAL_ENV_FILE" "$SYSTEM_ENV_FILE" || die "Unable to copy env to $SYSTEM_ENV_FILE"
-  chmod 640 "$SYSTEM_ENV_FILE" 2>/dev/null || warn "could not chmod 640 $SYSTEM_ENV_FILE"
+  set_service_group_readable_file "$SYSTEM_ENV_FILE"
   ok "synced $LOCAL_ENV_FILE -> $SYSTEM_ENV_FILE"
 }
 
@@ -1272,7 +1287,7 @@ restore_secret_file() {
     fi
   fi
   if [ -f "$key_dest" ]; then
-    chmod 640 "$key_dest" 2>/dev/null || warn "could not chmod 640 $key_dest"
+    set_service_group_readable_file "$key_dest"
   fi
 }
 
@@ -1345,7 +1360,7 @@ cmd_import() {
 
   mkdir -p "$(dirname -- "$SYSTEM_ENV_FILE")" || die "Unable to create $(dirname -- "$SYSTEM_ENV_FILE")"
   cp "$imported_env" "$SYSTEM_ENV_FILE" || die "Unable to restore env file to $SYSTEM_ENV_FILE"
-  chmod 640 "$SYSTEM_ENV_FILE" 2>/dev/null || warn "could not chmod 640 $SYSTEM_ENV_FILE"
+  set_service_group_readable_file "$SYSTEM_ENV_FILE"
 
   restore_data_files "$extracted" "$imported_env"
   restore_secret_file "$extracted" "$imported_env"
