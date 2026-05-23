@@ -141,6 +141,29 @@ class CheckoutContractsTest(unittest.TestCase):
                         action="status",
                     )
 
+    def test_run_git_decodes_subprocess_output_as_utf8_with_replacement(self) -> None:
+        class FakeProcess:
+            returncode = 0
+
+            def communicate(self, timeout: float) -> tuple[str, str]:
+                return "", ""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False),
+                patch("pullwise_server.checkout.subprocess.Popen", return_value=FakeProcess()) as popen,
+            ):
+                checkout.run_git(
+                    ["git", "status"],
+                    cwd=tmpdir,
+                    extra_env={},
+                    is_cancelled=lambda: False,
+                    action="status",
+                )
+
+        self.assertEqual(popen.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(popen.call_args.kwargs["errors"], "replace")
+
     def test_repository_authorization_requires_explicit_repo_match(self) -> None:
         self.assertFalse(app.repository_is_authorized(None, "owner/repo"))
         self.assertFalse(app.repository_is_authorized({"repositoriesNeedSync": True}, "owner/repo"))

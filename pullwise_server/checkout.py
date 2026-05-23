@@ -136,6 +136,8 @@ def run_git(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     while True:
         try:
@@ -201,10 +203,41 @@ def path_in_scan_workspace(path: str, user_id: str, scan_id: str) -> bool:
 def remove_existing_checkout(path: str) -> None:
     root_abs = os.path.abspath(checkout_root())
     path_abs = os.path.abspath(path)
-    if os.path.normcase(os.path.commonpath([root_abs, path_abs])) != os.path.normcase(root_abs):
+    try:
+        common = os.path.commonpath([root_abs, path_abs])
+    except ValueError:
+        common = ""
+    if (
+        os.path.normcase(common) != os.path.normcase(root_abs)
+        or os.path.normcase(path_abs) == os.path.normcase(root_abs)
+    ):
         raise RuntimeError("Refusing to remove a checkout outside PULLWISE_CHECKOUT_ROOT.")
     if os.path.exists(path_abs):
         shutil.rmtree(path_abs)
+
+
+def cleanup_scan_workspace(user_id: str, scan_id: str) -> None:
+    workspace = workspace_path_for(user_id, scan_id)
+    remove_existing_checkout(workspace)
+    remove_empty_checkout_parent(os.path.dirname(workspace))
+
+
+def remove_empty_checkout_parent(path: str) -> None:
+    root_abs = os.path.abspath(checkout_root())
+    path_abs = os.path.abspath(path)
+    try:
+        common = os.path.commonpath([root_abs, path_abs])
+    except ValueError:
+        return
+    if (
+        os.path.normcase(common) != os.path.normcase(root_abs)
+        or os.path.normcase(path_abs) == os.path.normcase(root_abs)
+    ):
+        return
+    try:
+        os.rmdir(path_abs)
+    except OSError:
+        pass
 
 
 def checkout_root() -> str:

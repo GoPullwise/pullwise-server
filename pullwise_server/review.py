@@ -23,6 +23,8 @@ import subprocess
 import tempfile
 import time
 
+from . import scan_logging
+
 
 CHECKOUT_PROVIDERS = {"claude_code", "codex"}
 DEFAULT_PROVIDER = "disabled"
@@ -146,24 +148,63 @@ def run_review(
     worker does not need to reshape provider output.
     """
     chosen = selected_provider(provider)
-    if chosen == "disabled":
-        raise RuntimeError(
-            "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER "
-            "to claude_code or codex for real scans. Use mock only for explicit local wire-up."
-        )
-    if chosen == "mock":
-        raw = _run_mock(repo=repo, branch=branch, commit=commit)
-    elif chosen == "claude_code":
-        raw = _run_claude_code(repo=repo, branch=branch, commit=commit, repo_path=repo_path)
-    elif chosen == "codex":
-        raw = _run_codex(repo=repo, branch=branch, commit=commit, repo_path=repo_path)
-    else:
-        raise ValueError(f"Unknown PULLWISE_REVIEW_PROVIDER: {chosen}")
+    started_at = time.monotonic()
+    scan_logging.log_event(
+        "review_provider_started",
+        scanId=scan_id,
+        userId=user_id,
+        repo=repo,
+        branch=branch,
+        commit=commit,
+        provider=chosen,
+        checkoutRequired=provider_requires_checkout(chosen),
+        repoPath=repo_path,
+    )
+    try:
+        if chosen == "disabled":
+            raise RuntimeError(
+                "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER "
+                "to claude_code or codex for real scans. Use mock only for explicit local wire-up."
+            )
+        if chosen == "mock":
+            raw = _run_mock(repo=repo, branch=branch, commit=commit)
+        elif chosen == "claude_code":
+            raw = _run_claude_code(repo=repo, branch=branch, commit=commit, repo_path=repo_path)
+        elif chosen == "codex":
+            raw = _run_codex(repo=repo, branch=branch, commit=commit, repo_path=repo_path)
+        else:
+            raise ValueError(f"Unknown PULLWISE_REVIEW_PROVIDER: {chosen}")
 
-    return [
-        _finalize_finding(finding, user_id=user_id, scan_id=scan_id, repo=repo)
-        for finding in raw
-    ]
+        findings = [
+            _finalize_finding(finding, user_id=user_id, scan_id=scan_id, repo=repo)
+            for finding in raw
+        ]
+        scan_logging.log_event(
+            "review_provider_completed",
+            scanId=scan_id,
+            userId=user_id,
+            repo=repo,
+            branch=branch,
+            commit=commit,
+            provider=chosen,
+            rawFindingCount=len(raw),
+            finalizedFindingCount=len(findings),
+            durationMs=int((time.monotonic() - started_at) * 1000),
+        )
+        return findings
+    except Exception as exc:
+        scan_logging.log_event(
+            "review_provider_failed",
+            scanId=scan_id,
+            userId=user_id,
+            repo=repo,
+            branch=branch,
+            commit=commit,
+            provider=chosen,
+            durationMs=int((time.monotonic() - started_at) * 1000),
+            error=str(exc)[:500],
+        )
+        raise
 
 
 def selected_provider(provider: str | None = None) -> str:
@@ -389,6 +430,8 @@ def _run_cli_provider(
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )

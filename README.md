@@ -360,6 +360,20 @@ waiting and when it moves to running.
 Raise those values only after sizing CPU, RAM, checkout storage, and provider
 rate limits.
 
+Scan/review flow tracing is enabled by default through the server logger named
+`pullwise_server.scan`. Events are emitted as single-line JSON payloads for
+queue claim, phase start/completion, checkout readiness, provider dispatch,
+finding counts, failures, cancellation, cleanup, and completion. They go to the
+same console and daily log files configured by `PULLWISE_LOG_DIR`.
+
+Disable scan trace logs without changing code:
+
+```env
+PULLWISE_SCAN_LOGS_ENABLED=false
+```
+
+The disable switch also accepts `0`, `no`, `off`, or `disabled`.
+
 ## Billing Setup
 
 Pullwise supports either Stripe or Creem. Configure one provider, or set

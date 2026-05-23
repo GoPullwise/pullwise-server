@@ -13,7 +13,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import billing, db, github_auth, logging_config, review, worker
+from . import billing, db, github_auth, logging_config, review, scan_logging, worker
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -1576,11 +1576,43 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             mark_state_dirty()
 
             if scan_error:
+                scan_logging.log_event(
+                    "scan_create_rejected",
+                    userId=session["userId"],
+                    repo=repository,
+                    provider=review.selected_provider(),
+                    httpStatus=int(scan_error[0]),
+                    reason=scan_error[1],
+                    requestId=request_id or None,
+                )
                 return self.error(scan_error[0], scan_error[1])
             if scan is None:
                 return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to create scan.")
             if scan_created:
+                scan_logging.log_event(
+                    "scan_queued",
+                    scanId=scan["id"],
+                    userId=scan.get("userId"),
+                    repo=scan.get("repo"),
+                    branch=scan.get("branch"),
+                    commit=scan.get("commit"),
+                    provider=review.selected_provider(),
+                    requestId=scan.get("requestId"),
+                    installationId=scan.get("installationId"),
+                )
                 worker.start_scan(scan["id"])
+            else:
+                scan_logging.log_event(
+                    "scan_request_reused",
+                    scanId=scan.get("id"),
+                    userId=scan.get("userId"),
+                    repo=scan.get("repo"),
+                    branch=scan.get("branch"),
+                    commit=scan.get("commit"),
+                    provider=review.selected_provider(),
+                    requestId=request_id or None,
+                    status=scan.get("status"),
+                )
             return self.json(scan_payload(scan), HTTPStatus.CREATED if scan_created else HTTPStatus.OK)
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
             session = self.current_session()

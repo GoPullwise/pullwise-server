@@ -167,6 +167,100 @@ class ScanQueueTest(unittest.TestCase):
         self.assertEqual(payload["queue"]["reason"], "waiting_for_turn")
         self.assertIn("1 scan ahead", payload["queue"]["message"])
 
+    def test_execute_scan_cleans_checkout_workspace_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "sc_success", "owner/repo")
+                os.makedirs(repo_path, exist_ok=True)
+                workspace = checkout.workspace_path_for("usr_1", "sc_success")
+                app.SCANS = [self._running_scan("sc_success")]
+
+                with (
+                    patch("pullwise_server.worker.time.sleep"),
+                    patch.object(worker.review, "provider_requires_checkout", return_value=True),
+                    patch.object(worker.checkout, "prepare_checkout", return_value=repo_path),
+                    patch.object(worker.review, "run_review", return_value=[]),
+                ):
+                    worker._execute_scan("sc_success", self._snapshot("sc_success"), 100)
+
+                self.assertFalse(os.path.exists(workspace))
+
+        self.assertEqual(app.SCANS[0]["status"], "done")
+        self.assertIsNone(app.SCANS[0].get("repoPath"))
+
+    def test_execute_scan_cleans_checkout_workspace_after_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "sc_failure", "owner/repo")
+                os.makedirs(repo_path, exist_ok=True)
+                workspace = checkout.workspace_path_for("usr_1", "sc_failure")
+                app.SCANS = [self._running_scan("sc_failure")]
+
+                with (
+                    patch("pullwise_server.worker.time.sleep"),
+                    patch("pullwise_server.worker.traceback.print_exc"),
+                    patch.object(worker.review, "provider_requires_checkout", return_value=True),
+                    patch.object(worker.checkout, "prepare_checkout", return_value=repo_path),
+                    patch.object(worker.review, "run_review", side_effect=RuntimeError("ai failed")),
+                ):
+                    worker._execute_scan("sc_failure", self._snapshot("sc_failure"), 100)
+
+                self.assertFalse(os.path.exists(workspace))
+
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertIn("ai failed", app.SCANS[0]["error"])
+        self.assertIsNone(app.SCANS[0].get("repoPath"))
+
+    def test_execute_scan_cleans_checkout_workspace_after_cancellation(self) -> None:
+        def cancel_checkout(*_args: object, **_kwargs: object) -> str:
+            app.SCANS[0]["status"] = "cancelled"
+            raise checkout.CheckoutCancelled()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "sc_cancelled", "owner/repo")
+                os.makedirs(repo_path, exist_ok=True)
+                workspace = checkout.workspace_path_for("usr_1", "sc_cancelled")
+                app.SCANS = [self._running_scan("sc_cancelled")]
+
+                with (
+                    patch("pullwise_server.worker.time.sleep"),
+                    patch.object(worker.review, "provider_requires_checkout", return_value=True),
+                    patch.object(worker.checkout, "prepare_checkout", side_effect=cancel_checkout),
+                ):
+                    worker._execute_scan("sc_cancelled", self._snapshot("sc_cancelled"), 100)
+
+                self.assertFalse(os.path.exists(workspace))
+
+        self.assertEqual(app.SCANS[0]["status"], "cancelled")
+        self.assertIsNone(app.SCANS[0].get("repoPath"))
+
+    def _running_scan(self, scan_id: str) -> dict:
+        return {
+            "id": scan_id,
+            "userId": "usr_1",
+            "repo": "owner/repo",
+            "branch": "main",
+            "commit": "pending",
+            "status": "running",
+            "createdAt": 100,
+            "startedAt": 100,
+            "repoPath": None,
+        }
+
+    def _snapshot(self, scan_id: str) -> dict:
+        return {
+            "id": scan_id,
+            "userId": "usr_1",
+            "repo": "owner/repo",
+            "branch": "main",
+            "commit": "pending",
+            "installationId": "123",
+            "cloneUrl": "https://github.com/owner/repo.git",
+            "repoPath": None,
+            "startedAt": 100,
+        }
+
 
 if __name__ == "__main__":
     unittest.main()

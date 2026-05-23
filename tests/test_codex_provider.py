@@ -59,6 +59,8 @@ class CodexProviderTest(unittest.TestCase):
         self.assertIn("--output-last-message", cmd)
         self.assertIn("--output-schema", cmd)
         self.assertEqual(captured["kwargs"]["cwd"], "F:\\tmp\\repo")
+        self.assertEqual(captured["kwargs"]["encoding"], "utf-8")
+        self.assertEqual(captured["kwargs"]["errors"], "replace")
 
     def test_codex_provider_resolves_path_shim_before_subprocess(self) -> None:
         captured = {}
