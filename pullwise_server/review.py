@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import tempfile
 import time
@@ -305,6 +306,7 @@ def _run_claude_code(*, repo: str, branch: str, commit: str, repo_path: str | No
     completed = _run_cli_provider(
         provider_label="Claude Code",
         executable="claude",
+        bin_env_var="PULLWISE_CLAUDE_BIN",
         login_command="claude login",
         cmd=cmd,
         cwd=repo_path,
@@ -355,6 +357,7 @@ def _run_codex(*, repo: str, branch: str, commit: str, repo_path: str | None) ->
         completed = _run_cli_provider(
             provider_label="Codex",
             executable="codex",
+            bin_env_var="PULLWISE_CODEX_BIN",
             login_command="codex login",
             cmd=cmd,
             cwd=repo_path,
@@ -369,14 +372,16 @@ def _run_cli_provider(
     *,
     provider_label: str,
     executable: str,
+    bin_env_var: str,
     login_command: str,
     cmd: list[str],
     cwd: str,
 ) -> subprocess.CompletedProcess[str]:
     timeout = int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600"))
+    resolved_cmd = [_resolve_cli_executable(executable, bin_env_var), *cmd[1:]]
     try:
         completed = subprocess.run(
-            cmd,
+            resolved_cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -408,6 +413,13 @@ def _run_cli_provider(
     raise ReviewProviderError(
         f"{provider_label} review failed (exit {completed.returncode}). Detail: {detail}"
     )
+
+
+def _resolve_cli_executable(executable: str, bin_env_var: str) -> str:
+    configured = os.environ.get(bin_env_var, "").strip()
+    if configured:
+        return configured
+    return shutil.which(executable) or executable
 
 
 def _cli_output_snippet(stdout: str | None, stderr: str | None) -> str:

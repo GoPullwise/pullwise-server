@@ -505,6 +505,15 @@ def user_scans(session: dict | None) -> list[dict]:
     return [scan for scan in SCANS if scan.get("userId") == session["userId"]]
 
 
+def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
+    if not request_id:
+        return None
+    for scan in SCANS:
+        if scan.get("userId") == user_id and scan.get("requestId") == request_id:
+            return scan
+    return None
+
+
 def scan_payload(scan: dict) -> dict:
     payload = dict(scan)
     queue = scan_queue_payload(scan)
@@ -1322,8 +1331,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
                 )
+            request_id = str(body.get("requestId") or body.get("idempotencyKey") or "").strip()[:128]
             scan_error: tuple[int, str] | None = None
             scan = None
+            scan_created = False
             with STATE_LOCK:
                 user = USERS.get(session["userId"]) or {}
                 github_access = user.get("githubRepositoryAccess")
@@ -1338,36 +1349,42 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 elif not repository_is_authorized(github_access, repository):
                     scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
                 else:
-                    repo_meta = repository_item(github_access, repository) or {}
-                    scan = {
-                        "id": make_id("sc"),
-                        "repo": repository,
-                        "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
-                        "commit": body.get("commit") or "pending",
-                        "status": "queued",
-                        "userId": session["userId"],
-                        "createdAt": now(),
-                        "queuedAt": now(),
-                        "progress": 0,
-                        "phase": None,
-                        "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                        "installationId": repo_meta.get("installationId") or github_access.get("installationId"),
-                        "installationAccount": repo_meta.get("installationAccount") or github_access.get("installationAccount"),
-                        "repositorySelection": repo_meta.get("repositorySelection") or github_access.get("repositorySelection"),
-                        "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
-                        "repositoryPrivate": bool(repo_meta.get("private")),
-                        "repoPath": None,
-                        "by": "you",
-                    }
-                    SCANS.insert(0, scan)
-                    mark_state_dirty()
+                    scan = user_scan_by_request_id(session["userId"], request_id)
+                    if scan is None:
+                        repo_meta = repository_item(github_access, repository) or {}
+                        scan = {
+                            "id": make_id("sc"),
+                            "repo": repository,
+                            "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
+                            "commit": body.get("commit") or "pending",
+                            "status": "queued",
+                            "userId": session["userId"],
+                            "createdAt": now(),
+                            "queuedAt": now(),
+                            "progress": 0,
+                            "phase": None,
+                            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                            "installationId": repo_meta.get("installationId") or github_access.get("installationId"),
+                            "installationAccount": repo_meta.get("installationAccount") or github_access.get("installationAccount"),
+                            "repositorySelection": repo_meta.get("repositorySelection") or github_access.get("repositorySelection"),
+                            "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
+                            "repositoryPrivate": bool(repo_meta.get("private")),
+                            "repoPath": None,
+                            "by": "you",
+                        }
+                        if request_id:
+                            scan["requestId"] = request_id
+                        SCANS.insert(0, scan)
+                        scan_created = True
+                        mark_state_dirty()
 
             if scan_error:
                 return self.error(scan_error[0], scan_error[1])
             if scan is None:
                 return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to create scan.")
-            worker.start_scan(scan["id"])
-            return self.json(scan_payload(scan), HTTPStatus.CREATED)
+            if scan_created:
+                worker.start_scan(scan["id"])
+            return self.json(scan_payload(scan), HTTPStatus.CREATED if scan_created else HTTPStatus.OK)
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
             session = self.current_session()
             if not session:
