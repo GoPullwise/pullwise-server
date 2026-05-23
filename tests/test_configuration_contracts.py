@@ -28,6 +28,12 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotEqual(values.get("PULLWISE_ENABLE_DEV_MAGIC_LINKS"), "true")
         self.assertNotEqual(values.get("PULLWISE_REVIEW_PROVIDER"), "mock")
 
+    def test_env_example_does_not_require_cli_api_keys(self) -> None:
+        values = env_example_values()
+
+        self.assertNotIn("ANTHROPIC_API_KEY", values)
+        self.assertNotIn("CODEX_API_KEY", values)
+
 
 if __name__ == "__main__":
     unittest.main()

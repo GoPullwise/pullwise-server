@@ -36,6 +36,69 @@ class CodexProviderTest(unittest.TestCase):
         self.assertIn("--output-schema", cmd)
         self.assertEqual(captured["kwargs"]["cwd"], "F:\\tmp\\repo")
 
+    def test_codex_provider_reports_missing_cli(self) -> None:
+        with patch("pullwise_server.review.subprocess.run", side_effect=FileNotFoundError()):
+            with self.assertRaisesRegex(RuntimeError, "Codex CLI is not installed"):
+                review._run_codex(
+                    repo="owner/repo",
+                    branch="main",
+                    commit="pending",
+                    repo_path="F:\\tmp\\repo",
+                )
+
+    def test_codex_provider_reports_missing_cli_login(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["codex"],
+            1,
+            stdout="",
+            stderr="not logged in; run codex login",
+        )
+
+        with patch("pullwise_server.review.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "Run `codex login`"):
+                review._run_codex(
+                    repo="owner/repo",
+                    branch="main",
+                    commit="pending",
+                    repo_path="F:\\tmp\\repo",
+                )
+
+    def test_codex_provider_reports_timeout(self) -> None:
+        error = subprocess.TimeoutExpired(["codex"], timeout=5)
+
+        with patch("pullwise_server.review.subprocess.run", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "timed out after 5 seconds"):
+                review._run_codex(
+                    repo="owner/repo",
+                    branch="main",
+                    commit="pending",
+                    repo_path="F:\\tmp\\repo",
+                )
+
+    def test_codex_provider_reports_invalid_json(self) -> None:
+        completed = subprocess.CompletedProcess(["codex"], 0, stdout="not json", stderr="")
+
+        with patch("pullwise_server.review.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "valid JSON"):
+                review._run_codex(
+                    repo="owner/repo",
+                    branch="main",
+                    commit="pending",
+                    repo_path="F:\\tmp\\repo",
+                )
+
+
+class ClaudeCodeProviderTest(unittest.TestCase):
+    def test_claude_code_provider_reports_missing_cli(self) -> None:
+        with patch("pullwise_server.review.subprocess.run", side_effect=FileNotFoundError()):
+            with self.assertRaisesRegex(RuntimeError, "Claude Code CLI is not installed"):
+                review._run_claude_code(
+                    repo="owner/repo",
+                    branch="main",
+                    commit="pending",
+                    repo_path="F:\\tmp\\repo",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

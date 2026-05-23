@@ -27,6 +27,10 @@ CHECKOUT_PROVIDERS = {"claude_code", "codex"}
 DEFAULT_PROVIDER = "disabled"
 
 
+class ReviewProviderError(RuntimeError):
+    """Expected review-provider failure that should be shown as a scan error."""
+
+
 SYSTEM_PROMPT = """\
 You are Pullwise's code review agent. Read the repository you are placed in
 and emit a structured report of issues. You are running in an isolated
@@ -282,7 +286,7 @@ def _run_claude_code(*, repo: str, branch: str, commit: str, repo_path: str | No
 
     Wire-up checklist:
       1. Install: `npm install -g @anthropic-ai/claude-code`.
-      2. Provide ANTHROPIC_API_KEY in the server env.
+      2. Log in with the Claude Code CLI as the OS user running Pullwise.
       3. Ensure the worker has GitHub App credentials; it clones the selected
          repository and passes repo_path before invoking review.
       4. Verify the CLI accepts the system prompt via `--append-system-prompt`
@@ -298,18 +302,13 @@ def _run_claude_code(*, repo: str, branch: str, commit: str, repo_path: str | No
         "--append-system-prompt", SYSTEM_PROMPT,
         USER_PROMPT_TEMPLATE.format(repo=repo, branch=branch, commit=commit, repo_path=repo_path),
     ]
-    completed = subprocess.run(
-        cmd,
+    completed = _run_cli_provider(
+        provider_label="Claude Code",
+        executable="claude",
+        login_command="claude login",
+        cmd=cmd,
         cwd=repo_path,
-        capture_output=True,
-        text=True,
-        timeout=int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600")),
-        check=False,
     )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"Claude Code review failed (exit {completed.returncode}): {completed.stderr.strip()[:500]}"
-        )
     return _parse_findings_json(completed.stdout)
 
 
@@ -321,7 +320,7 @@ def _run_codex(*, repo: str, branch: str, commit: str, repo_path: str | None) ->
 
     Wire-up checklist:
       1. Install Codex per its docs and confirm `codex --version` works.
-      2. Provide the auth token expected by Codex in the server env.
+      2. Log in with the Codex CLI as the OS user running Pullwise.
       3. Ensure the worker has GitHub App credentials; it clones the selected
          repository and passes repo_path before invoking review.
       4. Uses official non-interactive `codex exec` mode with read-only
@@ -353,22 +352,82 @@ def _run_codex(*, repo: str, branch: str, commit: str, repo_path: str | None) ->
             output_path,
             prompt,
         ]
-        completed = subprocess.run(
-            cmd,
+        completed = _run_cli_provider(
+            provider_label="Codex",
+            executable="codex",
+            login_command="codex login",
+            cmd=cmd,
             cwd=repo_path,
-            capture_output=True,
-            text=True,
-            timeout=int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600")),
-            check=False,
         )
-        if completed.returncode != 0:
-            raise RuntimeError(
-                f"Codex review failed (exit {completed.returncode}): {completed.stderr.strip()[:500]}"
-            )
         if os.path.exists(output_path):
             with open(output_path, "r", encoding="utf-8") as output_file:
                 return _parse_findings_json(output_file.read())
         return _parse_findings_json(completed.stdout)
+
+
+def _run_cli_provider(
+    *,
+    provider_label: str,
+    executable: str,
+    login_command: str,
+    cmd: list[str],
+    cwd: str,
+) -> subprocess.CompletedProcess[str]:
+    timeout = int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600"))
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise ReviewProviderError(
+            f"{provider_label} CLI is not installed or not on PATH. "
+            f"Install it, confirm `{executable} --version` works, then restart Pullwise."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        elapsed = int(exc.timeout or timeout)
+        raise ReviewProviderError(
+            f"{provider_label} review timed out after {elapsed} seconds. "
+            "Increase PULLWISE_REVIEW_TIMEOUT_SECONDS or retry with a smaller repository."
+        ) from exc
+
+    if completed.returncode == 0:
+        return completed
+
+    detail = _cli_output_snippet(completed.stdout, completed.stderr)
+    if _looks_like_cli_auth_failure(detail):
+        raise ReviewProviderError(
+            f"{provider_label} CLI is not authenticated. Run `{login_command}` "
+            "as the same OS user/session that runs Pullwise, then retry the scan. "
+            f"Detail: {detail}"
+        )
+    raise ReviewProviderError(
+        f"{provider_label} review failed (exit {completed.returncode}). Detail: {detail}"
+    )
+
+
+def _cli_output_snippet(stdout: str | None, stderr: str | None) -> str:
+    text = "\n".join(part.strip() for part in [stderr or "", stdout or ""] if part and part.strip())
+    return (text or "no output")[:500]
+
+
+def _looks_like_cli_auth_failure(text: str) -> bool:
+    lowered = text.lower()
+    markers = [
+        "not logged in",
+        "not authenticated",
+        "authentication",
+        "unauthorized",
+        "login required",
+        "please login",
+        "please log in",
+        "api key",
+    ]
+    return any(marker in lowered for marker in markers)
 
 
 def _findings_schema() -> dict:
@@ -411,6 +470,12 @@ def _parse_findings_json(raw: str) -> list[dict]:
     open_brace = text.find("{")
     if open_brace > 0:
         text = text[open_brace:]
-    document = json.loads(text)
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ReviewProviderError(
+            "Review provider did not return valid JSON findings. "
+            f"Detail: {_cli_output_snippet(text, None)}"
+        ) from exc
     findings = document.get("findings") if isinstance(document, dict) else None
     return findings if isinstance(findings, list) else []

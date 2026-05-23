@@ -211,13 +211,13 @@ mode with `PULLWISE_ENABLE_DEV_MAGIC_LINKS=true`.
 
 The scan worker defaults to disabled review provider mode so scans do not create
 synthetic findings by accident. For a real agent run, install `git` plus either
-Claude Code or Codex CLI.
+Claude Code or Codex CLI, then log in with that CLI as the same OS user/session
+that runs Pullwise.
 
 Claude Code:
 
 ```env
 PULLWISE_REVIEW_PROVIDER=claude_code
-ANTHROPIC_API_KEY=your_key
 PULLWISE_CHECKOUT_ROOT=F:\tmp\pullwise-checkouts
 ```
 
@@ -225,7 +225,6 @@ Codex:
 
 ```env
 PULLWISE_REVIEW_PROVIDER=codex
-CODEX_API_KEY=your_key
 PULLWISE_CHECKOUT_ROOT=F:\tmp\pullwise-checkouts
 ```
 
