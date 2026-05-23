@@ -69,6 +69,11 @@ def seed_session() -> str:
 
 
 class BillingRoutesTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.persist_patcher = patch.object(app, "persist_state")
+        self.persist_patcher.start()
+        self.addCleanup(self.persist_patcher.stop)
+
     def test_billing_plan_exposes_selected_provider(self) -> None:
         handler = HandlerHarness()
         with patch.dict(

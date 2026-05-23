@@ -324,9 +324,9 @@ def list_current_app_installations_for_user(user_access_token: str | None) -> li
 
 
 def installation_matches_configured_app(installation: dict, configured_slug: str, configured_app_id: str) -> bool:
-    installation_slug = str(installation.get("app_slug") or "")
+    installation_slug = str(installation.get("app_slug") or "").casefold()
     installation_app_id = str(installation.get("app_id") or "")
-    if configured_slug and installation_slug == configured_slug:
+    if configured_slug and installation_slug == configured_slug.casefold():
         return True
     return bool(configured_app_id and installation_app_id == str(configured_app_id))
 
@@ -394,6 +394,7 @@ def installation_to_dict(installation) -> dict:
         "target_type": getattr(installation, "target_type", None),
         "account": {"login": getattr(account, "login", None)} if account else {},
         "app_slug": getattr(installation, "app_slug", None),
+        "app_id": getattr(installation, "app_id", None),
         "html_url": getattr(installation, "html_url", None),
         "permissions": permission_levels_to_dict(getattr(installation, "permissions", None)),
     }

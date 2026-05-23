@@ -75,6 +75,41 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(payload["html_url"], "https://github.com/settings/installations/123")
         self.assertEqual(payload["permissions"]["contents"], "read")
 
+    def test_list_current_app_installations_matches_pygithub_installations_by_app_id(self) -> None:
+        account = Mock()
+        account.login = "octocat"
+        installation = Mock()
+        installation.id = 123
+        installation.repository_selection = "selected"
+        installation.target_type = "User"
+        installation.account = account
+        installation.app_slug = None
+        installation.app_id = 456
+        installation.html_url = "https://github.com/settings/installations/123"
+        installation.permissions = {"metadata": "read", "contents": "read"}
+        user = Mock()
+        user.get_installations.return_value = [installation]
+        github = Mock()
+        github.get_user.return_value = user
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_GITHUB_APP_ID": "456"}, clear=True),
+            patch.object(github_auth, "github_client", return_value=github),
+        ):
+            installations = github_auth.list_current_app_installations_for_user("gho_user")
+
+        self.assertEqual([item["id"] for item in installations], [123])
+        github.close.assert_called_once()
+
+    def test_installation_matches_configured_app_slug_case_insensitively(self) -> None:
+        self.assertTrue(
+            github_auth.installation_matches_configured_app(
+                {"app_slug": "gopullwise", "app_id": "456"},
+                "GoPullwise",
+                "",
+            )
+        )
+
     def test_list_installation_repositories_uses_official_installation_repositories_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {

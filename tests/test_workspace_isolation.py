@@ -44,6 +44,9 @@ class WorkspaceIsolationTest(unittest.TestCase):
 
 class ScanQueueTest(unittest.TestCase):
     def setUp(self) -> None:
+        self.persist_patcher = patch.object(app, "persist_state")
+        self.persist_patcher.start()
+        self.addCleanup(self.persist_patcher.stop)
         app.STATE_LOADED = True
         app.STATE_DIRTY = False
         app.ISSUES = []
