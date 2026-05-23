@@ -286,6 +286,61 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["cloneUrl"], "https://github.com/acme/service.git")
         start_scan.assert_called_once()
 
+    def test_scan_creation_is_idempotent_for_repeated_request_id(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": "111",
+            "repositories": ["owner/repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_1",
+                    "name": "repo",
+                    "fullName": "owner/repo",
+                    "installationId": "111",
+                    "defaultBranch": "main",
+                    "cloneUrl": "https://github.com/owner/repo.git",
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+
+        first = RouteHarness(
+            "/scans",
+            {"repo": "owner/repo", "requestId": "scan_req_1"},
+            cookie="pw_session=ses_1",
+        )
+        second = RouteHarness(
+            "/scans",
+            {"repo": "owner/repo", "requestId": "scan_req_1"},
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
+            patch.object(app.worker, "start_scan") as start_scan,
+        ):
+            app.PullwiseHandler.route(first, "POST")
+            app.PullwiseHandler.route(second, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertEqual(first.payload["id"], second.payload["id"])
+        self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_1"]), 1)
+        start_scan.assert_called_once_with(first.payload["id"])
+
     def test_scan_creation_rejects_repository_access_that_needs_sync_even_with_stale_repo_names(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

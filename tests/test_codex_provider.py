@@ -19,7 +19,10 @@ class CodexProviderTest(unittest.TestCase):
                 output_file.write('{"findings":[]}')
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        with patch("pullwise_server.review.subprocess.run", side_effect=fake_run):
+        with (
+            patch("pullwise_server.review.shutil.which", return_value=None),
+            patch("pullwise_server.review.subprocess.run", side_effect=fake_run),
+        ):
             findings = review._run_codex(
                 repo="owner/repo",
                 branch="main",
@@ -35,6 +38,57 @@ class CodexProviderTest(unittest.TestCase):
         self.assertIn("--output-last-message", cmd)
         self.assertIn("--output-schema", cmd)
         self.assertEqual(captured["kwargs"]["cwd"], "F:\\tmp\\repo")
+
+    def test_codex_provider_resolves_path_shim_before_subprocess(self) -> None:
+        captured = {}
+        resolved = "C:\\Users\\Dev\\AppData\\Roaming\\npm\\codex.CMD"
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            output_path = cmd[cmd.index("--output-last-message") + 1]
+            with open(output_path, "w", encoding="utf-8") as output_file:
+                output_file.write('{"findings":[]}')
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with (
+            patch("pullwise_server.review.shutil.which", return_value=resolved),
+            patch("pullwise_server.review.subprocess.run", side_effect=fake_run),
+        ):
+            review._run_codex(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                repo_path="F:\\tmp\\repo",
+            )
+
+        self.assertEqual(captured["cmd"][0], resolved)
+        self.assertEqual(captured["cmd"][1], "exec")
+
+    def test_codex_provider_prefers_configured_cli_path(self) -> None:
+        captured = {}
+        configured = "D:\\tools\\codex.cmd"
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            output_path = cmd[cmd.index("--output-last-message") + 1]
+            with open(output_path, "w", encoding="utf-8") as output_file:
+                output_file.write('{"findings":[]}')
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with (
+            patch.dict("os.environ", {"PULLWISE_CODEX_BIN": configured}, clear=True),
+            patch("pullwise_server.review.shutil.which", return_value="C:\\npm\\codex.CMD"),
+            patch("pullwise_server.review.subprocess.run", side_effect=fake_run),
+        ):
+            review._run_codex(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                repo_path="F:\\tmp\\repo",
+            )
+
+        self.assertEqual(captured["cmd"][0], configured)
+        self.assertEqual(captured["cmd"][1], "exec")
 
     def test_codex_provider_reports_missing_cli(self) -> None:
         with patch("pullwise_server.review.subprocess.run", side_effect=FileNotFoundError()):
