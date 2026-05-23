@@ -659,10 +659,41 @@ def github_repository_access_connected(github_access: dict | None) -> bool:
     return bool(repository_items_for_payload(github_access))
 
 
+def github_repository_access_authorized_for_user(user: dict | None, github_access: dict | None) -> bool:
+    if not user or not github_access:
+        return False
+    if github_access.get("mode") == "local":
+        return True
+    if github_access.get("mode") != "github-app":
+        return False
+
+    authorized_user_id = github_access.get("authorizedUserId")
+    if authorized_user_id and authorized_user_id != user.get("id"):
+        return False
+
+    authorized_github_id = str(github_access.get("authorizedGithubId") or "")
+    current_github_id = str(user.get("githubId") or "")
+    if authorized_github_id and current_github_id and authorized_github_id != current_github_id:
+        return False
+
+    authorized_login = str(github_access.get("authorizedGithubLogin") or "").casefold()
+    current_login = str(user.get("githubLogin") or "").casefold()
+    if authorized_login and current_login and authorized_login != current_login:
+        return False
+
+    if str(github_access.get("installationTargetType") or "").casefold() == "user":
+        installation_account = str(github_access.get("installationAccount") or "").casefold()
+        if installation_account and current_login and installation_account != current_login:
+            return False
+
+    return bool(authorized_user_id)
+
+
 def github_repositories_connected_for_user(user: dict | None) -> bool:
     if not user or github_repository_authorization_pending(user):
         return False
-    return github_repository_access_connected(user.get("githubRepositoryAccess"))
+    github_access = user.get("githubRepositoryAccess")
+    return github_repository_access_authorized_for_user(user, github_access) and github_repository_access_connected(github_access)
 
 
 def pending_repositories_payload() -> dict:
@@ -762,6 +793,14 @@ def bind_github_repository_access(
         user.get("githubAccessToken"),
         installation_hint,
     )
+    github_access.update(
+        {
+            "authorizedUserId": user.get("id"),
+            "authorizedGithubId": user.get("githubId"),
+            "authorizedGithubLogin": user.get("githubLogin"),
+            "validatedAt": now(),
+        }
+    )
     user["githubRepositoryAccess"] = github_access
     mark_state_dirty()
     return github_access
@@ -781,7 +820,12 @@ def installation_matches_user_login(user: dict, installation: dict) -> bool:
     return installation_account_login(installation).casefold() == login
 
 
-def select_github_app_installation_for_user(user: dict, installations: list[dict]) -> dict | None:
+def select_github_app_installation_for_user(
+    user: dict,
+    installations: list[dict],
+    *,
+    existing_access: dict | None = None,
+) -> dict | None:
     if not installations:
         return None
 
@@ -789,41 +833,43 @@ def select_github_app_installation_for_user(user: dict, installations: list[dict
         if installation_matches_user_login(user, installation):
             return installation
 
-    if len(installations) == 1:
-        return installations[0]
-
-    existing_installation_id = str((user.get("githubRepositoryAccess") or {}).get("installationId") or "")
+    existing_installation_id = str((existing_access or {}).get("installationId") or "")
     if existing_installation_id:
         for installation in installations:
             if str(installation.get("id") or "") == existing_installation_id:
                 return installation
 
-    return installations[0]
+    if len(installations) == 1:
+        return installations[0]
+
+    return None
 
 
-def github_repository_access_needs_personal_rebind(user: dict | None, github_access: dict | None) -> bool:
-    if not user or not github_access or github_access.get("mode") != "github-app":
-        return False
-    if str(github_access.get("installationTargetType") or "").casefold() != "user":
-        return False
-
-    github_login = str(user.get("githubLogin") or "").casefold()
-    installation_account = str(github_access.get("installationAccount") or "").casefold()
-    return bool(github_login and installation_account and github_login != installation_account)
+def current_user_installation_hint(user: dict, installation_id: str) -> dict | None:
+    installations = github_auth.list_current_app_installations_for_user(user.get("githubAccessToken"))
+    for installation in installations:
+        if str(installation.get("id") or "") == str(installation_id):
+            return installation
+    return None
 
 
 def try_bind_existing_github_repository_access(user: dict | None, *, force_refresh: bool = False) -> dict | None:
     if not user:
         return None
-    if user.get("githubRepositoryAccess") and not force_refresh:
-        return user.get("githubRepositoryAccess")
+    existing_access = user.get("githubRepositoryAccess")
+    if existing_access and not force_refresh:
+        return existing_access if github_repository_access_authorized_for_user(user, existing_access) else None
     if not github_auth.app_install_configured():
-        return user.get("githubRepositoryAccess") if not force_refresh else None
+        return existing_access if existing_access and github_repository_access_authorized_for_user(user, existing_access) else None
     if not has_real_github_identity(user):
-        return user.get("githubRepositoryAccess") if not force_refresh else None
+        return existing_access if existing_access and github_repository_access_authorized_for_user(user, existing_access) else None
 
     installations = github_auth.list_current_app_installations_for_user(user.get("githubAccessToken"))
-    installation = select_github_app_installation_for_user(user, installations)
+    installation = select_github_app_installation_for_user(
+        user,
+        installations,
+        existing_access=existing_access if github_repository_access_authorized_for_user(user, existing_access) else None,
+    )
     installation_id = str((installation or {}).get("id") or "")
     if installation_id:
         return bind_github_repository_access(
@@ -841,6 +887,14 @@ def has_real_github_identity(user: dict | None) -> bool:
     if not github_auth.oauth_configured():
         return "github" in user.get("providers", [])
     return bool(user.get("githubAccessToken"))
+
+
+def has_github_repository_authorization_identity(user: dict | None) -> bool:
+    if not user:
+        return False
+    if github_auth.oauth_configured():
+        return bool(user.get("githubAccessToken") and user.get("githubLogin"))
+    return "github" in user.get("providers", [])
 
 
 def session_payload(session: dict | None) -> dict:
@@ -1170,6 +1224,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     scan_error = (HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before starting a scan.")
                 elif github_repository_authorization_pending(user):
                     scan_error = (HTTPStatus.FORBIDDEN, "Complete GitHub repository authorization before starting a scan.")
+                elif not github_repository_access_authorized_for_user(user, github_access):
+                    scan_error = (HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before starting a scan.")
                 elif not repository_is_authorized(github_access, repository):
                     scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
                 else:
@@ -1349,6 +1405,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not session:
             return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before authorizing GitHub repositories.")
         user = USERS.get(session["userId"])
+        if not has_github_repository_authorization_identity(user):
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in with GitHub before authorizing repositories.")
         if github_auth.app_visibility_check_enabled():
             if not github_auth.app_slug():
                 return self.error(
@@ -1421,6 +1479,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         user = USERS.get(str(record["userId"]))
         if not user:
             raise ValueError("The GitHub installation belongs to a user session that no longer exists.")
+        if not has_github_repository_authorization_identity(user):
+            raise ValueError("Sign in with GitHub before authorizing repositories.")
         state = params.get("state") or None
         if params.get("setup_action") == "request":
             clear_github_repository_authorization_pending(user, state)
@@ -1439,10 +1499,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if user_can_access is not True:
                 raise ValueError("Unable to verify access to this GitHub App installation.")
 
+        installation_hint = current_user_installation_hint(user, installation_id)
+        if not installation_hint:
+            raise ValueError("Unable to verify this GitHub App installation belongs to the signed-in GitHub user.")
+
         bind_github_repository_access(
             user,
             installation_id,
             params.get("scope") or record.get("requestedScope") or "selected",
+            installation_hint,
         )
         clear_github_repository_authorization_pending(user, state)
         session = create_session(user)
@@ -1469,10 +1534,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         user = USERS.get(session["userId"]) if session else None
         github_access = user.get("githubRepositoryAccess") if user else None
         pending = bool(github_repository_authorization_pending(user))
-        visible_access = None if pending else github_access
+        visible_access = None if pending or not github_repository_access_authorized_for_user(user, github_access) else github_access
         github = {
             "provider": "github",
-            "connected": github_repository_access_connected(github_access) and not pending,
+            "connected": github_repository_access_authorized_for_user(user, github_access)
+            and github_repository_access_connected(github_access)
+            and not pending,
             "authorizationPending": pending,
             "mode": visible_access.get("mode") if visible_access else None,
             "scope": visible_access.get("scope") if visible_access else None,
@@ -1506,17 +1573,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             else:
                 return pending_repositories_payload()
 
+        if github_access and not github_repository_access_authorized_for_user(user, github_access):
+            github_access = try_bind_existing_github_repository_access(user, force_refresh=True) if refresh else None
+            bound_existing_access = bool(github_access)
+
         if not github_access:
             github_access = try_bind_existing_github_repository_access(user)
             bound_existing_access = bool(github_access)
         if not github_access:
             return {"items": [], "repositories": [], "needsAuthorization": True}
-
-        if refresh and github_repository_access_needs_personal_rebind(user, github_access):
-            rebound_access = try_bind_existing_github_repository_access(user, force_refresh=True)
-            if github_repository_access_connected(rebound_access):
-                github_access = rebound_access
-                bound_existing_access = True
 
         if refresh and not bound_existing_access and github_access.get("mode") == "github-app":
             repository_items = None

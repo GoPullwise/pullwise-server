@@ -53,6 +53,8 @@ class SecurityContractsTest(unittest.TestCase):
                 "email": "dev@example.com",
                 "createdAt": app.now(),
                 "providers": ["email"],
+                "githubId": "1",
+                "githubLogin": "octocat",
                 "githubRepositoryAccess": {"repositories": ["owner/repo"]},
             }
         }
@@ -543,7 +545,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIn("https://github.com/apps/pullwise/installations/new?state=", handler.payload["url"])
         self.assertEqual(len(app.GITHUB_STATES), 1)
 
-    def test_github_repository_authorize_does_not_require_pullwise_github_oauth_identity(self) -> None:
+    def test_github_repository_authorize_requires_pullwise_github_oauth_identity(self) -> None:
         app.USERS["usr_1"]["providers"] = ["email"]
         app.USERS["usr_1"].pop("githubAccessToken", None)
         app.USERS["usr_1"]["githubRepositoryAccess"] = None
@@ -576,10 +578,9 @@ class SecurityContractsTest(unittest.TestCase):
         ):
             app.PullwiseHandler.route(handler, "GET")
 
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["mode"], "github-app")
-        self.assertIn("https://github.com/apps/pullwise/installations/new?state=", handler.payload["url"])
-        self.assertEqual(len(app.GITHUB_STATES), 1)
+        self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+        self.assertIn("Sign in with GitHub", handler.payload["message"])
+        self.assertEqual(app.GITHUB_STATES, {})
 
     def test_github_repository_authorize_binds_existing_app_installation_without_popup(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1003,6 +1004,11 @@ class SecurityContractsTest(unittest.TestCase):
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
             "mode": "github-app",
             "installationId": "999",
+            "installationAccount": "octocat",
+            "installationTargetType": "User",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
             "repositories": ["octocat/private-repo"],
             "repositoriesNeedSync": False,
         }
@@ -1351,7 +1357,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["message"], "Server error.")
         log_exception.assert_called_once()
 
-    def test_github_installation_callback_with_state_does_not_require_pullwise_github_oauth_identity(self) -> None:
+    def test_github_installation_callback_with_state_requires_pullwise_github_oauth_identity(self) -> None:
         app.USERS["usr_1"]["providers"] = ["email"]
         app.USERS["usr_1"].pop("githubAccessToken", None)
         app.USERS["usr_1"]["githubRepositoryAccess"] = None
@@ -1403,9 +1409,9 @@ class SecurityContractsTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "GET")
 
         github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
-        self.assertEqual(handler.status, HTTPStatus.FOUND)
-        self.assertEqual(github_access["installationId"], "999")
-        self.assertEqual(github_access["repositories"], ["browser-github-user/private-repo"])
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("Sign in with GitHub", handler.payload["message"])
+        self.assertIsNone(github_access)
         user_can_access.assert_not_called()
 
     def test_github_installation_request_without_installation_id_reports_not_completed(self) -> None:
@@ -1493,6 +1499,19 @@ class SecurityContractsTest(unittest.TestCase):
                 clear=True,
             ),
             patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 999,
+                        "repository_selection": "selected",
+                        "target_type": "User",
+                        "account": {"login": "octocat"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "read"},
+                    }
+                ],
+            ),
             patch("pullwise_server.github_auth.list_user_installation_repositories", return_value=[]),
         ):
             app.PullwiseHandler.route(handler, "GET")
@@ -1526,6 +1545,19 @@ class SecurityContractsTest(unittest.TestCase):
                 clear=True,
             ),
             patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 999,
+                        "repository_selection": "selected",
+                        "target_type": "User",
+                        "account": {"login": "octocat"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "read"},
+                    }
+                ],
+            ),
             patch("pullwise_server.github_auth.list_user_installation_repositories", return_value=[]),
             patch("pullwise_server.github_auth.fetch_installation") as fetch_installation,
             patch("pullwise_server.github_auth.list_installation_repositories") as list_repositories,
@@ -1566,6 +1598,19 @@ class SecurityContractsTest(unittest.TestCase):
                 clear=True,
             ),
             patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 999,
+                        "repository_selection": "selected",
+                        "target_type": "User",
+                        "account": {"login": "octocat"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "read"},
+                    }
+                ],
+            ),
             patch(
                 "pullwise_server.github_auth.fetch_installation",
                 return_value={
@@ -1625,6 +1670,19 @@ class SecurityContractsTest(unittest.TestCase):
                 clear=True,
             ),
             patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 999,
+                        "repository_selection": "selected",
+                        "target_type": "User",
+                        "account": {"login": "octocat"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read"},
+                    }
+                ],
+            ),
             patch(
                 "pullwise_server.github_auth.fetch_installation",
                 return_value={
