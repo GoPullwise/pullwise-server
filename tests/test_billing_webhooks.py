@@ -167,6 +167,43 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["currentPeriodEnd"], 1712592000)
         self.assertTrue(update["cancelAtPeriodEnd"])
 
+    def test_creem_event_defaults_malformed_status_plan_and_interval(self) -> None:
+        update = billing.billing_update_from_creem_event(
+            {
+                "id": "evt_creem_malformed_values_1",
+                "eventType": "checkout.completed",
+                "object": {
+                    "customer": {"id": "cust_1"},
+                    "subscription": {"id": "sub_1", "status": {"state": "active"}},
+                    "metadata": {"userId": "usr_1", "plan": {"tier": "pro"}, "interval": ["year"]},
+                },
+            }
+        )
+
+        self.assertEqual(update["status"], "active")
+        self.assertEqual(update["plan"], "pro")
+        self.assertEqual(update["interval"], "month")
+
+    def test_stripe_subscription_event_defaults_malformed_status_plan_and_interval(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_stripe_malformed_values_1",
+                "type": "customer.subscription.updated",
+                "data": {
+                    "object": {
+                        "id": "sub_1",
+                        "customer": "cus_1",
+                        "status": {"state": "active"},
+                        "metadata": {"userId": "usr_1", "plan": ["pro"], "interval": {"period": "year"}},
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(update["status"], "active")
+        self.assertEqual(update["plan"], "pro")
+        self.assertEqual(update["interval"], "month")
+
     def test_creem_expired_subscription_is_not_mapped_to_canceled(self) -> None:
         event = {
             "id": "evt_creem_expired_1",

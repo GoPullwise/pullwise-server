@@ -469,6 +469,10 @@ def dict_payload(value: object) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def text_payload(value: object, fallback: str) -> str:
+    return value if isinstance(value, str) and value.strip() else fallback
+
+
 def billing_update_from_creem_event(event: dict) -> dict | None:
     event_type = event.get("eventType") or event.get("type")
     obj = dict_payload(event.get("object"))
@@ -600,8 +604,8 @@ def event_created(event: dict) -> int | None:
     return None
 
 
-def normalize_subscription_status(status: str | None) -> str:
-    normalized = (status or "active").strip().lower()
+def normalize_subscription_status(status: object) -> str:
+    normalized = text_payload(status, "active").strip().lower()
     if normalized in {"active", "trialing", "paid"}:
         return "active"
     if normalized in {"scheduled_cancel"}:
@@ -613,19 +617,19 @@ def normalize_subscription_status(status: str | None) -> str:
     return normalized or "active"
 
 
-def normalize_creem_subscription_status(event_type: str | None, status: str | None) -> str:
+def normalize_creem_subscription_status(event_type: str | None, status: object) -> str:
     if event_type == "subscription.expired":
         return "past_due"
     return normalize_subscription_status(status)
 
 
-def normalize_plan(plan: str | None) -> str:
-    normalized = (plan or "pro").strip().lower()
+def normalize_plan(plan: object) -> str:
+    normalized = text_payload(plan, "pro").strip().lower()
     return normalized if normalized in {"free", "pro"} else "pro"
 
 
-def normalize_interval(interval: str | None) -> str:
-    normalized = (interval or "month").strip().lower()
+def normalize_interval(interval: object) -> str:
+    normalized = text_payload(interval, "month").strip().lower()
     return normalized if normalized in {"month", "year"} else "month"
 
 
