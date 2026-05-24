@@ -491,8 +491,10 @@ def url_origin(value: str) -> str | None:
 
 
 def trusted_github_web_url(value: object) -> str | None:
-    raw = str(value or "").strip()
-    if not raw:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw or any(char in raw for char in "\r\n"):
         return None
     parsed = urlparse(raw)
     allowed = urlparse(github_auth.github_web_url())

@@ -542,6 +542,18 @@ class SecurityContractsTest(unittest.TestCase):
             self.assertIsNone(app.trusted_github_web_url("javascript:alert(1)"))
             self.assertIsNone(app.trusted_github_web_url("https://evil.example/settings/installations/123"))
 
+    def test_github_installation_html_url_rejects_crlf_values(self) -> None:
+        unsafe_url = "https://github.com/settings/installations/123\r\nX-Pullwise-Test: bad"
+
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            self.assertIsNone(app.trusted_github_web_url(unsafe_url))
+            summary = app.installation_summary_from_access({
+                "installationId": "123",
+                "installationHtmlUrl": unsafe_url,
+            })
+
+        self.assertIsNone(summary["installationHtmlUrl"])
+
     def test_installation_summary_drops_untrusted_html_url(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             summary = app.installation_summary_from_access({
