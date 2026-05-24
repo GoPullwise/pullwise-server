@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import os
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import requests
 
@@ -258,6 +258,42 @@ def find_pull_request_by_head(token: str, repo: str, *, head: str) -> dict | Non
         "number": number,
         "title": pull_request.get("title") or "",
     }
+
+
+def branch_exists(token: str, repo: str, branch: str) -> bool:
+    encoded_branch = quote(branch, safe="")
+    try:
+        response = requests.get(
+            f"{github_api_url()}/repos/{repo}/git/ref/heads/{encoded_branch}",
+            headers=github_api_headers(token),
+            timeout=request_timeout(),
+        )
+    except Exception as exc:
+        raise GitHubError(f"GitHub branch lookup failed: {exc}") from exc
+
+    if response.status_code == 404:
+        return False
+    if response.status_code < 200 or response.status_code >= 300:
+        detail = str(getattr(response, "text", "") or "").strip()
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            message = f"GitHub branch lookup failed: {exc}"
+            if detail:
+                message = f"{message}: {detail[:500]}"
+            raise GitHubError(message) from exc
+        raise GitHubError("GitHub branch lookup failed.")
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise GitHubError(f"GitHub branch lookup response was not valid JSON: {exc}") from exc
+    exact_ref = f"refs/heads/{branch}"
+    if isinstance(payload, dict):
+        return payload.get("ref") == exact_ref
+    if isinstance(payload, list):
+        return any(isinstance(item, dict) and item.get("ref") == exact_ref for item in payload)
+    raise GitHubError("GitHub branch lookup response body was not valid.")
 
 
 def create_pull_request(token: str, repo: str, *, title: str, head: str, base: str, body: str) -> dict:

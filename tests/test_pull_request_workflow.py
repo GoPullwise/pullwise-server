@@ -586,6 +586,7 @@ class PullRequestWorkflowTest(unittest.TestCase):
                     patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
                     patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
                     patch("pullwise_server.app.github_auth.find_pull_request_by_head", return_value=None),
+                    patch("pullwise_server.app.github_auth.branch_exists", return_value=False),
                     patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path),
                     patch("pullwise_server.app.checkout.run_git") as run_git,
                     patch(
@@ -603,6 +604,74 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
         self.assertEqual(pull_request["branch"], "pullwise/fix-f_123-stale")
         self.assertEqual(run_git.call_args_list[0].args[0], ["git", "checkout", "-B", "pullwise/fix-f_123-stale"])
+
+    def test_stale_pending_marker_creates_pull_request_directly_when_remote_branch_exists(self) -> None:
+        token = "ghs_secret_token"
+        app.ISSUES[0]["pullRequestPending"] = {
+            "branch": "pullwise/fix-f_123-stale",
+            "startedAt": app.now() - 3600,
+            "lastError": "process exited after push",
+        }
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+            patch("pullwise_server.app.github_auth.find_pull_request_by_head", return_value=None),
+            patch("pullwise_server.app.github_auth.branch_exists", return_value=True) as branch_exists,
+            patch(
+                "pullwise_server.app.github_auth.create_pull_request",
+                return_value={
+                    "url": "https://github.com/owner/repo/pull/12",
+                    "number": 12,
+                    "title": "Fix Validate redirect targets",
+                },
+            ) as create_pull_request,
+            patch("pullwise_server.app.persist_state") as persist_state,
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.make_id", side_effect=AssertionError("new branch token should not be generated")),
+        ):
+            pull_request = app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertEqual(pull_request["branch"], "pullwise/fix-f_123-stale")
+        self.assertEqual(pull_request["number"], 12)
+        self.assertEqual(app.ISSUES[0]["pullRequest"], pull_request)
+        self.assertNotIn("pullRequestPending", app.ISSUES[0])
+        branch_exists.assert_called_once_with(token, "owner/repo", "pullwise/fix-f_123-stale")
+        create_pull_request.assert_called_once()
+        self.assertEqual(create_pull_request.call_args.kwargs["head"], "pullwise/fix-f_123-stale")
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        persist_state.assert_called()
+
+    def test_direct_pull_request_failure_from_existing_remote_branch_preserves_pending_marker(self) -> None:
+        token = "ghs_secret_token"
+        app.ISSUES[0]["pullRequestPending"] = {
+            "branch": "pullwise/fix-f_123-stale",
+            "startedAt": app.now() - 3600,
+            "lastError": "process exited after push",
+        }
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+            patch("pullwise_server.app.github_auth.find_pull_request_by_head", return_value=None),
+            patch("pullwise_server.app.github_auth.branch_exists", return_value=True),
+            patch("pullwise_server.app.github_auth.create_pull_request", side_effect=github_auth.GitHubError("GitHub PR failed")),
+            patch("pullwise_server.app.persist_state") as persist_state,
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+        ):
+            with self.assertRaisesRegex(github_auth.GitHubError, "GitHub PR failed"):
+                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        pending = app.ISSUES[0]["pullRequestPending"]
+        self.assertEqual(pending["branch"], "pullwise/fix-f_123-stale")
+        self.assertIn("lastError", pending)
+        self.assertIn("failedAt", pending)
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        persist_state.assert_called()
 
     def test_failure_after_push_started_keeps_pending_branch_marker(self) -> None:
         token = "ghs_secret_token"
@@ -1030,6 +1099,24 @@ class PullRequestWorkflowTest(unittest.TestCase):
                     base="main",
                     body="Automated fix.",
                 )
+
+    def test_branch_exists_returns_true_for_exact_ref_match(self) -> None:
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"ref": "refs/heads/pullwise/fix-f_123-stale"}
+
+        with patch("pullwise_server.github_auth.requests.get", return_value=response) as get:
+            exists = github_auth.branch_exists("ghs_secret_token", "owner/repo", "pullwise/fix-f_123-stale")
+
+        self.assertTrue(exists)
+        self.assertEqual(get.call_args.args[0], "https://api.github.com/repos/owner/repo/git/ref/heads/pullwise%2Ffix-f_123-stale")
+
+    def test_branch_exists_returns_false_for_not_found(self) -> None:
+        response = Mock()
+        response.status_code = 404
+
+        with patch("pullwise_server.github_auth.requests.get", return_value=response):
+            self.assertFalse(github_auth.branch_exists("ghs_secret_token", "owner/repo", "pullwise/fix-f_123-stale"))
 
 
 if __name__ == "__main__":

@@ -949,6 +949,38 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                 persist_state()
                 return pull_request
 
+            if github_auth.branch_exists(recovery_token, repo, branch):
+                title = f"Fix {issue.get('title') or issue_id}"
+                body = (
+                    f"Automated deterministic fix for Pullwise issue {issue_id}.\n\n"
+                    f"Repository: {repo}\n"
+                    "Recovered from an existing Pullwise fix branch."
+                )
+                try:
+                    created = github_auth.create_pull_request(
+                        recovery_token,
+                        repo,
+                        title=title,
+                        head=branch,
+                        base=base_branch,
+                        body=body,
+                    )
+                except github_auth.GitHubError as exc:
+                    record_pull_request_pending_failure(issue, str(exc))
+                    raise
+                pull_request = {
+                    "issueId": issue_id,
+                    "branch": branch,
+                    "url": created.get("url"),
+                    "number": created.get("number"),
+                    "title": created.get("title") or title,
+                }
+                issue.pop("pullRequestPending", None)
+                issue["pullRequest"] = pull_request
+                mark_state_dirty()
+                persist_state()
+                return pull_request
+
         if not recovering_pending:
             random_token = safe_git_ref_component(make_id("fix").split("_", 1)[-1], "branch")[:16]
             branch = f"pullwise/fix-{issue_slug}-{random_token}"
