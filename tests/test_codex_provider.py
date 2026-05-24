@@ -152,6 +152,29 @@ class CodexProviderTest(unittest.TestCase):
                     repo_path="F:\\tmp\\repo",
                 )
 
+    def test_codex_provider_uses_default_timeout_for_malformed_timeout_env(self) -> None:
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["timeout"] = kwargs["timeout"]
+            output_path = cmd[cmd.index("--output-last-message") + 1]
+            with open(output_path, "w", encoding="utf-8") as output_file:
+                output_file.write('{"findings":[]}')
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with (
+            patch.dict("os.environ", {"PULLWISE_REVIEW_TIMEOUT_SECONDS": "abc"}, clear=True),
+            patch("pullwise_server.review.subprocess.run", side_effect=fake_run),
+        ):
+            review._run_codex(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                repo_path="F:\\tmp\\repo",
+            )
+
+        self.assertEqual(captured["timeout"], 600)
+
     def test_codex_provider_reports_invalid_json(self) -> None:
         completed = subprocess.CompletedProcess(["codex"], 0, stdout="not json", stderr="")
 

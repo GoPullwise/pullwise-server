@@ -503,7 +503,7 @@ def _run_cli_provider(
     cmd: list[str],
     cwd: str,
 ) -> subprocess.CompletedProcess[str]:
-    timeout = int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600"))
+    timeout = _review_timeout_seconds()
     resolved_cmd = [_resolve_cli_executable(executable, bin_env_var), *cmd[1:]]
     try:
         completed = subprocess.run(
@@ -541,6 +541,14 @@ def _run_cli_provider(
     raise ReviewProviderError(
         f"{provider_label} review failed (exit {completed.returncode}). Detail: {detail}"
     )
+
+
+def _review_timeout_seconds() -> int:
+    try:
+        timeout = int(os.environ.get("PULLWISE_REVIEW_TIMEOUT_SECONDS", "600"))
+    except (TypeError, ValueError):
+        return 600
+    return timeout if timeout > 0 else 600
 
 
 def _resolve_cli_executable(executable: str, bin_env_var: str) -> str:
