@@ -813,6 +813,50 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_1"]), 1)
         start_scan.assert_called_once_with(first.payload["id"])
 
+    def test_repositories_payload_treats_string_false_need_sync_as_connected(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "repositorySelection": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": "111",
+            "installationIds": ["111"],
+            "installationAccount": "octocat",
+            "installationAccounts": ["octocat"],
+            "repositories": ["octocat/private-repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_private",
+                    "name": "private-repo",
+                    "fullName": "octocat/private-repo",
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                    "defaultBranch": "main",
+                    "cloneUrl": "https://github.com/octocat/private-repo.git",
+                }
+            ],
+            "repositoriesNeedSync": "false",
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/repositories", cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["needsAuthorization"])
+        self.assertFalse(handler.payload["repositoriesNeedSync"])
+        self.assertEqual([item["fullName"] for item in handler.payload["items"]], ["octocat/private-repo"])
+
     def test_scan_creation_rejects_repository_access_that_needs_sync_even_with_stale_repo_names(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

@@ -961,7 +961,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             raise ValueError("Scan must be completed before creating a pull request.")
 
         github_access = user.get("githubRepositoryAccess")
-        if github_access and github_access.get("repositoriesNeedSync"):
+        if github_repositories_need_sync(github_access):
             raise ValueError("Sync GitHub repositories before creating a pull request.")
         existing = issue.get("pullRequest")
         pending = issue.get("pullRequestPending") if not isinstance(existing, dict) else None
@@ -1325,9 +1325,13 @@ def repository_items_for_payload(github_access: dict | None) -> list[dict]:
 
 
 def github_repository_access_connected(github_access: dict | None) -> bool:
-    if not github_access or github_access.get("repositoriesNeedSync"):
+    if not github_access or github_repositories_need_sync(github_access):
         return False
     return bool(repository_items_for_payload(github_access))
+
+
+def github_repositories_need_sync(github_access: dict | None) -> bool:
+    return bool(github_access and github_access.get("repositoriesNeedSync") is True)
 
 
 def github_repository_access_authorized_for_user(user: dict | None, github_access: dict | None) -> bool:
@@ -1397,6 +1401,7 @@ def pending_repositories_payload() -> dict:
 
 
 def unavailable_repositories_payload(github_access: dict) -> dict:
+    repositories_need_sync = github_repositories_need_sync(github_access)
     payload = {
         "items": [],
         "repositories": [],
@@ -1407,9 +1412,9 @@ def unavailable_repositories_payload(github_access: dict) -> dict:
         "installationAccount": github_access.get("installationAccount"),
         "installationAccounts": github_access.get("installationAccounts") or [],
         "installations": safe_installation_summaries(github_access.get("installations") or []),
-        "repositoriesNeedSync": github_access.get("repositoriesNeedSync", False),
+        "repositoriesNeedSync": repositories_need_sync,
     }
-    if github_access.get("repositoriesNeedSync") and not github_auth.app_api_configured():
+    if repositories_need_sync and not github_auth.app_api_configured():
         payload.update({
             "authorizationIssue": "github_app_api_unconfigured",
             "message": (
@@ -1431,7 +1436,7 @@ def installation_summary_from_access(github_access: dict) -> dict:
         "repositorySelection": github_access.get("repositorySelection"),
         "scope": github_access.get("scope"),
         "repositoryCount": len(repositories) if isinstance(repositories, list) else 0,
-        "repositoriesNeedSync": github_access.get("repositoriesNeedSync"),
+        "repositoriesNeedSync": github_repositories_need_sync(github_access),
     })
 
 
@@ -2113,7 +2118,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     scan_error = (HTTPStatus.FORBIDDEN, "Complete GitHub repository authorization before starting a scan.")
                 elif not github_repository_access_authorized_for_user(user, github_access):
                     scan_error = (HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before starting a scan.")
-                elif github_access.get("repositoriesNeedSync"):
+                elif github_repositories_need_sync(github_access):
                     scan_error = (HTTPStatus.FORBIDDEN, "Sync GitHub repositories before starting a scan.")
                 elif not repository_is_authorized(github_access, repository):
                     scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
@@ -2587,7 +2592,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "installationHtmlUrl": trusted_github_web_url(visible_access.get("installationHtmlUrl")) if visible_access else None,
             "installations": safe_installation_summaries(visible_access.get("installations") if visible_access else []),
             "repositories": visible_access.get("repositories") if visible_access else [],
-            "repositoriesNeedSync": visible_access.get("repositoriesNeedSync") if visible_access else False,
+            "repositoriesNeedSync": github_repositories_need_sync(visible_access),
         }
         items = [github]
         return {"items": items, "github": github}
@@ -2648,7 +2653,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "installationAccount": github_access.get("installationAccount"),
             "installationAccounts": github_access.get("installationAccounts") or [],
             "installations": safe_installation_summaries(github_access.get("installations") or []),
-            "repositoriesNeedSync": github_access.get("repositoriesNeedSync", False),
+            "repositoriesNeedSync": github_repositories_need_sync(github_access),
         }
 
     def repositories_connected(self) -> bool:
