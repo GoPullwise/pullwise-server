@@ -758,6 +758,57 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["cloneUrl"], "https://github.com/acme/service.git")
         start_scan.assert_called_once()
 
+    def test_scan_creation_sanitizes_malformed_branch_and_commit_inputs(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": "111",
+            "repositories": ["owner/repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_1",
+                    "name": "repo",
+                    "fullName": "owner/repo",
+                    "installationId": "111",
+                    "defaultBranch": "main",
+                    "cloneUrl": "https://github.com/owner/repo.git",
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/scans",
+            {
+                "repo": "owner/repo",
+                "branch": "feature\r\nX-Test: bad",
+                "commit": {"sha": "bad"},
+            },
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
+            patch.object(app.worker, "start_scan") as start_scan,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.payload["branch"], "main")
+        self.assertEqual(handler.payload["commit"], "pending")
+        start_scan.assert_called_once()
+
     def test_scan_creation_is_idempotent_for_repeated_request_id(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

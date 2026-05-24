@@ -2192,11 +2192,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             )
                         else:
                             repo_meta = repository_item(github_access, repository) or {}
+                            branch = (
+                                clean_github_access_text(body.get("branch"))
+                                or clean_github_access_text(repo_meta.get("defaultBranch"))
+                                or "main"
+                            )
                             scan = {
                                 "id": make_id("sc"),
                                 "repo": repository,
-                                "branch": body.get("branch") or repo_meta.get("defaultBranch") or "main",
-                                "commit": body.get("commit") or "pending",
+                                "branch": branch,
+                                "commit": clean_github_access_text(body.get("commit")) or "pending",
                                 "status": "queued",
                                 "userId": session["userId"],
                                 "createdAt": now(),
@@ -2204,9 +2209,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 "progress": 0,
                                 "phase": None,
                                 "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                                "installationId": repo_meta.get("installationId") or github_access.get("installationId"),
-                                "installationAccount": repo_meta.get("installationAccount") or github_access.get("installationAccount"),
-                                "repositorySelection": repo_meta.get("repositorySelection") or github_access.get("repositorySelection"),
+                                "installationId": (
+                                    clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
+                                    or clean_github_access_text(github_access.get("installationId"), allow_int=True)
+                                ),
+                                "installationAccount": (
+                                    clean_github_access_text(repo_meta.get("installationAccount"))
+                                    or clean_github_access_text(github_access.get("installationAccount"))
+                                ),
+                                "repositorySelection": (
+                                    clean_github_access_text(repo_meta.get("repositorySelection"))
+                                    or clean_github_access_text(github_access.get("repositorySelection"))
+                                ),
                                 "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
                                 "repositoryPrivate": bool(repo_meta.get("private")),
                                 "repoPath": None,
