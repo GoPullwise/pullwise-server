@@ -563,6 +563,30 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertIsNone(summary["installationHtmlUrl"])
 
+    def test_installation_summary_sanitizes_malformed_metadata(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            summary = app.installation_summary_from_access({
+                "installationId": {"id": "123"},
+                "installationAccount": {"login": "octocat"},
+                "installationTargetType": ["User"],
+                "installationAppSlug": {"slug": "pullwise"},
+                "installationHtmlUrl": "https://github.com/settings/installations/123",
+                "repositorySelection": "selected\r\nX-Test: bad",
+                "scope": {"scope": "selected"},
+                "repositories": {"octocat/repo": True},
+                "repositoriesNeedSync": "false",
+            })
+
+        self.assertIsNone(summary["installationId"])
+        self.assertIsNone(summary["installationAccount"])
+        self.assertIsNone(summary["installationTargetType"])
+        self.assertIsNone(summary["installationAppSlug"])
+        self.assertEqual(summary["installationHtmlUrl"], "https://github.com/settings/installations/123")
+        self.assertIsNone(summary["repositorySelection"])
+        self.assertIsNone(summary["scope"])
+        self.assertEqual(summary["repositoryCount"], 0)
+        self.assertFalse(summary["repositoriesNeedSync"])
+
     def test_safe_installation_summaries_sanitize_legacy_url_aliases(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             summaries = app.safe_installation_summaries([
@@ -572,6 +596,39 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIsNone(summaries[0]["installationHtmlUrl"])
         self.assertIsNone(summaries[0]["htmlUrl"])
         self.assertIsNone(summaries[0]["html_url"])
+
+    def test_safe_installation_summaries_sanitize_malformed_metadata(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            summaries = app.safe_installation_summaries([
+                {
+                    "installationId": {"id": "123"},
+                    "installationAccount": ["octocat"],
+                    "installationTargetType": {"type": "User"},
+                    "installationAppSlug": {"slug": "pullwise"},
+                    "installationHtmlUrl": "https://github.com/settings/installations/123",
+                    "repositorySelection": "selected\r\nX-Test: bad",
+                    "scope": {"scope": "selected"},
+                    "repositoryCount": -4,
+                    "repositoriesNeedSync": "false",
+                    "raw": {"unexpected": "value"},
+                }
+            ])
+
+        self.assertEqual(summaries, [
+            {
+                "installationId": None,
+                "installationAccount": None,
+                "installationTargetType": None,
+                "installationAppSlug": None,
+                "installationHtmlUrl": "https://github.com/settings/installations/123",
+                "htmlUrl": "https://github.com/settings/installations/123",
+                "html_url": "https://github.com/settings/installations/123",
+                "repositorySelection": None,
+                "scope": None,
+                "repositoryCount": 0,
+                "repositoriesNeedSync": False,
+            }
+        ])
 
     def test_issue_reads_require_sign_in(self) -> None:
         for path in ["/issues", "/issues/iss_1"]:

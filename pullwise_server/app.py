@@ -1421,31 +1421,64 @@ def unavailable_repositories_payload(github_access: dict) -> dict:
 
 
 def installation_summary_from_access(github_access: dict) -> dict:
-    return {
+    repositories = github_access.get("repositories")
+    return safe_installation_summary({
         "installationId": github_access.get("installationId"),
         "installationAccount": github_access.get("installationAccount"),
         "installationTargetType": github_access.get("installationTargetType"),
         "installationAppSlug": github_access.get("installationAppSlug"),
-        "installationHtmlUrl": trusted_github_web_url(github_access.get("installationHtmlUrl")),
+        "installationHtmlUrl": github_access.get("installationHtmlUrl"),
         "repositorySelection": github_access.get("repositorySelection"),
         "scope": github_access.get("scope"),
-        "repositoryCount": len(github_access.get("repositories") or []),
-        "repositoriesNeedSync": bool(github_access.get("repositoriesNeedSync")),
-    }
+        "repositoryCount": len(repositories) if isinstance(repositories, list) else 0,
+        "repositoriesNeedSync": github_access.get("repositoriesNeedSync"),
+    })
 
 
 def safe_installation_summaries(installations: list[dict]) -> list[dict]:
-    summaries = []
-    for installation in installations:
-        item = dict(installation)
-        safe_url = trusted_github_web_url(
-            item.get("installationHtmlUrl") or item.get("htmlUrl") or item.get("html_url")
-        )
-        item["installationHtmlUrl"] = safe_url
+    return [safe_installation_summary(installation, include_url_aliases=True) for installation in installations]
+
+
+def safe_installation_summary(installation: dict, *, include_url_aliases: bool = False) -> dict:
+    safe_url = trusted_github_web_url(
+        installation.get("installationHtmlUrl") or installation.get("htmlUrl") or installation.get("html_url")
+    )
+    item = {
+        "installationId": clean_installation_summary_text(installation.get("installationId")),
+        "installationAccount": clean_installation_summary_text(installation.get("installationAccount")),
+        "installationTargetType": clean_installation_summary_text(installation.get("installationTargetType")),
+        "installationAppSlug": clean_installation_summary_text(installation.get("installationAppSlug")),
+        "installationHtmlUrl": safe_url,
+        "repositorySelection": clean_installation_summary_text(installation.get("repositorySelection")),
+        "scope": clean_installation_summary_text(installation.get("scope")),
+        "repositoryCount": safe_installation_repository_count(installation.get("repositoryCount")),
+        "repositoriesNeedSync": installation.get("repositoriesNeedSync") is True,
+    }
+    if include_url_aliases:
         item["htmlUrl"] = safe_url
         item["html_url"] = safe_url
-        summaries.append(item)
-    return summaries
+    return item
+
+
+def clean_installation_summary_text(value: object) -> str | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or any(char in value for char in "\r\n"):
+        return None
+    return value
+
+
+def safe_installation_repository_count(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        count = int(value or 0)
+    except (OverflowError, TypeError, ValueError):
+        return 0
+    return max(0, count)
 
 
 def repository_item_with_installation_context(repository_item: dict, github_access: dict) -> dict:
