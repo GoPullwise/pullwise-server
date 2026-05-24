@@ -158,6 +158,26 @@ class ReviewContractsTest(unittest.TestCase):
         self.assertEqual(finding["goodCode"], [{"ln": 0, "code": "return redirect(safe_redirect(next_url))", "t": "add"}])
         self.assertEqual(finding["references"], [{"label": "Docs", "url": "https://example.com/docs"}])
 
+    def test_run_review_sanitizes_source_metadata_before_provider_dispatch(self) -> None:
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[{"id": "f_1", "title": "Issue"}]) as run_mock,
+        ):
+            findings = review.run_review(
+                repo="owner/repo\r\nX-Injected: bad",
+                branch="main\r\nX-Injected: bad",
+                commit={"sha": "abc1234"},
+                user_id="usr_1\r\nX-Injected: bad",
+                scan_id={"id": "sc_1"},
+            )
+
+        self.assertEqual(run_mock.call_args.kwargs["repo"], "")
+        self.assertEqual(run_mock.call_args.kwargs["branch"], "main")
+        self.assertEqual(run_mock.call_args.kwargs["commit"], "pending")
+        self.assertEqual(findings[0]["repo"], "")
+        self.assertEqual(findings[0]["userId"], "")
+        self.assertEqual(findings[0]["scanId"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -39,6 +40,7 @@ VALID_FINDING_CATEGORIES = {
     "docs": "Docs",
     "architecture": "Architecture",
 }
+_REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 class ReviewProviderError(RuntimeError):
@@ -158,6 +160,12 @@ def run_review(
     `userId`, `scanId`, `repo`, `status`, `createdAt` are filled here so the
     worker does not need to reshape provider output.
     """
+    repo = _safe_repo_full_name(repo)
+    branch = _safe_metadata_text(branch, "main")
+    commit = _safe_metadata_text(commit, "pending")
+    user_id = _safe_metadata_text(user_id)
+    scan_id = _safe_metadata_text(scan_id)
+    repo_path = _safe_metadata_text(repo_path) if repo_path is not None else None
     chosen = selected_provider(provider)
     started_at = time.monotonic()
     scan_logging.log_event(
@@ -259,6 +267,20 @@ def _safe_text(value: object, default: str = "") -> str:
     if not isinstance(value, str):
         return default
     return value.strip() or default
+
+
+def _safe_metadata_text(value: object, default: str = "") -> str:
+    if not isinstance(value, str):
+        return default
+    value = value.strip()
+    if not value or any(char in value for char in "\r\n"):
+        return default
+    return value
+
+
+def _safe_repo_full_name(value: object) -> str:
+    repo = _safe_metadata_text(value)
+    return repo if _REPO_FULL_NAME_RE.match(repo) else ""
 
 
 def _safe_severity(value: object) -> str:
