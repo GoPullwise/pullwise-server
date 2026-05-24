@@ -210,6 +210,19 @@ class GitHubAuthContractsTest(unittest.TestCase):
 
         self.assertEqual([repo["stars"] for repo in repositories], ["-", "-", "-"])
 
+    def test_list_installation_repositories_rejects_non_object_success_response(self) -> None:
+        response = Mock()
+        response.json.return_value = []
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.object(github_auth, "create_installation_access_token", return_value={"token": "ghs_123"}),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            with self.assertRaisesRegex(github_auth.GitHubError, "repositories response"):
+                github_auth.list_installation_repositories("123")
+
     def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {

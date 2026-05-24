@@ -376,8 +376,7 @@ def list_installation_repositories(installation_id: str) -> list[dict]:
             response.raise_for_status()
         except Exception as exc:
             raise GitHubError(f"GitHub installation repositories request failed: {exc}") from exc
-        payload = response.json()
-        repositories.extend(repo_to_pullwise(repo) for repo in payload.get("repositories") or [])
+        repositories.extend(repo_to_pullwise(repo) for repo in repositories_from_response(response, "installation repositories"))
         url = ((getattr(response, "links", {}) or {}).get("next") or {}).get("url")
         params = None
     return repositories
@@ -401,10 +400,22 @@ def list_user_installation_repositories(user_access_token: str | None, installat
             response.raise_for_status()
         except Exception as exc:
             raise GitHubError(f"GitHub user installation repositories request failed: {exc}") from exc
-        payload = response.json()
-        repositories.extend(repo_to_pullwise(repo) for repo in payload.get("repositories") or [])
+        repositories.extend(repo_to_pullwise(repo) for repo in repositories_from_response(response, "user installation repositories"))
         url = ((getattr(response, "links", {}) or {}).get("next") or {}).get("url")
         params = None
+    return repositories
+
+
+def repositories_from_response(response, context: str) -> list:
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise GitHubError(f"GitHub {context} response was not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise GitHubError(f"GitHub {context} response body was not an object.")
+    repositories = payload.get("repositories") or []
+    if not isinstance(repositories, list):
+        raise GitHubError(f"GitHub {context} response repositories field was not a list.")
     return repositories
 
 
