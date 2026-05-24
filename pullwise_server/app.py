@@ -2607,6 +2607,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not billing.verify_creem_webhook(raw, self.headers.get("creem-signature")):
             return self.error(HTTPStatus.BAD_REQUEST, "Invalid Creem webhook signature.")
         event = decode_json_body(raw)
+        if not isinstance(event, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         update = billing.billing_update_from_creem_event(event)
         if update:
             self.apply_billing_update(update)
@@ -2617,6 +2619,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not billing.verify_stripe_webhook(raw, self.headers.get("Stripe-Signature")):
             return self.error(HTTPStatus.BAD_REQUEST, "Invalid Stripe webhook signature.")
         event = decode_json_body(raw)
+        if not isinstance(event, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         update = billing.billing_update_from_stripe_event(event)
         if update:
             self.apply_billing_update(update)
