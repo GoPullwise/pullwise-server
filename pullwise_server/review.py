@@ -324,16 +324,24 @@ def _safe_text_list(value: object) -> list[str]:
     return [text for item in value if (text := _safe_text(item))]
 
 
+def _safe_code_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if any(char in value for char in "\r\n\x00"):
+        return None
+    return value
+
+
 def _safe_code_lines(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
     lines = []
     for item in value:
-        if not isinstance(item, dict) or not isinstance(item.get("code"), str):
+        if not isinstance(item, dict) or (code := _safe_code_text(item.get("code"))) is None:
             continue
         raw_marker = item.get("t")
         marker = raw_marker if raw_marker in ("del", "add", None) else None
-        lines.append({"ln": _safe_non_negative_int(item.get("ln")), "code": item["code"], "t": marker})
+        lines.append({"ln": _safe_non_negative_int(item.get("ln")), "code": code, "t": marker})
     return lines
 
 
