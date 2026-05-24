@@ -158,6 +158,14 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(profile["primaryEmail"], "octocat@example.com")
         self.assertEqual([call.args[1] for call in get_json.call_args_list], ["/user", "/user/emails"])
 
+    def test_fetch_user_profile_rejects_malformed_profile_body(self) -> None:
+        with (
+            patch.object(github_auth, "oauth_session", return_value=Mock()),
+            patch.object(github_auth, "authlib_get_json", return_value=[]),
+        ):
+            with self.assertRaisesRegex(github_auth.GitHubError, "user profile response"):
+                github_auth.fetch_user_profile("gho_user")
+
     def test_installation_matches_configured_app_slug_case_insensitively(self) -> None:
         self.assertTrue(
             github_auth.installation_matches_configured_app(

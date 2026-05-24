@@ -176,6 +176,8 @@ def exchange_oauth_code(code: str, redirect_uri: str, code_verifier: str, state:
 def fetch_user_profile(access_token: str) -> dict:
     client = oauth_session(token={"access_token": access_token, "token_type": "bearer"})
     profile = authlib_get_json(client, "/user")
+    if not isinstance(profile, dict):
+        raise GitHubError("GitHub user profile response is malformed.")
     if not profile.get("login"):
         raise GitHubError("GitHub user profile response is missing login.")
     profile["primaryEmail"] = clean_email_address(profile.get("email")) or fetch_primary_email(access_token)
