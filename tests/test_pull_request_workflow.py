@@ -132,10 +132,79 @@ class PullRequestWorkflowTest(unittest.TestCase):
         }
         app.ISSUES[0]["pullRequest"] = existing
 
-        with patch("pullwise_server.app.github_auth.app_api_configured", side_effect=AssertionError("config not needed")):
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True) as app_api_configured,
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
+            patch("pullwise_server.app.github_auth.create_pull_request") as create_pull_request,
+        ):
             pull_request = app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
 
         self.assertIs(pull_request, existing)
+        app_api_configured.assert_called_once()
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        create_token.assert_not_called()
+        create_pull_request.assert_not_called()
+
+    def test_existing_pull_request_does_not_bypass_github_app_configuration(self) -> None:
+        app.ISSUES[0]["pullRequest"] = {
+            "issueId": "f_123",
+            "branch": "pullwise/fix-f_123-existing",
+            "url": "https://github.com/owner/repo/pull/7",
+            "number": 7,
+            "title": "Fix Validate redirect targets",
+        }
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=False),
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
+            patch("pullwise_server.app.github_auth.create_pull_request") as create_pull_request,
+        ):
+            with self.assertRaisesRegex(ValueError, "GitHub App API"):
+                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        create_token.assert_not_called()
+        create_pull_request.assert_not_called()
+
+    def test_existing_pull_request_does_not_bypass_repository_write_permissions(self) -> None:
+        app.USERS["usr_1"]["githubRepositoryAccess"]["installationPermissions"] = {
+            "metadata": "read",
+            "contents": "read",
+            "pull_requests": "write",
+        }
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositoryItems"][0]["installationPermissions"] = {
+            "metadata": "read",
+            "contents": "read",
+            "pull_requests": "write",
+        }
+        app.ISSUES[0]["pullRequest"] = {
+            "issueId": "f_123",
+            "branch": "pullwise/fix-f_123-existing",
+            "url": "https://github.com/owner/repo/pull/7",
+            "number": 7,
+            "title": "Fix Validate redirect targets",
+        }
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
+            patch("pullwise_server.app.github_auth.create_pull_request") as create_pull_request,
+        ):
+            with self.assertRaisesRegex(ValueError, "Contents: write.*Pull requests: write"):
+                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        create_token.assert_not_called()
+        create_pull_request.assert_not_called()
 
     def test_existing_pull_request_does_not_bypass_issue_ownership_validation(self) -> None:
         app.ISSUES[0]["userId"] = "usr_2"
@@ -551,6 +620,14 @@ class PullRequestWorkflowTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_route_returns_not_found_for_missing_pull_request_issue(self) -> None:
+        handler = RouteHarness("/issues/missing/pull-requests", cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(handler.payload, {"message": "Issue not found."})
 
     def test_route_maps_value_error_to_bad_request(self) -> None:
         handler = RouteHarness("/issues/f_123/pull-requests", cookie=self.signed_in())

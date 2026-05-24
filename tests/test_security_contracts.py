@@ -2559,6 +2559,23 @@ class SecurityContractsTest(unittest.TestCase):
         )
         self.assertFalse(app.installation_supports_pull_request_creation({"permissions": {"metadata": "read"}}))
 
+    def test_repository_item_with_installation_context_preserves_installation_permissions(self) -> None:
+        item = app.repository_item_with_installation_context(
+            {"fullName": "owner/repo"},
+            {
+                "installationId": "123",
+                "installationPermissions": {
+                    "metadata": "read",
+                    "contents": "write",
+                    "pull_requests": "write",
+                },
+            },
+        )
+
+        self.assertEqual(item["installationId"], "123")
+        self.assertEqual(item["installationPermissions"]["contents"], "write")
+        self.assertEqual(item["installationPermissions"]["pull_requests"], "write")
+
     def test_unhandled_errors_do_not_echo_internal_exception_details(self) -> None:
         handler = RouteHarness("/boom")
 

@@ -878,13 +878,6 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
     pr_scan_id = f"pr_{issue_slug}"
 
     with preview_scan_lock(f"pull-request:{issue_slug}"):
-        existing = issue.get("pullRequest")
-        if isinstance(existing, dict):
-            return existing
-
-        if isinstance(issue.get("pullRequestPending"), dict):
-            raise ValueError("Pull request creation is already in progress for this issue.")
-
         if github_repository_authorization_pending(user):
             raise ValueError("Complete GitHub repository authorization before creating a pull request.")
         if scan.get("status") != "done":
@@ -893,6 +886,9 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         github_access = user.get("githubRepositoryAccess")
         if github_access and github_access.get("repositoriesNeedSync"):
             raise ValueError("Sync GitHub repositories before creating a pull request.")
+        existing = issue.get("pullRequest")
+        if not isinstance(existing, dict) and isinstance(issue.get("pullRequestPending"), dict):
+            raise ValueError("Pull request creation is already in progress for this issue.")
         if not github_auth.app_api_configured():
             raise ValueError("GitHub App API is not configured for pull request creation.")
         repo = str(issue.get("repo") or issue.get("repository") or scan.get("repo") or "").strip()
@@ -909,6 +905,10 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         installation_permissions = repo_meta.get("installationPermissions") or github_access.get("installationPermissions")
         if not isinstance(installation_permissions, dict) or not installation_supports_pull_request_creation({"permissions": installation_permissions}):
             raise ValueError(github_app_write_permissions_message())
+
+        if isinstance(existing, dict):
+            return existing
+
         base_branch = str(
             issue.get("branch")
             or scan.get("branch")
@@ -1245,6 +1245,7 @@ def repository_item_with_installation_context(repository_item: dict, github_acce
     item["installationAccount"] = github_access.get("installationAccount")
     item["installationTargetType"] = github_access.get("installationTargetType")
     item["repositorySelection"] = github_access.get("repositorySelection")
+    item["installationPermissions"] = github_access.get("installationPermissions") or {}
     return item
 
 
@@ -1946,7 +1947,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before creating pull requests.")
-            issue = self.find_or_404(user_issues(session), segments[1], "Issue")
+            issue = next((item for item in user_issues(session) if item.get("id") == segments[1]), None)
+            if not issue:
+                return self.error(HTTPStatus.NOT_FOUND, "Issue not found.")
             try:
                 pull_request = create_issue_pull_request(USERS[session["userId"]], issue)
             except github_auth.GitHubError as exc:
