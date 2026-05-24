@@ -7,6 +7,25 @@ review findings. Configure real GitHub OAuth, GitHub App, and review provider
 credentials for real scans. Explicit local mock switches are available only for
 development.
 
+Stage 1 production-trial scope:
+
+- GitHub identity login
+- GitHub App repository authorization
+- Repository listing and sync
+- Scan creation, queueing, recovery, cancellation, and history
+- Rich issue findings and manual triage/status changes
+- Stripe or Creem billing and live readiness status
+
+Stage 2 automation is intentionally not implemented yet:
+
+- Applying fixes
+- Creating branches or pull requests
+- Notifications
+- Slack or Linear writes
+
+If real GitHub OAuth secrets or GitHub App private keys were ever committed or
+shared outside the local machine, rotate them in GitHub before production use.
+
 ## Run
 
 Use a project-local virtual environment so this server does not share packages
@@ -127,8 +146,27 @@ GET /health
 Expected shape:
 
 ```json
-{"ok": true, "service": "pullwise-server"}
+{
+  "ok": true,
+  "service": "pullwise-server",
+  "reviewProvider": "codex",
+  "github": {
+    "oauthConfigured": true,
+    "appInstallConfigured": true,
+    "appApiConfigured": true,
+    "appVisibilityCheck": true
+  },
+  "billing": {"provider": "stripe", "enabled": true},
+  "limits": {
+    "maxConcurrentScans": 1,
+    "maxConcurrentScansPerUser": 1,
+    "rateLimitEnabled": true
+  }
+}
 ```
+
+The health payload intentionally exposes readiness booleans and provider names,
+not secrets, access tokens, private key contents, or private key paths.
 
 Run verification before deploying:
 
@@ -527,6 +565,7 @@ Explicitly not implemented:
 
 - `POST /issues/{id}/fixes/apply`
 - `POST /issues/{id}/pull-requests`
+- Notification delivery
 - Slack or Linear integration writes
 
 Those endpoints return `501 Not Implemented` instead of fake success payloads.
