@@ -424,6 +424,7 @@ class PullRequestWorkflowTest(unittest.TestCase):
         github_access["repositoryItems"][0]["cloneUrl"] = "https://evil.example/owner/repo.git"
         app.ISSUES[0]["repo"] = {"fullName": "owner/repo"}
         app.ISSUES[0]["branch"] = "main\r\nX-Injected: bad"
+        app.ISSUES[0]["title"] = "Validate redirect targets\r\nX-Injected: bad"
         app.SCANS[0]["branch"] = {"name": "main"}
         app.SCANS[0]["installationId"] = {"id": "123"}
         app.SCANS[0]["cloneUrl"] = "https://evil.example/owner/repo.git"
@@ -438,7 +439,7 @@ class PullRequestWorkflowTest(unittest.TestCase):
                 with (
                     patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
                     patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path) as prepare_checkout,
-                    patch("pullwise_server.app.checkout.run_git"),
+                    patch("pullwise_server.app.checkout.run_git") as run_git,
                     patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}) as create_token,
                     patch(
                         "pullwise_server.app.github_auth.create_pull_request",
@@ -459,6 +460,13 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertIsNone(scan_payload["cloneUrl"])
         create_token.assert_called_once_with("123")
         self.assertEqual(create_pull_request.call_args.kwargs["base"], "release")
+        self.assertEqual(create_pull_request.call_args.kwargs["title"], "Fix f_123")
+        commit_commands = [
+            call.args[0]
+            for call in run_git.call_args_list
+            if call.args[0][:3] == ["git", "commit", "-m"]
+        ]
+        self.assertEqual(commit_commands, [["git", "commit", "-m", "Fix f_123"]])
 
     def test_successful_pull_request_transition_is_persisted_before_cleanup(self) -> None:
         token = "ghs_secret_token"

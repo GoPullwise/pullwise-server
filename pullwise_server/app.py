@@ -1004,6 +1004,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         clone_url = trusted_github_web_url(repo_meta.get("cloneUrl") or repo_meta.get("clone_url"))
         if not clone_url:
             clone_url = trusted_github_web_url(scan.get("cloneUrl") or scan.get("clone_url"))
+        title = pull_request_title(issue, issue_id)
 
         recovery_token = ""
         if recovering_pending:
@@ -1019,13 +1020,12 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                     "branch": branch,
                     "url": recovered.get("url"),
                     "number": recovered.get("number"),
-                    "title": recovered.get("title") or f"Fix {issue.get('title') or issue_id}",
+                    "title": recovered.get("title") or title,
                 }
                 store_issue_pull_request(issue, pull_request)
                 return pull_request
 
             if github_auth.branch_exists(recovery_token, repo, branch):
-                title = f"Fix {issue.get('title') or issue_id}"
                 body = (
                     f"Automated deterministic fix for Pullwise issue {issue_id}.\n\n"
                     f"Repository: {repo}\n"
@@ -1086,7 +1086,6 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
 
             token = recovery_token or installation_token(installation_id)
 
-            title = f"Fix {issue.get('title') or issue_id}"
             body = (
                 f"Automated deterministic fix for Pullwise issue {issue_id}.\n\n"
                 f"Repository: {repo}\n"
@@ -1270,6 +1269,20 @@ def clean_repository_full_name(*values: object) -> str:
         except RuntimeError:
             continue
     return ""
+
+
+def pull_request_title(issue: dict, issue_id: str) -> str:
+    title = clean_pull_request_text(issue.get("title"))
+    fallback = clean_pull_request_text(issue_id) or safe_git_ref_component(issue_id, "issue")
+    return f"Fix {title or fallback}"
+
+
+def clean_pull_request_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    if any(char in value for char in "\r\n\x00"):
+        return ""
+    return value.strip()
 
 
 def safe_git_ref_component(value: object, fallback: str) -> str:
