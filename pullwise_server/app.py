@@ -1056,7 +1056,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                 record_pull_request_pending_failure(issue, str(exc))
                 raise github_auth.GitHubError(str(exc)) from exc
             clear_pull_request_pending(issue)
-            if remote_git_error(exc):
+            if github_service_error(exc):
                 raise github_auth.GitHubError(str(exc)) from exc
             raise ValueError(str(exc)) from exc
         except github_auth.GitHubError as exc:
@@ -1125,6 +1125,11 @@ def clear_pull_request_pending(issue: dict) -> None:
 def remote_git_error(exc: BaseException) -> bool:
     message = str(exc).lower()
     return message.startswith("git clone") or message.startswith("git fetch") or message.startswith("git push")
+
+
+def github_service_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return remote_git_error(exc) or "installation access token" in message
 
 
 def github_app_write_permissions_message() -> str:

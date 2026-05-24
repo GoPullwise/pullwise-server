@@ -649,6 +649,21 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertNotIn("pullRequestPending", app.ISSUES[0])
         persist_state.assert_called()
 
+    def test_checkout_missing_token_failure_clears_pending_marker_and_raises_github_error(self) -> None:
+        message = "GitHub App did not return an installation access token."
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.checkout.prepare_checkout", side_effect=RuntimeError(message)),
+            patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+            patch("pullwise_server.app.persist_state") as persist_state,
+            patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+        ):
+            with self.assertRaisesRegex(github_auth.GitHubError, "installation access token"):
+                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertNotIn("pullRequestPending", app.ISSUES[0])
+        persist_state.assert_called()
+
     def test_pending_marker_is_cleared_when_handled_operation_fails(self) -> None:
         with (
             patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
@@ -858,6 +873,22 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
         self.assertIn("Git clone repository failed", handler.payload["message"])
+        self.assertNotIn("pullRequestPending", app.ISSUES[0])
+
+    def test_route_maps_checkout_missing_token_failure_to_service_unavailable_and_clears_pending(self) -> None:
+        handler = RouteHarness("/issues/f_123/pull-requests", cookie=self.signed_in())
+        message = "GitHub App did not return an installation access token."
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.checkout.prepare_checkout", side_effect=RuntimeError(message)),
+            patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+            patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertIn("installation access token", handler.payload["message"])
         self.assertNotIn("pullRequestPending", app.ISSUES[0])
 
     def test_route_returns_pull_request_payload_on_success(self) -> None:
