@@ -465,9 +465,13 @@ def timing_safe_hex_equal(expected: str, actual: str) -> bool:
         return False
 
 
+def dict_payload(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
 def billing_update_from_creem_event(event: dict) -> dict | None:
     event_type = event.get("eventType") or event.get("type")
-    obj = event.get("object") or {}
+    obj = dict_payload(event.get("object"))
     if event_type not in {
         "checkout.completed",
         "subscription.active",
@@ -531,7 +535,8 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
 
 def billing_update_from_stripe_event(event: dict) -> dict | None:
     event_type = event.get("type") or ""
-    obj = ((event.get("data") or {}).get("object") or {})
+    data = dict_payload(event.get("data"))
+    obj = dict_payload(data.get("object"))
     if event_type == "checkout.session.completed":
         metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
         user_id = obj.get("client_reference_id") or metadata.get("userId")

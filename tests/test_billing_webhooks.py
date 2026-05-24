@@ -76,6 +76,39 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["eventId"], "evt_checkout_1")
         self.assertEqual(update["eventCreated"], 1710000000)
 
+    def test_creem_event_ignores_non_object_payload(self) -> None:
+        update = billing.billing_update_from_creem_event(
+            {
+                "id": "evt_bad_creem_1",
+                "eventType": "checkout.completed",
+                "object": [{"unexpected": True}],
+            }
+        )
+
+        self.assertIsNone(update)
+
+    def test_stripe_event_ignores_non_object_data(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_bad_stripe_1",
+                "type": "checkout.session.completed",
+                "data": [{"unexpected": True}],
+            }
+        )
+
+        self.assertIsNone(update)
+
+    def test_stripe_event_ignores_non_object_data_object(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_bad_stripe_2",
+                "type": "checkout.session.completed",
+                "data": {"object": [{"unexpected": True}]},
+            }
+        )
+
+        self.assertIsNone(update)
+
     def test_stripe_subscription_event_includes_event_metadata_for_idempotency(self) -> None:
         event = {
             "id": "evt_subscription_1",
