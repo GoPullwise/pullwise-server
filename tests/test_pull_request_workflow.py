@@ -148,6 +148,42 @@ class PullRequestWorkflowTest(unittest.TestCase):
         create_token.assert_not_called()
         create_pull_request.assert_not_called()
 
+    def test_existing_pull_request_payload_is_sanitized_before_returning(self) -> None:
+        app.ISSUES[0]["pullRequest"] = {
+            "issueId": {"value": "f_123"},
+            "branch": "pullwise/fix-f_123-existing\r\nX-Injected: bad",
+            "url": "javascript:alert(1)",
+            "number": {"value": 7},
+            "title": "Fix Validate redirect targets\r\nX-Injected: bad",
+        }
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
+            patch("pullwise_server.app.github_auth.create_pull_request") as create_pull_request,
+            patch("pullwise_server.app.persist_state") as persist_state,
+        ):
+            pull_request = app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertEqual(
+            pull_request,
+            {
+                "issueId": "f_123",
+                "branch": "",
+                "url": None,
+                "number": None,
+                "title": "Fix Validate redirect targets",
+            },
+        )
+        self.assertEqual(app.ISSUES[0]["pullRequest"], pull_request)
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        create_token.assert_not_called()
+        create_pull_request.assert_not_called()
+        persist_state.assert_called_once()
+
     def test_existing_pull_request_does_not_bypass_github_app_configuration(self) -> None:
         app.ISSUES[0]["pullRequest"] = {
             "issueId": "f_123",

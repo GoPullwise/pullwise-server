@@ -982,8 +982,13 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         installation_permissions = repo_meta.get("installationPermissions") or github_access.get("installationPermissions")
         if not isinstance(installation_permissions, dict) or not installation_supports_pull_request_creation({"permissions": installation_permissions}):
             raise ValueError(github_app_write_permissions_message())
+        title = pull_request_title(issue, issue_id)
 
         if isinstance(existing, dict):
+            safe_existing = safe_existing_pull_request(existing, issue_id=issue_id, fallback_title=title)
+            if safe_existing != existing:
+                store_issue_pull_request(issue, safe_existing)
+                return safe_existing
             return existing
 
         base_branch = (
@@ -1004,7 +1009,6 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         clone_url = trusted_github_web_url(repo_meta.get("cloneUrl") or repo_meta.get("clone_url"))
         if not clone_url:
             clone_url = trusted_github_web_url(scan.get("cloneUrl") or scan.get("clone_url"))
-        title = pull_request_title(issue, issue_id)
 
         recovery_token = ""
         if recovering_pending:
@@ -1221,6 +1225,17 @@ def store_issue_pull_request(issue: dict, pull_request: dict) -> None:
         issue["pullRequest"] = pull_request
         mark_state_dirty()
         persist_state()
+
+
+def safe_existing_pull_request(value: dict, *, issue_id: str, fallback_title: str) -> dict:
+    number = value.get("number")
+    return {
+        "issueId": issue_id,
+        "branch": valid_stored_pull_request_branch(value.get("branch")) or "",
+        "url": trusted_github_web_url(value.get("url")),
+        "number": number if isinstance(number, int) and not isinstance(number, bool) else None,
+        "title": clean_pull_request_text(value.get("title")) or fallback_title,
+    }
 
 
 def record_pull_request_pending_failure(issue: dict, message: str) -> None:
