@@ -162,6 +162,29 @@ class ScanQueueTest(unittest.TestCase):
         self.assertEqual(claimed["id"], "sc_2")
         self.assertEqual(app.SCANS[1]["status"], "queued")
 
+    def test_queue_claim_sanitizes_legacy_scan_metadata_snapshot(self) -> None:
+        app.SCANS = [
+            {
+                "id": "sc_dirty",
+                "userId": "usr_1",
+                "repo": "owner/repo",
+                "branch": "main\r\nX-Injected: bad",
+                "commit": {"sha": "abc1234"},
+                "installationId": 123,
+                "cloneUrl": "https://github.com/owner/repo.git\r\nX-Injected: bad",
+                "status": "queued",
+                "createdAt": 100,
+            }
+        ]
+
+        with patch.object(app, "persist_state"):
+            snapshot = worker._claim_next_scan()
+
+        self.assertEqual(snapshot["branch"], "main")
+        self.assertEqual(snapshot["commit"], "pending")
+        self.assertEqual(snapshot["installationId"], "123")
+        self.assertIsNone(snapshot["cloneUrl"])
+
     def test_queued_scan_payload_reports_global_position_and_reason(self) -> None:
         app.SCANS.insert(
             0,

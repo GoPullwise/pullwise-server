@@ -292,14 +292,15 @@ def _mark_running_locked(scan: dict) -> dict:
 
 
 def _scan_snapshot(scan: dict, started_at: int) -> dict:
+    clone_url = checkout.clean_scan_text(scan.get("cloneUrl") or scan.get("clone_url"))
     return {
         "id": scan["id"],
-        "userId": scan["userId"],
-        "repo": scan.get("repo", ""),
-        "branch": scan.get("branch", "main"),
-        "commit": scan.get("commit", "pending"),
-        "installationId": scan.get("installationId"),
-        "cloneUrl": scan.get("cloneUrl"),
+        "userId": checkout.clean_scan_text(scan.get("userId")) or "",
+        "repo": checkout.clean_scan_text(scan.get("repo")) or "",
+        "branch": checkout.clean_scan_text(scan.get("branch")) or "main",
+        "commit": checkout.clean_scan_text(scan.get("commit")) or "pending",
+        "installationId": checkout.clean_scan_text(scan.get("installationId"), allow_int=True),
+        "cloneUrl": clone_url,
         "repoPath": scan.get("repoPath"),
         "startedAt": started_at,
     }
@@ -349,15 +350,7 @@ def _start_running(scan_id: str, started_at: int) -> dict | None:
         )
         app.mark_state_dirty()
         app.persist_state()
-        return {
-            "userId": scan["userId"],
-            "repo": scan.get("repo", ""),
-            "branch": scan.get("branch", "main"),
-            "commit": scan.get("commit", "pending"),
-            "installationId": scan.get("installationId"),
-            "cloneUrl": scan.get("cloneUrl"),
-            "repoPath": scan.get("repoPath"),
-        }
+        return _scan_snapshot(scan, started_at)
 
 
 def _patch_scan(
