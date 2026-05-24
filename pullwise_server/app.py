@@ -213,6 +213,24 @@ def persist_state(*, force: bool = False) -> None:
         STATE_DIRTY = False
 
 
+def recover_interrupted_scans() -> int:
+    recovered = 0
+    with STATE_LOCK:
+        for scan in SCANS:
+            if scan.get("status") != "running":
+                continue
+            scan["status"] = "queued"
+            scan["progress"] = 0
+            scan["phase"] = None
+            scan["recoveredAt"] = now()
+            scan["recoveryReason"] = "server_restart"
+            recovered += 1
+        if recovered:
+            mark_state_dirty()
+            persist_state()
+    return recovered
+
+
 def allowed_origins() -> set[str]:
     raw = env(
         "PULLWISE_ALLOWED_ORIGINS",
@@ -2183,6 +2201,9 @@ def main() -> None:
     args = parser.parse_args()
 
     ensure_state_loaded()
+    recovered_scans = recover_interrupted_scans()
+    if recovered_scans:
+        logger.info("Recovered %s interrupted scan(s).", recovered_scans)
     worker.ensure_workers()
     httpd = ThreadingHTTPServer((args.host, args.port), PullwiseHandler)
     logger.info("Pullwise API listening on http://%s:%s", args.host, args.port)
