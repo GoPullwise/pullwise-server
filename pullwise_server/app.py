@@ -862,13 +862,6 @@ def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
 
 
 def create_issue_pull_request(user: dict, issue: dict) -> dict:
-    existing = issue.get("pullRequest")
-    if isinstance(existing, dict):
-        return existing
-
-    if not github_auth.app_api_configured():
-        raise ValueError("GitHub App API is not configured for pull request creation.")
-
     user_id = str(user.get("id") or "")
     if not user_id or str(issue.get("userId") or "") != user_id:
         raise ValueError("Issue does not belong to the signed-in user.")
@@ -879,6 +872,13 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         raise ValueError("Scan not found for issue.")
     if str(scan.get("userId") or "") != user_id:
         raise ValueError("Scan does not belong to the signed-in user.")
+
+    existing = issue.get("pullRequest")
+    if isinstance(existing, dict):
+        return existing
+
+    if not github_auth.app_api_configured():
+        raise ValueError("GitHub App API is not configured for pull request creation.")
 
     github_access = user.get("githubRepositoryAccess")
     repo = str(issue.get("repo") or issue.get("repository") or scan.get("repo") or "").strip()
