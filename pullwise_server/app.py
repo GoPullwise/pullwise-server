@@ -564,7 +564,7 @@ def get_or_create_github_user() -> dict:
 
 def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
     login = profile["login"]
-    github_id = str(profile.get("id") or re.sub(r"[^a-z0-9]+", "_", login.lower()).strip("_"))
+    github_id = github_profile_id(profile, login)
     user_id = "usr_github_" + github_id
     email = profile.get("primaryEmail") or profile.get("email") or f"{login}@users.noreply.github.com"
     if user_id not in USERS:
@@ -598,6 +598,17 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
         user["providers"].append("github")
     mark_state_dirty()
     return user
+
+
+def github_profile_id(profile: dict, login: str) -> str:
+    raw_id = profile.get("id")
+    if isinstance(raw_id, int) and not isinstance(raw_id, bool) and raw_id >= 0:
+        return str(raw_id)
+    if isinstance(raw_id, str):
+        candidate = raw_id.strip()
+        if re.fullmatch(r"[A-Za-z0-9_-]+", candidate):
+            return candidate
+    return re.sub(r"[^a-z0-9]+", "_", login.lower()).strip("_")
 
 
 def create_session(user: dict) -> dict:

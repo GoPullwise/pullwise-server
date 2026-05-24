@@ -140,6 +140,23 @@ class SecurityContractsTest(unittest.TestCase):
         record = next(iter(app.GITHUB_STATES.values()))
         self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/?screen=dashboard")
 
+    def test_real_github_user_uses_safe_login_fallback_for_malformed_profile_id(self) -> None:
+        app.USERS = {}
+
+        user = app.get_or_create_real_github_user(
+            {
+                "id": {"node_id": "bad"},
+                "login": "OctoCat",
+                "primaryEmail": "octocat@example.com",
+                "name": "Octo Cat",
+            },
+            {"access_token": "gho_user", "token_type": "bearer", "scope": "read:user"},
+        )
+
+        self.assertEqual(user["id"], "usr_github_octocat")
+        self.assertEqual(user["githubId"], "octocat")
+        self.assertNotIn("usr_github_{'node_id': 'bad'}", app.USERS)
+
     def test_issue_status_update_requires_sign_in(self) -> None:
         handler = RouteHarness("/issues/iss_1/status", {"status": "ignored"})
 
