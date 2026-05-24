@@ -639,11 +639,8 @@ def _parse_findings_json(raw: str) -> list[dict]:
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:].lstrip()
-    open_brace = text.find("{")
-    if open_brace > 0:
-        text = text[open_brace:]
     try:
-        document, _ = json.JSONDecoder().raw_decode(text)
+        document = _first_findings_document(text)
     except json.JSONDecodeError as exc:
         raise ReviewProviderError(
             "Review provider did not return valid JSON findings. "
@@ -651,3 +648,21 @@ def _parse_findings_json(raw: str) -> list[dict]:
         ) from exc
     findings = document.get("findings") if isinstance(document, dict) else None
     return findings if isinstance(findings, list) else []
+
+
+def _first_findings_document(text: str) -> dict:
+    decoder = json.JSONDecoder()
+    first_error = None
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            document, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError as exc:
+            first_error = first_error or exc
+            continue
+        if isinstance(document, dict) and isinstance(document.get("findings"), list):
+            return document
+    if first_error:
+        raise first_error
+    raise json.JSONDecodeError("No JSON object found", text, 0)
