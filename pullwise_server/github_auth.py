@@ -210,6 +210,37 @@ def create_installation_access_token(installation_id: str) -> dict:
         integration.close()
 
 
+def create_pull_request(token: str, repo: str, *, title: str, head: str, base: str, body: str) -> dict:
+    response = requests.post(
+        f"{github_api_url()}/repos/{repo}/pulls",
+        headers=github_api_headers(token),
+        json={
+            "title": title,
+            "head": head,
+            "base": base,
+            "body": body,
+        },
+        timeout=request_timeout(),
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        detail = str(getattr(response, "text", "") or "").strip()
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            message = f"GitHub pull request creation failed: {exc}"
+            if detail:
+                message = f"{message}: {detail[:500]}"
+            raise GitHubError(message) from exc
+        raise GitHubError("GitHub pull request creation failed.")
+
+    payload = response.json()
+    return {
+        "url": payload.get("html_url") or payload.get("url"),
+        "number": payload.get("number"),
+        "title": payload.get("title") or title,
+    }
+
+
 def list_installation_repositories(installation_id: str) -> list[dict]:
     token_payload = create_installation_access_token(installation_id)
     token = token_payload.get("token")
