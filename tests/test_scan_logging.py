@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
 
-from pullwise_server import app, review, worker
+from pullwise_server import app, review, scan_logging, worker
 
 
 class RouteHarness(app.PullwiseHandler):
@@ -87,6 +88,26 @@ class ScanLoggingTest(unittest.TestCase):
             self.assertNoLogs("pullwise_server.scan", level="INFO"),
         ):
             worker._execute_scan("sc_trace", self._snapshot("sc_trace"), 100)
+
+    def test_log_event_sanitizes_non_json_serializable_fields(self) -> None:
+        with self.assertLogs("pullwise_server.scan", level="INFO") as logs:
+            try:
+                scan_logging.log_event(
+                    "metadata_seen",
+                    labels={"beta", "alpha"},
+                    token=b"\xfftoken",
+                    metrics={"duration": float("nan"), "limit": float("inf")},
+                    rows=[{"value": {"nested"}}],
+                )
+            except TypeError as exc:
+                self.fail(f"log_event should sanitize non-JSON fields: {exc}")
+
+        payload = json.loads(logs.output[0].split("scan_review ", 1)[1])
+        self.assertEqual(payload["event"], "metadata_seen")
+        self.assertEqual(payload["labels"], ["alpha", "beta"])
+        self.assertEqual(payload["token"], "\ufffdtoken")
+        self.assertEqual(payload["metrics"], {"duration": None, "limit": None})
+        self.assertEqual(payload["rows"], [{"value": ["nested"]}])
 
     def test_run_review_logs_provider_dispatch(self) -> None:
         raw_finding = {
