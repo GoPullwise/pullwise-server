@@ -84,6 +84,8 @@ class SecurityContractsTest(unittest.TestCase):
         app.STATE_LOADED = True
         app.STATE_DIRTY = False
         app.GITHUB_STATES = {}
+        with app.PREVIEW_SCAN_LOCKS_GUARD:
+            app.PREVIEW_SCAN_LOCKS.clear()
 
     def signed_in(self):
         app.SESSIONS = {
@@ -378,6 +380,8 @@ class SecurityContractsTest(unittest.TestCase):
                 max_active_prepares = 0
                 prepare_calls = 0
                 counter_lock = threading.Lock()
+                first_prepare_entered = threading.Event()
+                release_first_prepare = threading.Event()
 
                 def prepare_checkout(_scan_id, _scan, _is_cancelled):
                     nonlocal active_prepares, max_active_prepares, prepare_calls
@@ -385,7 +389,12 @@ class SecurityContractsTest(unittest.TestCase):
                         active_prepares += 1
                         prepare_calls += 1
                         max_active_prepares = max(max_active_prepares, active_prepares)
-                    time.sleep(0.05)
+                        is_first_prepare = prepare_calls == 1
+                    if is_first_prepare:
+                        first_prepare_entered.set()
+                        release_first_prepare.wait(1)
+                    else:
+                        time.sleep(0.01)
                     with counter_lock:
                         active_prepares -= 1
                     return repo_path
@@ -407,6 +416,9 @@ class SecurityContractsTest(unittest.TestCase):
                     second = threading.Thread(target=run_preview)
                     first.start()
                     second.start()
+                    self.assertTrue(first_prepare_entered.wait(1))
+                    time.sleep(0.05)
+                    release_first_prepare.set()
                     first.join()
                     second.join()
 

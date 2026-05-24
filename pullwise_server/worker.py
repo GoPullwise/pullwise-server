@@ -411,17 +411,20 @@ def _prepare_checkout_if_needed(scan_id: str, snapshot: dict) -> str | None:
 
 
 def _cleanup_checkout_workspace(scan_id: str, snapshot: dict) -> None:
+    from . import app
+
     user_id = str(snapshot.get("userId") or "")
     if not user_id:
         return
-    try:
-        _log_scan_event("cleanup_started", scan_id, snapshot)
-        checkout.cleanup_scan_workspace(user_id, scan_id)
-        _patch_scan(scan_id, {"repoPath": None}, allow_after_cancel=True)
-        _log_scan_event("cleanup_completed", scan_id, snapshot)
-    except Exception:
-        traceback.print_exc()
-        _log_scan_event("cleanup_failed", scan_id, snapshot)
+    with app.preview_scan_lock(scan_id):
+        try:
+            _log_scan_event("cleanup_started", scan_id, snapshot)
+            checkout.cleanup_scan_workspace(user_id, scan_id)
+            _patch_scan(scan_id, {"repoPath": None}, allow_after_cancel=True)
+            _log_scan_event("cleanup_completed", scan_id, snapshot)
+        except Exception:
+            traceback.print_exc()
+            _log_scan_event("cleanup_failed", scan_id, snapshot)
 
 
 def _log_scan_event(event: str, scan_id: str, snapshot: dict, **fields: object) -> None:

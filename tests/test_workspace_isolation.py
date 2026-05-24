@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +11,10 @@ from pullwise_server import app, checkout, worker
 
 
 class WorkspaceIsolationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        with app.PREVIEW_SCAN_LOCKS_GUARD:
+            app.PREVIEW_SCAN_LOCKS.clear()
+
     def test_checkout_paths_are_namespaced_by_user_and_scan(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
@@ -40,6 +46,44 @@ class WorkspaceIsolationTest(unittest.TestCase):
 
         self.assertEqual(repo_path, expected_path)
         prepare_checkout.assert_called_once()
+
+    def test_worker_cleanup_waits_for_fix_preview_scan_lock(self) -> None:
+        cleanup_called = threading.Event()
+        cleanup_finished = threading.Event()
+        scan_lock = app.preview_scan_lock("sc_1")
+        snapshot = {
+            "id": "sc_1",
+            "userId": "usr_1",
+            "repo": "owner/repo",
+            "branch": "main",
+            "commit": "pending",
+            "repoPath": "checkout",
+        }
+
+        def cleanup_workspace(_user_id: str, _scan_id: str) -> None:
+            cleanup_called.set()
+
+        with (
+            patch.object(worker.checkout, "cleanup_scan_workspace", side_effect=cleanup_workspace),
+            patch.object(worker, "_patch_scan") as patch_scan,
+            patch.object(worker, "_log_scan_event"),
+        ):
+            scan_lock.acquire()
+            cleanup_thread = threading.Thread(
+                target=lambda: (worker._cleanup_checkout_workspace("sc_1", snapshot), cleanup_finished.set())
+            )
+            try:
+                cleanup_thread.start()
+                self.assertFalse(cleanup_called.wait(0.05))
+            finally:
+                scan_lock.release()
+
+            self.assertTrue(cleanup_called.wait(1))
+            cleanup_thread.join(1)
+
+        self.assertFalse(cleanup_thread.is_alive())
+        self.assertTrue(cleanup_finished.is_set())
+        patch_scan.assert_called_once_with("sc_1", {"repoPath": None}, allow_after_cancel=True)
 
 
 class ScanQueueTest(unittest.TestCase):
