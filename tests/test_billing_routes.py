@@ -612,6 +612,37 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertFalse(billing_state["cancelAtPeriodEnd"])
         self.assertEqual(billing_state["canceledAt"], 1713000000)
 
+    def test_billing_update_ignores_malformed_provider_and_event_type_when_applying(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "stripe",
+            "customerId": "cus_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+            "lastEventType": "checkout.session.completed",
+        }
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": ["stripe"],
+                "customerId": "cus_1",
+                "status": "past_due",
+                "eventType": {"type": "customer.subscription.updated"},
+                "eventId": "evt_bad_text_fields",
+                "eventCreated": 1100,
+            },
+        )
+
+        billing_state = app.USERS["usr_1"]["billing"]
+        self.assertEqual(billing_state["status"], "past_due")
+        self.assertEqual(billing_state["provider"], "stripe")
+        self.assertEqual(billing_state["lastEventType"], "checkout.session.completed")
+        self.assertIsNone(app.BILLING_EVENTS["evt_bad_text_fields"]["eventType"])
+
     def test_stripe_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
         seed_session()
         handler = HandlerHarness()

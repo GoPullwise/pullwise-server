@@ -1659,7 +1659,7 @@ def remember_billing_event(update: dict, *, applied: bool, stale: bool = False) 
     if not event_id:
         return
     BILLING_EVENTS[event_id] = {
-        "eventType": update.get("eventType"),
+        "eventType": billing_update_text(update.get("eventType")) or None,
         "eventCreated": billing_event_created(update),
         "processedAt": now(),
         "applied": applied,
@@ -1732,11 +1732,13 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     current_period_end = billing_update_scalar(update.get("currentPeriodEnd"))
     cancel_at_period_end = billing_update_bool(update.get("cancelAtPeriodEnd"))
     canceled_at = billing_update_scalar(update.get("canceledAt"))
+    provider = billing_update_text(update.get("provider"))
+    event_type = billing_update_text(update.get("eventType"))
     event_id = billing_event_id(update)
 
     user["billing"] = {
         **current,
-        "provider": update.get("provider") or current.get("provider"),
+        "provider": provider or current.get("provider"),
         "customerId": customer_id or current.get("customerId"),
         "customerEmail": customer_email or current.get("customerEmail"),
         "subscriptionId": subscription_id or current.get("subscriptionId"),
@@ -1749,7 +1751,7 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         "cancelAtPeriodEnd": cancel_at_period_end if cancel_at_period_end is not None else current.get("cancelAtPeriodEnd"),
         "canceledAt": canceled_at if canceled_at is not None else current.get("canceledAt"),
         "updatedAt": now(),
-        "lastEventType": update.get("eventType"),
+        "lastEventType": event_type or current.get("lastEventType"),
         "lastEventId": event_id or current.get("lastEventId"),
         "lastEventCreated": incoming_created if incoming_created is not None else current.get("lastEventCreated"),
     }
