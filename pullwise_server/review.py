@@ -643,7 +643,7 @@ def _parse_findings_json(raw: str) -> list[dict]:
     if open_brace > 0:
         text = text[open_brace:]
     try:
-        document = json.loads(text)
+        document, _ = json.JSONDecoder().raw_decode(text)
     except json.JSONDecodeError as exc:
         raise ReviewProviderError(
             "Review provider did not return valid JSON findings. "

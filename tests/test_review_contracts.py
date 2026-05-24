@@ -9,6 +9,13 @@ from pullwise_server import review
 
 
 class ReviewContractsTest(unittest.TestCase):
+    def test_parse_findings_json_ignores_trailing_provider_logs(self) -> None:
+        raw = 'INFO starting review\n{"findings":[{"id":"f_1","title":"Issue"}]}\nINFO review complete'
+
+        findings = review._parse_findings_json(raw)
+
+        self.assertEqual(findings, [{"id": "f_1", "title": "Issue"}])
+
     def test_run_review_sanitizes_malformed_provider_finding_fields(self) -> None:
         malformed_finding = {
             "id": {"value": "f_bad"},
