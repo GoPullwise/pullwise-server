@@ -90,6 +90,34 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(data["line_items[0][price]"], "price_123")
         self.assertEqual(data["customer_email"], "dev@example.com")
 
+    def test_billing_provider_requests_use_default_timeout_for_invalid_timeout_env(self) -> None:
+        for timeout_value in ["abc", "0", "-5"]:
+            with self.subTest(timeout_value=timeout_value):
+                response = Mock()
+                response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}
+                response.raise_for_status.return_value = None
+
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
+                            "PULLWISE_STRIPE_PRICE_ID": "price_123",
+                            "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                            "PULLWISE_BILLING_TIMEOUT_SECONDS": timeout_value,
+                        },
+                        clear=True,
+                    ),
+                    patch("pullwise_server.billing.requests.post", return_value=response) as post,
+                ):
+                    billing.create_checkout_session(
+                        {"id": "usr_1", "email": "dev@example.com"},
+                        success_url="https://app.pullwise.dev/?billing=success",
+                        cancel_url="https://app.pullwise.dev/?billing=cancel",
+                    )
+
+                self.assertEqual(post.call_args.kwargs["timeout"], 15)
+
     def test_creates_stripe_yearly_checkout_session_with_subscription_metadata(self) -> None:
         response = Mock()
         response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}

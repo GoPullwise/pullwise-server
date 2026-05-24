@@ -34,6 +34,11 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def billing_timeout_seconds() -> int:
+    value = env_int("PULLWISE_BILLING_TIMEOUT_SECONDS", 15)
+    return value if value > 0 else 15
+
+
 def billing_currency() -> str:
     return env("PULLWISE_BILLING_CURRENCY", "USD").upper()
 
@@ -218,7 +223,7 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
         "https://api.stripe.com/v1/checkout/sessions",
         auth=(env("PULLWISE_STRIPE_SECRET_KEY"), ""),
         data=data,
-        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+        timeout=billing_timeout_seconds(),
     )
     response.raise_for_status()
     payload = response.json()
@@ -256,7 +261,7 @@ def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, in
         urljoin(creem_api_base_url() + "/", "v1/checkouts"),
         headers={"x-api-key": env("PULLWISE_CREEM_API_KEY"), "Content-Type": "application/json"},
         json=payload,
-        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+        timeout=billing_timeout_seconds(),
     )
     response.raise_for_status()
     payload = response.json()
@@ -291,7 +296,7 @@ def create_stripe_portal_session(customer_id: str, *, return_url: str) -> dict:
         "https://api.stripe.com/v1/billing_portal/sessions",
         auth=(env("PULLWISE_STRIPE_SECRET_KEY"), ""),
         data={"customer": customer_id, "return_url": return_url},
-        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+        timeout=billing_timeout_seconds(),
     )
     response.raise_for_status()
     payload = response.json()
@@ -306,7 +311,7 @@ def create_creem_portal_session(customer_id: str) -> dict:
         urljoin(creem_api_base_url() + "/", "v1/customers/billing"),
         headers={"x-api-key": env("PULLWISE_CREEM_API_KEY"), "Content-Type": "application/json"},
         json={"customer_id": customer_id},
-        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+        timeout=billing_timeout_seconds(),
     )
     response.raise_for_status()
     payload = response.json()
@@ -370,7 +375,7 @@ def create_stripe_interval_change_session(billing: dict, *, return_url: str) -> 
         "https://api.stripe.com/v1/billing_portal/sessions",
         auth=(env("PULLWISE_STRIPE_SECRET_KEY"), ""),
         data=data,
-        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+        timeout=billing_timeout_seconds(),
     )
     response.raise_for_status()
     payload = response.json()
@@ -384,7 +389,7 @@ def fetch_stripe_subscription_item_id(subscription_id: str) -> str | None:
     response = requests.get(
         f"https://api.stripe.com/v1/subscriptions/{subscription_id}",
         auth=(env("PULLWISE_STRIPE_SECRET_KEY"), ""),
-        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+        timeout=billing_timeout_seconds(),
     )
     response.raise_for_status()
     payload = response.json()
@@ -406,7 +411,7 @@ def create_creem_interval_change(billing: dict) -> dict:
             "product_id": yearly_product,
             "update_behavior": env("PULLWISE_CREEM_UPGRADE_BEHAVIOR", "proration-charge-immediately"),
         },
-        timeout=int(env("PULLWISE_BILLING_TIMEOUT_SECONDS", "15")),
+        timeout=billing_timeout_seconds(),
     )
     response.raise_for_status()
     payload = response.json()
