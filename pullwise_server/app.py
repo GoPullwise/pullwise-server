@@ -1052,10 +1052,12 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             persist_state()
             return pull_request
         except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
-            if irreversible_started or remote_git_error(exc):
+            if irreversible_started:
                 record_pull_request_pending_failure(issue, str(exc))
                 raise github_auth.GitHubError(str(exc)) from exc
             clear_pull_request_pending(issue)
+            if remote_git_error(exc):
+                raise github_auth.GitHubError(str(exc)) from exc
             raise ValueError(str(exc)) from exc
         except github_auth.GitHubError as exc:
             if irreversible_started:
