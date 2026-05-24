@@ -30,6 +30,24 @@ class BillingWebhookTest(unittest.TestCase):
             self.assertTrue(billing.verify_stripe_webhook(raw, f"t={timestamp},v1={signature}"))
             self.assertFalse(billing.verify_stripe_webhook(raw, f"t={timestamp},v1={'0' * 64}"))
 
+    def test_stripe_webhook_uses_default_tolerance_for_invalid_tolerance_env(self) -> None:
+        raw = b'{"type":"checkout.session.completed"}'
+        timestamp = int(time.time()) - 1
+        signed = f"{timestamp}.{raw.decode('utf-8')}".encode("utf-8")
+        signature = hmac.new(b"whsec_test", signed, hashlib.sha256).hexdigest()
+
+        for tolerance in ["abc", "0", "-5"]:
+            with self.subTest(tolerance=tolerance):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PULLWISE_STRIPE_WEBHOOK_SECRET": "whsec_test",
+                        "PULLWISE_STRIPE_WEBHOOK_TOLERANCE_SECONDS": tolerance,
+                    },
+                    clear=True,
+                ):
+                    self.assertTrue(billing.verify_stripe_webhook(raw, f"t={timestamp},v1={signature}"))
+
     def test_creem_checkout_completed_maps_to_active_billing(self) -> None:
         event = {
             "id": "evt_creem_checkout_1",

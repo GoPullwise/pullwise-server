@@ -39,6 +39,11 @@ def billing_timeout_seconds() -> int:
     return value if value > 0 else 15
 
 
+def stripe_webhook_tolerance_seconds() -> int:
+    value = env_int("PULLWISE_STRIPE_WEBHOOK_TOLERANCE_SECONDS", 300)
+    return value if value > 0 else 300
+
+
 def billing_currency() -> str:
     return env("PULLWISE_BILLING_CURRENCY", "USD").upper()
 
@@ -455,7 +460,7 @@ def verify_stripe_webhook(raw_body: bytes, signature_header: str | None) -> bool
     if not timestamp or not (parts.get("v1") or []):
         return False
     try:
-        if abs(int(time.time()) - int(timestamp)) > int(env("PULLWISE_STRIPE_WEBHOOK_TOLERANCE_SECONDS", "300")):
+        if abs(int(time.time()) - int(timestamp)) > stripe_webhook_tolerance_seconds():
             return False
     except ValueError:
         return False
