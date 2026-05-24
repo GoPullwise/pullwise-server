@@ -574,6 +574,18 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(len(app.SCANS), initial_scan_count)
         start_scan.assert_not_called()
 
+    def test_scan_creation_rejects_non_object_body(self) -> None:
+        initial_scan_count = len(app.SCANS)
+        handler = RouteHarness("/scans", ["owner/repo"], cookie=self.signed_in())
+
+        with patch.object(app.worker, "start_scan") as start_scan:
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be a JSON object.")
+        self.assertEqual(len(app.SCANS), initial_scan_count)
+        start_scan.assert_not_called()
+
     def test_scan_creation_uses_repository_item_installation_id(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

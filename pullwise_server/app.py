@@ -1942,6 +1942,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting a scan.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             repository = str(body.get("repo") or body.get("repository") or "").strip()
             if not repository:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
