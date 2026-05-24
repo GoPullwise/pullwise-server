@@ -266,14 +266,21 @@ def _finalize_finding(finding: object, *, user_id: str, scan_id: str, repo: str)
 def _safe_text(value: object, default: str = "") -> str:
     if not isinstance(value, str):
         return default
-    return value.strip() or default
+    if any(char in value for char in "\r\n\x00"):
+        return default
+    value = value.strip()
+    if not value or any(char in value for char in "\r\n\x00"):
+        return default
+    return value
 
 
 def _safe_metadata_text(value: object, default: str = "") -> str:
     if not isinstance(value, str):
         return default
+    if any(char in value for char in "\r\n\x00"):
+        return default
     value = value.strip()
-    if not value or any(char in value for char in "\r\n"):
+    if not value:
         return default
     return value
 

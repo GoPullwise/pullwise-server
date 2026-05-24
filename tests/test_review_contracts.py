@@ -163,6 +163,49 @@ class ReviewContractsTest(unittest.TestCase):
         self.assertEqual(finding["goodCode"], [{"ln": 0, "code": "return redirect(safe_redirect(next_url))", "t": "add"}])
         self.assertEqual(finding["references"], [{"label": "Docs", "url": "https://example.com/docs"}])
 
+    def test_run_review_drops_control_characters_from_provider_finding_text(self) -> None:
+        provider_finding = {
+            "id": "f_bad\r\nX-Injected: bad",
+            "severity": "high\r\nX-Injected: bad",
+            "category": "security\r\nX-Injected: bad",
+            "title": "Unsafe redirect\r\nX-Injected: bad",
+            "summary": "Uses a raw redirect.\x00",
+            "impact": "Phishing risk.\r",
+            "file": "src/app.py\r\n../secret",
+            "effort": "5 min\n",
+            "tags": ["security\r\nbad", "redirect"],
+            "steps": ["Validate redirects.\r\nextra", "Use allowlist."],
+            "references": [
+                {"label": "Docs\r\nInjected", "url": "https://example.com/docs"},
+                {"label": "Safe", "url": "https://example.com/safe"},
+            ],
+        }
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[provider_finding]),
+        ):
+            findings = review.run_review(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                user_id="usr_1",
+                scan_id="sc_1",
+            )
+
+        finding = findings[0]
+        self.assertRegex(finding["id"], r"^f_")
+        self.assertEqual(finding["severity"], "medium")
+        self.assertEqual(finding["category"], "Quality")
+        self.assertEqual(finding["title"], "Untitled finding")
+        self.assertEqual(finding["summary"], "")
+        self.assertEqual(finding["impact"], "")
+        self.assertEqual(finding["file"], "")
+        self.assertEqual(finding["effort"], "-")
+        self.assertEqual(finding["tags"], ["redirect"])
+        self.assertEqual(finding["steps"], ["Use allowlist."])
+        self.assertEqual(finding["references"], [{"label": "Safe", "url": "https://example.com/safe"}])
+
     def test_run_review_sanitizes_source_metadata_before_provider_dispatch(self) -> None:
         with (
             patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
