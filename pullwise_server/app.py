@@ -778,6 +778,19 @@ def scan_payload(scan: dict) -> dict:
     return payload
 
 
+def issue_payload(issue: dict) -> dict:
+    payload = dict(issue)
+    pull_request = issue.get("pullRequest")
+    if isinstance(pull_request, dict):
+        issue_id = clean_pull_request_issue_id(issue.get("id"))
+        payload["pullRequest"] = safe_existing_pull_request(
+            pull_request,
+            issue_id=issue_id,
+            fallback_title=pull_request_title(issue, issue_id),
+        )
+    return payload
+
+
 def scan_queue_payload(scan: dict) -> dict | None:
     status = scan.get("status")
     if status not in {"queued", "running"}:
@@ -2166,12 +2179,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan_id = params.get("scanId")
             if scan_id:
                 issues = [issue for issue in issues if issue.get("scanId") == scan_id]
-            return self.json({"items": issues, "issues": issues})
+            issue_payloads = [issue_payload(issue) for issue in issues]
+            return self.json({"items": issue_payloads, "issues": issue_payloads})
         if len(segments) == 2 and segments[0] == "issues":
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing issues.")
-            return self.json(self.find_or_404(user_issues(session), segments[1], "Issue"))
+            return self.json(issue_payload(self.find_or_404(user_issues(session), segments[1], "Issue")))
         if path == "/settings":
             session = self.current_session()
             if not session:
@@ -2458,7 +2472,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, "Issue status must be open, fixed, or snoozed.")
             issue["status"] = next_status
             mark_state_dirty()
-            return self.json(issue)
+            return self.json(issue_payload(issue))
         if len(segments) == 1 and segments[0] == "settings":
             session = self.current_session()
             if not session:

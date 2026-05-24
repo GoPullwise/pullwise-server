@@ -1200,6 +1200,35 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertEqual(handler.payload, payload)
         create_pull_request.assert_called_once_with(app.USERS["usr_1"], app.ISSUES[0])
 
+    def test_issue_read_routes_sanitize_pull_request_payloads(self) -> None:
+        app.ISSUES[0]["pullRequest"] = {
+            "issueId": {"value": "f_123"},
+            "branch": "pullwise/fix-f_123-existing\r\nX-Injected: bad",
+            "url": "javascript:alert(1)",
+            "number": {"value": 7},
+            "title": "Fix Validate redirect targets\r\nX-Injected: bad",
+        }
+
+        expected = {
+            "issueId": "f_123",
+            "branch": "",
+            "url": None,
+            "number": None,
+            "title": "Fix Validate redirect targets",
+        }
+
+        for path in ("/issues", "/issues/f_123"):
+            with self.subTest(path=path):
+                handler = RouteHarness(path, cookie=self.signed_in())
+
+                app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.OK)
+                issue = handler.payload["items"][0] if path == "/issues" else handler.payload
+                self.assertEqual(issue["pullRequest"], expected)
+
+        self.assertNotEqual(app.ISSUES[0]["pullRequest"], expected)
+
     def test_create_pull_request_uses_github_rest_endpoint_and_safe_public_payload(self) -> None:
         response = Mock()
         response.status_code = 201
