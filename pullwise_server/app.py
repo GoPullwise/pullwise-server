@@ -950,8 +950,8 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
     if str(scan.get("userId") or "") != user_id:
         raise ValueError("Scan does not belong to the signed-in user.")
 
-    issue_id = str(issue.get("id") or "")
-    issue_slug = safe_git_ref_component(issue_id, "issue")
+    issue_id = clean_pull_request_issue_id(issue.get("id"))
+    issue_slug = issue_id
     pr_scan_id = f"pr_{issue_slug}"
 
     with preview_scan_lock(f"pull-request:{issue_slug}"):
@@ -1282,6 +1282,13 @@ def pull_request_title(issue: dict, issue_id: str) -> str:
     title = clean_pull_request_text(issue.get("title"))
     fallback = clean_pull_request_text(issue_id) or safe_git_ref_component(issue_id, "issue")
     return f"Fix {title or fallback}"
+
+
+def clean_pull_request_issue_id(value: object) -> str:
+    if not isinstance(value, str):
+        return "issue"
+    text = value.replace("\x00", "").splitlines()[0].strip()
+    return safe_git_ref_component(text, "issue")
 
 
 def clean_pull_request_text(value: object) -> str:

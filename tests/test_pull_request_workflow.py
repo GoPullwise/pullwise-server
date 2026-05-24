@@ -993,6 +993,40 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertTrue(branch.startswith("pullwise/fix-f-bad-value-token-value"))
         self.assertEqual(run_git.call_args_list[0].args[0], ["git", "checkout", "-B", branch])
 
+    def test_pull_request_creation_sanitizes_control_characters_from_issue_id(self) -> None:
+        token = "ghs_secret_token"
+        app.ISSUES[0]["id"] = "f_123\r\nX-Injected: bad"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_path = os.path.join(tmpdir, "repo")
+            os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+            with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                handle.write("def redirect_target(next_url):\n    return redirect(next_url)\n")
+
+            with (
+                patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path) as prepare_checkout,
+                patch("pullwise_server.app.checkout.path_in_scan_workspace", return_value=True),
+                patch("pullwise_server.app.checkout.run_git"),
+                patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+                patch(
+                    "pullwise_server.app.github_auth.create_pull_request",
+                    return_value={
+                        "url": "https://github.com/owner/repo/pull/12",
+                        "number": 12,
+                        "title": "Fix Validate redirect targets",
+                    },
+                ) as create_pull_request,
+                patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+                patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+            ):
+                pull_request = app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertEqual(prepare_checkout.call_args.args[0], "pr_f_123")
+        self.assertEqual(pull_request["issueId"], "f_123")
+        self.assertEqual(pull_request["branch"], "pullwise/fix-f_123-fixedtoken")
+        self.assertNotIn("X-Injected", create_pull_request.call_args.kwargs["body"])
+
     def test_repository_authorization_failure_is_rejected_before_checkout_or_git(self) -> None:
         app.USERS["usr_1"]["githubRepositoryAccess"]["repositories"] = ["owner/other"]
         app.USERS["usr_1"]["githubRepositoryAccess"]["repositoryItems"] = []
