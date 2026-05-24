@@ -8,6 +8,8 @@ import re
 import secrets
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -93,7 +95,15 @@ SCANS: list[dict] = []
 # Re-entrant so worker mutations can call persist_state() while already holding
 # the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
 STATE_LOCK = threading.RLock()
-PREVIEW_SCAN_LOCKS: dict[str, threading.RLock] = {}
+
+
+class PreviewScanLockEntry:
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.refs = 0
+
+
+PREVIEW_SCAN_LOCKS: dict[str, PreviewScanLockEntry] = {}
 PREVIEW_SCAN_LOCKS_GUARD = threading.Lock()
 MAX_BILLING_EVENT_RECORDS = 5000
 MAX_BILLING_PENDING_UPDATES = 1000
@@ -789,13 +799,24 @@ def user_issues(session: dict | None) -> list[dict]:
     return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
 
 
-def preview_scan_lock(scan_id: str) -> threading.RLock:
+@contextmanager
+def preview_scan_lock(scan_id: str) -> Iterator[None]:
     with PREVIEW_SCAN_LOCKS_GUARD:
-        lock = PREVIEW_SCAN_LOCKS.get(scan_id)
-        if lock is None:
-            lock = threading.RLock()
-            PREVIEW_SCAN_LOCKS[scan_id] = lock
-        return lock
+        entry = PREVIEW_SCAN_LOCKS.get(scan_id)
+        if entry is None:
+            entry = PreviewScanLockEntry()
+            PREVIEW_SCAN_LOCKS[scan_id] = entry
+        entry.refs += 1
+
+    entry.lock.acquire()
+    try:
+        yield
+    finally:
+        entry.lock.release()
+        with PREVIEW_SCAN_LOCKS_GUARD:
+            entry.refs -= 1
+            if entry.refs == 0 and PREVIEW_SCAN_LOCKS.get(scan_id) is entry:
+                PREVIEW_SCAN_LOCKS.pop(scan_id, None)
 
 
 def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:

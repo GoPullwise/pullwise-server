@@ -50,7 +50,6 @@ class WorkspaceIsolationTest(unittest.TestCase):
     def test_worker_cleanup_waits_for_fix_preview_scan_lock(self) -> None:
         cleanup_called = threading.Event()
         cleanup_finished = threading.Event()
-        scan_lock = app.preview_scan_lock("sc_1")
         snapshot = {
             "id": "sc_1",
             "userId": "usr_1",
@@ -68,15 +67,12 @@ class WorkspaceIsolationTest(unittest.TestCase):
             patch.object(worker, "_patch_scan") as patch_scan,
             patch.object(worker, "_log_scan_event"),
         ):
-            scan_lock.acquire()
-            cleanup_thread = threading.Thread(
-                target=lambda: (worker._cleanup_checkout_workspace("sc_1", snapshot), cleanup_finished.set())
-            )
-            try:
+            with app.preview_scan_lock("sc_1"):
+                cleanup_thread = threading.Thread(
+                    target=lambda: (worker._cleanup_checkout_workspace("sc_1", snapshot), cleanup_finished.set())
+                )
                 cleanup_thread.start()
                 self.assertFalse(cleanup_called.wait(0.05))
-            finally:
-                scan_lock.release()
 
             self.assertTrue(cleanup_called.wait(1))
             cleanup_thread.join(1)
@@ -84,6 +80,7 @@ class WorkspaceIsolationTest(unittest.TestCase):
         self.assertFalse(cleanup_thread.is_alive())
         self.assertTrue(cleanup_finished.is_set())
         patch_scan.assert_called_once_with("sc_1", {"repoPath": None}, allow_after_cancel=True)
+        self.assertNotIn("sc_1", app.PREVIEW_SCAN_LOCKS)
 
 
 class ScanQueueTest(unittest.TestCase):

@@ -244,6 +244,7 @@ class SecurityContractsTest(unittest.TestCase):
         prepare_checkout.assert_called_once()
         cleanup_scan_workspace.assert_called_once_with("usr_1", "sc_1")
         self.assertIsNone(app.SCANS[0]["repoPath"])
+        self.assertNotIn("sc_1", app.PREVIEW_SCAN_LOCKS)
 
     def test_preview_issue_fix_for_user_reuses_existing_workspace_repo_path(self) -> None:
         app.ISSUES[0].update({
