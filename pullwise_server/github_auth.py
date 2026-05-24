@@ -655,8 +655,8 @@ def normalize_permission_mapping(mapping: dict) -> dict:
     return {str(key): value for key, value in mapping.items() if isinstance(value, bool)}
 
 
-def format_count(value: int | None) -> str:
-    if value is None:
+def format_count(value: object) -> str:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         return "-"
     if value >= 1_000_000:
         return f"{value / 1_000_000:.1f}m"

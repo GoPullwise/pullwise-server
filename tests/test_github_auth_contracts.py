@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import unittest
 from unittest.mock import Mock, patch
@@ -173,6 +174,41 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(headers["Authorization"], "Bearer ghs_123")
         self.assertEqual(headers["Accept"], "application/vnd.github+json")
         self.assertIn("X-GitHub-Api-Version", headers)
+
+    def test_list_installation_repositories_sanitizes_malformed_star_counts(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "repositories": [
+                {
+                    "id": 1,
+                    "name": "MalformedObject",
+                    "full_name": "octocat/MalformedObject",
+                    "stargazers_count": {"count": 80},
+                },
+                {
+                    "id": 2,
+                    "name": "NegativeCount",
+                    "full_name": "octocat/NegativeCount",
+                    "stargazers_count": -5,
+                },
+                {
+                    "id": 3,
+                    "name": "NonFiniteCount",
+                    "full_name": "octocat/NonFiniteCount",
+                    "stargazers_count": math.inf,
+                },
+            ]
+        }
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.object(github_auth, "create_installation_access_token", return_value={"token": "ghs_123"}),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            repositories = github_auth.list_installation_repositories("123")
+
+        self.assertEqual([repo["stars"] for repo in repositories], ["-", "-", "-"])
 
     def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
         response = Mock()
