@@ -2568,7 +2568,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return json.loads(raw)
 
     def read_raw_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length") or 0)
+        length = self.request_content_length()
         if length == 0:
             return b""
         if length > max_body_bytes():
@@ -2578,9 +2578,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def enforce_body_size_limit(self, method: str) -> None:
         if method not in {"POST", "PATCH"}:
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        length = self.request_content_length()
         if length > max_body_bytes():
             raise RequestBodyTooLarge("Request body is too large.")
+
+    def request_content_length(self) -> int:
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return 0
+        raw_text = str(raw_length).strip()
+        if not raw_text:
+            return 0
+        if not raw_text.isdigit():
+            raise ValueError("Invalid Content-Length header.")
+        return int(raw_text)
 
     def handle_creem_webhook(self) -> None:
         raw = self.read_raw_body()

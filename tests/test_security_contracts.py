@@ -3033,6 +3033,28 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
 
+    def test_request_body_rejects_negative_content_length(self) -> None:
+        handler = RouteHarness(
+            "/auth/sign-out",
+            headers={"Content-Length": "-1"},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Invalid Content-Length header.")
+
+    def test_request_body_rejects_malformed_content_length(self) -> None:
+        handler = RouteHarness(
+            "/auth/sign-out",
+            headers={"Content-Length": "not-a-number"},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Invalid Content-Length header.")
+
 
 if __name__ == "__main__":
     unittest.main()
