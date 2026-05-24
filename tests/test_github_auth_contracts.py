@@ -374,6 +374,39 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual([repo["htmlUrl"] for repo in repositories], [None, None])
         self.assertEqual([repo["cloneUrl"] for repo in repositories], [None, None])
 
+    def test_list_installation_repositories_sanitizes_malformed_repository_text_fields(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "repositories": [
+                {
+                    "id": {"repo": 1},
+                    "name": {"display": "Bad Name"},
+                    "full_name": "octocat/Hello-World",
+                    "description": {"text": "Bad description"},
+                    "language": ["Python"],
+                    "default_branch": {"name": "main"},
+                    "updated_at": {"date": "2026-05-17"},
+                    "permissions": {"pull": True},
+                }
+            ]
+        }
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.object(github_auth, "create_installation_access_token", return_value={"token": "ghs_123"}),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            repositories = github_auth.list_installation_repositories("123")
+
+        self.assertEqual(repositories[0]["id"], "octocat/Hello-World")
+        self.assertEqual(repositories[0]["name"], "Hello-World")
+        self.assertEqual(repositories[0]["desc"], "")
+        self.assertEqual(repositories[0]["description"], "")
+        self.assertEqual(repositories[0]["lang"], "-")
+        self.assertEqual(repositories[0]["defaultBranch"], "main")
+        self.assertEqual(repositories[0]["updated"], "")
+
     def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {

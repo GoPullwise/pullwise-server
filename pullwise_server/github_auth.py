@@ -640,19 +640,21 @@ def permission_levels_to_dict(permissions) -> dict:
 def repo_to_pullwise(repo) -> dict:
     if isinstance(repo, dict):
         return repo_payload_to_pullwise(repo)
-    full_name = getattr(repo, "full_name", None) or getattr(repo, "name", "") or ""
+    full_name = clean_repository_text(getattr(repo, "full_name", None)) or clean_repository_text(getattr(repo, "name", None)) or ""
+    name = clean_repository_text(getattr(repo, "name", None)) or repository_name_from_full_name(full_name)
+    description = clean_repository_text(getattr(repo, "description", None)) or ""
     return {
-        "id": str(getattr(repo, "id", None) or full_name),
-        "name": getattr(repo, "name", None) or full_name,
+        "id": repository_id(getattr(repo, "id", None), full_name),
+        "name": name,
         "fullName": full_name,
-        "desc": getattr(repo, "description", None) or "",
-        "description": getattr(repo, "description", None) or "",
-        "lang": getattr(repo, "language", None) or "-",
+        "desc": description,
+        "description": description,
+        "lang": clean_repository_text(getattr(repo, "language", None)) or "-",
         "private": bool(getattr(repo, "private", False)),
         "stars": format_count(getattr(repo, "stargazers_count", None)),
         "branches": "-",
-        "defaultBranch": getattr(repo, "default_branch", None) or "main",
-        "updated": str(getattr(repo, "updated_at", None) or ""),
+        "defaultBranch": clean_repository_text(getattr(repo, "default_branch", None)) or "main",
+        "updated": clean_repository_text(getattr(repo, "updated_at", None)) or "",
         "htmlUrl": trusted_github_web_url(getattr(repo, "html_url", None)),
         "cloneUrl": trusted_github_web_url(getattr(repo, "clone_url", None)),
         "permissions": permissions_to_dict(getattr(repo, "permissions", None)),
@@ -660,23 +662,45 @@ def repo_to_pullwise(repo) -> dict:
 
 
 def repo_payload_to_pullwise(repo: dict) -> dict:
-    full_name = repo.get("full_name") or repo.get("name") or ""
+    full_name = clean_repository_text(repo.get("full_name")) or clean_repository_text(repo.get("name")) or ""
+    name = clean_repository_text(repo.get("name")) or repository_name_from_full_name(full_name)
+    description = clean_repository_text(repo.get("description")) or ""
     return {
-        "id": str(repo.get("id") or full_name),
-        "name": repo.get("name") or full_name,
+        "id": repository_id(repo.get("id"), full_name),
+        "name": name,
         "fullName": full_name,
-        "desc": repo.get("description") or "",
-        "description": repo.get("description") or "",
-        "lang": repo.get("language") or "-",
+        "desc": description,
+        "description": description,
+        "lang": clean_repository_text(repo.get("language")) or "-",
         "private": bool(repo.get("private", False)),
         "stars": format_count(repo.get("stargazers_count")),
         "branches": "-",
-        "defaultBranch": repo.get("default_branch") or "main",
-        "updated": str(repo.get("updated_at") or ""),
+        "defaultBranch": clean_repository_text(repo.get("default_branch")) or "main",
+        "updated": clean_repository_text(repo.get("updated_at")) or "",
         "htmlUrl": trusted_github_web_url(repo.get("html_url")),
         "cloneUrl": trusted_github_web_url(repo.get("clone_url")),
         "permissions": normalize_permission_mapping(repo.get("permissions") or {}),
     }
+
+
+def repository_id(raw_id: object, full_name: str) -> str:
+    if isinstance(raw_id, int) and not isinstance(raw_id, bool):
+        return str(raw_id)
+    text_id = clean_repository_text(raw_id)
+    return text_id or full_name
+
+
+def repository_name_from_full_name(full_name: str) -> str:
+    if "/" in full_name:
+        return full_name.rsplit("/", 1)[1]
+    return full_name
+
+
+def clean_repository_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
 
 
 def trusted_github_web_url(value: object) -> str | None:
