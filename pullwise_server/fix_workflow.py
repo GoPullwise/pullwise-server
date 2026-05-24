@@ -1,0 +1,208 @@
+"""Deterministic issue fix preview and apply helpers."""
+
+from __future__ import annotations
+
+import difflib
+import os
+import re
+
+
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def preview_issue_fix(repo_path: str, issue: dict) -> dict:
+    if not issue.get("autoFix") and not issue.get("autoFixable"):
+        return invalid(issue, "Issue is not auto-fixable.")
+
+    relative_path = safe_issue_file(issue.get("file"))
+    if not relative_path:
+        return invalid(issue, "Unsafe issue file path.")
+
+    bad_lines = code_lines(issue.get("badCode"))
+    good_lines = code_lines(issue.get("goodCode"))
+    if not bad_lines or not good_lines:
+        return invalid(issue, "Auto-fix requires non-empty badCode and goodCode.")
+
+    target_path = safe_join(repo_path, relative_path)
+    if not target_path:
+        return invalid(issue, "Unsafe issue file path.")
+
+    try:
+        with open(target_path, encoding="utf-8") as handle:
+            original = handle.read()
+    except FileNotFoundError:
+        return invalid(issue, "Issue file was not found.")
+
+    preview = replacement_preview(original, bad_lines, good_lines)
+    if not preview["ok"]:
+        return invalid(issue, preview["message"])
+
+    updated = preview["updatedContent"]
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            updated.splitlines(keepends=True),
+            fromfile=f"a/{relative_path}",
+            tofile=f"b/{relative_path}",
+        )
+    )
+    return {
+        "ok": True,
+        "issueId": str(issue.get("id") or ""),
+        "repo": issue.get("repo") or "",
+        "branch": issue.get("branch") or "",
+        "file": relative_path,
+        "diff": diff,
+        "originalContent": original,
+        "updatedContent": updated,
+    }
+
+
+def apply_issue_fix(repo_path: str, issue: dict) -> dict:
+    preview = preview_issue_fix(repo_path, issue)
+    if not preview["ok"]:
+        return preview
+
+    target_path = safe_join(repo_path, preview["file"])
+    if not target_path:
+        return invalid(issue, "Unsafe issue file path.")
+
+    with open(target_path, "w", encoding="utf-8") as handle:
+        handle.write(preview["updatedContent"])
+    return preview
+
+
+def invalid(issue: dict, message: str) -> dict:
+    return {
+        "ok": False,
+        "issueId": str(issue.get("id") or "") if isinstance(issue, dict) else "",
+        "message": message,
+    }
+
+
+def code_lines(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+
+    lines: list[str] = []
+    for item in value:
+        raw = item.get("code") if isinstance(item, dict) else item
+        if not isinstance(raw, str):
+            return []
+        split = raw.splitlines()
+        lines.extend(split or [""])
+    return lines
+
+
+def replacement_preview(original: str, bad_lines: list[str], good_lines: list[str]) -> dict:
+    if not bad_lines or not good_lines:
+        return {"ok": False, "message": "Auto-fix requires non-empty badCode and goodCode."}
+
+    records = [_split_line(line) for line in original.splitlines(keepends=True)]
+    contents = [content for content, _ending in records]
+    matches: list[tuple[int, list[str]]] = []
+    width = len(bad_lines)
+
+    for index in range(0, len(contents) - width + 1):
+        candidate = contents[index:index + width]
+        replacement = _replacement_lines(candidate, bad_lines, good_lines)
+        if replacement is not None:
+            matches.append((index, replacement))
+
+    if not matches:
+        return {"ok": False, "message": "Old block was not found."}
+    if len(matches) > 1:
+        return {"ok": False, "message": "Old block appears more than once."}
+
+    index, replacement = matches[0]
+    old_endings = [ending for _content, ending in records[index:index + width]]
+    endings = _replacement_endings(old_endings, len(replacement), _default_newline(original))
+    replacement_records = list(zip(replacement, endings, strict=True))
+    updated_records = records[:index] + replacement_records + records[index + width:]
+    updated = "".join(content + ending for content, ending in updated_records)
+    return {"ok": True, "updatedContent": updated}
+
+
+def safe_issue_file(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    raw = value.strip()
+    normalized = raw.replace("\\", "/")
+    if (
+        not raw
+        or "\x00" in raw
+        or _WINDOWS_DRIVE_RE.match(raw)
+        or os.path.isabs(raw)
+        or normalized.startswith("/")
+        or normalized.startswith("//")
+        or raw.startswith("\\")
+    ):
+        return None
+
+    parts = normalized.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return None
+    return "/".join(parts)
+
+
+def safe_join(root: str, relative_path: str) -> str | None:
+    if not isinstance(root, str) or not root.strip():
+        return None
+
+    safe_path = safe_issue_file(relative_path)
+    if not safe_path:
+        return None
+
+    root_abs = os.path.realpath(os.path.abspath(root))
+    candidate = os.path.realpath(os.path.abspath(os.path.join(root_abs, *safe_path.split("/"))))
+    try:
+        common = os.path.commonpath([root_abs, candidate])
+    except ValueError:
+        return None
+    if os.path.normcase(common) != os.path.normcase(root_abs):
+        return None
+    return candidate
+
+
+def _replacement_lines(candidate: list[str], bad_lines: list[str], good_lines: list[str]) -> list[str] | None:
+    if candidate == bad_lines:
+        return list(good_lines)
+
+    stripped_candidate = [line.lstrip(" \t") for line in candidate]
+    if stripped_candidate == bad_lines:
+        indent = _leading_whitespace(candidate[0]) if candidate else ""
+        return [indent + line if line else line for line in good_lines]
+
+    stripped_bad = [line.lstrip(" \t") for line in bad_lines]
+    if stripped_candidate == stripped_bad:
+        indent = _leading_whitespace(candidate[0]) if candidate else ""
+        return [indent + line.lstrip(" \t") if line.strip() else "" for line in good_lines]
+
+    return None
+
+
+def _leading_whitespace(value: str) -> str:
+    return value[:len(value) - len(value.lstrip(" \t"))]
+
+
+def _split_line(value: str) -> tuple[str, str]:
+    if value.endswith("\r\n"):
+        return value[:-2], "\r\n"
+    if value.endswith("\n"):
+        return value[:-1], "\n"
+    if value.endswith("\r"):
+        return value[:-1], "\r"
+    return value, ""
+
+
+def _replacement_endings(old_endings: list[str], replacement_count: int, default_newline: str) -> list[str]:
+    if replacement_count == len(old_endings):
+        return list(old_endings)
+    if replacement_count == 0:
+        return []
+    return [default_newline] * (replacement_count - 1) + [old_endings[-1] if old_endings else default_newline]
+
+
+def _default_newline(value: str) -> str:
+    return "\r\n" if "\r\n" in value else "\n"
