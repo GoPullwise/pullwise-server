@@ -16,6 +16,7 @@ HTTP layers.
 from __future__ import annotations
 
 import json
+import math
 import os
 import secrets
 import shutil
@@ -28,6 +29,16 @@ from . import scan_logging
 
 CHECKOUT_PROVIDERS = {"claude_code", "codex"}
 DEFAULT_PROVIDER = "disabled"
+VALID_FINDING_SEVERITIES = {"critical", "high", "medium", "low", "info"}
+VALID_FINDING_CATEGORIES = {
+    "security": "Security",
+    "performance": "Performance",
+    "dependencies": "Dependencies",
+    "quality": "Quality",
+    "tests": "Tests",
+    "docs": "Docs",
+    "architecture": "Architecture",
+}
 
 
 class ReviewProviderError(RuntimeError):
@@ -178,6 +189,7 @@ def run_review(
         findings = [
             _finalize_finding(finding, user_id=user_id, scan_id=scan_id, repo=repo)
             for finding in raw
+            if isinstance(finding, dict)
         ]
         scan_logging.log_event(
             "review_provider_completed",
@@ -215,30 +227,99 @@ def provider_requires_checkout(provider: str | None = None) -> bool:
     return selected_provider(provider) in CHECKOUT_PROVIDERS
 
 
-def _finalize_finding(finding: dict, *, user_id: str, scan_id: str, repo: str) -> dict:
+def _finalize_finding(finding: object, *, user_id: str, scan_id: str, repo: str) -> dict:
+    finding = finding if isinstance(finding, dict) else {}
+    finding_id = _safe_text(finding.get("id"))
     return {
-        "id": finding.get("id") or f"f_{secrets.token_urlsafe(6)}",
+        "id": finding_id or f"f_{secrets.token_urlsafe(6)}",
         "userId": user_id,
         "scanId": scan_id,
         "repo": repo,
         "status": "open",
-        "severity": finding.get("severity") or "medium",
-        "category": finding.get("category") or "Quality",
-        "title": finding.get("title") or "Untitled finding",
-        "summary": finding.get("summary") or "",
-        "impact": finding.get("impact") or "",
-        "file": finding.get("file") or "",
-        "line": int(finding.get("line") or 0),
-        "confidence": float(finding.get("confidence") or 0.7),
-        "autoFix": bool(finding.get("autoFix")),
-        "effort": finding.get("effort") or "—",
-        "tags": list(finding.get("tags") or []),
-        "steps": list(finding.get("steps") or []),
-        "badCode": list(finding.get("badCode") or []),
-        "goodCode": list(finding.get("goodCode") or []),
-        "references": list(finding.get("references") or []),
+        "severity": _safe_severity(finding.get("severity")),
+        "category": _safe_category(finding.get("category")),
+        "title": _safe_text(finding.get("title"), "Untitled finding"),
+        "summary": _safe_text(finding.get("summary")),
+        "impact": _safe_text(finding.get("impact")),
+        "file": _safe_text(finding.get("file")),
+        "line": _safe_non_negative_int(finding.get("line")),
+        "confidence": _safe_confidence(finding.get("confidence")),
+        "autoFix": finding.get("autoFix") is True,
+        "effort": _safe_text(finding.get("effort"), "-"),
+        "tags": _safe_text_list(finding.get("tags")),
+        "steps": _safe_text_list(finding.get("steps")),
+        "badCode": _safe_code_lines(finding.get("badCode")),
+        "goodCode": _safe_code_lines(finding.get("goodCode")),
+        "references": _safe_references(finding.get("references")),
         "createdAt": int(time.time()),
     }
+
+
+def _safe_text(value: object, default: str = "") -> str:
+    if not isinstance(value, str):
+        return default
+    return value.strip() or default
+
+
+def _safe_severity(value: object) -> str:
+    normalized = _safe_text(value).lower()
+    return normalized if normalized in VALID_FINDING_SEVERITIES else "medium"
+
+
+def _safe_category(value: object) -> str:
+    normalized = _safe_text(value).lower()
+    return VALID_FINDING_CATEGORIES.get(normalized, "Quality")
+
+
+def _safe_non_negative_int(value: object) -> int:
+    try:
+        candidate = int(value or 0)
+    except (OverflowError, TypeError, ValueError):
+        return 0
+    return max(0, candidate)
+
+
+def _safe_confidence(value: object) -> float:
+    try:
+        candidate = float(value)
+    except (TypeError, ValueError):
+        return 0.7
+    if not math.isfinite(candidate):
+        return 0.7
+    return min(1.0, max(0.0, candidate))
+
+
+def _safe_text_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [text for item in value if (text := _safe_text(item))]
+
+
+def _safe_code_lines(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    lines = []
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("code"), str):
+            continue
+        raw_marker = item.get("t")
+        marker = raw_marker if raw_marker in ("del", "add", None) else None
+        lines.append({"ln": _safe_non_negative_int(item.get("ln")), "code": item["code"], "t": marker})
+    return lines
+
+
+def _safe_references(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    references = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        label = _safe_text(item.get("label"))
+        url = _safe_text(item.get("url"))
+        if label and url.startswith(("https://", "http://")):
+            references.append({"label": label, "url": url})
+    return references
 
 
 # ── mock provider ─────────────────────────────────────────────────────────
