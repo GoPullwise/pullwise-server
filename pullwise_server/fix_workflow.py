@@ -12,7 +12,7 @@ _REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 def preview_issue_fix(repo_path: str, issue: dict) -> dict:
-    if not issue.get("autoFix") and not issue.get("autoFixable"):
+    if not is_auto_fixable(issue):
         return invalid(issue, "Issue is not auto-fixable.")
 
     relative_path = safe_issue_file(issue.get("file"))
@@ -90,7 +90,7 @@ def apply_issue_fix(repo_path: str, issue: dict) -> dict:
 def invalid(issue: dict, message: str) -> dict:
     return {
         "issueId": str(issue.get("id") or "") if isinstance(issue, dict) else "",
-        "autoFixable": bool(issue.get("autoFix") or issue.get("autoFixable")) if isinstance(issue, dict) else False,
+        "autoFixable": is_auto_fixable(issue),
         "valid": False,
         "message": message,
     }
@@ -124,6 +124,12 @@ def safe_preview_repository(issue: dict) -> str:
         if value and _REPO_FULL_NAME_RE.match(value):
             return value
     return ""
+
+
+def is_auto_fixable(issue: object) -> bool:
+    if not isinstance(issue, dict):
+        return False
+    return issue.get("autoFix") is True or issue.get("autoFixable") is True
 
 
 def replacement_preview(original: str, bad_lines: list[str], good_lines: list[str]) -> dict:

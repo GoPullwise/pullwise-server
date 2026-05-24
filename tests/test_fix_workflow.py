@@ -97,6 +97,18 @@ class FixWorkflowTest(unittest.TestCase):
         self.assertEqual(result["issueId"], "f_123")
         self.assertIn("auto-fixable", result["message"])
 
+    def test_preview_rejects_string_false_auto_fix_flags(self) -> None:
+        result = preview_issue_fix(
+            self.tmpdir.name,
+            self.issue(autoFix="false", autoFixable="false"),
+        )
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(set(result), INVALID_PREVIEW_KEYS)
+        self.assertFalse(result["autoFixable"])
+        self.assertEqual(result["issueId"], "f_123")
+        self.assertIn("auto-fixable", result["message"])
+
     def test_preview_rejects_unsafe_paths(self) -> None:
         for file_path in UNSAFE_PATHS:
             with self.subTest(file_path=file_path):
