@@ -2097,6 +2097,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting checkout.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
             checkout = billing.create_checkout_session(
                 user,
@@ -2127,6 +2129,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before opening the billing portal.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             portal = billing.create_portal_session(
                 USERS[session["userId"]],
                 return_url=safe_redirect_to(body.get("returnUrl"), "settings"),
@@ -2136,6 +2140,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before changing your subscription.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             result = billing.change_subscription_interval(
                 USERS[session["userId"]],
                 interval=str(body.get("interval") or "year"),

@@ -126,6 +126,17 @@ class BillingRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_checkout_session_rejects_non_object_body(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(["invalid"], cookie=cookie)
+
+        with patch("pullwise_server.billing.create_checkout_session") as create:
+            app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("JSON object", handler.payload["message"])
+        create.assert_not_called()
+
     def test_checkout_session_returns_provider_url_for_signed_in_user(self) -> None:
         cookie = seed_session()
         handler = HandlerHarness(
@@ -160,6 +171,28 @@ class BillingRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(create.call_args.kwargs["interval"], "year")
+
+    def test_portal_session_rejects_non_object_body(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(["invalid"], cookie=cookie)
+
+        with patch("pullwise_server.billing.create_portal_session") as create:
+            app.PullwiseHandler.handle_post(handler, "/billing/portal-sessions", {}, ["billing", "portal-sessions"])
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("JSON object", handler.payload["message"])
+        create.assert_not_called()
+
+    def test_change_interval_rejects_non_object_body(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(["invalid"], cookie=cookie)
+
+        with patch("pullwise_server.billing.change_subscription_interval") as change:
+            app.PullwiseHandler.handle_post(handler, "/billing/change-interval", {}, ["billing", "change-interval"])
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("JSON object", handler.payload["message"])
+        change.assert_not_called()
 
     def test_change_interval_requires_signed_in_user_and_returns_provider_result(self) -> None:
         cookie = seed_session()
