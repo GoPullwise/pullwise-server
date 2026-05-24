@@ -127,6 +127,14 @@ class GitHubAuthContractsTest(unittest.TestCase):
             with self.assertRaisesRegex(github_auth.GitHubError, "not valid base64"):
                 github_auth.app_private_key()
 
+    def test_exchange_oauth_code_rejects_malformed_access_token(self) -> None:
+        client = Mock()
+        client.fetch_token.return_value = {"access_token": {"token": "bad"}, "token_type": "bearer"}
+
+        with patch.object(github_auth, "oauth_session", return_value=client):
+            with self.assertRaisesRegex(github_auth.GitHubError, "access token"):
+                github_auth.exchange_oauth_code("code", "https://api.pullwise.dev/auth/github/callback", "verifier", "state")
+
     def test_fetch_primary_email_skips_malformed_email_items(self) -> None:
         emails = [
             "not an email object",

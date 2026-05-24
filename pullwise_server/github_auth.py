@@ -168,9 +168,14 @@ def exchange_oauth_code(code: str, redirect_uri: str, code_verifier: str, state:
         )
     except Exception as exc:
         raise GitHubError(f"GitHub OAuth token exchange failed: {exc}") from exc
-    if not token.get("access_token"):
+    if not isinstance(token, dict):
+        raise GitHubError("GitHub OAuth token response is malformed.")
+    access_token = clean_profile_text(token.get("access_token"))
+    if not access_token:
         raise GitHubError("GitHub did not return an access token.")
-    return dict(token)
+    token = dict(token)
+    token["access_token"] = access_token
+    return token
 
 
 def fetch_user_profile(access_token: str) -> dict:
