@@ -92,6 +92,53 @@ class GitHubAuthContractsTest(unittest.TestCase):
 
         self.assertEqual(payload["permissions"], {"metadata": "read"})
 
+    def test_installation_payload_to_dict_sanitizes_malformed_identity_fields(self) -> None:
+        installation = {
+            "id": {"value": 123},
+            "repository_selection": ["selected"],
+            "target_type": {"type": "User"},
+            "account": {"login": {"name": "octocat"}},
+            "app_slug": {"slug": "pullwise"},
+            "app_id": {"id": 456},
+            "html_url": "javascript:alert(1)",
+            "permissions": {"metadata": "read"},
+        }
+
+        payload = github_auth.installation_payload_to_dict(installation)
+
+        self.assertIsNone(payload["id"])
+        self.assertIsNone(payload["repository_selection"])
+        self.assertIsNone(payload["target_type"])
+        self.assertEqual(payload["account"], {})
+        self.assertIsNone(payload["app_slug"])
+        self.assertIsNone(payload["app_id"])
+        self.assertIsNone(payload["html_url"])
+        self.assertEqual(payload["permissions"], {"metadata": "read"})
+
+    def test_installation_to_dict_sanitizes_malformed_identity_fields(self) -> None:
+        account = Mock()
+        account.login = {"name": "octocat"}
+        installation = Mock()
+        installation.id = {"value": 123}
+        installation.repository_selection = ["selected"]
+        installation.target_type = {"type": "User"}
+        installation.account = account
+        installation.app_slug = {"slug": "pullwise"}
+        installation.app_id = {"id": 456}
+        installation.html_url = "javascript:alert(1)"
+        installation.permissions = {"metadata": "read"}
+
+        payload = github_auth.installation_to_dict(installation)
+
+        self.assertIsNone(payload["id"])
+        self.assertIsNone(payload["repository_selection"])
+        self.assertIsNone(payload["target_type"])
+        self.assertEqual(payload["account"], {})
+        self.assertIsNone(payload["app_slug"])
+        self.assertIsNone(payload["app_id"])
+        self.assertIsNone(payload["html_url"])
+        self.assertEqual(payload["permissions"], {"metadata": "read"})
+
     def test_list_current_app_installations_matches_pygithub_installations_by_app_id(self) -> None:
         account = Mock()
         account.login = "octocat"

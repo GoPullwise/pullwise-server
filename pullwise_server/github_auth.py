@@ -591,13 +591,13 @@ def app_private_key() -> str:
 def installation_to_dict(installation) -> dict:
     account = getattr(installation, "account", None)
     return {
-        "id": getattr(installation, "id", None),
-        "repository_selection": getattr(installation, "repository_selection", None),
-        "target_type": getattr(installation, "target_type", None),
-        "account": {"login": getattr(account, "login", None)} if account else {},
-        "app_slug": getattr(installation, "app_slug", None),
-        "app_id": getattr(installation, "app_id", None),
-        "html_url": getattr(installation, "html_url", None),
+        "id": clean_installation_scalar(getattr(installation, "id", None)),
+        "repository_selection": clean_repository_text(getattr(installation, "repository_selection", None)),
+        "target_type": clean_repository_text(getattr(installation, "target_type", None)),
+        "account": installation_account_to_dict(account),
+        "app_slug": clean_repository_text(getattr(installation, "app_slug", None)),
+        "app_id": clean_installation_scalar(getattr(installation, "app_id", None)),
+        "html_url": trusted_github_web_url(getattr(installation, "html_url", None)),
         "permissions": permission_levels_to_dict(getattr(installation, "permissions", None)),
     }
 
@@ -605,15 +605,29 @@ def installation_to_dict(installation) -> dict:
 def installation_payload_to_dict(installation: dict) -> dict:
     account = installation.get("account") or {}
     return {
-        "id": installation.get("id"),
-        "repository_selection": installation.get("repository_selection"),
-        "target_type": installation.get("target_type"),
-        "account": {"login": account.get("login")} if isinstance(account, dict) else {},
-        "app_slug": installation.get("app_slug"),
-        "app_id": installation.get("app_id"),
-        "html_url": installation.get("html_url"),
+        "id": clean_installation_scalar(installation.get("id")),
+        "repository_selection": clean_repository_text(installation.get("repository_selection")),
+        "target_type": clean_repository_text(installation.get("target_type")),
+        "account": installation_account_to_dict(account),
+        "app_slug": clean_repository_text(installation.get("app_slug")),
+        "app_id": clean_installation_scalar(installation.get("app_id")),
+        "html_url": trusted_github_web_url(installation.get("html_url")),
         "permissions": permission_levels_to_dict(installation.get("permissions")),
     }
+
+
+def clean_installation_scalar(value: object) -> int | str | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return clean_repository_text(value)
+
+
+def installation_account_to_dict(account: object) -> dict:
+    if isinstance(account, dict):
+        login = clean_repository_text(account.get("login"))
+    else:
+        login = clean_repository_text(getattr(account, "login", None))
+    return {"login": login} if login else {}
 
 
 def permission_levels_to_dict(permissions) -> dict:
