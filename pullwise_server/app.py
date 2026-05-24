@@ -13,7 +13,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from . import billing, db, github_auth, logging_config, review, scan_logging, worker
+from . import billing, checkout, db, fix_workflow, github_auth, logging_config, review, scan_logging, worker
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -785,6 +785,23 @@ def user_issues(session: dict | None) -> list[dict]:
     if not session:
         return []
     return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
+
+
+def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
+    scan_id = issue.get("scanId")
+    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+    if not scan:
+        raise ValueError("Scan not found for issue.")
+    if scan.get("userId") != user.get("id"):
+        raise ValueError("Scan does not belong to the signed-in user.")
+
+    repo_path = scan.get("repoPath")
+    if not repo_path:
+        raise ValueError("Scan checkout is not available for preview.")
+    if not checkout.path_in_scan_workspace(str(repo_path), str(user.get("id") or ""), str(scan.get("id") or "")):
+        raise ValueError("Scan checkout path is outside the scan workspace.")
+
+    return fix_workflow.preview_issue_fix(str(repo_path), issue)
 
 
 def repository_item(github_access: dict | None, full_name: str) -> dict | None:
@@ -1669,6 +1686,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 mark_state_dirty()
             worker.notify_queue_changed()
             return self.json(scan_payload(scan))
+        if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "preview":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before previewing fixes.")
+            issue = self.find_or_404(user_issues(session), segments[1], "Issue")
+            try:
+                preview = preview_issue_fix_for_user(USERS[session["userId"]], issue)
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            return self.json(preview, HTTPStatus.OK if preview.get("valid") else HTTPStatus.BAD_REQUEST)
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "apply":
             return self.error(HTTPStatus.NOT_IMPLEMENTED, "Applying fixes is not implemented on this backend.")
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "pull-requests":

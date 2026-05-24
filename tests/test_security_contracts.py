@@ -82,6 +82,17 @@ class SecurityContractsTest(unittest.TestCase):
         app.STATE_DIRTY = False
         app.GITHUB_STATES = {}
 
+    def signed_in(self):
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        return "pw_session=ses_1"
+
     def test_wildcard_allowed_origin_does_not_allow_open_redirects(self) -> None:
         with patch.dict(
             os.environ,
@@ -125,6 +136,48 @@ class SecurityContractsTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "PATCH")
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_issue_fix_preview_requires_sign_in(self) -> None:
+        handler = RouteHarness("/issues/iss_1/fixes/preview")
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_issue_fix_preview_returns_deterministic_preview(self) -> None:
+        app.ISSUES = [
+            {
+                "id": "iss_1",
+                "userId": "usr_1",
+                "status": "open",
+                "title": "Example",
+                "repo": "owner/repo",
+                "scanId": "sc_1",
+                "autoFix": True,
+                "file": "src/auth.py",
+                "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+                "goodCode": [{"ln": 1, "code": "new()", "t": "add"}],
+            }
+        ]
+        preview = {
+            "issueId": "iss_1",
+            "autoFixable": True,
+            "valid": True,
+            "repository": "owner/repo",
+            "branch": "main",
+            "file": "src/auth.py",
+            "diff": "--- a/src/auth.py\n+++ b/src/auth.py\n-old()\n+new()\n",
+            "summary": "1 file changed",
+        }
+        handler = RouteHarness("/issues/iss_1/fixes/preview", cookie=self.signed_in())
+
+        with patch("pullwise_server.app.preview_issue_fix_for_user", return_value=preview) as preview_fix:
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["valid"])
+        self.assertIn("-old()", handler.payload["diff"])
+        preview_fix.assert_called_once()
 
     def test_issue_status_update_rejects_unknown_status(self) -> None:
         app.SESSIONS = {
