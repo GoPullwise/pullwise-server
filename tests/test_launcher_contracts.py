@@ -26,10 +26,23 @@ def shell_executable() -> str:
     raise unittest.SkipTest("No POSIX shell is available for launcher tests.")
 
 
+def require_shell_path_converter(shell: str) -> None:
+    if os.name != "nt":
+        return
+    result = subprocess.run(
+        [shell, "-lc", "command -v cygpath"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise unittest.SkipTest("launcher tests require cygpath on Windows")
+
+
 def shell_path(path: Path) -> str:
     if os.name != "nt":
         return str(path)
     shell = shell_executable()
+    require_shell_path_converter(shell)
     converted = subprocess.run(
         [shell, "-lc", 'cygpath -u "$1"', "_", str(path)],
         check=True,

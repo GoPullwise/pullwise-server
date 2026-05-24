@@ -134,8 +134,14 @@ Run verification before deploying:
 
 ```bash
 . .venv/bin/activate
+python -m pip install -e .
 python -m unittest discover -s tests
 ```
+
+Run `python -m pip install -e .` before the test suite so imports resolve
+against the local package. On Windows, launcher contract tests require a POSIX
+shell that provides `cygpath`; when the available shell cannot convert Windows
+paths, those launcher tests skip with an explicit reason.
 
 ## API Authentication and Limits
 

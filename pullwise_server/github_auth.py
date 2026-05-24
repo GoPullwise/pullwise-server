@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import secrets
 from urllib.parse import urlencode
 
 import requests
@@ -276,7 +277,10 @@ def user_can_access_installation(user_access_token: str | None, installation_id:
     if not user_access_token:
         return None
 
-    github = github_client(token=user_access_token)
+    try:
+        github = github_client(token=user_access_token)
+    except GitHubError:
+        return None
     try:
         user = github.get_user()
         get_installations = getattr(user, "get_installations", None)
@@ -301,7 +305,10 @@ def list_current_app_installations_for_user(user_access_token: str | None) -> li
     if not configured_slug and not configured_app_id:
         return []
 
-    github = github_client(token=user_access_token)
+    try:
+        github = github_client(token=user_access_token)
+    except GitHubError:
+        return []
     try:
         user = github.get_user()
         get_installations = getattr(user, "get_installations", None)
@@ -523,8 +530,8 @@ def import_authlib_session():
 def authlib_generate_token(length: int) -> str:
     try:
         from authlib.common.security import generate_token
-    except ImportError as exc:
-        raise GitHubError("Install Authlib to use real GitHub OAuth: python -m pip install -e .") from exc
+    except ImportError:
+        return secrets.token_urlsafe(length)[:length]
     return generate_token(length)
 
 
