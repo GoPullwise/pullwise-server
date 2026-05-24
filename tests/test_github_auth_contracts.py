@@ -407,6 +407,26 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(repositories[0]["defaultBranch"], "main")
         self.assertEqual(repositories[0]["updated"], "")
 
+    def test_list_installation_repositories_sanitizes_malformed_private_flags(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "repositories": [
+                {"id": 1, "name": "StringFalse", "full_name": "octocat/StringFalse", "private": "false"},
+                {"id": 2, "name": "ObjectPrivate", "full_name": "octocat/ObjectPrivate", "private": {"private": True}},
+                {"id": 3, "name": "PrivateRepo", "full_name": "octocat/PrivateRepo", "private": True},
+            ]
+        }
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.object(github_auth, "create_installation_access_token", return_value={"token": "ghs_123"}),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            repositories = github_auth.list_installation_repositories("123")
+
+        self.assertEqual([repo["private"] for repo in repositories], [False, False, True])
+
     def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {

@@ -650,7 +650,7 @@ def repo_to_pullwise(repo) -> dict:
         "desc": description,
         "description": description,
         "lang": clean_repository_text(getattr(repo, "language", None)) or "-",
-        "private": bool(getattr(repo, "private", False)),
+        "private": repository_private(getattr(repo, "private", False)),
         "stars": format_count(getattr(repo, "stargazers_count", None)),
         "branches": "-",
         "defaultBranch": clean_repository_text(getattr(repo, "default_branch", None)) or "main",
@@ -672,7 +672,7 @@ def repo_payload_to_pullwise(repo: dict) -> dict:
         "desc": description,
         "description": description,
         "lang": clean_repository_text(repo.get("language")) or "-",
-        "private": bool(repo.get("private", False)),
+        "private": repository_private(repo.get("private", False)),
         "stars": format_count(repo.get("stargazers_count")),
         "branches": "-",
         "defaultBranch": clean_repository_text(repo.get("default_branch")) or "main",
@@ -694,6 +694,10 @@ def repository_name_from_full_name(full_name: str) -> str:
     if "/" in full_name:
         return full_name.rsplit("/", 1)[1]
     return full_name
+
+
+def repository_private(value: object) -> bool:
+    return value is True
 
 
 def clean_repository_text(value: object) -> str | None:
