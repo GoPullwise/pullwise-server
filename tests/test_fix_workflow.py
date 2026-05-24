@@ -44,6 +44,14 @@ class FixWorkflowTest(unittest.TestCase):
         with open(self.auth_path, encoding="utf-8") as handle:
             return handle.read()
 
+    def write_auth_bytes(self, content: bytes) -> None:
+        with open(self.auth_path, "wb") as handle:
+            handle.write(content)
+
+    def read_auth_bytes(self) -> bytes:
+        with open(self.auth_path, "rb") as handle:
+            return handle.read()
+
     def issue(self, **overrides: object) -> dict:
         data = {
             "id": "f_123",
@@ -150,6 +158,54 @@ class FixWorkflowTest(unittest.TestCase):
             "    return redirect(safe_redirect(next_url))\n",
         )
         self.assertIn("--- a/src/auth.py", result["diff"])
+
+    def test_apply_preserves_nested_relative_indentation(self) -> None:
+        self.write_auth(
+            "def handler(next_url):\n"
+            "    if next_url:\n"
+            "        return redirect(next_url)\n"
+            "    return redirect('/home')\n"
+        )
+
+        result = apply_issue_fix(
+            self.tmpdir.name,
+            self.issue(
+                badCode=[
+                    "if next_url:",
+                    "    return redirect(next_url)",
+                ],
+                goodCode=[
+                    "if safe_redirect(next_url):",
+                    "    return redirect(safe_redirect(next_url))",
+                ],
+            ),
+        )
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(
+            self.read_auth(),
+            "def handler(next_url):\n"
+            "    if safe_redirect(next_url):\n"
+            "        return redirect(safe_redirect(next_url))\n"
+            "    return redirect('/home')\n",
+        )
+
+    def test_apply_preserves_existing_line_endings(self) -> None:
+        self.write_auth_bytes(
+            b"def login(next_url):\r\n"
+            b"    return redirect(next_url)\r\n"
+            b"# keep lf\n"
+        )
+
+        result = apply_issue_fix(self.tmpdir.name, self.issue())
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(
+            self.read_auth_bytes(),
+            b"def login(next_url):\r\n"
+            b"    return redirect(safe_redirect(next_url))\r\n"
+            b"# keep lf\n",
+        )
 
 
 if __name__ == "__main__":

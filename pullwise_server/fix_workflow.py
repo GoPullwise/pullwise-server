@@ -28,7 +28,7 @@ def preview_issue_fix(repo_path: str, issue: dict) -> dict:
         return invalid(issue, "Unsafe issue file path.")
 
     try:
-        with open(target_path, encoding="utf-8") as handle:
+        with open(target_path, encoding="utf-8", newline="") as handle:
             original = handle.read()
     except FileNotFoundError:
         return invalid(issue, "Issue file was not found.")
@@ -68,7 +68,7 @@ def apply_issue_fix(repo_path: str, issue: dict) -> dict:
         return invalid(issue, "Unsafe issue file path.")
 
     try:
-        with open(target_path, encoding="utf-8") as handle:
+        with open(target_path, encoding="utf-8", newline="") as handle:
             original = handle.read()
     except FileNotFoundError:
         return invalid(issue, "Issue file was not found.")
@@ -81,7 +81,7 @@ def apply_issue_fix(repo_path: str, issue: dict) -> dict:
     if not replacement["ok"]:
         return invalid(issue, replacement["message"])
 
-    with open(target_path, "w", encoding="utf-8") as handle:
+    with open(target_path, "w", encoding="utf-8", newline="") as handle:
         handle.write(replacement["updatedContent"])
     return preview
 
@@ -181,20 +181,38 @@ def safe_join(root: str, relative_path: str) -> str | None:
 
 
 def _replacement_lines(candidate: list[str], bad_lines: list[str], good_lines: list[str]) -> list[str] | None:
-    if candidate == bad_lines:
-        return list(good_lines)
+    candidate_indent = _common_outer_indent(candidate)
+    normalized_candidate = _remove_outer_indent(candidate, candidate_indent)
+    normalized_bad = _remove_outer_indent(bad_lines, _common_outer_indent(bad_lines))
+    if normalized_candidate != normalized_bad:
+        return None
 
-    stripped_candidate = [line.lstrip(" \t") for line in candidate]
-    if stripped_candidate == bad_lines:
-        indent = _leading_whitespace(candidate[0]) if candidate else ""
-        return [indent + line if line else line for line in good_lines]
+    relative_good = _remove_outer_indent(good_lines, _common_outer_indent(good_lines))
+    return _add_outer_indent(relative_good, candidate_indent)
 
-    stripped_bad = [line.lstrip(" \t") for line in bad_lines]
-    if stripped_candidate == stripped_bad:
-        indent = _leading_whitespace(candidate[0]) if candidate else ""
-        return [indent + line.lstrip(" \t") if line.strip() else "" for line in good_lines]
 
-    return None
+def _common_outer_indent(lines: list[str]) -> str:
+    indents = [_leading_whitespace(line) for line in lines if line.strip()]
+    if not indents:
+        return ""
+
+    common = indents[0]
+    for indent in indents[1:]:
+        while common and not indent.startswith(common):
+            common = common[:-1]
+        if not common:
+            break
+    return common
+
+
+def _remove_outer_indent(lines: list[str], indent: str) -> list[str]:
+    if not indent:
+        return [line if line.strip() else "" for line in lines]
+    return [line[len(indent):] if line.strip() and line.startswith(indent) else "" for line in lines]
+
+
+def _add_outer_indent(lines: list[str], indent: str) -> list[str]:
+    return [indent + line if line.strip() else "" for line in lines]
 
 
 def _leading_whitespace(value: str) -> str:
