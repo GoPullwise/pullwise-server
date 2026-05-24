@@ -573,6 +573,45 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(billing_state["plan"], "pro")
         self.assertEqual(billing_state["interval"], "month")
 
+    def test_billing_update_ignores_malformed_period_fields_when_applying(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "stripe",
+            "customerId": "cus_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+            "currentPeriodStart": 1710000000,
+            "currentPeriodEnd": 1712592000,
+            "cancelAtPeriodEnd": False,
+            "canceledAt": 1713000000,
+        }
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "status": "past_due",
+                "currentPeriodStart": {"seconds": 1710000001},
+                "currentPeriodEnd": ["1712592001"],
+                "cancelAtPeriodEnd": "false",
+                "canceledAt": {"seconds": 1713000001},
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_bad_periods",
+                "eventCreated": 1000,
+            },
+        )
+
+        billing_state = app.USERS["usr_1"]["billing"]
+        self.assertEqual(billing_state["status"], "past_due")
+        self.assertEqual(billing_state["currentPeriodStart"], 1710000000)
+        self.assertEqual(billing_state["currentPeriodEnd"], 1712592000)
+        self.assertFalse(billing_state["cancelAtPeriodEnd"])
+        self.assertEqual(billing_state["canceledAt"], 1713000000)
+
     def test_stripe_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
         seed_session()
         handler = HandlerHarness()

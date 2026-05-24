@@ -1626,6 +1626,18 @@ def billing_update_text(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
+def billing_update_scalar(value: object) -> object | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        return value if value.strip() else None
+    return value if isinstance(value, int | float) else None
+
+
+def billing_update_bool(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
 def billing_event_created(update: dict) -> int | None:
     value = update.get("eventCreated")
     if isinstance(value, bool):
@@ -1716,6 +1728,10 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     status = billing_update_text(update.get("status"))
     plan = billing_update_text(update.get("plan"))
     interval = billing_update_text(update.get("interval"))
+    current_period_start = billing_update_scalar(update.get("currentPeriodStart"))
+    current_period_end = billing_update_scalar(update.get("currentPeriodEnd"))
+    cancel_at_period_end = billing_update_bool(update.get("cancelAtPeriodEnd"))
+    canceled_at = billing_update_scalar(update.get("canceledAt"))
     event_id = billing_event_id(update)
 
     user["billing"] = {
@@ -1728,10 +1744,10 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         "status": status or current.get("status") or "active",
         "plan": plan or current.get("plan") or "pro",
         "interval": interval or current.get("interval") or "month",
-        "currentPeriodStart": update.get("currentPeriodStart") or current.get("currentPeriodStart"),
-        "currentPeriodEnd": update.get("currentPeriodEnd") or current.get("currentPeriodEnd"),
-        "cancelAtPeriodEnd": update.get("cancelAtPeriodEnd") if update.get("cancelAtPeriodEnd") is not None else current.get("cancelAtPeriodEnd"),
-        "canceledAt": update.get("canceledAt") or current.get("canceledAt"),
+        "currentPeriodStart": current_period_start if current_period_start is not None else current.get("currentPeriodStart"),
+        "currentPeriodEnd": current_period_end if current_period_end is not None else current.get("currentPeriodEnd"),
+        "cancelAtPeriodEnd": cancel_at_period_end if cancel_at_period_end is not None else current.get("cancelAtPeriodEnd"),
+        "canceledAt": canceled_at if canceled_at is not None else current.get("canceledAt"),
         "updatedAt": now(),
         "lastEventType": update.get("eventType"),
         "lastEventId": event_id or current.get("lastEventId"),
