@@ -906,8 +906,8 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             raise ValueError("Repository is not authorized for this GitHub App installation.")
 
         repo_meta = repository_item(github_access, repo) or {}
-        installation_permissions = repo_meta.get("installationPermissions") or github_access.get("installationPermissions") or {}
-        if installation_permissions and not installation_supports_pull_request_creation({"permissions": installation_permissions}):
+        installation_permissions = repo_meta.get("installationPermissions") or github_access.get("installationPermissions")
+        if not isinstance(installation_permissions, dict) or not installation_supports_pull_request_creation({"permissions": installation_permissions}):
             raise ValueError(github_app_write_permissions_message())
         base_branch = str(
             issue.get("branch")
@@ -934,6 +934,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             "startedAt": now(),
         }
         mark_state_dirty()
+        persist_state()
 
         scan_payload = dict(scan)
         scan_payload.update({

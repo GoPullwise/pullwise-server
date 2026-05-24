@@ -241,9 +241,15 @@ def create_pull_request(token: str, repo: str, *, title: str, head: str, base: s
         payload = response.json()
     except Exception as exc:
         raise GitHubError(f"GitHub pull request response was not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise GitHubError("GitHub pull request response body was not an object.")
+    url = payload.get("html_url") or payload.get("url")
+    number = payload.get("number")
+    if not url or number is None:
+        raise GitHubError("GitHub pull request response body was missing url or number.")
     return {
-        "url": payload.get("html_url") or payload.get("url"),
-        "number": payload.get("number"),
+        "url": url,
+        "number": number,
         "title": payload.get("title") or title,
     }
 

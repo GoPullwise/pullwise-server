@@ -216,6 +216,25 @@ class PullRequestWorkflowTest(unittest.TestCase):
         create_token.assert_not_called()
         create_pull_request.assert_not_called()
 
+    def test_missing_installation_permissions_are_rejected_before_checkout_or_git(self) -> None:
+        app.USERS["usr_1"]["githubRepositoryAccess"].pop("installationPermissions", None)
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositoryItems"][0].pop("installationPermissions", None)
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
+            patch("pullwise_server.app.github_auth.create_pull_request") as create_pull_request,
+        ):
+            with self.assertRaisesRegex(ValueError, "Contents: write.*Pull requests: write"):
+                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        create_token.assert_not_called()
+        create_pull_request.assert_not_called()
+
     def test_repository_authorization_pending_is_rejected_before_checkout_or_git(self) -> None:
         app.USERS["usr_1"]["githubRepositoryAccessPending"] = {
             "state": "pending",
@@ -415,6 +434,32 @@ class PullRequestWorkflowTest(unittest.TestCase):
                 app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
 
         self.assertNotIn("pullRequestPending", app.ISSUES[0])
+
+    def test_pending_marker_is_persisted_before_checkout_starts(self) -> None:
+        events: list[str] = []
+
+        def persist_state() -> None:
+            self.assertIn("pullRequestPending", app.ISSUES[0])
+            self.assertIn("branch", app.ISSUES[0]["pullRequestPending"])
+            self.assertIn("startedAt", app.ISSUES[0]["pullRequestPending"])
+            events.append("persist")
+
+        def prepare_checkout(_scan_id, _scan, _is_cancelled):
+            events.append("prepare")
+            raise RuntimeError("stop after persistence check")
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.persist_state", side_effect=persist_state) as persist,
+            patch("pullwise_server.app.checkout.prepare_checkout", side_effect=prepare_checkout),
+            patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+            patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+        ):
+            with self.assertRaisesRegex(ValueError, "stop after persistence check"):
+                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        persist.assert_called()
+        self.assertEqual(events[:2], ["persist", "prepare"])
 
     def test_cleanup_failure_after_success_does_not_mask_pull_request_result(self) -> None:
         token = "ghs_secret_token"
@@ -616,6 +661,38 @@ class PullRequestWorkflowTest(unittest.TestCase):
         response = Mock()
         response.status_code = 201
         response.json.side_effect = ValueError("invalid json")
+
+        with patch("pullwise_server.github_auth.requests.post", return_value=response):
+            with self.assertRaisesRegex(github_auth.GitHubError, "response"):
+                github_auth.create_pull_request(
+                    "ghs_secret_token",
+                    "owner/repo",
+                    title="Fix issue",
+                    head="pullwise/fix-f_123-fixedtoken",
+                    base="main",
+                    body="Automated fix.",
+                )
+
+    def test_create_pull_request_rejects_non_object_success_response(self) -> None:
+        response = Mock()
+        response.status_code = 201
+        response.json.return_value = []
+
+        with patch("pullwise_server.github_auth.requests.post", return_value=response):
+            with self.assertRaisesRegex(github_auth.GitHubError, "response"):
+                github_auth.create_pull_request(
+                    "ghs_secret_token",
+                    "owner/repo",
+                    title="Fix issue",
+                    head="pullwise/fix-f_123-fixedtoken",
+                    base="main",
+                    body="Automated fix.",
+                )
+
+    def test_create_pull_request_rejects_success_response_missing_public_fields(self) -> None:
+        response = Mock()
+        response.status_code = 201
+        response.json.return_value = {}
 
         with patch("pullwise_server.github_auth.requests.post", return_value=response):
             with self.assertRaisesRegex(github_auth.GitHubError, "response"):
