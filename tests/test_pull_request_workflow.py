@@ -1148,6 +1148,15 @@ class PullRequestWorkflowTest(unittest.TestCase):
             with self.assertRaisesRegex(github_auth.GitHubError, "branch lookup response"):
                 github_auth.branch_exists("ghs_secret_token", "owner/repo", "pullwise/fix-f_123-stale")
 
+    def test_branch_exists_rejects_malformed_success_list_body(self) -> None:
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = [{"ref": "refs/tags/pullwise/fix-f_123-stale"}]
+
+        with patch("pullwise_server.github_auth.requests.get", return_value=response):
+            with self.assertRaisesRegex(github_auth.GitHubError, "branch lookup response"):
+                github_auth.branch_exists("ghs_secret_token", "owner/repo", "pullwise/fix-f_123-stale")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -294,7 +294,9 @@ def branch_exists(token: str, repo: str, branch: str) -> bool:
             return True
         raise GitHubError("GitHub branch lookup response body did not match the requested branch.")
     if isinstance(payload, list):
-        return any(isinstance(item, dict) and item.get("ref") == exact_ref for item in payload)
+        if any(isinstance(item, dict) and item.get("ref") == exact_ref for item in payload):
+            return True
+        raise GitHubError("GitHub branch lookup response body did not match the requested branch.")
     raise GitHubError("GitHub branch lookup response body was not valid.")
 
 
