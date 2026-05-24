@@ -7,21 +7,32 @@ review findings. Configure real GitHub OAuth, GitHub App, and review provider
 credentials for real scans. Explicit local mock switches are available only for
 development.
 
-Stage 1 production-trial scope:
+Current production-trial scope:
 
 - GitHub identity login
 - GitHub App repository authorization
 - Repository listing and sync
 - Scan creation, queueing, recovery, cancellation, and history
 - Rich issue findings and manual triage/status changes
+- Deterministic fix preview for auto-fixable findings
+- GitHub pull request creation for deterministic issue fixes
 - Stripe or Creem billing and live readiness status
 
-Stage 2 automation is intentionally not implemented yet:
+Stage 2 remediation is intentionally narrow:
 
-- Applying fixes
-- Creating branches or pull requests
+- Pullwise can preview deterministic fix diffs and open GitHub pull requests
+  through the GitHub App for auto-fixable findings.
+- The GitHub App installation must grant `Contents: write`, `Pull requests:
+  write`, and `Metadata: read`.
+
+Still not implemented:
+
+- Direct in-place fix application
+- Batch fixes
+- Auto-merge
 - Notifications
 - Slack or Linear writes
+- AI-generated replacement patches beyond the finding payload
 
 If real GitHub OAuth secrets or GitHub App private keys were ever committed or
 shared outside the local machine, rotate them in GitHub before production use.
@@ -552,6 +563,8 @@ Implemented endpoints:
 - `GET /issues`
 - `GET /issues/{id}`
 - `PATCH /issues/{id}/status`
+- `POST /issues/{id}/fixes/preview`
+- `POST /issues/{id}/pull-requests`
 - `GET /settings`
 - `PATCH /settings`
 - `GET /billing/plan`
@@ -564,8 +577,10 @@ Implemented endpoints:
 Explicitly not implemented:
 
 - `POST /issues/{id}/fixes/apply`
-- `POST /issues/{id}/pull-requests`
+- Batch fixes and auto-merge
 - Notification delivery
 - Slack or Linear integration writes
+- AI-generated replacement patches beyond the finding payload
 
-Those endpoints return `501 Not Implemented` instead of fake success payloads.
+The direct apply endpoint returns `501 Not Implemented` instead of a fake
+success payload.
