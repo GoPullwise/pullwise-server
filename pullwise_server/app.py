@@ -873,142 +873,187 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
     if str(scan.get("userId") or "") != user_id:
         raise ValueError("Scan does not belong to the signed-in user.")
 
-    existing = issue.get("pullRequest")
-    if isinstance(existing, dict):
-        return existing
-
-    if not github_auth.app_api_configured():
-        raise ValueError("GitHub App API is not configured for pull request creation.")
-
-    github_access = user.get("githubRepositoryAccess")
-    repo = str(issue.get("repo") or issue.get("repository") or scan.get("repo") or "").strip()
-    try:
-        repo = checkout.validate_repo_full_name(repo)
-    except RuntimeError as exc:
-        raise ValueError(str(exc)) from exc
-    if not github_repository_access_authorized_for_user(user, github_access):
-        raise ValueError("Authorize GitHub repositories before creating a pull request.")
-    if not repository_is_authorized(github_access, repo):
-        raise ValueError("Repository is not authorized for this GitHub App installation.")
-
-    repo_meta = repository_item(github_access, repo) or {}
-    base_branch = str(
-        issue.get("branch")
-        or scan.get("branch")
-        or repo_meta.get("defaultBranch")
-        or github_access.get("defaultBranch")
-        or "main"
-    )
-    installation_id = str(
-        repo_meta.get("installationId")
-        or scan.get("installationId")
-        or github_access.get("installationId")
-        or ""
-    )
-    if not installation_id:
-        raise ValueError("Repository is missing a GitHub App installation id.")
-    clone_url = repo_meta.get("cloneUrl") or repo_meta.get("clone_url") or scan.get("cloneUrl")
-
     issue_id = str(issue.get("id") or "")
-    pr_scan_id = f"pr_{checkout.safe_path_segment(issue_id, 'issue')}"
-    scan_payload = dict(scan)
-    scan_payload.update({
-        "id": pr_scan_id,
-        "userId": user_id,
-        "repo": repo,
-        "branch": base_branch,
-        "installationId": installation_id,
-        "cloneUrl": clone_url,
-    })
+    issue_slug = safe_git_ref_component(issue_id, "issue")
+    pr_scan_id = f"pr_{issue_slug}"
 
-    checkout_started = False
-    try:
-        checkout_started = True
-        repo_path = checkout.prepare_checkout(pr_scan_id, scan_payload, lambda: False)
-        repo_path = str(repo_path)
-        if not checkout.path_in_scan_workspace(repo_path, user_id, pr_scan_id):
-            raise ValueError("Prepared checkout path is outside the pull request workspace.")
+    with preview_scan_lock(f"pull-request:{issue_slug}"):
+        existing = issue.get("pullRequest")
+        if isinstance(existing, dict):
+            return existing
 
-        preview = fix_workflow.apply_issue_fix(repo_path, issue)
-        if not preview.get("valid"):
-            raise ValueError(str(preview.get("message") or "Issue fix could not be applied."))
-        fix_file = str(preview.get("file") or "")
-        if not fix_file:
-            raise ValueError("Issue fix did not report a file to commit.")
+        if isinstance(issue.get("pullRequestPending"), dict):
+            raise ValueError("Pull request creation is already in progress for this issue.")
 
-        token_payload = github_auth.create_installation_access_token(installation_id)
-        token = str(token_payload.get("token") or "")
-        if not token:
-            raise github_auth.GitHubError("GitHub did not return an installation access token.")
+        if github_repository_authorization_pending(user):
+            raise ValueError("Complete GitHub repository authorization before creating a pull request.")
+        if scan.get("status") != "done":
+            raise ValueError("Scan must be completed before creating a pull request.")
 
-        random_token = make_id("fix").split("_", 1)[-1]
-        random_token = re.sub(r"[^A-Za-z0-9._-]+", "-", random_token).strip(".-")[:16] or "branch"
-        issue_slug = re.sub(r"[^A-Za-z0-9._-]+", "-", issue_id).strip(".-") or "issue"
+        github_access = user.get("githubRepositoryAccess")
+        if github_access and github_access.get("repositoriesNeedSync"):
+            raise ValueError("Sync GitHub repositories before creating a pull request.")
+        if not github_auth.app_api_configured():
+            raise ValueError("GitHub App API is not configured for pull request creation.")
+        repo = str(issue.get("repo") or issue.get("repository") or scan.get("repo") or "").strip()
+        try:
+            repo = checkout.validate_repo_full_name(repo)
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from exc
+        if not github_repository_access_authorized_for_user(user, github_access):
+            raise ValueError("Authorize GitHub repositories before creating a pull request.")
+        if not repository_is_authorized(github_access, repo):
+            raise ValueError("Repository is not authorized for this GitHub App installation.")
+
+        repo_meta = repository_item(github_access, repo) or {}
+        installation_permissions = repo_meta.get("installationPermissions") or github_access.get("installationPermissions") or {}
+        if installation_permissions and not installation_supports_pull_request_creation({"permissions": installation_permissions}):
+            raise ValueError(github_app_write_permissions_message())
+        base_branch = str(
+            issue.get("branch")
+            or scan.get("branch")
+            or repo_meta.get("defaultBranch")
+            or github_access.get("defaultBranch")
+            or "main"
+        )
+        installation_id = str(
+            repo_meta.get("installationId")
+            or scan.get("installationId")
+            or github_access.get("installationId")
+            or ""
+        )
+        if not installation_id:
+            raise ValueError("Repository is missing a GitHub App installation id.")
+        clone_url = repo_meta.get("cloneUrl") or repo_meta.get("clone_url") or scan.get("cloneUrl")
+
+        random_token = safe_git_ref_component(make_id("fix").split("_", 1)[-1], "branch")[:16]
         branch = f"pullwise/fix-{issue_slug}-{random_token}"
-        title = f"Fix {issue.get('title') or issue_id}"
-        body = (
-            f"Automated deterministic fix for Pullwise issue {issue_id}.\n\n"
-            f"Repository: {repo}\n"
-            f"File: {fix_file}"
-        )
-        git_env = checkout.git_auth_env(token)
-        git_env.update({
-            "GIT_AUTHOR_NAME": "Pullwise",
-            "GIT_AUTHOR_EMAIL": "pullwise@example.invalid",
-            "GIT_COMMITTER_NAME": "Pullwise",
-            "GIT_COMMITTER_EMAIL": "pullwise@example.invalid",
-        })
-        checkout.run_git(
-            ["git", "checkout", "-B", branch],
-            cwd=repo_path,
-            extra_env=git_env,
-            is_cancelled=lambda: False,
-            action="create fix branch",
-        )
-        checkout.run_git(
-            ["git", "add", "--", fix_file],
-            cwd=repo_path,
-            extra_env=git_env,
-            is_cancelled=lambda: False,
-            action="stage issue fix",
-        )
-        checkout.run_git(
-            ["git", "commit", "-m", title],
-            cwd=repo_path,
-            extra_env=git_env,
-            is_cancelled=lambda: False,
-            action="commit issue fix",
-        )
-        checkout.run_git(
-            ["git", "push", "origin", f"HEAD:{branch}"],
-            cwd=repo_path,
-            extra_env=git_env,
-            is_cancelled=lambda: False,
-            action="push issue fix",
-        )
-        created = github_auth.create_pull_request(
-            token,
-            repo,
-            title=title,
-            head=branch,
-            base=base_branch,
-            body=body,
-        )
-        pull_request = {
+        issue["pullRequestPending"] = {
             "issueId": issue_id,
             "branch": branch,
-            "url": created.get("url"),
-            "number": created.get("number"),
-            "title": created.get("title") or title,
+            "startedAt": now(),
         }
-        issue["pullRequest"] = pull_request
         mark_state_dirty()
-        return pull_request
-    except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
-        raise ValueError(str(exc)) from exc
-    finally:
-        if checkout_started:
-            checkout.cleanup_scan_workspace(user_id, pr_scan_id)
+
+        scan_payload = dict(scan)
+        scan_payload.update({
+            "id": pr_scan_id,
+            "userId": user_id,
+            "repo": repo,
+            "branch": base_branch,
+            "installationId": installation_id,
+            "cloneUrl": clone_url,
+        })
+
+        checkout_started = False
+        try:
+            checkout_started = True
+            repo_path = checkout.prepare_checkout(pr_scan_id, scan_payload, lambda: False)
+            repo_path = str(repo_path)
+            if not checkout.path_in_scan_workspace(repo_path, user_id, pr_scan_id):
+                raise ValueError("Prepared checkout path is outside the pull request workspace.")
+
+            preview = fix_workflow.apply_issue_fix(repo_path, issue)
+            if not preview.get("valid"):
+                raise ValueError(str(preview.get("message") or "Issue fix could not be applied."))
+            fix_file = str(preview.get("file") or "")
+            if not fix_file:
+                raise ValueError("Issue fix did not report a file to commit.")
+
+            token_payload = github_auth.create_installation_access_token(installation_id)
+            token = str(token_payload.get("token") or "")
+            if not token:
+                raise github_auth.GitHubError("GitHub did not return an installation access token.")
+
+            title = f"Fix {issue.get('title') or issue_id}"
+            body = (
+                f"Automated deterministic fix for Pullwise issue {issue_id}.\n\n"
+                f"Repository: {repo}\n"
+                f"File: {fix_file}"
+            )
+            git_env = checkout.git_auth_env(token)
+            git_env.update({
+                "GIT_AUTHOR_NAME": "Pullwise",
+                "GIT_AUTHOR_EMAIL": "pullwise@example.invalid",
+                "GIT_COMMITTER_NAME": "Pullwise",
+                "GIT_COMMITTER_EMAIL": "pullwise@example.invalid",
+            })
+            checkout.run_git(
+                ["git", "checkout", "-B", branch],
+                cwd=repo_path,
+                extra_env=git_env,
+                is_cancelled=lambda: False,
+                action="create fix branch",
+            )
+            checkout.run_git(
+                ["git", "add", "--", fix_file],
+                cwd=repo_path,
+                extra_env=git_env,
+                is_cancelled=lambda: False,
+                action="stage issue fix",
+            )
+            checkout.run_git(
+                ["git", "commit", "-m", title],
+                cwd=repo_path,
+                extra_env=git_env,
+                is_cancelled=lambda: False,
+                action="commit issue fix",
+            )
+            checkout.run_git(
+                ["git", "push", "origin", f"HEAD:{branch}"],
+                cwd=repo_path,
+                extra_env=git_env,
+                is_cancelled=lambda: False,
+                action="push issue fix",
+            )
+            created = github_auth.create_pull_request(
+                token,
+                repo,
+                title=title,
+                head=branch,
+                base=base_branch,
+                body=body,
+            )
+            pull_request = {
+                "issueId": issue_id,
+                "branch": branch,
+                "url": created.get("url"),
+                "number": created.get("number"),
+                "title": created.get("title") or title,
+            }
+            issue.pop("pullRequestPending", None)
+            issue["pullRequest"] = pull_request
+            mark_state_dirty()
+            return pull_request
+        except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
+            issue.pop("pullRequestPending", None)
+            mark_state_dirty()
+            raise ValueError(str(exc)) from exc
+        except Exception:
+            issue.pop("pullRequestPending", None)
+            mark_state_dirty()
+            raise
+        finally:
+            if checkout_started:
+                try:
+                    checkout.cleanup_scan_workspace(user_id, pr_scan_id)
+                except (RuntimeError, OSError) as exc:
+                    logger.warning("Unable to clean up pull request checkout workspace %s: %s", pr_scan_id, exc)
+
+
+def github_app_write_permissions_message() -> str:
+    return "GitHub App installation must grant Contents: write and Pull requests: write for Pullwise to push fix branches and open pull requests."
+
+
+def installation_supports_pull_request_creation(installation: dict) -> bool:
+    permissions = installation.get("permissions") or {}
+    return permissions.get("contents") == "write" and permissions.get("pull_requests") == "write"
+
+
+def safe_git_ref_component(value: object, fallback: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or "")).strip("-_")
+    slug = re.sub(r"-+", "-", slug).strip("-_")
+    return slug or fallback
 
 
 def repository_item(github_access: dict | None, full_name: str) -> dict | None:
@@ -1165,11 +1210,6 @@ def unavailable_repositories_payload(github_access: dict) -> dict:
     return payload
 
 
-def installation_has_read_only_repository_contents(installation: dict) -> bool:
-    permissions = installation.get("permissions") or {}
-    return permissions.get("contents") == "read"
-
-
 def installation_summary_from_access(github_access: dict) -> dict:
     return {
         "installationId": github_access.get("installationId"),
@@ -1228,16 +1268,12 @@ def github_repository_access_for_installation(
     app_api_configured = github_auth.app_api_configured()
     if app_api_configured:
         installation = github_auth.fetch_installation(installation_id)
-        if not installation_has_read_only_repository_contents(installation):
-            raise ValueError(
-                "GitHub App installation must grant Contents: read-only access so Pullwise can scan private repositories without write permission."
-            )
+        if not installation_supports_pull_request_creation(installation):
+            raise ValueError(github_app_write_permissions_message())
         repository_items = github_auth.list_installation_repositories(installation_id)
     elif user_access_token:
-        if installation.get("permissions") and not installation_has_read_only_repository_contents(installation):
-            raise ValueError(
-                "GitHub App installation must grant Contents: read-only access so Pullwise can scan private repositories without write permission."
-            )
+        if installation.get("permissions") and not installation_supports_pull_request_creation(installation):
+            raise ValueError(github_app_write_permissions_message())
         try:
             repository_items = github_auth.list_user_installation_repositories(user_access_token, installation_id)
         except Exception:

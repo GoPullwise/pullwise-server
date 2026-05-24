@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import tempfile
@@ -1236,7 +1236,7 @@ class SecurityContractsTest(unittest.TestCase):
                     "account": {"login": "octocat"},
                     "app_slug": "pullwise",
                     "html_url": "https://github.com/settings/installations/999",
-                    "permissions": {"metadata": "read", "contents": "read"},
+                    "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                 },
             ),
             patch(
@@ -1664,7 +1664,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     }
                 ],
             ),
@@ -1748,7 +1748,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "SanChai20"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                     {
                         "id": 222,
@@ -1756,7 +1756,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "DFerryman"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                 ],
             ),
@@ -1823,7 +1823,7 @@ class SecurityContractsTest(unittest.TestCase):
                     "target_type": "User",
                     "account": {"login": "octocat"},
                     "app_slug": "pullwise",
-                    "permissions": {"metadata": "read", "contents": "read"},
+                    "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                 },
             ),
             patch(
@@ -1964,7 +1964,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     }
                 ],
             ),
@@ -2055,7 +2055,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
                         "html_url": "https://github.com/settings/installations/111",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                     {
                         "id": 222,
@@ -2064,7 +2064,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "account": {"login": "acme"},
                         "app_slug": "pullwise",
                         "html_url": "https://github.com/organizations/acme/settings/installations/222",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                 ],
             ),
@@ -2159,7 +2159,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                     {
                         "id": 222,
@@ -2167,7 +2167,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "Organization",
                         "account": {"login": "acme"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                 ],
             ) as list_installations,
@@ -2250,7 +2250,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                     {
                         "id": 222,
@@ -2258,7 +2258,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "Organization",
                         "account": {"login": "acme"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                 ],
             ),
@@ -2324,7 +2324,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "SanChai20"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                     {
                         "id": 222,
@@ -2332,7 +2332,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "DFerryman"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                 ],
             ),
@@ -2418,7 +2418,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "SanChai20"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                     {
                         "id": 222,
@@ -2426,7 +2426,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "DFerryman"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                 ],
             ),
@@ -2508,7 +2508,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "SanChai20"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                     {
                         "id": 222,
@@ -2516,7 +2516,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "DFerryman"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     },
                 ],
             ),
@@ -2541,18 +2541,23 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["items"][0]["fullName"], "DFerryman/private-repo")
         self.assertEqual(github_access["installationId"], "222")
 
-    def test_github_repository_content_permission_must_be_read_only(self) -> None:
+    def test_github_repository_installation_permissions_must_support_pull_request_creation(self) -> None:
         self.assertTrue(
-            app.installation_has_read_only_repository_contents(
-                {"permissions": {"metadata": "read", "contents": "read"}}
+            app.installation_supports_pull_request_creation(
+                {"permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"}}
             )
         )
         self.assertFalse(
-            app.installation_has_read_only_repository_contents(
-                {"permissions": {"metadata": "read", "contents": "write"}}
+            app.installation_supports_pull_request_creation(
+                {"permissions": {"metadata": "read", "contents": "read", "pull_requests": "write"}}
             )
         )
-        self.assertFalse(app.installation_has_read_only_repository_contents({"permissions": {"metadata": "read"}}))
+        self.assertFalse(
+            app.installation_supports_pull_request_creation(
+                {"permissions": {"metadata": "read", "contents": "write", "pull_requests": "read"}}
+            )
+        )
+        self.assertFalse(app.installation_supports_pull_request_creation({"permissions": {"metadata": "read"}}))
 
     def test_unhandled_errors_do_not_echo_internal_exception_details(self) -> None:
         handler = RouteHarness("/boom")
@@ -2602,7 +2607,7 @@ class SecurityContractsTest(unittest.TestCase):
                     "target_type": "User",
                     "account": {"login": "browser-github-user"},
                     "app_slug": "pullwise",
-                    "permissions": {"metadata": "read", "contents": "read"},
+                    "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                 },
             ),
             patch(
@@ -2720,7 +2725,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     }
                 ],
             ),
@@ -2766,7 +2771,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     }
                 ],
             ),
@@ -2819,7 +2824,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "read"},
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                     }
                 ],
             ),
@@ -2830,7 +2835,7 @@ class SecurityContractsTest(unittest.TestCase):
                     "target_type": "User",
                     "account": {"login": "octocat"},
                     "app_slug": "pullwise",
-                    "permissions": {"metadata": "read", "contents": "read"},
+                    "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
                 },
             ),
             patch(
@@ -2852,11 +2857,12 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.FOUND)
         self.assertEqual(github_access["installationAccount"], "octocat")
         self.assertEqual(github_access["installationTargetType"], "User")
-        self.assertEqual(github_access["installationPermissions"]["contents"], "read")
+        self.assertEqual(github_access["installationPermissions"]["contents"], "write")
+        self.assertEqual(github_access["installationPermissions"]["pull_requests"], "write")
         self.assertEqual(github_access["repositories"], ["octocat/private-repo"])
         self.assertTrue(github_access["repositoryItems"][0]["private"])
 
-    def test_github_installation_callback_rejects_installation_without_contents_read(self) -> None:
+    def test_github_installation_callback_rejects_installation_without_pull_request_write_permissions(self) -> None:
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
         app.USERS["usr_1"]["githubRepositoryAccess"] = None
         state = app.remember_github_state(
@@ -2891,7 +2897,7 @@ class SecurityContractsTest(unittest.TestCase):
                         "target_type": "User",
                         "account": {"login": "octocat"},
                         "app_slug": "pullwise",
-                        "permissions": {"metadata": "read"},
+                        "permissions": {"metadata": "read", "contents": "read", "pull_requests": "write"},
                     }
                 ],
             ),
@@ -2902,7 +2908,7 @@ class SecurityContractsTest(unittest.TestCase):
                     "target_type": "User",
                     "account": {"login": "octocat"},
                     "app_slug": "pullwise",
-                    "permissions": {"metadata": "read"},
+                    "permissions": {"metadata": "read", "contents": "read", "pull_requests": "write"},
                 },
             ),
             patch("pullwise_server.github_auth.list_installation_repositories") as list_repositories,
@@ -2910,7 +2916,8 @@ class SecurityContractsTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("Contents: read", handler.payload["message"])
+        self.assertIn("Contents: write", handler.payload["message"])
+        self.assertIn("Pull requests: write", handler.payload["message"])
         self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
         list_repositories.assert_not_called()
 

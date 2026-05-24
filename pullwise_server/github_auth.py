@@ -211,17 +211,21 @@ def create_installation_access_token(installation_id: str) -> dict:
 
 
 def create_pull_request(token: str, repo: str, *, title: str, head: str, base: str, body: str) -> dict:
-    response = requests.post(
-        f"{github_api_url()}/repos/{repo}/pulls",
-        headers=github_api_headers(token),
-        json={
-            "title": title,
-            "head": head,
-            "base": base,
-            "body": body,
-        },
-        timeout=request_timeout(),
-    )
+    try:
+        response = requests.post(
+            f"{github_api_url()}/repos/{repo}/pulls",
+            headers=github_api_headers(token),
+            json={
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+            },
+            timeout=request_timeout(),
+        )
+    except Exception as exc:
+        raise GitHubError(f"GitHub pull request creation failed: {exc}") from exc
+
     if response.status_code < 200 or response.status_code >= 300:
         detail = str(getattr(response, "text", "") or "").strip()
         try:
@@ -233,7 +237,10 @@ def create_pull_request(token: str, repo: str, *, title: str, head: str, base: s
             raise GitHubError(message) from exc
         raise GitHubError("GitHub pull request creation failed.")
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise GitHubError(f"GitHub pull request response was not valid JSON: {exc}") from exc
     return {
         "url": payload.get("html_url") or payload.get("url"),
         "number": payload.get("number"),
