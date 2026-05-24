@@ -13,6 +13,7 @@ build/
 dist/
 .pullwise/
 .omx/
+.worktrees/
 Python-3.10.12.tgz
 .tmp-copy.sqlite3
 .tmp-sqlite-test.db
