@@ -774,7 +774,10 @@ class PullRequestWorkflowTest(unittest.TestCase):
             patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
             patch("pullwise_server.app.github_auth.find_pull_request_by_head", return_value=None),
             patch("pullwise_server.app.github_auth.branch_exists", return_value=True),
-            patch("pullwise_server.app.github_auth.create_pull_request", side_effect=github_auth.GitHubError("GitHub PR failed")),
+            patch(
+                "pullwise_server.app.github_auth.create_pull_request",
+                side_effect=github_auth.GitHubError("GitHub PR failed\r\nX-Injected: bad"),
+            ),
             patch("pullwise_server.app.persist_state") as persist_state,
             patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
             patch("pullwise_server.app.checkout.run_git") as run_git,
@@ -785,6 +788,7 @@ class PullRequestWorkflowTest(unittest.TestCase):
         pending = app.ISSUES[0]["pullRequestPending"]
         self.assertEqual(pending["branch"], "pullwise/fix-f_123-stale")
         self.assertIn("lastError", pending)
+        self.assertEqual(pending["lastError"], "GitHub PR failed")
         self.assertIn("failedAt", pending)
         prepare_checkout.assert_not_called()
         run_git.assert_not_called()

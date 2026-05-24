@@ -1227,7 +1227,7 @@ def record_pull_request_pending_failure(issue: dict, message: str) -> None:
     with STATE_LOCK:
         pending = issue.get("pullRequestPending")
         if isinstance(pending, dict):
-            pending["lastError"] = message[:500]
+            pending["lastError"] = clean_pull_request_error(message)
             pending["failedAt"] = now()
         mark_state_dirty()
         persist_state()
@@ -1252,6 +1252,13 @@ def github_service_error(exc: BaseException) -> bool:
 
 def github_app_write_permissions_message() -> str:
     return "GitHub App installation must grant Contents: write and Pull requests: write for Pullwise to push fix branches and open pull requests."
+
+
+def clean_pull_request_error(value: object) -> str:
+    if not isinstance(value, str):
+        return "Pull request creation failed."
+    text = value.replace("\x00", "").splitlines()[0].strip()
+    return (text or "Pull request creation failed.")[:500]
 
 
 def installation_supports_pull_request_creation(installation: dict) -> bool:
