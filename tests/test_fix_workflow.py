@@ -165,6 +165,20 @@ class FixWorkflowTest(unittest.TestCase):
         self.assertEqual(set(result), VALID_PREVIEW_KEYS)
         self.assertEqual(result["repository"], "fallback/repo")
 
+    def test_preview_sanitizes_repository_and_branch_metadata(self) -> None:
+        result = preview_issue_fix(
+            self.tmpdir.name,
+            self.issue(
+                repo={"fullName": "owner/repo"},
+                repository="fallback/repo",
+                branch="main\r\nX-Injected: bad",
+            ),
+        )
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["repository"], "fallback/repo")
+        self.assertEqual(result["branch"], "")
+
     def test_apply_writes_valid_fix_and_returns_preview_metadata(self) -> None:
         result = apply_issue_fix(self.tmpdir.name, self.issue())
 

@@ -8,6 +8,7 @@ import re
 
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 def preview_issue_fix(repo_path: str, issue: dict) -> dict:
@@ -50,8 +51,8 @@ def preview_issue_fix(repo_path: str, issue: dict) -> dict:
         "valid": True,
         "issueId": str(issue.get("id") or ""),
         "autoFixable": True,
-        "repository": issue.get("repo") or issue.get("repository") or "",
-        "branch": issue.get("branch") or "",
+        "repository": safe_preview_repository(issue),
+        "branch": safe_preview_text(issue.get("branch")),
         "file": relative_path,
         "diff": diff,
         "summary": "1 file changed",
@@ -107,6 +108,22 @@ def code_lines(value: object) -> list[str]:
         split = raw.splitlines()
         lines.extend(split or [""])
     return lines
+
+
+def safe_preview_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    if any(char in value for char in "\r\n\x00"):
+        return ""
+    return value.strip()
+
+
+def safe_preview_repository(issue: dict) -> str:
+    for key in ("repo", "repository"):
+        value = safe_preview_text(issue.get(key))
+        if value and _REPO_FULL_NAME_RE.match(value):
+            return value
+    return ""
 
 
 def replacement_preview(original: str, bad_lines: list[str], good_lines: list[str]) -> dict:
