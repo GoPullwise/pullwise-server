@@ -473,6 +473,10 @@ def text_payload(value: object, fallback: str) -> str:
     return value if isinstance(value, str) and value.strip() else fallback
 
 
+def bool_payload(value: object) -> bool:
+    return value if isinstance(value, bool) else False
+
+
 def billing_update_from_creem_event(event: dict) -> dict | None:
     event_type = text_payload(event.get("eventType") or event.get("type"), "")
     obj = dict_payload(event.get("object"))
@@ -572,7 +576,8 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             or "month"
         )
         status = normalize_subscription_status(obj.get("status"))
-        if obj.get("cancel_at_period_end") and status == "active":
+        cancel_at_period_end = bool_payload(obj.get("cancel_at_period_end"))
+        if cancel_at_period_end and status == "active":
             status = "canceling"
         return {
             "userId": metadata.get("userId") or metadata.get("internal_customer_id"),
@@ -585,7 +590,7 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             "interval": interval,
             "currentPeriodStart": obj.get("current_period_start") or (item or {}).get("current_period_start"),
             "currentPeriodEnd": obj.get("current_period_end") or (item or {}).get("current_period_end"),
-            "cancelAtPeriodEnd": bool(obj.get("cancel_at_period_end")),
+            "cancelAtPeriodEnd": cancel_at_period_end,
             "canceledAt": obj.get("canceled_at"),
             "eventType": event_type,
             "eventId": event.get("id"),

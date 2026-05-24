@@ -207,6 +207,25 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["currentPeriodEnd"], 1712592000)
         self.assertTrue(update["cancelAtPeriodEnd"])
 
+    def test_stripe_subscription_event_ignores_malformed_cancel_at_period_end(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_subscription_bad_cancel_1",
+                "type": "customer.subscription.updated",
+                "data": {
+                    "object": {
+                        "id": "sub_1",
+                        "customer": "cus_1",
+                        "status": "active",
+                        "cancel_at_period_end": "false",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(update["status"], "active")
+        self.assertFalse(update["cancelAtPeriodEnd"])
+
     def test_creem_event_defaults_malformed_status_plan_and_interval(self) -> None:
         update = billing.billing_update_from_creem_event(
             {
