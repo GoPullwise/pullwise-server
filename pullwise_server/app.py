@@ -2166,7 +2166,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating issue status.")
             issue = self.find_or_404(user_issues(session), segments[1], "Issue")
-            next_status = str(body.get("status") or issue["status"])
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            next_status = str(body.get("status") or issue["status"]).strip().lower()
             if next_status not in ISSUE_STATUSES:
                 return self.error(HTTPStatus.BAD_REQUEST, "Issue status must be open, fixed, or snoozed.")
             issue["status"] = next_status

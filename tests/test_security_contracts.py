@@ -474,6 +474,22 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(app.ISSUES[0]["status"], "open")
 
+    def test_issue_status_update_normalizes_status_text(self) -> None:
+        handler = RouteHarness("/issues/iss_1/status", {"status": " Fixed "}, cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "PATCH")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(app.ISSUES[0]["status"], "fixed")
+
+    def test_issue_status_update_rejects_non_object_body(self) -> None:
+        handler = RouteHarness("/issues/iss_1/status", ["fixed"], cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "PATCH")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(app.ISSUES[0]["status"], "open")
+
     def test_github_installation_html_url_must_match_configured_github_host(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             self.assertEqual(
