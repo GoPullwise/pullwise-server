@@ -620,11 +620,19 @@ def permission_levels_to_dict(permissions) -> dict:
     if not permissions:
         return {}
     if isinstance(permissions, dict):
-        return {str(key): str(value) for key, value in permissions.items() if value is not None}
+        return {
+            str(key): value.strip()
+            for key, value in permissions.items()
+            if isinstance(value, str) and value.strip()
+        }
 
     raw_data = getattr(permissions, "raw_data", None) or getattr(permissions, "_rawData", None)
     if isinstance(raw_data, dict):
-        return {str(key): str(value) for key, value in raw_data.items() if value is not None}
+        return {
+            str(key): value.strip()
+            for key, value in raw_data.items()
+            if isinstance(value, str) and value.strip()
+        }
 
     result = {}
     for key in ("metadata", "contents", "issues", "pull_requests", "checks", "statuses"):
@@ -632,8 +640,8 @@ def permission_levels_to_dict(permissions) -> dict:
             value = getattr(permissions, key)
         except Exception:
             continue
-        if value is not None:
-            result[key] = str(value)
+        if isinstance(value, str) and value.strip():
+            result[key] = value.strip()
     return result
 
 

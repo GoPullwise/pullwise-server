@@ -76,6 +76,22 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(payload["html_url"], "https://github.com/settings/installations/123")
         self.assertEqual(payload["permissions"]["contents"], "read")
 
+    def test_installation_to_dict_ignores_malformed_permission_levels(self) -> None:
+        installation = {
+            "id": 123,
+            "account": {"login": "octocat"},
+            "permissions": {
+                "metadata": "read",
+                "contents": {"level": "write"},
+                "pull_requests": ["write"],
+                "statuses": True,
+            },
+        }
+
+        payload = github_auth.installation_payload_to_dict(installation)
+
+        self.assertEqual(payload["permissions"], {"metadata": "read"})
+
     def test_list_current_app_installations_matches_pygithub_installations_by_app_id(self) -> None:
         account = Mock()
         account.login = "octocat"
