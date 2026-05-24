@@ -39,6 +39,8 @@ UNSAFE_PATHS = [
     "src/../secrets.env",
     "C:\\secrets.env",
     "C:secrets.env",
+    "src/auth.py\r\nX-Injected: bad",
+    "src/auth.py\nX-Injected: bad",
     ".git/config",
     ".GIT/hooks/post-checkout",
     "src/.git/config",

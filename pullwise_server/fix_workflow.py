@@ -169,7 +169,7 @@ def safe_issue_file(value: object) -> str | None:
     normalized = raw.replace("\\", "/")
     if (
         not raw
-        or "\x00" in raw
+        or any(char in raw for char in "\r\n\x00")
         or _WINDOWS_DRIVE_RE.match(raw)
         or os.path.isabs(raw)
         or normalized.startswith("/")
