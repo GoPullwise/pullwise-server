@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -177,7 +178,96 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertTrue(handler.payload["valid"])
         self.assertIn("-old()", handler.payload["diff"])
-        preview_fix.assert_called_once()
+        self.assertNotIn("originalContent", handler.payload)
+        self.assertNotIn("updatedContent", handler.payload)
+        preview_fix.assert_called_once_with(app.USERS["usr_1"], app.ISSUES[0])
+
+    def test_issue_fix_preview_maps_helper_value_error_to_bad_request(self) -> None:
+        handler = RouteHarness("/issues/iss_1/fixes/preview", cookie=self.signed_in())
+
+        with patch("pullwise_server.app.preview_issue_fix_for_user", side_effect=ValueError("No checkout")):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "No checkout")
+
+    def test_issue_fix_preview_returns_bad_request_for_invalid_preview(self) -> None:
+        preview = {
+            "issueId": "iss_1",
+            "autoFixable": True,
+            "valid": False,
+            "message": "Old block was not found.",
+        }
+        handler = RouteHarness("/issues/iss_1/fixes/preview", cookie=self.signed_in())
+
+        with patch("pullwise_server.app.preview_issue_fix_for_user", return_value=preview):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload, preview)
+
+    def test_preview_issue_fix_for_user_prepares_checkout_after_worker_cleanup(self) -> None:
+        app.ISSUES[0].update({
+            "repo": "owner/repo",
+            "scanId": "sc_1",
+            "autoFix": True,
+            "file": "src/auth.py",
+            "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+            "goodCode": [{"ln": 1, "code": "new()", "t": "add"}],
+        })
+        app.SCANS[0].update({
+            "branch": "main",
+            "commit": "abc1234",
+            "repoPath": None,
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = app.checkout.checkout_path_for("usr_1", "sc_1", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("old()\n")
+
+                with (
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path) as prepare_checkout,
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace") as cleanup_scan_workspace,
+                ):
+                    preview = app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertTrue(preview["valid"])
+        self.assertIn("-old()", preview["diff"])
+        self.assertIn("+new()", preview["diff"])
+        prepare_checkout.assert_called_once()
+        cleanup_scan_workspace.assert_called_once_with("usr_1", "sc_1")
+        self.assertIsNone(app.SCANS[0]["repoPath"])
+
+    def test_preview_issue_fix_for_user_rejects_scan_owned_by_another_user(self) -> None:
+        app.ISSUES[0]["scanId"] = "sc_2"
+        app.SCANS.append({
+            "id": "sc_2",
+            "userId": "usr_2",
+            "status": "done",
+            "repo": "owner/repo",
+            "repoPath": None,
+        })
+
+        with self.assertRaises(ValueError) as context:
+            app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertIn("signed-in user", str(context.exception))
+
+    def test_preview_issue_fix_for_user_rejects_repo_path_outside_scan_workspace(self) -> None:
+        app.ISSUES[0]["scanId"] = "sc_1"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": os.path.join(tmpdir, "checkouts")}, clear=False):
+                outside_path = os.path.join(tmpdir, "outside", "repo")
+                app.SCANS[0]["repoPath"] = outside_path
+
+                with self.assertRaises(ValueError) as context:
+                    app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertIn("outside the scan workspace", str(context.exception))
 
     def test_issue_status_update_rejects_unknown_status(self) -> None:
         app.SESSIONS = {

@@ -792,16 +792,38 @@ def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
     scan = next((item for item in SCANS if item.get("id") == scan_id), None)
     if not scan:
         raise ValueError("Scan not found for issue.")
-    if scan.get("userId") != user.get("id"):
+    user_id = str(user.get("id") or "")
+    scan_id = str(scan.get("id") or scan_id or "")
+    if str(scan.get("userId") or "") != user_id:
         raise ValueError("Scan does not belong to the signed-in user.")
 
     repo_path = scan.get("repoPath")
-    if not repo_path:
-        raise ValueError("Scan checkout is not available for preview.")
-    if not checkout.path_in_scan_workspace(str(repo_path), str(user.get("id") or ""), str(scan.get("id") or "")):
-        raise ValueError("Scan checkout path is outside the scan workspace.")
+    if repo_path:
+        repo_path = str(repo_path)
+        if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
+            raise ValueError("Scan checkout path is outside the scan workspace.")
+        if os.path.exists(repo_path):
+            return fix_workflow.preview_issue_fix(repo_path, issue)
 
-    return fix_workflow.preview_issue_fix(str(repo_path), issue)
+    try:
+        repo_path = checkout.prepare_checkout(scan_id, scan, lambda: False)
+    except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
+        try:
+            checkout.cleanup_scan_workspace(user_id, scan_id)
+        except (RuntimeError, OSError) as cleanup_exc:
+            raise ValueError(f"Unable to clean up failed preview checkout: {cleanup_exc}") from cleanup_exc
+        raise ValueError(str(exc)) from exc
+
+    try:
+        repo_path = str(repo_path)
+        if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
+            raise ValueError("Prepared checkout path is outside the scan workspace.")
+        return fix_workflow.preview_issue_fix(repo_path, issue)
+    finally:
+        try:
+            checkout.cleanup_scan_workspace(user_id, scan_id)
+        except (RuntimeError, OSError) as exc:
+            raise ValueError(f"Unable to clean up preview checkout: {exc}") from exc
 
 
 def repository_item(github_access: dict | None, full_name: str) -> dict | None:
