@@ -101,6 +101,19 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual([item["id"] for item in installations], [123])
         github.close.assert_called_once()
 
+    def test_app_api_configured_rejects_malformed_app_id(self) -> None:
+        for app_id in ["abc", "0", "-1"]:
+            with self.subTest(app_id=app_id):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PULLWISE_GITHUB_APP_ID": app_id,
+                        "PULLWISE_GITHUB_APP_PRIVATE_KEY": "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+                    },
+                    clear=True,
+                ):
+                    self.assertFalse(github_auth.app_api_configured())
+
     def test_installation_matches_configured_app_slug_case_insensitively(self) -> None:
         self.assertTrue(
             github_auth.installation_matches_configured_app(

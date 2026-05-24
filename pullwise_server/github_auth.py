@@ -48,6 +48,16 @@ def app_id() -> str:
     return env_any(["PULLWISE_GITHUB_APP_ID", "GITHUB_APP_ID"])
 
 
+def app_id_int() -> int:
+    try:
+        value = int(app_id())
+    except ValueError:
+        raise GitHubError("PULLWISE_GITHUB_APP_ID must be a positive integer.") from None
+    if value <= 0:
+        raise GitHubError("PULLWISE_GITHUB_APP_ID must be a positive integer.")
+    return value
+
+
 def app_install_configured() -> bool:
     return bool(app_slug() or app_install_url_override())
 
@@ -61,8 +71,9 @@ def app_api_configured() -> bool:
     if not app_id():
         return False
     try:
+        app_id_int()
         return bool(app_private_key())
-    except OSError:
+    except (GitHubError, OSError):
         return False
 
 
@@ -505,7 +516,7 @@ def app_integration():
     kwargs = {"timeout": request_timeout(), "per_page": 100, "user_agent": DEFAULT_USER_AGENT}
     if github_api_url() != DEFAULT_API_URL:
         kwargs["base_url"] = github_api_url()
-    return GithubIntegration(auth=Auth.AppAuth(int(app_id()), app_private_key()), **kwargs)
+    return GithubIntegration(auth=Auth.AppAuth(app_id_int(), app_private_key()), **kwargs)
 
 
 def app_private_key() -> str:
