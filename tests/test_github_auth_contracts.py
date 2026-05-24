@@ -127,6 +127,24 @@ class GitHubAuthContractsTest(unittest.TestCase):
             with self.assertRaisesRegex(github_auth.GitHubError, "not valid base64"):
                 github_auth.app_private_key()
 
+    def test_fetch_primary_email_skips_malformed_email_items(self) -> None:
+        emails = [
+            "not an email object",
+            {"verified": True, "primary": True, "email": {"address": "bad@example.com"}},
+            {"verified": True, "primary": True, "email": "octocat@example.com"},
+        ]
+
+        with (
+            patch.object(github_auth, "oauth_session", return_value=Mock()),
+            patch.object(github_auth, "authlib_get_json", return_value=emails),
+        ):
+            try:
+                primary_email = github_auth.fetch_primary_email("gho_user")
+            except AttributeError as exc:
+                self.fail(f"fetch_primary_email should skip malformed email items: {exc}")
+
+        self.assertEqual(primary_email, "octocat@example.com")
+
     def test_installation_matches_configured_app_slug_case_insensitively(self) -> None:
         self.assertTrue(
             github_auth.installation_matches_configured_app(

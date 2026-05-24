@@ -191,17 +191,29 @@ def fetch_primary_email(access_token: str) -> str | None:
     if not isinstance(emails, list):
         return None
 
-    verified = [email for email in emails if email.get("verified")]
+    email_records = [email for email in emails if isinstance(email, dict)]
+    verified = [email for email in email_records if email.get("verified") is True]
     for email in verified:
-        if email.get("primary") and email.get("email"):
-            return email["email"]
+        address = email_record_address(email)
+        if email.get("primary") is True and address:
+            return address
     for email in verified:
-        if email.get("email"):
-            return email["email"]
-    for email in emails:
-        if email.get("email"):
-            return email["email"]
+        address = email_record_address(email)
+        if address:
+            return address
+    for email in email_records:
+        address = email_record_address(email)
+        if address:
+            return address
     return None
+
+
+def email_record_address(email: dict) -> str | None:
+    address = email.get("email")
+    if not isinstance(address, str):
+        return None
+    address = address.strip()
+    return address or None
 
 
 def fetch_installation(installation_id: str) -> dict:
