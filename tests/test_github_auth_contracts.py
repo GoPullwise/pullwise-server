@@ -340,6 +340,40 @@ class GitHubAuthContractsTest(unittest.TestCase):
 
         self.assertEqual([repo["fullName"] for repo in repositories], ["octocat/Hello-World"])
 
+    def test_list_installation_repositories_sanitizes_malformed_repository_urls(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "repositories": [
+                {
+                    "id": 1296269,
+                    "name": "Hello-World",
+                    "full_name": "octocat/Hello-World",
+                    "html_url": "javascript:alert(1)",
+                    "clone_url": {"url": "https://github.com/octocat/Hello-World.git"},
+                    "permissions": {"pull": True},
+                },
+                {
+                    "id": 1296270,
+                    "name": "UnsafeHost",
+                    "full_name": "octocat/UnsafeHost",
+                    "html_url": "https://evil.example/octocat/UnsafeHost",
+                    "clone_url": "https://evil.example/octocat/UnsafeHost.git",
+                    "permissions": {"pull": True},
+                },
+            ]
+        }
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.object(github_auth, "create_installation_access_token", return_value={"token": "ghs_123"}),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            repositories = github_auth.list_installation_repositories("123")
+
+        self.assertEqual([repo["htmlUrl"] for repo in repositories], [None, None])
+        self.assertEqual([repo["cloneUrl"] for repo in repositories], [None, None])
+
     def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {

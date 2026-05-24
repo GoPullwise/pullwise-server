@@ -4,7 +4,7 @@ import base64
 import binascii
 import os
 import secrets
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 import requests
 
@@ -653,8 +653,8 @@ def repo_to_pullwise(repo) -> dict:
         "branches": "-",
         "defaultBranch": getattr(repo, "default_branch", None) or "main",
         "updated": str(getattr(repo, "updated_at", None) or ""),
-        "htmlUrl": getattr(repo, "html_url", None),
-        "cloneUrl": getattr(repo, "clone_url", None),
+        "htmlUrl": trusted_github_web_url(getattr(repo, "html_url", None)),
+        "cloneUrl": trusted_github_web_url(getattr(repo, "clone_url", None)),
         "permissions": permissions_to_dict(getattr(repo, "permissions", None)),
     }
 
@@ -673,10 +673,25 @@ def repo_payload_to_pullwise(repo: dict) -> dict:
         "branches": "-",
         "defaultBranch": repo.get("default_branch") or "main",
         "updated": str(repo.get("updated_at") or ""),
-        "htmlUrl": repo.get("html_url"),
-        "cloneUrl": repo.get("clone_url"),
+        "htmlUrl": trusted_github_web_url(repo.get("html_url")),
+        "cloneUrl": trusted_github_web_url(repo.get("clone_url")),
         "permissions": normalize_permission_mapping(repo.get("permissions") or {}),
     }
+
+
+def trusted_github_web_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw or any(char in raw for char in "\r\n"):
+        return None
+    parsed = urlparse(raw)
+    allowed = urlparse(github_web_url())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if allowed.netloc and parsed.netloc.lower() != allowed.netloc.lower():
+        return None
+    return raw
 
 
 def permissions_to_dict(permissions) -> dict:
