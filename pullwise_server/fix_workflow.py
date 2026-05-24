@@ -55,8 +55,6 @@ def preview_issue_fix(repo_path: str, issue: dict) -> dict:
         "file": relative_path,
         "diff": diff,
         "summary": "1 file changed",
-        "originalContent": original,
-        "updatedContent": updated,
     }
 
 
@@ -69,8 +67,22 @@ def apply_issue_fix(repo_path: str, issue: dict) -> dict:
     if not target_path:
         return invalid(issue, "Unsafe issue file path.")
 
+    try:
+        with open(target_path, encoding="utf-8") as handle:
+            original = handle.read()
+    except FileNotFoundError:
+        return invalid(issue, "Issue file was not found.")
+
+    replacement = replacement_preview(
+        original,
+        code_lines(issue.get("badCode")),
+        code_lines(issue.get("goodCode")),
+    )
+    if not replacement["ok"]:
+        return invalid(issue, replacement["message"])
+
     with open(target_path, "w", encoding="utf-8") as handle:
-        handle.write(preview["updatedContent"])
+        handle.write(replacement["updatedContent"])
     return preview
 
 
