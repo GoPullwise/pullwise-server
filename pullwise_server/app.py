@@ -1622,6 +1622,10 @@ def billing_event_id(update: dict) -> str:
     return str(update.get("eventId") or "")
 
 
+def billing_update_text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
 def billing_event_created(update: dict) -> int | None:
     value = update.get("eventCreated")
     if isinstance(value, bool):
@@ -1676,7 +1680,7 @@ def remember_pending_billing_update(update: dict) -> None:
 
 
 def billing_user_for_update(update: dict) -> dict | None:
-    user = USERS.get(update.get("userId") or "")
+    user = USERS.get(billing_update_text(update.get("userId")))
     if user:
         return user
     for candidate in USERS.values():
@@ -1687,11 +1691,14 @@ def billing_user_for_update(update: dict) -> dict | None:
 
 def billing_update_matches_user(update: dict, user: dict) -> bool:
     current = user.get("billing") or {}
-    if update.get("customerId") and current.get("customerId") == update.get("customerId"):
+    customer_id = billing_update_text(update.get("customerId"))
+    subscription_id = billing_update_text(update.get("subscriptionId"))
+    user_id = billing_update_text(update.get("userId"))
+    if customer_id and current.get("customerId") == customer_id:
         return True
-    if update.get("subscriptionId") and current.get("subscriptionId") == update.get("subscriptionId"):
+    if subscription_id and current.get("subscriptionId") == subscription_id:
         return True
-    return bool(update.get("userId") and update.get("userId") == user.get("id"))
+    return bool(user_id and user_id == user.get("id"))
 
 
 def apply_billing_update_to_user(user: dict, update: dict) -> bool:
