@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -1643,6 +1644,8 @@ def billing_event_created(update: dict) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
+        if not math.isfinite(value):
+            return None
         return int(value)
     if isinstance(value, str) and value.isdigit():
         return int(value)

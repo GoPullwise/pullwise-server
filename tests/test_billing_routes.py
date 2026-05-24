@@ -643,6 +643,27 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(billing_state["lastEventType"], "checkout.session.completed")
         self.assertIsNone(app.BILLING_EVENTS["evt_bad_text_fields"]["eventType"])
 
+    def test_billing_update_ignores_non_finite_event_created_when_applying(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "status": "active",
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_bad_created",
+                "eventCreated": float("nan"),
+            },
+        )
+
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
+        self.assertIsNone(app.USERS["usr_1"]["billing"].get("lastEventCreated"))
+        self.assertIsNone(app.BILLING_EVENTS["evt_bad_created"]["eventCreated"])
+
     def test_stripe_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
         seed_session()
         handler = HandlerHarness()

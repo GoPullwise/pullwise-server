@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import hashlib
 import hmac
+import math
 import secrets
 import time
 from urllib.parse import urljoin
@@ -604,6 +605,8 @@ def event_created(event: dict) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
+        if not math.isfinite(value):
+            return None
         return int(value)
     if isinstance(value, str) and value.isdigit():
         return int(value)

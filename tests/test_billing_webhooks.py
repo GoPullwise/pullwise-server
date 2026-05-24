@@ -226,6 +226,25 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["status"], "active")
         self.assertFalse(update["cancelAtPeriodEnd"])
 
+    def test_stripe_subscription_event_ignores_non_finite_event_created(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_subscription_bad_created_1",
+                "created": float("nan"),
+                "type": "customer.subscription.updated",
+                "data": {
+                    "object": {
+                        "id": "sub_1",
+                        "customer": "cus_1",
+                        "status": "active",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(update["status"], "active")
+        self.assertIsNone(update["eventCreated"])
+
     def test_creem_event_defaults_malformed_status_plan_and_interval(self) -> None:
         update = billing.billing_update_from_creem_event(
             {
