@@ -674,25 +674,30 @@ class PullRequestWorkflowTest(unittest.TestCase):
         persist_state.assert_called()
 
     def test_stale_pending_marker_with_invalid_branch_is_cleared(self) -> None:
-        app.ISSUES[0]["pullRequestPending"] = {
-            "branch": "../main",
-            "startedAt": app.now() - 3600,
-            "lastError": "previous bad state",
-        }
+        for branch in ("../main", "pullwise/fix-f_123/.lock", "pullwise/fix-f_123//retry"):
+            with self.subTest(branch=branch):
+                app.ISSUES[0]["pullRequestPending"] = {
+                    "branch": branch,
+                    "startedAt": app.now() - 3600,
+                    "lastError": "previous bad state",
+                }
 
-        with (
-            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
-            patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
-            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
-            patch("pullwise_server.app.persist_state") as persist_state,
-        ):
-            with self.assertRaisesRegex(ValueError, "Stored pull request branch is invalid"):
-                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+                with (
+                    patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                    patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
+                    patch("pullwise_server.app.github_auth.find_pull_request_by_head", return_value=None) as find_pull_request,
+                    patch("pullwise_server.app.github_auth.branch_exists", side_effect=AssertionError("branch lookup should not run")),
+                    patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+                    patch("pullwise_server.app.persist_state") as persist_state,
+                ):
+                    with self.assertRaisesRegex(ValueError, "Stored pull request branch is invalid"):
+                        app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
 
-        self.assertNotIn("pullRequestPending", app.ISSUES[0])
-        create_token.assert_not_called()
-        prepare_checkout.assert_not_called()
-        persist_state.assert_called()
+                self.assertNotIn("pullRequestPending", app.ISSUES[0])
+                create_token.assert_not_called()
+                find_pull_request.assert_not_called()
+                prepare_checkout.assert_not_called()
+                persist_state.assert_called()
 
     def test_failure_after_push_started_keeps_pending_branch_marker(self) -> None:
         token = "ghs_secret_token"

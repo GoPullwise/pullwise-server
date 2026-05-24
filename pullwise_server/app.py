@@ -1133,9 +1133,12 @@ def valid_stored_pull_request_branch(branch: object) -> str | None:
     value = str(branch or "").strip()
     if not value.startswith("pullwise/fix-"):
         return None
-    if value.endswith("/") or value.endswith(".") or ".." in value or " " in value:
+    if value.endswith("/") or value.endswith(".") or ".." in value or "//" in value or " " in value:
         return None
     if not re.match(r"^[A-Za-z0-9._/-]+$", value):
+        return None
+    parts = value.split("/")
+    if any(not part or part.startswith(".") or part.casefold().endswith(".lock") for part in parts):
         return None
     return value
 
