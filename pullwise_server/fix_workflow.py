@@ -49,7 +49,7 @@ def preview_issue_fix(repo_path: str, issue: dict) -> dict:
     )
     return {
         "valid": True,
-        "issueId": str(issue.get("id") or ""),
+        "issueId": safe_preview_text(issue.get("id")),
         "autoFixable": True,
         "repository": safe_preview_repository(issue),
         "branch": safe_preview_text(issue.get("branch")),
@@ -89,7 +89,7 @@ def apply_issue_fix(repo_path: str, issue: dict) -> dict:
 
 def invalid(issue: dict, message: str) -> dict:
     return {
-        "issueId": str(issue.get("id") or "") if isinstance(issue, dict) else "",
+        "issueId": safe_preview_text(issue.get("id")) if isinstance(issue, dict) else "",
         "autoFixable": is_auto_fixable(issue),
         "valid": False,
         "message": message,

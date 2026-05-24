@@ -267,6 +267,19 @@ class FixWorkflowTest(unittest.TestCase):
             },
         )
 
+    def test_preview_sanitizes_issue_id_metadata(self) -> None:
+        result = preview_issue_fix(
+            self.tmpdir.name,
+            self.issue(id={"value": "f_123"}),
+        )
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["issueId"], "")
+
+        invalid_result = invalid({"id": "f_bad\r\nX-Injected: bad", "autoFix": True}, "Not safe.")
+
+        self.assertEqual(invalid_result["issueId"], "")
+
     def test_code_lines_accepts_code_dicts_and_raw_strings(self) -> None:
         self.assertEqual(
             code_lines([
