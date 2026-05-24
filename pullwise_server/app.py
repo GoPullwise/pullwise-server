@@ -1319,8 +1319,7 @@ def repository_items_for_payload(github_access: dict | None) -> list[dict]:
         return []
     return [
         repository_item_from_full_name(str(full_name))
-        for full_name in github_access.get("repositories") or []
-        if str(full_name)
+        for full_name in clean_github_access_text_list(github_access.get("repositories"))
     ]
 
 
@@ -1406,11 +1405,11 @@ def unavailable_repositories_payload(github_access: dict) -> dict:
         "items": [],
         "repositories": [],
         "needsAuthorization": True,
-        "installationId": github_access.get("installationId"),
-        "installationIds": github_access.get("installationIds") or [],
-        "repositorySelection": github_access.get("repositorySelection"),
-        "installationAccount": github_access.get("installationAccount"),
-        "installationAccounts": github_access.get("installationAccounts") or [],
+        "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
+        "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
+        "repositorySelection": clean_github_access_text(github_access.get("repositorySelection")),
+        "installationAccount": clean_github_access_text(github_access.get("installationAccount")),
+        "installationAccounts": clean_github_access_text_list(github_access.get("installationAccounts")),
         "installations": safe_installation_summaries(github_access.get("installations") or []),
         "repositoriesNeedSync": repositories_need_sync,
     }
@@ -1441,7 +1440,13 @@ def installation_summary_from_access(github_access: dict) -> dict:
 
 
 def safe_installation_summaries(installations: list[dict]) -> list[dict]:
-    return [safe_installation_summary(installation, include_url_aliases=True) for installation in installations]
+    if not isinstance(installations, list):
+        return []
+    return [
+        safe_installation_summary(installation, include_url_aliases=True)
+        for installation in installations
+        if isinstance(installation, dict)
+    ]
 
 
 def safe_installation_summary(installation: dict, *, include_url_aliases: bool = False) -> dict:
@@ -1466,7 +1471,11 @@ def safe_installation_summary(installation: dict, *, include_url_aliases: bool =
 
 
 def clean_installation_summary_text(value: object) -> str | None:
-    if isinstance(value, int) and not isinstance(value, bool):
+    return clean_github_access_text(value, allow_int=True)
+
+
+def clean_github_access_text(value: object, *, allow_int: bool = False) -> str | None:
+    if allow_int and isinstance(value, int) and not isinstance(value, bool):
         return str(value)
     if not isinstance(value, str):
         return None
@@ -1474,6 +1483,16 @@ def clean_installation_summary_text(value: object) -> str | None:
     if not value or any(char in value for char in "\r\n"):
         return None
     return value
+
+
+def clean_github_access_text_list(value: object, *, allow_int: bool = False) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        text
+        for item in value
+        if (text := clean_github_access_text(item, allow_int=allow_int))
+    ]
 
 
 def safe_installation_repository_count(value: object) -> int:
@@ -1707,12 +1726,12 @@ def session_payload(session: dict | None) -> dict:
             "login": user.get("githubLogin"),
             "repositoriesConnected": repositories_connected,
             "repositoriesAuthorizationPending": repositories_pending,
-            "repositoryScope": visible_access.get("scope") if visible_access else None,
+            "repositoryScope": clean_github_access_text(visible_access.get("scope")) if visible_access else None,
             "authorizedAt": visible_access.get("authorizedAt") if visible_access else None,
-            "installationId": visible_access.get("installationId") if visible_access else None,
-            "installationIds": visible_access.get("installationIds") if visible_access else [],
-            "repositorySelection": visible_access.get("repositorySelection") if visible_access else None,
-            "repositoryCount": len(visible_access.get("repositories", [])) if visible_access else 0,
+            "installationId": clean_github_access_text(visible_access.get("installationId"), allow_int=True) if visible_access else None,
+            "installationIds": clean_github_access_text_list(visible_access.get("installationIds"), allow_int=True) if visible_access else [],
+            "repositorySelection": clean_github_access_text(visible_access.get("repositorySelection")) if visible_access else None,
+            "repositoryCount": len(clean_github_access_text_list(visible_access.get("repositories"))) if visible_access else 0,
         },
         "nextStep": "choose_repositories" if repositories_connected else "connect_github_repositories",
     }
@@ -2458,7 +2477,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "connected": True,
                     "url": existing_url,
                     "mode": "github-app-existing-manage",
-                    "installationId": existing_access.get("installationId"),
+                    "installationId": clean_github_access_text(existing_access.get("installationId"), allow_int=True),
                 })
             existing_installations = existing_access.get("installations") if existing_access else []
             safe_existing_installations = safe_installation_summaries(existing_installations or [])
@@ -2469,10 +2488,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "connected": True,
                     "mode": "github-app-existing-manage-list",
-                    "installationId": existing_access.get("installationId"),
-                    "installationIds": existing_access.get("installationIds") or [],
-                    "installationAccount": existing_access.get("installationAccount"),
-                    "installationAccounts": existing_access.get("installationAccounts") or [],
+                    "installationId": clean_github_access_text(existing_access.get("installationId"), allow_int=True),
+                    "installationIds": clean_github_access_text_list(existing_access.get("installationIds"), allow_int=True),
+                    "installationAccount": clean_github_access_text(existing_access.get("installationAccount")),
+                    "installationAccounts": clean_github_access_text_list(existing_access.get("installationAccounts")),
                     "installations": safe_existing_installations,
                 })
             state = remember_github_repository_authorization(user, redirect_to, scope, manage=True)
@@ -2483,7 +2502,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "connected": True,
                 "mode": "github-app-existing",
-                "installationId": existing_access.get("installationId"),
+                "installationId": clean_github_access_text(existing_access.get("installationId"), allow_int=True),
             }
             return self.json(payload)
         existing_url = trusted_github_web_url(existing_access.get("installationHtmlUrl") if existing_access else None)
@@ -2582,16 +2601,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             and github_repository_access_connected(github_access)
             and not pending,
             "authorizationPending": pending,
-            "mode": visible_access.get("mode") if visible_access else None,
-            "scope": visible_access.get("scope") if visible_access else None,
-            "repositorySelection": visible_access.get("repositorySelection") if visible_access else None,
-            "installationId": visible_access.get("installationId") if visible_access else None,
-            "installationIds": visible_access.get("installationIds") if visible_access else [],
-            "installationAccount": visible_access.get("installationAccount") if visible_access else None,
-            "installationAccounts": visible_access.get("installationAccounts") if visible_access else [],
+            "mode": clean_github_access_text(visible_access.get("mode")) if visible_access else None,
+            "scope": clean_github_access_text(visible_access.get("scope")) if visible_access else None,
+            "repositorySelection": clean_github_access_text(visible_access.get("repositorySelection")) if visible_access else None,
+            "installationId": clean_github_access_text(visible_access.get("installationId"), allow_int=True) if visible_access else None,
+            "installationIds": clean_github_access_text_list(visible_access.get("installationIds"), allow_int=True) if visible_access else [],
+            "installationAccount": clean_github_access_text(visible_access.get("installationAccount")) if visible_access else None,
+            "installationAccounts": clean_github_access_text_list(visible_access.get("installationAccounts")) if visible_access else [],
             "installationHtmlUrl": trusted_github_web_url(visible_access.get("installationHtmlUrl")) if visible_access else None,
             "installations": safe_installation_summaries(visible_access.get("installations") if visible_access else []),
-            "repositories": visible_access.get("repositories") if visible_access else [],
+            "repositories": clean_github_access_text_list(visible_access.get("repositories")) if visible_access else [],
             "repositoriesNeedSync": github_repositories_need_sync(visible_access),
         }
         items = [github]
@@ -2647,11 +2666,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "items": repository_items,
             "repositories": repository_items,
             "needsAuthorization": False,
-            "installationId": github_access.get("installationId"),
-            "installationIds": github_access.get("installationIds") or [],
-            "repositorySelection": github_access.get("repositorySelection"),
-            "installationAccount": github_access.get("installationAccount"),
-            "installationAccounts": github_access.get("installationAccounts") or [],
+            "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
+            "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
+            "repositorySelection": clean_github_access_text(github_access.get("repositorySelection")),
+            "installationAccount": clean_github_access_text(github_access.get("installationAccount")),
+            "installationAccounts": clean_github_access_text_list(github_access.get("installationAccounts")),
             "installations": safe_installation_summaries(github_access.get("installations") or []),
             "repositoriesNeedSync": github_repositories_need_sync(github_access),
         }

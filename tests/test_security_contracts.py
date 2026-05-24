@@ -1146,6 +1146,52 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIsNone(handler.payload["github"]["installationAccount"])
         self.assertEqual(handler.payload["github"]["repositories"], [])
 
+    def test_integrations_payload_sanitizes_malformed_github_access_metadata(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": {"scope": "selected"},
+            "repositorySelection": "selected\r\nX-Test: bad",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": {"id": "111"},
+            "installationIds": [{"id": "111"}, "222\r\nX-Test: bad", "333", 444],
+            "installationAccount": {"login": "octocat"},
+            "installationAccounts": [{"login": "octocat"}, "acme\r\nX-Test: bad", "valid-org"],
+            "installationTargetType": {"type": "Organization"},
+            "installationHtmlUrl": "https://github.com/settings/installations/111",
+            "installations": [],
+            "repositories": {"octocat/private-repo": True},
+            "repositoryItems": [{"id": "repo_private", "name": "private-repo", "fullName": "octocat/private-repo"}],
+            "repositoriesNeedSync": "false",
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/integrations", cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        github = handler.payload["github"]
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(github["connected"])
+        self.assertIsNone(github["scope"])
+        self.assertIsNone(github["repositorySelection"])
+        self.assertIsNone(github["installationId"])
+        self.assertEqual(github["installationIds"], ["333", "444"])
+        self.assertIsNone(github["installationAccount"])
+        self.assertEqual(github["installationAccounts"], ["valid-org"])
+        self.assertEqual(github["installationHtmlUrl"], "https://github.com/settings/installations/111")
+        self.assertEqual(github["repositories"], [])
+        self.assertFalse(github["repositoriesNeedSync"])
+
     def test_repository_sync_requires_sign_in(self) -> None:
         handler = RouteHarness("/repositories/sync")
 
