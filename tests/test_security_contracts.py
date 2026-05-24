@@ -157,6 +157,27 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(user["githubId"], "octocat")
         self.assertNotIn("usr_github_{'node_id': 'bad'}", app.USERS)
 
+    def test_real_github_user_sanitizes_malformed_profile_display_fields(self) -> None:
+        app.USERS = {}
+
+        user = app.get_or_create_real_github_user(
+            {
+                "id": 123,
+                "login": "OctoCat",
+                "primaryEmail": {"email": "bad@example.com"},
+                "email": {"email": "bad@example.com"},
+                "name": {"display": "Bad Name"},
+                "avatar_url": {"url": "https://avatars.githubusercontent.com/u/123"},
+                "html_url": "javascript:alert(1)",
+            },
+            {"access_token": "gho_user", "token_type": "bearer", "scope": "read:user"},
+        )
+
+        self.assertEqual(user["name"], "OctoCat")
+        self.assertEqual(user["email"], "OctoCat@users.noreply.github.com")
+        self.assertIsNone(user["avatarUrl"])
+        self.assertIsNone(user["githubHtmlUrl"])
+
     def test_issue_status_update_requires_sign_in(self) -> None:
         handler = RouteHarness("/issues/iss_1/status", {"status": "ignored"})
 

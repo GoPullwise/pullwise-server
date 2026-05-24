@@ -566,13 +566,20 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
     login = profile["login"]
     github_id = github_profile_id(profile, login)
     user_id = "usr_github_" + github_id
-    email = profile.get("primaryEmail") or profile.get("email") or f"{login}@users.noreply.github.com"
+    profile_name = clean_user_profile_text(profile.get("name"))
+    email = (
+        clean_user_profile_text(profile.get("primaryEmail"))
+        or clean_user_profile_text(profile.get("email"))
+        or f"{login}@users.noreply.github.com"
+    )
+    avatar_url = trusted_public_url(profile.get("avatar_url"))
+    github_html_url = trusted_github_web_url(profile.get("html_url"))
     if user_id not in USERS:
         USERS[user_id] = {
             "id": user_id,
-            "name": profile.get("name") or login,
+            "name": profile_name or login,
             "email": email,
-            "avatarUrl": profile.get("avatar_url"),
+            "avatarUrl": avatar_url,
             "createdAt": now(),
             "providers": ["github"],
             "githubRepositoryAccess": None,
@@ -582,12 +589,12 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
     user = USERS[user_id]
     user.update(
         {
-            "name": profile.get("name") or user.get("name") or login,
+            "name": profile_name or clean_user_profile_text(user.get("name")) or login,
             "email": email,
-            "avatarUrl": profile.get("avatar_url"),
+            "avatarUrl": avatar_url,
             "githubId": github_id,
             "githubLogin": login,
-            "githubHtmlUrl": profile.get("html_url"),
+            "githubHtmlUrl": github_html_url,
             "githubAccessToken": token_payload.get("access_token"),
             "githubTokenType": token_payload.get("token_type"),
             "githubOAuthScope": token_payload.get("scope"),
@@ -609,6 +616,25 @@ def github_profile_id(profile: dict, login: str) -> str:
         if re.fullmatch(r"[A-Za-z0-9_-]+", candidate):
             return candidate
     return re.sub(r"[^a-z0-9]+", "_", login.lower()).strip("_")
+
+
+def clean_user_profile_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def trusted_public_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if any(char in raw for char in "\r\n"):
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return raw
 
 
 def create_session(user: dict) -> dict:
