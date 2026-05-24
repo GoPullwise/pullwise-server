@@ -292,15 +292,11 @@ def find_pull_request_by_head(token: str, repo: str, *, head: str) -> dict | Non
     pull_request = payload[0]
     if not isinstance(pull_request, dict):
         raise GitHubError("GitHub pull request lookup response item was not an object.")
-    url = pull_request.get("html_url") or pull_request.get("url")
-    number = pull_request.get("number")
-    if not url or number is None:
-        raise GitHubError("GitHub pull request lookup response body was missing url or number.")
-    return {
-        "url": url,
-        "number": number,
-        "title": pull_request.get("title") or "",
-    }
+    return _pull_request_public_payload(
+        pull_request,
+        fallback_title="",
+        error_prefix="GitHub pull request lookup response body",
+    )
 
 
 def branch_exists(token: str, repo: str, branch: str) -> bool:
@@ -376,15 +372,37 @@ def create_pull_request(token: str, repo: str, *, title: str, head: str, base: s
         raise GitHubError(f"GitHub pull request response was not valid JSON: {exc}") from exc
     if not isinstance(payload, dict):
         raise GitHubError("GitHub pull request response body was not an object.")
-    url = payload.get("html_url") or payload.get("url")
+    return _pull_request_public_payload(
+        payload,
+        fallback_title=title,
+        error_prefix="GitHub pull request response body",
+    )
+
+
+def _pull_request_public_payload(payload: dict, *, fallback_title: str, error_prefix: str) -> dict:
+    url = trusted_github_web_url(payload.get("html_url") or payload.get("url"))
     number = payload.get("number")
-    if not url or number is None:
-        raise GitHubError("GitHub pull request response body was missing url or number.")
+    raw_title = payload.get("title")
+    title = clean_pull_request_text(raw_title)
+    if raw_title not in (None, "") and title is None:
+        raise GitHubError(f"{error_prefix} was missing valid public fields.")
+    title = title or clean_pull_request_text(fallback_title)
+    if not url or not isinstance(number, int) or isinstance(number, bool) or not title:
+        raise GitHubError(f"{error_prefix} was missing valid public fields.")
     return {
         "url": url,
         "number": number,
-        "title": payload.get("title") or title,
+        "title": title,
     }
+
+
+def clean_pull_request_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if any(char in value for char in "\r\n\x00"):
+        return None
+    value = value.strip()
+    return value or None
 
 
 def list_installation_repositories(installation_id: str) -> list[dict]:

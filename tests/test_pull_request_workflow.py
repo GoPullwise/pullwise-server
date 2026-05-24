@@ -1262,6 +1262,42 @@ class PullRequestWorkflowTest(unittest.TestCase):
                     body="Automated fix.",
                 )
 
+    def test_create_pull_request_rejects_malformed_success_public_fields(self) -> None:
+        malformed_payloads = [
+            {
+                "html_url": "javascript:alert(1)",
+                "number": 12,
+                "title": "Fix issue",
+            },
+            {
+                "html_url": "https://github.com/owner/repo/pull/12",
+                "number": {"value": 12},
+                "title": "Fix issue",
+            },
+            {
+                "html_url": "https://github.com/owner/repo/pull/12",
+                "number": 12,
+                "title": "Fix issue\r\nX-Injected: bad",
+            },
+        ]
+
+        for payload in malformed_payloads:
+            with self.subTest(payload=payload):
+                response = Mock()
+                response.status_code = 201
+                response.json.return_value = payload
+
+                with patch("pullwise_server.github_auth.requests.post", return_value=response):
+                    with self.assertRaisesRegex(github_auth.GitHubError, "response"):
+                        github_auth.create_pull_request(
+                            "ghs_secret_token",
+                            "owner/repo",
+                            title="Fix issue",
+                            head="pullwise/fix-f_123-fixedtoken",
+                            base="main",
+                            body="Automated fix.",
+                        )
+
     def test_branch_exists_returns_true_for_exact_ref_match(self) -> None:
         response = Mock()
         response.status_code = 200
