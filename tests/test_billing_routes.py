@@ -237,6 +237,19 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertIn("review limit", second.payload["message"].lower())
         self.assertEqual(app.USERS["usr_1"]["billingUsage"]["used"], 1)
 
+    def test_billing_account_payload_ignores_non_finite_usage(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billingUsage"] = {
+            "period": app.current_review_usage_period(),
+            "plan": "free",
+            "used": float("inf"),
+        }
+
+        payload = app.billing_account_payload(app.USERS["usr_1"])
+
+        self.assertEqual(payload["usage"]["used"], 0)
+        self.assertEqual(payload["usage"]["remaining"], payload["usage"]["limit"])
+
     def test_checkout_returns_not_implemented_when_billing_is_disabled(self) -> None:
         cookie = seed_session()
         handler = HandlerHarness(path="/billing/checkout-sessions", cookie=cookie)

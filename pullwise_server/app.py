@@ -644,13 +644,18 @@ def effective_billing_plan(user: dict | None) -> str:
     return "free"
 
 
+def non_negative_int(value: object) -> int:
+    try:
+        candidate = int(value or 0)
+    except (OverflowError, TypeError, ValueError):
+        return 0
+    return max(0, candidate)
+
+
 def billing_usage_for_user(user: dict, plan_id: str, *, timestamp: int | None = None, mutate: bool = False) -> dict:
     period = current_review_usage_period(timestamp)
     current = user.get("billingUsage") if isinstance(user.get("billingUsage"), dict) else {}
-    try:
-        used = max(0, int(current.get("used") or 0))
-    except (TypeError, ValueError):
-        used = 0
+    used = non_negative_int(current.get("used"))
     if current.get("period") != period or current.get("plan") != plan_id:
         usage = {"period": period, "plan": plan_id, "used": 0}
     else:
@@ -666,7 +671,7 @@ def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = N
     plan_id = effective_billing_plan(user)
     limit = billing.review_limit(plan_id)
     usage = billing_usage_for_user(user or {}, plan_id, timestamp=timestamp, mutate=mutate) if user else {"period": current_review_usage_period(timestamp), "plan": plan_id, "used": 0}
-    used = max(0, int(usage.get("used") or 0))
+    used = non_negative_int(usage.get("used"))
     return {
         "plan": plan_id,
         "interval": (user.get("billing") or {}).get("interval") if user and plan_id == "pro" else "month",
