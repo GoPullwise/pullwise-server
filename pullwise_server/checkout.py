@@ -28,11 +28,11 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
     if not github_auth.app_api_configured():
         raise RuntimeError("Repository checkout requires GitHub App API credentials.")
 
-    user_id = str(scan.get("userId") or "")
+    user_id = clean_scan_text(scan.get("userId")) or ""
     if not user_id:
         raise RuntimeError("Scan is missing a user id.")
-    repo = validate_repo_full_name(str(scan.get("repo") or ""))
-    installation_id = str(scan.get("installationId") or "")
+    repo = validate_repo_full_name(clean_scan_text(scan.get("repo")) or "")
+    installation_id = clean_scan_text(scan.get("installationId"), allow_int=True) or ""
     if not installation_id:
         raise RuntimeError("Scan is missing a GitHub App installation id.")
 
@@ -46,6 +46,7 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
     workspace = workspace_path_for(user_id, scan_id)
 
     git_env = git_auth_env(token)
+    branch = clean_scan_text(scan.get("branch")) or "main"
     run_git(
         [
             "git",
@@ -55,9 +56,9 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
             "--depth",
             clone_depth(),
             "--branch",
-            str(scan.get("branch") or "main"),
+            branch,
             "--single-branch",
-            clone_url_for(repo, scan.get("cloneUrl")),
+            scan_clone_url_for(repo, scan.get("cloneUrl") or scan.get("clone_url")),
             checkout_path,
         ],
         cwd=workspace,
@@ -66,7 +67,7 @@ def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool])
         action="clone repository",
     )
 
-    commit = str(scan.get("commit") or "").strip()
+    commit = clean_scan_text(scan.get("commit")) or "pending"
     if commit.lower() not in _NO_COMMIT:
         checkout_commit(checkout_path, commit, git_env, is_cancelled)
 
@@ -261,8 +262,38 @@ def clone_depth() -> str:
         return "1"
 
 
+def clean_scan_text(value: object, *, allow_int: bool = False) -> str | None:
+    if allow_int and isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or any(char in value for char in "\r\n"):
+        return None
+    return value
+
+
+def scan_clone_url_for(repo: str, configured_url: object | None = None) -> str:
+    safe_configured_url = clean_scan_text(configured_url)
+    if safe_configured_url:
+        try:
+            return clone_url_for(repo, safe_configured_url)
+        except RuntimeError:
+            pass
+    return clone_url_for(repo)
+
+
 def clone_url_for(repo: str, configured_url: object | None = None) -> str:
-    clone_url = str(configured_url or "").strip() or f"{github_auth.github_web_url()}/{repo}.git"
+    if configured_url is None:
+        clone_url = f"{github_auth.github_web_url()}/{repo}.git"
+    elif not isinstance(configured_url, str):
+        raise RuntimeError("Repository clone URL must be an HTTP(S) URL.")
+    else:
+        clone_url = configured_url.strip()
+        if not clone_url:
+            clone_url = f"{github_auth.github_web_url()}/{repo}.git"
+        elif any(char in clone_url for char in "\r\n"):
+            raise RuntimeError("Repository clone URL must be an HTTP(S) URL.")
     parsed = urlparse(clone_url)
     allowed = urlparse(github_auth.github_web_url())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:

@@ -78,6 +78,44 @@ class CheckoutContractsTest(unittest.TestCase):
             self.assertNotIn("ghs_secret_token", " ".join(extra_env.values()))
             self.assertIn("http.extraHeader", extra_env.values())
 
+    def test_prepare_checkout_sanitizes_legacy_scan_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scan = {
+                "userId": "usr_1",
+                "repo": "owner/repo",
+                "branch": "main\r\nX-Injected: bad",
+                "commit": {"sha": "abc1234"},
+                "installationId": 123,
+                "cloneUrl": "https://github.com/owner/repo.git\r\nX-Injected: bad",
+            }
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "PULLWISE_CHECKOUT_ROOT": tmpdir,
+                        "PULLWISE_GITHUB_WEB_URL": "https://github.com",
+                    },
+                    clear=False,
+                ),
+                patch.object(checkout.github_auth, "app_api_configured", return_value=True),
+                patch.object(
+                    checkout.github_auth,
+                    "create_installation_access_token",
+                    return_value={"token": "ghs_secret_token"},
+                ) as create_token,
+                patch.object(checkout, "run_git") as run_git,
+            ):
+                try:
+                    checkout.prepare_checkout("sc_123", scan, lambda: False)
+                except RuntimeError as exc:
+                    self.fail(f"prepare_checkout should sanitize legacy scan metadata: {exc}")
+
+            create_token.assert_called_once_with("123")
+            command = run_git.call_args.args[0]
+            self.assertEqual(command[command.index("--branch") + 1], "main")
+            self.assertEqual(command[-2], "https://github.com/owner/repo.git")
+            self.assertEqual(run_git.call_count, 1)
+
     def test_checkout_root_defaults_inside_server_state_directory(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             root = os.path.abspath(checkout.checkout_root())
