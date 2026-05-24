@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from pullwise_server.fix_workflow import (
     apply_issue_fix,
@@ -295,6 +296,20 @@ class FixWorkflowTest(unittest.TestCase):
         for file_path in [*UNSAFE_PATHS, "../secrets.env"]:
             with self.subTest(file_path=file_path):
                 self.assertIsNone(safe_join(self.tmpdir.name, file_path))
+
+    def test_safe_join_rejects_paths_resolving_into_git_directory(self) -> None:
+        original_realpath = os.path.realpath
+        root_abs = original_realpath(os.path.abspath(self.tmpdir.name))
+        link_path = os.path.abspath(os.path.join(root_abs, "config-link"))
+        git_config_path = os.path.join(root_abs, ".git", "config")
+
+        def fake_realpath(path: str) -> str:
+            if os.path.normcase(os.path.abspath(path)) == os.path.normcase(link_path):
+                return git_config_path
+            return original_realpath(path)
+
+        with patch("pullwise_server.fix_workflow.os.path.realpath", side_effect=fake_realpath):
+            self.assertIsNone(safe_join(self.tmpdir.name, "config-link"))
 
 
 if __name__ == "__main__":

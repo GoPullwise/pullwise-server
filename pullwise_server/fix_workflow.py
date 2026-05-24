@@ -179,7 +179,18 @@ def safe_join(root: str, relative_path: str) -> str | None:
         return None
     if os.path.normcase(common) != os.path.normcase(root_abs):
         return None
+    git_dir = os.path.realpath(os.path.abspath(os.path.join(root_abs, ".git")))
+    if path_contains_or_is(git_dir, candidate):
+        return None
     return candidate
+
+
+def path_contains_or_is(parent: str, candidate: str) -> bool:
+    try:
+        common = os.path.commonpath([os.path.normcase(parent), os.path.normcase(candidate)])
+    except ValueError:
+        return False
+    return common == os.path.normcase(parent)
 
 
 def _replacement_lines(candidate: list[str], bad_lines: list[str], good_lines: list[str]) -> list[str] | None:
