@@ -1619,7 +1619,7 @@ def session_payload(session: dict | None) -> dict:
 
 
 def billing_event_id(update: dict) -> str:
-    return str(update.get("eventId") or "")
+    return billing_update_text(update.get("eventId"))
 
 
 def billing_update_text(value: object) -> str:
@@ -1712,6 +1712,7 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     customer_id = billing_update_text(update.get("customerId"))
     subscription_id = billing_update_text(update.get("subscriptionId"))
     subscription_item_id = billing_update_text(update.get("subscriptionItemId"))
+    event_id = billing_event_id(update)
 
     user["billing"] = {
         **current,
@@ -1729,7 +1730,7 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         "canceledAt": update.get("canceledAt") or current.get("canceledAt"),
         "updatedAt": now(),
         "lastEventType": update.get("eventType"),
-        "lastEventId": update.get("eventId") or current.get("lastEventId"),
+        "lastEventId": event_id or current.get("lastEventId"),
         "lastEventCreated": incoming_created if incoming_created is not None else current.get("lastEventCreated"),
     }
     remember_billing_event(update, applied=True)
