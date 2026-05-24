@@ -451,6 +451,39 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "past_due")
         self.assertEqual(app.USERS["usr_1"]["billing"]["subscriptionId"], "sub_1")
 
+    def test_billing_update_ignores_malformed_identifier_fields_when_applying(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "stripe",
+            "customerId": "cus_existing",
+            "subscriptionId": "sub_existing",
+            "subscriptionItemId": "si_existing",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+        }
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": ["cus_bad"],
+                "subscriptionId": {"id": "sub_bad"},
+                "subscriptionItemId": ["si_bad"],
+                "status": "past_due",
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_bad_ids",
+                "eventCreated": 500,
+            },
+        )
+
+        self.assertEqual(app.USERS["usr_1"]["billing"]["customerId"], "cus_existing")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["subscriptionId"], "sub_existing")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["subscriptionItemId"], "si_existing")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "past_due")
+
     def test_stripe_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
         seed_session()
         handler = HandlerHarness()

@@ -1709,13 +1709,17 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         remember_billing_event(update, applied=False, stale=True)
         return False
 
+    customer_id = billing_update_text(update.get("customerId"))
+    subscription_id = billing_update_text(update.get("subscriptionId"))
+    subscription_item_id = billing_update_text(update.get("subscriptionItemId"))
+
     user["billing"] = {
         **current,
         "provider": update.get("provider") or current.get("provider"),
-        "customerId": update.get("customerId") or current.get("customerId"),
+        "customerId": customer_id or current.get("customerId"),
         "customerEmail": update.get("customerEmail") or current.get("customerEmail"),
-        "subscriptionId": update.get("subscriptionId") or current.get("subscriptionId"),
-        "subscriptionItemId": update.get("subscriptionItemId") or current.get("subscriptionItemId"),
+        "subscriptionId": subscription_id or current.get("subscriptionId"),
+        "subscriptionItemId": subscription_item_id or current.get("subscriptionItemId"),
         "status": update.get("status") or current.get("status") or "active",
         "plan": update.get("plan") or current.get("plan") or "pro",
         "interval": update.get("interval") or current.get("interval") or "month",
