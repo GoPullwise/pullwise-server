@@ -542,6 +542,37 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(app.USERS["usr_1"]["billing"]["customerEmail"], "dev@example.com")
         self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "past_due")
 
+    def test_billing_update_ignores_malformed_status_plan_and_interval_when_applying(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "stripe",
+            "customerId": "cus_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+        }
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "stripe",
+                "customerId": "cus_1",
+                "status": {"state": "past_due"},
+                "plan": ["free"],
+                "interval": {"period": "year"},
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_bad_billing_values",
+                "eventCreated": 900,
+            },
+        )
+
+        billing_state = app.USERS["usr_1"]["billing"]
+        self.assertEqual(billing_state["status"], "active")
+        self.assertEqual(billing_state["plan"], "pro")
+        self.assertEqual(billing_state["interval"], "month")
+
     def test_stripe_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
         seed_session()
         handler = HandlerHarness()

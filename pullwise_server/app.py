@@ -1713,6 +1713,9 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     customer_email = billing_update_text(update.get("customerEmail"))
     subscription_id = billing_update_text(update.get("subscriptionId"))
     subscription_item_id = billing_update_text(update.get("subscriptionItemId"))
+    status = billing_update_text(update.get("status"))
+    plan = billing_update_text(update.get("plan"))
+    interval = billing_update_text(update.get("interval"))
     event_id = billing_event_id(update)
 
     user["billing"] = {
@@ -1722,9 +1725,9 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         "customerEmail": customer_email or current.get("customerEmail"),
         "subscriptionId": subscription_id or current.get("subscriptionId"),
         "subscriptionItemId": subscription_item_id or current.get("subscriptionItemId"),
-        "status": update.get("status") or current.get("status") or "active",
-        "plan": update.get("plan") or current.get("plan") or "pro",
-        "interval": update.get("interval") or current.get("interval") or "month",
+        "status": status or current.get("status") or "active",
+        "plan": plan or current.get("plan") or "pro",
+        "interval": interval or current.get("interval") or "month",
         "currentPeriodStart": update.get("currentPeriodStart") or current.get("currentPeriodStart"),
         "currentPeriodEnd": update.get("currentPeriodEnd") or current.get("currentPeriodEnd"),
         "cancelAtPeriodEnd": update.get("cancelAtPeriodEnd") if update.get("cancelAtPeriodEnd") is not None else current.get("cancelAtPeriodEnd"),
