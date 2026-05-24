@@ -4,7 +4,15 @@ import os
 import tempfile
 import unittest
 
-from pullwise_server.fix_workflow import apply_issue_fix, preview_issue_fix
+from pullwise_server.fix_workflow import (
+    apply_issue_fix,
+    code_lines,
+    invalid,
+    preview_issue_fix,
+    replacement_preview,
+    safe_issue_file,
+    safe_join,
+)
 
 
 VALID_PREVIEW_KEYS = {
@@ -23,6 +31,14 @@ INVALID_PREVIEW_KEYS = {
     "valid",
     "message",
 }
+UNSAFE_PATHS = [
+    "",
+    "/tmp/secret",
+    "src/./auth.py",
+    "src/../secrets.env",
+    "C:\\secrets.env",
+    "C:secrets.env",
+]
 
 
 class FixWorkflowTest(unittest.TestCase):
@@ -206,6 +222,76 @@ class FixWorkflowTest(unittest.TestCase):
             b"    return redirect(safe_redirect(next_url))\r\n"
             b"# keep lf\n",
         )
+
+    def test_invalid_returns_minimal_invalid_payload(self) -> None:
+        result = invalid({"id": "f_123", "autoFix": True}, "Not safe.")
+
+        self.assertEqual(set(result), INVALID_PREVIEW_KEYS)
+        self.assertEqual(
+            result,
+            {
+                "issueId": "f_123",
+                "autoFixable": True,
+                "valid": False,
+                "message": "Not safe.",
+            },
+        )
+
+    def test_code_lines_accepts_code_dicts_and_raw_strings(self) -> None:
+        self.assertEqual(
+            code_lines([
+                {"ln": 10, "code": "first"},
+                "second\nthird",
+            ]),
+            ["first", "second", "third"],
+        )
+
+    def test_code_lines_returns_empty_when_any_code_is_not_string(self) -> None:
+        self.assertEqual(code_lines([{"code": "ok"}, {"code": 123}]), [])
+
+    def test_replacement_preview_rejects_multiple_matches(self) -> None:
+        result = replacement_preview("return value\nreturn value\n", ["return value"], ["return safe_value"])
+
+        self.assertFalse(result["ok"])
+        self.assertIn("more than once", result["message"])
+
+    def test_replacement_preview_returns_updated_content_for_valid_replacement(self) -> None:
+        result = replacement_preview(
+            "def login(next_url):\n"
+            "    return redirect(next_url)\n",
+            ["return redirect(next_url)"],
+            ["return redirect(safe_redirect(next_url))"],
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            result["updatedContent"],
+            "def login(next_url):\n"
+            "    return redirect(safe_redirect(next_url))\n",
+        )
+
+    def test_safe_issue_file_accepts_normal_repo_relative_path(self) -> None:
+        self.assertEqual(safe_issue_file("src/auth.py"), "src/auth.py")
+
+    def test_safe_issue_file_rejects_unsafe_path_variants(self) -> None:
+        for file_path in UNSAFE_PATHS:
+            with self.subTest(file_path=file_path):
+                self.assertIsNone(safe_issue_file(file_path))
+
+    def test_safe_join_returns_path_under_root_for_valid_input(self) -> None:
+        result = safe_join(self.tmpdir.name, "src/auth.py")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            os.path.normcase(os.path.commonpath([os.path.abspath(self.tmpdir.name), result or ""])),
+            os.path.normcase(os.path.abspath(self.tmpdir.name)),
+        )
+        self.assertTrue((result or "").endswith(os.path.join("src", "auth.py")))
+
+    def test_safe_join_rejects_unsafe_or_escaping_input(self) -> None:
+        for file_path in [*UNSAFE_PATHS, "../secrets.env"]:
+            with self.subTest(file_path=file_path):
+                self.assertIsNone(safe_join(self.tmpdir.name, file_path))
 
 
 if __name__ == "__main__":
