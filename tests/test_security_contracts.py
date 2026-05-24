@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
+import time
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -321,6 +323,99 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertIn("clone failed", str(context.exception))
         cleanup_scan_workspace.assert_called_once_with("usr_1", "sc_1")
+
+    def test_preview_issue_fix_for_user_rejects_non_completed_scan(self) -> None:
+        app.ISSUES[0].update({
+            "repo": "owner/repo",
+            "scanId": "sc_1",
+            "autoFix": True,
+            "file": "src/auth.py",
+            "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+            "goodCode": [{"ln": 1, "code": "new()", "t": "add"}],
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = app.checkout.checkout_path_for("usr_1", "sc_1", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                app.SCANS[0].update({
+                    "status": "running",
+                    "repoPath": repo_path,
+                })
+
+                with (
+                    patch("pullwise_server.app.checkout.prepare_checkout", side_effect=AssertionError("prepare_checkout should not run")),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace", side_effect=AssertionError("cleanup should not run")),
+                    patch("pullwise_server.app.fix_workflow.preview_issue_fix", side_effect=AssertionError("preview should not run")),
+                ):
+                    with self.assertRaises(ValueError) as context:
+                        app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertIn("completed", str(context.exception))
+
+    def test_preview_issue_fix_for_user_serializes_same_scan_checkout_previews(self) -> None:
+        app.ISSUES[0].update({
+            "repo": "owner/repo",
+            "scanId": "sc_1",
+            "autoFix": True,
+            "file": "src/auth.py",
+            "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+            "goodCode": [{"ln": 1, "code": "new()", "t": "add"}],
+        })
+        app.SCANS[0].update({
+            "status": "done",
+            "repoPath": None,
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = app.checkout.checkout_path_for("usr_1", "sc_1", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("old()\n")
+
+                active_prepares = 0
+                max_active_prepares = 0
+                prepare_calls = 0
+                counter_lock = threading.Lock()
+
+                def prepare_checkout(_scan_id, _scan, _is_cancelled):
+                    nonlocal active_prepares, max_active_prepares, prepare_calls
+                    with counter_lock:
+                        active_prepares += 1
+                        prepare_calls += 1
+                        max_active_prepares = max(max_active_prepares, active_prepares)
+                    time.sleep(0.05)
+                    with counter_lock:
+                        active_prepares -= 1
+                    return repo_path
+
+                previews = []
+                errors = []
+
+                def run_preview():
+                    try:
+                        previews.append(app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0]))
+                    except Exception as exc:
+                        errors.append(exc)
+
+                with (
+                    patch("pullwise_server.app.checkout.prepare_checkout", side_effect=prepare_checkout),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace") as cleanup_scan_workspace,
+                ):
+                    first = threading.Thread(target=run_preview)
+                    second = threading.Thread(target=run_preview)
+                    first.start()
+                    second.start()
+                    first.join()
+                    second.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(previews), 2)
+        self.assertTrue(all(preview["valid"] for preview in previews))
+        self.assertEqual(prepare_calls, 2)
+        self.assertEqual(cleanup_scan_workspace.call_count, 2)
+        self.assertEqual(max_active_prepares, 1)
 
     def test_preview_issue_fix_for_user_rejects_scan_owned_by_another_user(self) -> None:
         app.ISSUES[0]["scanId"] = "sc_2"

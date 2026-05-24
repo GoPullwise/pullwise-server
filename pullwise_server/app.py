@@ -93,6 +93,8 @@ SCANS: list[dict] = []
 # Re-entrant so worker mutations can call persist_state() while already holding
 # the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
 STATE_LOCK = threading.RLock()
+PREVIEW_SCAN_LOCKS: dict[str, threading.RLock] = {}
+PREVIEW_SCAN_LOCKS_GUARD = threading.Lock()
 MAX_BILLING_EVENT_RECORDS = 5000
 MAX_BILLING_PENDING_UPDATES = 1000
 
@@ -787,6 +789,15 @@ def user_issues(session: dict | None) -> list[dict]:
     return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
 
 
+def preview_scan_lock(scan_id: str) -> threading.RLock:
+    with PREVIEW_SCAN_LOCKS_GUARD:
+        lock = PREVIEW_SCAN_LOCKS.get(scan_id)
+        if lock is None:
+            lock = threading.RLock()
+            PREVIEW_SCAN_LOCKS[scan_id] = lock
+        return lock
+
+
 def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
     scan_id = issue.get("scanId")
     scan = next((item for item in SCANS if item.get("id") == scan_id), None)
@@ -796,34 +807,37 @@ def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
     scan_id = str(scan.get("id") or scan_id or "")
     if str(scan.get("userId") or "") != user_id:
         raise ValueError("Scan does not belong to the signed-in user.")
+    if scan.get("status") != "done":
+        raise ValueError("Scan must be completed before previewing fixes.")
 
-    repo_path = scan.get("repoPath")
-    if repo_path:
-        repo_path = str(repo_path)
-        if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
-            raise ValueError("Scan checkout path is outside the scan workspace.")
-        if os.path.exists(repo_path):
+    with preview_scan_lock(scan_id):
+        repo_path = scan.get("repoPath")
+        if repo_path:
+            repo_path = str(repo_path)
+            if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
+                raise ValueError("Scan checkout path is outside the scan workspace.")
+            if os.path.exists(repo_path):
+                return fix_workflow.preview_issue_fix(repo_path, issue)
+
+        try:
+            repo_path = checkout.prepare_checkout(scan_id, scan, lambda: False)
+        except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
+            try:
+                checkout.cleanup_scan_workspace(user_id, scan_id)
+            except (RuntimeError, OSError) as cleanup_exc:
+                raise ValueError(f"Unable to clean up failed preview checkout: {cleanup_exc}") from cleanup_exc
+            raise ValueError(str(exc)) from exc
+
+        try:
+            repo_path = str(repo_path)
+            if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
+                raise ValueError("Prepared checkout path is outside the scan workspace.")
             return fix_workflow.preview_issue_fix(repo_path, issue)
-
-    try:
-        repo_path = checkout.prepare_checkout(scan_id, scan, lambda: False)
-    except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
-        try:
-            checkout.cleanup_scan_workspace(user_id, scan_id)
-        except (RuntimeError, OSError) as cleanup_exc:
-            raise ValueError(f"Unable to clean up failed preview checkout: {cleanup_exc}") from cleanup_exc
-        raise ValueError(str(exc)) from exc
-
-    try:
-        repo_path = str(repo_path)
-        if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
-            raise ValueError("Prepared checkout path is outside the scan workspace.")
-        return fix_workflow.preview_issue_fix(repo_path, issue)
-    finally:
-        try:
-            checkout.cleanup_scan_workspace(user_id, scan_id)
-        except (RuntimeError, OSError) as exc:
-            raise ValueError(f"Unable to clean up preview checkout: {exc}") from exc
+        finally:
+            try:
+                checkout.cleanup_scan_workspace(user_id, scan_id)
+            except (RuntimeError, OSError) as exc:
+                raise ValueError(f"Unable to clean up preview checkout: {exc}") from exc
 
 
 def repository_item(github_access: dict | None, full_name: str) -> dict | None:
