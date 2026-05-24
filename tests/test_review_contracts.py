@@ -43,6 +43,11 @@ class ReviewContractsTest(unittest.TestCase):
 
         self.assertEqual(findings, [{"id": "f_1", "title": "Issue"}])
 
+    def test_parse_findings_json_treats_malformed_findings_field_as_empty(self) -> None:
+        findings = review._parse_findings_json('{"findings":{"id":"f_bad","title":"Issue"}}')
+
+        self.assertEqual(findings, [])
+
     def test_run_review_sanitizes_malformed_provider_finding_fields(self) -> None:
         malformed_finding = {
             "id": {"value": "f_bad"},

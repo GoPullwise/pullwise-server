@@ -675,6 +675,7 @@ def _parse_findings_json(raw: str) -> list[dict]:
 def _first_findings_document(text: str) -> dict:
     decoder = json.JSONDecoder()
     first_error = None
+    malformed_findings_document = None
     index = 0
     while index < len(text):
         index = text.find("{", index)
@@ -688,7 +689,11 @@ def _first_findings_document(text: str) -> dict:
             continue
         if _is_findings_document(document):
             return document
+        if _is_malformed_findings_document(document) and malformed_findings_document is None:
+            malformed_findings_document = document
         index += max(1, end)
+    if malformed_findings_document is not None:
+        return malformed_findings_document
     if first_error:
         raise first_error
     raise json.JSONDecodeError("No JSON object found", text, 0)
@@ -700,3 +705,7 @@ def _is_findings_document(document: object) -> bool:
     if "event" in document:
         return False
     return isinstance(document.get("findings"), list)
+
+
+def _is_malformed_findings_document(document: object) -> bool:
+    return isinstance(document, dict) and "event" not in document and "findings" in document
