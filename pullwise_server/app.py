@@ -231,6 +231,31 @@ def recover_interrupted_scans() -> int:
     return recovered
 
 
+def readiness_payload() -> dict:
+    try:
+        billing_provider = billing.selected_provider()
+    except (billing.BillingConfigurationError, billing.BillingProviderConflict):
+        billing_provider = "error"
+    return {
+        "reviewProvider": review.selected_provider(),
+        "github": {
+            "oauthConfigured": github_auth.oauth_configured(),
+            "appInstallConfigured": github_auth.app_install_configured(),
+            "appApiConfigured": github_auth.app_api_configured(),
+            "appVisibilityCheck": github_auth.app_visibility_check_enabled(),
+        },
+        "billing": {
+            "provider": billing_provider,
+            "enabled": billing_provider in {"stripe", "creem"},
+        },
+        "limits": {
+            "maxConcurrentScans": max_scan_concurrency(),
+            "maxConcurrentScansPerUser": max_scan_concurrency_per_user(),
+            "rateLimitEnabled": rate_limit_enabled(),
+        },
+    }
+
+
 def allowed_origins() -> set[str]:
     raw = env(
         "PULLWISE_ALLOWED_ORIGINS",
@@ -1449,6 +1474,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "time": now(),
                 "mode": env("PULLWISE_MODE", "local"),
                 "database": {"type": "sqlite", "path": db.database_path()},
+                **readiness_payload(),
             })
         if path == "/auth/session":
             return self.json(session_payload(self.current_session()))

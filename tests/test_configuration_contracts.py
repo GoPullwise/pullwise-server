@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import unittest
+from http import HTTPStatus
+
+from pullwise_server import app
 
 
 def project_root() -> str:
@@ -18,6 +22,22 @@ def env_example_values() -> dict[str, str]:
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip()
     return values
+
+
+class RouteHarness(app.PullwiseHandler):
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.headers = {"Host": "api.pullwise.dev", "Cookie": ""}
+        self.payload = None
+        self.status = None
+
+    def json(self, payload: dict, status: int = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
+        self.payload = payload
+        self.status = status
+        self.headers_out = headers or {}
+
+    def error(self, status: int, message: str) -> None:
+        self.json({"message": message}, status)
 
 
 class ConfigurationContractsTest(unittest.TestCase):
@@ -57,6 +77,23 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_ENABLED"), "true")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
+
+    def test_health_exposes_safe_readiness_details(self) -> None:
+        handler = RouteHarness("/health")
+
+        handler.handle_get("/health", {}, ["health"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertIn("reviewProvider", handler.payload)
+        self.assertIn("github", handler.payload)
+        self.assertIn("billing", handler.payload)
+        self.assertIn("limits", handler.payload)
+        self.assertIn("oauthConfigured", handler.payload["github"])
+        self.assertIn("appApiConfigured", handler.payload["github"])
+        serialized = json.dumps(handler.payload)
+        self.assertNotIn("secret", serialized.lower())
+        self.assertNotIn("privateKey", serialized)
+        self.assertNotIn("token", serialized.lower())
 
 
 if __name__ == "__main__":
