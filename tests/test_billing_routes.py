@@ -4,6 +4,7 @@ import os
 import hashlib
 import hmac
 import json
+import time
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -269,6 +270,62 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(app.USERS["usr_1"]["billing"]["provider"], "creem")
         self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
         self.assertEqual(app.USERS["usr_1"]["billing"]["customerId"], "cust_1")
+
+    def test_creem_webhook_rejects_malformed_json_without_parser_details(self) -> None:
+        raw = b"{"
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(path="/webhooks/creem", raw_body=raw, headers={"Content-Length": str(len(raw)), "creem-signature": signature})
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test"}, clear=True):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
+
+    def test_creem_webhook_rejects_non_utf8_json_without_decoder_details(self) -> None:
+        raw = b"\xff"
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(path="/webhooks/creem", raw_body=raw, headers={"Content-Length": str(len(raw)), "creem-signature": signature})
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test"}, clear=True):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
+
+    def test_stripe_webhook_rejects_malformed_json_without_parser_details(self) -> None:
+        raw = b"{"
+        timestamp = str(int(time.time()))
+        signed = timestamp.encode("utf-8") + b"." + raw
+        signature = hmac.new(b"whsec_test", signed, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/stripe",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "Stripe-Signature": f"t={timestamp},v1={signature}"},
+        )
+
+        with patch.dict(os.environ, {"PULLWISE_STRIPE_WEBHOOK_SECRET": "whsec_test"}, clear=True):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
+
+    def test_stripe_webhook_rejects_non_utf8_json_without_decoder_details(self) -> None:
+        raw = b"\xff"
+        timestamp = str(int(time.time()))
+        signed = timestamp.encode("utf-8") + b"." + raw
+        signature = hmac.new(b"whsec_test", signed, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/stripe",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "Stripe-Signature": f"t={timestamp},v1={signature}"},
+        )
+
+        with patch.dict(os.environ, {"PULLWISE_STRIPE_WEBHOOK_SECRET": "whsec_test"}, clear=True):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
 
     def test_billing_updates_are_idempotent_by_event_id(self) -> None:
         seed_session()

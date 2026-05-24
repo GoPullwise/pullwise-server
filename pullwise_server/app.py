@@ -132,6 +132,21 @@ def max_body_bytes() -> int:
     return max(0, env_int("PULLWISE_MAX_BODY_BYTES", 1024 * 1024))
 
 
+def decode_json_body(raw_bytes: bytes) -> dict:
+    if not raw_bytes:
+        return {}
+    try:
+        raw = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("Request body must be valid JSON.") from None
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        raise ValueError("Request body must be valid JSON.") from None
+
+
 def rate_limit_enabled() -> bool:
     configured = os.environ.get("PULLWISE_RATE_LIMIT_ENABLED")
     if configured is not None:
@@ -2559,19 +2574,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raise ValueError(f"{label} not found: {item_id}")
 
     def read_json(self) -> dict:
-        raw_bytes = self.read_raw_body()
-        if not raw_bytes:
-            return {}
-        try:
-            raw = raw_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            raise ValueError("Request body must be valid JSON.") from None
-        if not raw.strip():
-            return {}
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            raise ValueError("Request body must be valid JSON.") from None
+        return decode_json_body(self.read_raw_body())
 
     def read_raw_body(self) -> bytes:
         length = self.request_content_length()
@@ -2603,7 +2606,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raw = self.read_raw_body()
         if not billing.verify_creem_webhook(raw, self.headers.get("creem-signature")):
             return self.error(HTTPStatus.BAD_REQUEST, "Invalid Creem webhook signature.")
-        event = json.loads(raw.decode("utf-8") or "{}")
+        event = decode_json_body(raw)
         update = billing.billing_update_from_creem_event(event)
         if update:
             self.apply_billing_update(update)
@@ -2613,7 +2616,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raw = self.read_raw_body()
         if not billing.verify_stripe_webhook(raw, self.headers.get("Stripe-Signature")):
             return self.error(HTTPStatus.BAD_REQUEST, "Invalid Stripe webhook signature.")
-        event = json.loads(raw.decode("utf-8") or "{}")
+        event = decode_json_body(raw)
         update = billing.billing_update_from_stripe_event(event)
         if update:
             self.apply_billing_update(update)
