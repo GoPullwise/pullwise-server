@@ -857,6 +857,83 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertFalse(handler.payload["repositoriesNeedSync"])
         self.assertEqual([item["fullName"] for item in handler.payload["items"]], ["octocat/private-repo"])
 
+    def test_repositories_payload_sanitizes_malformed_repository_items(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "repositorySelection": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": "111",
+            "repositories": ["octocat/private-repo"],
+            "repositoryItems": [
+                "not a repository object",
+                {
+                    "id": {"id": "bad"},
+                    "name": {"name": "bad"},
+                    "fullName": {"owner": "octocat", "repo": "bad"},
+                    "cloneUrl": "https://github.com/octocat/bad.git",
+                },
+                {
+                    "id": {"id": "repo_private"},
+                    "name": {"name": "private-repo"},
+                    "fullName": "octocat/private-repo",
+                    "desc": {"text": "bad"},
+                    "description": {"text": "bad"},
+                    "lang": {"name": "Python"},
+                    "private": "false",
+                    "stars": {"count": 5},
+                    "branches": {"count": 2},
+                    "defaultBranch": {"name": "main"},
+                    "updated": {"at": "2026-05-25"},
+                    "htmlUrl": "javascript:alert(1)",
+                    "cloneUrl": "https://evil.example/octocat/private-repo.git",
+                    "permissions": {"pull": True, "push": "false"},
+                    "installationId": {"id": "111"},
+                    "installationAccount": {"login": "octocat"},
+                    "installationTargetType": ["User"],
+                    "repositorySelection": "selected\r\nX-Test: bad",
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/repositories", cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["needsAuthorization"])
+        self.assertEqual(len(handler.payload["items"]), 1)
+        item = handler.payload["items"][0]
+        self.assertEqual(item["id"], "octocat/private-repo")
+        self.assertEqual(item["name"], "private-repo")
+        self.assertEqual(item["fullName"], "octocat/private-repo")
+        self.assertEqual(item["desc"], "")
+        self.assertEqual(item["description"], "")
+        self.assertEqual(item["lang"], "-")
+        self.assertFalse(item["private"])
+        self.assertEqual(item["stars"], "-")
+        self.assertEqual(item["branches"], "-")
+        self.assertEqual(item["defaultBranch"], "main")
+        self.assertEqual(item["updated"], "")
+        self.assertIsNone(item["htmlUrl"])
+        self.assertIsNone(item["cloneUrl"])
+        self.assertEqual(item["permissions"], {"pull": True})
+        self.assertIsNone(item["installationId"])
+        self.assertIsNone(item["installationAccount"])
+        self.assertIsNone(item["installationTargetType"])
+        self.assertIsNone(item["repositorySelection"])
+
     def test_scan_creation_rejects_repository_access_that_needs_sync_even_with_stale_repo_names(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

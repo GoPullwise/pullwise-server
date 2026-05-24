@@ -1269,7 +1269,7 @@ def safe_git_ref_component(value: object, fallback: str) -> str:
 def repository_item(github_access: dict | None, full_name: str) -> dict | None:
     if not github_access:
         return None
-    for item in github_access.get("repositoryItems") or []:
+    for item in repository_items_for_payload(github_access):
         if item.get("fullName") == full_name or item.get("full_name") == full_name:
             return item
     return None
@@ -1278,7 +1278,7 @@ def repository_item(github_access: dict | None, full_name: str) -> dict | None:
 def repository_is_authorized(github_access: dict | None, full_name: str) -> bool:
     if not github_access:
         return False
-    repositories = github_access.get("repositories") or []
+    repositories = clean_github_access_text_list(github_access.get("repositories"))
     if repositories:
         return full_name in repositories
     return repository_item(github_access, full_name) is not None
@@ -1309,8 +1309,14 @@ def repository_items_for_payload(github_access: dict | None) -> list[dict]:
     if not github_access:
         return []
     repository_items = github_access.get("repositoryItems") or []
-    if repository_items:
-        return repository_items
+    if isinstance(repository_items, list):
+        safe_items = [
+            item
+            for repository_item in repository_items
+            if (item := safe_repository_item_for_payload(repository_item))
+        ]
+        if safe_items:
+            return safe_items
     if (
         github_access.get("mode") != "github-app"
         and not github_access.get("installationId")
@@ -1321,6 +1327,37 @@ def repository_items_for_payload(github_access: dict | None) -> list[dict]:
         repository_item_from_full_name(str(full_name))
         for full_name in clean_github_access_text_list(github_access.get("repositories"))
     ]
+
+
+def safe_repository_item_for_payload(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    full_name = clean_github_access_text(value.get("fullName")) or clean_github_access_text(value.get("full_name"))
+    if not full_name or "/" not in full_name:
+        return None
+
+    base_item = repository_item_from_full_name(full_name)
+    description = clean_github_access_text(value.get("description")) or clean_github_access_text(value.get("desc")) or ""
+    return {
+        "id": clean_github_access_text(value.get("id"), allow_int=True) or full_name,
+        "name": clean_github_access_text(value.get("name")) or base_item["name"],
+        "fullName": full_name,
+        "desc": description,
+        "description": description,
+        "lang": clean_github_access_text(value.get("lang")) or clean_github_access_text(value.get("language")) or "-",
+        "private": value.get("private") is True,
+        "stars": clean_github_access_text(value.get("stars")) or "-",
+        "branches": clean_github_access_text(value.get("branches")) or "-",
+        "defaultBranch": clean_github_access_text(value.get("defaultBranch")) or clean_github_access_text(value.get("default_branch")) or "main",
+        "updated": clean_github_access_text(value.get("updated")) or "",
+        "htmlUrl": trusted_github_web_url(value.get("htmlUrl") or value.get("html_url")),
+        "cloneUrl": trusted_github_web_url(value.get("cloneUrl") or value.get("clone_url")),
+        "permissions": github_auth.permissions_to_dict(value.get("permissions") or {}),
+        "installationId": clean_github_access_text(value.get("installationId"), allow_int=True),
+        "installationAccount": clean_github_access_text(value.get("installationAccount")),
+        "installationTargetType": clean_github_access_text(value.get("installationTargetType")),
+        "repositorySelection": clean_github_access_text(value.get("repositorySelection")),
+    }
 
 
 def github_repository_access_connected(github_access: dict | None) -> bool:
@@ -1507,10 +1544,10 @@ def safe_installation_repository_count(value: object) -> int:
 
 def repository_item_with_installation_context(repository_item: dict, github_access: dict) -> dict:
     item = dict(repository_item)
-    item["installationId"] = github_access.get("installationId")
-    item["installationAccount"] = github_access.get("installationAccount")
-    item["installationTargetType"] = github_access.get("installationTargetType")
-    item["repositorySelection"] = github_access.get("repositorySelection")
+    item["installationId"] = clean_github_access_text(github_access.get("installationId"), allow_int=True)
+    item["installationAccount"] = clean_github_access_text(github_access.get("installationAccount"))
+    item["installationTargetType"] = clean_github_access_text(github_access.get("installationTargetType"))
+    item["repositorySelection"] = clean_github_access_text(github_access.get("repositorySelection"))
     item["installationPermissions"] = github_access.get("installationPermissions") or {}
     return item
 
