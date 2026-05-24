@@ -664,9 +664,17 @@ def _first_findings_document(text: str) -> dict:
             first_error = first_error or exc
             index += 1
             continue
-        if isinstance(document, dict) and isinstance(document.get("findings"), list):
+        if _is_findings_document(document):
             return document
         index += max(1, end)
     if first_error:
         raise first_error
     raise json.JSONDecodeError("No JSON object found", text, 0)
+
+
+def _is_findings_document(document: object) -> bool:
+    if not isinstance(document, dict):
+        return False
+    if "event" in document:
+        return False
+    return isinstance(document.get("findings"), list)

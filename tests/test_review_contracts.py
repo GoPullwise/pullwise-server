@@ -33,6 +33,16 @@ class ReviewContractsTest(unittest.TestCase):
 
         self.assertEqual(findings, [{"id": "f_1", "title": "Issue"}])
 
+    def test_parse_findings_json_skips_top_level_log_findings(self) -> None:
+        raw = (
+            '{"event":"review_progress","findings":[]}\n'
+            '{"findings":[{"id":"f_1","title":"Issue"}]}'
+        )
+
+        findings = review._parse_findings_json(raw)
+
+        self.assertEqual(findings, [{"id": "f_1", "title": "Issue"}])
+
     def test_run_review_sanitizes_malformed_provider_finding_fields(self) -> None:
         malformed_finding = {
             "id": {"value": "f_bad"},
