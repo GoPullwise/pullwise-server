@@ -653,16 +653,20 @@ def _parse_findings_json(raw: str) -> list[dict]:
 def _first_findings_document(text: str) -> dict:
     decoder = json.JSONDecoder()
     first_error = None
-    for index, char in enumerate(text):
-        if char != "{":
-            continue
+    index = 0
+    while index < len(text):
+        index = text.find("{", index)
+        if index < 0:
+            break
         try:
-            document, _ = decoder.raw_decode(text[index:])
+            document, end = decoder.raw_decode(text[index:])
         except json.JSONDecodeError as exc:
             first_error = first_error or exc
+            index += 1
             continue
         if isinstance(document, dict) and isinstance(document.get("findings"), list):
             return document
+        index += max(1, end)
     if first_error:
         raise first_error
     raise json.JSONDecodeError("No JSON object found", text, 0)
