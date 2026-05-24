@@ -178,8 +178,10 @@ def fetch_user_profile(access_token: str) -> dict:
     profile = authlib_get_json(client, "/user")
     if not isinstance(profile, dict):
         raise GitHubError("GitHub user profile response is malformed.")
-    if not profile.get("login"):
+    login = clean_profile_text(profile.get("login"))
+    if not login:
         raise GitHubError("GitHub user profile response is missing login.")
+    profile["login"] = login
     profile["primaryEmail"] = clean_email_address(profile.get("email")) or fetch_primary_email(access_token)
     return profile
 
@@ -215,10 +217,14 @@ def email_record_address(email: dict) -> str | None:
 
 
 def clean_email_address(address: object) -> str | None:
-    if not isinstance(address, str):
+    return clean_profile_text(address)
+
+
+def clean_profile_text(value: object) -> str | None:
+    if not isinstance(value, str):
         return None
-    address = address.strip()
-    return address or None
+    value = value.strip()
+    return value or None
 
 
 def fetch_installation(installation_id: str) -> dict:

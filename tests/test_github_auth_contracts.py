@@ -166,6 +166,16 @@ class GitHubAuthContractsTest(unittest.TestCase):
             with self.assertRaisesRegex(github_auth.GitHubError, "user profile response"):
                 github_auth.fetch_user_profile("gho_user")
 
+    def test_fetch_user_profile_rejects_malformed_login_field(self) -> None:
+        profile_response = {"login": {"name": "octocat"}, "email": "octocat@example.com"}
+
+        with (
+            patch.object(github_auth, "oauth_session", return_value=Mock()),
+            patch.object(github_auth, "authlib_get_json", return_value=profile_response),
+        ):
+            with self.assertRaisesRegex(github_auth.GitHubError, "missing login"):
+                github_auth.fetch_user_profile("gho_user")
+
     def test_installation_matches_configured_app_slug_case_insensitively(self) -> None:
         self.assertTrue(
             github_auth.installation_matches_configured_app(
