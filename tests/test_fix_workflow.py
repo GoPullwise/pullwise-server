@@ -38,6 +38,9 @@ UNSAFE_PATHS = [
     "src/../secrets.env",
     "C:\\secrets.env",
     "C:secrets.env",
+    ".git/config",
+    ".GIT/hooks/post-checkout",
+    "src/.git/config",
 ]
 
 
@@ -94,7 +97,7 @@ class FixWorkflowTest(unittest.TestCase):
         self.assertIn("auto-fixable", result["message"])
 
     def test_preview_rejects_unsafe_paths(self) -> None:
-        for file_path in ["../secrets.env", "C:secrets.env"]:
+        for file_path in UNSAFE_PATHS:
             with self.subTest(file_path=file_path):
                 result = preview_issue_fix(
                     self.tmpdir.name,

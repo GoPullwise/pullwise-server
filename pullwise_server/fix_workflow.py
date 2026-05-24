@@ -158,6 +158,8 @@ def safe_issue_file(value: object) -> str | None:
     parts = normalized.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         return None
+    if any(part.casefold() == ".git" for part in parts):
+        return None
     return "/".join(parts)
 
 
