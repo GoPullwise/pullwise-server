@@ -970,11 +970,9 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             raise ValueError("Pull request creation is already in progress for this issue.")
         if not github_auth.app_api_configured():
             raise ValueError("GitHub App API is not configured for pull request creation.")
-        repo = str(issue.get("repo") or issue.get("repository") or scan.get("repo") or "").strip()
-        try:
-            repo = checkout.validate_repo_full_name(repo)
-        except RuntimeError as exc:
-            raise ValueError(str(exc)) from exc
+        repo = clean_repository_full_name(issue.get("repo"), issue.get("repository"), scan.get("repo"))
+        if not repo:
+            raise ValueError("Repository must be a GitHub full name like owner/repo.")
         if not github_repository_access_authorized_for_user(user, github_access):
             raise ValueError("Authorize GitHub repositories before creating a pull request.")
         if not repository_is_authorized(github_access, repo):
@@ -1260,6 +1258,18 @@ def github_app_write_permissions_message() -> str:
 def installation_supports_pull_request_creation(installation: dict) -> bool:
     permissions = installation.get("permissions") or {}
     return permissions.get("contents") == "write" and permissions.get("pull_requests") == "write"
+
+
+def clean_repository_full_name(*values: object) -> str:
+    for value in values:
+        candidate = clean_github_access_text(value)
+        if not candidate:
+            continue
+        try:
+            return checkout.validate_repo_full_name(candidate)
+        except RuntimeError:
+            continue
+    return ""
 
 
 def safe_git_ref_component(value: object, fallback: str) -> str:

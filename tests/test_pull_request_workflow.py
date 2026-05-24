@@ -422,6 +422,7 @@ class PullRequestWorkflowTest(unittest.TestCase):
         github_access["repositoryItems"][0]["installationId"] = {"id": "123"}
         github_access["repositoryItems"][0]["defaultBranch"] = "release"
         github_access["repositoryItems"][0]["cloneUrl"] = "https://evil.example/owner/repo.git"
+        app.ISSUES[0]["repo"] = {"fullName": "owner/repo"}
         app.ISSUES[0]["branch"] = "main\r\nX-Injected: bad"
         app.SCANS[0]["branch"] = {"name": "main"}
         app.SCANS[0]["installationId"] = {"id": "123"}
