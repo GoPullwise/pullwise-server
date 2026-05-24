@@ -241,6 +241,87 @@ class SecurityContractsTest(unittest.TestCase):
         cleanup_scan_workspace.assert_called_once_with("usr_1", "sc_1")
         self.assertIsNone(app.SCANS[0]["repoPath"])
 
+    def test_preview_issue_fix_for_user_reuses_existing_workspace_repo_path(self) -> None:
+        app.ISSUES[0].update({
+            "repo": "owner/repo",
+            "scanId": "sc_1",
+            "autoFix": True,
+            "file": "src/auth.py",
+            "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+            "goodCode": [{"ln": 1, "code": "new()", "t": "add"}],
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                workspace = app.checkout.workspace_path_for("usr_1", "sc_1")
+                repo_path = os.path.join(workspace, "owner_repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("old()\n")
+                app.SCANS[0]["repoPath"] = repo_path
+
+                with (
+                    patch("pullwise_server.app.checkout.prepare_checkout", side_effect=AssertionError("prepare_checkout should not run")),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace", side_effect=AssertionError("cleanup should not run")),
+                ):
+                    preview = app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertTrue(preview["valid"])
+        self.assertIn("-old()", preview["diff"])
+        self.assertIn("+new()", preview["diff"])
+
+    def test_preview_issue_fix_for_user_refreshes_stale_workspace_repo_path(self) -> None:
+        app.ISSUES[0].update({
+            "repo": "owner/repo",
+            "scanId": "sc_1",
+            "autoFix": True,
+            "file": "src/auth.py",
+            "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+            "goodCode": [{"ln": 1, "code": "new()", "t": "add"}],
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                workspace = app.checkout.workspace_path_for("usr_1", "sc_1")
+                stale_path = os.path.join(workspace, "stale_repo")
+                fresh_path = os.path.join(workspace, "fresh_repo")
+                os.makedirs(os.path.join(fresh_path, "src"), exist_ok=True)
+                with open(os.path.join(fresh_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("old()\n")
+                app.SCANS[0]["repoPath"] = stale_path
+
+                with (
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=fresh_path) as prepare_checkout,
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace") as cleanup_scan_workspace,
+                ):
+                    preview = app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertTrue(preview["valid"])
+        self.assertIn("-old()", preview["diff"])
+        prepare_checkout.assert_called_once()
+        cleanup_scan_workspace.assert_called_once_with("usr_1", "sc_1")
+
+    def test_preview_issue_fix_for_user_cleans_up_after_checkout_prepare_failure(self) -> None:
+        app.ISSUES[0].update({
+            "repo": "owner/repo",
+            "scanId": "sc_1",
+            "autoFix": True,
+            "file": "src/auth.py",
+            "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+            "goodCode": [{"ln": 1, "code": "new()", "t": "add"}],
+        })
+        app.SCANS[0]["repoPath"] = None
+
+        with (
+            patch("pullwise_server.app.checkout.prepare_checkout", side_effect=RuntimeError("clone failed")),
+            patch("pullwise_server.app.checkout.cleanup_scan_workspace") as cleanup_scan_workspace,
+        ):
+            with self.assertRaises(ValueError) as context:
+                app.preview_issue_fix_for_user(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertIn("clone failed", str(context.exception))
+        cleanup_scan_workspace.assert_called_once_with("usr_1", "sc_1")
+
     def test_preview_issue_fix_for_user_rejects_scan_owned_by_another_user(self) -> None:
         app.ISSUES[0]["scanId"] = "sc_2"
         app.SCANS.append({
