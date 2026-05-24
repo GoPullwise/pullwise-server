@@ -178,7 +178,7 @@ def fetch_user_profile(access_token: str) -> dict:
     profile = authlib_get_json(client, "/user")
     if not profile.get("login"):
         raise GitHubError("GitHub user profile response is missing login.")
-    profile["primaryEmail"] = profile.get("email") or fetch_primary_email(access_token)
+    profile["primaryEmail"] = clean_email_address(profile.get("email")) or fetch_primary_email(access_token)
     return profile
 
 
@@ -209,7 +209,10 @@ def fetch_primary_email(access_token: str) -> str | None:
 
 
 def email_record_address(email: dict) -> str | None:
-    address = email.get("email")
+    return clean_email_address(email.get("email"))
+
+
+def clean_email_address(address: object) -> str | None:
     if not isinstance(address, str):
         return None
     address = address.strip()
