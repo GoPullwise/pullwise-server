@@ -2562,10 +2562,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raw_bytes = self.read_raw_body()
         if not raw_bytes:
             return {}
-        raw = raw_bytes.decode("utf-8")
+        try:
+            raw = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("Request body must be valid JSON.") from None
         if not raw.strip():
             return {}
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            raise ValueError("Request body must be valid JSON.") from None
 
     def read_raw_body(self) -> bytes:
         length = self.request_content_length()

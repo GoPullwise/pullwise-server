@@ -47,6 +47,11 @@ class RouteHarness(app.PullwiseHandler):
         self.headers_out = {"Set-Cookie": set_cookie} if set_cookie else {}
 
 
+class RawBodyRouteHarness(RouteHarness):
+    def read_json(self) -> dict:
+        return app.PullwiseHandler.read_json(self)
+
+
 class SecurityContractsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.persist_patcher = patch.object(app, "persist_state")
@@ -3054,6 +3059,30 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(handler.payload["message"], "Invalid Content-Length header.")
+
+    def test_request_body_rejects_malformed_json_without_parser_details(self) -> None:
+        handler = RawBodyRouteHarness(
+            "/auth/sign-out",
+            headers={"Content-Length": "1"},
+            raw_body=b"{",
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
+
+    def test_request_body_rejects_non_utf8_json_without_decoder_details(self) -> None:
+        handler = RawBodyRouteHarness(
+            "/auth/sign-out",
+            headers={"Content-Length": "1"},
+            raw_body=b"\xff",
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
 
 
 if __name__ == "__main__":
