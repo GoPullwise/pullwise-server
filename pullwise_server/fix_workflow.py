@@ -47,12 +47,14 @@ def preview_issue_fix(repo_path: str, issue: dict) -> dict:
         )
     )
     return {
-        "ok": True,
+        "valid": True,
         "issueId": str(issue.get("id") or ""),
-        "repo": issue.get("repo") or "",
+        "autoFixable": True,
+        "repository": issue.get("repo") or issue.get("repository") or "",
         "branch": issue.get("branch") or "",
         "file": relative_path,
         "diff": diff,
+        "summary": "1 file changed",
         "originalContent": original,
         "updatedContent": updated,
     }
@@ -60,7 +62,7 @@ def preview_issue_fix(repo_path: str, issue: dict) -> dict:
 
 def apply_issue_fix(repo_path: str, issue: dict) -> dict:
     preview = preview_issue_fix(repo_path, issue)
-    if not preview["ok"]:
+    if not preview.get("valid"):
         return preview
 
     target_path = safe_join(repo_path, preview["file"])
@@ -74,8 +76,9 @@ def apply_issue_fix(repo_path: str, issue: dict) -> dict:
 
 def invalid(issue: dict, message: str) -> dict:
     return {
-        "ok": False,
         "issueId": str(issue.get("id") or "") if isinstance(issue, dict) else "",
+        "autoFixable": bool(issue.get("autoFix") or issue.get("autoFixable")) if isinstance(issue, dict) else False,
+        "valid": False,
         "message": message,
     }
 

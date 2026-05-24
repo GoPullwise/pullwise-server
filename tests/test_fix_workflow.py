@@ -45,9 +45,11 @@ class FixWorkflowTest(unittest.TestCase):
             self.issue(autoFix=False, autoFixable=False),
         )
 
-        self.assertFalse(result["ok"])
+        self.assertFalse(result["valid"])
+        self.assertFalse(result["autoFixable"])
         self.assertEqual(result["issueId"], "f_123")
         self.assertIn("auto-fixable", result["message"])
+        self.assertNotIn("ok", result)
 
     def test_preview_rejects_unsafe_paths(self) -> None:
         for file_path in ["../secrets.env", "C:secrets.env"]:
@@ -57,8 +59,10 @@ class FixWorkflowTest(unittest.TestCase):
                     self.issue(file=file_path),
                 )
 
-                self.assertFalse(result["ok"])
+                self.assertFalse(result["valid"])
+                self.assertTrue(result["autoFixable"])
                 self.assertIn("Unsafe", result["message"])
+                self.assertNotIn("ok", result)
 
     def test_preview_rejects_missing_old_block(self) -> None:
         self.write_auth(
@@ -68,8 +72,10 @@ class FixWorkflowTest(unittest.TestCase):
 
         result = preview_issue_fix(self.tmpdir.name, self.issue())
 
-        self.assertFalse(result["ok"])
+        self.assertFalse(result["valid"])
+        self.assertTrue(result["autoFixable"])
         self.assertIn("not found", result["message"])
+        self.assertNotIn("ok", result)
 
     def test_preview_rejects_ambiguous_old_block(self) -> None:
         self.write_auth(
@@ -82,17 +88,21 @@ class FixWorkflowTest(unittest.TestCase):
 
         result = preview_issue_fix(self.tmpdir.name, self.issue())
 
-        self.assertFalse(result["ok"])
+        self.assertFalse(result["valid"])
+        self.assertTrue(result["autoFixable"])
         self.assertIn("more than once", result["message"])
+        self.assertNotIn("ok", result)
 
     def test_preview_returns_unified_diff_for_valid_fix(self) -> None:
         result = preview_issue_fix(self.tmpdir.name, self.issue())
 
-        self.assertTrue(result["ok"])
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["autoFixable"])
         self.assertEqual(result["issueId"], "f_123")
-        self.assertEqual(result["repo"], "owner/repo")
+        self.assertEqual(result["repository"], "owner/repo")
         self.assertEqual(result["branch"], "main")
         self.assertEqual(result["file"], "src/auth.py")
+        self.assertEqual(result["summary"], "1 file changed")
         self.assertEqual(
             result["updatedContent"],
             "def login(next_url):\n"
@@ -102,11 +112,23 @@ class FixWorkflowTest(unittest.TestCase):
         self.assertIn("+++ b/src/auth.py", result["diff"])
         self.assertIn("-    return redirect(next_url)", result["diff"])
         self.assertIn("+    return redirect(safe_redirect(next_url))", result["diff"])
+        self.assertNotIn("ok", result)
+        self.assertNotIn("repo", result)
+
+    def test_preview_uses_repository_when_repo_is_missing(self) -> None:
+        issue = self.issue(repository="fallback/repo")
+        issue.pop("repo")
+
+        result = preview_issue_fix(self.tmpdir.name, issue)
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["repository"], "fallback/repo")
 
     def test_apply_writes_valid_fix_and_returns_preview_metadata(self) -> None:
         result = apply_issue_fix(self.tmpdir.name, self.issue())
 
-        self.assertTrue(result["ok"])
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["autoFixable"])
         self.assertEqual(result["file"], "src/auth.py")
         self.assertEqual(
             self.read_auth(),
