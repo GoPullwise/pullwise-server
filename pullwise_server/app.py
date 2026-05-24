@@ -932,6 +932,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         if recovering_pending:
             branch = valid_stored_pull_request_branch(pending.get("branch"))
             if not branch:
+                clear_pull_request_pending(issue)
                 raise ValueError("Stored pull request branch is invalid.")
             recovery_token = installation_token(installation_id)
             recovered = github_auth.find_pull_request_by_head(recovery_token, repo, head=branch)
