@@ -416,7 +416,14 @@ def repositories_from_response(response, context: str) -> list:
     repositories = payload.get("repositories") or []
     if not isinstance(repositories, list):
         raise GitHubError(f"GitHub {context} response repositories field was not a list.")
-    return [repo for repo in repositories if isinstance(repo, dict)]
+    return [repo for repo in repositories if valid_repository_payload(repo)]
+
+
+def valid_repository_payload(repo: object) -> bool:
+    if not isinstance(repo, dict):
+        return False
+    full_name = repo.get("full_name")
+    return isinstance(full_name, str) and "/" in full_name and bool(full_name.strip())
 
 
 def github_api_headers(token: str | None = None) -> dict[str, str]:

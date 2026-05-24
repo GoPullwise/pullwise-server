@@ -249,6 +249,40 @@ class GitHubAuthContractsTest(unittest.TestCase):
 
         self.assertEqual([repo["fullName"] for repo in repositories], ["octocat/Hello-World"])
 
+    def test_list_installation_repositories_skips_items_without_valid_full_name(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "repositories": [
+                {
+                    "id": 1,
+                    "name": "MissingFullName",
+                    "stargazers_count": 3,
+                },
+                {
+                    "id": 2,
+                    "name": "ObjectFullName",
+                    "full_name": {"owner": "octocat", "repo": "ObjectFullName"},
+                    "stargazers_count": 5,
+                },
+                {
+                    "id": 3,
+                    "name": "Hello-World",
+                    "full_name": "octocat/Hello-World",
+                    "stargazers_count": 80,
+                },
+            ]
+        }
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.object(github_auth, "create_installation_access_token", return_value={"token": "ghs_123"}),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            repositories = github_auth.list_installation_repositories("123")
+
+        self.assertEqual([repo["fullName"] for repo in repositories], ["octocat/Hello-World"])
+
     def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {
