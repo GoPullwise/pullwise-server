@@ -887,7 +887,9 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         if github_access and github_access.get("repositoriesNeedSync"):
             raise ValueError("Sync GitHub repositories before creating a pull request.")
         existing = issue.get("pullRequest")
-        if not isinstance(existing, dict) and isinstance(issue.get("pullRequestPending"), dict):
+        pending = issue.get("pullRequestPending") if not isinstance(existing, dict) else None
+        recovering_pending = isinstance(pending, dict) and pull_request_pending_is_stale(pending)
+        if isinstance(pending, dict) and not recovering_pending:
             raise ValueError("Pull request creation is already in progress for this issue.")
         if not github_auth.app_api_configured():
             raise ValueError("GitHub App API is not configured for pull request creation.")
@@ -926,8 +928,30 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             raise ValueError("Repository is missing a GitHub App installation id.")
         clone_url = repo_meta.get("cloneUrl") or repo_meta.get("clone_url") or scan.get("cloneUrl")
 
-        random_token = safe_git_ref_component(make_id("fix").split("_", 1)[-1], "branch")[:16]
-        branch = f"pullwise/fix-{issue_slug}-{random_token}"
+        recovery_token = ""
+        if recovering_pending:
+            branch = valid_stored_pull_request_branch(pending.get("branch"))
+            if not branch:
+                raise ValueError("Stored pull request branch is invalid.")
+            recovery_token = installation_token(installation_id)
+            recovered = github_auth.find_pull_request_by_head(recovery_token, repo, head=branch)
+            if recovered:
+                pull_request = {
+                    "issueId": issue_id,
+                    "branch": branch,
+                    "url": recovered.get("url"),
+                    "number": recovered.get("number"),
+                    "title": recovered.get("title") or f"Fix {issue.get('title') or issue_id}",
+                }
+                issue.pop("pullRequestPending", None)
+                issue["pullRequest"] = pull_request
+                mark_state_dirty()
+                persist_state()
+                return pull_request
+
+        if not recovering_pending:
+            random_token = safe_git_ref_component(make_id("fix").split("_", 1)[-1], "branch")[:16]
+            branch = f"pullwise/fix-{issue_slug}-{random_token}"
         issue["pullRequestPending"] = {
             "issueId": issue_id,
             "branch": branch,
@@ -947,6 +971,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         })
 
         checkout_started = False
+        irreversible_started = False
         try:
             checkout_started = True
             repo_path = checkout.prepare_checkout(pr_scan_id, scan_payload, lambda: False)
@@ -961,10 +986,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             if not fix_file:
                 raise ValueError("Issue fix did not report a file to commit.")
 
-            token_payload = github_auth.create_installation_access_token(installation_id)
-            token = str(token_payload.get("token") or "")
-            if not token:
-                raise github_auth.GitHubError("GitHub did not return an installation access token.")
+            token = recovery_token or installation_token(installation_id)
 
             title = f"Fix {issue.get('title') or issue_id}"
             body = (
@@ -1000,6 +1022,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                 is_cancelled=lambda: False,
                 action="commit issue fix",
             )
+            irreversible_started = True
             checkout.run_git(
                 ["git", "push", "origin", f"HEAD:{branch}"],
                 cwd=repo_path,
@@ -1007,6 +1030,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                 is_cancelled=lambda: False,
                 action="push issue fix",
             )
+            irreversible_started = True
             created = github_auth.create_pull_request(
                 token,
                 repo,
@@ -1025,14 +1049,22 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             issue.pop("pullRequestPending", None)
             issue["pullRequest"] = pull_request
             mark_state_dirty()
+            persist_state()
             return pull_request
         except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
-            issue.pop("pullRequestPending", None)
-            mark_state_dirty()
+            if irreversible_started or remote_git_error(exc):
+                record_pull_request_pending_failure(issue, str(exc))
+                raise github_auth.GitHubError(str(exc)) from exc
+            clear_pull_request_pending(issue)
             raise ValueError(str(exc)) from exc
+        except github_auth.GitHubError as exc:
+            if irreversible_started:
+                record_pull_request_pending_failure(issue, str(exc))
+            else:
+                clear_pull_request_pending(issue)
+            raise
         except Exception:
-            issue.pop("pullRequestPending", None)
-            mark_state_dirty()
+            clear_pull_request_pending(issue)
             raise
         finally:
             if checkout_started:
@@ -1040,6 +1072,57 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                     checkout.cleanup_scan_workspace(user_id, pr_scan_id)
                 except (RuntimeError, OSError) as exc:
                     logger.warning("Unable to clean up pull request checkout workspace %s: %s", pr_scan_id, exc)
+
+
+def installation_token(installation_id: str) -> str:
+    token_payload = github_auth.create_installation_access_token(installation_id)
+    token = str(token_payload.get("token") or "")
+    if not token:
+        raise github_auth.GitHubError("GitHub did not return an installation access token.")
+    return token
+
+
+def pull_request_pending_is_stale(pending: dict) -> bool:
+    try:
+        started_at = int(pending.get("startedAt") or 0)
+    except (TypeError, ValueError):
+        started_at = 0
+    return started_at <= now() - pull_request_pending_stale_seconds()
+
+
+def pull_request_pending_stale_seconds() -> int:
+    return max(60, env_int("PULLWISE_PR_PENDING_STALE_SECONDS", 15 * 60))
+
+
+def valid_stored_pull_request_branch(branch: object) -> str | None:
+    value = str(branch or "").strip()
+    if not value.startswith("pullwise/fix-"):
+        return None
+    if value.endswith("/") or value.endswith(".") or ".." in value or " " in value:
+        return None
+    if not re.match(r"^[A-Za-z0-9._/-]+$", value):
+        return None
+    return value
+
+
+def record_pull_request_pending_failure(issue: dict, message: str) -> None:
+    pending = issue.get("pullRequestPending")
+    if isinstance(pending, dict):
+        pending["lastError"] = message[:500]
+        pending["failedAt"] = now()
+    mark_state_dirty()
+    persist_state()
+
+
+def clear_pull_request_pending(issue: dict) -> None:
+    issue.pop("pullRequestPending", None)
+    mark_state_dirty()
+    persist_state()
+
+
+def remote_git_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return message.startswith("git clone") or message.startswith("git fetch") or message.startswith("git push")
 
 
 def github_app_write_permissions_message() -> str:

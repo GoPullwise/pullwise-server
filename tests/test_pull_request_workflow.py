@@ -414,6 +414,49 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertNotIn(token, json.dumps(pull_request))
         self.assertNotIn(token, json.dumps(app.ISSUES[0]["pullRequest"]))
 
+    def test_successful_pull_request_transition_is_persisted_before_cleanup(self) -> None:
+        token = "ghs_secret_token"
+        events: list[str] = []
+
+        def persist_state() -> None:
+            if app.ISSUES[0].get("pullRequest"):
+                self.assertNotIn("pullRequestPending", app.ISSUES[0])
+                events.append("success_persist")
+            elif app.ISSUES[0].get("pullRequestPending"):
+                events.append("pending_persist")
+
+        def cleanup(_user_id: str, _scan_id: str) -> None:
+            events.append("cleanup")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "pr_f_123", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("def redirect_target(next_url):\n    return redirect(next_url)\n")
+
+                with (
+                    patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                    patch("pullwise_server.app.persist_state", side_effect=persist_state),
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path),
+                    patch("pullwise_server.app.checkout.run_git"),
+                    patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+                    patch(
+                        "pullwise_server.app.github_auth.create_pull_request",
+                        return_value={
+                            "url": "https://github.com/owner/repo/pull/12",
+                            "number": 12,
+                            "title": "Fix Validate redirect targets",
+                        },
+                    ),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace", side_effect=cleanup),
+                    patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+                ):
+                    pull_request = app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertEqual(pull_request, app.ISSUES[0]["pullRequest"])
+        self.assertEqual(events, ["pending_persist", "success_persist", "cleanup"])
+
     def test_concurrent_pull_request_creation_for_same_issue_runs_external_work_once(self) -> None:
         token = "ghs_secret_token"
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -492,6 +535,106 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
         self.assert_no_external_pull_request_work(app_api_configured, prepare_checkout, run_git, create_token, create_pull_request)
 
+    def test_stale_pending_marker_recovers_existing_github_pull_request(self) -> None:
+        app.ISSUES[0]["pullRequestPending"] = {
+            "branch": "pullwise/fix-f_123-stale",
+            "startedAt": app.now() - 3600,
+            "lastError": "push result unknown",
+        }
+        recovered = {
+            "url": "https://github.com/owner/repo/pull/12",
+            "number": 12,
+            "title": "Fix Validate redirect targets",
+        }
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": "ghs_secret_token"}),
+            patch("pullwise_server.app.github_auth.find_pull_request_by_head", return_value=recovered) as find_pull_request,
+            patch("pullwise_server.app.persist_state") as persist_state,
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.github_auth.create_pull_request") as create_pull_request,
+        ):
+            pull_request = app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertEqual(pull_request["branch"], "pullwise/fix-f_123-stale")
+        self.assertEqual(pull_request["number"], 12)
+        self.assertEqual(app.ISSUES[0]["pullRequest"], pull_request)
+        self.assertNotIn("pullRequestPending", app.ISSUES[0])
+        find_pull_request.assert_called_once_with("ghs_secret_token", "owner/repo", head="pullwise/fix-f_123-stale")
+        persist_state.assert_called()
+        prepare_checkout.assert_not_called()
+        run_git.assert_not_called()
+        create_pull_request.assert_not_called()
+
+    def test_stale_pending_marker_retries_using_existing_branch(self) -> None:
+        token = "ghs_secret_token"
+        app.ISSUES[0]["pullRequestPending"] = {
+            "branch": "pullwise/fix-f_123-stale",
+            "startedAt": app.now() - 3600,
+            "lastError": "push result unknown",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "pr_f_123", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("def redirect_target(next_url):\n    return redirect(next_url)\n")
+
+                with (
+                    patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                    patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+                    patch("pullwise_server.app.github_auth.find_pull_request_by_head", return_value=None),
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path),
+                    patch("pullwise_server.app.checkout.run_git") as run_git,
+                    patch(
+                        "pullwise_server.app.github_auth.create_pull_request",
+                        return_value={
+                            "url": "https://github.com/owner/repo/pull/12",
+                            "number": 12,
+                            "title": "Fix Validate redirect targets",
+                        },
+                    ),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+                    patch("pullwise_server.app.make_id", side_effect=AssertionError("new branch token should not be generated")),
+                ):
+                    pull_request = app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertEqual(pull_request["branch"], "pullwise/fix-f_123-stale")
+        self.assertEqual(run_git.call_args_list[0].args[0], ["git", "checkout", "-B", "pullwise/fix-f_123-stale"])
+
+    def test_failure_after_push_started_keeps_pending_branch_marker(self) -> None:
+        token = "ghs_secret_token"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "pr_f_123", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("def redirect_target(next_url):\n    return redirect(next_url)\n")
+
+                def run_git(cmd: list[str], **_kwargs: object) -> None:
+                    if cmd[:3] == ["git", "push", "origin"]:
+                        raise RuntimeError("Git push failed")
+
+                with (
+                    patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                    patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path),
+                    patch("pullwise_server.app.checkout.run_git", side_effect=run_git),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+                    patch("pullwise_server.app.persist_state") as persist_state,
+                    patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+                ):
+                    with self.assertRaises(github_auth.GitHubError):
+                        app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        pending = app.ISSUES[0]["pullRequestPending"]
+        self.assertEqual(pending["branch"], "pullwise/fix-f_123-fixedtoken")
+        self.assertIn("lastError", pending)
+        self.assertIn("failedAt", pending)
+        persist_state.assert_called()
+
     def test_pending_marker_is_cleared_when_handled_operation_fails(self) -> None:
         with (
             patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
@@ -508,10 +651,12 @@ class PullRequestWorkflowTest(unittest.TestCase):
         events: list[str] = []
 
         def persist_state() -> None:
-            self.assertIn("pullRequestPending", app.ISSUES[0])
-            self.assertIn("branch", app.ISSUES[0]["pullRequestPending"])
-            self.assertIn("startedAt", app.ISSUES[0]["pullRequestPending"])
-            events.append("persist")
+            if app.ISSUES[0].get("pullRequestPending"):
+                self.assertIn("branch", app.ISSUES[0]["pullRequestPending"])
+                self.assertIn("startedAt", app.ISSUES[0]["pullRequestPending"])
+                events.append("persist")
+            else:
+                events.append("clear_persist")
 
         def prepare_checkout(_scan_id, _scan, _is_cancelled):
             events.append("prepare")
@@ -647,6 +792,45 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
         self.assertEqual(handler.payload, {"message": "GitHub unavailable"})
 
+    def test_route_maps_installation_token_failure_to_service_unavailable(self) -> None:
+        handler = RouteHarness("/issues/f_123/pull-requests", cookie=self.signed_in())
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+            patch("pullwise_server.app.github_auth.create_installation_access_token", side_effect=github_auth.GitHubError("GitHub token failed")),
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(handler.payload, {"message": "GitHub token failed"})
+
+    def test_route_maps_remote_git_push_failure_to_service_unavailable(self) -> None:
+        token = "ghs_secret_token"
+        handler = RouteHarness("/issues/f_123/pull-requests", cookie=self.signed_in())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "pr_f_123", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("def redirect_target(next_url):\n    return redirect(next_url)\n")
+
+                def run_git(cmd: list[str], **_kwargs: object) -> None:
+                    if cmd[:3] == ["git", "push", "origin"]:
+                        raise RuntimeError("Git push failed")
+
+                with (
+                    patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                    patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path),
+                    patch("pullwise_server.app.checkout.run_git", side_effect=run_git),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+                    patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+                ):
+                    app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertIn("Git push failed", handler.payload["message"])
+
     def test_route_returns_pull_request_payload_on_success(self) -> None:
         handler = RouteHarness("/issues/f_123/pull-requests", cookie=self.signed_in())
         payload = {
@@ -733,6 +917,11 @@ class PullRequestWorkflowTest(unittest.TestCase):
                     base="main",
                     body="Automated fix.",
                 )
+
+    def test_create_installation_access_token_wraps_provider_errors_as_github_error(self) -> None:
+        with patch("pullwise_server.github_auth.app_integration", side_effect=RuntimeError("provider down")):
+            with self.assertRaisesRegex(github_auth.GitHubError, "installation token"):
+                github_auth.create_installation_access_token("123")
 
     def test_create_pull_request_wraps_invalid_json_as_github_error(self) -> None:
         response = Mock()

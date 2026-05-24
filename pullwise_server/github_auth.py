@@ -202,12 +202,62 @@ def fetch_installation(installation_id: str) -> dict:
 
 
 def create_installation_access_token(installation_id: str) -> dict:
-    integration = app_integration()
     try:
-        token = integration.get_access_token(int(installation_id))
-        return {"token": token.token, "expires_at": str(token.expires_at)}
-    finally:
-        integration.close()
+        integration = app_integration()
+        try:
+            token = integration.get_access_token(int(installation_id))
+            return {"token": token.token, "expires_at": str(token.expires_at)}
+        finally:
+            integration.close()
+    except GitHubError:
+        raise
+    except Exception as exc:
+        raise GitHubError(f"GitHub installation token request failed: {exc}") from exc
+
+
+def find_pull_request_by_head(token: str, repo: str, *, head: str) -> dict | None:
+    owner = repo.split("/", 1)[0]
+    try:
+        response = requests.get(
+            f"{github_api_url()}/repos/{repo}/pulls",
+            headers=github_api_headers(token),
+            params={"head": f"{owner}:{head}", "state": "open", "per_page": 1},
+            timeout=request_timeout(),
+        )
+    except Exception as exc:
+        raise GitHubError(f"GitHub pull request lookup failed: {exc}") from exc
+
+    if response.status_code < 200 or response.status_code >= 300:
+        detail = str(getattr(response, "text", "") or "").strip()
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            message = f"GitHub pull request lookup failed: {exc}"
+            if detail:
+                message = f"{message}: {detail[:500]}"
+            raise GitHubError(message) from exc
+        raise GitHubError("GitHub pull request lookup failed.")
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise GitHubError(f"GitHub pull request lookup response was not valid JSON: {exc}") from exc
+    if not isinstance(payload, list):
+        raise GitHubError("GitHub pull request lookup response body was not a list.")
+    if not payload:
+        return None
+    pull_request = payload[0]
+    if not isinstance(pull_request, dict):
+        raise GitHubError("GitHub pull request lookup response item was not an object.")
+    url = pull_request.get("html_url") or pull_request.get("url")
+    number = pull_request.get("number")
+    if not url or number is None:
+        raise GitHubError("GitHub pull request lookup response body was missing url or number.")
+    return {
+        "url": url,
+        "number": number,
+        "title": pull_request.get("title") or "",
+    }
 
 
 def create_pull_request(token: str, repo: str, *, title: str, head: str, base: str, body: str) -> dict:
