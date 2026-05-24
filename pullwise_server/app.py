@@ -129,6 +129,23 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def parse_port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("port must be an integer.") from None
+    if port < 1 or port > 65535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535.")
+    return port
+
+
+def server_port() -> int:
+    try:
+        return parse_port(env("PULLWISE_PORT", "8080"))
+    except argparse.ArgumentTypeError:
+        return 8080
+
+
 def max_body_bytes() -> int:
     return max(0, env_int("PULLWISE_MAX_BODY_BYTES", 1024 * 1024))
 
@@ -2717,7 +2734,7 @@ def main() -> None:
     logging_config.configure_logging(project_root=project_root())
     parser = argparse.ArgumentParser(description="Run the Pullwise local API server.")
     parser.add_argument("--host", default=env("PULLWISE_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(env("PULLWISE_PORT", "8080")))
+    parser.add_argument("--port", type=parse_port, default=server_port())
     args = parser.parse_args()
 
     ensure_state_loaded()

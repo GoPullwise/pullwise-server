@@ -4,6 +4,7 @@ import json
 import os
 import unittest
 from http import HTTPStatus
+from unittest.mock import patch
 
 from pullwise_server import app
 
@@ -77,6 +78,41 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_ENABLED"), "true")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
+
+    def test_main_uses_default_port_for_invalid_port_env(self) -> None:
+        class ServerStub:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def serve_forever(self) -> None:
+                raise KeyboardInterrupt
+
+            def server_close(self) -> None:
+                self.closed = True
+
+        for configured_port in ["abc", "0", "70000"]:
+            with self.subTest(configured_port=configured_port):
+                server = ServerStub()
+                addresses = []
+
+                def server_factory(address, handler_class):
+                    addresses.append(address)
+                    return server
+
+                with (
+                    patch.dict(os.environ, {"PULLWISE_PORT": configured_port}, clear=True),
+                    patch("sys.argv", ["pullwise-server"]),
+                    patch.object(app, "load_env_file"),
+                    patch.object(app.logging_config, "configure_logging"),
+                    patch.object(app, "ensure_state_loaded"),
+                    patch.object(app, "recover_interrupted_scans", return_value=0),
+                    patch.object(app.worker, "ensure_workers"),
+                    patch.object(app, "ThreadingHTTPServer", side_effect=server_factory),
+                ):
+                    app.main()
+
+                self.assertEqual([("0.0.0.0", 8080)], addresses)
+                self.assertTrue(server.closed)
 
     def test_health_exposes_safe_readiness_details(self) -> None:
         handler = RouteHarness("/health")
