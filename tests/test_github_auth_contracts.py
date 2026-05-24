@@ -223,6 +223,32 @@ class GitHubAuthContractsTest(unittest.TestCase):
             with self.assertRaisesRegex(github_auth.GitHubError, "repositories response"):
                 github_auth.list_installation_repositories("123")
 
+    def test_list_installation_repositories_skips_non_object_repository_items(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "repositories": [
+                ["not", "a", "repo"],
+                "bad repo",
+                {
+                    "id": 1296269,
+                    "name": "Hello-World",
+                    "full_name": "octocat/Hello-World",
+                    "stargazers_count": 80,
+                    "permissions": {"pull": True},
+                },
+            ]
+        }
+        response.links = {}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.object(github_auth, "create_installation_access_token", return_value={"token": "ghs_123"}),
+            patch("pullwise_server.github_auth.requests.get", return_value=response),
+        ):
+            repositories = github_auth.list_installation_repositories("123")
+
+        self.assertEqual([repo["fullName"] for repo in repositories], ["octocat/Hello-World"])
+
     def test_list_user_installation_repositories_uses_official_user_installation_endpoint(self) -> None:
         response = Mock()
         response.json.return_value = {
