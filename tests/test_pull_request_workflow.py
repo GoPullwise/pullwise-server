@@ -457,6 +457,69 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertEqual(pull_request, app.ISSUES[0]["pullRequest"])
         self.assertEqual(events, ["pending_persist", "success_persist", "cleanup"])
 
+    def test_pull_request_state_transition_mutations_hold_state_lock(self) -> None:
+        token = "ghs_secret_token"
+        mutations: list[tuple[str, str]] = []
+
+        class TrackingLock:
+            def __init__(self) -> None:
+                self.depth = 0
+
+            def __enter__(self) -> "TrackingLock":
+                self.depth += 1
+                return self
+
+            def __exit__(self, *_exc_info: object) -> None:
+                self.depth -= 1
+
+        tracking_lock = TrackingLock()
+        test_case = self
+
+        class LockCheckingIssue(dict):
+            def __setitem__(self, key: str, value: object) -> None:
+                if key in {"pullRequestPending", "pullRequest"}:
+                    test_case.assertGreater(tracking_lock.depth, 0, f"{key} set outside STATE_LOCK")
+                    mutations.append(("set", key))
+                super().__setitem__(key, value)
+
+            def pop(self, key: str, *args: object) -> object:
+                if key in {"pullRequestPending", "pullRequest"}:
+                    test_case.assertGreater(tracking_lock.depth, 0, f"{key} popped outside STATE_LOCK")
+                    mutations.append(("pop", key))
+                return super().pop(key, *args)
+
+        app.ISSUES[0] = LockCheckingIssue(app.ISSUES[0])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "pr_f_123", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("def redirect_target(next_url):\n    return redirect(next_url)\n")
+
+                with (
+                    patch("pullwise_server.app.STATE_LOCK", tracking_lock),
+                    patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path),
+                    patch("pullwise_server.app.checkout.run_git"),
+                    patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}),
+                    patch(
+                        "pullwise_server.app.github_auth.create_pull_request",
+                        return_value={
+                            "url": "https://github.com/owner/repo/pull/12",
+                            "number": 12,
+                            "title": "Fix Validate redirect targets",
+                        },
+                    ),
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+                    patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+                ):
+                    app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assertIn(("set", "pullRequestPending"), mutations)
+        self.assertIn(("pop", "pullRequestPending"), mutations)
+        self.assertIn(("set", "pullRequest"), mutations)
+
     def test_concurrent_pull_request_creation_for_same_issue_runs_external_work_once(self) -> None:
         token = "ghs_secret_token"
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -674,7 +737,13 @@ class PullRequestWorkflowTest(unittest.TestCase):
         persist_state.assert_called()
 
     def test_stale_pending_marker_with_invalid_branch_is_cleared(self) -> None:
-        for branch in ("../main", "pullwise/fix-f_123/.lock", "pullwise/fix-f_123//retry"):
+        for branch in (
+            "../main",
+            "pullwise/fix-f_123/.lock",
+            "pullwise/fix-f_123//retry",
+            "pullwise/fix-f_123-stale ",
+            "\tpullwise/fix-f_123-stale",
+        ):
             with self.subTest(branch=branch):
                 app.ISSUES[0]["pullRequestPending"] = {
                     "branch": branch,

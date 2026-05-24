@@ -944,10 +944,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                     "number": recovered.get("number"),
                     "title": recovered.get("title") or f"Fix {issue.get('title') or issue_id}",
                 }
-                issue.pop("pullRequestPending", None)
-                issue["pullRequest"] = pull_request
-                mark_state_dirty()
-                persist_state()
+                store_issue_pull_request(issue, pull_request)
                 return pull_request
 
             if github_auth.branch_exists(recovery_token, repo, branch):
@@ -976,22 +973,13 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                     "number": created.get("number"),
                     "title": created.get("title") or title,
                 }
-                issue.pop("pullRequestPending", None)
-                issue["pullRequest"] = pull_request
-                mark_state_dirty()
-                persist_state()
+                store_issue_pull_request(issue, pull_request)
                 return pull_request
 
         if not recovering_pending:
             random_token = safe_git_ref_component(make_id("fix").split("_", 1)[-1], "branch")[:16]
             branch = f"pullwise/fix-{issue_slug}-{random_token}"
-        issue["pullRequestPending"] = {
-            "issueId": issue_id,
-            "branch": branch,
-            "startedAt": now(),
-        }
-        mark_state_dirty()
-        persist_state()
+        store_pull_request_pending(issue, issue_id, branch)
 
         scan_payload = dict(scan)
         scan_payload.update({
@@ -1079,10 +1067,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
                 "number": created.get("number"),
                 "title": created.get("title") or title,
             }
-            issue.pop("pullRequestPending", None)
-            issue["pullRequest"] = pull_request
-            mark_state_dirty()
-            persist_state()
+            store_issue_pull_request(issue, pull_request)
             return pull_request
         except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
             if irreversible_started:
@@ -1130,7 +1115,7 @@ def pull_request_pending_stale_seconds() -> int:
 
 
 def valid_stored_pull_request_branch(branch: object) -> str | None:
-    value = str(branch or "").strip()
+    value = str(branch or "")
     if not value.startswith("pullwise/fix-"):
         return None
     if value.endswith("/") or value.endswith(".") or ".." in value or "//" in value or " " in value:
@@ -1143,19 +1128,40 @@ def valid_stored_pull_request_branch(branch: object) -> str | None:
     return value
 
 
+def store_pull_request_pending(issue: dict, issue_id: str, branch: str) -> None:
+    with STATE_LOCK:
+        issue["pullRequestPending"] = {
+            "issueId": issue_id,
+            "branch": branch,
+            "startedAt": now(),
+        }
+        mark_state_dirty()
+        persist_state()
+
+
+def store_issue_pull_request(issue: dict, pull_request: dict) -> None:
+    with STATE_LOCK:
+        issue.pop("pullRequestPending", None)
+        issue["pullRequest"] = pull_request
+        mark_state_dirty()
+        persist_state()
+
+
 def record_pull_request_pending_failure(issue: dict, message: str) -> None:
-    pending = issue.get("pullRequestPending")
-    if isinstance(pending, dict):
-        pending["lastError"] = message[:500]
-        pending["failedAt"] = now()
-    mark_state_dirty()
-    persist_state()
+    with STATE_LOCK:
+        pending = issue.get("pullRequestPending")
+        if isinstance(pending, dict):
+            pending["lastError"] = message[:500]
+            pending["failedAt"] = now()
+        mark_state_dirty()
+        persist_state()
 
 
 def clear_pull_request_pending(issue: dict) -> None:
-    issue.pop("pullRequestPending", None)
-    mark_state_dirty()
-    persist_state()
+    with STATE_LOCK:
+        issue.pop("pullRequestPending", None)
+        mark_state_dirty()
+        persist_state()
 
 
 def remote_git_error(exc: BaseException) -> bool:
