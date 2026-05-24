@@ -1632,7 +1632,9 @@ def billing_update_scalar(value: object) -> object | None:
         return None
     if isinstance(value, str):
         return value if value.strip() else None
-    return value if isinstance(value, int | float) else None
+    if isinstance(value, int | float):
+        return value if math.isfinite(value) else None
+    return None
 
 
 def billing_update_bool(value: object) -> bool | None:
