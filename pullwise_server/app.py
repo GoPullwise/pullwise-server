@@ -1710,6 +1710,7 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         return False
 
     customer_id = billing_update_text(update.get("customerId"))
+    customer_email = billing_update_text(update.get("customerEmail"))
     subscription_id = billing_update_text(update.get("subscriptionId"))
     subscription_item_id = billing_update_text(update.get("subscriptionItemId"))
     event_id = billing_event_id(update)
@@ -1718,7 +1719,7 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         **current,
         "provider": update.get("provider") or current.get("provider"),
         "customerId": customer_id or current.get("customerId"),
-        "customerEmail": update.get("customerEmail") or current.get("customerEmail"),
+        "customerEmail": customer_email or current.get("customerEmail"),
         "subscriptionId": subscription_id or current.get("subscriptionId"),
         "subscriptionItemId": subscription_item_id or current.get("subscriptionItemId"),
         "status": update.get("status") or current.get("status") or "active",
