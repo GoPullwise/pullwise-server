@@ -474,7 +474,7 @@ def text_payload(value: object, fallback: str) -> str:
 
 
 def billing_update_from_creem_event(event: dict) -> dict | None:
-    event_type = event.get("eventType") or event.get("type")
+    event_type = text_payload(event.get("eventType") or event.get("type"), "")
     obj = dict_payload(event.get("object"))
     if event_type not in {
         "checkout.completed",
@@ -538,7 +538,7 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
 
 
 def billing_update_from_stripe_event(event: dict) -> dict | None:
-    event_type = event.get("type") or ""
+    event_type = text_payload(event.get("type"), "")
     data = dict_payload(event.get("data"))
     obj = dict_payload(data.get("object"))
     if event_type == "checkout.session.completed":
