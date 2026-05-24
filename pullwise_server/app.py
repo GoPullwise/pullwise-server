@@ -988,22 +988,24 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         if isinstance(existing, dict):
             return existing
 
-        base_branch = str(
-            issue.get("branch")
-            or scan.get("branch")
-            or repo_meta.get("defaultBranch")
-            or github_access.get("defaultBranch")
+        base_branch = (
+            clean_github_access_text(issue.get("branch"))
+            or clean_github_access_text(scan.get("branch"))
+            or clean_github_access_text(repo_meta.get("defaultBranch"))
+            or clean_github_access_text(github_access.get("defaultBranch"))
             or "main"
         )
-        installation_id = str(
-            repo_meta.get("installationId")
-            or scan.get("installationId")
-            or github_access.get("installationId")
+        installation_id = (
+            clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
+            or clean_github_access_text(scan.get("installationId"), allow_int=True)
+            or clean_github_access_text(github_access.get("installationId"), allow_int=True)
             or ""
         )
         if not installation_id:
             raise ValueError("Repository is missing a GitHub App installation id.")
-        clone_url = repo_meta.get("cloneUrl") or repo_meta.get("clone_url") or scan.get("cloneUrl")
+        clone_url = trusted_github_web_url(repo_meta.get("cloneUrl") or repo_meta.get("clone_url"))
+        if not clone_url:
+            clone_url = trusted_github_web_url(scan.get("cloneUrl") or scan.get("clone_url"))
 
         recovery_token = ""
         if recovering_pending:

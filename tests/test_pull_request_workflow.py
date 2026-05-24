@@ -414,6 +414,51 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertNotIn(token, json.dumps(pull_request))
         self.assertNotIn(token, json.dumps(app.ISSUES[0]["pullRequest"]))
 
+    def test_pull_request_creation_sanitizes_legacy_source_metadata(self) -> None:
+        token = "ghs_secret_token"
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        github_access["installationId"] = "123"
+        github_access["defaultBranch"] = "stable"
+        github_access["repositoryItems"][0]["installationId"] = {"id": "123"}
+        github_access["repositoryItems"][0]["defaultBranch"] = "release"
+        github_access["repositoryItems"][0]["cloneUrl"] = "https://evil.example/owner/repo.git"
+        app.ISSUES[0]["branch"] = "main\r\nX-Injected: bad"
+        app.SCANS[0]["branch"] = {"name": "main"}
+        app.SCANS[0]["installationId"] = {"id": "123"}
+        app.SCANS[0]["cloneUrl"] = "https://evil.example/owner/repo.git"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "pr_f_123", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("def redirect_target(next_url):\n    return redirect(next_url)\n")
+
+                with (
+                    patch("pullwise_server.app.github_auth.app_api_configured", return_value=True),
+                    patch("pullwise_server.app.checkout.prepare_checkout", return_value=repo_path) as prepare_checkout,
+                    patch("pullwise_server.app.checkout.run_git"),
+                    patch("pullwise_server.app.github_auth.create_installation_access_token", return_value={"token": token}) as create_token,
+                    patch(
+                        "pullwise_server.app.github_auth.create_pull_request",
+                        return_value={
+                            "url": "https://github.com/owner/repo/pull/12",
+                            "number": 12,
+                            "title": "Fix Validate redirect targets",
+                        },
+                    ) as create_pull_request,
+                    patch("pullwise_server.app.checkout.cleanup_scan_workspace"),
+                    patch("pullwise_server.app.make_id", return_value="fix_fixedtoken"),
+                ):
+                    app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        scan_payload = prepare_checkout.call_args.args[1]
+        self.assertEqual(scan_payload["branch"], "release")
+        self.assertEqual(scan_payload["installationId"], "123")
+        self.assertIsNone(scan_payload["cloneUrl"])
+        create_token.assert_called_once_with("123")
+        self.assertEqual(create_pull_request.call_args.kwargs["base"], "release")
+
     def test_successful_pull_request_transition_is_persisted_before_cleanup(self) -> None:
         token = "ghs_secret_token"
         events: list[str] = []
