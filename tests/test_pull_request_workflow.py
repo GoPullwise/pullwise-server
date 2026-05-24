@@ -1147,6 +1147,19 @@ class PullRequestWorkflowTest(unittest.TestCase):
             with self.assertRaisesRegex(github_auth.GitHubError, "installation token"):
                 github_auth.create_installation_access_token("123")
 
+    def test_create_installation_access_token_rejects_malformed_tokens(self) -> None:
+        token = Mock()
+        token.token = {"token": "bad"}
+        token.expires_at = "2026-05-25T00:00:00Z"
+        integration = Mock()
+        integration.get_access_token.return_value = token
+
+        with patch("pullwise_server.github_auth.app_integration", return_value=integration):
+            with self.assertRaisesRegex(github_auth.GitHubError, "installation token"):
+                github_auth.create_installation_access_token("123")
+
+        integration.close.assert_called_once()
+
     def test_create_pull_request_wraps_invalid_json_as_github_error(self) -> None:
         response = Mock()
         response.status_code = 201

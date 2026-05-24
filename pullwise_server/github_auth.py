@@ -246,7 +246,10 @@ def create_installation_access_token(installation_id: str) -> dict:
         integration = app_integration()
         try:
             token = integration.get_access_token(int(installation_id))
-            return {"token": token.token, "expires_at": str(token.expires_at)}
+            access_token = clean_profile_text(getattr(token, "token", None))
+            if not access_token:
+                raise GitHubError("GitHub did not return an installation token.")
+            return {"token": access_token, "expires_at": str(token.expires_at)}
         finally:
             integration.close()
     except GitHubError:
