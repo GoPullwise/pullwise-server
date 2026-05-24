@@ -543,6 +543,7 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
     obj = dict_payload(data.get("object"))
     if event_type == "checkout.session.completed":
         metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+        customer_details = dict_payload(obj.get("customer_details"))
         user_id = obj.get("client_reference_id") or metadata.get("userId")
         if not user_id:
             return None
@@ -550,7 +551,7 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             "userId": user_id,
             "provider": "stripe",
             "customerId": obj.get("customer"),
-            "customerEmail": (obj.get("customer_details") or {}).get("email") or obj.get("customer_email"),
+            "customerEmail": customer_details.get("email") or obj.get("customer_email"),
             "subscriptionId": obj.get("subscription"),
             "status": "active",
             "plan": normalize_plan(metadata.get("plan") or "pro"),

@@ -76,6 +76,24 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["eventId"], "evt_checkout_1")
         self.assertEqual(update["eventCreated"], 1710000000)
 
+    def test_stripe_checkout_ignores_malformed_customer_details(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_checkout_bad_customer_details_1",
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "client_reference_id": "usr_1",
+                        "customer": "cus_1",
+                        "customer_details": [{"email": "bad@example.com"}],
+                        "customer_email": "dev@example.com",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(update["customerEmail"], "dev@example.com")
+
     def test_creem_event_ignores_non_object_payload(self) -> None:
         update = billing.billing_update_from_creem_event(
             {
