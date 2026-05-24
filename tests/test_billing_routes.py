@@ -523,6 +523,26 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(app.USERS["usr_1"]["billing"]["customerId"], "cus_1")
         self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "past_due")
 
+    def test_billing_update_with_malformed_pending_identifiers_is_not_queued(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "provider": "stripe",
+                "customerId": ["cus_bad"],
+                "subscriptionId": {"id": "sub_bad"},
+                "status": "past_due",
+                "eventType": "customer.subscription.updated",
+                "eventId": "evt_bad_pending_ids",
+                "eventCreated": 600,
+            },
+        )
+
+        self.assertNotIn("billing", app.USERS["usr_1"])
+        self.assertEqual(app.BILLING_PENDING_UPDATES, [])
+
 
 if __name__ == "__main__":
     unittest.main()

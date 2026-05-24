@@ -1666,7 +1666,7 @@ def prune_billing_events() -> None:
 
 
 def remember_pending_billing_update(update: dict) -> None:
-    if not (update.get("customerId") or update.get("subscriptionId")):
+    if not (billing_update_text(update.get("customerId")) or billing_update_text(update.get("subscriptionId"))):
         return
     event_id = billing_event_id(update)
     if event_id and any(billing_event_id(candidate) == event_id for candidate in BILLING_PENDING_UPDATES):
