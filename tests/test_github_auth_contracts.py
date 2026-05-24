@@ -114,6 +114,18 @@ class GitHubAuthContractsTest(unittest.TestCase):
                 ):
                     self.assertFalse(github_auth.app_api_configured())
 
+    def test_app_private_key_rejects_invalid_private_key_base64(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_GITHUB_APP_ID": "456",
+                "PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64": "%%%",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(github_auth.GitHubError, "not valid base64"):
+                github_auth.app_private_key()
+
     def test_installation_matches_configured_app_slug_case_insensitively(self) -> None:
         self.assertTrue(
             github_auth.installation_matches_configured_app(

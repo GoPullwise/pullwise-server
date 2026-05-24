@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import os
 import secrets
 from urllib.parse import quote, urlencode
@@ -527,8 +528,8 @@ def app_private_key() -> str:
     encoded = env_any(["PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64", "GITHUB_APP_PRIVATE_KEY_BASE64"])
     if encoded:
         try:
-            return base64.b64decode(encoded).decode("utf-8")
-        except ValueError as exc:
+            return base64.b64decode(encoded.strip(), validate=True).decode("utf-8")
+        except (binascii.Error, ValueError) as exc:
             raise GitHubError("PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64 is not valid base64.") from exc
 
     key_path = env_any(["PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_APP_PRIVATE_KEY_PATH"])
