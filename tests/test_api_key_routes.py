@@ -150,6 +150,19 @@ class ApiKeyRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(denied, "GET")
         self.assertEqual(denied.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_invalid_requested_api_key_scopes_are_rejected(self) -> None:
+        cookie = seed_session()
+        handler = RouteHarness("/api-keys", {"name": "Bad automation", "scopes": ["admin:all"]}, cookie=cookie)
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("scope", handler.payload["message"].lower())
+
+        list_handler = RouteHarness("/api-keys", cookie=cookie)
+        app.PullwiseHandler.route(list_handler, "GET")
+        self.assertEqual(list_handler.payload["items"], [])
+
     def test_api_key_lists_repositories_and_controls_scan_by_repo_id(self) -> None:
         _cookie, key = self.create_api_key()
         auth = {"Authorization": f"Bearer {key}"}

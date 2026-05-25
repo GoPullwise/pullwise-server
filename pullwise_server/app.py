@@ -1207,6 +1207,31 @@ def clean_api_key_scopes(value: object) -> list[str]:
     return scopes or list(API_KEY_DEFAULT_SCOPES)
 
 
+def requested_api_key_scopes(value: object, *, provided: bool) -> tuple[list[str], str | None]:
+    if not provided or value is None:
+        return list(API_KEY_DEFAULT_SCOPES), None
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+        candidates = value
+    else:
+        return [], "API key scopes must be a string or a list of strings."
+
+    scopes: list[str] = []
+    invalid: list[str] = []
+    for candidate in candidates:
+        normalized = candidate.strip().lower()
+        if normalized in API_KEY_ALLOWED_SCOPES:
+            if normalized not in scopes:
+                scopes.append(normalized)
+        else:
+            invalid.append(candidate)
+    if invalid or not scopes:
+        allowed = ", ".join(sorted(API_KEY_ALLOWED_SCOPES))
+        return [], f"API key scopes must include only: {allowed}."
+    return scopes, None
+
+
 def parse_api_key_scopes(value: object) -> list[str]:
     if isinstance(value, list):
         return clean_api_key_scopes(value)
@@ -4547,6 +4572,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Workspace not found.")
         if not db.user_is_workspace_member(workspace["id"], user["id"]):
             return self.error(HTTPStatus.FORBIDDEN, "Workspace membership is required to create API keys.")
+        scopes, scopes_error = requested_api_key_scopes(body.get("scopes"), provided="scopes" in body)
+        if scopes_error:
+            return self.error(HTTPStatus.BAD_REQUEST, scopes_error)
         token = API_KEY_PREFIX + secrets.token_urlsafe(32)
         record = db.create_api_key(
             {
@@ -4556,7 +4584,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "name": public_issue_text(body.get("name")) or "API key",
                 "key_prefix": api_key_prefix(token),
                 "key_hash": api_key_hash(token),
-                "scopes": clean_api_key_scopes(body.get("scopes")),
+                "scopes": scopes,
             }
         )
         return self.json(api_key_public_payload(record, token=token), HTTPStatus.CREATED)
