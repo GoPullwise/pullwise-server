@@ -19,6 +19,10 @@ class BillingProviderConflict(RuntimeError):
     pass
 
 
+class BillingProviderResponseError(RuntimeError):
+    pass
+
+
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
@@ -167,11 +171,11 @@ def provider_price_configured(provider: str, interval: str) -> bool:
 
 def provider_redirect_url(value: object, provider: str, label: str) -> str:
     if not isinstance(value, str):
-        raise RuntimeError(f"{provider} did not return a safe {label} URL.")
+        raise BillingProviderResponseError(f"{provider} did not return a safe {label} URL.")
     raw = value.strip()
     parsed = urlparse(raw)
     if not raw or any(char in raw for char in "\r\n") or parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise RuntimeError(f"{provider} did not return a safe {label} URL.")
+        raise BillingProviderResponseError(f"{provider} did not return a safe {label} URL.")
     return raw
 
 

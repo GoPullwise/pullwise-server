@@ -241,6 +241,53 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["url"], "https://billing.stripe.com/session")
         self.assertEqual(change.call_args.kwargs["interval"], "year")
 
+    def test_billing_redirect_routes_reject_unsafe_internal_urls(self) -> None:
+        scenarios = [
+            (
+                "/billing/checkout-sessions",
+                {},
+                "pullwise_server.billing.create_checkout_session",
+                {"provider": "stripe", "id": "cs_1", "url": "javascript:alert(1)"},
+                lambda: None,
+            ),
+            (
+                "/billing/portal-sessions",
+                {},
+                "pullwise_server.billing.create_portal_session",
+                {"provider": "stripe", "id": "bps_1", "url": "javascript:alert(1)"},
+                lambda: app.USERS["usr_1"].update({"billing": {"customerId": "cus_1"}}),
+            ),
+            (
+                "/billing/change-interval",
+                {"interval": "year"},
+                "pullwise_server.billing.change_subscription_interval",
+                {"provider": "stripe", "interval": "year", "url": "javascript:alert(1)"},
+                lambda: app.USERS["usr_1"].update({
+                    "billing": {
+                        "provider": "stripe",
+                        "customerId": "cus_1",
+                        "subscriptionId": "sub_1",
+                        "subscriptionItemId": "si_1",
+                        "status": "active",
+                        "plan": "pro",
+                        "interval": "month",
+                    }
+                }),
+            ),
+        ]
+
+        for path, body, patch_target, provider_result, setup in scenarios:
+            with self.subTest(path=path):
+                cookie = seed_session()
+                setup()
+                handler = HandlerHarness(body, cookie=cookie, path=path)
+
+                with patch(patch_target, return_value=provider_result):
+                    app.PullwiseHandler.route(handler, "POST")
+
+                self.assertEqual(handler.status, HTTPStatus.BAD_GATEWAY)
+                self.assertNotIn("url", handler.payload)
+
     def test_free_plan_blocks_scans_after_monthly_review_limit(self) -> None:
         cookie = seed_session()
         authorize_repo_for_seed_user()
