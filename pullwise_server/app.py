@@ -44,6 +44,8 @@ SESSION_COOKIE = "pw_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7
 GITHUB_STATE_MAX_AGE = 60 * 10
 ISSUE_STATUSES = {"open", "fixed", "snoozed"}
+SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
+SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
@@ -769,13 +771,90 @@ def billing_account_payload(user: dict) -> dict:
 
 
 def scan_payload(scan: dict) -> dict:
-    payload = dict(scan)
+    payload = {
+        "id": public_issue_text(scan.get("id")),
+        "userId": public_issue_text(scan.get("userId")),
+        "repo": clean_repository_full_name(scan.get("repo"), scan.get("repository")),
+        "branch": clean_github_access_text(scan.get("branch")) or "main",
+        "commit": clean_github_access_text(scan.get("commit")) or "pending",
+        "status": public_scan_status(scan.get("status")),
+        "phase": public_scan_phase(scan.get("phase")),
+        "progress": public_scan_progress(scan.get("progress")),
+        "issues": public_scan_issue_counts(scan.get("issues")),
+        "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
+    }
+    for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
+        if key in scan:
+            payload[key] = pull_request_timestamp(scan.get(key)) or 0
+    if "error" in scan:
+        payload["error"] = clean_scan_error(scan.get("error"))
+    if "time" in scan:
+        payload["time"] = public_issue_text(scan.get("time"))
+    if "by" in scan:
+        payload["by"] = public_issue_text(scan.get("by"))
+    if "installationId" in scan:
+        payload["installationId"] = clean_github_access_text(scan.get("installationId"), allow_int=True)
+    if "installationAccount" in scan:
+        payload["installationAccount"] = clean_github_access_text(scan.get("installationAccount"))
+    if "installationTargetType" in scan:
+        payload["installationTargetType"] = clean_github_access_text(scan.get("installationTargetType"))
+    if "repositorySelection" in scan:
+        payload["repositorySelection"] = clean_github_access_text(scan.get("repositorySelection"))
+    if "cloneUrl" in scan:
+        payload["cloneUrl"] = trusted_github_web_url(scan.get("cloneUrl"))
     queue = scan_queue_payload(scan)
     if queue:
         payload["queue"] = queue
-    else:
-        payload.pop("queue", None)
     return payload
+
+
+def public_scan_status(value: object) -> str:
+    status = public_issue_text(value).lower()
+    return status if status in SCAN_STATUSES else "queued"
+
+
+def public_scan_phase(value: object) -> str:
+    phase = public_issue_text(value)
+    return phase if phase in SCAN_PHASES else ""
+
+
+def public_scan_progress(value: object) -> float:
+    if isinstance(value, bool):
+        return 0
+    try:
+        progress = float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(progress):
+        return 0
+    return min(100, max(0, progress))
+
+
+def public_scan_count(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        count = int(value or 0)
+    except (OverflowError, TypeError, ValueError):
+        return 0
+    return max(0, count)
+
+
+def public_scan_issue_counts(value: object) -> dict:
+    counts = value if isinstance(value, dict) else {}
+    return {
+        "critical": public_scan_count(counts.get("critical")),
+        "high": public_scan_count(counts.get("high")),
+        "medium": public_scan_count(counts.get("medium")),
+        "low": public_scan_count(counts.get("low")),
+        "info": public_scan_count(counts.get("info")),
+    }
+
+
+def clean_scan_error(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.replace("\x00", "").splitlines()[0].strip()[:500]
 
 
 def issue_payload(issue: dict) -> dict:

@@ -716,6 +716,62 @@ class SecurityContractsTest(unittest.TestCase):
 
                 self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_scan_read_routes_sanitize_legacy_scan_fields(self) -> None:
+        app.SCANS[0].update({
+            "repo": {"fullName": "owner/repo"},
+            "repository": "owner/repo",
+            "branch": "main\r\nX-Injected: bad",
+            "commit": {"sha": "abc123"},
+            "status": "done",
+            "phase": "ai\r\nX-Injected: bad",
+            "progress": float("nan"),
+            "issues": {
+                "critical": -1,
+                "high": "3",
+                "medium": float("nan"),
+                "low": {"count": 2},
+                "info": True,
+                "unexpected": 99,
+            },
+            "error": "Provider failed\r\nX-Injected: bad",
+            "createdAt": {"value": app.now()},
+            "queuedAt": {"value": app.now()},
+            "startedAt": "123",
+            "completedAt": True,
+            "repoPath": "C:\\secret\\checkout",
+            "cloneUrl": "javascript:alert(1)",
+            "installationId": {"id": "123"},
+        })
+
+        expected = {
+            "id": "sc_1",
+            "userId": "usr_1",
+            "repo": "owner/repo",
+            "branch": "main",
+            "commit": "pending",
+            "status": "done",
+            "phase": "",
+            "progress": 0,
+            "issues": {"critical": 0, "high": 3, "medium": 0, "low": 0, "info": 0},
+            "error": "Provider failed",
+            "createdAt": 0,
+            "queuedAt": 0,
+            "startedAt": 123,
+            "completedAt": 0,
+            "installationId": None,
+            "cloneUrl": None,
+        }
+
+        for path in ("/scans", "/scans/sc_1"):
+            with self.subTest(path=path):
+                handler = RouteHarness(path, cookie=self.signed_in())
+
+                app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.OK)
+                scan = handler.payload["items"][0] if path == "/scans" else handler.payload
+                self.assertEqual(scan, expected)
+
     def test_magic_link_routes_are_not_available(self) -> None:
         cases = [
             ("GET", "/dev/magic-links"),
