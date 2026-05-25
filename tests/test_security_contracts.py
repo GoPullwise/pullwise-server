@@ -1520,6 +1520,32 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(app.GITHUB_STATES, {})
         log_exception.assert_not_called()
 
+    def test_clear_repository_authorization_pending_ignores_malformed_state_records(self) -> None:
+        app.USERS["usr_1"]["githubRepositoryAccessPending"] = {
+            "state": "pending_state",
+            "startedAt": app.now(),
+            "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+        }
+        other_user_record = {
+            "kind": "install",
+            "userId": "usr_2",
+            "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+        }
+        app.GITHUB_STATES = {
+            "malformed": "not-a-state-record",
+            "matching": {
+                "kind": "install",
+                "userId": "usr_1",
+                "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+            },
+            "other_user": other_user_record,
+        }
+
+        app.clear_github_repository_authorization_pending(app.USERS["usr_1"])
+
+        self.assertNotIn("githubRepositoryAccessPending", app.USERS["usr_1"])
+        self.assertEqual(app.GITHUB_STATES, {"other_user": other_user_record})
+
     def test_auth_session_treats_legacy_install_state_as_pending_repository_authorization(self) -> None:
         app.USERS["usr_1"]["githubLogin"] = "DFerryman"
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

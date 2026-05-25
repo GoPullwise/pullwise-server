@@ -505,13 +505,18 @@ def clear_github_repository_authorization_pending(user: dict | None, state: str 
         user.pop("githubRepositoryAccessPending", None)
         mark_state_dirty()
 
-    states_to_clear = [
-        stored_state
-        for stored_state, record in GITHUB_STATES.items()
-        if record.get("kind") == "install"
-        and record.get("userId") == user.get("id")
-        and (not state or stored_state == state)
-    ]
+    states_to_clear = []
+    for stored_state, record in GITHUB_STATES.items():
+        if not isinstance(record, dict):
+            if not state or stored_state == state:
+                states_to_clear.append(stored_state)
+            continue
+        if (
+            record.get("kind") == "install"
+            and record.get("userId") == user.get("id")
+            and (not state or stored_state == state)
+        ):
+            states_to_clear.append(stored_state)
     for stored_state in states_to_clear:
         GITHUB_STATES.pop(stored_state, None)
     if states_to_clear:
