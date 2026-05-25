@@ -779,8 +779,40 @@ def scan_payload(scan: dict) -> dict:
 
 
 def issue_payload(issue: dict) -> dict:
-    payload = dict(issue)
-    issue_id = clean_pull_request_issue_id(issue.get("id"))
+    issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
+    auto_fix = issue.get("autoFix") is True
+    auto_fixable = issue.get("autoFixable") is True or auto_fix
+    payload = {
+        "id": issue_id,
+        "userId": public_issue_text(issue.get("userId")),
+        "scanId": public_issue_text(issue.get("scanId")),
+        "repo": clean_repository_full_name(issue.get("repo"), issue.get("repository")),
+        "branch": public_issue_text(issue.get("branch")),
+        "status": public_issue_status(issue.get("status")),
+        "severity": review._safe_severity(issue.get("severity")),
+        "category": review._safe_category(issue.get("category")),
+        "title": review._safe_text(issue.get("title"), "Untitled finding"),
+        "summary": public_issue_text(issue.get("summary")) or public_issue_text(issue.get("description")),
+        "impact": public_issue_text(issue.get("impact")),
+        "file": public_issue_text(issue.get("file")),
+        "line": review._safe_non_negative_int(issue.get("line")),
+        "confidence": review._safe_confidence(issue.get("confidence")),
+        "autoFix": auto_fix,
+        "autoFixable": auto_fixable,
+        "effort": review._safe_text(issue.get("effort"), "-"),
+        "tags": review._safe_text_list(issue.get("tags")),
+        "steps": review._safe_text_list(issue.get("steps")),
+        "badCode": review._safe_code_lines(issue.get("badCode")),
+        "goodCode": review._safe_code_lines(issue.get("goodCode")),
+        "references": review._safe_references(issue.get("references")),
+        "createdAt": pull_request_timestamp(issue.get("createdAt")) or 0,
+    }
+    updated_at = pull_request_timestamp(issue.get("updatedAt"))
+    if updated_at is not None:
+        payload["updatedAt"] = updated_at
+    age = public_issue_text(issue.get("age"))
+    if age:
+        payload["age"] = age
     pull_request = issue.get("pullRequest")
     if isinstance(pull_request, dict):
         payload["pullRequest"] = safe_existing_pull_request(
@@ -792,6 +824,15 @@ def issue_payload(issue: dict) -> dict:
     if isinstance(pending, dict):
         payload["pullRequestPending"] = safe_pending_pull_request(pending, issue_id=issue_id)
     return payload
+
+
+def public_issue_text(value: object) -> str:
+    return review._safe_text(value)
+
+
+def public_issue_status(value: object) -> str:
+    status = public_issue_text(value).lower()
+    return status if status in ISSUE_STATUSES else "open"
 
 
 def scan_queue_payload(scan: dict) -> dict | None:

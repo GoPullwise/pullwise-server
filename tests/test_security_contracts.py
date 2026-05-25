@@ -533,6 +533,74 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(app.ISSUES[0]["status"], "open")
 
+    def test_issue_read_routes_sanitize_legacy_issue_fields(self) -> None:
+        app.ISSUES[0].update({
+            "scanId": {"value": "sc_1"},
+            "repo": {"fullName": "owner/repo"},
+            "repository": "owner/repo",
+            "branch": "main\r\nX-Injected: bad",
+            "severity": "critical\r\nX-Injected: bad",
+            "category": "security\r\nX-Injected: bad",
+            "title": "Unsafe redirect\r\nX-Injected: bad",
+            "summary": {"text": "bad shape"},
+            "impact": "Phishing risk.\x00",
+            "file": "src/app.py\r\n../secret",
+            "line": {"value": 12},
+            "confidence": float("nan"),
+            "autoFix": "false",
+            "autoFixable": "true",
+            "effort": {"value": "5 min"},
+            "tags": ["safe-tag", "bad\r\nextra", {"value": "bad"}],
+            "steps": ["Use allowlist.", "bad\r\nextra"],
+            "badCode": [
+                {"ln": 1, "code": "bad\r\nextra", "t": "del"},
+                {"ln": 2, "code": "return redirect(next_url)", "t": "bad"},
+            ],
+            "goodCode": [{"ln": {"value": 2}, "code": "return safe_redirect(next_url)", "t": "add"}],
+            "references": [
+                {"label": "Docs\r\nInjected", "url": "https://example.com/docs"},
+                {"label": "Unsafe", "url": "javascript:alert(1)"},
+                {"label": "Safe", "url": "https://example.com/safe"},
+            ],
+            "createdAt": {"value": app.now()},
+        })
+
+        expected = {
+            "id": "iss_1",
+            "userId": "usr_1",
+            "scanId": "",
+            "repo": "owner/repo",
+            "branch": "",
+            "status": "open",
+            "severity": "medium",
+            "category": "Quality",
+            "title": "Untitled finding",
+            "summary": "",
+            "impact": "",
+            "file": "",
+            "line": 0,
+            "confidence": 0.7,
+            "autoFix": False,
+            "autoFixable": False,
+            "effort": "-",
+            "tags": ["safe-tag"],
+            "steps": ["Use allowlist."],
+            "badCode": [{"ln": 2, "code": "return redirect(next_url)", "t": None}],
+            "goodCode": [{"ln": 0, "code": "return safe_redirect(next_url)", "t": "add"}],
+            "references": [{"label": "Safe", "url": "https://example.com/safe"}],
+            "createdAt": 0,
+        }
+
+        for path in ("/issues", "/issues/iss_1"):
+            with self.subTest(path=path):
+                handler = RouteHarness(path, cookie=self.signed_in())
+
+                app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.OK)
+                issue = handler.payload["items"][0] if path == "/issues" else handler.payload
+                self.assertEqual(issue, expected)
+
     def test_github_installation_html_url_must_match_configured_github_host(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             self.assertEqual(
