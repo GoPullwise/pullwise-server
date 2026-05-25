@@ -184,7 +184,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         with patch.object(app.worker, "start_scan") as start_scan:
             start = RouteHarness(
                 f"/api/v1/repositories/{repo['repoId']}/scans",
-                {"requestId": "req_api", "branch": "main"},
+                {"requestId": "req_bad\r\nX-Test: bad", "idempotencyKey": "req_api", "branch": "main"},
                 headers=auth,
             )
             app.PullwiseHandler.route(start, "POST")
@@ -193,6 +193,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(start.payload["repoId"], repo["repoId"])
         self.assertEqual(start.payload["workspaceId"], db.workspace_id_for_installation("111"))
         self.assertEqual(app.SCANS[0]["apiKeyId"], repositories.payload["apiKey"]["id"])
+        self.assertEqual(app.SCANS[0]["requestId"], "req_api")
         start_scan.assert_called_once_with(start.payload["id"])
 
         status = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/current", headers=auth)

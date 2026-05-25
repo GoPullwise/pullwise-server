@@ -1232,6 +1232,14 @@ def requested_api_key_scopes(value: object, *, provided: bool) -> tuple[list[str
     return scopes, None
 
 
+def scan_request_id_from_body(body: dict) -> str:
+    for key in ("requestId", "idempotencyKey"):
+        value = clean_github_access_text(body.get(key), allow_int=True)
+        if value and "\x00" not in value:
+            return value[:128]
+    return ""
+
+
 def parse_api_key_scopes(value: object) -> list[str]:
     if isinstance(value, list):
         return clean_api_key_scopes(value)
@@ -3615,7 +3623,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
                 )
-            request_id = str(body.get("requestId") or body.get("idempotencyKey") or "").strip()[:128]
+            request_id = scan_request_id_from_body(body)
             scan_error: tuple[int, str] | None = None
             scan_error_code: str | None = None
             scan_error_workspace_id: str | None = None
@@ -4706,7 +4714,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
             )
-        request_id = str(body.get("requestId") or body.get("idempotencyKey") or "").strip()[:128]
+        request_id = scan_request_id_from_body(body)
         existing = user_scan_by_request_id(context["user"]["id"], request_id)
         if existing and existing.get("repoId") == repository["id"] and existing.get("workspaceId") == context["workspace"]["id"]:
             return self.json(scan_payload(existing))

@@ -1110,6 +1110,8 @@ class SecurityContractsTest(unittest.TestCase):
                 "repo": "owner/repo",
                 "branch": "feature\r\nX-Test: bad",
                 "commit": {"sha": "bad"},
+                "requestId": {"bad": "shape"},
+                "idempotencyKey": "safe_scan_req",
             },
             cookie="pw_session=ses_1",
         )
@@ -1123,6 +1125,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertEqual(handler.payload["branch"], "main")
         self.assertEqual(handler.payload["commit"], "pending")
+        self.assertEqual(app.SCANS[0]["requestId"], "safe_scan_req")
         start_scan.assert_called_once()
 
     def test_scan_creation_is_idempotent_for_repeated_request_id(self) -> None:
