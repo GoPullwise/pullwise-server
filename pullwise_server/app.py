@@ -532,9 +532,9 @@ def trusted_github_web_url(value: object) -> str | None:
     return raw
 
 
-def safe_redirect_to(value: str | None, screen: str) -> str:
+def safe_redirect_to(value: object, screen: str) -> str:
     fallback = default_redirect(screen)
-    if not value:
+    if not isinstance(value, str) or not value:
         return fallback
     if any(char in value for char in "\r\n"):
         return fallback

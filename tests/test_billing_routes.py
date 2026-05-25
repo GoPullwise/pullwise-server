@@ -173,6 +173,29 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(create.call_args.kwargs["interval"], "year")
 
+    def test_checkout_session_falls_back_for_non_string_redirect_urls(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(
+            {
+                "successUrl": {"url": "https://evil.example/success"},
+                "cancelUrl": ["https://evil.example/cancel"],
+            },
+            cookie=cookie,
+        )
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_APP_URL": "https://app.pullwise.dev"}, clear=True),
+            patch(
+                "pullwise_server.billing.create_checkout_session",
+                return_value={"provider": "stripe", "id": "cs_1", "url": "https://checkout.stripe.com/cs/test"},
+            ) as create,
+        ):
+            app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(create.call_args.kwargs["success_url"], "https://app.pullwise.dev/?screen=settings")
+        self.assertEqual(create.call_args.kwargs["cancel_url"], "https://app.pullwise.dev/?screen=settings")
+
     def test_portal_session_rejects_non_object_body(self) -> None:
         cookie = seed_session()
         handler = HandlerHarness(["invalid"], cookie=cookie)
