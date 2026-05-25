@@ -20,7 +20,7 @@ import threading
 import time
 import traceback
 
-from . import checkout, review, scan_logging
+from . import checkout, db, review, scan_logging
 
 
 # Phase keys must match the SCAN_PHASES table the frontend renders.
@@ -154,6 +154,7 @@ def _execute_scan(scan_id: str, snapshot: dict, started_at: int) -> None:
                 if repo_path:
                     snapshot["repoPath"] = repo_path
                     snapshot["commit"] = checkout.current_commit(repo_path, lambda: _is_cancelled(scan_id))
+                    _record_repo_risk_decision(scan_id, snapshot, repo_path)
                     _log_scan_event("checkout_ready", scan_id, snapshot, repoPath=repo_path)
                 else:
                     time.sleep(weight or 0)
@@ -407,6 +408,61 @@ def _prepare_checkout_if_needed(scan_id: str, snapshot: dict) -> str | None:
     ):
         return str(repo_path)
     return checkout.prepare_checkout(scan_id, snapshot, lambda: _is_cancelled(scan_id))
+
+
+def _record_repo_risk_decision(scan_id: str, snapshot: dict, repo_path: str) -> None:
+    try:
+        fingerprint = checkout.repository_fingerprint(
+            repo_path,
+            lambda: _is_cancelled(scan_id),
+            head_sha=str(snapshot.get("commit") or ""),
+        )
+        fingerprint["defaultBranch"] = str(snapshot.get("branch") or "main")
+        decision = _repo_risk_decision(snapshot, fingerprint)
+        snapshot["repoFingerprint"] = fingerprint
+        snapshot["riskDecision"] = decision
+        _patch_scan(
+            scan_id,
+            {
+                "repoFingerprint": fingerprint,
+                "riskDecision": decision,
+            },
+        )
+        _log_scan_event(
+            "repo_risk_decision",
+            scan_id,
+            snapshot,
+            riskDecision=decision.get("decision"),
+            riskReason=decision.get("reason"),
+            matchedRepositoryId=decision.get("matchedRepositoryId"),
+            sourceFingerprint=fingerprint.get("sourceFingerprint"),
+        )
+    except checkout.CheckoutCancelled:
+        raise
+    except Exception as exc:
+        _log_scan_event("repo_risk_decision_failed", scan_id, snapshot, error=str(exc)[:500])
+
+
+def _repo_risk_decision(snapshot: dict, fingerprint: dict) -> dict:
+    workspace_id = str(snapshot.get("workspaceId") or "")
+    repository_id = str(snapshot.get("repoId") or "")
+    source_fingerprint = str(fingerprint.get("sourceFingerprint") or "")
+    if not repository_id:
+        return {"decision": "allow", "reason": "missing_repository_context"}
+
+    match = db.find_workspace_repo_fingerprint_match(
+        workspace_id,
+        repository_id,
+        source_fingerprint,
+    )
+    db.upsert_repo_fingerprint(repository_id, fingerprint)
+    if match:
+        return {
+            "decision": "allow_limited_trial",
+            "reason": "source_fingerprint_matches_existing_workspace_repo",
+            "matchedRepositoryId": match.get("repository_id"),
+        }
+    return {"decision": "allow", "reason": "no_matching_workspace_source_fingerprint"}
 
 
 def _cleanup_checkout_workspace(scan_id: str, snapshot: dict) -> None:

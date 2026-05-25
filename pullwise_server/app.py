@@ -1222,6 +1222,33 @@ def scan_payload(scan: dict) -> dict:
         payload["billingUsage"] = safe_quota_usage_payload(scan.get("billingUsage"), default_scope="workspace")
     if isinstance(scan.get("repoUsage"), dict):
         payload["repoUsage"] = safe_quota_usage_payload(scan.get("repoUsage"), default_scope="repository")
+    if isinstance(scan.get("riskDecision"), dict):
+        decision = public_issue_text(scan["riskDecision"].get("decision"))
+        reason = public_issue_text(scan["riskDecision"].get("reason"))
+        risk_payload = {}
+        if decision:
+            risk_payload["decision"] = decision
+        if reason:
+            risk_payload["reason"] = reason
+        matched_repository_id = clean_github_access_text(scan["riskDecision"].get("matchedRepositoryId"), allow_int=True)
+        if matched_repository_id:
+            risk_payload["matchedRepositoryId"] = matched_repository_id
+        if risk_payload:
+            payload["riskDecision"] = risk_payload
+    if isinstance(scan.get("repoFingerprint"), dict):
+        fingerprint_payload = {}
+        for source_key, target_key in (
+            ("headSha", "headSha"),
+            ("treeSha", "treeSha"),
+            ("lockfileHash", "lockfileHash"),
+            ("manifestHash", "manifestHash"),
+            ("sourceFingerprint", "sourceFingerprint"),
+        ):
+            value = clean_github_access_text(scan["repoFingerprint"].get(source_key))
+            if value:
+                fingerprint_payload[target_key] = value
+        if fingerprint_payload:
+            payload["repoFingerprint"] = fingerprint_payload
     if "installationAccount" in scan:
         payload["installationAccount"] = clean_github_access_text(scan.get("installationAccount"))
     if "installationTargetType" in scan:

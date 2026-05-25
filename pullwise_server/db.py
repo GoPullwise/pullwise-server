@@ -609,6 +609,93 @@ def get_workspace_repository(workspace_id: str, repository_id: str) -> dict[str,
         )
 
 
+def upsert_repo_fingerprint(repository_id: str, fingerprint: dict[str, Any]) -> dict[str, Any] | None:
+    initialize()
+    repository_id = str(repository_id or "").strip()
+    if not repository_id:
+        raise ValueError("repository id is required")
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO repo_fingerprints (
+                    repository_id, default_branch, head_sha, tree_sha, lockfile_hash,
+                    manifest_hash, source_fingerprint, computed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                ON CONFLICT(repository_id) DO UPDATE SET
+                    default_branch = COALESCE(excluded.default_branch, repo_fingerprints.default_branch),
+                    head_sha = COALESCE(excluded.head_sha, repo_fingerprints.head_sha),
+                    tree_sha = COALESCE(excluded.tree_sha, repo_fingerprints.tree_sha),
+                    lockfile_hash = COALESCE(excluded.lockfile_hash, repo_fingerprints.lockfile_hash),
+                    manifest_hash = COALESCE(excluded.manifest_hash, repo_fingerprints.manifest_hash),
+                    source_fingerprint = COALESCE(excluded.source_fingerprint, repo_fingerprints.source_fingerprint),
+                    computed_at = excluded.computed_at
+                """,
+                (
+                    repository_id,
+                    fingerprint.get("defaultBranch") or fingerprint.get("default_branch"),
+                    fingerprint.get("headSha") or fingerprint.get("head_sha"),
+                    fingerprint.get("treeSha") or fingerprint.get("tree_sha"),
+                    fingerprint.get("lockfileHash") or fingerprint.get("lockfile_hash"),
+                    fingerprint.get("manifestHash") or fingerprint.get("manifest_hash"),
+                    fingerprint.get("sourceFingerprint") or fingerprint.get("source_fingerprint"),
+                ),
+            )
+            return row_to_dict(
+                connection.execute(
+                    "SELECT * FROM repo_fingerprints WHERE repository_id = ?",
+                    (repository_id,),
+                ).fetchone()
+            )
+
+
+def get_repo_fingerprint(repository_id: str) -> dict[str, Any] | None:
+    initialize()
+    repository_id = str(repository_id or "").strip()
+    if not repository_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                "SELECT * FROM repo_fingerprints WHERE repository_id = ?",
+                (repository_id,),
+            ).fetchone()
+        )
+
+
+def find_workspace_repo_fingerprint_match(
+    workspace_id: str,
+    repository_id: str,
+    source_fingerprint: str,
+) -> dict[str, Any] | None:
+    initialize()
+    workspace_id = str(workspace_id or "").strip()
+    repository_id = str(repository_id or "").strip()
+    source_fingerprint = str(source_fingerprint or "").strip()
+    if not workspace_id or not repository_id or not source_fingerprint:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                """
+                SELECT rf.*, wr.workspace_id
+                FROM repo_fingerprints rf
+                JOIN workspace_repositories wr ON wr.repository_id = rf.repository_id
+                WHERE wr.workspace_id = ?
+                  AND rf.repository_id != ?
+                  AND rf.source_fingerprint = ?
+                ORDER BY rf.computed_at ASC
+                LIMIT 1
+                """,
+                (workspace_id, repository_id, source_fingerprint),
+            ).fetchone()
+        )
+
+
 def update_workspace_billing(workspace_id: str, billing_state: dict[str, Any]) -> dict[str, Any] | None:
     initialize()
     with _LOCK, closing(connect()) as connection:

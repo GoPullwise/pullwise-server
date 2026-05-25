@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import re
 import shutil
@@ -21,6 +22,63 @@ class CheckoutCancelled(Exception):
 _REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _NO_COMMIT = {"", "-", "pending"}
+_LOCKFILE_NAMES = {
+    "cargo.lock",
+    "composer.lock",
+    "gemfile.lock",
+    "go.sum",
+    "package-lock.json",
+    "pipfile.lock",
+    "pnpm-lock.yaml",
+    "poetry.lock",
+    "yarn.lock",
+}
+_MANIFEST_NAMES = {
+    "build.gradle",
+    "cargo.toml",
+    "composer.json",
+    "gemfile",
+    "go.mod",
+    "package.json",
+    "pom.xml",
+    "pyproject.toml",
+    "requirements.txt",
+}
+_SOURCE_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".go",
+    ".h",
+    ".hpp",
+    ".html",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".mjs",
+    ".php",
+    ".py",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".ts",
+    ".tsx",
+    ".vue",
+}
+_FINGERPRINT_SKIP_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+}
 
 
 def prepare_checkout(scan_id: str, scan: dict, is_cancelled: Callable[[], bool]) -> str:
@@ -195,6 +253,100 @@ def current_commit(checkout_path: str, is_cancelled: Callable[[], bool]) -> str:
     if not _COMMIT_RE.match(commit):
         raise RuntimeError("Git checkout did not report a valid commit SHA.")
     return commit
+
+
+def repository_fingerprint(
+    checkout_path: str,
+    is_cancelled: Callable[[], bool],
+    *,
+    head_sha: str | None = None,
+) -> dict[str, str]:
+    head = (head_sha or current_commit(checkout_path, is_cancelled)).strip()
+    if not _COMMIT_RE.match(head):
+        raise RuntimeError("Git checkout did not report a valid commit SHA.")
+    tree = run_git_output(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=checkout_path,
+        extra_env={},
+        is_cancelled=is_cancelled,
+        action="read checkout tree",
+    ).strip()
+    if not _COMMIT_RE.match(tree):
+        raise RuntimeError("Git checkout did not report a valid tree SHA.")
+    files = list(_iter_fingerprint_files(checkout_path, is_cancelled))
+    return {
+        "headSha": head,
+        "treeSha": tree,
+        "lockfileHash": _fingerprint_files(checkout_path, files, _LOCKFILE_NAMES, is_cancelled),
+        "manifestHash": _fingerprint_files(checkout_path, files, _MANIFEST_NAMES, is_cancelled),
+        "sourceFingerprint": _fingerprint_source_files(checkout_path, files, is_cancelled),
+    }
+
+
+def _iter_fingerprint_files(checkout_path: str, is_cancelled: Callable[[], bool]) -> list[str]:
+    root = os.path.abspath(checkout_path)
+    rel_paths: list[str] = []
+    for current_root, dirs, files in os.walk(root):
+        if is_cancelled():
+            raise CheckoutCancelled()
+        dirs[:] = sorted(
+            dirname for dirname in dirs if dirname.lower() not in _FINGERPRINT_SKIP_DIRS
+        )
+        for name in sorted(files):
+            path = os.path.join(current_root, name)
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                continue
+            if size > 2 * 1024 * 1024:
+                continue
+            rel_paths.append(os.path.relpath(path, root).replace(os.sep, "/"))
+    return rel_paths
+
+
+def _fingerprint_files(
+    checkout_path: str,
+    files: list[str],
+    names: set[str],
+    is_cancelled: Callable[[], bool],
+) -> str:
+    selected = [path for path in files if os.path.basename(path).lower() in names]
+    return _digest_paths(checkout_path, selected, is_cancelled)
+
+
+def _fingerprint_source_files(
+    checkout_path: str,
+    files: list[str],
+    is_cancelled: Callable[[], bool],
+) -> str:
+    selected = [
+        path
+        for path in files
+        if os.path.splitext(path)[1].lower() in _SOURCE_EXTENSIONS
+    ]
+    return _digest_paths(checkout_path, selected[:2000], is_cancelled)
+
+
+def _digest_paths(checkout_path: str, rel_paths: list[str], is_cancelled: Callable[[], bool]) -> str:
+    if not rel_paths:
+        return ""
+    digest = hashlib.sha256()
+    for rel_path in sorted(rel_paths):
+        if is_cancelled():
+            raise CheckoutCancelled()
+        digest.update(rel_path.encode("utf-8", "surrogateescape"))
+        digest.update(b"\0")
+        digest.update(_file_digest(os.path.join(checkout_path, rel_path)).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _file_digest(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def terminate_process(process: subprocess.Popen) -> None:

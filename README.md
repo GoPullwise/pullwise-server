@@ -509,7 +509,9 @@ User records contain:
 Normalized tables include `workspaces`, `workspace_members`, `repositories`,
 `workspace_repositories`, `quota_buckets`, `quota_ledger`, and
 `repo_fingerprints`. New scans store `workspaceId`, `repoId`, `githubRepoId`,
-workspace usage, repository usage, and quota bucket ids.
+workspace usage, repository usage, quota bucket ids, and checkout fingerprint
+risk decisions. Forks share repository quota through their GitHub source repo id,
+and content fingerprints are recorded after checkout for clone/reuse review.
 
 The frontend-facing surfaces are `GET /auth/session` for login, GitHub, and
 workspace state, and `GET /billing/plan` for plan catalog plus current workspace

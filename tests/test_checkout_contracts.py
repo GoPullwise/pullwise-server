@@ -215,5 +215,33 @@ class CheckoutContractsTest(unittest.TestCase):
         )
 
 
+class RepositoryFingerprintTest(unittest.TestCase):
+    def test_repository_fingerprint_hashes_dependency_and_source_files(self) -> None:
+        with tempfile.TemporaryDirectory() as repo_path:
+            os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+            with open(os.path.join(repo_path, "package-lock.json"), "w", encoding="utf-8") as handle:
+                handle.write('{"lockfileVersion": 3}\n')
+            with open(os.path.join(repo_path, "package.json"), "w", encoding="utf-8") as handle:
+                handle.write('{"name": "demo"}\n')
+            with open(os.path.join(repo_path, "src", "app.py"), "w", encoding="utf-8") as handle:
+                handle.write("print('ok')\n")
+            os.makedirs(os.path.join(repo_path, ".git"), exist_ok=True)
+            with open(os.path.join(repo_path, ".git", "ignored.py"), "w", encoding="utf-8") as handle:
+                handle.write("print('ignored')\n")
+
+            with patch.object(checkout, "run_git_output", return_value="b" * 40):
+                fingerprint = checkout.repository_fingerprint(
+                    repo_path,
+                    lambda: False,
+                    head_sha="a" * 40,
+                )
+
+        self.assertEqual(fingerprint["headSha"], "a" * 40)
+        self.assertEqual(fingerprint["treeSha"], "b" * 40)
+        self.assertRegex(fingerprint["lockfileHash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(fingerprint["manifestHash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(fingerprint["sourceFingerprint"], r"^[0-9a-f]{64}$")
+
+
 if __name__ == "__main__":
     unittest.main()
