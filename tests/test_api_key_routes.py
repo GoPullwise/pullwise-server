@@ -212,6 +212,54 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(stop.status, HTTPStatus.OK)
         self.assertEqual(stop.payload["status"], "cancelled")
 
+    def test_api_key_rejects_request_id_reuse_for_different_repo(self) -> None:
+        _cookie, key = self.create_api_key()
+        workspace_id = db.workspace_id_for_installation("111")
+        other_repo = db.upsert_repository(
+            {
+                "id": db.repository_id_for_github_repo("456"),
+                "github_repo_id": "456",
+                "full_name": "acme/other",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "clone_url": "https://github.com/acme/other.git",
+            }
+        )
+        db.upsert_workspace_repository(
+            workspace_id,
+            other_repo["id"],
+            github_app_installation_id="111",
+            permissions={"pull": True},
+            repository_selection="selected",
+            installation_account="acme",
+        )
+        auth = {"Authorization": f"Bearer {key}"}
+
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        app.PullwiseHandler.route(repositories, "GET")
+        repo_ids = {item["fullName"]: item["repoId"] for item in repositories.payload["items"]}
+
+        with patch.object(app.worker, "start_scan") as start_scan:
+            first = RouteHarness(
+                f"/api/v1/repositories/{repo_ids['acme/api']}/scans",
+                {"requestId": "req_shared"},
+                headers=auth,
+            )
+            second = RouteHarness(
+                f"/api/v1/repositories/{repo_ids['acme/other']}/scans",
+                {"requestId": "req_shared"},
+                headers=auth,
+            )
+            app.PullwiseHandler.route(first, "POST")
+            app.PullwiseHandler.route(second, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.CONFLICT)
+        self.assertEqual(second.payload["code"], "IDEMPOTENCY_KEY_REUSED")
+        self.assertEqual(second.payload["repoId"], first.payload["repoId"])
+        self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "req_shared"]), 1)
+        start_scan.assert_called_once_with(first.payload["id"])
+
     def test_user_can_create_manual_workspace_for_dashboard_switcher(self) -> None:
         cookie = seed_session()
         handler = RouteHarness("/workspaces", {"name": "Platform"}, cookie=cookie)

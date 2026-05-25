@@ -1009,6 +1009,32 @@ def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
     return None
 
 
+IDEMPOTENCY_KEY_REUSED_MESSAGE = "This idempotency key is already attached to a different repository scan."
+
+
+def scan_matches_requested_repository(scan: dict, *, requested_repo_id: str | None = None, requested_repository: str | None = None) -> bool:
+    if requested_repo_id:
+        scan_repo_ids = {
+            clean_github_access_text(scan.get("repoId"), allow_int=True),
+            clean_github_access_text(scan.get("githubRepoId"), allow_int=True),
+        }
+        if requested_repo_id in scan_repo_ids:
+            return True
+    if requested_repository and clean_repository_full_name(scan.get("repo"), scan.get("repository")) == requested_repository:
+        return True
+    return False
+
+
+def idempotency_key_reused_payload(scan: dict | None) -> dict:
+    payload = {"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"}
+    if isinstance(scan, dict):
+        if workspace_id := clean_github_access_text(scan.get("workspaceId"), allow_int=True):
+            payload["workspaceId"] = workspace_id
+        if repo_id := clean_github_access_text(scan.get("repoId"), allow_int=True):
+            payload["repoId"] = repo_id
+    return payload
+
+
 def current_review_usage_period(timestamp: int | None = None) -> str:
     return time.strftime("%Y-%m", time.gmtime(timestamp or now()))
 
@@ -3644,7 +3670,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     scan_error_code = "REPOSITORY_SYNC_REQUIRED"
                 else:
                     scan = user_scan_by_request_id(session["userId"], request_id)
-                    if scan is None:
+                    if scan is not None and not scan_matches_requested_repository(
+                        scan,
+                        requested_repo_id=requested_repo_id,
+                        requested_repository=requested_repository,
+                    ):
+                        scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
+                        scan_error_code = "IDEMPOTENCY_KEY_REUSED"
+                        scan_error_workspace_id = clean_github_access_text(scan.get("workspaceId"), allow_int=True)
+                        scan_error_repo_id = clean_github_access_text(scan.get("repoId"), allow_int=True)
+                        scan = None
+                    elif scan is None:
                         repo_meta, request_key = repository_item_for_scan_request(github_access, body)
                         if not repo_meta:
                             scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
@@ -4718,6 +4754,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         existing = user_scan_by_request_id(context["user"]["id"], request_id)
         if existing and existing.get("repoId") == repository["id"] and existing.get("workspaceId") == context["workspace"]["id"]:
             return self.json(scan_payload(existing))
+        if existing:
+            return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
         scan_id = make_id("sc")
         try:
             quota_result = quota.consume_scan_quota(

@@ -1183,6 +1183,72 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_1"]), 1)
         start_scan.assert_called_once_with(first.payload["id"])
 
+    def test_scan_creation_rejects_request_id_reuse_for_different_repo(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": "111",
+            "repositories": ["owner/repo", "owner/other"],
+            "repositoryItems": [
+                {
+                    "id": "repo_1",
+                    "githubRepoId": "101",
+                    "name": "repo",
+                    "fullName": "owner/repo",
+                    "installationId": "111",
+                    "defaultBranch": "main",
+                    "cloneUrl": "https://github.com/owner/repo.git",
+                },
+                {
+                    "id": "repo_2",
+                    "githubRepoId": "202",
+                    "name": "other",
+                    "fullName": "owner/other",
+                    "installationId": "111",
+                    "defaultBranch": "main",
+                    "cloneUrl": "https://github.com/owner/other.git",
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+
+        first = RouteHarness(
+            "/scans",
+            {"repo": "owner/repo", "requestId": "scan_req_shared"},
+            cookie="pw_session=ses_1",
+        )
+        second = RouteHarness(
+            "/scans",
+            {"repo": "owner/other", "requestId": "scan_req_shared"},
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
+            patch.object(app.worker, "start_scan") as start_scan,
+        ):
+            app.PullwiseHandler.route(first, "POST")
+            app.PullwiseHandler.route(second, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.CONFLICT)
+        self.assertEqual(second.payload["code"], "IDEMPOTENCY_KEY_REUSED")
+        self.assertEqual(second.payload["repoId"], first.payload["repoId"])
+        self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_shared"]), 1)
+        start_scan.assert_called_once_with(first.payload["id"])
+
     def test_repositories_payload_treats_string_false_need_sync_as_connected(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
