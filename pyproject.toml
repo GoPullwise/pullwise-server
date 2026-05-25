@@ -11,3 +11,6 @@ dependencies = [
 
 [project.scripts]
 pullwise-server = "pullwise_server.app:main"
+
+[tool.setuptools]
+packages = ["pullwise_server"]
