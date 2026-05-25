@@ -266,18 +266,22 @@ def persist_state(*, force: bool = False) -> None:
     with STATE_LOCK:
         if not STATE_LOADED or (not force and not STATE_DIRTY):
             return
-        db.save_state(
-            {
-                "users": USERS,
-                "sessions": SESSIONS,
-                "githubStates": GITHUB_STATES,
-                "settings": SETTINGS,
-                "billingEvents": BILLING_EVENTS,
-                "billingPendingUpdates": BILLING_PENDING_UPDATES,
-                "scans": SCANS,
-                "issues": ISSUES,
-            }
-        )
+        try:
+            db.save_state(
+                {
+                    "users": USERS,
+                    "sessions": SESSIONS,
+                    "githubStates": GITHUB_STATES,
+                    "settings": SETTINGS,
+                    "billingEvents": BILLING_EVENTS,
+                    "billingPendingUpdates": BILLING_PENDING_UPDATES,
+                    "scans": SCANS,
+                    "issues": ISSUES,
+                }
+            )
+        except Exception:
+            logger.exception("Failed to persist app state.")
+            return
         STATE_DIRTY = False
 
 

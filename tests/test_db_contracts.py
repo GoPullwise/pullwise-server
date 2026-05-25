@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from pullwise_server import db
+from pullwise_server import app, db
 
 
 class FakeConnection:
@@ -68,6 +68,18 @@ class DatabaseContractsTest(unittest.TestCase):
 
         self.assertTrue(initialize_connection.closed)
         self.assertTrue(write_connection.closed)
+
+    def test_persist_state_keeps_dirty_when_save_fails(self) -> None:
+        with (
+            patch.object(app, "STATE_LOADED", True),
+            patch.object(app, "STATE_DIRTY", True),
+            patch.object(app.db, "save_state", side_effect=RuntimeError("disk full")),
+            patch.object(app.logger, "exception") as log_exception,
+        ):
+            app.persist_state()
+
+            self.assertTrue(app.STATE_DIRTY)
+            log_exception.assert_called_once()
 
 
 if __name__ == "__main__":
