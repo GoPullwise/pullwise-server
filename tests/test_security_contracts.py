@@ -739,6 +739,26 @@ class SecurityContractsTest(unittest.TestCase):
 
                 self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_missing_resource_routes_return_not_found_without_internal_details(self) -> None:
+        cases = [
+            ("GET", "/scans/missing", {}, "Scan not found."),
+            ("POST", "/scans/missing/cancel", {}, "Scan not found."),
+            ("GET", "/issues/missing", {}, "Issue not found."),
+            ("POST", "/issues/missing/fixes/preview", {}, "Issue not found."),
+            ("PATCH", "/issues/missing/status", {"status": "fixed"}, "Issue not found."),
+        ]
+
+        for method, path, body, message in cases:
+            with self.subTest(method=method, path=path):
+                handler = RouteHarness(path, body, cookie=self.signed_in())
+
+                with patch.object(app.logger, "exception") as log_exception:
+                    app.PullwiseHandler.route(handler, method)
+
+                self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+                self.assertEqual(handler.payload, {"message": message})
+                log_exception.assert_not_called()
+
     def test_scan_read_routes_sanitize_legacy_scan_fields(self) -> None:
         app.SCANS[0].update({
             "repo": {"fullName": "owner/repo"},

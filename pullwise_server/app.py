@@ -117,6 +117,12 @@ class RequestBodyTooLarge(ValueError):
     pass
 
 
+class ResourceNotFound(Exception):
+    def __init__(self, label: str) -> None:
+        safe_label = label if label in {"Issue", "Scan"} else "Resource"
+        super().__init__(f"{safe_label} not found.")
+
+
 def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
@@ -2328,6 +2334,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
         except RequestBodyTooLarge as exc:
             return self.error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+        except ResourceNotFound as exc:
+            return self.error(HTTPStatus.NOT_FOUND, str(exc))
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         except billing.BillingProviderConflict as exc:
@@ -3050,7 +3058,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         for item in collection:
             if item.get("id") == item_id:
                 return item
-        raise ValueError(f"{label} not found: {item_id}")
+        raise ResourceNotFound(label)
 
     def read_json(self) -> dict:
         return decode_json_body(self.read_raw_body())
