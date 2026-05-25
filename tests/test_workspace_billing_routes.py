@@ -206,6 +206,50 @@ class WorkspaceBillingRoutesTest(unittest.TestCase):
         self.assertEqual(updated["billing_status"], "active")
         self.assertEqual(updated["billing_subscription_id"], "sub_1")
 
+    def test_workspace_billing_update_ignores_unsafe_scalar_fields(self) -> None:
+        workspace = db.upsert_workspace(
+            {
+                "id": "ws_123",
+                "name": "acme",
+                "github_app_installation_id": "111",
+                "plan": "pro",
+                "billing_provider": "stripe",
+                "billing_customer_id": "cus_existing",
+                "billing_subscription_id": "sub_existing",
+                "billing_subscription_item_id": "si_existing",
+                "billing_status": "active",
+                "billing_interval": "month",
+            }
+        )
+        handler = RouteHarness()
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "workspaceId": workspace["id"],
+                "provider": "stripe\r\nX-Injected: bad",
+                "customerId": "cus_bad\r\nX-Injected: bad",
+                "subscriptionId": "sub_bad\r\nX-Injected: bad",
+                "subscriptionItemId": "si_bad\r\nX-Injected: bad",
+                "status": "past_due\r\nX-Injected: bad",
+                "plan": "free\r\nX-Injected: bad",
+                "interval": "year\r\nX-Injected: bad",
+                "eventType": "customer.subscription.updated\r\nX-Injected: bad",
+                "eventId": "evt_bad_workspace_scalars",
+                "eventCreated": 300,
+            },
+        )
+
+        updated = db.get_workspace(workspace["id"])
+        self.assertEqual(updated["billing_provider"], "stripe")
+        self.assertEqual(updated["billing_customer_id"], "cus_existing")
+        self.assertEqual(updated["billing_subscription_id"], "sub_existing")
+        self.assertEqual(updated["billing_subscription_item_id"], "si_existing")
+        self.assertEqual(updated["billing_status"], "active")
+        self.assertEqual(updated["plan"], "pro")
+        self.assertEqual(updated["billing_interval"], "month")
+        self.assertIsNone(app.BILLING_EVENTS["evt_bad_workspace_scalars"]["eventType"])
+
     def test_legacy_user_billing_usage_migrates_to_workspace_bucket(self) -> None:
         cookie = seed_workspace_session()
         app.USERS["usr_1"]["billingUsage"] = {
