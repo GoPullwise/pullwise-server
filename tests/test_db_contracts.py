@@ -49,6 +49,16 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertTrue(initialize_connection.closed)
         self.assertTrue(read_connection.closed)
 
+    def test_load_state_ignores_malformed_json_rows(self) -> None:
+        initialize_connection = FakeConnection()
+        read_connection = FakeConnection([
+            ("users", '{"usr_1": {"id": "usr_1"}}'),
+            ("sessions", "{not-json"),
+        ])
+
+        with patch("pullwise_server.db.connect", side_effect=[initialize_connection, read_connection]):
+            self.assertEqual(db.load_state(), {"users": {"usr_1": {"id": "usr_1"}}})
+
     def test_save_state_closes_initialize_and_write_connections(self) -> None:
         initialize_connection = FakeConnection()
         write_connection = FakeConnection()

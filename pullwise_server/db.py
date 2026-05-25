@@ -77,7 +77,13 @@ def load_state() -> dict[str, Any]:
     initialize()
     with _LOCK, closing(connect()) as connection:
         rows = connection.execute("SELECT name, payload FROM app_state").fetchall()
-    return {name: json.loads(payload) for name, payload in rows}
+    state: dict[str, Any] = {}
+    for name, payload in rows:
+        try:
+            state[name] = json.loads(payload)
+        except (TypeError, json.JSONDecodeError):
+            continue
+    return state
 
 
 def save_state(state: dict[str, Any]) -> None:
