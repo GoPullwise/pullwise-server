@@ -250,6 +250,48 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(payload["usage"]["used"], 0)
         self.assertEqual(payload["usage"]["remaining"], payload["usage"]["limit"])
 
+    def test_billing_account_payload_sanitizes_malformed_public_state(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "stripe\r\nX-Injected: bad",
+            "status": "active\r\nX-Injected: bad",
+            "plan": "pro",
+            "interval": {"value": "year"},
+            "customerId": {"id": "cus_1"},
+            "subscriptionId": "sub_1\r\nX-Injected: bad",
+            "subscriptionItemId": "si_1",
+            "customerEmail": "dev@example.com\r\nX-Injected: bad",
+            "currentPeriodStart": {"value": 1710000000},
+            "currentPeriodEnd": "1712592000",
+            "cancelAtPeriodEnd": "false",
+            "canceledAt": float("nan"),
+            "lastEventId": ["evt_1"],
+            "lastEventType": "checkout.session.completed\r\nX-Injected: bad",
+            "lastEventCreated": "1710000123",
+            "updatedAt": True,
+            "raw": {"unsafe": True},
+        }
+
+        payload = app.billing_account_payload(app.USERS["usr_1"])
+
+        self.assertEqual(payload["status"], "none")
+        self.assertEqual(payload["plan"], "free")
+        self.assertEqual(payload["interval"], "month")
+        self.assertIsNone(payload["provider"])
+        self.assertIsNone(payload["customerId"])
+        self.assertIsNone(payload["subscriptionId"])
+        self.assertEqual(payload["subscriptionItemId"], "si_1")
+        self.assertIsNone(payload["customerEmail"])
+        self.assertIsNone(payload["currentPeriodStart"])
+        self.assertEqual(payload["currentPeriodEnd"], 1712592000)
+        self.assertIsNone(payload["cancelAtPeriodEnd"])
+        self.assertIsNone(payload["canceledAt"])
+        self.assertIsNone(payload["lastEventId"])
+        self.assertIsNone(payload["lastEventType"])
+        self.assertEqual(payload["lastEventCreated"], 1710000123)
+        self.assertIsNone(payload["updatedAt"])
+        self.assertNotIn("raw", payload)
+
     def test_checkout_returns_not_implemented_when_billing_is_disabled(self) -> None:
         cookie = seed_session()
         handler = HandlerHarness(path="/billing/checkout-sessions", cookie=cookie)

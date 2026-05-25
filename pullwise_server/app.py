@@ -46,6 +46,7 @@ GITHUB_STATE_MAX_AGE = 60 * 10
 ISSUE_STATUSES = {"open", "fixed", "snoozed"}
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
 SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
+BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
@@ -723,12 +724,16 @@ def current_review_usage_period(timestamp: int | None = None) -> str:
 def effective_billing_plan(user: dict | None) -> str:
     if not user:
         return "free"
-    current = user.get("billing") or {}
+    current = user_billing_state(user)
     status = str(current.get("status") or "").lower()
     plan = billing.normalize_plan(current.get("plan"))
     if plan == "pro" and status in {"active", "trialing", "canceling"}:
         return "pro"
     return "free"
+
+
+def user_billing_state(user: dict) -> dict:
+    return user.get("billing") if isinstance(user.get("billing"), dict) else {}
 
 
 def non_negative_int(value: object) -> int:
@@ -759,9 +764,10 @@ def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = N
     limit = billing.review_limit(plan_id)
     usage = billing_usage_for_user(user or {}, plan_id, timestamp=timestamp, mutate=mutate) if user else {"period": current_review_usage_period(timestamp), "plan": plan_id, "used": 0}
     used = non_negative_int(usage.get("used"))
+    current = user_billing_state(user) if user else {}
     return {
         "plan": plan_id,
-        "interval": (user.get("billing") or {}).get("interval") if user and plan_id == "pro" else "month",
+        "interval": current.get("interval") if plan_id == "pro" else "month",
         "period": usage["period"],
         "used": used,
         "limit": limit,
@@ -780,14 +786,25 @@ def consume_review_quota(user: dict) -> tuple[bool, dict]:
 
 
 def billing_account_payload(user: dict) -> dict:
-    current = dict(user.get("billing") or {})
+    current = user_billing_state(user)
     entitlement = billing_entitlement_for_user(user)
-    status = current.get("status") or "none"
     return {
-        **current,
-        "status": status,
+        "provider": public_billing_text(current.get("provider")),
+        "status": public_billing_status(current.get("status")),
         "plan": entitlement["plan"],
-        "interval": entitlement["interval"],
+        "interval": billing.normalize_interval(entitlement["interval"]),
+        "customerId": public_billing_text(current.get("customerId")),
+        "subscriptionId": public_billing_text(current.get("subscriptionId")),
+        "subscriptionItemId": public_billing_text(current.get("subscriptionItemId")),
+        "customerEmail": public_billing_text(current.get("customerEmail")),
+        "currentPeriodStart": pull_request_timestamp(current.get("currentPeriodStart")),
+        "currentPeriodEnd": pull_request_timestamp(current.get("currentPeriodEnd")),
+        "cancelAtPeriodEnd": current.get("cancelAtPeriodEnd") if isinstance(current.get("cancelAtPeriodEnd"), bool) else None,
+        "canceledAt": pull_request_timestamp(current.get("canceledAt")),
+        "lastEventId": public_billing_text(current.get("lastEventId")),
+        "lastEventType": public_billing_text(current.get("lastEventType")),
+        "lastEventCreated": pull_request_timestamp(current.get("lastEventCreated")),
+        "updatedAt": pull_request_timestamp(current.get("updatedAt")),
         "reviewLimit": entitlement["limit"],
         "usage": {
             "period": entitlement["period"],
@@ -797,6 +814,15 @@ def billing_account_payload(user: dict) -> dict:
             "plan": entitlement["plan"],
         },
     }
+
+
+def public_billing_text(value: object) -> str | None:
+    return public_issue_text(value) or None
+
+
+def public_billing_status(value: object) -> str:
+    status = public_issue_text(value).lower()
+    return status if status in BILLING_PUBLIC_STATUSES else "none"
 
 
 def scan_payload(scan: dict) -> dict:
