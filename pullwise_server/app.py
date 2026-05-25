@@ -117,6 +117,13 @@ class RequestBodyTooLarge(ValueError):
     pass
 
 
+class ClientDisconnected(ConnectionError):
+    pass
+
+
+_CLIENT_DISCONNECT_EXCEPTIONS = (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)
+
+
 class ResourceNotFound(Exception):
     def __init__(self, label: str) -> None:
         safe_label = label if label in {"Issue", "Scan"} else "Resource"
@@ -3069,11 +3076,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return "unknown"
 
     def do_OPTIONS(self) -> None:
-        self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_cors_headers()
-        self.send_header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization")
-        self.end_headers()
+        try:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_cors_headers()
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization")
+            self.end_headers()
+        except _CLIENT_DISCONNECT_EXCEPTIONS:
+            logger.debug("Client disconnected while handling OPTIONS %s", self.path)
 
     def do_GET(self) -> None:
         self.route("GET")
@@ -3096,33 +3106,39 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         self._rate_limit_headers = {}
 
         try:
-            if self.apply_rate_limit(method, path):
-                return
-            self.enforce_body_size_limit(method)
-            if method == "GET":
-                return self.handle_get(path, params, segments)
-            if method == "POST":
-                return self.handle_post(path, params, segments)
-            if method == "PATCH":
-                return self.handle_patch(segments)
-            if method == "DELETE":
-                return self.handle_delete(segments)
-            return self.error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
-        except RequestBodyTooLarge as exc:
-            return self.error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
-        except ResourceNotFound as exc:
-            return self.error(HTTPStatus.NOT_FOUND, str(exc))
-        except ValueError as exc:
-            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-        except billing.BillingProviderResponseError as exc:
-            return self.error(HTTPStatus.BAD_GATEWAY, str(exc))
-        except billing.BillingProviderConflict as exc:
-            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-        except billing.BillingConfigurationError as exc:
-            return self.error(HTTPStatus.NOT_IMPLEMENTED, str(exc))
-        except Exception as exc:
-            logger.exception("Unhandled server error while handling %s %s", method, self.path)
-            return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Server error.")
+            try:
+                if self.apply_rate_limit(method, path):
+                    return
+                self.enforce_body_size_limit(method)
+                if method == "GET":
+                    return self.handle_get(path, params, segments)
+                if method == "POST":
+                    return self.handle_post(path, params, segments)
+                if method == "PATCH":
+                    return self.handle_patch(segments)
+                if method == "DELETE":
+                    return self.handle_delete(segments)
+                return self.error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
+            except ClientDisconnected:
+                raise
+            except RequestBodyTooLarge as exc:
+                return self.error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+            except ResourceNotFound as exc:
+                return self.error(HTTPStatus.NOT_FOUND, str(exc))
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            except billing.BillingProviderResponseError as exc:
+                return self.error(HTTPStatus.BAD_GATEWAY, str(exc))
+            except billing.BillingProviderConflict as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            except billing.BillingConfigurationError as exc:
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, str(exc))
+            except Exception as exc:
+                logger.exception("Unhandled server error while handling %s %s", method, self.path)
+                return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Server error.")
+        except ClientDisconnected:
+            logger.debug("Client disconnected while handling %s %s", method, self.path)
+            return
         finally:
             persist_state()
 
@@ -4227,23 +4243,29 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def json(self, payload: dict, status: int = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_cors_headers()
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        response_headers = {**getattr(self, "_rate_limit_headers", {}), **(headers or {})}
-        for key, value in response_headers.items():
-            self.send_header(key, value)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_cors_headers()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            response_headers = {**getattr(self, "_rate_limit_headers", {}), **(headers or {})}
+            for key, value in response_headers.items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(body)
+        except _CLIENT_DISCONNECT_EXCEPTIONS as exc:
+            raise ClientDisconnected("Client disconnected before the response was sent.") from exc
 
     def redirect(self, location: str, set_cookie: str | None = None) -> None:
-        self.send_response(HTTPStatus.FOUND)
-        self.send_cors_headers()
-        self.send_header("Location", location)
-        if set_cookie:
-            self.send_header("Set-Cookie", set_cookie)
-        self.end_headers()
+        try:
+            self.send_response(HTTPStatus.FOUND)
+            self.send_cors_headers()
+            self.send_header("Location", location)
+            if set_cookie:
+                self.send_header("Set-Cookie", set_cookie)
+            self.end_headers()
+        except _CLIENT_DISCONNECT_EXCEPTIONS as exc:
+            raise ClientDisconnected("Client disconnected before the response was sent.") from exc
 
     def error(self, status: int, message: str) -> None:
         self.json({"message": message}, status)

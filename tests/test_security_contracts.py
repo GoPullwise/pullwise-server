@@ -52,6 +52,14 @@ class RawBodyRouteHarness(RouteHarness):
         return app.PullwiseHandler.read_json(self)
 
 
+class DisconnectingRouteHarness(RouteHarness):
+    def handle_get(self, path: str, params: dict, segments: list[str]) -> None:
+        raise app.ClientDisconnected("Client disconnected during response write.")
+
+    def error(self, status: int, message: str) -> None:
+        raise AssertionError("client disconnects must not be converted into error responses")
+
+
 class SecurityContractsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.persist_patcher = patch.object(app, "persist_state")
@@ -108,6 +116,36 @@ class SecurityContractsTest(unittest.TestCase):
             }
         }
         return "pw_session=ses_1"
+
+    def test_route_ignores_client_disconnect_without_500_response(self) -> None:
+        handler = DisconnectingRouteHarness("/auth/session")
+
+        with (
+            patch.object(app, "ensure_state_loaded"),
+            patch.object(app, "rate_limit_enabled", return_value=False),
+            patch.object(app.logger, "exception") as log_exception,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        log_exception.assert_not_called()
+        self.assertIsNone(handler.status)
+
+    def test_json_raises_client_disconnected_for_aborted_socket(self) -> None:
+        class FailingWriter:
+            def write(self, _: bytes) -> None:
+                raise ConnectionAbortedError(10053, "aborted")
+
+        handler = app.PullwiseHandler.__new__(app.PullwiseHandler)
+        handler.path = "/auth/session"
+        handler.command = "GET"
+        handler.requestline = "GET /auth/session HTTP/1.1"
+        handler.request_version = "HTTP/1.1"
+        handler.client_address = ("127.0.0.1", 41229)
+        handler.headers = {"Host": "api.pullwise.dev", "Cookie": ""}
+        handler.wfile = FailingWriter()
+
+        with self.assertRaises(app.ClientDisconnected):
+            app.PullwiseHandler.json(handler, {"authenticated": False})
 
     def test_wildcard_allowed_origin_does_not_allow_open_redirects(self) -> None:
         with patch.dict(
