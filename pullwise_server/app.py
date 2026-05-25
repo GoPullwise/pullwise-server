@@ -483,11 +483,14 @@ def github_repository_authorization_pending(user: dict | None) -> dict | None:
         if expires_at is None or expires_at < timestamp:
             expired_states.append(state)
             continue
+        github_access = user.get("githubRepositoryAccess")
+        if not isinstance(github_access, dict):
+            github_access = {}
         return {
             "state": state,
             "startedAt": record.get("startedAt"),
             "expiresAt": record.get("expiresAt"),
-            "previousInstallationId": (user.get("githubRepositoryAccess") or {}).get("installationId"),
+            "previousInstallationId": github_access.get("installationId"),
             "manage": True,
         }
 

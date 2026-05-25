@@ -1587,6 +1587,37 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertFalse(handler.payload["github"]["repositoriesConnected"])
         self.assertTrue(handler.payload["github"]["repositoriesAuthorizationPending"])
 
+    def test_auth_session_ignores_malformed_access_for_legacy_install_pending_state(self) -> None:
+        app.USERS["usr_1"]["githubLogin"] = "DFerryman"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = "not-a-repository-access-record"
+        app.GITHUB_STATES = {
+            "legacy_state": {
+                "kind": "install",
+                "redirectTo": "https://app.pullwise.dev/?screen=repos",
+                "userId": "usr_1",
+                "requestedScope": "all",
+                "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+            }
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/auth/session", cookie="pw_session=ses_1")
+
+        with patch.object(app.logger, "exception") as log_exception:
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertFalse(handler.payload["github"]["repositoriesConnected"])
+        self.assertTrue(handler.payload["github"]["repositoriesAuthorizationPending"])
+        log_exception.assert_not_called()
+
     def test_auth_session_does_not_report_stale_personal_installation_connected_for_current_github_login(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubLogin"] = "DFerryman"
