@@ -833,8 +833,8 @@ def list_api_keys_for_user(user_id: str, workspace_id: str | None = None) -> lis
             rows = connection.execute(
                 """
                 SELECT * FROM api_keys
-                WHERE user_id = ? AND workspace_id = ?
-                ORDER BY revoked_at IS NOT NULL, created_at DESC
+                WHERE user_id = ? AND workspace_id = ? AND revoked_at IS NULL
+                ORDER BY created_at DESC
                 """,
                 (user_id, workspace_id),
             ).fetchall()
@@ -842,8 +842,8 @@ def list_api_keys_for_user(user_id: str, workspace_id: str | None = None) -> lis
             rows = connection.execute(
                 """
                 SELECT * FROM api_keys
-                WHERE user_id = ?
-                ORDER BY revoked_at IS NOT NULL, created_at DESC
+                WHERE user_id = ? AND revoked_at IS NULL
+                ORDER BY created_at DESC
                 """,
                 (user_id,),
             ).fetchall()
