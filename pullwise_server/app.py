@@ -1172,6 +1172,19 @@ def public_billing_status(value: object) -> str:
     return status if status in BILLING_PUBLIC_STATUSES else "none"
 
 
+def safe_billing_redirect_response(result: dict, label: str, *, require_url: bool = False) -> dict:
+    if not isinstance(result, dict):
+        raise billing.BillingProviderResponseError("Billing provider returned an invalid response.")
+    payload = dict(result)
+    provider = public_billing_text(payload.get("provider")) or "Billing provider"
+    if "url" not in payload:
+        if require_url:
+            billing.provider_redirect_url(None, provider, label)
+        return payload
+    payload["url"] = billing.provider_redirect_url(payload.get("url"), provider, label)
+    return payload
+
+
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -3074,6 +3087,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, str(exc))
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        except billing.BillingProviderResponseError as exc:
+            return self.error(HTTPStatus.BAD_GATEWAY, str(exc))
         except billing.BillingProviderConflict as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         except billing.BillingConfigurationError as exc:
@@ -3436,6 +3451,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 plan=str(body.get("plan") or "pro"),
                 interval=str(body.get("interval") or "month"),
             )
+            checkout = safe_billing_redirect_response(checkout, "Checkout", require_url=True)
             if checkout.get("customerId"):
                 current_billing = workspaces.billing_state_from_workspace(current_workspace)
                 updated_workspace = db.update_workspace_billing(
@@ -3471,6 +3487,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 workspace_billing_subject(user, current_workspace),
                 return_url=safe_redirect_to(body.get("returnUrl"), "settings"),
             )
+            portal = safe_billing_redirect_response(portal, "portal", require_url=True)
             return self.json(portal)
         if path == "/billing/change-interval":
             session = self.current_session()
@@ -3485,6 +3502,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 interval=str(body.get("interval") or "year"),
                 return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
             )
+            result = safe_billing_redirect_response(result, "portal")
             if result.get("alreadyActive"):
                 return self.json(result)
             if result.get("provider") == "creem" and result.get("interval") == "year":
