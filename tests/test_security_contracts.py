@@ -221,6 +221,34 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_resource_routes_decode_percent_encoded_path_ids(self) -> None:
+        app.ISSUES[0]["id"] = "iss/with spaces#1"
+        app.SCANS[0]["id"] = "sc/with spaces#1"
+        cookie = self.signed_in()
+
+        issue_read = RouteHarness("/issues/iss%2Fwith%20spaces%231", cookie=cookie)
+        scan_read = RouteHarness("/scans/sc%2Fwith%20spaces%231", cookie=cookie)
+        issue_update = RouteHarness(
+            "/issues/iss%2Fwith%20spaces%231/status",
+            {"status": "fixed"},
+            cookie=cookie,
+        )
+        scan_cancel = RouteHarness("/scans/sc%2Fwith%20spaces%231/cancel", cookie=cookie)
+
+        app.PullwiseHandler.route(issue_read, "GET")
+        app.PullwiseHandler.route(scan_read, "GET")
+        app.PullwiseHandler.route(issue_update, "PATCH")
+        app.PullwiseHandler.route(scan_cancel, "POST")
+
+        self.assertEqual(issue_read.status, HTTPStatus.OK)
+        self.assertEqual(issue_read.payload["id"], "iss/with spaces#1")
+        self.assertEqual(scan_read.status, HTTPStatus.OK)
+        self.assertEqual(scan_read.payload["id"], "sc/with spaces#1")
+        self.assertEqual(issue_update.status, HTTPStatus.OK)
+        self.assertEqual(issue_update.payload["status"], "fixed")
+        self.assertEqual(scan_cancel.status, HTTPStatus.OK)
+        self.assertEqual(scan_cancel.payload["status"], "cancelled")
+
     def test_issue_fix_preview_requires_sign_in(self) -> None:
         handler = RouteHarness("/issues/iss_1/fixes/preview")
 

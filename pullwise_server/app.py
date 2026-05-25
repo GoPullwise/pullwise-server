@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 
 from . import billing, checkout, db, fix_workflow, github_auth, logging_config, review, scan_logging, worker
 
@@ -2362,7 +2362,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
-        segments = [part for part in path.split("/") if part]
+        segments = [unquote(part) for part in path.split("/") if part]
         self._rate_limit_headers = {}
 
         try:
