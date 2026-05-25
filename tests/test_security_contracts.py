@@ -140,6 +140,42 @@ class SecurityContractsTest(unittest.TestCase):
         record = next(iter(app.GITHUB_STATES.values()))
         self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/?screen=dashboard")
 
+    def test_github_callback_rejects_malformed_persisted_state_records(self) -> None:
+        cases = {
+            "non_object": "not-a-state-record",
+            "malformed_expiry": {
+                "kind": "login",
+                "redirectTo": "https://app.pullwise.dev/?screen=dashboard",
+                "expiresAt": {"value": app.now() + 60},
+                "codeVerifier": "verifier",
+            },
+        }
+
+        for state, record in cases.items():
+            with self.subTest(state=state):
+                app.GITHUB_STATES = {state: record}
+                handler = RouteHarness(f"/auth/github/callback?state={state}&code=oauth_code")
+
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                            "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                            "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                            "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                        },
+                        clear=True,
+                    ),
+                    patch.object(app.logger, "exception") as log_exception,
+                ):
+                    app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+                self.assertEqual(handler.payload["message"], "GitHub authorization state is invalid or expired.")
+                self.assertEqual(app.GITHUB_STATES, {})
+                log_exception.assert_not_called()
+
     def test_real_github_user_uses_safe_login_fallback_for_malformed_profile_id(self) -> None:
         app.USERS = {}
 

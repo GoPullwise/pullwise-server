@@ -426,9 +426,12 @@ def remember_github_state(kind: str, redirect_to: str, **extra: object) -> str:
 
 def pop_github_state(kind: str, state: str) -> dict:
     record = GITHUB_STATES.pop(state, None)
-    if record:
+    if record is not None:
         mark_state_dirty()
-    if not record or record.get("kind") != kind or record.get("expiresAt", 0) < now():
+    if not isinstance(record, dict):
+        raise ValueError("GitHub authorization state is invalid or expired.")
+    expires_at = pull_request_timestamp(record.get("expiresAt"))
+    if record.get("kind") != kind or expires_at is None or expires_at < now():
         raise ValueError("GitHub authorization state is invalid or expired.")
     return record
 
