@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import sqlite3
+import tempfile
 import unittest
+from contextlib import closing
 from unittest.mock import patch
 
 from pullwise_server import app, db
@@ -80,6 +84,40 @@ class DatabaseContractsTest(unittest.TestCase):
 
             self.assertTrue(app.STATE_DIRTY)
             log_exception.assert_called_once()
+
+    def test_rate_limit_resets_malformed_stored_request_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            INSERT INTO api_rate_limits
+                                (key, subject, route, window_start, request_count, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            ("ip:203.0.113.10:api:120", "ip:203.0.113.10", "api", 120, "not-a-count", 120),
+                        )
+
+                result = db.record_rate_limit_hit(
+                    "ip:203.0.113.10",
+                    limit=5,
+                    window_seconds=60,
+                    timestamp=120,
+                )
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    stored_count = connection.execute(
+                        "SELECT request_count FROM api_rate_limits WHERE key = ?",
+                        ("ip:203.0.113.10:api:120",),
+                    ).fetchone()[0]
+
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["remaining"], 4)
+        self.assertEqual(stored_count, 1)
 
 
 if __name__ == "__main__":

@@ -105,6 +105,16 @@ def save_state(state: dict[str, Any]) -> None:
             )
 
 
+def stored_request_count(row: Any) -> int:
+    if not row:
+        return 0
+    try:
+        count = int(row[0])
+    except (IndexError, TypeError, ValueError, OverflowError):
+        return 0
+    return max(0, count)
+
+
 def record_rate_limit_hit(
     subject: str,
     *,
@@ -130,7 +140,7 @@ def record_rate_limit_hit(
                 "SELECT request_count FROM api_rate_limits WHERE key = ?",
                 (key,),
             ).fetchone()
-            request_count = int(row[0]) + 1 if row else 1
+            request_count = stored_request_count(row) + 1
             if row:
                 connection.execute(
                     """
