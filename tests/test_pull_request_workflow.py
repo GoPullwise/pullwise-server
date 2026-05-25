@@ -1229,6 +1229,34 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
         self.assertNotEqual(app.ISSUES[0]["pullRequest"], expected)
 
+    def test_issue_read_routes_sanitize_pending_pull_request_payloads(self) -> None:
+        app.ISSUES[0]["pullRequestPending"] = {
+            "issueId": {"value": "f_123"},
+            "branch": "pullwise/fix-f_123-existing\r\nX-Injected: bad",
+            "startedAt": {"value": app.now()},
+            "lastError": "GitHub failed\r\nX-Injected: bad",
+            "failedAt": {"value": app.now()},
+        }
+
+        expected = {
+            "issueId": "f_123",
+            "branch": "",
+            "startedAt": 0,
+            "lastError": "GitHub failed",
+        }
+
+        for path in ("/issues", "/issues/f_123"):
+            with self.subTest(path=path):
+                handler = RouteHarness(path, cookie=self.signed_in())
+
+                app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.OK)
+                issue = handler.payload["items"][0] if path == "/issues" else handler.payload
+                self.assertEqual(issue["pullRequestPending"], expected)
+
+        self.assertNotEqual(app.ISSUES[0]["pullRequestPending"], expected)
+
     def test_create_pull_request_uses_github_rest_endpoint_and_safe_public_payload(self) -> None:
         response = Mock()
         response.status_code = 201

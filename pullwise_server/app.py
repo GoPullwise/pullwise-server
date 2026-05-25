@@ -780,14 +780,17 @@ def scan_payload(scan: dict) -> dict:
 
 def issue_payload(issue: dict) -> dict:
     payload = dict(issue)
+    issue_id = clean_pull_request_issue_id(issue.get("id"))
     pull_request = issue.get("pullRequest")
     if isinstance(pull_request, dict):
-        issue_id = clean_pull_request_issue_id(issue.get("id"))
         payload["pullRequest"] = safe_existing_pull_request(
             pull_request,
             issue_id=issue_id,
             fallback_title=pull_request_title(issue, issue_id),
         )
+    pending = issue.get("pullRequestPending")
+    if isinstance(pending, dict):
+        payload["pullRequestPending"] = safe_pending_pull_request(pending, issue_id=issue_id)
     return payload
 
 
@@ -1249,6 +1252,32 @@ def safe_existing_pull_request(value: dict, *, issue_id: str, fallback_title: st
         "number": number if isinstance(number, int) and not isinstance(number, bool) else None,
         "title": clean_pull_request_text(value.get("title")) or fallback_title,
     }
+
+
+def safe_pending_pull_request(value: dict, *, issue_id: str) -> dict:
+    payload = {
+        "issueId": issue_id,
+        "branch": valid_stored_pull_request_branch(value.get("branch")) or "",
+        "startedAt": pull_request_timestamp(value.get("startedAt")) or 0,
+    }
+    if "lastError" in value:
+        payload["lastError"] = clean_pull_request_error(value.get("lastError"))
+    failed_at = pull_request_timestamp(value.get("failedAt"))
+    if failed_at is not None:
+        payload["failedAt"] = failed_at
+    return payload
+
+
+def pull_request_timestamp(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        if not math.isfinite(value):
+            return None
+        return int(value)
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
 
 
 def record_pull_request_pending_failure(issue: dict, message: str) -> None:
