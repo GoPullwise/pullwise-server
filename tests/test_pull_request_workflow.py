@@ -373,6 +373,21 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
         self.assert_no_external_pull_request_work(app_api_configured, prepare_checkout, run_git, create_token, create_pull_request)
 
+    def test_malformed_repository_access_is_rejected_before_checkout_or_git(self) -> None:
+        app.USERS["usr_1"]["githubRepositoryAccess"] = "not-a-repository-access-record"
+
+        with (
+            patch("pullwise_server.app.github_auth.app_api_configured") as app_api_configured,
+            patch("pullwise_server.app.checkout.prepare_checkout") as prepare_checkout,
+            patch("pullwise_server.app.checkout.run_git") as run_git,
+            patch("pullwise_server.app.github_auth.create_installation_access_token") as create_token,
+            patch("pullwise_server.app.github_auth.create_pull_request") as create_pull_request,
+        ):
+            with self.assertRaisesRegex(ValueError, "Authorize GitHub repositories"):
+                app.create_issue_pull_request(app.USERS["usr_1"], app.ISSUES[0])
+
+        self.assert_no_external_pull_request_work(app_api_configured, prepare_checkout, run_git, create_token, create_pull_request)
+
     def test_non_completed_scan_is_rejected_before_checkout_or_git(self) -> None:
         app.SCANS[0]["status"] = "running"
 

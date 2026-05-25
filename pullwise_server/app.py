@@ -1191,6 +1191,8 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             raise ValueError("Scan must be completed before creating a pull request.")
 
         github_access = user.get("githubRepositoryAccess")
+        if not github_repository_access_authorized_for_user(user, github_access):
+            raise ValueError("Authorize GitHub repositories before creating a pull request.")
         if github_repositories_need_sync(github_access):
             raise ValueError("Sync GitHub repositories before creating a pull request.")
         existing = issue.get("pullRequest")
@@ -1203,8 +1205,6 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         repo = clean_repository_full_name(issue.get("repo"), issue.get("repository"), scan.get("repo"))
         if not repo:
             raise ValueError("Repository must be a GitHub full name like owner/repo.")
-        if not github_repository_access_authorized_for_user(user, github_access):
-            raise ValueError("Authorize GitHub repositories before creating a pull request.")
         if not repository_is_authorized(github_access, repo):
             raise ValueError("Repository is not authorized for this GitHub App installation.")
 
