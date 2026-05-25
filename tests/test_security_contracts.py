@@ -1227,6 +1227,52 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertFalse(expired_handler.payload["authenticated"])
         self.assertNotIn("expired", app.SESSIONS)
 
+    def test_auth_session_sanitizes_legacy_user_public_fields(self) -> None:
+        app.USERS["usr_1"].update({
+            "id": "usr_1\r\nX-Injected: bad",
+            "name": "Dev\r\nX-Injected: bad",
+            "email": {"value": "dev@example.com"},
+            "avatarUrl": "javascript:alert(1)",
+            "createdAt": {"value": app.now()},
+            "providers": ["github", "email\r\nX-Injected: bad", {"provider": "bad"}],
+            "githubLogin": "octocat\r\nX-Injected: bad",
+            "githubRepositoryAccess": {
+                "mode": "github-app",
+                "scope": "selected\r\nX-Injected: bad",
+                "authorizedUserId": "usr_1",
+                "authorizedGithubId": "1",
+                "authorizedGithubLogin": "octocat",
+                "authorizedAt": {"value": app.now()},
+                "repositories": ["owner/repo"],
+                "repositoryItems": [
+                    {
+                        "fullName": "owner/repo",
+                        "installationId": "123",
+                    }
+                ],
+                "repositoriesNeedSync": False,
+            },
+        })
+        handler = RouteHarness("/auth/session", cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertEqual(
+            handler.payload["user"],
+            {
+                "id": "",
+                "name": "User",
+                "email": "",
+                "avatarUrl": None,
+                "createdAt": 0,
+                "providers": ["github"],
+            },
+        )
+        self.assertIsNone(handler.payload["github"]["login"])
+        self.assertIsNone(handler.payload["github"]["repositoryScope"])
+        self.assertIsNone(handler.payload["github"]["authorizedAt"])
+
     def test_auth_session_does_not_report_pending_empty_repository_access_connected(self) -> None:
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
             "mode": "github-app",

@@ -535,12 +535,12 @@ def redirect_with_params(location: str, params: dict[str, str]) -> str:
 
 def user_public(user: dict) -> dict:
     return {
-        "id": user["id"],
-        "name": user["name"],
-        "email": user["email"],
-        "avatarUrl": user.get("avatarUrl"),
-        "createdAt": user["createdAt"],
-        "providers": user.get("providers", []),
+        "id": public_issue_text(user.get("id")),
+        "name": public_issue_text(user.get("name")) or "User",
+        "email": public_issue_text(user.get("email")),
+        "avatarUrl": trusted_public_url(user.get("avatarUrl")),
+        "createdAt": pull_request_timestamp(user.get("createdAt")) or 0,
+        "providers": review._safe_text_list(user.get("providers")),
     }
 
 
@@ -2005,11 +2005,11 @@ def session_payload(session: dict | None) -> dict:
         "user": user_public(user),
         "github": {
             "identityConnected": has_real_github_identity(user),
-            "login": user.get("githubLogin"),
+            "login": public_issue_text(user.get("githubLogin")) or None,
             "repositoriesConnected": repositories_connected,
             "repositoriesAuthorizationPending": repositories_pending,
             "repositoryScope": clean_github_access_text(visible_access.get("scope")) if visible_access else None,
-            "authorizedAt": visible_access.get("authorizedAt") if visible_access else None,
+            "authorizedAt": pull_request_timestamp(visible_access.get("authorizedAt")) if visible_access else None,
             "installationId": clean_github_access_text(visible_access.get("installationId"), allow_int=True) if visible_access else None,
             "installationIds": clean_github_access_text_list(visible_access.get("installationIds"), allow_int=True) if visible_access else [],
             "repositorySelection": clean_github_access_text(visible_access.get("repositorySelection")) if visible_access else None,
