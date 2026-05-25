@@ -323,6 +323,74 @@ class BillingContractsTest(unittest.TestCase):
                 ):
                     call()
 
+    def test_provider_request_redirect_urls_must_be_absolute_http_urls(self) -> None:
+        user = {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cus_123"}}
+        stripe_env = {
+            "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
+            "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
+            "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
+            "PULLWISE_APP_URL": "https://app.pullwise.dev",
+        }
+        creem_env = {
+            "PULLWISE_CREEM_API_KEY": "creem_123",
+            "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
+            "PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly",
+            "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+            "PULLWISE_APP_URL": "https://app.pullwise.dev",
+        }
+        interval_user = {
+            "id": "usr_1",
+            "billing": {
+                "provider": "stripe",
+                "customerId": "cus_123",
+                "subscriptionId": "sub_123",
+                "subscriptionItemId": "si_123",
+                "plan": "pro",
+                "interval": "month",
+                "status": "active",
+            },
+        }
+        scenarios = [
+            (
+                "stripe checkout success",
+                stripe_env,
+                lambda: billing.create_checkout_session(user, success_url="javascript:alert(1)", cancel_url="https://app.pullwise.dev/cancel"),
+            ),
+            (
+                "stripe checkout cancel",
+                stripe_env,
+                lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success", cancel_url="javascript:alert(1)"),
+            ),
+            (
+                "creem checkout success",
+                creem_env,
+                lambda: billing.create_checkout_session(user, success_url="javascript:alert(1)", cancel_url="https://app.pullwise.dev/cancel"),
+            ),
+            (
+                "stripe portal return",
+                stripe_env,
+                lambda: billing.create_portal_session(user, return_url="javascript:alert(1)"),
+            ),
+            (
+                "stripe interval return",
+                stripe_env,
+                lambda: billing.change_subscription_interval(interval_user, interval="year", return_url="javascript:alert(1)"),
+            ),
+        ]
+
+        for name, env_vars, call in scenarios:
+            with self.subTest(name=name):
+                response = Mock()
+                response.json.return_value = {"id": "safe", "url": "https://provider.example/session"}
+                response.raise_for_status.return_value = None
+                with (
+                    patch.dict(os.environ, env_vars, clear=True),
+                    patch("pullwise_server.billing.requests.post", return_value=response) as post,
+                    self.assertRaisesRegex(billing.BillingConfigurationError, "absolute HTTP"),
+                ):
+                    call()
+                post.assert_not_called()
+
     def test_stripe_monthly_to_yearly_change_uses_portal_update_confirmation(self) -> None:
         response = Mock()
         response.json.return_value = {"id": "bps_123", "url": "https://billing.stripe.com/session"}
