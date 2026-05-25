@@ -1704,6 +1704,51 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(github["repositories"], [])
         self.assertFalse(github["repositoriesNeedSync"])
 
+    def test_auth_session_ignores_malformed_aggregate_installation_records(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationIds": ["111"],
+            "installationAccounts": ["octocat"],
+            "repositories": ["octocat/private-repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_private",
+                    "name": "private-repo",
+                    "fullName": "octocat/private-repo",
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                }
+            ],
+            "installations": [
+                "not-an-installation-record",
+                {"installationTargetType": "User", "installationAccount": "octocat"},
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/auth/session", cookie="pw_session=ses_1")
+
+        with patch.object(app.logger, "exception") as log_exception:
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertTrue(handler.payload["github"]["repositoriesConnected"])
+        log_exception.assert_not_called()
+
     def test_repository_sync_requires_sign_in(self) -> None:
         handler = RouteHarness("/repositories/sync")
 

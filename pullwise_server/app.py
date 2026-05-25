@@ -1705,7 +1705,12 @@ def github_repository_access_authorized_for_user(user: dict | None, github_acces
         if installation_account and current_login and installation_account != current_login:
             return False
 
-    for installation in github_access.get("installations") or []:
+    installations = github_access.get("installations") or []
+    if not isinstance(installations, list):
+        installations = []
+    for installation in installations:
+        if not isinstance(installation, dict):
+            continue
         if str(installation.get("installationTargetType") or "").casefold() != "user":
             continue
         installation_account = str(installation.get("installationAccount") or "").casefold()
