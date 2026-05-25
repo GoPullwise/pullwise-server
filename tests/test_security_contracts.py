@@ -1473,6 +1473,53 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertFalse(handler.payload["github"]["repositoriesConnected"])
         self.assertEqual(handler.payload["nextStep"], "connect_github_repositories")
 
+    def test_auth_session_ignores_malformed_repository_authorization_pending_state(self) -> None:
+        app.USERS["usr_1"]["githubLogin"] = "DFerryman"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "installationId": "111",
+            "installationAccount": "DFerryman",
+            "repositories": ["DFerryman/private-repo"],
+            "repositoryItems": [{"fullName": "DFerryman/private-repo"}],
+            "repositoriesNeedSync": False,
+        }
+        app.USERS["usr_1"]["githubRepositoryAccessPending"] = {
+            "state": "pending_state",
+            "startedAt": app.now(),
+            "expiresAt": {"value": app.now() + app.GITHUB_STATE_MAX_AGE},
+            "previousInstallationId": "111",
+            "manage": True,
+        }
+        app.GITHUB_STATES = {
+            "legacy_bad": "not-a-state-record",
+            "legacy_bad_expiry": {
+                "kind": "install",
+                "userId": "usr_1",
+                "expiresAt": {"value": app.now() + app.GITHUB_STATE_MAX_AGE},
+            },
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/auth/session", cookie="pw_session=ses_1")
+
+        with patch.object(app.logger, "exception") as log_exception:
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertFalse(handler.payload["github"]["repositoriesConnected"])
+        self.assertFalse(handler.payload["github"]["repositoriesAuthorizationPending"])
+        self.assertEqual(handler.payload["nextStep"], "connect_github_repositories")
+        self.assertNotIn("githubRepositoryAccessPending", app.USERS["usr_1"])
+        self.assertEqual(app.GITHUB_STATES, {})
+        log_exception.assert_not_called()
+
     def test_auth_session_treats_legacy_install_state_as_pending_repository_authorization(self) -> None:
         app.USERS["usr_1"]["githubLogin"] = "DFerryman"
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

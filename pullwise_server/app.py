@@ -464,16 +464,21 @@ def github_repository_authorization_pending(user: dict | None) -> dict | None:
     timestamp = now()
     pending = user.get("githubRepositoryAccessPending")
     if isinstance(pending, dict):
-        if int(pending.get("expiresAt") or 0) >= timestamp:
+        pending_expires_at = pull_request_timestamp(pending.get("expiresAt"))
+        if pending_expires_at is not None and pending_expires_at >= timestamp:
             return pending
         user.pop("githubRepositoryAccessPending", None)
         mark_state_dirty()
 
     expired_states = []
     for state, record in GITHUB_STATES.items():
+        if not isinstance(record, dict):
+            expired_states.append(state)
+            continue
         if record.get("kind") != "install" or record.get("userId") != user.get("id"):
             continue
-        if int(record.get("expiresAt") or 0) < timestamp:
+        expires_at = pull_request_timestamp(record.get("expiresAt"))
+        if expires_at is None or expires_at < timestamp:
             expired_states.append(state)
             continue
         return {
