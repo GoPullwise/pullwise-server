@@ -40,6 +40,7 @@ Usage:
   ./launcher.sh <command> [options]
 
 Commands:
+  init-env [--force]        Create .env.local from .env.example and list next steps
   setup                     Create .venv and install the server package
   sync-env                  Copy .env.local to /etc/pullwise/server.env
   render-service            Print the systemd service unit
@@ -64,6 +65,7 @@ Environment overrides:
   PULLWISE_VENV_DIR, PULLWISE_PYTHON_BIN, PULLWISE_MANAGER
 
 Recommended production flow:
+  ./launcher.sh init-env
   ./launcher.sh setup
   ./launcher.sh sync-env
   ./launcher.sh install-service
@@ -422,6 +424,40 @@ cmd_setup() {
   "$py" -m pip install --upgrade pip || die "Unable to upgrade pip."
   "$py" -m pip install -e "$APP_DIR" || die "Unable to install $APP_NAME."
   ok "setup complete"
+}
+
+cmd_init_env() {
+  force=false
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --force)
+        force=true
+        ;;
+      *)
+        die "Unknown init-env option: $1"
+        ;;
+    esac
+    shift
+  done
+
+  example_file=$APP_DIR/.env.example
+  [ -f "$example_file" ] || die "template env file not found: $example_file"
+  if [ -f "$LOCAL_ENV_FILE" ] && [ "$force" != true ]; then
+    warn "local env file already exists: $LOCAL_ENV_FILE"
+    say "Re-run with --force to overwrite it from .env.example."
+  else
+    mkdir -p "$(dirname -- "$LOCAL_ENV_FILE")" || die "Unable to create $(dirname -- "$LOCAL_ENV_FILE")"
+    cp "$example_file" "$LOCAL_ENV_FILE" || die "Unable to create $LOCAL_ENV_FILE"
+    chmod 600 "$LOCAL_ENV_FILE" 2>/dev/null || warn "could not chmod 600 $LOCAL_ENV_FILE"
+    ok "created local env template: $LOCAL_ENV_FILE"
+  fi
+
+  say "Edit these required production groups in $LOCAL_ENV_FILE:"
+  say "  - HTTP/runtime: PULLWISE_APP_URL, PULLWISE_ALLOWED_ORIGINS, PULLWISE_API_BASE_URL"
+  say "  - Storage: PULLWISE_DB_PATH, PULLWISE_LOG_DIR, PULLWISE_CHECKOUT_ROOT"
+  say "  - GitHub OAuth/App: client id/secret, app slug/id, private key path or base64"
+  say "  - Review provider: PULLWISE_REVIEW_PROVIDER plus PULLWISE_CODEX_BIN or PULLWISE_CLAUDE_BIN"
+  say "Then run: ./launcher.sh sync-env && ./launcher.sh doctor"
 }
 
 cmd_sync_env() {
@@ -1436,6 +1472,9 @@ main() {
       ;;
     setup|install)
       cmd_setup "$@"
+      ;;
+    init-env|env-template)
+      cmd_init_env "$@"
       ;;
     sync-env)
       cmd_sync_env "$@"

@@ -83,7 +83,7 @@ class LauncherContractsTest(unittest.TestCase):
 
     def write_fake_runtime(self, root: Path) -> tuple[Path, Path, Path]:
         venv_python = root / "venv" / "bin" / "python"
-        venv_python.parent.mkdir(parents=True)
+        venv_python.parent.mkdir(parents=True, exist_ok=True)
         write_executable(
             venv_python,
             """
@@ -124,6 +124,25 @@ class LauncherContractsTest(unittest.TestCase):
         )
         return venv_python, fake_git, fake_codex
 
+    def write_fake_long_running_python(self, root: Path) -> Path:
+        venv_python = root / "venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True, exist_ok=True)
+        write_executable(
+            venv_python,
+            """
+            #!/usr/bin/env sh
+            if [ "$1" = "--version" ]; then
+              echo "Python 3.10.12"
+              exit 0
+            fi
+            printf 'fake server invoked: %s\\n' "$*" >> "$PULLWISE_FAKE_SERVER_LOG"
+            while :; do
+              sleep 1
+            done
+            """,
+        )
+        return venv_python
+
     def write_fake_chgrp(self, root: Path) -> tuple[Path, Path]:
         fake_chgrp = root / "bin" / "chgrp"
         fake_chgrp.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +155,20 @@ class LauncherContractsTest(unittest.TestCase):
             """,
         )
         return fake_chgrp, log_file
+
+    def write_fake_systemctl(self, root: Path) -> tuple[Path, Path]:
+        fake_systemctl = root / "bin" / "systemctl"
+        fake_systemctl.parent.mkdir(parents=True, exist_ok=True)
+        log_file = root / "systemctl.log"
+        write_executable(
+            fake_systemctl,
+            """
+            #!/usr/bin/env sh
+            printf '%s\\n' "$*" >> "$PULLWISE_SYSTEMCTL_LOG"
+            echo "systemctl args: $*"
+            """,
+        )
+        return fake_systemctl, log_file
 
     def write_production_env(self, root: Path, *, allowed_origins: str = "https://app.example.com") -> Path:
         env_file = root / "server.env"
@@ -238,6 +271,7 @@ class LauncherContractsTest(unittest.TestCase):
 
         self.assertEqual(0, result.returncode, result.stderr + result.stdout)
         for command in [
+            "init-env",
             "setup",
             "sync-env",
             "install-service",
@@ -253,6 +287,46 @@ class LauncherContractsTest(unittest.TestCase):
             "config",
         ]:
             self.assertIn(command, result.stdout)
+
+    def test_launcher_file_is_directly_executable(self) -> None:
+        mode = (project_root() / "launcher.sh").stat().st_mode
+
+        self.assertTrue(mode & stat.S_IXUSR)
+
+    def test_init_env_creates_local_template_and_guides_required_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            local_env = root / ".env.local"
+            env["PULLWISE_APP_DIR"] = shell_path(project_root())
+            env["PULLWISE_LOCAL_ENV_FILE"] = shell_path(local_env)
+
+            result = self.run_launcher(["init-env"], env)
+            created = local_env.read_text(encoding="utf-8")
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("PULLWISE_MODE=production", created)
+        self.assertIn("PULLWISE_GITHUB_CLIENT_ID", created)
+        self.assertIn("HTTP/runtime", result.stdout)
+        self.assertIn("GitHub OAuth/App", result.stdout)
+        self.assertIn("Review provider", result.stdout)
+        self.assertIn("doctor", result.stdout)
+
+    def test_init_env_does_not_overwrite_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            local_env = root / ".env.local"
+            local_env.write_text("CUSTOM=1\n", encoding="utf-8", newline="\n")
+            env["PULLWISE_APP_DIR"] = shell_path(project_root())
+            env["PULLWISE_LOCAL_ENV_FILE"] = shell_path(local_env)
+
+            result = self.run_launcher(["init-env"], env)
+            current = local_env.read_text(encoding="utf-8")
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertEqual("CUSTOM=1\n", current)
+        self.assertIn("already exists", result.stderr + result.stdout)
 
     def test_doctor_accepts_complete_ubuntu_production_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -397,6 +471,30 @@ class LauncherContractsTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr + result.stdout)
         self.assertIn("systemctl start pullwise-server", result.stdout)
 
+    def test_systemd_manager_can_start_stop_restart_and_report_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            fake_systemctl, systemctl_log = self.write_fake_systemctl(root)
+            self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
+            env["PULLWISE_SYSTEMCTL_BIN"] = shell_path(fake_systemctl)
+            env["PULLWISE_SYSTEMCTL_LOG"] = shell_path(systemctl_log)
+
+            start = self.run_launcher(["start"], env)
+            stop = self.run_launcher(["stop"], env)
+            restart = self.run_launcher(["restart"], env)
+            status = self.run_launcher(["status"], env)
+            calls = systemctl_log.read_text(encoding="utf-8")
+
+        self.assertEqual(0, start.returncode, start.stderr + start.stdout)
+        self.assertEqual(0, stop.returncode, stop.stderr + stop.stdout)
+        self.assertEqual(0, restart.returncode, restart.stderr + restart.stdout)
+        self.assertEqual(0, status.returncode, status.stderr + status.stdout)
+        self.assertIn("start pullwise-server", calls)
+        self.assertIn("stop pullwise-server", calls)
+        self.assertIn("restart pullwise-server", calls)
+        self.assertIn("status pullwise-server --no-pager", calls)
+
     def test_start_dry_run_can_still_print_direct_server_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env = self.base_launcher_env(Path(tmp))
@@ -407,6 +505,80 @@ class LauncherContractsTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr + result.stdout)
         self.assertIn("-m pullwise_server --host 0.0.0.0 --port 3010", result.stdout)
         self.assertIn("dry-run", result.stdout)
+
+    def test_direct_manager_can_start_report_status_and_stop_service(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            venv_python = self.write_fake_long_running_python(root)
+            env.update(
+                {
+                    "PULLWISE_APP_DIR": shell_path(root),
+                    "PULLWISE_MANAGER": "direct",
+                    "PULLWISE_VENV_DIR": shell_path(venv_python.parents[1]),
+                    "PULLWISE_RUN_DIR": shell_path(root / "run"),
+                    "PULLWISE_LOG_DIR": shell_path(root / "logs"),
+                    "PULLWISE_CHECKOUT_ROOT": shell_path(root / "checkouts"),
+                    "PULLWISE_DB_PATH": shell_path(root / "data" / "pullwise.sqlite3"),
+                    "PULLWISE_FAKE_SERVER_LOG": shell_path(root / "fake-server.log"),
+                    "PULLWISE_STOP_TIMEOUT_SECONDS": "3",
+                }
+            )
+
+            try:
+                start = self.run_launcher(["start"], env)
+                self.assertEqual(0, start.returncode, start.stderr + start.stdout)
+                self.assertIn("started with pid", start.stdout)
+
+                status = self.run_launcher(["status"], env)
+                self.assertEqual(0, status.returncode, status.stderr + status.stdout)
+                self.assertIn("pullwise-server: running", status.stdout)
+                self.assertIn("-m pullwise_server", status.stdout)
+
+                stop = self.run_launcher(["stop"], env)
+                self.assertEqual(0, stop.returncode, stop.stderr + stop.stdout)
+                self.assertIn("stopped", stop.stdout)
+
+                stopped = self.run_launcher(["status"], env)
+                self.assertEqual(0, stopped.returncode, stopped.stderr + stopped.stdout)
+                self.assertIn("pullwise-server: stopped", stopped.stdout)
+            finally:
+                self.run_launcher(["stop", "--force"], env)
+
+    def test_direct_manager_restart_replaces_running_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            venv_python = self.write_fake_long_running_python(root)
+            env.update(
+                {
+                    "PULLWISE_APP_DIR": shell_path(root),
+                    "PULLWISE_MANAGER": "direct",
+                    "PULLWISE_VENV_DIR": shell_path(venv_python.parents[1]),
+                    "PULLWISE_RUN_DIR": shell_path(root / "run"),
+                    "PULLWISE_LOG_DIR": shell_path(root / "logs"),
+                    "PULLWISE_CHECKOUT_ROOT": shell_path(root / "checkouts"),
+                    "PULLWISE_DB_PATH": shell_path(root / "data" / "pullwise.sqlite3"),
+                    "PULLWISE_FAKE_SERVER_LOG": shell_path(root / "fake-server.log"),
+                    "PULLWISE_STOP_TIMEOUT_SECONDS": "3",
+                }
+            )
+
+            try:
+                start = self.run_launcher(["start"], env)
+                self.assertEqual(0, start.returncode, start.stderr + start.stdout)
+                first_pid = (root / "run" / "pullwise-server.pid").read_text(encoding="utf-8").strip()
+
+                restart = self.run_launcher(["restart"], env)
+                self.assertEqual(0, restart.returncode, restart.stderr + restart.stdout)
+                second_pid = (root / "run" / "pullwise-server.pid").read_text(encoding="utf-8").strip()
+
+                self.assertNotEqual(first_pid, second_pid)
+                status = self.run_launcher(["status"], env)
+                self.assertEqual(0, status.returncode, status.stderr + status.stdout)
+                self.assertIn(f"pid: {second_pid}", status.stdout)
+            finally:
+                self.run_launcher(["stop", "--force"], env)
 
     def test_logs_journal_tails_systemd_journal_for_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -421,6 +593,30 @@ class LauncherContractsTest(unittest.TestCase):
         self.assertIn("-u pullwise-server", result.stdout)
         self.assertIn("-n 120", result.stdout)
         self.assertIn("-f", result.stdout)
+
+    def test_logs_can_tail_direct_server_and_app_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            env["PULLWISE_MANAGER"] = "direct"
+            env["PULLWISE_RUN_DIR"] = shell_path(root / "run")
+            env["PULLWISE_LOG_DIR"] = shell_path(root / "logs")
+            (root / "run").mkdir()
+            (root / "logs").mkdir()
+            (root / "run" / "server.out.log").write_text("server output\n", encoding="utf-8")
+            (root / "run" / "server.err.log").write_text("server error\n", encoding="utf-8")
+            (root / "logs" / "pullwise-2026-05-25.log").write_text("app log\n", encoding="utf-8")
+
+            server = self.run_launcher(["logs", "server"], env)
+            error = self.run_launcher(["logs", "error"], env)
+            app = self.run_launcher(["logs", "app"], env)
+
+        self.assertEqual(0, server.returncode, server.stderr + server.stdout)
+        self.assertEqual(0, error.returncode, error.stderr + error.stdout)
+        self.assertEqual(0, app.returncode, app.stderr + app.stdout)
+        self.assertIn("server output", server.stdout)
+        self.assertIn("server error", error.stdout)
+        self.assertIn("app log", app.stdout)
 
     def test_export_packages_env_state_logs_checkouts_and_private_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
