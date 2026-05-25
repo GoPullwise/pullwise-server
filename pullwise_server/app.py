@@ -2800,7 +2800,12 @@ def billing_event_id(update: dict) -> str:
 
 
 def billing_update_text(value: object) -> str:
-    return value if isinstance(value, str) else ""
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text or any(ord(char) < 32 or ord(char) == 127 for char in text):
+        return ""
+    return text
 
 
 def billing_update_scalar(value: object) -> object | None:
