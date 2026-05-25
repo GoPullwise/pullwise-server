@@ -222,6 +222,20 @@ def local_github_mocks_enabled() -> bool:
     return env_flag("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS")
 
 
+def persisted_state_dict(state: object, name: str) -> dict:
+    if not isinstance(state, dict):
+        return {}
+    value = state.get(name)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def persisted_state_list(state: object, name: str) -> list:
+    if not isinstance(state, dict):
+        return []
+    value = state.get(name)
+    return list(value) if isinstance(value, list) else []
+
+
 def ensure_state_loaded() -> None:
     global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, GITHUB_STATES, SETTINGS, BILLING_EVENTS, BILLING_PENDING_UPDATES, SCANS, ISSUES
     with STATE_LOCK:
@@ -229,14 +243,14 @@ def ensure_state_loaded() -> None:
             return
 
         state = db.load_state()
-        USERS = dict(state.get("users") or {})
-        SESSIONS = dict(state.get("sessions") or {})
-        GITHUB_STATES = dict(state.get("githubStates") or {})
-        SETTINGS = dict(state.get("settings") or {})
-        BILLING_EVENTS = dict(state.get("billingEvents") or {})
-        BILLING_PENDING_UPDATES = list(state.get("billingPendingUpdates") or [])
-        SCANS = list(state.get("scans") or [])
-        ISSUES = list(state.get("issues") or [])
+        USERS = persisted_state_dict(state, "users")
+        SESSIONS = persisted_state_dict(state, "sessions")
+        GITHUB_STATES = persisted_state_dict(state, "githubStates")
+        SETTINGS = persisted_state_dict(state, "settings")
+        BILLING_EVENTS = persisted_state_dict(state, "billingEvents")
+        BILLING_PENDING_UPDATES = persisted_state_list(state, "billingPendingUpdates")
+        SCANS = persisted_state_list(state, "scans")
+        ISSUES = persisted_state_list(state, "issues")
         STATE_LOADED = True
         STATE_DIRTY = False
 

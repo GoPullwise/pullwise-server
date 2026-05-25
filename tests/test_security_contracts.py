@@ -1283,6 +1283,32 @@ class SecurityContractsTest(unittest.TestCase):
                 self.assertNotIn(session_id, app.SESSIONS)
                 log_exception.assert_not_called()
 
+    def test_state_loader_ignores_malformed_persisted_sections(self) -> None:
+        app.STATE_LOADED = False
+        state = {
+            "users": ["not", "a", "dict"],
+            "sessions": "not-a-dict",
+            "githubStates": [{"not": "a mapping"}],
+            "settings": "not-a-dict",
+            "billingEvents": ["not", "a", "dict"],
+            "billingPendingUpdates": {"not": "a-list"},
+            "scans": {"not": "a-list"},
+            "issues": "not-a-list",
+        }
+
+        with patch.object(app.db, "load_state", return_value=state):
+            app.ensure_state_loaded()
+
+        self.assertTrue(app.STATE_LOADED)
+        self.assertEqual(app.USERS, {})
+        self.assertEqual(app.SESSIONS, {})
+        self.assertEqual(app.GITHUB_STATES, {})
+        self.assertEqual(app.SETTINGS, {})
+        self.assertEqual(app.BILLING_EVENTS, {})
+        self.assertEqual(app.BILLING_PENDING_UPDATES, [])
+        self.assertEqual(app.SCANS, [])
+        self.assertEqual(app.ISSUES, [])
+
     def test_auth_session_sanitizes_legacy_user_public_fields(self) -> None:
         app.USERS["usr_1"].update({
             "id": "usr_1\r\nX-Injected: bad",
