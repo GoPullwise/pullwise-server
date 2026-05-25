@@ -1965,6 +1965,49 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIn("https://github.com/apps/pullwise/installations/new?state=", handler.payload["url"])
         self.assertEqual(len(app.GITHUB_STATES), 1)
 
+    def test_github_repository_authorize_ignores_malformed_existing_access_when_starting_install(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = "not-a-repository-access-record"
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/authorize?redirectTo=https%3A%2F%2Fapp.pullwise.dev%2F%3Fscreen%3Drepos",
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_slug_publicly_installable", return_value=True),
+            patch("pullwise_server.github_auth.list_current_app_installations_for_user", return_value=[]),
+            patch.object(app.logger, "exception") as log_exception,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["mode"], "github-app")
+        self.assertIn("https://github.com/apps/pullwise/installations/new?state=", handler.payload["url"])
+        self.assertIn("githubRepositoryAccessPending", app.USERS["usr_1"])
+        self.assertEqual(app.USERS["usr_1"]["githubRepositoryAccessPending"]["previousInstallationId"], None)
+        self.assertEqual(len(app.GITHUB_STATES), 1)
+        log_exception.assert_not_called()
+
     def test_github_repository_authorize_requires_pullwise_github_oauth_identity(self) -> None:
         app.USERS["usr_1"]["providers"] = ["email"]
         app.USERS["usr_1"].pop("githubAccessToken", None)

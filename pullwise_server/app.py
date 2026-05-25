@@ -444,7 +444,9 @@ def remember_github_repository_authorization(
     manage: bool = False,
 ) -> str:
     state = remember_github_state("install", redirect_to, userId=user["id"], requestedScope=requested_scope)
-    github_access = user.get("githubRepositoryAccess") or {}
+    github_access = user.get("githubRepositoryAccess")
+    if not isinstance(github_access, dict):
+        github_access = {}
     timestamp = now()
     user["githubRepositoryAccessPending"] = {
         "state": state,
