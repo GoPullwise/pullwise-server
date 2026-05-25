@@ -6,7 +6,7 @@ import hmac
 import math
 import secrets
 import time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -165,6 +165,16 @@ def provider_price_configured(provider: str, interval: str) -> bool:
     return False
 
 
+def provider_redirect_url(value: object, provider: str, label: str) -> str:
+    if not isinstance(value, str):
+        raise RuntimeError(f"{provider} did not return a safe {label} URL.")
+    raw = value.strip()
+    parsed = urlparse(raw)
+    if not raw or any(char in raw for char in "\r\n") or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError(f"{provider} did not return a safe {label} URL.")
+    return raw
+
+
 def default_success_url() -> str:
     return f"{env('PULLWISE_APP_URL', 'http://localhost:5173').rstrip('/')}/?screen=settings&billing=success"
 
@@ -232,9 +242,7 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
     )
     response.raise_for_status()
     payload = response.json()
-    checkout_url = payload.get("url")
-    if not checkout_url:
-        raise RuntimeError("Stripe did not return a Checkout URL.")
+    checkout_url = provider_redirect_url(payload.get("url"), "Stripe", "Checkout")
     return {
         "provider": "stripe",
         "plan": plan,
@@ -270,9 +278,7 @@ def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, in
     )
     response.raise_for_status()
     payload = response.json()
-    checkout_url = payload.get("checkout_url") or payload.get("url")
-    if not checkout_url:
-        raise RuntimeError("Creem did not return a Checkout URL.")
+    checkout_url = provider_redirect_url(payload.get("checkout_url") or payload.get("url"), "Creem", "Checkout")
     return {
         "provider": "creem",
         "plan": plan,
@@ -305,9 +311,7 @@ def create_stripe_portal_session(customer_id: str, *, return_url: str) -> dict:
     )
     response.raise_for_status()
     payload = response.json()
-    portal_url = payload.get("url")
-    if not portal_url:
-        raise RuntimeError("Stripe did not return a portal URL.")
+    portal_url = provider_redirect_url(payload.get("url"), "Stripe", "portal")
     return {"provider": "stripe", "id": payload.get("id"), "url": portal_url}
 
 
@@ -320,9 +324,7 @@ def create_creem_portal_session(customer_id: str) -> dict:
     )
     response.raise_for_status()
     payload = response.json()
-    portal_url = payload.get("customer_portal_link") or payload.get("url")
-    if not portal_url:
-        raise RuntimeError("Creem did not return a portal URL.")
+    portal_url = provider_redirect_url(payload.get("customer_portal_link") or payload.get("url"), "Creem", "portal")
     return {"provider": "creem", "url": portal_url}
 
 
@@ -384,9 +386,7 @@ def create_stripe_interval_change_session(billing: dict, *, return_url: str) -> 
     )
     response.raise_for_status()
     payload = response.json()
-    portal_url = payload.get("url")
-    if not portal_url:
-        raise RuntimeError("Stripe did not return a portal URL.")
+    portal_url = provider_redirect_url(payload.get("url"), "Stripe", "portal")
     return {"provider": "stripe", "plan": "pro", "interval": "year", "id": payload.get("id"), "url": portal_url}
 
 

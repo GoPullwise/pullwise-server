@@ -248,6 +248,81 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(json_payload["metadata"]["plan"], "pro")
         self.assertEqual(json_payload["metadata"]["interval"], "year")
 
+    def test_provider_redirect_urls_must_be_absolute_http_urls(self) -> None:
+        user = {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cus_123"}}
+        stripe_env = {
+            "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
+            "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
+            "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
+            "PULLWISE_APP_URL": "https://app.pullwise.dev",
+        }
+        creem_env = {
+            "PULLWISE_CREEM_API_KEY": "creem_123",
+            "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
+            "PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly",
+            "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+            "PULLWISE_APP_URL": "https://app.pullwise.dev",
+        }
+        scenarios = [
+            (
+                "stripe checkout",
+                stripe_env,
+                {"id": "cs_test_123", "url": "javascript:alert(1)"},
+                lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success", cancel_url="https://app.pullwise.dev/cancel"),
+            ),
+            (
+                "creem checkout",
+                creem_env,
+                {"id": "chk_123", "checkout_url": "javascript:alert(1)"},
+                lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success", cancel_url="https://app.pullwise.dev/cancel"),
+            ),
+            (
+                "stripe portal",
+                stripe_env,
+                {"id": "bps_123", "url": "javascript:alert(1)"},
+                lambda: billing.create_portal_session(user, return_url="https://app.pullwise.dev/settings"),
+            ),
+            (
+                "creem portal",
+                creem_env,
+                {"customer_portal_link": "javascript:alert(1)"},
+                lambda: billing.create_portal_session(user, return_url="https://app.pullwise.dev/settings"),
+            ),
+            (
+                "stripe interval change",
+                stripe_env,
+                {"id": "bps_123", "url": "javascript:alert(1)"},
+                lambda: billing.change_subscription_interval(
+                    {
+                        "id": "usr_1",
+                        "billing": {
+                            "provider": "stripe",
+                            "customerId": "cus_123",
+                            "subscriptionId": "sub_123",
+                            "subscriptionItemId": "si_123",
+                            "plan": "pro",
+                            "interval": "month",
+                            "status": "active",
+                        },
+                    },
+                    interval="year",
+                    return_url="https://app.pullwise.dev/billing",
+                ),
+            ),
+        ]
+
+        for name, env_vars, payload, call in scenarios:
+            with self.subTest(name=name):
+                response = Mock()
+                response.json.return_value = payload
+                response.raise_for_status.return_value = None
+                with (
+                    patch.dict(os.environ, env_vars, clear=True),
+                    patch("pullwise_server.billing.requests.post", return_value=response),
+                    self.assertRaisesRegex(RuntimeError, "safe .* URL"),
+                ):
+                    call()
+
     def test_stripe_monthly_to_yearly_change_uses_portal_update_confirmation(self) -> None:
         response = Mock()
         response.json.return_value = {"id": "bps_123", "url": "https://billing.stripe.com/session"}
