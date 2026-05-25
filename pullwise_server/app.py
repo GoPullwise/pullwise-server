@@ -2270,11 +2270,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self._rate_limit_headers = {}
             return False
 
-        rate = db.record_rate_limit_hit(
-            self.rate_limit_subject(),
-            limit=limit,
-            window_seconds=rate_limit_window_seconds(),
-        )
+        try:
+            rate = db.record_rate_limit_hit(
+                self.rate_limit_subject(),
+                limit=limit,
+                window_seconds=rate_limit_window_seconds(),
+            )
+        except Exception:
+            logger.exception("Failed to apply API rate limit.")
+            self._rate_limit_headers = {}
+            return False
         headers = {
             "X-RateLimit-Limit": str(rate["limit"]),
             "X-RateLimit-Remaining": str(rate["remaining"]),

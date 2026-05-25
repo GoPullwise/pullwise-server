@@ -106,6 +106,21 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
 
         self.assertEqual(rows, [("ip:203.0.113.10", 2)])
 
+    def test_rate_limit_storage_failures_do_not_block_api_requests(self) -> None:
+        handler = HandlerHarness("/auth/session")
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
+            patch.object(app.db, "record_rate_limit_hit", side_effect=RuntimeError("database locked")),
+            patch.object(app.logger, "exception") as log_exception,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["authenticated"])
+        self.assertEqual(handler.headers_out, {})
+        log_exception.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
