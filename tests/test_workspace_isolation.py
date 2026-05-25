@@ -82,6 +82,28 @@ class WorkspaceIsolationTest(unittest.TestCase):
         patch_scan.assert_called_once_with("sc_1", {"repoPath": None}, allow_after_cancel=True)
         self.assertNotIn("sc_1", app.PREVIEW_SCAN_LOCKS)
 
+    def test_worker_cleanup_logs_failure_reason(self) -> None:
+        snapshot = {
+            "id": "sc_1",
+            "userId": "usr_1",
+            "repo": "owner/repo",
+            "branch": "main",
+            "commit": "pending",
+            "repoPath": "checkout",
+        }
+
+        with (
+            patch.object(worker.checkout, "cleanup_scan_workspace", side_effect=PermissionError("locked object")),
+            patch.object(worker, "_patch_scan") as patch_scan,
+            patch.object(worker, "_log_scan_event") as log_scan_event,
+            patch("pullwise_server.worker.traceback.print_exc"),
+        ):
+            worker._cleanup_checkout_workspace("sc_1", snapshot)
+
+        patch_scan.assert_not_called()
+        self.assertEqual("cleanup_failed", log_scan_event.call_args_list[-1].args[0])
+        self.assertIn("locked object", log_scan_event.call_args_list[-1].kwargs["error"])
+
 
 class RepositoryRiskDecisionTest(unittest.TestCase):
     def test_matching_source_fingerprint_in_same_workspace_is_limited_trial(self) -> None:

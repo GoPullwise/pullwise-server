@@ -7,6 +7,7 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -409,7 +410,21 @@ def remove_existing_checkout(path: str) -> None:
     ):
         raise RuntimeError("Refusing to remove a checkout outside PULLWISE_CHECKOUT_ROOT.")
     if os.path.exists(path_abs):
-        shutil.rmtree(path_abs)
+        shutil.rmtree(path_abs, onerror=_retry_remove_readonly)
+
+
+def _retry_remove_readonly(func: Callable[[str], None], path: str, exc_info: object) -> None:
+    exc = exc_info[1] if isinstance(exc_info, tuple) and len(exc_info) > 1 else None
+    if isinstance(exc, PermissionError):
+        try:
+            os.chmod(path, stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+            func(path)
+            return
+        except Exception:
+            pass
+    if isinstance(exc, BaseException):
+        raise exc
+    raise PermissionError(path)
 
 
 def cleanup_scan_workspace(user_id: str, scan_id: str) -> None:

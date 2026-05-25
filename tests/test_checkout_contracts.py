@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -124,6 +125,25 @@ class CheckoutContractsTest(unittest.TestCase):
             root,
             os.path.abspath(os.path.join(checkout.project_root(), ".pullwise", "checkouts")),
         )
+
+    def test_cleanup_scan_workspace_retries_readonly_git_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = checkout.checkout_path_for("usr_1", "sc_1", "owner/repo")
+                object_dir = os.path.join(repo_path, ".git", "objects", "aa")
+                os.makedirs(object_dir, exist_ok=True)
+                object_path = os.path.join(object_dir, "object")
+                with open(object_path, "w", encoding="utf-8") as handle:
+                    handle.write("git object")
+                os.chmod(object_path, stat.S_IREAD)
+
+                try:
+                    checkout.cleanup_scan_workspace("usr_1", "sc_1")
+                finally:
+                    if os.path.exists(object_path):
+                        os.chmod(object_path, stat.S_IREAD | stat.S_IWRITE)
+
+                self.assertFalse(os.path.exists(checkout.workspace_path_for("usr_1", "sc_1")))
 
     def test_git_auth_env_disables_system_and_user_git_config(self) -> None:
         git_env = checkout.git_auth_env("ghs_secret_token")

@@ -477,9 +477,9 @@ def _cleanup_checkout_workspace(scan_id: str, snapshot: dict) -> None:
             checkout.cleanup_scan_workspace(user_id, scan_id)
             _patch_scan(scan_id, {"repoPath": None}, allow_after_cancel=True)
             _log_scan_event("cleanup_completed", scan_id, snapshot)
-        except Exception:
+        except Exception as exc:
             traceback.print_exc()
-            _log_scan_event("cleanup_failed", scan_id, snapshot)
+            _log_scan_event("cleanup_failed", scan_id, snapshot, error=str(exc)[:500])
 
 
 def _log_scan_event(event: str, scan_id: str, snapshot: dict, **fields: object) -> None:
