@@ -208,6 +208,29 @@ def initialize() -> None:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    key_prefix TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    scopes TEXT NOT NULL DEFAULT '[]',
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    last_used_at INTEGER,
+                    revoked_at INTEGER,
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_api_keys_user_workspace
+                ON api_keys(user_id, workspace_id, revoked_at)
+                """
+            )
 
 
 def load_state() -> dict[str, Any]:
@@ -609,6 +632,30 @@ def get_workspace_repository(workspace_id: str, repository_id: str) -> dict[str,
         )
 
 
+def list_repositories_for_workspace(workspace_id: str) -> list[dict[str, Any]]:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT
+                r.*,
+                wr.workspace_id,
+                wr.github_app_installation_id,
+                wr.permissions,
+                wr.repository_selection,
+                wr.installation_account,
+                wr.last_authorized_at
+            FROM workspace_repositories wr
+            JOIN repositories r ON r.id = wr.repository_id
+            WHERE wr.workspace_id = ?
+            ORDER BY r.full_name COLLATE NOCASE
+            """,
+            (workspace_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def upsert_repo_fingerprint(repository_id: str, fingerprint: dict[str, Any]) -> dict[str, Any] | None:
     initialize()
     repository_id = str(repository_id or "").strip()
@@ -748,6 +795,102 @@ def find_workspace_for_billing_update(update: dict[str, Any]) -> dict[str, Any] 
             if row:
                 return dict(row)
     return None
+
+
+def create_api_key(record: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    api_key_id = str(record.get("id") or "").strip()
+    user_id = str(record.get("user_id") or "").strip()
+    workspace_id = str(record.get("workspace_id") or "").strip()
+    name = str(record.get("name") or "API key").strip() or "API key"
+    key_prefix = str(record.get("key_prefix") or "").strip()
+    key_hash = str(record.get("key_hash") or "").strip()
+    scopes = record.get("scopes")
+    if not api_key_id or not user_id or not workspace_id or not key_prefix or not key_hash:
+        raise ValueError("api key id, user_id, workspace_id, prefix, and hash are required")
+    scopes_text = scopes if isinstance(scopes, str) else json.dumps(scopes or [], sort_keys=True)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO api_keys (
+                    id, user_id, workspace_id, name, key_prefix, key_hash, scopes,
+                    created_at, last_used_at, revoked_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), NULL, NULL)
+                """,
+                (api_key_id, user_id, workspace_id, name, key_prefix, key_hash, scopes_text),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM api_keys WHERE id = ?", (api_key_id,)).fetchone()) or {}
+
+
+def list_api_keys_for_user(user_id: str, workspace_id: str | None = None) -> list[dict[str, Any]]:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        if workspace_id:
+            rows = connection.execute(
+                """
+                SELECT * FROM api_keys
+                WHERE user_id = ? AND workspace_id = ?
+                ORDER BY revoked_at IS NOT NULL, created_at DESC
+                """,
+                (user_id, workspace_id),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT * FROM api_keys
+                WHERE user_id = ?
+                ORDER BY revoked_at IS NOT NULL, created_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_api_key_by_hash(key_hash: str) -> dict[str, Any] | None:
+    initialize()
+    key_hash = str(key_hash or "").strip()
+    if not key_hash:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                """
+                SELECT * FROM api_keys
+                WHERE key_hash = ? AND revoked_at IS NULL
+                """,
+                (key_hash,),
+            ).fetchone()
+        )
+
+
+def mark_api_key_used(api_key_id: str) -> None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                "UPDATE api_keys SET last_used_at = strftime('%s', 'now') WHERE id = ? AND revoked_at IS NULL",
+                (api_key_id,),
+            )
+
+
+def revoke_api_key(api_key_id: str, user_id: str) -> bool:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            updated = connection.execute(
+                """
+                UPDATE api_keys
+                SET revoked_at = COALESCE(revoked_at, strftime('%s', 'now'))
+                WHERE id = ? AND user_id = ?
+                """,
+                (api_key_id, user_id),
+            ).rowcount
+        return updated > 0
 
 
 def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> str:

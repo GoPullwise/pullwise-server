@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import math
@@ -47,6 +48,9 @@ ISSUE_STATUSES = {"open", "fixed", "snoozed"}
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
 SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
+API_KEY_PREFIX = "pwk_"
+API_KEY_ALLOWED_SCOPES = {"repositories:read", "scans:read", "scans:write", "quota:read"}
+API_KEY_DEFAULT_SCOPES = ["repositories:read", "scans:read", "scans:write", "quota:read"]
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
@@ -223,6 +227,24 @@ def bearer_token(handler: BaseHTTPRequestHandler) -> str | None:
     if not token or any(char in token for char in "\r\n"):
         return None
     return token
+
+
+def api_key_token(handler: BaseHTTPRequestHandler) -> str | None:
+    authorization_token = bearer_token(handler)
+    if authorization_token and authorization_token.startswith(API_KEY_PREFIX):
+        return authorization_token
+    header_token = first_header_value(handler, "X-Pullwise-Api-Key")
+    if header_token and header_token.startswith(API_KEY_PREFIX) and not any(char in header_token for char in "\r\n"):
+        return header_token
+    return None
+
+
+def api_key_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def api_key_prefix(token: str) -> str:
+    return token[:16]
 
 
 def local_github_mocks_enabled() -> bool:
@@ -1170,6 +1192,180 @@ def workspace_billing_subject(user: dict, workspace: dict | None) -> dict:
     return workspaces.billing_subject_for_workspace(user, workspace)
 
 
+def clean_api_key_scopes(value: object) -> list[str]:
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, list):
+        candidates = [item for item in value if isinstance(item, str)]
+    else:
+        candidates = API_KEY_DEFAULT_SCOPES
+    scopes: list[str] = []
+    for scope in candidates:
+        normalized = scope.strip().lower()
+        if normalized in API_KEY_ALLOWED_SCOPES and normalized not in scopes:
+            scopes.append(normalized)
+    return scopes or list(API_KEY_DEFAULT_SCOPES)
+
+
+def parse_api_key_scopes(value: object) -> list[str]:
+    if isinstance(value, list):
+        return clean_api_key_scopes(value)
+    if not isinstance(value, str):
+        return list(API_KEY_DEFAULT_SCOPES)
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return clean_api_key_scopes(decoded)
+
+
+def api_key_public_payload(record: dict, *, token: str | None = None) -> dict:
+    payload = {
+        "id": public_issue_text(record.get("id")),
+        "name": public_issue_text(record.get("name")) or "API key",
+        "userId": public_issue_text(record.get("user_id")),
+        "workspaceId": public_issue_text(record.get("workspace_id")),
+        "prefix": public_issue_text(record.get("key_prefix")),
+        "scopes": parse_api_key_scopes(record.get("scopes")),
+        "createdAt": pull_request_timestamp(record.get("created_at")) or 0,
+        "lastUsedAt": pull_request_timestamp(record.get("last_used_at")),
+        "revokedAt": pull_request_timestamp(record.get("revoked_at")),
+    }
+    if token:
+        payload["key"] = token
+    return payload
+
+
+def navigation_payload() -> dict:
+    return {
+        "top": [
+            {"id": "product", "label": "Product", "href": "/"},
+            {"id": "pricing", "label": "Pricing", "href": "/pricing"},
+            {"id": "api", "label": "API", "href": "/api-docs"},
+        ],
+        "dashboard": [
+            {"id": "overview", "label": "Overview", "href": "/dashboard/overview", "scope": "workspace"},
+            {"id": "repositories", "label": "Repositories", "href": "/repositories"},
+            {"id": "api-keys", "label": "API Keys", "href": "/api-keys"},
+            {"id": "billing", "label": "Billing", "href": "/billing"},
+        ],
+        "workspace": {
+            "list": {"method": "GET", "href": "/workspaces"},
+            "create": {"method": "POST", "href": "/workspaces"},
+        },
+    }
+
+
+def pricing_payload(user: dict | None = None) -> dict:
+    payload = billing.public_plan()
+    payload["page"] = {
+        "id": "pricing",
+        "checkoutAction": {"method": "POST", "href": "/billing/checkout-sessions"},
+        "billingRoute": "/billing",
+    }
+    if user:
+        current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
+        payload["workspace"] = billing_workspace_payload(current_workspace)
+        payload["account"] = billing_account_payload(user)
+    return payload
+
+
+def billing_page_payload(user: dict) -> dict:
+    current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
+    return {
+        "page": {
+            "id": "billing",
+            "subscriptionAction": {"label": "View pricing", "href": "/pricing"},
+            "checkoutAction": None,
+        },
+        "workspace": billing_workspace_payload(current_workspace),
+        "account": billing_account_payload(user),
+    }
+
+
+def api_docs_payload() -> dict:
+    return {
+        "page": {"id": "api", "title": "Pullwise API"},
+        "authentication": {
+            "type": "apiKey",
+            "headers": ["Authorization: Bearer <api_key>", "X-Pullwise-Api-Key: <api_key>"],
+            "createKey": {"method": "POST", "href": "/api-keys"},
+        },
+        "endpoints": [
+            {
+                "method": "GET",
+                "path": "/api/v1/repositories",
+                "scope": "repositories:read",
+                "description": "List authorized repositories for the API key workspace, including repoId.",
+            },
+            {
+                "method": "POST",
+                "path": "/api/v1/repositories/{repoId}/scans",
+                "scope": "scans:write",
+                "description": "Start a scan for an authorized repository.",
+            },
+            {
+                "method": "POST",
+                "path": "/api/v1/repositories/{repoId}/scans/stop",
+                "scope": "scans:write",
+                "description": "Cancel the latest queued or running scan for the repository.",
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/repositories/{repoId}/scans/current",
+                "scope": "scans:read",
+                "description": "Read the latest scan status for the repository.",
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/repositories/{repoId}/quota",
+                "scope": "quota:read",
+                "description": "Read remaining workspace and repository scan quota.",
+            },
+        ],
+    }
+
+
+def dashboard_overview_payload(session: dict) -> dict:
+    user = USERS.get(session["userId"])
+    current_workspace = current_workspace_for_user(user)
+    scans = [scan_payload(scan) for scan in user_scans(session)]
+    repositories = repository_items_for_response(user, user.get("githubRepositoryAccess") if user else None) if user else []
+    status_counts: dict[str, int] = {}
+    for scan in scans:
+        status = scan.get("status") or "unknown"
+        status_counts[status] = status_counts.get(status, 0) + 1
+    return {
+        "scope": {
+            "type": "workspace",
+            "workspaceId": current_workspace.get("id") if current_workspace else None,
+            "repoId": None,
+            "repo": None,
+        },
+        "breadcrumbs": [{"label": "Overview", "href": "/dashboard/overview"}],
+        "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
+        "scanTotals": {
+            "total": len(scans),
+            "byStatus": status_counts,
+        },
+        "authorizedRepositories": {
+            "count": len(repositories),
+            "href": "/repositories",
+            "items": repositories,
+        },
+        "recentScans": scans[:10],
+    }
+
+
+def workspace_for_request(user: dict | None, workspace_id: object = None) -> dict | None:
+    if not user:
+        return None
+    requested_id = clean_github_access_text(workspace_id, allow_int=True)
+    if requested_id:
+        return db.get_workspace(requested_id)
+    return current_workspace_for_user(user)
+
+
 def public_billing_text(value: object) -> str | None:
     return public_issue_text(value) or None
 
@@ -2054,6 +2250,10 @@ def repository_item_with_quota(item: dict, workspace: dict | None = None) -> dic
         repository = db.get_repository(repo_id)
         if repository:
             payload["quota"] = quota.quota_payload_for_repository(repository, workspace)
+    link_repo_id = clean_github_access_text(payload.get("repoId"), allow_int=True)
+    if link_repo_id:
+        payload["href"] = f"/repositories/{link_repo_id}"
+        payload["scanAction"] = {"method": "POST", "href": f"/api/v1/repositories/{link_repo_id}/scans"}
     return payload
 
 
@@ -2783,6 +2983,7 @@ def session_payload(session: dict | None) -> dict:
             "authenticated": False,
             "user": None,
             "github": {"identityConnected": False, "repositoriesConnected": False, "repositoryScope": None},
+            "navigation": navigation_payload(),
             "nextStep": "sign_in",
         }
 
@@ -2811,6 +3012,7 @@ def session_payload(session: dict | None) -> dict:
         },
         "workspaces": workspace_payloads,
         "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
+        "navigation": navigation_payload(),
         "nextStep": "choose_repositories" if repositories_connected else "connect_github_repositories",
     }
 
@@ -3040,6 +3242,71 @@ def cookie_secure_enabled() -> bool:
     return public_base.startswith("https://")
 
 
+def external_api_segments(segments: list[str]) -> list[str] | None:
+    if len(segments) >= 2 and segments[0] == "v1":
+        return segments[1:]
+    if len(segments) >= 3 and segments[0] == "api" and segments[1] == "v1":
+        return segments[2:]
+    return None
+
+
+def decode_permissions(value: object) -> dict:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def api_repository_payload(row: dict, workspace: dict | None = None) -> dict:
+    repository = db.get_repository(str(row.get("id") or "")) if not row.get("github_repo_id") else row
+    repository = repository or row
+    workspace_id = public_issue_text(row.get("workspace_id")) or public_issue_text((workspace or {}).get("id"))
+    payload = {
+        "id": public_issue_text(repository.get("id")),
+        "repoId": public_issue_text(repository.get("id")),
+        "githubRepoId": public_issue_text(repository.get("github_repo_id")),
+        "fullName": public_issue_text(repository.get("full_name")),
+        "ownerLogin": public_issue_text(repository.get("owner_login")),
+        "defaultBranch": public_issue_text(repository.get("default_branch")) or "main",
+        "private": bool(repository.get("private")),
+        "fork": bool(repository.get("fork")),
+        "htmlUrl": trusted_public_url(repository.get("html_url")),
+        "cloneUrl": trusted_public_url(repository.get("clone_url")),
+        "workspaceId": workspace_id,
+        "installationId": clean_github_access_text(row.get("github_app_installation_id"), allow_int=True),
+        "installationAccount": public_issue_text(row.get("installation_account")),
+        "repositorySelection": public_issue_text(row.get("repository_selection")),
+        "lastAuthorizedAt": pull_request_timestamp(row.get("last_authorized_at")),
+        "permissions": decode_permissions(row.get("permissions")),
+    }
+    if workspace and repository.get("id"):
+        payload["quota"] = quota.quota_payload_for_repository(repository, workspace)
+    return payload
+
+
+def latest_scan_for_workspace_repo(workspace_id: str, repo_id: str) -> dict | None:
+    for scan in SCANS:
+        if scan.get("workspaceId") == workspace_id and scan.get("repoId") == repo_id:
+            return scan
+    return None
+
+
+def active_scan_for_workspace_repo(workspace_id: str, repo_id: str) -> dict | None:
+    for scan in SCANS:
+        if (
+            scan.get("workspaceId") == workspace_id
+            and scan.get("repoId") == repo_id
+            and scan.get("status") in {"queued", "running"}
+        ):
+            return scan
+    return None
+
+
 class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
@@ -3105,7 +3372,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.NO_CONTENT)
             self.send_cors_headers()
             self.send_header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Pullwise-Api-Key")
             self.end_headers()
         except _CLIENT_DISCONNECT_EXCEPTIONS:
             logger.debug("Client disconnected while handling OPTIONS %s", self.path)
@@ -3177,8 +3444,26 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "database": {"type": "sqlite", "path": db.database_path()},
                 **readiness_payload(),
             })
+        if path == "/pricing":
+            session = self.current_session()
+            user = USERS.get(session["userId"]) if session else None
+            return self.json(pricing_payload(user))
+        if path in {"/api-docs", "/api/docs"}:
+            return self.json(api_docs_payload())
+        api_segments = external_api_segments(segments)
+        if api_segments is not None:
+            return self.handle_external_api_get(api_segments, params)
         if path == "/auth/session":
             return self.json(session_payload(self.current_session()))
+        if path == "/dashboard/overview":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing the dashboard.")
+            return self.json(dashboard_overview_payload(session))
+        if path == "/workspaces":
+            return self.handle_workspaces_get()
+        if path == "/api-keys":
+            return self.handle_api_keys_get(params)
         if path == "/auth/github/authorize":
             return self.handle_github_authorize(params)
         if path == "/auth/github/callback":
@@ -3225,14 +3510,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing settings.")
             return self.json(settings_payload(session["userId"]))
         if path == "/billing/plan":
-            payload = billing.public_plan()
             session = self.current_session()
             user = USERS.get(session["userId"]) if session else None
-            if user:
-                current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
-                payload["workspace"] = billing_workspace_payload(current_workspace)
-                payload["account"] = billing_account_payload(user)
-            return self.json(payload)
+            return self.json(pricing_payload(user))
+        if path == "/billing":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing billing.")
+            return self.json(billing_page_payload(USERS[session["userId"]]))
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_post(self, path: str, params: dict, segments: list[str]) -> None:
@@ -3241,9 +3526,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/webhooks/creem":
             return self.handle_creem_webhook()
         body = self.read_json()
+        api_segments = external_api_segments(segments)
+        if api_segments is not None:
+            return self.handle_external_api_post(api_segments, body)
         if path == "/auth/sign-out":
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
+        if path == "/workspaces":
+            return self.handle_workspaces_post(body)
+        if path == "/api-keys":
+            return self.handle_api_keys_post(body)
         if (
             len(segments) == 5
             and segments[0] == "integrations"
@@ -3621,6 +3913,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_delete(self, segments: list[str]) -> None:
+        if len(segments) == 2 and segments[0] == "api-keys":
+            return self.handle_api_key_delete(segments[1])
         if len(segments) == 2 and segments[0] == "integrations":
             session = self.current_session()
             if segments[1] != "github":
@@ -4181,6 +4475,298 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         cookie = SimpleCookie(raw_cookie)
         morsel = cookie.get(SESSION_COOKIE)
         return morsel.value if morsel else None
+
+    def current_api_key_context(self) -> dict | None:
+        cached = getattr(self, "_api_key_context", None)
+        if cached is not None:
+            return cached
+        token = api_key_token(self)
+        if not token:
+            self._api_key_context = None
+            return None
+        token_hash = api_key_hash(token)
+        record = db.get_api_key_by_hash(token_hash)
+        if not record:
+            self._api_key_context = None
+            return None
+        user = USERS.get(str(record.get("user_id") or ""))
+        workspace = db.get_workspace(str(record.get("workspace_id") or ""))
+        if not user or not workspace or not db.user_is_workspace_member(workspace["id"], user["id"]):
+            self._api_key_context = None
+            return None
+        db.mark_api_key_used(record["id"])
+        context = {"apiKey": record, "user": user, "workspace": workspace, "scopes": parse_api_key_scopes(record.get("scopes"))}
+        self._api_key_context = context
+        return context
+
+    def require_api_key_context(self, scope: str) -> dict | None:
+        context = self.current_api_key_context()
+        if not context:
+            self.error(HTTPStatus.UNAUTHORIZED, "A valid Pullwise API key is required.")
+            return None
+        if scope not in context.get("scopes", []):
+            self.error(HTTPStatus.FORBIDDEN, f"API key scope {scope} is required.")
+            return None
+        return context
+
+    def api_repository_context(self, context: dict, repo_id: str) -> tuple[dict, dict] | None:
+        repo_id = clean_github_access_text(repo_id, allow_int=True) or ""
+        if not repo_id:
+            self.error(HTTPStatus.BAD_REQUEST, "repoId is required.")
+            return None
+        workspace = context["workspace"]
+        workspace_repo = db.get_workspace_repository(workspace["id"], repo_id)
+        repository = db.get_repository(repo_id)
+        if not workspace_repo or not repository:
+            self.error(HTTPStatus.NOT_FOUND, "Repository is not authorized for this workspace.")
+            return None
+        return workspace_repo, repository
+
+    def handle_api_keys_get(self, params: dict) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing API keys.")
+        user = USERS[session["userId"]]
+        workspace = workspace_for_request(user, params.get("workspaceId"))
+        if not workspace:
+            return self.error(HTTPStatus.NOT_FOUND, "Workspace not found.")
+        if not db.user_is_workspace_member(workspace["id"], user["id"]):
+            return self.error(HTTPStatus.FORBIDDEN, "Workspace membership is required to view API keys.")
+        keys = [api_key_public_payload(item) for item in db.list_api_keys_for_user(user["id"], workspace["id"])]
+        return self.json({"items": keys, "apiKeys": keys, "workspace": workspaces.workspace_public_payload(workspace)})
+
+    def handle_api_keys_post(self, body: dict) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before creating API keys.")
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        user = USERS[session["userId"]]
+        workspace = workspace_for_request(user, body.get("workspaceId"))
+        if not workspace:
+            return self.error(HTTPStatus.NOT_FOUND, "Workspace not found.")
+        if not db.user_is_workspace_member(workspace["id"], user["id"]):
+            return self.error(HTTPStatus.FORBIDDEN, "Workspace membership is required to create API keys.")
+        token = API_KEY_PREFIX + secrets.token_urlsafe(32)
+        record = db.create_api_key(
+            {
+                "id": make_id("ak"),
+                "user_id": user["id"],
+                "workspace_id": workspace["id"],
+                "name": public_issue_text(body.get("name")) or "API key",
+                "key_prefix": api_key_prefix(token),
+                "key_hash": api_key_hash(token),
+                "scopes": clean_api_key_scopes(body.get("scopes")),
+            }
+        )
+        return self.json(api_key_public_payload(record, token=token), HTTPStatus.CREATED)
+
+    def handle_api_key_delete(self, key_id: str) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before revoking API keys.")
+        if not db.revoke_api_key(key_id, session["userId"]):
+            return self.error(HTTPStatus.NOT_FOUND, "API key not found.")
+        return self.json({"ok": True, "id": public_issue_text(key_id), "revoked": True})
+
+    def handle_workspaces_get(self) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing workspaces.")
+        user = USERS[session["userId"]]
+        current_workspace = current_workspace_for_user(user)
+        workspace_items = workspaces_payload_for_user(user)
+        return self.json(
+            {
+                "items": workspace_items,
+                "workspaces": workspace_items,
+                "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
+                "createAction": {"method": "POST", "href": "/workspaces"},
+            }
+        )
+
+    def handle_workspaces_post(self, body: dict) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before creating workspaces.")
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        user = USERS[session["userId"]]
+        workspace_name = public_issue_text(body.get("name")) or "New workspace"
+        workspace = db.upsert_workspace(
+            {
+                "id": make_id("ws"),
+                "name": workspace_name,
+                "github_owner_login": None,
+                "github_owner_type": "Manual",
+                "plan": "free",
+            }
+        )
+        db.upsert_workspace_member(workspace["id"], user["id"], role="owner", source="manual")
+        return self.json(workspaces.workspace_public_payload(workspace, role="owner") or {}, HTTPStatus.CREATED)
+
+    def handle_external_api_get(self, segments: list[str], params: dict) -> None:
+        if segments == ["repositories"]:
+            context = self.require_api_key_context("repositories:read")
+            if not context:
+                return
+            workspace = context["workspace"]
+            rows = db.list_repositories_for_workspace(workspace["id"])
+            items = [api_repository_payload(row, workspace) for row in rows]
+            return self.json(
+                {
+                    "items": items,
+                    "repositories": items,
+                    "workspace": workspaces.workspace_public_payload(workspace),
+                    "apiKey": api_key_public_payload(context["apiKey"]),
+                }
+            )
+        if len(segments) == 4 and segments[0] == "repositories" and segments[2] == "scans" and segments[3] == "current":
+            context = self.require_api_key_context("scans:read")
+            if not context:
+                return
+            repo_context = self.api_repository_context(context, segments[1])
+            if not repo_context:
+                return
+            scan = latest_scan_for_workspace_repo(context["workspace"]["id"], repo_context[1]["id"])
+            return self.json(
+                {
+                    "repoId": repo_context[1]["id"],
+                    "workspaceId": context["workspace"]["id"],
+                    "scan": scan_payload(scan) if scan else None,
+                    "status": public_scan_status(scan.get("status")) if scan else "idle",
+                }
+            )
+        if len(segments) == 3 and segments[0] == "repositories" and segments[2] == "quota":
+            context = self.require_api_key_context("quota:read")
+            if not context:
+                return
+            repo_context = self.api_repository_context(context, segments[1])
+            if not repo_context:
+                return
+            workspace = context["workspace"]
+            repository = repo_context[1]
+            return self.json(
+                {
+                    "workspaceId": workspace["id"],
+                    "repoId": repository["id"],
+                    "workspace": quota.quota_payload_for_workspace(workspace),
+                    "repository": quota.quota_payload_for_repository(repository, workspace),
+                }
+            )
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def handle_external_api_post(self, segments: list[str], body: dict) -> None:
+        if len(segments) == 3 and segments[0] == "repositories" and segments[2] == "scans":
+            return self.handle_external_api_scan_start(segments[1], body)
+        if len(segments) == 4 and segments[0] == "repositories" and segments[2] == "scans" and segments[3] == "stop":
+            return self.handle_external_api_scan_stop(segments[1])
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def handle_external_api_scan_start(self, repo_id: str, body: dict) -> None:
+        context = self.require_api_key_context("scans:write")
+        if not context:
+            return
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        repo_context = self.api_repository_context(context, repo_id)
+        if not repo_context:
+            return
+        workspace_repo, repository = repo_context
+        if review.selected_provider() == "disabled":
+            return self.error(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
+            )
+        request_id = str(body.get("requestId") or body.get("idempotencyKey") or "").strip()[:128]
+        existing = user_scan_by_request_id(context["user"]["id"], request_id)
+        if existing and existing.get("repoId") == repository["id"] and existing.get("workspaceId") == context["workspace"]["id"]:
+            return self.json(scan_payload(existing))
+        scan_id = make_id("sc")
+        try:
+            quota_result = quota.consume_scan_quota(
+                workspace=context["workspace"],
+                repository=repository,
+                requested_by_user_id=context["user"]["id"],
+                scan_id=scan_id,
+                request_id=request_id or None,
+            )
+        except quota.QuotaExceeded as exc:
+            payload = {"message": exc.message, "code": exc.code}
+            if exc.workspace_id:
+                payload["workspaceId"] = exc.workspace_id
+            if exc.repo_id:
+                payload["repoId"] = exc.repo_id
+            return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
+
+        branch = clean_github_access_text(body.get("branch")) or clean_github_access_text(repository.get("default_branch")) or "main"
+        scan = {
+            "id": scan_id,
+            "repo": repository["full_name"],
+            "branch": branch,
+            "commit": clean_github_access_text(body.get("commit")) or "pending",
+            "status": "queued",
+            "userId": context["user"]["id"],
+            "apiKeyId": context["apiKey"]["id"],
+            "createdAt": now(),
+            "queuedAt": now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "installationId": clean_github_access_text(workspace_repo.get("github_app_installation_id"), allow_int=True),
+            "installationAccount": clean_github_access_text(workspace_repo.get("installation_account")),
+            "repositorySelection": clean_github_access_text(workspace_repo.get("repository_selection")),
+            "workspaceId": context["workspace"]["id"],
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "quotaBucketIds": quota_result["bucketIds"],
+            "cloneUrl": repository.get("clone_url"),
+            "repositoryPrivate": bool(repository.get("private")),
+            "repoPath": None,
+            "billingUsage": quota_result["workspace"],
+            "repoUsage": quota_result["repository"],
+            "by": "api key",
+        }
+        if request_id:
+            scan["requestId"] = request_id
+        with STATE_LOCK:
+            SCANS.insert(0, scan)
+            mark_state_dirty()
+        scan_logging.log_event(
+            "scan_queued",
+            scanId=scan["id"],
+            userId=scan.get("userId"),
+            repo=scan.get("repo"),
+            branch=scan.get("branch"),
+            commit=scan.get("commit"),
+            provider=review.selected_provider(),
+            requestId=scan.get("requestId"),
+            installationId=scan.get("installationId"),
+            workspaceId=scan.get("workspaceId"),
+            repoId=scan.get("repoId"),
+            githubRepoId=scan.get("githubRepoId"),
+            quotaBucketIds=scan.get("quotaBucketIds"),
+            apiKeyId=scan.get("apiKeyId"),
+        )
+        worker.start_scan(scan["id"])
+        return self.json(scan_payload(scan), HTTPStatus.CREATED)
+
+    def handle_external_api_scan_stop(self, repo_id: str) -> None:
+        context = self.require_api_key_context("scans:write")
+        if not context:
+            return
+        repo_context = self.api_repository_context(context, repo_id)
+        if not repo_context:
+            return
+        with STATE_LOCK:
+            scan = active_scan_for_workspace_repo(context["workspace"]["id"], repo_context[1]["id"])
+            if not scan:
+                return self.error(HTTPStatus.NOT_FOUND, "No queued or running scan exists for this repository.")
+            scan["status"] = "cancelled"
+            scan["completedAt"] = now()
+            mark_state_dirty()
+        worker.notify_queue_changed()
+        return self.json(scan_payload(scan))
 
     def clear_current_session(self) -> None:
         session_id = self.current_session_id()

@@ -13,10 +13,12 @@ Current production-trial scope:
 - GitHub App repository authorization
 - Repository listing and sync
 - Scan creation, queueing, recovery, cancellation, and history
+- Workspace creation and API key management for external automation
 - Rich issue findings and manual triage/status changes
 - Deterministic fix preview for auto-fixable findings
 - GitHub pull request creation for deterministic issue fixes
-- Stripe or Creem billing and live readiness status
+- Stripe or Creem billing, pricing metadata, API docs metadata, and live
+  readiness status
 
 Stage 2 remediation is intentionally narrow:
 
@@ -203,6 +205,25 @@ Endpoints that read or mutate account data require a valid session, whether it
 arrives by cookie or bearer header. Public OAuth callback routes, billing
 webhooks, and `/health` stay callable without a user session, with webhook
 signature verification enforced by the billing provider integration.
+
+Workspace-scoped automation uses API keys created from the signed-in dashboard:
+
+- `GET /api-keys` lists keys for the current workspace.
+- `POST /api-keys` creates a key and returns the `pwk_...` token once.
+- `DELETE /api-keys/{id}` revokes a key.
+
+External API requests can pass the key as `Authorization: Bearer <api-key>` or
+`X-Pullwise-Api-Key: <api-key>`. API keys are tied to one user and one
+workspace, store only a hash server-side, and grant scopes such as
+`repositories:read`, `scans:write`, `scans:read`, and `quota:read`.
+
+API-key endpoints:
+
+- `GET /api/v1/repositories`
+- `POST /api/v1/repositories/{repoId}/scans`
+- `POST /api/v1/repositories/{repoId}/scans/stop`
+- `GET /api/v1/repositories/{repoId}/scans/current`
+- `GET /api/v1/repositories/{repoId}/quota`
 
 When `PULLWISE_RATE_LIMIT_ENABLED=true`, each request is counted in SQLite in
 the `api_rate_limits` table. The limiter keys by signed-in user id when a valid
@@ -474,6 +495,7 @@ PULLWISE_CREEM_TEST_MODE=false
 Implemented billing routes:
 
 - `GET /billing/plan`
+- `GET /billing`
 - `POST /billing/checkout-sessions`
 - `POST /billing/portal-sessions`
 - `POST /billing/change-interval`
@@ -507,7 +529,7 @@ User records contain:
   repository quota buckets, not from `user.billingUsage`
 
 Normalized tables include `workspaces`, `workspace_members`, `repositories`,
-`workspace_repositories`, `quota_buckets`, `quota_ledger`, and
+`workspace_repositories`, `quota_buckets`, `quota_ledger`, `api_keys`, and
 `repo_fingerprints`. New scans store `workspaceId`, `repoId`, `githubRepoId`,
 workspace usage, repository usage, quota bucket ids, and checkout fingerprint
 risk decisions. Forks share repository quota through their GitHub source repo id,
@@ -574,9 +596,17 @@ provider.
 Implemented endpoints:
 
 - `GET /auth/session`
+- `GET /pricing`
+- `GET /api-docs`
+- `GET /dashboard/overview`
 - `GET /auth/github/authorize?redirectTo=...`
 - `GET /auth/github/callback?redirectTo=...`
 - `POST /auth/sign-out`
+- `GET /workspaces`
+- `POST /workspaces`
+- `GET /api-keys`
+- `POST /api-keys`
+- `DELETE /api-keys/{id}`
 - `GET /integrations/github/authorize?scope=all|selected&redirectTo=...`
 - `GET /integrations/github/callback?scope=all|selected&redirectTo=...`
 - `GET /integrations`
@@ -600,6 +630,11 @@ Implemented endpoints:
 - `POST /billing/change-interval`
 - `POST /webhooks/stripe`
 - `POST /webhooks/creem`
+- `GET /api/v1/repositories`
+- `POST /api/v1/repositories/{repoId}/scans`
+- `POST /api/v1/repositories/{repoId}/scans/stop`
+- `GET /api/v1/repositories/{repoId}/scans/current`
+- `GET /api/v1/repositories/{repoId}/quota`
 
 Explicitly not implemented:
 
