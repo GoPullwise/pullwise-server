@@ -2252,6 +2252,24 @@ def github_repository_access_needs_aggregation_migration(user: dict | None, gith
     return not bool(github_access.get("installations"))
 
 
+def repository_sync_should_refresh(user: dict | None, github_access: dict | None, body: dict) -> bool:
+    if body.get("force") is True:
+        return True
+    if not user:
+        return False
+    if github_repository_authorization_pending(user):
+        return True
+    if not github_access:
+        return True
+    if not github_repository_access_authorized_for_user(user, github_access):
+        return True
+    if github_repository_access_needs_aggregation_migration(user, github_access):
+        return True
+    if github_repositories_need_sync(github_access):
+        return True
+    return not github_repository_access_connected(github_access)
+
+
 def github_repositories_connected_for_user(user: dict | None) -> bool:
     if not user or github_repository_authorization_pending(user):
         return False
@@ -2511,6 +2529,7 @@ def aggregate_github_repository_access(user: dict, installation_accesses: list[d
     if not installation_accesses:
         return None
 
+    timestamp = now()
     repository_items_by_name: dict[str, dict] = {}
     for access in installation_accesses:
         for item in access.get("repositoryItems") or []:
@@ -2535,11 +2554,12 @@ def aggregate_github_repository_access(user: dict, installation_accesses: list[d
         "mode": "github-app",
         "scope": aggregate_repository_scope(scopes) or "selected",
         "repositorySelection": aggregate_repository_scope(repository_selections) or "selected",
-        "authorizedAt": now(),
+        "authorizedAt": timestamp,
         "authorizedUserId": user.get("id"),
         "authorizedGithubId": user.get("githubId"),
         "authorizedGithubLogin": user.get("githubLogin"),
-        "validatedAt": now(),
+        "validatedAt": timestamp,
+        "repositoriesSyncedAt": timestamp,
         "installationId": single_access.get("installationId") if single_access else None,
         "installationIds": installation_ids,
         "installationAccount": unique_accounts[0] if len(unique_accounts) == 1 else None,
@@ -3240,12 +3260,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             installation_id = clean_github_access_text(body.get("installationId"), allow_int=True)
             github_identity_id = clean_github_access_text(body.get("githubIdentityId"))
+            user = USERS.get(session["userId"])
+            if not user:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before syncing repositories.")
             if installation_id or github_identity_id:
                 if not installation_id:
                     return self.error(HTTPStatus.BAD_REQUEST, "installationId is required for scoped repository sync.")
-                user = USERS.get(session["userId"])
-                if not user:
-                    return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before syncing repositories.")
                 sync_github_repository_installation_scope(
                     user,
                     installation_id,
@@ -3253,7 +3273,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 )
                 payload = self.repositories_payload(refresh=False)
             else:
-                payload = self.repositories_payload(refresh=True)
+                payload = self.repositories_payload(
+                    refresh=repository_sync_should_refresh(
+                        user,
+                        user.get("githubRepositoryAccess"),
+                        body,
+                    )
+                )
             payload.update({"ok": True, "syncedAt": now()})
             return self.json(payload)
         if path == "/scans":

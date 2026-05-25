@@ -3235,6 +3235,58 @@ class SecurityContractsTest(unittest.TestCase):
         fetch_installation.assert_not_called()
         list_repositories.assert_not_called()
 
+    def test_repositories_sync_reuses_connected_access_without_force(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "repositorySelection": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": "111",
+            "installationIds": ["111"],
+            "installationAccount": "octocat",
+            "installationAccounts": ["octocat"],
+            "repositories": ["octocat/private-repo"],
+            "repositoryItems": [
+                {
+                    "id": "repo_private",
+                    "name": "private-repo",
+                    "fullName": "octocat/private-repo",
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                }
+            ],
+            "installations": [
+                {
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                    "repositorySelection": "selected",
+                    "repositoryCount": 1,
+                }
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/repositories/sync", cookie="pw_session=ses_1")
+
+        with patch("pullwise_server.github_auth.list_current_app_installations_for_user") as list_installations:
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["needsAuthorization"])
+        self.assertEqual(handler.payload["items"][0]["fullName"], "octocat/private-repo")
+        list_installations.assert_not_called()
+
     def test_repositories_sync_aggregates_all_accessible_github_app_installations(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
@@ -3368,7 +3420,7 @@ class SecurityContractsTest(unittest.TestCase):
                 "expiresAt": app.now() + 3600,
             }
         }
-        handler = RouteHarness("/repositories/sync", cookie="pw_session=ses_1")
+        handler = RouteHarness("/repositories/sync", {"force": True}, cookie="pw_session=ses_1")
 
         def installation_repositories(_token: str, installation_id: str) -> list[dict]:
             if installation_id == "111":
@@ -3422,6 +3474,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual([item["fullName"] for item in handler.payload["items"]], ["octocat/private-repo", "acme/service"])
         self.assertEqual(github_access["repositories"], ["octocat/private-repo", "acme/service"])
+        self.assertIsInstance(github_access.get("repositoriesSyncedAt"), int)
         list_installations.assert_called_once_with("gho_user")
         self.assertEqual(
             [call.args for call in list_user_repositories.call_args_list],
