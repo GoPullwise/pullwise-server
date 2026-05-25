@@ -153,6 +153,7 @@ def _execute_scan(scan_id: str, snapshot: dict, started_at: int) -> None:
                 repo_path = _prepare_checkout_if_needed(scan_id, snapshot)
                 if repo_path:
                     snapshot["repoPath"] = repo_path
+                    snapshot["commit"] = checkout.current_commit(repo_path, lambda: _is_cancelled(scan_id))
                     _log_scan_event("checkout_ready", scan_id, snapshot, repoPath=repo_path)
                 else:
                     time.sleep(weight or 0)
@@ -163,6 +164,7 @@ def _execute_scan(scan_id: str, snapshot: dict, started_at: int) -> None:
                 }
                 if repo_path:
                     patch["repoPath"] = repo_path
+                    patch["commit"] = snapshot["commit"]
                 _patch_scan(scan_id, patch)
                 _log_scan_event(
                     "phase_completed",
@@ -297,6 +299,10 @@ def _scan_snapshot(scan: dict, started_at: int) -> dict:
         "id": scan["id"],
         "userId": checkout.clean_scan_text(scan.get("userId")) or "",
         "repo": checkout.clean_scan_text(scan.get("repo")) or "",
+        "workspaceId": checkout.clean_scan_text(scan.get("workspaceId"), allow_int=True),
+        "repoId": checkout.clean_scan_text(scan.get("repoId"), allow_int=True),
+        "githubRepoId": checkout.clean_scan_text(scan.get("githubRepoId"), allow_int=True),
+        "quotaBucketIds": scan.get("quotaBucketIds") if isinstance(scan.get("quotaBucketIds"), dict) else {},
         "branch": checkout.clean_scan_text(scan.get("branch")) or "main",
         "commit": checkout.clean_scan_text(scan.get("commit")) or "pending",
         "installationId": checkout.clean_scan_text(scan.get("installationId"), allow_int=True),
@@ -426,6 +432,10 @@ def _log_scan_event(event: str, scan_id: str, snapshot: dict, **fields: object) 
         scanId=scan_id,
         userId=snapshot.get("userId"),
         repo=snapshot.get("repo"),
+        workspaceId=snapshot.get("workspaceId"),
+        repoId=snapshot.get("repoId"),
+        githubRepoId=snapshot.get("githubRepoId"),
+        quotaBucketIds=snapshot.get("quotaBucketIds"),
         branch=snapshot.get("branch"),
         commit=snapshot.get("commit"),
         **fields,

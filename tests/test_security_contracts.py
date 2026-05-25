@@ -57,6 +57,12 @@ class SecurityContractsTest(unittest.TestCase):
         self.persist_patcher = patch.object(app, "persist_state")
         self.persist_patcher.start()
         self.addCleanup(self.persist_patcher.stop)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.db_path = os.path.join(self.temp_dir.name, "pullwise.sqlite3")
+        self.db_patcher = patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=False)
+        self.db_patcher.start()
+        self.addCleanup(self.db_patcher.stop)
         app.USERS = {
             "usr_1": {
                 "id": "usr_1",
@@ -688,6 +694,47 @@ class SecurityContractsTest(unittest.TestCase):
                 issue = handler.payload["items"][0] if path == "/issues" else handler.payload
                 self.assertEqual(issue, expected)
 
+    def test_issue_payload_hides_auto_fix_for_legacy_empty_replacement(self) -> None:
+        app.ISSUES[0].update({
+            "scanId": "sc_1",
+            "repo": "owner/repo",
+            "file": "src/auth.py",
+            "autoFix": True,
+            "badCode": [{"ln": 1, "code": "old()", "t": "del"}],
+            "goodCode": [],
+        })
+
+        payload = app.issue_payload(app.ISSUES[0])
+
+        self.assertIs(payload["autoFix"], False)
+        self.assertIs(payload["autoFixable"], False)
+
+    def test_issue_payload_hides_auto_fix_for_legacy_non_contiguous_bad_code(self) -> None:
+        app.ISSUES[0].update({
+            "scanId": "sc_1",
+            "repo": "owner/repo",
+            "file": "src/auth.py",
+            "autoFix": True,
+            "badCode": [
+                {"ln": 1, "code": "first()", "t": "del"},
+                {"ln": 3, "code": "third()", "t": "del"},
+            ],
+            "goodCode": [{"ln": 1, "code": "fixed()", "t": "add"}],
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"PULLWISE_CHECKOUT_ROOT": tmpdir}, clear=False):
+                repo_path = app.checkout.checkout_path_for("usr_1", "sc_1", "owner/repo")
+                os.makedirs(os.path.join(repo_path, "src"), exist_ok=True)
+                with open(os.path.join(repo_path, "src", "auth.py"), "w", encoding="utf-8") as handle:
+                    handle.write("first()\nsecond()\nthird()\n")
+                app.SCANS[0]["repoPath"] = repo_path
+
+                payload = app.issue_payload(app.ISSUES[0])
+
+        self.assertIs(payload["autoFix"], False)
+        self.assertIs(payload["autoFixable"], False)
+
     def test_github_installation_html_url_must_match_configured_github_host(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             self.assertEqual(
@@ -977,7 +1024,7 @@ class SecurityContractsTest(unittest.TestCase):
         handler = RouteHarness("/scans", {"repo": "acme/service"}, cookie="pw_session=ses_1")
 
         with (
-            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
             patch.object(app.worker, "start_scan") as start_scan,
         ):
             app.PullwiseHandler.route(handler, "POST")
@@ -1030,7 +1077,7 @@ class SecurityContractsTest(unittest.TestCase):
         )
 
         with (
-            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
             patch.object(app.worker, "start_scan") as start_scan,
         ):
             app.PullwiseHandler.route(handler, "POST")
@@ -1083,7 +1130,7 @@ class SecurityContractsTest(unittest.TestCase):
         )
 
         with (
-            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
             patch.object(app.worker, "start_scan") as start_scan,
         ):
             app.PullwiseHandler.route(first, "POST")
@@ -1251,7 +1298,7 @@ class SecurityContractsTest(unittest.TestCase):
         handler = RouteHarness("/scans", {"repo": "octocat/stale-repo"}, cookie="pw_session=ses_1")
 
         with (
-            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
             patch.object(app.worker, "start_scan") as start_scan,
         ):
             app.PullwiseHandler.route(handler, "POST")
@@ -1759,7 +1806,8 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(github["installationIds"], ["333", "444"])
         self.assertIsNone(github["installationAccount"])
         self.assertEqual(github["installationAccounts"], ["valid-org"])
-        self.assertEqual(github["installationHtmlUrl"], "https://github.com/settings/installations/111")
+        self.assertIsNone(github["installationHtmlUrl"])
+        self.assertEqual(github["identities"][0]["login"], "octocat")
         self.assertEqual(github["repositories"], [])
         self.assertFalse(github["repositoriesNeedSync"])
 
@@ -2230,9 +2278,14 @@ class SecurityContractsTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["mode"], "github-app-existing-manage")
-        self.assertEqual(handler.payload["url"], "https://github.com/settings/installations/999")
-        self.assertEqual(app.GITHUB_STATES, {})
+        self.assertEqual(handler.payload["mode"], "github-installation-manage")
+        self.assertIn("/integrations/github/manage/start?state=", handler.payload["url"])
+        self.assertNotIn("/settings/installations/999", handler.payload["url"])
+        self.assertEqual(len(app.GITHUB_STATES), 1)
+        record = next(iter(app.GITHUB_STATES.values()))
+        self.assertEqual(record["kind"], "manage_installation")
+        self.assertEqual(record["expectedInstallationId"], "999")
+        self.assertEqual(record["expectedAccountLogin"], "octocat")
 
     def test_github_repository_authorize_manage_lists_existing_aggregate_installations(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -2307,7 +2360,244 @@ class SecurityContractsTest(unittest.TestCase):
             [installation["installationAccount"] for installation in handler.payload["installations"]],
             ["octocat", "acme"],
         )
+        self.assertTrue(all(installation["installationHtmlUrl"] is None for installation in handler.payload["installations"]))
+        self.assertTrue(all("manage" in installation for installation in handler.payload["installations"]))
         self.assertEqual(app.GITHUB_STATES, {})
+
+    def test_github_installation_manage_session_creates_controlled_state_without_raw_settings_url(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubIdentities"] = [
+            {
+                "id": "ghi_1",
+                "githubUserId": "1",
+                "githubLogin": "octocat",
+                "accessToken": "gho_user",
+                "status": "active",
+            }
+        ]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationIds": ["111", "222"],
+            "installationAccounts": ["octocat", "acme"],
+            "repositories": ["octocat/private-repo", "acme/service"],
+            "repositoryItems": [
+                {"fullName": "octocat/private-repo", "installationId": "111"},
+                {"fullName": "acme/service", "installationId": "222"},
+            ],
+            "installations": [
+                {
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                    "installationTargetType": "User",
+                    "installationHtmlUrl": "https://github.com/settings/installations/111",
+                },
+                {
+                    "installationId": "222",
+                    "installationAccount": "acme",
+                    "installationTargetType": "Organization",
+                    "installationHtmlUrl": "https://github.com/organizations/acme/settings/installations/222",
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/integrations/github/installations/222/manage-sessions",
+            {"githubIdentityId": "ghi_1", "returnUrl": "https://app.pullwise.dev/?screen=settings"},
+            cookie="pw_session=ses_1",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["mode"], "github-installation-manage")
+        self.assertIn("/integrations/github/manage/start?state=", handler.payload["url"])
+        self.assertNotIn("github.com/organizations/acme/settings/installations/222", handler.payload["url"])
+        record = next(iter(app.GITHUB_STATES.values()))
+        self.assertEqual(record["kind"], "manage_installation")
+        self.assertEqual(record["expectedInstallationId"], "222")
+        self.assertEqual(record["expectedAccountLogin"], "acme")
+        self.assertEqual(record["expectedGithubIdentityId"], "ghi_1")
+        self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/?screen=settings")
+
+    def test_github_manage_start_redirects_to_oauth_account_picker(self) -> None:
+        state = app.remember_github_state(
+            "manage_installation",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            expectedInstallationId="999",
+        )
+        handler = RouteHarness(f"/integrations/github/manage/start?state={state}")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.make_code_verifier", return_value="verifier"),
+            patch(
+                "pullwise_server.github_auth.build_oauth_authorize_url",
+                return_value="https://github.com/login/oauth/authorize?prompt=select_account",
+            ) as build_authorize_url,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertEqual(handler.location, "https://github.com/login/oauth/authorize?prompt=select_account")
+        self.assertEqual(app.GITHUB_STATES[state]["codeVerifier"], "verifier")
+        self.assertEqual(build_authorize_url.call_args.kwargs["prompt"], "select_account")
+
+    def test_github_manage_callback_redirects_to_verified_installation_settings_url(self) -> None:
+        state = app.remember_github_state(
+            "manage_installation",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            expectedInstallationId="999",
+            expectedAccountLogin="octocat",
+            expectedInstallationTargetType="User",
+            expectedInstallationHtmlUrl="https://github.com/settings/installations/999",
+            codeVerifier="verifier",
+        )
+        handler = RouteHarness(f"/auth/github/callback?state={state}&code=oauth_code")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.exchange_oauth_code", return_value={"access_token": "gho_user", "scope": "read:user"}),
+            patch(
+                "pullwise_server.github_auth.fetch_user_profile",
+                return_value={"id": 1, "login": "octocat", "html_url": "https://github.com/octocat"},
+            ),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 999,
+                        "target_type": "User",
+                        "account": {"login": "octocat"},
+                        "html_url": "https://github.com/settings/installations/999",
+                    }
+                ],
+            ),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertEqual(handler.location, "https://github.com/settings/installations/999")
+        self.assertEqual(app.USERS["usr_1"]["githubIdentities"][0]["githubLogin"], "octocat")
+        access = app.USERS["usr_1"]["githubIdentityInstallationAccess"][0]
+        self.assertTrue(access["canAccess"])
+        self.assertEqual(access["githubAppInstallationId"], "999")
+
+    def test_github_manage_callback_wrong_identity_returns_account_mismatch(self) -> None:
+        state = app.remember_github_state(
+            "manage_installation",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            expectedInstallationId="999",
+            expectedAccountLogin="octocat",
+            expectedInstallationTargetType="User",
+            expectedGithubIdentityId="ghi_1",
+            codeVerifier="verifier",
+        )
+        handler = RouteHarness(f"/auth/github/callback?state={state}&code=oauth_code")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.exchange_oauth_code", return_value={"access_token": "gho_wrong", "scope": "read:user"}),
+            patch(
+                "pullwise_server.github_auth.fetch_user_profile",
+                return_value={"id": 2, "login": "wrong-user", "html_url": "https://github.com/wrong-user"},
+            ),
+            patch("pullwise_server.github_auth.list_current_app_installations_for_user") as list_installations,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertIn("github_error=github_account_mismatch", handler.location)
+        self.assertIn("github_login=wrong-user", handler.location)
+        list_installations.assert_not_called()
+
+    def test_github_manage_callback_invisible_installation_returns_pullwise_error(self) -> None:
+        state = app.remember_github_state(
+            "manage_installation",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            expectedInstallationId="999",
+            expectedAccountLogin="acme",
+            expectedInstallationTargetType="Organization",
+            codeVerifier="verifier",
+        )
+        handler = RouteHarness(f"/auth/github/callback?state={state}&code=oauth_code")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.exchange_oauth_code", return_value={"access_token": "gho_user", "scope": "read:user"}),
+            patch(
+                "pullwise_server.github_auth.fetch_user_profile",
+                return_value={"id": 1, "login": "octocat", "html_url": "https://github.com/octocat"},
+            ),
+            patch("pullwise_server.github_auth.list_current_app_installations_for_user", return_value=[]),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertIn("github_error=github_installation_not_visible", handler.location)
+        self.assertNotIn("settings%2Finstallations%2F999", handler.location)
 
     def test_github_repository_authorize_add_returns_install_url_for_existing_aggregate_installations(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -3099,6 +3389,112 @@ class SecurityContractsTest(unittest.TestCase):
             [call.args for call in list_user_repositories.call_args_list],
             [("gho_user", "111"), ("gho_user", "222")],
         )
+
+    def test_repositories_sync_can_refresh_only_target_installation_with_selected_identity(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubIdentities"] = [
+            {
+                "id": "ghi_bob",
+                "githubUserId": "2",
+                "githubLogin": "bob",
+                "accessToken": "gho_bob",
+                "status": "active",
+            }
+        ]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "mixed",
+            "repositorySelection": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationIds": ["111", "222"],
+            "installationAccounts": ["octocat", "acme"],
+            "repositories": ["octocat/private-repo", "acme/old-service"],
+            "repositoryItems": [
+                {"fullName": "octocat/private-repo", "installationId": "111"},
+                {"fullName": "acme/old-service", "installationId": "222"},
+            ],
+            "installations": [
+                {
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                    "installationTargetType": "User",
+                    "repositorySelection": "selected",
+                    "repositoryCount": 1,
+                },
+                {
+                    "installationId": "222",
+                    "installationAccount": "acme",
+                    "installationTargetType": "Organization",
+                    "repositorySelection": "selected",
+                    "repositoryCount": 1,
+                },
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/repositories/sync",
+            {"installationId": "222", "githubIdentityId": "ghi_bob"},
+            cookie="pw_session=ses_1",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_api_configured", return_value=False),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 222,
+                        "repository_selection": "selected",
+                        "target_type": "Organization",
+                        "account": {"login": "acme"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
+                    }
+                ],
+            ) as list_installations,
+            patch(
+                "pullwise_server.github_auth.list_user_installation_repositories",
+                return_value=[{"id": "repo_service", "name": "service", "fullName": "acme/service"}],
+            ) as list_user_repositories,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["needsAuthorization"])
+        self.assertEqual(github_access["repositories"], ["octocat/private-repo", "acme/service"])
+        self.assertEqual(
+            [item["fullName"] for item in handler.payload["items"]],
+            ["octocat/private-repo", "acme/service"],
+        )
+        list_installations.assert_called_once_with("gho_bob")
+        list_user_repositories.assert_called_once_with("gho_bob", "222")
+        access = app.USERS["usr_1"]["githubIdentityInstallationAccess"][0]
+        self.assertEqual(access["githubIdentityId"], "ghi_bob")
+        self.assertEqual(access["githubAppInstallationId"], "222")
+        self.assertTrue(access["canAccess"])
 
     def test_repositories_list_migrates_legacy_single_installation_access_to_aggregate_model(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]

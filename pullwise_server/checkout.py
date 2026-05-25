@@ -116,6 +116,35 @@ def run_git(
     is_cancelled: Callable[[], bool],
     action: str,
 ) -> None:
+    _run_git_process(cmd, cwd=cwd, extra_env=extra_env, is_cancelled=is_cancelled, action=action)
+
+
+def run_git_output(
+    cmd: list[str],
+    *,
+    cwd: str | None,
+    extra_env: dict[str, str],
+    is_cancelled: Callable[[], bool],
+    action: str,
+) -> str:
+    stdout, _stderr = _run_git_process(
+        cmd,
+        cwd=cwd,
+        extra_env=extra_env,
+        is_cancelled=is_cancelled,
+        action=action,
+    )
+    return stdout
+
+
+def _run_git_process(
+    cmd: list[str],
+    *,
+    cwd: str | None,
+    extra_env: dict[str, str],
+    is_cancelled: Callable[[], bool],
+    action: str,
+) -> tuple[str, str]:
     if not cwd:
         raise RuntimeError("Git command cwd must be inside the checkout root.")
     root_abs = os.path.abspath(checkout_root())
@@ -152,6 +181,20 @@ def run_git(
     if process.returncode != 0:
         detail = (stderr or stdout or "").strip()
         raise RuntimeError(f"Git {action} failed (exit {process.returncode}): {detail[:500]}")
+    return stdout, stderr
+
+
+def current_commit(checkout_path: str, is_cancelled: Callable[[], bool]) -> str:
+    commit = run_git_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=checkout_path,
+        extra_env={},
+        is_cancelled=is_cancelled,
+        action="read checkout commit",
+    ).strip()
+    if not _COMMIT_RE.match(commit):
+        raise RuntimeError("Git checkout did not report a valid commit SHA.")
+    return commit
 
 
 def terminate_process(process: subprocess.Popen) -> None:

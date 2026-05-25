@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -69,6 +70,142 @@ def initialize() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_api_rate_limits_subject
                 ON api_rate_limits(subject, route, window_start)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workspaces (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    github_owner_id TEXT,
+                    github_owner_login TEXT,
+                    github_owner_type TEXT,
+                    github_app_installation_id TEXT UNIQUE,
+                    plan TEXT NOT NULL DEFAULT 'free',
+                    billing_provider TEXT,
+                    billing_customer_id TEXT,
+                    billing_subscription_id TEXT,
+                    billing_subscription_item_id TEXT,
+                    billing_status TEXT,
+                    billing_interval TEXT,
+                    billing_pending_binding INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workspace_members (
+                    workspace_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'member',
+                    source TEXT NOT NULL DEFAULT 'github_installation',
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    PRIMARY KEY (workspace_id, user_id),
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS repositories (
+                    id TEXT PRIMARY KEY,
+                    github_repo_id TEXT NOT NULL UNIQUE,
+                    github_node_id TEXT,
+                    full_name TEXT NOT NULL,
+                    owner_login TEXT,
+                    owner_id TEXT,
+                    default_branch TEXT,
+                    private INTEGER NOT NULL DEFAULT 0,
+                    fork INTEGER NOT NULL DEFAULT 0,
+                    parent_github_repo_id TEXT,
+                    source_github_repo_id TEXT,
+                    html_url TEXT,
+                    clone_url TEXT,
+                    last_synced_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_repositories_full_name
+                ON repositories(full_name)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workspace_repositories (
+                    workspace_id TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    github_app_installation_id TEXT,
+                    permissions TEXT NOT NULL DEFAULT '{}',
+                    repository_selection TEXT,
+                    installation_account TEXT,
+                    last_authorized_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    PRIMARY KEY (workspace_id, repository_id),
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+                    FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS quota_buckets (
+                    id TEXT PRIMARY KEY,
+                    scope_type TEXT NOT NULL,
+                    scope_id TEXT NOT NULL,
+                    period TEXT NOT NULL,
+                    plan TEXT NOT NULL,
+                    quota_limit INTEGER NOT NULL,
+                    used INTEGER NOT NULL DEFAULT 0,
+                    reset_at INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    UNIQUE (scope_type, scope_id, period, plan)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS quota_ledger (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    github_repo_id TEXT NOT NULL,
+                    scan_id TEXT,
+                    requested_by_user_id TEXT NOT NULL,
+                    request_id TEXT,
+                    bucket_id TEXT NOT NULL,
+                    delta INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+                    FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+                    FOREIGN KEY (bucket_id) REFERENCES quota_buckets(id) ON DELETE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_quota_ledger_request
+                ON quota_ledger(requested_by_user_id, request_id, reason)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS repo_fingerprints (
+                    repository_id TEXT PRIMARY KEY,
+                    default_branch TEXT,
+                    head_sha TEXT,
+                    tree_sha TEXT,
+                    lockfile_hash TEXT,
+                    manifest_hash TEXT,
+                    source_fingerprint TEXT,
+                    computed_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+                )
                 """
             )
 
@@ -194,3 +331,341 @@ def to_jsonable(value: Any, *, path: str = "$") -> Any:
         return [to_jsonable(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
 
     raise TypeError(f"State value at {path} is not JSON serializable: {type(value).__name__}.")
+
+
+def stable_id(prefix: str, value: object) -> str:
+    text = str(value or "").strip()
+    slug = "".join(char.lower() if char.isalnum() else "_" for char in text).strip("_")
+    if slug and len(slug) <= 80:
+        return f"{prefix}_{slug}"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}_{digest}"
+
+
+def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    return dict(row) if row else None
+
+
+def workspace_id_for_installation(installation_id: object) -> str:
+    return stable_id("ws_inst", installation_id)
+
+
+def legacy_workspace_id_for_user(user_id: object) -> str:
+    return stable_id("ws_legacy", user_id)
+
+
+def repository_id_for_github_repo(github_repo_id: object) -> str:
+    return stable_id("repo", github_repo_id)
+
+
+def upsert_workspace(workspace: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    workspace_id = str(workspace.get("id") or "").strip()
+    if not workspace_id:
+        raise ValueError("workspace id is required")
+    name = str(workspace.get("name") or workspace.get("github_owner_login") or workspace_id).strip() or workspace_id
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO workspaces (
+                    id, name, github_owner_id, github_owner_login, github_owner_type,
+                    github_app_installation_id, plan, billing_provider, billing_customer_id,
+                    billing_subscription_id, billing_subscription_item_id, billing_status,
+                    billing_interval, billing_pending_binding, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now'))
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    github_owner_id = COALESCE(excluded.github_owner_id, workspaces.github_owner_id),
+                    github_owner_login = COALESCE(excluded.github_owner_login, workspaces.github_owner_login),
+                    github_owner_type = COALESCE(excluded.github_owner_type, workspaces.github_owner_type),
+                    github_app_installation_id = COALESCE(excluded.github_app_installation_id, workspaces.github_app_installation_id),
+                    plan = CASE
+                        WHEN workspaces.plan = 'pro' AND excluded.billing_status IS NULL THEN workspaces.plan
+                        ELSE COALESCE(NULLIF(excluded.plan, ''), workspaces.plan)
+                    END,
+                    billing_provider = COALESCE(excluded.billing_provider, workspaces.billing_provider),
+                    billing_customer_id = COALESCE(excluded.billing_customer_id, workspaces.billing_customer_id),
+                    billing_subscription_id = COALESCE(excluded.billing_subscription_id, workspaces.billing_subscription_id),
+                    billing_subscription_item_id = COALESCE(excluded.billing_subscription_item_id, workspaces.billing_subscription_item_id),
+                    billing_status = COALESCE(excluded.billing_status, workspaces.billing_status),
+                    billing_interval = COALESCE(excluded.billing_interval, workspaces.billing_interval),
+                    billing_pending_binding = excluded.billing_pending_binding,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    workspace_id,
+                    name,
+                    workspace.get("github_owner_id"),
+                    workspace.get("github_owner_login"),
+                    workspace.get("github_owner_type"),
+                    workspace.get("github_app_installation_id"),
+                    workspace.get("plan") or "free",
+                    workspace.get("billing_provider"),
+                    workspace.get("billing_customer_id"),
+                    workspace.get("billing_subscription_id"),
+                    workspace.get("billing_subscription_item_id"),
+                    workspace.get("billing_status"),
+                    workspace.get("billing_interval"),
+                    1 if workspace.get("billing_pending_binding") else 0,
+                ),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()) or {}
+
+
+def get_workspace(workspace_id: str) -> dict[str, Any] | None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(connection.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone())
+
+
+def get_workspace_by_installation(installation_id: object) -> dict[str, Any] | None:
+    installation_text = str(installation_id or "").strip()
+    if not installation_text:
+        return None
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                "SELECT * FROM workspaces WHERE github_app_installation_id = ?",
+                (installation_text,),
+            ).fetchone()
+        )
+
+
+def list_workspaces_for_user(user_id: str) -> list[dict[str, Any]]:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT w.*, wm.role, wm.source
+            FROM workspaces w
+            JOIN workspace_members wm ON wm.workspace_id = w.id
+            WHERE wm.user_id = ?
+            ORDER BY w.github_app_installation_id IS NULL, w.name COLLATE NOCASE
+            """,
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def upsert_workspace_member(workspace_id: str, user_id: str, *, role: str = "member", source: str = "github_installation") -> None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_members (workspace_id, user_id, role, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now'))
+                ON CONFLICT(workspace_id, user_id) DO UPDATE SET
+                    role = excluded.role,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                (workspace_id, user_id, role, source),
+            )
+
+
+def user_is_workspace_member(workspace_id: str, user_id: str) -> bool:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+            (workspace_id, user_id),
+        ).fetchone()
+        return row is not None
+
+
+def upsert_repository(repository: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    github_repo_id = str(repository.get("github_repo_id") or "").strip()
+    if not github_repo_id:
+        raise ValueError("github_repo_id is required")
+    repository_id = str(repository.get("id") or repository_id_for_github_repo(github_repo_id)).strip()
+    full_name = str(repository.get("full_name") or "").strip()
+    if not full_name:
+        raise ValueError("repository full_name is required")
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO repositories (
+                    id, github_repo_id, github_node_id, full_name, owner_login, owner_id,
+                    default_branch, private, fork, parent_github_repo_id, source_github_repo_id,
+                    html_url, clone_url, last_synced_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                ON CONFLICT(github_repo_id) DO UPDATE SET
+                    github_node_id = COALESCE(excluded.github_node_id, repositories.github_node_id),
+                    full_name = excluded.full_name,
+                    owner_login = COALESCE(excluded.owner_login, repositories.owner_login),
+                    owner_id = COALESCE(excluded.owner_id, repositories.owner_id),
+                    default_branch = COALESCE(excluded.default_branch, repositories.default_branch),
+                    private = excluded.private,
+                    fork = excluded.fork,
+                    parent_github_repo_id = COALESCE(excluded.parent_github_repo_id, repositories.parent_github_repo_id),
+                    source_github_repo_id = COALESCE(excluded.source_github_repo_id, repositories.source_github_repo_id),
+                    html_url = COALESCE(excluded.html_url, repositories.html_url),
+                    clone_url = COALESCE(excluded.clone_url, repositories.clone_url),
+                    last_synced_at = excluded.last_synced_at
+                """,
+                (
+                    repository_id,
+                    github_repo_id,
+                    repository.get("github_node_id"),
+                    full_name,
+                    repository.get("owner_login"),
+                    repository.get("owner_id"),
+                    repository.get("default_branch") or "main",
+                    1 if repository.get("private") else 0,
+                    1 if repository.get("fork") else 0,
+                    repository.get("parent_github_repo_id"),
+                    repository.get("source_github_repo_id"),
+                    repository.get("html_url"),
+                    repository.get("clone_url"),
+                ),
+            )
+            return row_to_dict(
+                connection.execute("SELECT * FROM repositories WHERE github_repo_id = ?", (github_repo_id,)).fetchone()
+            ) or {}
+
+
+def get_repository(repository_id: str) -> dict[str, Any] | None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(connection.execute("SELECT * FROM repositories WHERE id = ?", (repository_id,)).fetchone())
+
+
+def get_repository_by_github_repo_id(github_repo_id: object) -> dict[str, Any] | None:
+    github_repo_id_text = str(github_repo_id or "").strip()
+    if not github_repo_id_text:
+        return None
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute("SELECT * FROM repositories WHERE github_repo_id = ?", (github_repo_id_text,)).fetchone()
+        )
+
+
+def upsert_workspace_repository(
+    workspace_id: str,
+    repository_id: str,
+    *,
+    github_app_installation_id: object = None,
+    permissions: dict[str, Any] | None = None,
+    repository_selection: object = None,
+    installation_account: object = None,
+) -> None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_repositories (
+                    workspace_id, repository_id, github_app_installation_id, permissions,
+                    repository_selection, installation_account, last_authorized_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                ON CONFLICT(workspace_id, repository_id) DO UPDATE SET
+                    github_app_installation_id = excluded.github_app_installation_id,
+                    permissions = excluded.permissions,
+                    repository_selection = excluded.repository_selection,
+                    installation_account = excluded.installation_account,
+                    last_authorized_at = excluded.last_authorized_at
+                """,
+                (
+                    workspace_id,
+                    repository_id,
+                    str(github_app_installation_id) if github_app_installation_id not in (None, "") else None,
+                    json.dumps(permissions or {}, sort_keys=True),
+                    str(repository_selection) if repository_selection not in (None, "") else None,
+                    str(installation_account) if installation_account not in (None, "") else None,
+                ),
+            )
+
+
+def get_workspace_repository(workspace_id: str, repository_id: str) -> dict[str, Any] | None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                """
+                SELECT wr.*, r.github_repo_id, r.full_name
+                FROM workspace_repositories wr
+                JOIN repositories r ON r.id = wr.repository_id
+                WHERE wr.workspace_id = ? AND wr.repository_id = ?
+                """,
+                (workspace_id, repository_id),
+            ).fetchone()
+        )
+
+
+def update_workspace_billing(workspace_id: str, billing_state: dict[str, Any]) -> dict[str, Any] | None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                UPDATE workspaces
+                SET billing_provider = COALESCE(?, billing_provider),
+                    billing_customer_id = COALESCE(?, billing_customer_id),
+                    billing_subscription_id = COALESCE(?, billing_subscription_id),
+                    billing_subscription_item_id = COALESCE(?, billing_subscription_item_id),
+                    billing_status = COALESCE(?, billing_status),
+                    plan = COALESCE(?, plan),
+                    billing_interval = COALESCE(?, billing_interval),
+                    updated_at = strftime('%s', 'now')
+                WHERE id = ?
+                """,
+                (
+                    billing_state.get("provider"),
+                    billing_state.get("customerId"),
+                    billing_state.get("subscriptionId"),
+                    billing_state.get("subscriptionItemId"),
+                    billing_state.get("status"),
+                    billing_state.get("plan"),
+                    billing_state.get("interval"),
+                    workspace_id,
+                ),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone())
+
+
+def find_workspace_for_billing_update(update: dict[str, Any]) -> dict[str, Any] | None:
+    initialize()
+    workspace_id = str(update.get("workspaceId") or "").strip()
+    customer_id = str(update.get("customerId") or "").strip()
+    subscription_id = str(update.get("subscriptionId") or "").strip()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        if workspace_id:
+            row = connection.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+            if row:
+                return dict(row)
+        if customer_id:
+            row = connection.execute("SELECT * FROM workspaces WHERE billing_customer_id = ?", (customer_id,)).fetchone()
+            if row:
+                return dict(row)
+        if subscription_id:
+            row = connection.execute("SELECT * FROM workspaces WHERE billing_subscription_id = ?", (subscription_id,)).fetchone()
+            if row:
+                return dict(row)
+    return None
+
+
+def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> str:
+    return stable_id("qb", f"{scope_type}:{scope_id}:{period}:{plan}")
+
+
+def quota_ledger_id(*parts: object) -> str:
+    return stable_id("ql", ":".join(str(part or "") for part in parts))

@@ -9,6 +9,31 @@ from pullwise_server import github_auth
 
 
 class GitHubAuthContractsTest(unittest.TestCase):
+    def test_oauth_authorize_url_can_force_account_picker_prompt(self) -> None:
+        client = Mock()
+        client.create_authorization_url.return_value = ("https://github.com/login/oauth/authorize", "state")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                },
+                clear=True,
+            ),
+            patch.object(github_auth, "oauth_session", return_value=client),
+        ):
+            url = github_auth.build_oauth_authorize_url(
+                "https://api.pullwise.dev/auth/github/callback",
+                "state",
+                "verifier",
+                prompt="select_account",
+            )
+
+        self.assertEqual(url, "https://github.com/login/oauth/authorize")
+        self.assertEqual(client.create_authorization_url.call_args.kwargs["prompt"], "select_account")
+
     def test_authlib_rest_requests_use_official_github_headers(self) -> None:
         response = Mock()
         response.json.return_value = {"login": "octocat"}
@@ -294,6 +319,29 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(headers["Authorization"], "Bearer ghs_123")
         self.assertEqual(headers["Accept"], "application/vnd.github+json")
         self.assertIn("X-GitHub-Api-Version", headers)
+
+    def test_repo_payload_preserves_stable_ids_owner_and_fork_source(self) -> None:
+        payload = github_auth.repo_payload_to_pullwise(
+            {
+                "id": 1296269,
+                "node_id": "R_kgDOABC",
+                "name": "Hello-World",
+                "full_name": "octocat/Hello-World",
+                "owner": {"id": 583231, "login": "octocat", "type": "User"},
+                "fork": True,
+                "parent": {"id": 2, "node_id": "R_parent", "full_name": "octocat/Parent"},
+                "source": {"id": 1, "node_id": "R_source", "full_name": "octocat/Source"},
+                "permissions": {"pull": True},
+            }
+        )
+
+        self.assertEqual(payload["githubRepoId"], "1296269")
+        self.assertEqual(payload["githubNodeId"], "R_kgDOABC")
+        self.assertEqual(payload["ownerLogin"], "octocat")
+        self.assertEqual(payload["ownerId"], "583231")
+        self.assertTrue(payload["fork"])
+        self.assertEqual(payload["parentGithubRepoId"], "2")
+        self.assertEqual(payload["sourceGithubRepoId"], "1")
 
     def test_list_installation_repositories_sanitizes_malformed_star_counts(self) -> None:
         response = Mock()

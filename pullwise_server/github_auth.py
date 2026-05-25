@@ -106,12 +106,18 @@ def make_code_verifier() -> str:
     return authlib_generate_token(48)
 
 
-def build_oauth_authorize_url(redirect_uri: str, state: str, code_verifier: str) -> str:
+def build_oauth_authorize_url(
+    redirect_uri: str,
+    state: str,
+    code_verifier: str,
+    *,
+    prompt: str | None = None,
+) -> str:
     client = oauth_session(scope=oauth_scope(), code_challenge_method="S256")
     kwargs = {"redirect_uri": redirect_uri}
-    prompt = env_any(["PULLWISE_GITHUB_OAUTH_PROMPT"])
-    if prompt:
-        kwargs["prompt"] = prompt
+    selected_prompt = prompt if prompt is not None else env_any(["PULLWISE_GITHUB_OAUTH_PROMPT"])
+    if selected_prompt:
+        kwargs["prompt"] = selected_prompt
     allow_signup = env_any(["PULLWISE_GITHUB_ALLOW_SIGNUP"])
     if allow_signup:
         kwargs["allow_signup"] = allow_signup
@@ -617,6 +623,7 @@ def installation_to_dict(installation) -> dict:
         "app_id": clean_installation_scalar(getattr(installation, "app_id", None)),
         "html_url": trusted_github_web_url(getattr(installation, "html_url", None)),
         "permissions": permission_levels_to_dict(getattr(installation, "permissions", None)),
+        "suspended_at": clean_repository_text(getattr(installation, "suspended_at", None)),
     }
 
 
@@ -631,6 +638,7 @@ def installation_payload_to_dict(installation: dict) -> dict:
         "app_id": clean_installation_scalar(installation.get("app_id")),
         "html_url": trusted_github_web_url(installation.get("html_url")),
         "permissions": permission_levels_to_dict(installation.get("permissions")),
+        "suspended_at": clean_repository_text(installation.get("suspended_at")),
     }
 
 
@@ -643,9 +651,18 @@ def clean_installation_scalar(value: object) -> int | str | None:
 def installation_account_to_dict(account: object) -> dict:
     if isinstance(account, dict):
         login = clean_repository_text(account.get("login"))
+        account_id = clean_installation_scalar(account.get("id"))
+        account_type = clean_repository_text(account.get("type"))
     else:
         login = clean_repository_text(getattr(account, "login", None))
-    return {"login": login} if login else {}
+        account_id = clean_installation_scalar(getattr(account, "id", None))
+        account_type = clean_repository_text(getattr(account, "type", None))
+    result = {"login": login} if login else {}
+    if account_id is not None:
+        result["id"] = account_id
+    if account_type:
+        result["type"] = account_type
+    return result
 
 
 def permission_levels_to_dict(permissions) -> dict:
@@ -683,14 +700,28 @@ def repo_to_pullwise(repo) -> dict:
     full_name = clean_repository_text(getattr(repo, "full_name", None)) or clean_repository_text(getattr(repo, "name", None)) or ""
     name = clean_repository_text(getattr(repo, "name", None)) or repository_name_from_full_name(full_name)
     description = clean_repository_text(getattr(repo, "description", None)) or ""
+    raw_id = getattr(repo, "id", None)
+    owner = repository_owner_to_dict(getattr(repo, "owner", None))
+    parent = repository_related_to_dict(getattr(repo, "parent", None))
+    source = repository_related_to_dict(getattr(repo, "source", None))
     return {
-        "id": repository_id(getattr(repo, "id", None), full_name),
+        "id": repository_id(raw_id, full_name),
+        "githubRepoId": repository_id(raw_id, full_name),
+        "githubNodeId": clean_repository_text(getattr(repo, "node_id", None)),
         "name": name,
         "fullName": full_name,
         "desc": description,
         "description": description,
+        "owner": owner,
+        "ownerLogin": owner.get("login"),
+        "ownerId": owner.get("id"),
         "lang": clean_repository_text(getattr(repo, "language", None)) or "-",
         "private": repository_private(getattr(repo, "private", False)),
+        "fork": repository_private(getattr(repo, "fork", False)),
+        "parentGithubRepoId": parent.get("id"),
+        "sourceGithubRepoId": source.get("id"),
+        "parent": parent,
+        "source": source,
         "stars": format_count(getattr(repo, "stargazers_count", None)),
         "branches": "-",
         "defaultBranch": clean_repository_text(getattr(repo, "default_branch", None)) or "main",
@@ -705,14 +736,28 @@ def repo_payload_to_pullwise(repo: dict) -> dict:
     full_name = clean_repository_text(repo.get("full_name")) or clean_repository_text(repo.get("name")) or ""
     name = clean_repository_text(repo.get("name")) or repository_name_from_full_name(full_name)
     description = clean_repository_text(repo.get("description")) or ""
+    raw_id = repo.get("id")
+    owner = repository_owner_to_dict(repo.get("owner"))
+    parent = repository_related_to_dict(repo.get("parent"))
+    source = repository_related_to_dict(repo.get("source"))
     return {
-        "id": repository_id(repo.get("id"), full_name),
+        "id": repository_id(raw_id, full_name),
+        "githubRepoId": repository_id(raw_id, full_name),
+        "githubNodeId": clean_repository_text(repo.get("node_id")),
         "name": name,
         "fullName": full_name,
         "desc": description,
         "description": description,
+        "owner": owner,
+        "ownerLogin": owner.get("login"),
+        "ownerId": owner.get("id"),
         "lang": clean_repository_text(repo.get("language")) or "-",
         "private": repository_private(repo.get("private", False)),
+        "fork": repository_private(repo.get("fork", False)),
+        "parentGithubRepoId": parent.get("id"),
+        "sourceGithubRepoId": source.get("id"),
+        "parent": parent,
+        "source": source,
         "stars": format_count(repo.get("stargazers_count")),
         "branches": "-",
         "defaultBranch": clean_repository_text(repo.get("default_branch")) or "main",
@@ -738,6 +783,50 @@ def repository_name_from_full_name(full_name: str) -> str:
 
 def repository_private(value: object) -> bool:
     return value is True
+
+
+def repository_owner_to_dict(owner: object) -> dict:
+    if not owner:
+        return {}
+    if isinstance(owner, dict):
+        login = clean_repository_text(owner.get("login"))
+        owner_id = repository_id(owner.get("id"), "")
+        owner_type = clean_repository_text(owner.get("type"))
+    else:
+        login = clean_repository_text(getattr(owner, "login", None))
+        owner_id = repository_id(getattr(owner, "id", None), "")
+        owner_type = clean_repository_text(getattr(owner, "type", None))
+    result = {}
+    if login:
+        result["login"] = login
+    if owner_id:
+        result["id"] = owner_id
+    if owner_type:
+        result["type"] = owner_type
+    return result
+
+
+def repository_related_to_dict(repo: object) -> dict:
+    if not repo:
+        return {}
+    if isinstance(repo, dict):
+        full_name = clean_repository_text(repo.get("full_name"))
+        raw_id = repo.get("id")
+        node_id = repo.get("node_id")
+    else:
+        full_name = clean_repository_text(getattr(repo, "full_name", None))
+        raw_id = getattr(repo, "id", None)
+        node_id = getattr(repo, "node_id", None)
+    related_id = repository_id(raw_id, full_name or "")
+    result = {}
+    if related_id:
+        result["id"] = related_id
+    if full_name:
+        result["fullName"] = full_name
+    node_id_text = clean_repository_text(node_id)
+    if node_id_text:
+        result["nodeId"] = node_id_text
+    return result
 
 
 def clean_repository_text(value: object) -> str | None:

@@ -243,14 +243,17 @@ class ScanQueueTest(unittest.TestCase):
                     patch("pullwise_server.worker.time.sleep"),
                     patch.object(worker.review, "provider_requires_checkout", return_value=True),
                     patch.object(worker.checkout, "prepare_checkout", return_value=repo_path),
-                    patch.object(worker.review, "run_review", return_value=[]),
+                    patch.object(worker.checkout, "current_commit", return_value="a" * 40),
+                    patch.object(worker.review, "run_review", return_value=[]) as run_review,
                 ):
                     worker._execute_scan("sc_success", self._snapshot("sc_success"), 100)
 
                 self.assertFalse(os.path.exists(workspace))
 
         self.assertEqual(app.SCANS[0]["status"], "done")
+        self.assertEqual(app.SCANS[0]["commit"], "a" * 40)
         self.assertIsNone(app.SCANS[0].get("repoPath"))
+        self.assertEqual(run_review.call_args.kwargs["commit"], "a" * 40)
 
     def test_execute_scan_cleans_checkout_workspace_after_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -265,6 +268,7 @@ class ScanQueueTest(unittest.TestCase):
                     patch("pullwise_server.worker.traceback.print_exc"),
                     patch.object(worker.review, "provider_requires_checkout", return_value=True),
                     patch.object(worker.checkout, "prepare_checkout", return_value=repo_path),
+                    patch.object(worker.checkout, "current_commit", return_value="b" * 40),
                     patch.object(worker.review, "run_review", side_effect=RuntimeError("ai failed")),
                 ):
                     worker._execute_scan("sc_failure", self._snapshot("sc_failure"), 100)

@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+import tempfile
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -100,6 +101,12 @@ class BillingRoutesTest(unittest.TestCase):
         self.persist_patcher = patch.object(app, "persist_state")
         self.persist_patcher.start()
         self.addCleanup(self.persist_patcher.stop)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.db_path = os.path.join(self.temp_dir.name, "pullwise.sqlite3")
+        self.db_patcher = patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=False)
+        self.db_patcher.start()
+        self.addCleanup(self.db_patcher.stop)
 
     def test_billing_plan_exposes_selected_provider(self) -> None:
         handler = HandlerHarness()
@@ -248,7 +255,7 @@ class BillingRoutesTest(unittest.TestCase):
         second = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_2"}, cookie=cookie)
 
         with (
-            patch.dict(os.environ, {"PULLWISE_FREE_REVIEW_LIMIT": "1"}, clear=True),
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_REVIEW_LIMIT": "1"}, clear=True),
             patch("pullwise_server.review.selected_provider", return_value="codex"),
             patch.object(app.worker, "start_scan"),
         ):
@@ -257,8 +264,8 @@ class BillingRoutesTest(unittest.TestCase):
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
-        self.assertIn("review limit", second.payload["message"].lower())
-        self.assertEqual(app.USERS["usr_1"]["billingUsage"]["used"], 1)
+        self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_WORKSPACE")
+        self.assertEqual(first.payload["billingUsage"]["used"], 1)
 
     def test_billing_account_payload_ignores_non_finite_usage(self) -> None:
         seed_session()

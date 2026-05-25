@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import unittest
+from http import HTTPStatus
+from unittest.mock import patch
+
+from pullwise_server import app
+
+
+class RouteHarness(app.PullwiseHandler):
+    def __init__(self, body: dict | None = None, cookie: str = "") -> None:
+        self.path = "/scans"
+        self._body = body or {}
+        self._raw_body = json.dumps(self._body).encode("utf-8")
+        self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie}
+        self.payload = None
+        self.status = None
+        self.headers_out = {}
+
+    def read_json(self) -> dict:
+        return self._body
+
+    def read_raw_body(self) -> bytes:
+        return self._raw_body
+
+    def json(self, payload: dict, status: int = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
+        self.payload = payload
+        self.status = status
+        self.headers_out = headers or {}
+
+    def error(self, status: int, message: str) -> None:
+        self.json({"message": message}, status)
+
+
+def reset_state() -> None:
+    app.USERS = {}
+    app.SESSIONS = {}
+    app.SETTINGS = {}
+    app.BILLING_EVENTS = {}
+    app.BILLING_PENDING_UPDATES = []
+    app.SCANS = []
+    app.ISSUES = []
+    app.STATE_LOADED = True
+    app.STATE_DIRTY = False
+
+
+def seed_user(user_id: str, session_id: str, *, installation_id: str = "111", repo_id: str = "123") -> str:
+    app.USERS[user_id] = {
+        "id": user_id,
+        "name": user_id,
+        "email": f"{user_id}@example.com",
+        "createdAt": app.now(),
+        "providers": ["github"],
+        "githubId": user_id.removeprefix("usr_"),
+        "githubLogin": user_id,
+        "githubRepositoryAccess": {
+            "mode": "github-app",
+            "scope": "selected",
+            "repositorySelection": "selected",
+            "authorizedUserId": user_id,
+            "authorizedGithubId": user_id.removeprefix("usr_"),
+            "authorizedGithubLogin": user_id,
+            "installationId": installation_id,
+            "installationIds": [installation_id],
+            "installationAccount": "acme",
+            "installationAccounts": ["acme"],
+            "repositories": ["acme/api"],
+            "repositoryItems": [
+                {
+                    "id": repo_id,
+                    "githubRepoId": repo_id,
+                    "name": "api",
+                    "fullName": "acme/api",
+                    "installationId": installation_id,
+                    "installationAccount": "acme",
+                    "defaultBranch": "main",
+                    "cloneUrl": "https://github.com/acme/api.git",
+                }
+            ],
+            "repositoriesNeedSync": False,
+        },
+    }
+    app.SESSIONS[session_id] = {
+        "id": session_id,
+        "userId": user_id,
+        "createdAt": app.now(),
+        "expiresAt": app.now() + 3600,
+    }
+    return f"pw_session={session_id}"
+
+
+class ScanQuotaRoutesTest(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_state()
+        self.persist_patcher = patch.object(app, "persist_state")
+        self.persist_patcher.start()
+        self.addCleanup(self.persist_patcher.stop)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.env = patch.dict(
+            os.environ,
+            {
+                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
+                "PULLWISE_REVIEW_PROVIDER": "mock",
+                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "10",
+                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "1",
+            },
+            clear=True,
+        )
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def test_same_github_repo_id_shares_repository_quota_across_users(self) -> None:
+        first_cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        second_cookie = seed_user("usr_b", "ses_b", installation_id="222", repo_id="123")
+
+        first = RouteHarness({"repo": "acme/api", "requestId": "req_a"}, cookie=first_cookie)
+        second = RouteHarness({"repo": "acme/api", "requestId": "req_b"}, cookie=second_cookie)
+
+        with patch.object(app.worker, "start_scan"):
+            app.PullwiseHandler.route(first, "POST")
+            app.PullwiseHandler.route(second, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
+        self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_REPOSITORY")
+        self.assertEqual(first.payload["githubRepoId"], "123")
+        self.assertEqual(first.payload["repoUsage"]["used"], 1)
+
+    def test_same_installation_shares_workspace_quota_across_users(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "workspace-quota.sqlite3"),
+                "PULLWISE_REVIEW_PROVIDER": "mock",
+                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "1",
+                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "10",
+            },
+            clear=True,
+        ):
+            first_cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+            second_cookie = seed_user("usr_b", "ses_b", installation_id="111", repo_id="456")
+            app.USERS["usr_b"]["githubRepositoryAccess"]["repositories"] = ["acme/other"]
+            app.USERS["usr_b"]["githubRepositoryAccess"]["repositoryItems"][0].update(
+                {"id": "456", "githubRepoId": "456", "name": "other", "fullName": "acme/other"}
+            )
+
+            first = RouteHarness({"repo": "acme/api", "requestId": "req_a"}, cookie=first_cookie)
+            second = RouteHarness({"repo": "acme/other", "requestId": "req_b"}, cookie=second_cookie)
+
+            with patch.object(app.worker, "start_scan"):
+                app.PullwiseHandler.route(first, "POST")
+                app.PullwiseHandler.route(second, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
+        self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_WORKSPACE")
+
+    def test_same_request_id_does_not_consume_quota_twice(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        first = RouteHarness({"repoId": "123", "requestId": "req_same"}, cookie=cookie)
+        second = RouteHarness({"repoId": "123", "requestId": "req_same"}, cookie=cookie)
+
+        with patch.object(app.worker, "start_scan") as start_scan:
+            app.PullwiseHandler.route(first, "POST")
+            app.PullwiseHandler.route(second, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertEqual(first.payload["id"], second.payload["id"])
+        self.assertEqual(first.payload["billingUsage"]["used"], 1)
+        start_scan.assert_called_once_with(first.payload["id"])
+
+    def test_repo_without_stable_id_requires_repository_sync(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        item = app.USERS["usr_a"]["githubRepositoryAccess"]["repositoryItems"][0]
+        item.pop("id")
+        item.pop("githubRepoId")
+        first = RouteHarness({"repo": "acme/api", "requestId": "req_missing_id"}, cookie=cookie)
+
+        with patch.object(app.worker, "start_scan") as start_scan:
+            app.PullwiseHandler.route(first, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CONFLICT)
+        self.assertEqual(first.payload["code"], "REPOSITORY_SYNC_REQUIRED")
+        start_scan.assert_not_called()
+
+    def test_body_workspace_id_is_ignored_for_quota_authority(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        handler = RouteHarness(
+            {"repo": "acme/api", "workspaceId": "ws_attacker", "requestId": "req_workspace_spoof"},
+            cookie=cookie,
+        )
+
+        with patch.object(app.worker, "start_scan"):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.payload["workspaceId"], "ws_inst_111")
+        self.assertNotEqual(handler.payload["workspaceId"], "ws_attacker")
+
+    def test_repo_id_must_belong_to_current_authorized_repositories(self) -> None:
+        seed_user("usr_owner", "ses_owner", installation_id="111", repo_id="123")
+        other_cookie = seed_user("usr_other", "ses_other", installation_id="222", repo_id="456")
+        handler = RouteHarness({"repoId": "123", "requestId": "req_foreign_repo"}, cookie=other_cookie)
+
+        with patch.object(app.worker, "start_scan") as start_scan:
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+        self.assertEqual(handler.payload["code"], "REPOSITORY_NOT_AUTHORIZED")
+        start_scan.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

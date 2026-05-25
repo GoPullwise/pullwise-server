@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 import time
 
-from . import scan_logging
+from . import fix_workflow, scan_logging
 
 
 CHECKOUT_PROVIDERS = {"claude_code", "codex"}
@@ -101,7 +101,10 @@ trailing prose. Schema:
 
 Always include `badCode`, `goodCode`, and `references` as arrays; use empty
 arrays when not applicable. Populate `badCode`/`goodCode` only when `autoFix`
-is true and you can produce a deterministic patch.
+is true and you can produce a deterministic patch. For `autoFix: true`,
+`badCode` must be one exact contiguous old block as it appears in `file`, and
+`goodCode` must be the complete replacement block. Do not skip unchanged lines
+inside the old block.
 
 # Severity rubric
 
@@ -194,11 +197,21 @@ def run_review(
         else:
             raise ValueError(f"Unknown PULLWISE_REVIEW_PROVIDER: {chosen}")
 
-        findings = [
-            _finalize_finding(finding, user_id=user_id, scan_id=scan_id, repo=repo)
-            for finding in raw
-            if isinstance(finding, dict)
-        ]
+        findings = []
+        auto_fix_downgraded = 0
+        for finding in raw:
+            if not isinstance(finding, dict):
+                continue
+            finalized = _finalize_finding(
+                finding,
+                user_id=user_id,
+                scan_id=scan_id,
+                repo=repo,
+                repo_path=repo_path,
+            )
+            if finding.get("autoFix") is True and finalized["autoFix"] is False:
+                auto_fix_downgraded += 1
+            findings.append(finalized)
         scan_logging.log_event(
             "review_provider_completed",
             scanId=scan_id,
@@ -209,6 +222,7 @@ def run_review(
             provider=chosen,
             rawFindingCount=len(raw),
             finalizedFindingCount=len(findings),
+            autoFixDowngradedCount=auto_fix_downgraded,
             durationMs=int((time.monotonic() - started_at) * 1000),
         )
         return findings
@@ -235,9 +249,29 @@ def provider_requires_checkout(provider: str | None = None) -> bool:
     return selected_provider(provider) in CHECKOUT_PROVIDERS
 
 
-def _finalize_finding(finding: object, *, user_id: str, scan_id: str, repo: str) -> dict:
+def _finalize_finding(
+    finding: object,
+    *,
+    user_id: str,
+    scan_id: str,
+    repo: str,
+    repo_path: str | None = None,
+) -> dict:
     finding = finding if isinstance(finding, dict) else {}
     finding_id = _safe_text(finding.get("id"))
+    file_path = _safe_finding_file(finding.get("file"), repo_path)
+    bad_code = _safe_code_lines(finding.get("badCode"))
+    good_code = _safe_code_lines(finding.get("goodCode"))
+    auto_fix = _safe_auto_fix(
+        finding,
+        repo_path=repo_path,
+        file_path=file_path,
+        bad_code=bad_code,
+        good_code=good_code,
+    )
+    if not auto_fix:
+        bad_code = []
+        good_code = []
     return {
         "id": finding_id or f"f_{secrets.token_urlsafe(6)}",
         "userId": user_id,
@@ -249,15 +283,15 @@ def _finalize_finding(finding: object, *, user_id: str, scan_id: str, repo: str)
         "title": _safe_text(finding.get("title"), "Untitled finding"),
         "summary": _safe_text(finding.get("summary")),
         "impact": _safe_text(finding.get("impact")),
-        "file": _safe_text(finding.get("file")),
+        "file": file_path,
         "line": _safe_non_negative_int(finding.get("line")),
         "confidence": _safe_confidence(finding.get("confidence")),
-        "autoFix": finding.get("autoFix") is True,
+        "autoFix": auto_fix,
         "effort": _safe_text(finding.get("effort"), "-"),
         "tags": _safe_text_list(finding.get("tags")),
         "steps": _safe_text_list(finding.get("steps")),
-        "badCode": _safe_code_lines(finding.get("badCode")),
-        "goodCode": _safe_code_lines(finding.get("goodCode")),
+        "badCode": bad_code,
+        "goodCode": good_code,
         "references": _safe_references(finding.get("references")),
         "createdAt": int(time.time()),
     }
@@ -288,6 +322,61 @@ def _safe_metadata_text(value: object, default: str = "") -> str:
 def _safe_repo_full_name(value: object) -> str:
     repo = _safe_metadata_text(value)
     return repo if _REPO_FULL_NAME_RE.match(repo) else ""
+
+
+def _safe_finding_file(value: object, repo_path: str | None = None) -> str:
+    path = _safe_text(value)
+    if not path:
+        return ""
+
+    relative_path = _relative_file_inside_repo(path, repo_path) or path
+    return fix_workflow.safe_issue_file(relative_path) or ""
+
+
+def _relative_file_inside_repo(path: str, repo_path: str | None) -> str | None:
+    if not repo_path or not os.path.isabs(path):
+        return None
+
+    root_abs = os.path.realpath(os.path.abspath(repo_path))
+    file_abs = os.path.realpath(os.path.abspath(path))
+    try:
+        common = os.path.commonpath([root_abs, file_abs])
+    except ValueError:
+        return None
+    if os.path.normcase(common) != os.path.normcase(root_abs):
+        return None
+    return os.path.relpath(file_abs, root_abs).replace(os.sep, "/")
+
+
+def _safe_auto_fix(
+    finding: dict,
+    *,
+    repo_path: str | None,
+    file_path: str,
+    bad_code: list[dict],
+    good_code: list[dict],
+) -> bool:
+    if finding.get("autoFix") is not True:
+        return False
+    if not file_path or not bad_code or not good_code:
+        return False
+    if not repo_path:
+        return True
+
+    try:
+        preview = fix_workflow.preview_issue_fix(
+            repo_path,
+            {
+                "id": "contract-check",
+                "file": file_path,
+                "autoFix": True,
+                "badCode": bad_code,
+                "goodCode": good_code,
+            },
+        )
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return preview.get("valid") is True
 
 
 def _safe_severity(value: object) -> str:

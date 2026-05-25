@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 
-from . import billing, checkout, db, fix_workflow, github_auth, logging_config, review, scan_logging, worker
+from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, worker, workspaces
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -424,16 +424,32 @@ def remember_github_state(kind: str, redirect_to: str, **extra: object) -> str:
     return state
 
 
-def pop_github_state(kind: str, state: str) -> dict:
-    record = GITHUB_STATES.pop(state, None)
-    if record is not None:
+def github_state_record(state: str, *, consume: bool, expected_kind: str | None = None) -> dict:
+    record = GITHUB_STATES.pop(state, None) if consume else GITHUB_STATES.get(state)
+    if consume and record is not None:
         mark_state_dirty()
     if not isinstance(record, dict):
         raise ValueError("GitHub authorization state is invalid or expired.")
     expires_at = pull_request_timestamp(record.get("expiresAt"))
-    if record.get("kind") != kind or expires_at is None or expires_at < now():
+    kind = record.get("kind")
+    if expires_at is None or expires_at < now() or (expected_kind is not None and kind != expected_kind):
+        if not consume and (expires_at is None or expires_at < now()):
+            GITHUB_STATES.pop(state, None)
+            mark_state_dirty()
         raise ValueError("GitHub authorization state is invalid or expired.")
     return record
+
+
+def peek_github_state(kind: str, state: str) -> dict:
+    return github_state_record(state, consume=False, expected_kind=kind)
+
+
+def pop_any_github_state(state: str) -> dict:
+    return github_state_record(state, consume=True)
+
+
+def pop_github_state(kind: str, state: str) -> dict:
+    return github_state_record(state, consume=True, expected_kind=kind)
 
 
 def remember_github_repository_authorization(
@@ -457,6 +473,26 @@ def remember_github_repository_authorization(
     }
     mark_state_dirty()
     return state
+
+
+def remember_github_installation_manage_state(
+    user: dict,
+    installation: dict,
+    redirect_to: str,
+    *,
+    expected_github_identity_id: str | None = None,
+) -> str:
+    return remember_github_state(
+        "manage_installation",
+        redirect_to,
+        purpose="manage_installation",
+        userId=user["id"],
+        expectedInstallationId=clean_installation_summary_text(installation.get("installationId")),
+        expectedAccountLogin=clean_installation_summary_text(installation.get("installationAccount")),
+        expectedInstallationTargetType=clean_installation_summary_text(installation.get("installationTargetType")),
+        expectedInstallationHtmlUrl=trusted_github_web_url(installation.get("installationHtmlUrl")),
+        expectedGithubIdentityId=expected_github_identity_id,
+    )
 
 
 def github_repository_authorization_pending(user: dict | None) -> dict | None:
@@ -650,6 +686,7 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
     )
     if "github" not in user["providers"]:
         user["providers"].append("github")
+    upsert_github_identity(user, profile, token_payload)
     mark_state_dirty()
     return user
 
@@ -663,6 +700,180 @@ def github_profile_id(profile: dict, login: str) -> str:
         if re.fullmatch(r"[A-Za-z0-9_-]+", candidate):
             return candidate
     return re.sub(r"[^a-z0-9]+", "_", login.lower()).strip("_")
+
+
+def github_identity_record_id(github_user_id: object, login: object) -> str:
+    source = str(github_user_id or login or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", source).strip("_")
+    return f"ghi_{slug or secrets.token_urlsafe(6)}"
+
+
+def github_identity_list(user: dict | None) -> list[dict]:
+    if not user:
+        return []
+    identities = user.get("githubIdentities")
+    if not isinstance(identities, list):
+        identities = []
+        user["githubIdentities"] = identities
+    return identities
+
+
+def upsert_github_identity(user: dict, profile: dict, token_payload: dict) -> dict:
+    login = public_issue_text(profile.get("login")) or "github-user"
+    github_user_id = github_profile_id(profile, login)
+    identities = github_identity_list(user)
+    identity = next(
+        (
+            item
+            for item in identities
+            if isinstance(item, dict) and str(item.get("githubUserId") or "") == str(github_user_id)
+        ),
+        None,
+    )
+    if identity is None:
+        identity = {
+            "id": github_identity_record_id(github_user_id, login),
+            "userId": user.get("id"),
+            "githubUserId": str(github_user_id),
+        }
+        identities.append(identity)
+
+    timestamp = now()
+    identity.update({
+        "githubLogin": login,
+        "login": login,
+        "githubHtmlUrl": trusted_github_web_url(profile.get("html_url")),
+        "avatarUrl": trusted_public_url(profile.get("avatar_url")),
+        "accessToken": token_payload.get("access_token"),
+        "oauthScope": token_payload.get("scope"),
+        "tokenUpdatedAt": timestamp,
+        "lastVerifiedAt": timestamp,
+        "status": "active",
+    })
+    mark_state_dirty()
+    return identity
+
+
+def synthesized_current_github_identity(user: dict | None) -> dict | None:
+    if not user or not user.get("githubAccessToken") or not user.get("githubLogin"):
+        return None
+    github_user_id = str(user.get("githubId") or user.get("githubLogin") or "")
+    login = public_issue_text(user.get("githubLogin")) or "github-user"
+    return {
+        "id": github_identity_record_id(github_user_id, login),
+        "userId": user.get("id"),
+        "githubUserId": github_user_id,
+        "githubLogin": login,
+        "login": login,
+        "githubHtmlUrl": trusted_github_web_url(user.get("githubHtmlUrl")),
+        "avatarUrl": trusted_public_url(user.get("avatarUrl")),
+        "accessToken": user.get("githubAccessToken"),
+        "oauthScope": user.get("githubOAuthScope"),
+        "tokenUpdatedAt": user.get("githubAccessTokenUpdatedAt"),
+        "lastVerifiedAt": user.get("githubAccessTokenUpdatedAt") or user.get("createdAt"),
+        "status": "active",
+    }
+
+
+def github_identities_for_user(user: dict | None) -> list[dict]:
+    if not user:
+        return []
+    identities = [identity for identity in github_identity_list(user) if isinstance(identity, dict)]
+    current_identity = synthesized_current_github_identity(user)
+    if current_identity and not any(identity.get("id") == current_identity["id"] for identity in identities):
+        identities = [*identities, current_identity]
+    return identities
+
+
+def public_github_identity(identity: dict) -> dict:
+    return {
+        "id": clean_github_access_text(identity.get("id")),
+        "githubUserId": clean_github_access_text(identity.get("githubUserId"), allow_int=True),
+        "login": clean_github_access_text(identity.get("githubLogin") or identity.get("login")),
+        "githubHtmlUrl": trusted_github_web_url(identity.get("githubHtmlUrl")),
+        "avatarUrl": trusted_public_url(identity.get("avatarUrl")),
+        "status": clean_github_access_text(identity.get("status")) or "active",
+        "lastVerifiedAt": pull_request_timestamp(identity.get("lastVerifiedAt")),
+    }
+
+
+def public_github_identities(user: dict | None) -> list[dict]:
+    identities = []
+    for identity in github_identities_for_user(user):
+        public_identity = public_github_identity(identity)
+        if public_identity["id"] and public_identity["login"]:
+            identities.append(public_identity)
+    return identities
+
+
+def github_identity_by_id(user: dict | None, identity_id: str | None) -> dict | None:
+    if not identity_id:
+        return None
+    for identity in github_identities_for_user(user):
+        if identity.get("id") == identity_id:
+            return identity
+    return None
+
+
+def github_identity_access_list(user: dict | None) -> list[dict]:
+    if not user:
+        return []
+    records = user.get("githubIdentityInstallationAccess")
+    if not isinstance(records, list):
+        records = []
+        user["githubIdentityInstallationAccess"] = records
+    return records
+
+
+def upsert_github_identity_installation_access(
+    user: dict,
+    identity: dict,
+    installation_id: str,
+    *,
+    can_access: bool,
+    last_error_code: str | None = None,
+    verification_method: str = "user_installations_api",
+) -> dict:
+    records = github_identity_access_list(user)
+    identity_id = clean_github_access_text(identity.get("id"))
+    record = next(
+        (
+            item
+            for item in records
+            if isinstance(item, dict)
+            and item.get("githubIdentityId") == identity_id
+            and str(item.get("githubAppInstallationId") or "") == str(installation_id)
+        ),
+        None,
+    )
+    if record is None:
+        record = {
+            "githubIdentityId": identity_id,
+            "githubAppInstallationId": str(installation_id),
+        }
+        records.append(record)
+    record.update({
+        "canAccess": bool(can_access),
+        "canManage": "unknown" if can_access else False,
+        "verifiedAt": now(),
+        "verificationMethod": verification_method,
+        "lastErrorCode": last_error_code,
+    })
+    mark_state_dirty()
+    return record
+
+
+def latest_installation_access_record(user: dict | None, installation_id: str | None) -> dict | None:
+    if not installation_id:
+        return None
+    candidates = [
+        record
+        for record in github_identity_access_list(user)
+        if isinstance(record, dict)
+        and str(record.get("githubAppInstallationId") or "") == str(installation_id)
+    ]
+    candidates.sort(key=lambda record: pull_request_timestamp(record.get("verifiedAt")) or 0, reverse=True)
+    return candidates[0] if candidates else None
 
 
 def clean_user_profile_text(value: object) -> str | None:
@@ -747,7 +958,17 @@ def apply_settings_update(user_id: str, body: dict) -> dict:
 def user_scans(session: dict | None) -> list[dict]:
     if not session:
         return []
-    return [scan for scan in SCANS if scan.get("userId") == session["userId"]]
+    workspace_ids = {
+        workspace.get("id")
+        for workspace in db.list_workspaces_for_user(session["userId"])
+        if workspace.get("id")
+    }
+    return [
+        scan
+        for scan in SCANS
+        if scan.get("userId") == session["userId"]
+        or (scan.get("workspaceId") and scan.get("workspaceId") in workspace_ids)
+    ]
 
 
 def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
@@ -831,6 +1052,7 @@ def billing_account_payload(user: dict) -> dict:
     current = user_billing_state(user)
     entitlement = billing_entitlement_for_user(user)
     return {
+        "deprecated": True,
         "provider": public_billing_text(current.get("provider")),
         "status": public_billing_status(current.get("status")),
         "plan": entitlement["plan"],
@@ -856,6 +1078,89 @@ def billing_account_payload(user: dict) -> dict:
             "plan": entitlement["plan"],
         },
     }
+
+
+def current_workspace_for_user(user: dict | None) -> dict | None:
+    if not user:
+        return None
+    try:
+        return workspaces.current_workspace_for_user(user)
+    except Exception:
+        logger.exception("Unable to resolve workspace for user %s", user.get("id"))
+        return None
+
+
+def workspaces_payload_for_user(user: dict | None) -> list[dict]:
+    if not user:
+        return []
+    try:
+        return [
+            payload
+            for workspace in workspaces.workspaces_for_user(user)
+            if (payload := workspaces.workspace_public_payload(workspace))
+        ]
+    except Exception:
+        logger.exception("Unable to list workspaces for user %s", user.get("id"))
+        return []
+
+
+def billing_workspace_payload(workspace: dict | None) -> dict | None:
+    if not workspace:
+        return None
+    current = workspaces.billing_state_from_workspace(workspace)
+    usage = quota.quota_payload_for_workspace(workspace)
+    return {
+        "id": public_billing_text(workspace.get("id")),
+        "name": public_billing_text(workspace.get("name")) or "Workspace",
+        "provider": public_billing_text(current.get("provider")),
+        "status": public_billing_status(current.get("status")),
+        "plan": quota.effective_workspace_plan(workspace),
+        "interval": billing.normalize_interval(current.get("interval") if quota.effective_workspace_plan(workspace) == "pro" else "month"),
+        "customerId": public_billing_text(current.get("customerId")),
+        "subscriptionId": public_billing_text(current.get("subscriptionId")),
+        "subscriptionItemId": public_billing_text(current.get("subscriptionItemId")),
+        "reviewLimit": usage["limit"],
+        "usage": usage,
+        "githubOwnerLogin": public_billing_text(workspace.get("github_owner_login")),
+        "githubOwnerType": public_billing_text(workspace.get("github_owner_type")),
+        "githubAppInstallationId": public_billing_text(workspace.get("github_app_installation_id")),
+    }
+
+
+def migrate_user_billing_to_workspace(user: dict, workspace: dict | None) -> dict | None:
+    if not workspace:
+        return None
+    user_billing = user.get("billing") if isinstance(user.get("billing"), dict) else {}
+    if user_billing and not workspace.get("billing_customer_id") and not workspace.get("billing_subscription_id"):
+        updated = db.update_workspace_billing(
+            workspace["id"],
+            {
+                "provider": user_billing.get("provider"),
+                "customerId": user_billing.get("customerId"),
+                "subscriptionId": user_billing.get("subscriptionId"),
+                "subscriptionItemId": user_billing.get("subscriptionItemId"),
+                "status": user_billing.get("status"),
+                "plan": user_billing.get("plan"),
+                "interval": user_billing.get("interval"),
+            },
+        )
+        if updated:
+            workspace = updated
+    legacy_usage = user.get("billingUsage") if isinstance(user.get("billingUsage"), dict) else {}
+    legacy_period = clean_github_access_text(legacy_usage.get("period"))
+    legacy_used = non_negative_int(legacy_usage.get("used"))
+    if legacy_period and legacy_used > 0:
+        quota.migrate_workspace_usage(
+            workspace,
+            period=legacy_period,
+            used=legacy_used,
+            plan=clean_github_access_text(legacy_usage.get("plan")) or quota.effective_workspace_plan(workspace),
+        )
+    return workspace
+
+
+def workspace_billing_subject(user: dict, workspace: dict | None) -> dict:
+    return workspaces.billing_subject_for_workspace(user, workspace)
 
 
 def public_billing_text(value: object) -> str | None:
@@ -891,6 +1196,19 @@ def scan_payload(scan: dict) -> dict:
         payload["by"] = public_issue_text(scan.get("by"))
     if "installationId" in scan:
         payload["installationId"] = clean_github_access_text(scan.get("installationId"), allow_int=True)
+    for key in ("workspaceId", "repoId", "githubRepoId"):
+        if key in scan:
+            payload[key] = clean_github_access_text(scan.get(key), allow_int=True)
+    if isinstance(scan.get("quotaBucketIds"), dict):
+        payload["quotaBucketIds"] = {
+            key: clean_github_access_text(value, allow_int=True)
+            for key, value in scan["quotaBucketIds"].items()
+            if clean_github_access_text(value, allow_int=True)
+        }
+    if isinstance(scan.get("billingUsage"), dict):
+        payload["billingUsage"] = safe_quota_usage_payload(scan.get("billingUsage"), default_scope="workspace")
+    if isinstance(scan.get("repoUsage"), dict):
+        payload["repoUsage"] = safe_quota_usage_payload(scan.get("repoUsage"), default_scope="repository")
     if "installationAccount" in scan:
         payload["installationAccount"] = clean_github_access_text(scan.get("installationAccount"))
     if "installationTargetType" in scan:
@@ -956,8 +1274,8 @@ def clean_scan_error(value: object) -> str:
 
 def issue_payload(issue: dict) -> dict:
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
-    auto_fix = issue.get("autoFix") is True
-    auto_fixable = issue.get("autoFixable") is True or auto_fix
+    auto_fix = issue_auto_fix_contract_ok(issue)
+    auto_fixable = auto_fix
     payload = {
         "id": issue_id,
         "userId": public_issue_text(issue.get("userId")),
@@ -1000,6 +1318,49 @@ def issue_payload(issue: dict) -> dict:
     if isinstance(pending, dict):
         payload["pullRequestPending"] = safe_pending_pull_request(pending, issue_id=issue_id)
     return payload
+
+
+def safe_quota_usage_payload(value: object, *, default_scope: str) -> dict:
+    usage = value if isinstance(value, dict) else {}
+    used = non_negative_int(usage.get("used"))
+    limit = non_negative_int(usage.get("limit"))
+    return {
+        "scope": clean_github_access_text(usage.get("scope")) or default_scope,
+        "period": clean_github_access_text(usage.get("period")) or current_review_usage_period(),
+        "plan": clean_github_access_text(usage.get("plan")) or "free",
+        "used": used,
+        "limit": limit,
+        "remaining": max(0, non_negative_int(usage.get("remaining")) if "remaining" in usage else limit - used),
+        "resetAt": non_negative_int(usage.get("resetAt")),
+        "bucketId": clean_github_access_text(usage.get("bucketId"), allow_int=True),
+    }
+
+
+def issue_auto_fix_contract_ok(issue: dict) -> bool:
+    if issue.get("autoFix") is not True and issue.get("autoFixable") is not True:
+        return False
+    if not fix_workflow.safe_issue_file(issue.get("file")):
+        return False
+    if not fix_workflow.code_lines(issue.get("badCode")) or not fix_workflow.code_lines(issue.get("goodCode")):
+        return False
+
+    scan_id = public_issue_text(issue.get("scanId"))
+    if not scan_id:
+        return True
+    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+    if not scan:
+        return True
+    repo_path = scan.get("repoPath")
+    user_id = public_issue_text(issue.get("userId"))
+    if not isinstance(repo_path, str) or not repo_path or not user_id:
+        return True
+    if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id) or not os.path.exists(repo_path):
+        return True
+
+    try:
+        return fix_workflow.preview_issue_fix(repo_path, issue).get("valid") is True
+    except (OSError, UnicodeError, ValueError):
+        return False
 
 
 def public_issue_text(value: object) -> str:
@@ -1588,6 +1949,29 @@ def repository_item(github_access: dict | None, full_name: str) -> dict | None:
     return None
 
 
+def repository_item_by_repo_id(github_access: dict | None, repo_id: str) -> dict | None:
+    if not github_access or not repo_id:
+        return None
+    for item in repository_items_for_payload(github_access):
+        if repo_id in {
+            str(item.get("repoId") or ""),
+            str(item.get("id") or ""),
+            str(item.get("githubRepoId") or ""),
+        }:
+            return item
+    return None
+
+
+def repository_item_for_scan_request(github_access: dict | None, body: dict) -> tuple[dict | None, str | None]:
+    repo_id = clean_github_access_text(body.get("repoId"), allow_int=True)
+    if repo_id:
+        return repository_item_by_repo_id(github_access, repo_id), "repoId"
+    full_name = clean_repository_full_name(body.get("repo"), body.get("repository"))
+    if full_name:
+        return repository_item(github_access, full_name), "repo"
+    return None, None
+
+
 def repository_is_authorized(github_access: dict | None, full_name: str) -> bool:
     if not github_access:
         return False
@@ -1595,6 +1979,70 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     if repositories:
         return full_name in repositories
     return repository_item(github_access, full_name) is not None
+
+
+def sync_workspace_access_for_user(user: dict | None, github_access: dict | None) -> None:
+    if not user or not isinstance(github_access, dict):
+        return
+    try:
+        workspaces.sync_access_for_user(user, github_access)
+    except Exception:
+        logger.exception("Unable to sync workspace repository access for user %s", user.get("id"))
+
+
+def repository_item_with_quota(item: dict, workspace: dict | None = None) -> dict:
+    payload = dict(item)
+    item_workspace_id = clean_github_access_text(payload.get("workspaceId"), allow_int=True)
+    item_workspace = db.get_workspace(item_workspace_id) if item_workspace_id else None
+    workspace = item_workspace or workspace
+    repo_id = clean_github_access_text(payload.get("repoId"), allow_int=True)
+    if not repo_id:
+        github_repo_id = clean_github_access_text(payload.get("githubRepoId"), allow_int=True)
+        if github_repo_id:
+            repository = db.get_repository_by_github_repo_id(github_repo_id)
+            if repository:
+                repo_id = repository.get("id")
+                payload["repoId"] = repo_id
+    if repo_id and workspace:
+        repository = db.get_repository(repo_id)
+        if repository:
+            payload["quota"] = quota.quota_payload_for_repository(repository, workspace)
+    return payload
+
+
+def repository_items_for_response(user: dict | None, github_access: dict | None) -> list[dict]:
+    if user and isinstance(github_access, dict):
+        sync_workspace_access_for_user(user, github_access)
+    workspace = current_workspace_for_user(user)
+    return [repository_item_with_quota(item, workspace) for item in repository_items_for_payload(github_access)]
+
+
+def scan_resource_context(user: dict, github_access: dict, repo_meta: dict) -> tuple[dict, dict]:
+    sync_workspace_access_for_user(user, github_access)
+    repo_record = workspaces.repository_record_from_item(repo_meta)
+    if not repo_record:
+        raise ValueError("REPOSITORY_SYNC_REQUIRED")
+    repository = db.upsert_repository(repo_record)
+    workspace_id = clean_github_access_text(repo_meta.get("workspaceId"), allow_int=True)
+    workspace = db.get_workspace(workspace_id) if workspace_id else None
+    if not workspace:
+        installation_id = clean_github_access_text(repo_meta.get("installationId"), allow_int=True) or clean_github_access_text(github_access.get("installationId"), allow_int=True)
+        workspace = db.get_workspace_by_installation(installation_id) if installation_id else None
+    if not workspace:
+        workspace = current_workspace_for_user(user)
+    if not workspace:
+        raise ValueError("WORKSPACE_MEMBERSHIP_REQUIRED")
+    if not db.user_is_workspace_member(workspace["id"], user["id"]):
+        raise ValueError("WORKSPACE_MEMBERSHIP_REQUIRED")
+    db.upsert_workspace_repository(
+        workspace["id"],
+        repository["id"],
+        github_app_installation_id=repo_meta.get("installationId") or github_access.get("installationId"),
+        permissions=repo_meta.get("permissions") if isinstance(repo_meta.get("permissions"), dict) else {},
+        repository_selection=repo_meta.get("repositorySelection") or github_access.get("repositorySelection"),
+        installation_account=repo_meta.get("installationAccount") or github_access.get("installationAccount"),
+    )
+    return workspace, repository
 
 
 def repository_item_from_full_name(full_name: str) -> dict:
@@ -1651,14 +2099,36 @@ def safe_repository_item_for_payload(value: object) -> dict | None:
 
     base_item = repository_item_from_full_name(full_name)
     description = clean_github_access_text(value.get("description")) or clean_github_access_text(value.get("desc")) or ""
+    raw_repo_id = clean_github_access_text(value.get("id"), allow_int=True)
+    github_repo_id = (
+        clean_github_access_text(value.get("githubRepoId"), allow_int=True)
+        or clean_github_access_text(value.get("github_repo_id"), allow_int=True)
+        or raw_repo_id
+    )
+    owner = value.get("owner") if isinstance(value.get("owner"), dict) else {}
+    parent = value.get("parent") if isinstance(value.get("parent"), dict) else {}
+    source = value.get("source") if isinstance(value.get("source"), dict) else {}
     return {
-        "id": clean_github_access_text(value.get("id"), allow_int=True) or full_name,
+        "id": raw_repo_id or full_name,
+        "repoId": clean_github_access_text(value.get("repoId"), allow_int=True),
+        "githubRepoId": github_repo_id,
+        "githubNodeId": clean_github_access_text(value.get("githubNodeId")) or clean_github_access_text(value.get("nodeId")) or clean_github_access_text(value.get("node_id")),
         "name": clean_github_access_text(value.get("name")) or base_item["name"],
         "fullName": full_name,
         "desc": description,
         "description": description,
+        "owner": {
+            key: clean_github_access_text(owner.get(key), allow_int=key == "id")
+            for key in ("login", "id", "type")
+            if clean_github_access_text(owner.get(key), allow_int=key == "id")
+        },
+        "ownerLogin": clean_github_access_text(value.get("ownerLogin")) or clean_github_access_text(value.get("owner_login")) or clean_github_access_text(owner.get("login")),
+        "ownerId": clean_github_access_text(value.get("ownerId"), allow_int=True) or clean_github_access_text(value.get("owner_id"), allow_int=True) or clean_github_access_text(owner.get("id"), allow_int=True),
         "lang": clean_github_access_text(value.get("lang")) or clean_github_access_text(value.get("language")) or "-",
         "private": value.get("private") is True,
+        "fork": value.get("fork") is True,
+        "parentGithubRepoId": clean_github_access_text(value.get("parentGithubRepoId"), allow_int=True) or clean_github_access_text(value.get("parent_github_repo_id"), allow_int=True) or clean_github_access_text(parent.get("id"), allow_int=True),
+        "sourceGithubRepoId": clean_github_access_text(value.get("sourceGithubRepoId"), allow_int=True) or clean_github_access_text(value.get("source_github_repo_id"), allow_int=True) or clean_github_access_text(source.get("id"), allow_int=True),
         "stars": clean_github_access_text(value.get("stars")) or "-",
         "branches": clean_github_access_text(value.get("branches")) or "-",
         "defaultBranch": clean_github_access_text(value.get("defaultBranch")) or clean_github_access_text(value.get("default_branch")) or "main",
@@ -1670,6 +2140,8 @@ def safe_repository_item_for_payload(value: object) -> dict | None:
         "installationAccount": clean_github_access_text(value.get("installationAccount")),
         "installationTargetType": clean_github_access_text(value.get("installationTargetType")),
         "repositorySelection": clean_github_access_text(value.get("repositorySelection")),
+        "workspaceId": clean_github_access_text(value.get("workspaceId"), allow_int=True),
+        "quota": safe_quota_usage_payload(value.get("quota"), default_scope="repository") if isinstance(value.get("quota"), dict) else None,
     }
 
 
@@ -1825,6 +2297,69 @@ def safe_installation_summary(installation: dict, *, include_url_aliases: bool =
     return item
 
 
+def public_installation_summary(user: dict | None, installation: dict) -> dict:
+    item = safe_installation_summary(installation)
+    installation_id = clean_installation_summary_text(item.get("installationId"))
+    item["installationHtmlUrl"] = None
+    item["manage"] = github_installation_manage_status(user, installation_id)
+    return item
+
+
+def public_installation_summaries(user: dict | None, github_access: dict | None) -> list[dict]:
+    return [
+        public_installation_summary(user, installation)
+        for installation in installation_summaries_for_access(github_access)
+    ]
+
+
+def installation_summaries_for_access(github_access: dict | None) -> list[dict]:
+    if not isinstance(github_access, dict):
+        return []
+    installations = github_access.get("installations")
+    if isinstance(installations, list) and installations:
+        return [
+            safe_installation_summary(installation, include_url_aliases=True)
+            for installation in installations
+            if isinstance(installation, dict)
+        ]
+    if clean_github_access_text(github_access.get("installationId"), allow_int=True):
+        return [installation_summary_from_access(github_access)]
+    return []
+
+
+def installation_summary_by_id(github_access: dict | None, installation_id: str) -> dict | None:
+    target = str(installation_id)
+    for installation in installation_summaries_for_access(github_access):
+        if str(installation.get("installationId") or "") == target:
+            return installation
+    return None
+
+
+def github_installation_manage_status(user: dict | None, installation_id: str | None) -> dict:
+    access_record = latest_installation_access_record(user, installation_id)
+    if not access_record:
+        return {"mode": "needs_identity"}
+    identity = github_identity_by_id(user, clean_github_access_text(access_record.get("githubIdentityId")))
+    if access_record.get("canAccess") is True and identity:
+        public_identity = public_github_identity(identity)
+        if public_identity["status"] == "needs_reauth":
+            return {
+                "mode": "needs_reauth",
+                "githubIdentityId": public_identity["id"],
+                "githubLogin": public_identity["login"],
+                "lastVerifiedAt": public_identity["lastVerifiedAt"],
+            }
+        return {
+            "mode": "verified_identity",
+            "githubIdentityId": public_identity["id"],
+            "githubLogin": public_identity["login"],
+            "lastVerifiedAt": pull_request_timestamp(access_record.get("verifiedAt")),
+        }
+    if access_record.get("lastErrorCode") == "github_identity_reauth_required":
+        return {"mode": "needs_reauth"}
+    return {"mode": "needs_identity", "lastErrorCode": clean_github_access_text(access_record.get("lastErrorCode"))}
+
+
 def clean_installation_summary_text(value: object) -> str | None:
     return clean_github_access_text(value, allow_int=True)
 
@@ -1973,6 +2508,122 @@ def aggregate_github_repository_access(user: dict, installation_accesses: list[d
     }
 
 
+def installation_accesses_from_github_access(github_access: dict | None) -> list[dict]:
+    if not isinstance(github_access, dict) or github_access.get("mode") != "github-app":
+        return []
+    if clean_github_access_text(github_access.get("installationId"), allow_int=True):
+        return [dict(github_access)]
+
+    repository_items = [
+        item
+        for item in github_access.get("repositoryItems") or []
+        if isinstance(item, dict)
+    ]
+    accesses = []
+    for summary in installation_summaries_for_access(github_access):
+        installation_id = clean_github_access_text(summary.get("installationId"), allow_int=True)
+        if not installation_id:
+            continue
+        items = [
+            item
+            for item in repository_items
+            if str(item.get("installationId") or "") == installation_id
+        ]
+        accesses.append({
+            "mode": "github-app",
+            "scope": summary.get("scope") or github_access.get("scope") or "selected",
+            "repositorySelection": summary.get("repositorySelection") or github_access.get("repositorySelection") or "selected",
+            "authorizedAt": github_access.get("authorizedAt") or now(),
+            "installationId": installation_id,
+            "installationAccount": summary.get("installationAccount"),
+            "installationTargetType": summary.get("installationTargetType"),
+            "installationAppSlug": summary.get("installationAppSlug"),
+            "installationHtmlUrl": trusted_github_web_url(summary.get("installationHtmlUrl")),
+            "installationPermissions": github_access.get("installationPermissions") or {},
+            "repositories": [item["fullName"] for item in items if item.get("fullName")],
+            "repositoryItems": items,
+            "repositoriesNeedSync": summary.get("repositoriesNeedSync") is True,
+        })
+    return accesses
+
+
+def installation_allowed_for_identity(identity: dict, installation: dict) -> bool:
+    if str(installation.get("target_type") or "").casefold() != "user":
+        return True
+    login = str(identity.get("githubLogin") or identity.get("login") or "").casefold()
+    return bool(login) and installation_account_login(installation).casefold() == login
+
+
+def sync_github_repository_installation_scope(
+    user: dict,
+    installation_id: str,
+    *,
+    github_identity_id: str | None = None,
+) -> dict | None:
+    identity = github_identity_by_id(user, github_identity_id) if github_identity_id else None
+    if github_identity_id and not identity:
+        raise ValueError("GitHub identity is not linked to this Pullwise account.")
+    token = identity.get("accessToken") if identity else user.get("githubAccessToken")
+    if not token:
+        raise ValueError("Sign in with GitHub before syncing repositories.")
+
+    installations = github_auth.list_current_app_installations_for_user(token)
+    if identity:
+        installations = [
+            installation
+            for installation in installations
+            if installation_allowed_for_identity(identity, installation)
+        ]
+    else:
+        installations = [
+            installation
+            for installation in installations
+            if installation_allowed_for_user(user, installation)
+        ]
+    target = next(
+        (
+            installation
+            for installation in installations
+            if str(installation.get("id") or "") == str(installation_id)
+        ),
+        None,
+    )
+    if not target:
+        if identity:
+            upsert_github_identity_installation_access(
+                user,
+                identity,
+                installation_id,
+                can_access=False,
+                last_error_code="github_installation_not_visible",
+            )
+        raise ValueError("GitHub installation is not visible to the selected GitHub identity.")
+
+    refreshed_access = github_repository_access_for_installation(
+        installation_id,
+        target.get("repository_selection") or "selected",
+        token,
+        target,
+    )
+    existing_accesses = [
+        access
+        for access in installation_accesses_from_github_access(user.get("githubRepositoryAccess"))
+        if str(access.get("installationId") or "") != str(installation_id)
+    ]
+    github_access = aggregate_github_repository_access(user, [*existing_accesses, refreshed_access])
+    if github_access:
+        user["githubRepositoryAccess"] = github_access
+        mark_state_dirty()
+    if identity:
+        upsert_github_identity_installation_access(
+            user,
+            identity,
+            installation_id,
+            can_access=True,
+        )
+    return github_access
+
+
 def installation_allowed_for_user(user: dict, installation: dict) -> bool:
     if str(installation.get("target_type") or "").casefold() != "user":
         return True
@@ -2009,6 +2660,7 @@ def bind_github_repository_installations(
     github_access = aggregate_github_repository_access(user, installation_accesses)
     if github_access:
         user["githubRepositoryAccess"] = github_access
+        sync_workspace_access_for_user(user, github_access)
         mark_state_dirty()
     return github_access
 
@@ -2073,6 +2725,8 @@ def session_payload(session: dict | None) -> dict:
     repositories_authorized = github_repository_access_authorized_for_user(user, repo_access)
     visible_access = repo_access if repositories_authorized and not repositories_pending else None
     repositories_connected = repositories_authorized and github_repository_access_connected(repo_access) and not repositories_pending
+    current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
+    workspace_payloads = workspaces_payload_for_user(user)
     return {
         "authenticated": True,
         "user": user_public(user),
@@ -2088,6 +2742,8 @@ def session_payload(session: dict | None) -> dict:
             "repositorySelection": clean_github_access_text(visible_access.get("repositorySelection")) if visible_access else None,
             "repositoryCount": len(clean_github_access_text_list(visible_access.get("repositories"))) if visible_access else 0,
         },
+        "workspaces": workspace_payloads,
+        "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
         "nextStep": "choose_repositories" if repositories_connected else "connect_github_repositories",
     }
 
@@ -2179,6 +2835,14 @@ def billing_user_for_update(update: dict) -> dict | None:
     return None
 
 
+def billing_workspace_for_update(update: dict) -> dict | None:
+    try:
+        return db.find_workspace_for_billing_update(update)
+    except Exception:
+        logger.exception("Unable to find workspace for billing update.")
+        return None
+
+
 def billing_update_matches_user(update: dict, user: dict) -> bool:
     current = user.get("billing") or {}
     customer_id = billing_update_text(update.get("customerId"))
@@ -2235,6 +2899,32 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     }
     remember_billing_event(update, applied=True)
     mark_state_dirty()
+    return True
+
+
+def apply_billing_update_to_workspace(workspace: dict, update: dict) -> bool:
+    current = workspaces.billing_state_from_workspace(workspace)
+    incoming_created = billing_event_created(update)
+    current_created = billing_event_created({"eventCreated": workspace.get("last_event_created")})
+    if incoming_created is not None and current_created is not None and incoming_created < current_created:
+        remember_billing_event(update, applied=False, stale=True)
+        return False
+
+    updated = db.update_workspace_billing(
+        workspace["id"],
+        {
+            "provider": billing_update_text(update.get("provider")) or current.get("provider"),
+            "customerId": billing_update_text(update.get("customerId")) or current.get("customerId"),
+            "subscriptionId": billing_update_text(update.get("subscriptionId")) or current.get("subscriptionId"),
+            "subscriptionItemId": billing_update_text(update.get("subscriptionItemId")) or current.get("subscriptionItemId"),
+            "status": billing_update_text(update.get("status")) or current.get("status") or "active",
+            "plan": billing_update_text(update.get("plan")) or current.get("plan") or "pro",
+            "interval": billing_update_text(update.get("interval")) or current.get("interval") or "month",
+        },
+    )
+    if not updated:
+        return False
+    remember_billing_event(update, applied=True)
     return True
 
 
@@ -2416,6 +3106,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_github_repository_authorize(params)
         if path == "/integrations/github/callback":
             return self.handle_github_repository_callback(params)
+        if path == "/integrations/github/manage/start":
+            return self.handle_github_manage_start(params)
         if path == "/repositories":
             return self.json(self.repositories_payload())
         if path == "/scans":
@@ -2454,6 +3146,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             user = USERS.get(session["userId"]) if session else None
             if user:
+                current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
+                payload["workspace"] = billing_workspace_payload(current_workspace)
                 payload["account"] = billing_account_payload(user)
             return self.json(payload)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
@@ -2467,10 +3161,36 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/auth/sign-out":
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
+        if (
+            len(segments) == 5
+            and segments[0] == "integrations"
+            and segments[1] == "github"
+            and segments[2] == "installations"
+            and segments[4] == "manage-sessions"
+        ):
+            return self.handle_github_installation_manage_session(segments[3], body)
         if path == "/repositories/sync":
-            if not self.current_session():
+            session = self.current_session()
+            if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before syncing repositories.")
-            payload = self.repositories_payload(refresh=True)
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            installation_id = clean_github_access_text(body.get("installationId"), allow_int=True)
+            github_identity_id = clean_github_access_text(body.get("githubIdentityId"))
+            if installation_id or github_identity_id:
+                if not installation_id:
+                    return self.error(HTTPStatus.BAD_REQUEST, "installationId is required for scoped repository sync.")
+                user = USERS.get(session["userId"])
+                if not user:
+                    return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before syncing repositories.")
+                sync_github_repository_installation_scope(
+                    user,
+                    installation_id,
+                    github_identity_id=github_identity_id,
+                )
+                payload = self.repositories_payload(refresh=False)
+            else:
+                payload = self.repositories_payload(refresh=True)
             payload.update({"ok": True, "syncedAt": now()})
             return self.json(payload)
         if path == "/scans":
@@ -2479,9 +3199,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting a scan.")
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
-            repository = str(body.get("repo") or body.get("repository") or "").strip()
-            if not repository:
+            requested_repo_id = clean_github_access_text(body.get("repoId"), allow_int=True)
+            requested_repository = clean_repository_full_name(body.get("repo"), body.get("repository"))
+            if not requested_repo_id and not requested_repository:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
+            repository = requested_repository or requested_repo_id or ""
             if review.selected_provider() == "disabled":
                 return self.error(
                     HTTPStatus.SERVICE_UNAVAILABLE,
@@ -2489,6 +3211,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 )
             request_id = str(body.get("requestId") or body.get("idempotencyKey") or "").strip()[:128]
             scan_error: tuple[int, str] | None = None
+            scan_error_code: str | None = None
+            scan_error_workspace_id: str | None = None
+            scan_error_repo_id: str | None = None
             scan = None
             scan_created = False
             with STATE_LOCK:
@@ -2502,29 +3227,68 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     scan_error = (HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before starting a scan.")
                 elif github_repositories_need_sync(github_access):
                     scan_error = (HTTPStatus.FORBIDDEN, "Sync GitHub repositories before starting a scan.")
-                elif not repository_is_authorized(github_access, repository):
-                    scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                    scan_error_code = "REPOSITORY_SYNC_REQUIRED"
                 else:
                     scan = user_scan_by_request_id(session["userId"], request_id)
                     if scan is None:
-                        quota_allowed, entitlement = consume_review_quota(user)
-                        if not quota_allowed:
-                            scan_error = (
-                                HTTPStatus.PAYMENT_REQUIRED,
-                                (
-                                    f"Monthly review limit reached for the {entitlement['plan']} plan "
-                                    f"({entitlement['used']}/{entitlement['limit']} reviews used)."
-                                ),
-                            )
+                        repo_meta, request_key = repository_item_for_scan_request(github_access, body)
+                        if not repo_meta:
+                            scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                            scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
                         else:
-                            repo_meta = repository_item(github_access, repository) or {}
+                            repository = clean_repository_full_name(repo_meta.get("fullName"), requested_repository)
+                            if not repository:
+                                scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                                scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+                            elif request_key != "repoId" and not repository_is_authorized(github_access, repository):
+                                scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                                scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+                        if scan_error is None:
+                            scan_id = make_id("sc")
+                            try:
+                                workspace, repository_record = scan_resource_context(user, github_access, repo_meta)
+                            except ValueError as exc:
+                                code = str(exc)
+                                if code == "REPOSITORY_SYNC_REQUIRED":
+                                    scan_error = (
+                                        HTTPStatus.CONFLICT,
+                                        "Sync GitHub repositories before starting a scan so Pullwise can verify the stable repository ID.",
+                                    )
+                                    scan_error_code = "REPOSITORY_SYNC_REQUIRED"
+                                elif code == "WORKSPACE_MEMBERSHIP_REQUIRED":
+                                    scan_error = (
+                                        HTTPStatus.FORBIDDEN,
+                                        "Workspace membership is required to scan this repository.",
+                                    )
+                                    scan_error_code = "WORKSPACE_MEMBERSHIP_REQUIRED"
+                                else:
+                                    scan_error = (HTTPStatus.BAD_REQUEST, "Unable to resolve repository workspace.")
+                            else:
+                                try:
+                                    quota_result = quota.consume_scan_quota(
+                                        workspace=workspace,
+                                        repository=repository_record,
+                                        requested_by_user_id=session["userId"],
+                                        scan_id=scan_id,
+                                        request_id=request_id or None,
+                                    )
+                                except quota.QuotaExceeded as exc:
+                                    scan_error = (HTTPStatus.PAYMENT_REQUIRED, exc.message)
+                                    scan_error_code = exc.code
+                                    scan_error_workspace_id = exc.workspace_id
+                                    scan_error_repo_id = exc.repo_id
+                                else:
+                                    entitlement = quota_result["workspace"]
+                        if scan_error:
+                            pass
+                        else:
                             branch = (
                                 clean_github_access_text(body.get("branch"))
                                 or clean_github_access_text(repo_meta.get("defaultBranch"))
                                 or "main"
                             )
                             scan = {
-                                "id": make_id("sc"),
+                                "id": scan_id,
                                 "repo": repository,
                                 "branch": branch,
                                 "commit": clean_github_access_text(body.get("commit")) or "pending",
@@ -2547,15 +3311,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                     clean_github_access_text(repo_meta.get("repositorySelection"))
                                     or clean_github_access_text(github_access.get("repositorySelection"))
                                 ),
+                                "workspaceId": workspace["id"],
+                                "repoId": repository_record["id"],
+                                "githubRepoId": repository_record["github_repo_id"],
+                                "quotaBucketIds": quota_result["bucketIds"],
                                 "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
                                 "repositoryPrivate": bool(repo_meta.get("private")),
                                 "repoPath": None,
-                                "billingUsage": {
-                                    "period": entitlement["period"],
-                                    "plan": entitlement["plan"],
-                                    "used": entitlement["used"],
-                                    "limit": entitlement["limit"],
-                                },
+                                "billingUsage": quota_result["workspace"],
+                                "repoUsage": quota_result["repository"],
                                 "by": "you",
                             }
                             if request_id:
@@ -2573,8 +3337,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     httpStatus=int(scan_error[0]),
                     reason=scan_error[1],
                     requestId=request_id or None,
+                    code=scan_error_code,
+                    workspaceId=scan_error_workspace_id,
+                    repoId=scan_error_repo_id,
                 )
-                return self.error(scan_error[0], scan_error[1])
+                payload = {"message": scan_error[1]}
+                if scan_error_code:
+                    payload["code"] = scan_error_code
+                if scan_error_workspace_id:
+                    payload["workspaceId"] = scan_error_workspace_id
+                if scan_error_repo_id:
+                    payload["repoId"] = scan_error_repo_id
+                return self.json(payload, scan_error[0])
             if scan is None:
                 return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to create scan.")
             if scan_created:
@@ -2588,6 +3362,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     provider=review.selected_provider(),
                     requestId=scan.get("requestId"),
                     installationId=scan.get("installationId"),
+                    workspaceId=scan.get("workspaceId"),
+                    repoId=scan.get("repoId"),
+                    githubRepoId=scan.get("githubRepoId"),
+                    quotaBucketIds=scan.get("quotaBucketIds"),
                 )
                 worker.start_scan(scan["id"])
             else:
@@ -2649,25 +3427,32 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
+            current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
             checkout = billing.create_checkout_session(
-                user,
+                workspace_billing_subject(user, current_workspace),
+                workspace=current_workspace,
                 success_url=safe_redirect_to(body.get("successUrl"), "settings"),
                 cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
                 plan=str(body.get("plan") or "pro"),
                 interval=str(body.get("interval") or "month"),
             )
             if checkout.get("customerId"):
-                current_billing = user.get("billing") or {}
-                user["billing"] = {
-                    **current_billing,
-                    "provider": checkout.get("provider") or current_billing.get("provider"),
-                    "customerId": checkout.get("customerId"),
-                    "updatedAt": now(),
-                }
+                current_billing = workspaces.billing_state_from_workspace(current_workspace)
+                updated_workspace = db.update_workspace_billing(
+                    current_workspace["id"],
+                    {
+                        **current_billing,
+                        "provider": checkout.get("provider") or current_billing.get("provider"),
+                        "customerId": checkout.get("customerId"),
+                    },
+                )
+                if updated_workspace:
+                    current_workspace = updated_workspace
             user["billingCheckout"] = {
                 "provider": checkout.get("provider"),
                 "id": checkout.get("id"),
                 "requestId": checkout.get("requestId"),
+                "workspaceId": checkout.get("workspaceId") or (current_workspace or {}).get("id"),
                 "plan": checkout.get("plan"),
                 "interval": checkout.get("interval"),
                 "createdAt": now(),
@@ -2680,8 +3465,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before opening the billing portal.")
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            user = USERS[session["userId"]]
+            current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
             portal = billing.create_portal_session(
-                USERS[session["userId"]],
+                workspace_billing_subject(user, current_workspace),
                 return_url=safe_redirect_to(body.get("returnUrl"), "settings"),
             )
             return self.json(portal)
@@ -2691,27 +3478,28 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before changing your subscription.")
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            user = USERS[session["userId"]]
+            current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
             result = billing.change_subscription_interval(
-                USERS[session["userId"]],
+                workspace_billing_subject(user, current_workspace),
                 interval=str(body.get("interval") or "year"),
                 return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
             )
             if result.get("alreadyActive"):
                 return self.json(result)
             if result.get("provider") == "creem" and result.get("interval") == "year":
-                user = USERS[session["userId"]]
-                current_billing = user.get("billing") or {}
-                user["billing"] = {
-                    **current_billing,
+                current_billing = workspaces.billing_state_from_workspace(current_workspace)
+                db.update_workspace_billing(
+                    current_workspace["id"],
+                    {
+                        **current_billing,
                     "provider": "creem",
                     "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
                     "status": result.get("status") or current_billing.get("status") or "active",
                     "plan": "pro",
                     "interval": "year",
-                    "currentPeriodStart": result.get("currentPeriodStart") or current_billing.get("currentPeriodStart"),
-                    "currentPeriodEnd": result.get("currentPeriodEnd") or current_billing.get("currentPeriodEnd"),
-                    "updatedAt": now(),
-                }
+                    },
+                )
                 mark_state_dirty()
             return self.json(result)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
@@ -2780,7 +3568,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.redirect(safe_redirect_to(params.get("redirectTo"), "dashboard"), cookie_header(session["id"]))
 
         state = params.get("state") or ""
-        record = pop_github_state("login", state)
+        record = pop_any_github_state(state)
+        if record.get("kind") == "manage_installation":
+            return self.handle_github_manage_callback(params, record, state)
+        if record.get("kind") != "login":
+            raise ValueError("GitHub authorization state is invalid or expired.")
         redirect_to = str(record["redirectTo"])
         if params.get("error"):
             return self.redirect(redirect_with_params(redirect_to, {"github_error": params.get("error_description") or params["error"]}))
@@ -2797,6 +3589,174 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         user = get_or_create_real_github_user(profile, token_payload)
         session = create_session(user)
         return self.redirect(redirect_to, cookie_header(session["id"]))
+
+    def handle_github_installation_manage_session(self, installation_id: str, body: dict) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before managing GitHub installations.")
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if not github_auth.oauth_configured():
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured. Set PULLWISE_GITHUB_CLIENT_ID and PULLWISE_GITHUB_CLIENT_SECRET.")
+        if not github_auth.app_install_configured():
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub App installation is not configured. Set PULLWISE_GITHUB_APP_SLUG or PULLWISE_GITHUB_APP_INSTALL_URL.")
+
+        user = USERS.get(session["userId"])
+        github_access = user.get("githubRepositoryAccess") if user else None
+        if not github_repository_access_authorized_for_user(user, github_access) or not github_repository_access_connected(github_access):
+            return self.error(HTTPStatus.FORBIDDEN, "Connect GitHub repositories before managing an installation.")
+
+        clean_installation_id = clean_github_access_text(installation_id, allow_int=True)
+        if not clean_installation_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "A GitHub App installation id is required.")
+        installation = installation_summary_by_id(github_access, clean_installation_id)
+        if not installation:
+            return self.error(HTTPStatus.NOT_FOUND, "GitHub App installation is not connected to this Pullwise account.")
+
+        identity_id = clean_github_access_text(body.get("githubIdentityId"))
+        if identity_id and not github_identity_by_id(user, identity_id):
+            return self.error(HTTPStatus.BAD_REQUEST, "GitHub identity is not linked to this Pullwise account.")
+
+        redirect_to = safe_redirect_to(body.get("returnUrl") or body.get("redirectTo"), "repos")
+        state = remember_github_installation_manage_state(
+            user,
+            installation,
+            redirect_to,
+            expected_github_identity_id=identity_id,
+        )
+        url = f"{api_base_url(self)}/integrations/github/manage/start?{urlencode({'state': state})}"
+        return self.json({
+            "mode": "github-installation-manage",
+            "url": url,
+            "installationId": clean_installation_id,
+        })
+
+    def handle_github_manage_start(self, params: dict) -> None:
+        state = params.get("state") or ""
+        record = peek_github_state("manage_installation", state)
+        if not github_auth.oauth_configured():
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured. Set PULLWISE_GITHUB_CLIENT_ID and PULLWISE_GITHUB_CLIENT_SECRET.")
+        verifier = github_auth.make_code_verifier()
+        record["codeVerifier"] = verifier
+        record["oauthStartedAt"] = now()
+        mark_state_dirty()
+        authorize_url = github_auth.build_oauth_authorize_url(
+            f"{api_base_url(self)}/auth/github/callback",
+            state,
+            verifier,
+            prompt="select_account",
+        )
+        return self.redirect(authorize_url)
+
+    def handle_github_manage_callback(self, params: dict, record: dict, state: str) -> None:
+        redirect_to = str(record["redirectTo"])
+        if params.get("error"):
+            return self.redirect(redirect_with_params(redirect_to, {"github_error": params.get("error_description") or params["error"]}))
+        if not params.get("code"):
+            return self.redirect(redirect_with_params(redirect_to, {"github_error": "missing_oauth_code"}))
+
+        user = USERS.get(str(record.get("userId") or ""))
+        if not user:
+            raise ValueError("The GitHub manage session belongs to a user session that no longer exists.")
+        token_payload = github_auth.exchange_oauth_code(
+            params["code"],
+            f"{api_base_url(self)}/auth/github/callback",
+            str(record.get("codeVerifier") or ""),
+            state,
+        )
+        profile = github_auth.fetch_user_profile(token_payload["access_token"])
+        identity = upsert_github_identity(user, profile, token_payload)
+        expected_installation_id = clean_github_access_text(record.get("expectedInstallationId"), allow_int=True)
+        if not expected_installation_id:
+            return self.redirect(redirect_with_params(redirect_to, {"github_error": "github_installation_not_visible"}))
+
+        if self.github_manage_identity_mismatch(identity, record):
+            upsert_github_identity_installation_access(
+                user,
+                identity,
+                expected_installation_id,
+                can_access=False,
+                last_error_code="github_account_mismatch",
+            )
+            return self.redirect(self.github_manage_error_redirect(redirect_to, "github_account_mismatch", identity, record))
+
+        try:
+            installations = github_auth.list_current_app_installations_for_user(identity.get("accessToken"))
+        except github_auth.GitHubError:
+            identity["status"] = "needs_reauth"
+            upsert_github_identity_installation_access(
+                user,
+                identity,
+                expected_installation_id,
+                can_access=False,
+                last_error_code="github_identity_reauth_required",
+            )
+            return self.redirect(self.github_manage_error_redirect(redirect_to, "github_identity_reauth_required", identity, record))
+
+        installation = next(
+            (
+                item
+                for item in installations
+                if str(item.get("id") or "") == str(expected_installation_id)
+            ),
+            None,
+        )
+        if not installation:
+            upsert_github_identity_installation_access(
+                user,
+                identity,
+                expected_installation_id,
+                can_access=False,
+                last_error_code="github_installation_not_visible",
+            )
+            return self.redirect(self.github_manage_error_redirect(redirect_to, "github_installation_not_visible", identity, record))
+        if installation.get("suspended_at"):
+            upsert_github_identity_installation_access(
+                user,
+                identity,
+                expected_installation_id,
+                can_access=False,
+                last_error_code="github_installation_deleted",
+            )
+            return self.redirect(self.github_manage_error_redirect(redirect_to, "github_installation_deleted", identity, record))
+
+        html_url = trusted_github_web_url(installation.get("html_url") or record.get("expectedInstallationHtmlUrl"))
+        if not html_url:
+            upsert_github_identity_installation_access(
+                user,
+                identity,
+                expected_installation_id,
+                can_access=False,
+                last_error_code="github_installation_not_visible",
+            )
+            return self.redirect(self.github_manage_error_redirect(redirect_to, "github_installation_not_visible", identity, record))
+
+        upsert_github_identity_installation_access(
+            user,
+            identity,
+            expected_installation_id,
+            can_access=True,
+        )
+        return self.redirect(html_url)
+
+    def github_manage_identity_mismatch(self, identity: dict, record: dict) -> bool:
+        expected_identity_id = clean_github_access_text(record.get("expectedGithubIdentityId"))
+        if expected_identity_id and identity.get("id") != expected_identity_id:
+            return True
+        expected_target_type = str(record.get("expectedInstallationTargetType") or "").casefold()
+        expected_account = str(record.get("expectedAccountLogin") or "").casefold()
+        selected_login = str(identity.get("githubLogin") or identity.get("login") or "").casefold()
+        return expected_target_type == "user" and expected_account and selected_login and selected_login != expected_account
+
+    def github_manage_error_redirect(self, redirect_to: str, code: str, identity: dict, record: dict) -> str:
+        return redirect_with_params(
+            redirect_to,
+            {
+                "github_error": code,
+                "github_login": clean_github_access_text(identity.get("githubLogin") or identity.get("login")) or "",
+                "installation_account": clean_github_access_text(record.get("expectedAccountLogin")) or "",
+            },
+        )
 
     def handle_github_repository_authorize(self, params: dict) -> None:
         scope = params.get("scope") if params.get("scope") in {"all", "selected"} else "all"
@@ -2846,20 +3806,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app-add"})
 
         if manage:
-            existing_url = trusted_github_web_url(existing_access.get("installationHtmlUrl") if existing_access else None)
-            if github_repository_access_connected(existing_access) and existing_url:
+            existing_installations = installation_summaries_for_access(existing_access)
+            if github_repository_access_connected(existing_access) and len(existing_installations) == 1:
+                installation = existing_installations[0]
+                installation_id = clean_github_access_text(installation.get("installationId"), allow_int=True)
+                state = remember_github_installation_manage_state(user, installation, redirect_to)
+                url = f"{api_base_url(self)}/integrations/github/manage/start?{urlencode({'state': state})}"
                 return self.json({
                     "ok": True,
                     "connected": True,
-                    "url": existing_url,
-                    "mode": "github-app-existing-manage",
-                    "installationId": clean_github_access_text(existing_access.get("installationId"), allow_int=True),
+                    "url": url,
+                    "mode": "github-installation-manage",
+                    "installationId": installation_id,
                 })
-            existing_installations = existing_access.get("installations") if existing_access else []
-            safe_existing_installations = safe_installation_summaries(existing_installations or [])
-            if github_repository_access_connected(existing_access) and any(
-                installation.get("installationHtmlUrl") for installation in safe_existing_installations
-            ):
+            if github_repository_access_connected(existing_access) and existing_installations:
                 return self.json({
                     "ok": True,
                     "connected": True,
@@ -2868,7 +3828,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "installationIds": clean_github_access_text_list(existing_access.get("installationIds"), allow_int=True),
                     "installationAccount": clean_github_access_text(existing_access.get("installationAccount")),
                     "installationAccounts": clean_github_access_text_list(existing_access.get("installationAccounts")),
-                    "installations": safe_existing_installations,
+                    "installations": public_installation_summaries(user, existing_access),
+                    "identities": public_github_identities(user),
                 })
             state = remember_github_repository_authorization(user, redirect_to, scope, manage=True)
             return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app"})
@@ -2945,6 +3906,26 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             installations,
             params.get("scope") or record.get("requestedScope") or "selected",
         )
+        identity = upsert_github_identity(
+            user,
+            {
+                "id": user.get("githubId"),
+                "login": user.get("githubLogin"),
+                "html_url": user.get("githubHtmlUrl"),
+                "avatar_url": user.get("avatarUrl"),
+            },
+            {
+                "access_token": user.get("githubAccessToken"),
+                "scope": user.get("githubOAuthScope"),
+            },
+        )
+        upsert_github_identity_installation_access(
+            user,
+            identity,
+            installation_id,
+            can_access=True,
+            verification_method="setup_callback",
+        )
         clear_github_repository_authorization_pending(user, state)
         session = create_session(user)
         return self.redirect(str(record["redirectTo"]), cookie_header(session["id"]))
@@ -2984,8 +3965,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "installationIds": clean_github_access_text_list(visible_access.get("installationIds"), allow_int=True) if visible_access else [],
             "installationAccount": clean_github_access_text(visible_access.get("installationAccount")) if visible_access else None,
             "installationAccounts": clean_github_access_text_list(visible_access.get("installationAccounts")) if visible_access else [],
-            "installationHtmlUrl": trusted_github_web_url(visible_access.get("installationHtmlUrl")) if visible_access else None,
-            "installations": safe_installation_summaries(visible_access.get("installations") if visible_access else []),
+            "installationHtmlUrl": None,
+            "identities": public_github_identities(user),
+            "installations": public_installation_summaries(user, visible_access),
             "repositories": clean_github_access_text_list(visible_access.get("repositories")) if visible_access else [],
             "repositoriesNeedSync": github_repositories_need_sync(visible_access),
         }
@@ -3034,20 +4016,23 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 github_access = refreshed_access
                 bound_existing_access = True
 
-        repository_items = repository_items_for_payload(github_access)
+        repository_items = repository_items_for_response(user, github_access)
         if not github_repository_access_connected(github_access):
             return unavailable_repositories_payload(github_access)
 
+        current_workspace = current_workspace_for_user(user)
         return {
             "items": repository_items,
             "repositories": repository_items,
             "needsAuthorization": False,
+            "workspace": workspaces.workspace_public_payload(current_workspace),
+            "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
             "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
             "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
             "repositorySelection": clean_github_access_text(github_access.get("repositorySelection")),
             "installationAccount": clean_github_access_text(github_access.get("installationAccount")),
             "installationAccounts": clean_github_access_text_list(github_access.get("installationAccounts")),
-            "installations": safe_installation_summaries(github_access.get("installations") or []),
+            "installations": public_installation_summaries(user, github_access),
             "repositoriesNeedSync": github_repositories_need_sync(github_access),
         }
 
@@ -3172,12 +4157,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def apply_billing_update(self, update: dict) -> None:
         if billing_event_processed(update):
             return
-        user = billing_user_for_update(update)
-        if not user:
-            remember_pending_billing_update(update)
+        workspace = billing_workspace_for_update(update) if billing_update_text(update.get("workspaceId")) else None
+        if workspace:
+            apply_billing_update_to_workspace(workspace, update)
             return
-        apply_billing_update_to_user(user, update)
-        apply_pending_billing_updates_for_user(user)
+        user = billing_user_for_update(update)
+        if user:
+            apply_billing_update_to_user(user, update)
+            apply_pending_billing_updates_for_user(user)
+            return
+        workspace = billing_workspace_for_update(update)
+        if workspace:
+            apply_billing_update_to_workspace(workspace, update)
+            return
+        remember_pending_billing_update(update)
 
     def send_cors_headers(self) -> None:
         origin = self.headers.get("Origin")

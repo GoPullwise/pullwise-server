@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -34,6 +35,11 @@ class ScanLoggingTest(unittest.TestCase):
         self.persist_patcher = patch.object(app, "persist_state")
         self.persist_patcher.start()
         self.addCleanup(self.persist_patcher.stop)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.db_patcher = patch.dict(os.environ, {"PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3")}, clear=False)
+        self.db_patcher.start()
+        self.addCleanup(self.db_patcher.stop)
         app.STATE_LOADED = True
         app.STATE_DIRTY = False
         app.ISSUES = []

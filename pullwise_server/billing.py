@@ -50,8 +50,12 @@ def billing_currency() -> str:
 
 def review_limit(plan: str) -> int:
     if plan == "pro":
+        if env("PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT"):
+            return max(0, env_int("PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT", 100))
         return max(0, env_int("PULLWISE_PRO_REVIEW_LIMIT", 100))
-    return max(0, env_int("PULLWISE_FREE_REVIEW_LIMIT", 5))
+    if env("PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT"):
+        return max(0, env_int("PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT", 10))
+    return max(0, env_int("PULLWISE_FREE_REVIEW_LIMIT", 10))
 
 
 def pro_amount(interval: str) -> str:
@@ -133,7 +137,7 @@ def public_plan() -> dict:
             {
                 "id": "free",
                 "name": "Free",
-                "description": "Try Pullwise with a small monthly review allowance.",
+                "description": "Try Pullwise with shared monthly workspace and repository scan allowance.",
                 "currency": currency,
                 "reviewLimit": review_limit("free"),
                 "prices": {
@@ -148,7 +152,7 @@ def public_plan() -> dict:
             {
                 "id": "pro",
                 "name": pro_name,
-                "description": pro_description,
+                "description": f"{pro_description} Quota is shared by workspace members and repositories.",
                 "currency": currency,
                 "reviewLimit": review_limit("pro"),
                 "prices": pro_prices,
@@ -176,6 +180,7 @@ def default_cancel_url() -> str:
 def create_checkout_session(
     user: dict,
     *,
+    workspace: dict | None = None,
     success_url: str | None = None,
     cancel_url: str | None = None,
     plan: str = "pro",
@@ -184,9 +189,9 @@ def create_checkout_session(
     plan, interval = validate_checkout_selection(plan, interval)
     provider = selected_provider()
     if provider == "stripe":
-        return create_stripe_checkout_session(user, success_url=success_url, cancel_url=cancel_url, plan=plan, interval=interval)
+        return create_stripe_checkout_session(user, workspace=workspace, success_url=success_url, cancel_url=cancel_url, plan=plan, interval=interval)
     if provider == "creem":
-        return create_creem_checkout_session(user, success_url=success_url or default_success_url(), plan=plan, interval=interval)
+        return create_creem_checkout_session(user, workspace=workspace, success_url=success_url or default_success_url(), plan=plan, interval=interval)
     raise BillingConfigurationError("Billing is not configured.")
 
 
@@ -200,10 +205,11 @@ def validate_checkout_selection(plan: str, interval: str) -> tuple[str, str]:
     return normalized_plan, normalized_interval
 
 
-def create_stripe_checkout_session(user: dict, *, success_url: str | None, cancel_url: str | None, plan: str, interval: str) -> dict:
+def create_stripe_checkout_session(user: dict, *, workspace: dict | None = None, success_url: str | None, cancel_url: str | None, plan: str, interval: str) -> dict:
     price_id = stripe_price_id(interval)
     if not price_id:
         raise BillingConfigurationError(f"Stripe Pro {interval} price is not configured.")
+    workspace_id = text_payload((workspace or {}).get("id"), "")
     data = {
         "mode": env("PULLWISE_STRIPE_CHECKOUT_MODE", "subscription"),
         "line_items[0][price]": price_id,
@@ -218,6 +224,9 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
         "subscription_data[metadata][plan]": plan,
         "subscription_data[metadata][interval]": interval,
     }
+    if workspace_id:
+        data["metadata[workspaceId]"] = workspace_id
+        data["subscription_data[metadata][workspaceId]"] = workspace_id
     customer_id = (user.get("billing") or {}).get("customerId")
     if customer_id:
         data["customer"] = customer_id
@@ -237,6 +246,7 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
         raise RuntimeError("Stripe did not return a Checkout URL.")
     return {
         "provider": "stripe",
+        "workspaceId": workspace_id or None,
         "plan": plan,
         "interval": interval,
         "id": payload.get("id"),
@@ -245,7 +255,7 @@ def create_stripe_checkout_session(user: dict, *, success_url: str | None, cance
     }
 
 
-def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, interval: str) -> dict:
+def create_creem_checkout_session(user: dict, *, workspace: dict | None = None, success_url: str, plan: str, interval: str) -> dict:
     product_id = creem_product_id(interval)
     if not product_id:
         raise BillingConfigurationError(f"Creem Pro {interval} product is not configured.")
@@ -258,7 +268,12 @@ def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, in
         "request_id": request_id,
         "units": 1,
         "success_url": success_url,
-        "metadata": {"userId": user["id"], "plan": plan, "interval": interval},
+        "metadata": {
+            "userId": user["id"],
+            "workspaceId": text_payload((workspace or {}).get("id"), ""),
+            "plan": plan,
+            "interval": interval,
+        },
     }
     if customer:
         payload["customer"] = customer
@@ -275,6 +290,7 @@ def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, in
         raise RuntimeError("Creem did not return a Checkout URL.")
     return {
         "provider": "creem",
+        "workspaceId": text_payload((workspace or {}).get("id"), "") or None,
         "plan": plan,
         "interval": interval,
         "id": payload.get("id"),
@@ -518,6 +534,7 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         or subscription_metadata.get("userId")
         or subscription_metadata.get("internal_customer_id")
     )
+    workspace_id = metadata.get("workspaceId") or subscription_metadata.get("workspaceId")
     subscription_customer = subscription.get("customer") if isinstance(subscription, dict) else None
     if isinstance(subscription_customer, dict):
         subscription_customer_id = subscription_customer.get("id")
@@ -536,6 +553,7 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     )
     return {
         "userId": user_id,
+        "workspaceId": workspace_id,
         "provider": "creem",
         "customerId": customer_id,
         "customerEmail": customer.get("email"),
@@ -564,6 +582,7 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             return None
         return {
             "userId": user_id,
+            "workspaceId": metadata.get("workspaceId"),
             "provider": "stripe",
             "customerId": obj.get("customer"),
             "customerEmail": customer_details.get("email") or obj.get("customer_email"),
@@ -592,6 +611,7 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
             status = "canceling"
         return {
             "userId": metadata.get("userId") or metadata.get("internal_customer_id"),
+            "workspaceId": metadata.get("workspaceId"),
             "provider": "stripe",
             "customerId": obj.get("customer"),
             "subscriptionId": obj.get("id"),
