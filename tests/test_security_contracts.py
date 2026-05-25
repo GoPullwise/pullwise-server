@@ -1247,6 +1247,42 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertFalse(expired_handler.payload["authenticated"])
         self.assertNotIn("expired", app.SESSIONS)
 
+    def test_auth_session_ignores_malformed_persisted_sessions(self) -> None:
+        cases = {
+            "non_object": "not-a-session",
+            "missing_user_id": {
+                "id": "missing_user_id",
+                "expiresAt": app.now() + 60,
+            },
+            "malformed_user_id": {
+                "id": "malformed_user_id",
+                "userId": {"id": "usr_1"},
+                "expiresAt": app.now() + 60,
+            },
+            "missing_expiry": {
+                "id": "missing_expiry",
+                "userId": "usr_1",
+            },
+            "malformed_expiry": {
+                "id": "malformed_expiry",
+                "userId": "usr_1",
+                "expiresAt": {"value": app.now() + 60},
+            },
+        }
+
+        for session_id, session in cases.items():
+            with self.subTest(session_id=session_id):
+                app.SESSIONS = {session_id: session}
+                handler = RouteHarness("/auth/session", cookie=f"pw_session={session_id}")
+
+                with patch.object(app.logger, "exception") as log_exception:
+                    app.PullwiseHandler.route(handler, "GET")
+
+                self.assertEqual(handler.status, HTTPStatus.OK)
+                self.assertFalse(handler.payload["authenticated"])
+                self.assertNotIn(session_id, app.SESSIONS)
+                log_exception.assert_not_called()
+
     def test_auth_session_sanitizes_legacy_user_public_fields(self) -> None:
         app.USERS["usr_1"].update({
             "id": "usr_1\r\nX-Injected: bad",

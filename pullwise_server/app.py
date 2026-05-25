@@ -3025,11 +3025,21 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         session = SESSIONS.get(session_id)
         if not session:
             return None
-        if session["expiresAt"] < now():
+        if not isinstance(session, dict):
             SESSIONS.pop(session_id, None)
             mark_state_dirty()
             return None
-        user = USERS.get(session["userId"])
+        expires_at = pull_request_timestamp(session.get("expiresAt"))
+        user_id = session.get("userId")
+        if expires_at is None or not isinstance(user_id, str) or not user_id:
+            SESSIONS.pop(session_id, None)
+            mark_state_dirty()
+            return None
+        if expires_at < now():
+            SESSIONS.pop(session_id, None)
+            mark_state_dirty()
+            return None
+        user = USERS.get(user_id)
         if not user:
             SESSIONS.pop(session_id, None)
             mark_state_dirty()
