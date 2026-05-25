@@ -1749,6 +1749,29 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertTrue(handler.payload["github"]["repositoriesConnected"])
         log_exception.assert_not_called()
 
+    def test_auth_session_ignores_malformed_github_repository_access_record(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = "not-a-repository-access-record"
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/auth/session", cookie="pw_session=ses_1")
+
+        with patch.object(app.logger, "exception") as log_exception:
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertFalse(handler.payload["github"]["repositoriesConnected"])
+        self.assertEqual(handler.payload["nextStep"], "connect_github_repositories")
+        log_exception.assert_not_called()
+
     def test_repository_sync_requires_sign_in(self) -> None:
         handler = RouteHarness("/repositories/sync")
 

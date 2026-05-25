@@ -1679,7 +1679,7 @@ def github_repositories_need_sync(github_access: dict | None) -> bool:
 
 
 def github_repository_access_authorized_for_user(user: dict | None, github_access: dict | None) -> bool:
-    if not user or not github_access:
+    if not user or not isinstance(github_access, dict):
         return False
     if github_access.get("mode") == "local":
         return True
