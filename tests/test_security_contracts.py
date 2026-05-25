@@ -533,6 +533,29 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(app.ISSUES[0]["status"], "open")
 
+    def test_settings_update_rejects_non_object_body(self) -> None:
+        handler = RouteHarness("/settings", ["not", "an", "object"], cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "PATCH")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["message"], "Request body must be a JSON object.")
+
+    def test_settings_payload_sanitizes_profile_fields(self) -> None:
+        app.SETTINGS["usr_1"] = {
+            "profile": {
+                "name": "Mallory\r\nX-Injected: bad",
+                "email": {"value": "mallory@example.com"},
+            },
+            "extra": {"unsafe": True},
+        }
+        handler = RouteHarness("/settings", cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload, {"profile": {"name": "Dev", "email": "dev@example.com"}})
+
     def test_issue_read_routes_sanitize_legacy_issue_fields(self) -> None:
         app.ISSUES[0].update({
             "scanId": {"value": "sc_1"},

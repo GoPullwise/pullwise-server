@@ -655,21 +655,50 @@ def create_session(user: dict) -> dict:
 
 
 def default_settings_payload(user_id: str) -> dict:
-    user = USERS[user_id]
+    user = USERS.get(user_id) or {}
     return {
-        "profile": {"name": user["name"], "email": user["email"]},
+        "profile": {
+            "name": public_issue_text(user.get("name")) or "User",
+            "email": public_issue_text(user.get("email")),
+        },
     }
 
 
 def settings_payload(user_id: str) -> dict:
-    return SETTINGS.get(user_id) or default_settings_payload(user_id)
+    return clean_settings_payload(user_id, SETTINGS.get(user_id))
 
 
 def default_settings(user_id: str) -> dict:
-    if user_id not in SETTINGS:
+    if not isinstance(SETTINGS.get(user_id), dict):
         SETTINGS[user_id] = default_settings_payload(user_id)
         mark_state_dirty()
     return SETTINGS[user_id]
+
+
+def clean_settings_payload(user_id: str, value: object) -> dict:
+    base = default_settings_payload(user_id)
+    settings = value if isinstance(value, dict) else {}
+    profile = settings.get("profile") if isinstance(settings.get("profile"), dict) else {}
+    return {
+        "profile": {
+            "name": public_issue_text(profile.get("name")) or base["profile"]["name"],
+            "email": public_issue_text(profile.get("email")) or base["profile"]["email"],
+        },
+    }
+
+
+def apply_settings_update(user_id: str, body: dict) -> dict:
+    settings = settings_payload(user_id)
+    profile = body.get("profile") if isinstance(body.get("profile"), dict) else {}
+    name = public_issue_text(profile.get("name"))
+    email = public_issue_text(profile.get("email"))
+    if name:
+        settings["profile"]["name"] = name
+    if email:
+        settings["profile"]["email"] = email
+    SETTINGS[user_id] = settings
+    mark_state_dirty()
+    return settings
 
 
 def user_scans(session: dict | None) -> list[dict]:
@@ -2626,10 +2655,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating settings.")
-            settings = default_settings(session["userId"])
-            settings.update(body)
-            mark_state_dirty()
-            return self.json(settings)
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            return self.json(apply_settings_update(session["userId"], body))
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_delete(self, segments: list[str]) -> None:
