@@ -123,6 +123,19 @@ class CodexProviderTest(unittest.TestCase):
                     repo_path="F:\\tmp\\repo",
                 )
 
+    def test_codex_provider_reports_unexecutable_cli(self) -> None:
+        with (
+            patch.dict("os.environ", {"PULLWISE_CODEX_BIN": "/root/.nvm/bin/codex"}, clear=True),
+            patch("pullwise_server.review.subprocess.run", side_effect=PermissionError()),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Codex CLI is not executable"):
+                review._run_codex(
+                    repo="owner/repo",
+                    branch="main",
+                    commit="pending",
+                    repo_path="F:\\tmp\\repo",
+                )
+
     def test_codex_provider_reports_missing_cli_login(self) -> None:
         completed = subprocess.CompletedProcess(
             ["codex"],

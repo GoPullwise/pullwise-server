@@ -647,6 +647,13 @@ def _run_cli_provider(
             f"{provider_label} CLI is not installed or not on PATH. "
             f"Install it, confirm `{executable} --version` works, then restart Pullwise."
         ) from exc
+    except PermissionError as exc:
+        cli_path = resolved_cmd[0]
+        raise ReviewProviderError(
+            f"{provider_label} CLI is not executable by the Pullwise service user: {cli_path}. "
+            f"Set {bin_env_var} to a readable executable path, confirm `{executable} --version` "
+            "works as the same OS user/session that runs Pullwise, then restart Pullwise."
+        ) from exc
     except subprocess.TimeoutExpired as exc:
         elapsed = int(exc.timeout or timeout)
         raise ReviewProviderError(
