@@ -296,6 +296,10 @@ chgrp_bin() {
   tool_bin PULLWISE_CHGRP_BIN chgrp || true
 }
 
+chown_bin() {
+  tool_bin PULLWISE_CHOWN_BIN chown || true
+}
+
 set_service_group_readable_file() {
   file=$1
   chgrp_cmd=$(chgrp_bin)
@@ -307,11 +311,29 @@ set_service_group_readable_file() {
   chmod 640 "$file" 2>/dev/null || warn "could not chmod 640 $file"
 }
 
+set_service_owned_dir() {
+  dir=$1
+  [ -d "$dir" ] || return 0
+  [ "${PULLWISE_LAUNCHER_TESTING:-}" = "1" ] && return 0
+  [ "$(id -u 2>/dev/null || printf 1)" = "0" ] || return 0
+  id "$SERVICE_USER" >/dev/null 2>&1 || return 0
+  chown_cmd=$(chown_bin)
+  if [ -n "$chown_cmd" ]; then
+    "$chown_cmd" "$SERVICE_USER:$SERVICE_GROUP" "$dir" 2>/dev/null || warn "could not set owner $SERVICE_USER:$SERVICE_GROUP on $dir"
+  else
+    warn "chown not found; could not set owner $SERVICE_USER:$SERVICE_GROUP on $dir"
+  fi
+}
+
 ensure_runtime_dirs() {
   mkdir -p "$RUN_DIR" || die "Unable to create run directory: $RUN_DIR"
   mkdir -p "$(dirname -- "$(db_path)")" || die "Unable to create database directory: $(dirname -- "$(db_path)")"
   mkdir -p "$(log_dir)" || die "Unable to create log directory: $(log_dir)"
   mkdir -p "$(checkout_root)" || die "Unable to create checkout directory: $(checkout_root)"
+  set_service_owned_dir "$RUN_DIR"
+  set_service_owned_dir "$(dirname -- "$(db_path)")"
+  set_service_owned_dir "$(log_dir)"
+  set_service_owned_dir "$(checkout_root)"
 }
 
 server_url_host() {
