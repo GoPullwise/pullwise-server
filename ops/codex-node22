@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+node_bin=${PULLWISE_CODEX_NODE_BIN:-/root/.nvm/versions/node/v22.22.3/bin/node}
+codex_js=${PULLWISE_CODEX_JS:-/root/.nvm/versions/node/v22.22.3/lib/node_modules/@openai/codex/bin/codex.js}
+
+exec "$node_bin" "$codex_js" "$@"
