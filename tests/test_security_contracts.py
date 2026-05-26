@@ -2706,7 +2706,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIn("github_error=github_installation_not_visible", handler.location)
         self.assertNotIn("settings%2Finstallations%2F999", handler.location)
 
-    def test_github_repository_authorize_add_returns_install_url_for_existing_aggregate_installations(self) -> None:
+    def test_github_repository_authorize_add_returns_identity_picker_url_for_existing_aggregate_installations(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
@@ -2772,8 +2772,145 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["mode"], "github-app-add")
-        self.assertIn("https://github.com/apps/pullwise/installations/new?state=", handler.payload["url"])
+        self.assertIn("/integrations/github/install/start?state=", handler.payload["url"])
         self.assertEqual(len(app.GITHUB_STATES), 1)
+        self.assertEqual(next(iter(app.GITHUB_STATES.values()))["kind"], "install_identity")
+
+    def test_github_repository_authorize_add_uses_selected_identity_for_other_personal_account_installation(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubId"] = "1"
+        app.USERS["usr_1"]["githubLogin"] = "DFerryman"
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_dferryman"
+        app.USERS["usr_1"]["githubOAuthScope"] = "read:user"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "DFerryman",
+            "installationId": "111",
+            "installationIds": ["111"],
+            "installationAccount": "DFerryman",
+            "installationAccounts": ["DFerryman"],
+            "repositories": ["DFerryman/service"],
+            "repositoryItems": [{"fullName": "DFerryman/service", "installationId": "111"}],
+            "installations": [
+                {
+                    "installationId": "111",
+                    "installationAccount": "DFerryman",
+                    "installationTargetType": "User",
+                    "repositorySelection": "selected",
+                    "repositoryCount": 1,
+                }
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        authorize = RouteHarness(
+            "/integrations/github/authorize?add=1&redirectTo=https%3A%2F%2Fapp.pullwise.dev%2F%3Fscreen%3Drepos",
+            cookie="pw_session=ses_1",
+        )
+
+        env = {
+            "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+            "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+            "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+            "PULLWISE_APP_URL": "https://app.pullwise.dev",
+            "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("pullwise_server.github_auth.app_slug_publicly_installable", return_value=True),
+        ):
+            app.PullwiseHandler.route(authorize, "GET")
+
+        self.assertEqual(authorize.status, HTTPStatus.OK)
+        self.assertEqual(authorize.payload["mode"], "github-app-add")
+        self.assertIn("/integrations/github/install/start?state=", authorize.payload["url"])
+        identity_state = next(iter(app.GITHUB_STATES))
+
+        start = RouteHarness(f"/integrations/github/install/start?state={identity_state}")
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("pullwise_server.github_auth.make_code_verifier", return_value="verifier"),
+            patch(
+                "pullwise_server.github_auth.build_oauth_authorize_url",
+                return_value="https://github.com/login/oauth/authorize?prompt=select_account",
+            ) as build_authorize_url,
+        ):
+            app.PullwiseHandler.route(start, "GET")
+
+        self.assertEqual(start.status, HTTPStatus.FOUND)
+        self.assertEqual(start.location, "https://github.com/login/oauth/authorize?prompt=select_account")
+        self.assertEqual(build_authorize_url.call_args.kwargs["prompt"], "select_account")
+
+        oauth = RouteHarness(f"/auth/github/callback?state={identity_state}&code=oauth_code")
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("pullwise_server.github_auth.exchange_oauth_code", return_value={"access_token": "gho_other", "scope": "read:user"}),
+            patch(
+                "pullwise_server.github_auth.fetch_user_profile",
+                return_value={"id": 2, "login": "other-user", "html_url": "https://github.com/other-user"},
+            ),
+        ):
+            app.PullwiseHandler.route(oauth, "GET")
+
+        self.assertEqual(oauth.status, HTTPStatus.FOUND)
+        self.assertIn("https://github.com/apps/pullwise/installations/new?state=", oauth.location)
+        install_state = oauth.location.rsplit("state=", 1)[1]
+        self.assertEqual(app.GITHUB_STATES[install_state]["selectedGithubIdentityId"], "ghi_2")
+
+        callback = RouteHarness(f"/integrations/github/callback?state={install_state}&installation_id=222")
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 222,
+                        "repository_selection": "selected",
+                        "target_type": "User",
+                        "account": {"login": "other-user"},
+                        "app_slug": "pullwise",
+                        "html_url": "https://github.com/settings/installations/222",
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
+                    }
+                ],
+            ) as list_installations,
+            patch("pullwise_server.github_auth.app_api_configured", return_value=False),
+            patch(
+                "pullwise_server.github_auth.list_user_installation_repositories",
+                return_value=[
+                    {
+                        "id": "repo_other_private",
+                        "name": "private-repo",
+                        "fullName": "other-user/private-repo",
+                        "private": True,
+                        "cloneUrl": "https://github.com/other-user/private-repo.git",
+                    }
+                ],
+            ) as list_repositories,
+        ):
+            app.PullwiseHandler.route(callback, "GET")
+
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        self.assertEqual(callback.status, HTTPStatus.FOUND)
+        self.assertEqual(callback.location, "https://app.pullwise.dev/?screen=repos")
+        list_installations.assert_called_once_with("gho_other")
+        list_repositories.assert_called_once_with("gho_other", "222")
+        self.assertIn("DFerryman/service", github_access["repositories"])
+        self.assertIn("other-user/private-repo", github_access["repositories"])
+        self.assertEqual(github_access["installationIds"], ["111", "222"])
+        access = app.USERS["usr_1"]["githubIdentityInstallationAccess"][0]
+        self.assertEqual(access["githubIdentityId"], "ghi_2")
+        self.assertEqual(access["githubAppInstallationId"], "222")
+        self.assertTrue(access["canAccess"])
 
     def test_github_repository_authorize_does_not_return_cached_configure_url_for_manage(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]

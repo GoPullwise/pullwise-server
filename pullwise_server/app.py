@@ -487,8 +487,15 @@ def remember_github_repository_authorization(
     requested_scope: str,
     *,
     manage: bool = False,
+    selected_github_identity_id: str | None = None,
 ) -> str:
-    state = remember_github_state("install", redirect_to, userId=user["id"], requestedScope=requested_scope)
+    state = remember_github_state(
+        "install",
+        redirect_to,
+        userId=user["id"],
+        requestedScope=requested_scope,
+        selectedGithubIdentityId=selected_github_identity_id,
+    )
     github_access = user.get("githubRepositoryAccess")
     if not isinstance(github_access, dict):
         github_access = {}
@@ -499,6 +506,39 @@ def remember_github_repository_authorization(
         "expiresAt": timestamp + GITHUB_STATE_MAX_AGE,
         "previousInstallationId": github_access.get("installationId"),
         "manage": bool(manage),
+    }
+    mark_state_dirty()
+    return state
+
+
+def remember_github_repository_identity_authorization(
+    user: dict,
+    redirect_to: str,
+    requested_scope: str,
+    *,
+    add: bool = False,
+    manage: bool = False,
+) -> str:
+    state = remember_github_state(
+        "install_identity",
+        redirect_to,
+        userId=user["id"],
+        requestedScope=requested_scope,
+        add=bool(add),
+        manage=bool(manage),
+    )
+    github_access = user.get("githubRepositoryAccess")
+    if not isinstance(github_access, dict):
+        github_access = {}
+    timestamp = now()
+    user["githubRepositoryAccessPending"] = {
+        "state": state,
+        "startedAt": timestamp,
+        "expiresAt": timestamp + GITHUB_STATE_MAX_AGE,
+        "previousInstallationId": github_access.get("installationId"),
+        "add": bool(add),
+        "manage": bool(manage),
+        "needsIdentitySelection": True,
     }
     mark_state_dirty()
     return state
@@ -2991,6 +3031,34 @@ def bind_github_repository_installations(
     return github_access
 
 
+def bind_github_repository_installation_for_identity(
+    user: dict,
+    installation: dict,
+    token: str | None,
+    requested_scope: str = "selected",
+) -> dict | None:
+    installation_id = str(installation.get("id") or "")
+    if not installation_id:
+        return None
+    refreshed_access = github_repository_access_for_installation(
+        installation_id,
+        installation.get("repository_selection") or requested_scope,
+        token,
+        installation,
+    )
+    existing_accesses = [
+        access
+        for access in installation_accesses_from_github_access(user.get("githubRepositoryAccess"))
+        if str(access.get("installationId") or "") != installation_id
+    ]
+    github_access = aggregate_github_repository_access(user, [*existing_accesses, refreshed_access])
+    if github_access:
+        user["githubRepositoryAccess"] = github_access
+        sync_workspace_access_for_user(user, github_access)
+        mark_state_dirty()
+    return github_access
+
+
 def installation_account_login(installation: dict) -> str:
     account = installation.get("account") or {}
     return str(account.get("login") or "")
@@ -3533,6 +3601,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_github_repository_authorize(params)
         if path == "/integrations/github/callback":
             return self.handle_github_repository_callback(params)
+        if path == "/integrations/github/install/start":
+            return self.handle_github_install_start(params)
         if path == "/integrations/github/manage/start":
             return self.handle_github_manage_start(params)
         if path == "/repositories":
@@ -4026,6 +4096,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         record = pop_any_github_state(state)
         if record.get("kind") == "manage_installation":
             return self.handle_github_manage_callback(params, record, state)
+        if record.get("kind") == "install_identity":
+            return self.handle_github_install_identity_callback(params, record, state)
         if record.get("kind") != "login":
             raise ValueError("GitHub authorization state is invalid or expired.")
         redirect_to = str(record["redirectTo"])
@@ -4085,6 +4157,52 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "url": url,
             "installationId": clean_installation_id,
         })
+
+    def handle_github_install_start(self, params: dict) -> None:
+        state = params.get("state") or ""
+        record = peek_github_state("install_identity", state)
+        if not github_auth.oauth_configured():
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured. Set PULLWISE_GITHUB_CLIENT_ID and PULLWISE_GITHUB_CLIENT_SECRET.")
+        verifier = github_auth.make_code_verifier()
+        record["codeVerifier"] = verifier
+        record["oauthStartedAt"] = now()
+        mark_state_dirty()
+        authorize_url = github_auth.build_oauth_authorize_url(
+            f"{api_base_url(self)}/auth/github/callback",
+            state,
+            verifier,
+            prompt="select_account",
+        )
+        return self.redirect(authorize_url)
+
+    def handle_github_install_identity_callback(self, params: dict, record: dict, state: str) -> None:
+        redirect_to = str(record["redirectTo"])
+        user = USERS.get(str(record.get("userId") or ""))
+        if not user:
+            raise ValueError("The GitHub installation identity session belongs to a user session that no longer exists.")
+        if params.get("error"):
+            clear_github_repository_authorization_pending(user, state)
+            return self.redirect(redirect_with_params(redirect_to, {"github_error": params.get("error_description") or params["error"]}))
+        if not params.get("code"):
+            clear_github_repository_authorization_pending(user, state)
+            return self.redirect(redirect_with_params(redirect_to, {"github_error": "missing_oauth_code"}))
+
+        token_payload = github_auth.exchange_oauth_code(
+            params["code"],
+            f"{api_base_url(self)}/auth/github/callback",
+            str(record.get("codeVerifier") or ""),
+            state,
+        )
+        profile = github_auth.fetch_user_profile(token_payload["access_token"])
+        identity = upsert_github_identity(user, profile, token_payload)
+        install_state = remember_github_repository_authorization(
+            user,
+            redirect_to,
+            str(record.get("requestedScope") or "selected"),
+            manage=record.get("manage") is True,
+            selected_github_identity_id=clean_github_access_text(identity.get("id")),
+        )
+        return self.redirect(github_auth.build_app_install_url(install_state))
 
     def handle_github_manage_start(self, params: dict) -> None:
         state = params.get("state") or ""
@@ -4257,8 +4375,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
         existing_access = try_bind_existing_github_repository_access(user)
         if add_installation:
-            state = remember_github_repository_authorization(user, redirect_to, scope)
-            return self.json({"url": github_auth.build_app_install_url(state), "mode": "github-app-add"})
+            state = remember_github_repository_identity_authorization(user, redirect_to, scope, add=True)
+            url = f"{api_base_url(self)}/integrations/github/install/start?{urlencode({'state': state})}"
+            return self.json({"url": url, "mode": "github-app-add"})
 
         if manage:
             existing_installations = installation_summaries_for_access(existing_access)
@@ -4352,28 +4471,67 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if user_can_access is not True:
                 raise ValueError("Unable to verify access to this GitHub App installation.")
 
-        installations = current_user_github_app_installations(user)
-        if not any(str(installation.get("id") or "") == installation_id for installation in installations):
+        selected_identity = github_identity_by_id(
+            user,
+            clean_github_access_text(record.get("selectedGithubIdentityId")),
+        )
+        selected_token = selected_identity.get("accessToken") if selected_identity else user.get("githubAccessToken")
+        installations = (
+            [
+                installation
+                for installation in github_auth.list_current_app_installations_for_user(selected_token)
+                if installation_allowed_for_identity(selected_identity, installation)
+            ]
+            if selected_identity
+            else current_user_github_app_installations(user)
+        )
+        target_installation = next(
+            (
+                installation
+                for installation in installations
+                if str(installation.get("id") or "") == installation_id
+            ),
+            None,
+        )
+        if not target_installation:
+            if selected_identity:
+                upsert_github_identity_installation_access(
+                    user,
+                    selected_identity,
+                    installation_id,
+                    can_access=False,
+                    last_error_code="github_installation_not_visible",
+                )
             raise ValueError("Unable to verify this GitHub App installation belongs to the signed-in GitHub user.")
 
-        bind_github_repository_installations(
-            user,
-            installations,
-            params.get("scope") or record.get("requestedScope") or "selected",
-        )
-        identity = upsert_github_identity(
-            user,
-            {
-                "id": user.get("githubId"),
-                "login": user.get("githubLogin"),
-                "html_url": user.get("githubHtmlUrl"),
-                "avatar_url": user.get("avatarUrl"),
-            },
-            {
-                "access_token": user.get("githubAccessToken"),
-                "scope": user.get("githubOAuthScope"),
-            },
-        )
+        requested_scope = params.get("scope") or record.get("requestedScope") or "selected"
+        if selected_identity:
+            bind_github_repository_installation_for_identity(
+                user,
+                target_installation,
+                selected_token,
+                requested_scope,
+            )
+            identity = selected_identity
+        else:
+            bind_github_repository_installations(
+                user,
+                installations,
+                requested_scope,
+            )
+            identity = upsert_github_identity(
+                user,
+                {
+                    "id": user.get("githubId"),
+                    "login": user.get("githubLogin"),
+                    "html_url": user.get("githubHtmlUrl"),
+                    "avatar_url": user.get("avatarUrl"),
+                },
+                {
+                    "access_token": user.get("githubAccessToken"),
+                    "scope": user.get("githubOAuthScope"),
+                },
+            )
         upsert_github_identity_installation_access(
             user,
             identity,
