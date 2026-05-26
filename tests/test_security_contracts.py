@@ -3803,6 +3803,109 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(access["githubAppInstallationId"], "222")
         self.assertTrue(access["canAccess"])
 
+    def test_repositories_sync_binds_pending_add_flow_with_selected_identity(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubLogin"] = "alice"
+        app.USERS["usr_1"]["githubAccessToken"] = "gho_alice"
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubLogin": "alice",
+            "installationIds": ["111"],
+            "installationAccounts": ["alice"],
+            "repositories": ["alice/service"],
+            "repositoryItems": [{"fullName": "alice/service", "installationId": "111"}],
+            "installations": [
+                {
+                    "installationId": "111",
+                    "installationAccount": "alice",
+                    "installationTargetType": "User",
+                    "repositorySelection": "selected",
+                    "repositoryCount": 1,
+                }
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.USERS["usr_1"]["githubIdentities"] = [
+            {
+                "id": "ghi_bob",
+                "userId": "usr_1",
+                "githubUserId": "2",
+                "githubLogin": "bob",
+                "login": "bob",
+                "accessToken": "gho_bob",
+                "status": "active",
+            }
+        ]
+        state = app.remember_github_state(
+            "install",
+            "https://app.pullwise.dev/?screen=repos",
+            userId="usr_1",
+            requestedScope="selected",
+            selectedGithubIdentityId="ghi_bob",
+        )
+        app.USERS["usr_1"]["githubRepositoryAccessPending"] = {
+            "state": state,
+            "startedAt": app.now(),
+            "expiresAt": app.now() + app.GITHUB_STATE_MAX_AGE,
+            "previousInstallationId": "111",
+            "add": True,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/repositories/sync", cookie="pw_session=ses_1")
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_GITHUB_APP_SLUG": "pullwise",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.app_api_configured", return_value=False),
+            patch(
+                "pullwise_server.github_auth.list_current_app_installations_for_user",
+                return_value=[
+                    {
+                        "id": 222,
+                        "repository_selection": "selected",
+                        "target_type": "User",
+                        "account": {"login": "bob"},
+                        "app_slug": "pullwise",
+                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
+                    }
+                ],
+            ) as list_installations,
+            patch(
+                "pullwise_server.github_auth.list_user_installation_repositories",
+                return_value=[{"id": "repo_bob_private", "name": "private", "fullName": "bob/private"}],
+            ) as list_user_repositories,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["needsAuthorization"])
+        self.assertEqual(
+            [item["fullName"] for item in handler.payload["items"]],
+            ["alice/service", "bob/private"],
+        )
+        self.assertEqual(github_access["installationIds"], ["111", "222"])
+        self.assertNotIn("githubRepositoryAccessPending", app.USERS["usr_1"])
+        list_installations.assert_called_once_with("gho_bob")
+        list_user_repositories.assert_called_once_with("gho_bob", "222")
+
     def test_repositories_list_migrates_legacy_single_installation_access_to_aggregate_model(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"

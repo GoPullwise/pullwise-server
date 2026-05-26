@@ -3017,6 +3017,53 @@ def sync_github_repository_installation_scope(
     return github_access
 
 
+def bind_pending_selected_github_identity_access(user: dict | None) -> dict | None:
+    pending = github_repository_authorization_pending(user)
+    if not user or not isinstance(pending, dict):
+        return None
+    state = clean_github_access_text(pending.get("state"))
+    if not state:
+        return None
+    try:
+        record = peek_github_state("install", state)
+    except ValueError:
+        return None
+    identity = github_identity_by_id(
+        user,
+        clean_github_access_text(record.get("selectedGithubIdentityId")),
+    )
+    if not identity:
+        return None
+    token = identity.get("accessToken")
+    if not token:
+        return None
+
+    installations = [
+        installation
+        for installation in github_auth.list_current_app_installations_for_user(token)
+        if installation_allowed_for_identity(identity, installation)
+    ]
+    github_access = user.get("githubRepositoryAccess")
+    for installation in installations:
+        installation_id = clean_github_access_text(installation.get("id"), allow_int=True)
+        if not installation_id:
+            continue
+        github_access = bind_github_repository_installation_for_identity(
+            user,
+            installation,
+            token,
+            str(record.get("requestedScope") or "selected"),
+        )
+        upsert_github_identity_installation_access(
+            user,
+            identity,
+            installation_id,
+            can_access=True,
+            verification_method="pending_sync",
+        )
+    return github_access if isinstance(github_access, dict) else None
+
+
 def installation_allowed_for_user(user: dict, installation: dict) -> bool:
     if str(installation.get("target_type") or "").casefold() != "user":
         return True
@@ -4626,7 +4673,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if pending:
             if not refresh:
                 return pending_repositories_payload()
-            github_access = try_bind_existing_github_repository_access(user, force_refresh=True)
+            github_access = (
+                bind_pending_selected_github_identity_access(user)
+                or try_bind_existing_github_repository_access(user, force_refresh=True)
+            )
             if github_repository_access_connected(github_access):
                 clear_github_repository_authorization_pending(user)
                 pending = False
