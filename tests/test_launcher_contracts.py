@@ -170,6 +170,27 @@ class LauncherContractsTest(unittest.TestCase):
         )
         return fake_systemctl, log_file
 
+    def write_fake_curl(self, root: Path, *, exit_code: int = 0, output: str = '{"ok":true}') -> Path:
+        fake_curl = root / "bin" / "curl"
+        fake_curl.parent.mkdir(parents=True, exist_ok=True)
+        write_executable(
+            fake_curl,
+            f"""
+            #!/usr/bin/env sh
+            printf '%s\\n' "$*" >> "$PULLWISE_CURL_LOG"
+            printf '%s' '{output}'
+            exit {exit_code}
+            """,
+        )
+        return fake_curl
+
+    def health_env(self, root: Path, *, curl_exit_code: int = 0) -> dict[str, str]:
+        env = self.base_launcher_env(root)
+        curl_log = root / "curl.log"
+        env["PULLWISE_CURL_BIN"] = shell_path(self.write_fake_curl(root, exit_code=curl_exit_code))
+        env["PULLWISE_CURL_LOG"] = shell_path(curl_log)
+        return env
+
     def write_production_env(self, root: Path, *, allowed_origins: str = "https://app.example.com") -> Path:
         env_file = root / "server.env"
         env_file.write_text(
@@ -292,6 +313,26 @@ class LauncherContractsTest(unittest.TestCase):
         mode = (project_root() / "launcher.sh").stat().st_mode
 
         self.assertTrue(mode & stat.S_IXUSR)
+
+    def test_health_returns_success_when_curl_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.health_env(root)
+
+            result = self.run_launcher(["health"], env)
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn('{"ok":true}', result.stdout)
+
+    def test_health_returns_failure_when_curl_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.health_env(root, curl_exit_code=7)
+
+            result = self.run_launcher(["health"], env)
+
+        self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("health check failed", result.stderr)
 
     def test_init_env_creates_local_template_and_guides_required_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

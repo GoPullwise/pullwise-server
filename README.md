@@ -302,6 +302,30 @@ sudo ./launcher.sh audit
 after `install-service` has written the unit file. Set `PULLWISE_MANAGER=direct`
 only when you deliberately want the older PID-file background mode.
 
+Optional Git auto-deploy polling is available through `git-watch.sh` from the
+repository root. It periodically fetches the configured upstream and, when a new
+fast-forward commit is available, pulls it, runs the README verification steps,
+restarts through `launcher.sh`, and checks health:
+
+```bash
+chmod +x git-watch.sh
+./git-watch.sh --once
+PULLWISE_WATCH_INTERVAL_SECONDS=60 ./git-watch.sh
+```
+
+By default the watcher runs `./launcher.sh setup`,
+`.venv/bin/python -m unittest discover -s tests`, `./launcher.sh restart`, and
+`./launcher.sh health`. Enable production-only steps when the process has the
+right permissions:
+
+```bash
+PULLWISE_WATCH_RUN_SYNC_ENV=true PULLWISE_WATCH_RUN_DOCTOR=true ./git-watch.sh
+```
+
+The watcher refuses to update a dirty working tree unless
+`PULLWISE_WATCH_ALLOW_DIRTY=true` is set, uses `git pull --ff-only`, and writes
+logs to `.pullwise/git-watch.log`.
+
 For server migration or backup, export the runtime state:
 
 ```bash

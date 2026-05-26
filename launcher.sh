@@ -715,7 +715,7 @@ cmd_health() {
   url=$(health_url)
   curl_bin=$(tool_bin PULLWISE_CURL_BIN curl || true)
   [ -n "$curl_bin" ] || die "curl is required for health checks."
-  "$curl_bin" -fsS --max-time "${PULLWISE_HEALTH_TIMEOUT_SECONDS:-5}" "$url"
+  "$curl_bin" -fsS --max-time "${PULLWISE_HEALTH_TIMEOUT_SECONDS:-5}" "$url" || die "health check failed: $url"
   printf '\n'
 }
 
