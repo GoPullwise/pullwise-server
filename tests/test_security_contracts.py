@@ -2912,6 +2912,16 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(access["githubAppInstallationId"], "222")
         self.assertTrue(access["canAccess"])
 
+        repositories = RouteHarness("/repositories", cookie="pw_session=ses_1")
+        app.PullwiseHandler.route(repositories, "GET")
+
+        self.assertEqual(repositories.status, HTTPStatus.OK)
+        self.assertFalse(repositories.payload["needsAuthorization"])
+        self.assertEqual(
+            [item["fullName"] for item in repositories.payload["items"]],
+            ["DFerryman/service", "other-user/private-repo"],
+        )
+
     def test_github_repository_authorize_does_not_return_cached_configure_url_for_manage(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"

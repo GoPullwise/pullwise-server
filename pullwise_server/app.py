@@ -2525,7 +2525,13 @@ def github_repository_access_authorized_for_user(user: dict | None, github_acces
 
     if str(github_access.get("installationTargetType") or "").casefold() == "user":
         installation_account = str(github_access.get("installationAccount") or "").casefold()
-        if installation_account and current_login and installation_account != current_login:
+        installation_id = clean_github_access_text(github_access.get("installationId"), allow_int=True)
+        if (
+            installation_account
+            and current_login
+            and installation_account != current_login
+            and not verified_identity_can_access_user_installation(user, installation_id, installation_account)
+        ):
             return False
 
     installations = github_access.get("installations") or []
@@ -2537,10 +2543,31 @@ def github_repository_access_authorized_for_user(user: dict | None, github_acces
         if str(installation.get("installationTargetType") or "").casefold() != "user":
             continue
         installation_account = str(installation.get("installationAccount") or "").casefold()
-        if installation_account and current_login and installation_account != current_login:
+        installation_id = clean_github_access_text(installation.get("installationId"), allow_int=True)
+        if (
+            installation_account
+            and current_login
+            and installation_account != current_login
+            and not verified_identity_can_access_user_installation(user, installation_id, installation_account)
+        ):
             return False
 
     return bool(authorized_user_id)
+
+
+def verified_identity_can_access_user_installation(
+    user: dict | None,
+    installation_id: str | None,
+    installation_account: str,
+) -> bool:
+    if not user or not installation_id or not installation_account:
+        return False
+    access_record = latest_installation_access_record(user, installation_id)
+    if not access_record or access_record.get("canAccess") is not True:
+        return False
+    identity = github_identity_by_id(user, clean_github_access_text(access_record.get("githubIdentityId")))
+    identity_login = str((identity or {}).get("githubLogin") or (identity or {}).get("login") or "").casefold()
+    return bool(identity_login and identity_login == installation_account.casefold())
 
 
 def github_repository_access_needs_aggregation_migration(user: dict | None, github_access: dict | None) -> bool:
