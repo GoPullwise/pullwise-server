@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import math
+import mimetypes
 import os
 import re
 import secrets
@@ -24,6 +25,15 @@ access_logger = logging.getLogger("pullwise_server.access")
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
+
+
+def web_root() -> str:
+    """Return the path to the built frontend assets."""
+    custom = env("PULLWISE_WEB_DIR", "")
+    if custom:
+        return os.path.abspath(custom)
+    # Default: ../pullwise-web/dist relative to this file
+    return os.path.join(os.path.dirname(project_root()), "pullwise-web", "dist")
 
 
 def load_env_file(path: str | None = None) -> None:
@@ -3726,6 +3736,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing billing.")
             return self.json(billing_page_payload(USERS[session["userId"]]))
+        # Static file serving + SPA fallback for client-side routing
+        root = web_root()
+        if os.path.isdir(root):
+            # Try to serve the exact file
+            rel = path.lstrip("/")
+            candidate = os.path.normpath(os.path.join(root, rel))
+            # Prevent path traversal
+            if candidate.startswith(os.path.normpath(root)) and os.path.isfile(candidate):
+                return self.serve_static_file(candidate)
+            # SPA fallback: serve index.html for any other GET
+            return self.serve_spa()
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_post(self, path: str, params: dict, segments: list[str]) -> None:
@@ -5197,6 +5218,43 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self.end_headers()
         except _CLIENT_DISCONNECT_EXCEPTIONS as exc:
             raise ClientDisconnected("Client disconnected before the response was sent.") from exc
+
+    def serve_static_file(self, file_path: str) -> None:
+        """Serve a static file from disk with appropriate headers."""
+        try:
+            stat = os.stat(file_path)
+        except (FileNotFoundError, IsADirectoryError, PermissionError):
+            return self.error(HTTPStatus.NOT_FOUND, "File not found")
+        content_type, _ = mimetypes.guess_type(file_path)
+        content_type = content_type or "application/octet-stream"
+        try:
+            with open(file_path, "rb") as f:
+                body = f.read()
+        except (FileNotFoundError, IsADirectoryError, PermissionError):
+            return self.error(HTTPStatus.NOT_FOUND, "File not found")
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_cors_headers()
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(stat.st_size))
+            # Cache static assets for 1 year (hashed filenames), don't cache index.html
+            if os.path.basename(file_path) == "index.html":
+                self.send_header("Cache-Control", "no-cache")
+            elif "/assets/" in file_path.replace("\\", "/"):
+                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.end_headers()
+            self.wfile.write(body)
+        except _CLIENT_DISCONNECT_EXCEPTIONS as exc:
+            raise ClientDisconnected("Client disconnected before the response was sent.") from exc
+
+    def serve_spa(self) -> None:
+        """Serve the SPA index.html for client-side routing."""
+        root = web_root()
+        index = os.path.join(root, "index.html")
+        if os.path.isfile(index):
+            self.serve_static_file(index)
+        else:
+            self.error(HTTPStatus.NOT_FOUND, "Frontend not built. Run 'npm run build' in pullwise-web.")
 
     def error(self, status: int, message: str) -> None:
         self.json({"message": message}, status)
