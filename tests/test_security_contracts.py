@@ -721,7 +721,10 @@ class SecurityContractsTest(unittest.TestCase):
             "fixRisks": "",
             "tags": ["safe-tag"],
             "steps": ["Use allowlist."],
-            "badCode": [{"ln": 2, "code": "return redirect(next_url)", "t": None}],
+            "badCode": [
+                {"ln": 1, "code": "bad\nextra", "t": "del"},
+                {"ln": 2, "code": "return redirect(next_url)", "t": None},
+            ],
             "goodCode": [{"ln": 0, "code": "return safe_redirect(next_url)", "t": "add"}],
             "references": [{"label": "Safe", "url": "https://example.com/safe"}],
             "createdAt": 0,

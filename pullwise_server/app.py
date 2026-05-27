@@ -1628,19 +1628,19 @@ def issue_payload(issue: dict) -> dict:
         "severity": review._safe_severity(issue.get("severity")),
         "category": review._safe_category(issue.get("category")),
         "title": review._safe_text(issue.get("title"), "Untitled finding"),
-        "summary": public_issue_text(issue.get("summary")) or public_issue_text(issue.get("description")),
-        "impact": public_issue_text(issue.get("impact")),
-        "detectionReasoning": review._safe_text(issue.get("detectionReasoning")),
-        "reproductionPath": review._safe_text(issue.get("reproductionPath")),
+        "summary": review._safe_text_lenient(issue.get("summary")) or public_issue_text(issue.get("description")),
+        "impact": review._safe_text_lenient(issue.get("impact")),
+        "detectionReasoning": review._safe_text_lenient(issue.get("detectionReasoning")),
+        "reproductionPath": review._safe_text_lenient(issue.get("reproductionPath")),
         "file": public_issue_text(issue.get("file")),
         "line": review._safe_non_negative_int(issue.get("line")),
         "confidence": review._safe_confidence(issue.get("confidence")),
-        "confidenceRationale": review._safe_text(issue.get("confidenceRationale")),
+        "confidenceRationale": review._safe_text_lenient(issue.get("confidenceRationale")),
         "autoFix": auto_fix,
         "autoFixable": auto_fixable,
         "effort": review._safe_text(issue.get("effort"), "-"),
-        "fixBenefits": review._safe_text(issue.get("fixBenefits")),
-        "fixRisks": review._safe_text(issue.get("fixRisks")),
+        "fixBenefits": review._safe_text_lenient(issue.get("fixBenefits")),
+        "fixRisks": review._safe_text_lenient(issue.get("fixRisks")),
         "tags": review._safe_text_list(issue.get("tags")),
         "steps": review._safe_text_list(issue.get("steps")),
         "badCode": review._safe_code_lines(issue.get("badCode")),
@@ -4778,7 +4778,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def current_session_id(self) -> str | None:
         authorization_token = bearer_token(self)
-        if authorization_token:
+        if authorization_token and not authorization_token.startswith(API_KEY_PREFIX):
             return authorization_token
         raw_cookie = request_header(self, "Cookie") or ""
         cookie = SimpleCookie(raw_cookie)

@@ -372,7 +372,7 @@ class ReviewContractsTest(unittest.TestCase):
         self.assertEqual(finding["category"], "Quality")
         self.assertEqual(finding["title"], "Untitled finding")
         self.assertEqual(finding["summary"], "")
-        self.assertEqual(finding["impact"], "")
+        self.assertEqual(finding["impact"], "Phishing risk.")
         self.assertEqual(finding["file"], "")
         self.assertEqual(finding["effort"], "-")
         self.assertEqual(finding["tags"], ["redirect"])
@@ -409,10 +409,19 @@ class ReviewContractsTest(unittest.TestCase):
             )
 
         finding = findings[0]
-        self.assertEqual(finding["badCode"], [{"ln": 1, "code": "return redirect(next_url)", "t": "del"}])
+        self.assertEqual(
+            finding["badCode"],
+            [
+                {"ln": 1, "code": "return redirect(next_url)", "t": "del"},
+                {"ln": 2, "code": "bad\nextra", "t": "del"},
+            ],
+        )
         self.assertEqual(
             finding["goodCode"],
-            [{"ln": 1, "code": "return redirect(safe_redirect(next_url))", "t": "add"}],
+            [
+                {"ln": 1, "code": "return redirect(safe_redirect(next_url))", "t": "add"},
+                {"ln": 2, "code": "bad\nextra", "t": "add"},
+            ],
         )
 
     def test_run_review_sanitizes_source_metadata_before_provider_dispatch(self) -> None:

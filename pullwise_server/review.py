@@ -291,18 +291,18 @@ def _finalize_finding(
         "severity": _safe_severity(finding.get("severity")),
         "category": _safe_category(finding.get("category")),
         "title": _safe_text(finding.get("title"), "Untitled finding"),
-        "summary": _safe_text(finding.get("summary")),
-        "impact": _safe_text(finding.get("impact")),
-        "detectionReasoning": _safe_text(finding.get("detectionReasoning")),
-        "reproductionPath": _safe_text(finding.get("reproductionPath")),
+        "summary": _safe_text_lenient(finding.get("summary")),
+        "impact": _safe_text_lenient(finding.get("impact")),
+        "detectionReasoning": _safe_text_lenient(finding.get("detectionReasoning")),
+        "reproductionPath": _safe_text_lenient(finding.get("reproductionPath")),
         "file": file_path,
         "line": _safe_non_negative_int(finding.get("line")),
         "confidence": _safe_confidence(finding.get("confidence")),
-        "confidenceRationale": _safe_text(finding.get("confidenceRationale")),
+        "confidenceRationale": _safe_text_lenient(finding.get("confidenceRationale")),
         "autoFix": auto_fix,
         "effort": _safe_text(finding.get("effort"), "-"),
-        "fixBenefits": _safe_text(finding.get("fixBenefits")),
-        "fixRisks": _safe_text(finding.get("fixRisks")),
+        "fixBenefits": _safe_text_lenient(finding.get("fixBenefits")),
+        "fixRisks": _safe_text_lenient(finding.get("fixRisks")),
         "tags": _safe_text_list(finding.get("tags")),
         "steps": _safe_text_list(finding.get("steps")),
         "badCode": bad_code,
@@ -319,6 +319,28 @@ def _safe_text(value: object, default: str = "") -> str:
         return default
     value = value.strip()
     if not value or any(char in value for char in "\r\n\x00"):
+        return default
+    return value
+
+
+def _safe_text_lenient(value: object, default: str = "") -> str:
+    """Sanitize text for issue content fields (summary, impact, etc.).
+
+    Unlike ``_safe_text`` which rejects any string containing CR/LF/CRLF,
+    this variant normalizes CRLF and CR to spaces while preserving LF.
+    LLM providers frequently emit multi-line content in issue descriptions,
+    and silently discarding that content leaves users with empty fields.
+
+    CR and CRLF are still neutralized (replaced with spaces) to prevent
+    HTTP header injection. Plain LF is safe in JSON API responses and
+    HTML rendering contexts used by the issue detail view.
+    """
+    if not isinstance(value, str):
+        return default
+    if "\x00" in value:
+        return default
+    value = value.replace("\r\n", " ").replace("\r", " ").strip()
+    if not value or "\x00" in value:
         return default
     return value
 
@@ -436,12 +458,30 @@ def _safe_code_text(value: object) -> str | None:
     return value
 
 
+def _safe_code_text_lenient(value: object) -> str | None:
+    """Sanitize code text for issue evidence fields (badCode, goodCode).
+
+    Unlike ``_safe_code_text`` which rejects any string containing CR/LF/CRLF,
+    this variant normalizes CRLF and CR to LF while preserving LF.
+    Code evidence frequently contains legitimate newlines within a single
+    logical line (e.g. template literals, multi-line expressions).
+
+    CR and CRLF are still neutralized to prevent HTTP header injection.
+    Plain LF is safe in JSON API responses and HTML <pre> rendering.
+    """
+    if not isinstance(value, str):
+        return None
+    if "\x00" in value:
+        return None
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _safe_code_lines(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
     lines = []
     for item in value:
-        if not isinstance(item, dict) or (code := _safe_code_text(item.get("code"))) is None:
+        if not isinstance(item, dict) or (code := _safe_code_text_lenient(item.get("code"))) is None:
             continue
         raw_marker = item.get("t")
         marker = raw_marker if raw_marker in ("del", "add", None) else None
