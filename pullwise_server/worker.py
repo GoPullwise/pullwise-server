@@ -300,7 +300,6 @@ def _scan_snapshot(scan: dict, started_at: int) -> dict:
         "id": scan["id"],
         "userId": checkout.clean_scan_text(scan.get("userId")) or "",
         "repo": checkout.clean_scan_text(scan.get("repo")) or "",
-        "workspaceId": checkout.clean_scan_text(scan.get("workspaceId"), allow_int=True),
         "repoId": checkout.clean_scan_text(scan.get("repoId"), allow_int=True),
         "githubRepoId": checkout.clean_scan_text(scan.get("githubRepoId"), allow_int=True),
         "quotaBucketIds": scan.get("quotaBucketIds") if isinstance(scan.get("quotaBucketIds"), dict) else {},
@@ -444,25 +443,20 @@ def _record_repo_risk_decision(scan_id: str, snapshot: dict, repo_path: str) -> 
 
 
 def _repo_risk_decision(snapshot: dict, fingerprint: dict) -> dict:
-    workspace_id = str(snapshot.get("workspaceId") or "")
     repository_id = str(snapshot.get("repoId") or "")
     source_fingerprint = str(fingerprint.get("sourceFingerprint") or "")
     if not repository_id:
         return {"decision": "allow", "reason": "missing_repository_context"}
 
-    match = db.find_workspace_repo_fingerprint_match(
-        workspace_id,
-        repository_id,
-        source_fingerprint,
-    )
+    match = db.find_repo_fingerprint_match(repository_id, source_fingerprint)
     db.upsert_repo_fingerprint(repository_id, fingerprint)
     if match:
         return {
             "decision": "allow_limited_trial",
-            "reason": "source_fingerprint_matches_existing_workspace_repo",
+            "reason": "source_fingerprint_matches_existing_repo",
             "matchedRepositoryId": match.get("repository_id"),
         }
-    return {"decision": "allow", "reason": "no_matching_workspace_source_fingerprint"}
+    return {"decision": "allow", "reason": "no_matching_source_fingerprint"}
 
 
 def _cleanup_checkout_workspace(scan_id: str, snapshot: dict) -> None:
@@ -488,7 +482,6 @@ def _log_scan_event(event: str, scan_id: str, snapshot: dict, **fields: object) 
         scanId=scan_id,
         userId=snapshot.get("userId"),
         repo=snapshot.get("repo"),
-        workspaceId=snapshot.get("workspaceId"),
         repoId=snapshot.get("repoId"),
         githubRepoId=snapshot.get("githubRepoId"),
         quotaBucketIds=snapshot.get("quotaBucketIds"),

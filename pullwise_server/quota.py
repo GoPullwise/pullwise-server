@@ -12,11 +12,10 @@ from . import db
 
 
 class QuotaExceeded(Exception):
-    def __init__(self, code: str, message: str, *, workspace_id: str | None = None, repo_id: str | None = None) -> None:
+    def __init__(self, code: str, message: str, *, repo_id: str | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
-        self.workspace_id = workspace_id
         self.repo_id = repo_id
 
 
@@ -64,25 +63,26 @@ def non_negative_int(value: object) -> int:
         return 0
 
 
-def effective_workspace_plan(workspace: dict[str, Any] | None) -> str:
-    if not workspace:
+def effective_user_plan(user: dict[str, Any] | None) -> str:
+    if not user:
         return "free"
-    status = str(workspace.get("billing_status") or workspace.get("status") or "").lower()
-    plan = str(workspace.get("plan") or "free").lower()
+    billing = user.get("billing") if isinstance(user.get("billing"), dict) else {}
+    status = str(billing.get("status") or user.get("billing_status") or user.get("status") or "").lower()
+    plan = str(billing.get("plan") or user.get("plan") or "free").lower()
     if plan == "pro" and status in {"active", "trialing", "canceling"}:
         return "pro"
     return "free"
 
 
-def workspace_limit_for_plan(plan: str) -> int:
+def user_limit_for_plan(plan: str) -> int:
     if plan == "pro":
-        return max(0, env_int(["PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT", "PULLWISE_PRO_REVIEW_LIMIT"], 100))
-    return max(0, env_int(["PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT", "PULLWISE_FREE_REVIEW_LIMIT"], 10))
+        return max(0, env_int(["PULLWISE_PRO_USER_REVIEW_LIMIT", "PULLWISE_PRO_REVIEW_LIMIT"], 100))
+    return max(0, env_int(["PULLWISE_FREE_USER_REVIEW_LIMIT", "PULLWISE_FREE_REVIEW_LIMIT"], 10))
 
 
 def repository_limit_for_plan(plan: str) -> int:
     if plan == "pro":
-        return max(0, env_int("PULLWISE_PRO_REPO_REVIEW_LIMIT", workspace_limit_for_plan("pro")))
+        return max(0, env_int("PULLWISE_PRO_REPO_REVIEW_LIMIT", user_limit_for_plan("pro")))
     return max(0, env_int("PULLWISE_FREE_REPO_REVIEW_LIMIT", 3))
 
 
@@ -155,44 +155,20 @@ def quota_payload(bucket: dict[str, Any], *, scope: str) -> dict[str, Any]:
     }
 
 
-def quota_payload_for_workspace(workspace: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any]:
-    plan = effective_workspace_plan(workspace)
+def quota_payload_for_user(user: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any]:
+    plan = effective_user_plan(user)
     bucket = ensure_quota_bucket(
-        scope_type="workspace",
-        scope_id=str(workspace["id"]),
+        scope_type="user",
+        scope_id=str(user["id"]),
         period=current_period(timestamp),
         plan=plan,
-        limit=workspace_limit_for_plan(plan),
+        limit=user_limit_for_plan(plan),
     )
-    return quota_payload(bucket, scope="workspace")
+    return quota_payload(bucket, scope="user")
 
 
-def migrate_workspace_usage(workspace: dict[str, Any], *, period: str, used: int, plan: str | None = None) -> dict[str, Any]:
-    db.initialize()
-    plan = plan or effective_workspace_plan(workspace)
-    used = non_negative_int(used)
-    with closing(db.connect()) as connection:
-        connection.row_factory = sqlite3.Row
-        with connection:
-            bucket = _ensure_quota_bucket(
-                connection,
-                scope_type="workspace",
-                scope_id=str(workspace["id"]),
-                period=period,
-                plan=plan,
-                limit=workspace_limit_for_plan(plan),
-            )
-            if non_negative_int(bucket.get("used")) < used:
-                connection.execute(
-                    "UPDATE quota_buckets SET used = ?, updated_at = strftime('%s', 'now') WHERE id = ?",
-                    (used, bucket["id"]),
-                )
-                bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (bucket["id"],)).fetchone())
-            return quota_payload(bucket, scope="workspace")
-
-
-def quota_payload_for_repository(repository: dict[str, Any], workspace: dict[str, Any] | None = None, *, timestamp: int | None = None) -> dict[str, Any]:
-    plan = effective_workspace_plan(workspace)
+def quota_payload_for_repository(repository: dict[str, Any], user: dict[str, Any] | None = None, *, timestamp: int | None = None) -> dict[str, Any]:
+    plan = effective_user_plan(user)
     bucket = ensure_quota_bucket(
         scope_type="repository",
         scope_id=repository_quota_scope_id(repository),
@@ -205,7 +181,7 @@ def quota_payload_for_repository(repository: dict[str, Any], workspace: dict[str
 
 def consume_scan_quota(
     *,
-    workspace: dict[str, Any],
+    user: dict[str, Any],
     repository: dict[str, Any],
     requested_by_user_id: str,
     scan_id: str,
@@ -213,11 +189,11 @@ def consume_scan_quota(
     timestamp: int | None = None,
 ) -> dict[str, Any]:
     db.initialize()
-    plan = effective_workspace_plan(workspace)
+    plan = effective_user_plan(user)
     period = current_period(timestamp)
-    workspace_limit = workspace_limit_for_plan(plan)
+    user_limit = user_limit_for_plan(plan)
     repository_limit = repository_limit_for_plan(plan)
-    workspace_id = str(workspace["id"])
+    user_id = str(user["id"])
     repository_id = str(repository["id"])
     repository_scope_id = repository_quota_scope_id(repository)
     github_repo_id = str(repository["github_repo_id"])
@@ -240,13 +216,13 @@ def consume_scan_quota(
                     """,
                     (requested_by_user_id, request_id, repository_id),
                 ).fetchone()
-            workspace_bucket = _ensure_quota_bucket(
+            user_bucket = _ensure_quota_bucket(
                 connection,
-                scope_type="workspace",
-                scope_id=workspace_id,
+                scope_type="user",
+                scope_id=user_id,
                 period=period,
                 plan=plan,
-                limit=workspace_limit,
+                limit=user_limit,
             )
             repository_bucket = _ensure_quota_bucket(
                 connection,
@@ -260,10 +236,10 @@ def consume_scan_quota(
                 connection.commit()
                 return {
                     "deduplicated": True,
-                    "workspace": quota_payload(workspace_bucket, scope="workspace"),
+                    "user": quota_payload(user_bucket, scope="user"),
                     "repository": quota_payload(repository_bucket, scope="repository"),
                     "bucketIds": {
-                        "workspace": workspace_bucket["id"],
+                        "user": user_bucket["id"],
                         "repository": repository_bucket["id"],
                     },
                 }
@@ -280,29 +256,27 @@ def consume_scan_quota(
                 connection.rollback()
                 raise QuotaExceeded(
                     "QUOTA_EXCEEDED_REPOSITORY",
-                    "This repository has used its free scan quota for the current workspace.",
-                    workspace_id=workspace_id,
+                    "This repository has used its scan quota for the current billing period.",
                     repo_id=repository_id,
                 )
 
-            workspace_updated = connection.execute(
+            user_updated = connection.execute(
                 """
                 UPDATE quota_buckets
                 SET used = used + 1, updated_at = strftime('%s', 'now')
                 WHERE id = ? AND used < quota_limit
                 """,
-                (workspace_bucket["id"],),
+                (user_bucket["id"],),
             ).rowcount
-            if workspace_updated != 1:
+            if user_updated != 1:
                 connection.rollback()
                 raise QuotaExceeded(
-                    "QUOTA_EXCEEDED_WORKSPACE",
-                    "This workspace has used its shared scan quota for the current billing period.",
-                    workspace_id=workspace_id,
+                    "QUOTA_EXCEEDED_USER",
+                    "Your account has used its scan quota for the current billing period.",
                     repo_id=repository_id,
                 )
 
-            for bucket_id in (workspace_bucket["id"], repository_bucket["id"]):
+            for bucket_id in (user_bucket["id"], repository_bucket["id"]):
                 connection.execute(
                     """
                     INSERT INTO quota_ledger (
@@ -313,7 +287,7 @@ def consume_scan_quota(
                     """,
                     (
                         db.quota_ledger_id(bucket_id, scan_id, requested_by_user_id, request_id),
-                        workspace_id,
+                        user_id,
                         repository_id,
                         github_repo_id,
                         scan_id,
@@ -323,15 +297,15 @@ def consume_scan_quota(
                     ),
                 )
 
-            workspace_bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (workspace_bucket["id"],)).fetchone())
+            user_bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (user_bucket["id"],)).fetchone())
             repository_bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (repository_bucket["id"],)).fetchone())
             connection.commit()
             return {
                 "deduplicated": False,
-                "workspace": quota_payload(workspace_bucket, scope="workspace"),
+                "user": quota_payload(user_bucket, scope="user"),
                 "repository": quota_payload(repository_bucket, scope="repository"),
                 "bucketIds": {
-                    "workspace": workspace_bucket["id"],
+                    "user": user_bucket["id"],
                     "repository": repository_bucket["id"],
                 },
             }

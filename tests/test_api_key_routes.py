@@ -127,11 +127,10 @@ class ApiKeyRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
-        self.assertEqual(handler.payload["workspaceId"], db.workspace_id_for_installation("111"))
         self.assertTrue(handler.payload["key"].startswith("pwk_"))
         return cookie, handler.payload["key"]
 
-    def test_session_user_can_create_list_and_revoke_workspace_api_keys(self) -> None:
+    def test_session_user_can_create_list_and_revoke_api_keys(self) -> None:
         cookie, key = self.create_api_key()
         list_handler = RouteHarness("/api-keys", cookie=cookie)
 
@@ -191,7 +190,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
 
         self.assertEqual(start.status, HTTPStatus.CREATED)
         self.assertEqual(start.payload["repoId"], repo["repoId"])
-        self.assertEqual(start.payload["workspaceId"], db.workspace_id_for_installation("111"))
+        self.assertNotIn("workspaceId", start.payload)
         self.assertEqual(app.SCANS[0]["apiKeyId"], repositories.payload["apiKey"]["id"])
         self.assertEqual(app.SCANS[0]["requestId"], "req_api")
         start_scan.assert_called_once_with(start.payload["id"])
@@ -214,7 +213,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
 
     def test_api_key_rejects_request_id_reuse_for_different_repo(self) -> None:
         _cookie, key = self.create_api_key()
-        workspace_id = db.workspace_id_for_installation("111")
         other_repo = db.upsert_repository(
             {
                 "id": db.repository_id_for_github_repo("456"),
@@ -225,13 +223,20 @@ class ApiKeyRoutesTest(unittest.TestCase):
                 "clone_url": "https://github.com/acme/other.git",
             }
         )
-        db.upsert_workspace_repository(
-            workspace_id,
-            other_repo["id"],
-            github_app_installation_id="111",
-            permissions={"pull": True},
-            repository_selection="selected",
-            installation_account="acme",
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositories"].append("acme/other")
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositoryItems"].append(
+            {
+                "id": "456",
+                "githubRepoId": "456",
+                "name": "other",
+                "fullName": "acme/other",
+                "installationId": "111",
+                "installationAccount": "acme",
+                "repositorySelection": "selected",
+                "defaultBranch": "main",
+                "cloneUrl": "https://github.com/acme/other.git",
+                "permissions": {"pull": True},
+            }
         )
         auth = {"Authorization": f"Bearer {key}"}
 
@@ -260,17 +265,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "req_shared"]), 1)
         start_scan.assert_called_once_with(first.payload["id"])
 
-    def test_user_can_create_manual_workspace_for_dashboard_switcher(self) -> None:
-        cookie = seed_session()
-        handler = RouteHarness("/workspaces", {"name": "Platform"}, cookie=cookie)
-
-        app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.CREATED)
-        self.assertEqual(handler.payload["name"], "Platform")
-        self.assertEqual(handler.payload["role"], "owner")
-        self.assertTrue(db.user_is_workspace_member(handler.payload["id"], "usr_1"))
-
     def test_pricing_api_docs_and_dashboard_overview_contracts_are_available(self) -> None:
         cookie = seed_session()
         pricing = RouteHarness("/pricing", cookie=cookie)
@@ -286,7 +280,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(docs.status, HTTPStatus.OK)
         self.assertIn("/api/v1/repositories/{repoId}/quota", [item["path"] for item in docs.payload["endpoints"]])
         self.assertEqual(overview.status, HTTPStatus.OK)
-        self.assertIsNone(overview.payload["scope"]["repoId"])
         self.assertEqual(overview.payload["authorizedRepositories"]["href"], "/repositories")
         self.assertEqual(
             overview.payload["authorizedRepositories"]["items"][0]["href"],
@@ -302,7 +295,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(billing.status, HTTPStatus.OK)
         self.assertEqual(billing.payload["page"]["subscriptionAction"]["href"], "/pricing")
         self.assertIsNone(billing.payload["page"]["checkoutAction"])
-        self.assertEqual(billing.payload["workspace"]["id"], db.workspace_id_for_installation("111"))
+        self.assertEqual(billing.payload["account"]["plan"], "free")
 
 
 if __name__ == "__main__":

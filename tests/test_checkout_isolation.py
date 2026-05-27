@@ -10,7 +10,7 @@ from unittest.mock import patch
 from pullwise_server import app, checkout, db, worker
 
 
-class WorkspaceIsolationTest(unittest.TestCase):
+class CheckoutIsolationTest(unittest.TestCase):
     def setUp(self) -> None:
         with app.PREVIEW_SCAN_LOCKS_GUARD:
             app.PREVIEW_SCAN_LOCKS.clear()
@@ -103,60 +103,6 @@ class WorkspaceIsolationTest(unittest.TestCase):
         patch_scan.assert_not_called()
         self.assertEqual("cleanup_failed", log_scan_event.call_args_list[-1].args[0])
         self.assertIn("locked object", log_scan_event.call_args_list[-1].kwargs["error"])
-
-
-class RepositoryRiskDecisionTest(unittest.TestCase):
-    def test_matching_source_fingerprint_in_same_workspace_is_limited_trial(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            database_path = os.path.join(tmpdir, "pullwise.sqlite3")
-            with patch.dict(os.environ, {"PULLWISE_DB_PATH": database_path}, clear=False):
-                workspace = db.upsert_workspace(
-                    {
-                        "id": "ws_1",
-                        "name": "acme",
-                        "github_app_installation_id": "111",
-                    }
-                )
-                first_repo = db.upsert_repository(
-                    {
-                        "id": "repo_1",
-                        "github_repo_id": "1",
-                        "full_name": "acme/first",
-                    }
-                )
-                second_repo = db.upsert_repository(
-                    {
-                        "id": "repo_2",
-                        "github_repo_id": "2",
-                        "full_name": "acme/second",
-                    }
-                )
-                db.upsert_workspace_repository(workspace["id"], first_repo["id"])
-                db.upsert_workspace_repository(workspace["id"], second_repo["id"])
-                db.upsert_repo_fingerprint(
-                    first_repo["id"],
-                    {
-                        "defaultBranch": "main",
-                        "headSha": "a" * 40,
-                        "treeSha": "b" * 40,
-                        "sourceFingerprint": "same-source",
-                    },
-                )
-
-                decision = worker._repo_risk_decision(
-                    {"workspaceId": workspace["id"], "repoId": second_repo["id"]},
-                    {
-                        "defaultBranch": "main",
-                        "headSha": "c" * 40,
-                        "treeSha": "d" * 40,
-                        "sourceFingerprint": "same-source",
-                    },
-                )
-                stored = db.get_repo_fingerprint(second_repo["id"])
-
-        self.assertEqual(decision["decision"], "allow_limited_trial")
-        self.assertEqual(decision["matchedRepositoryId"], first_repo["id"])
-        self.assertEqual(stored["source_fingerprint"], "same-source")
 
 
 class ScanQueueTest(unittest.TestCase):

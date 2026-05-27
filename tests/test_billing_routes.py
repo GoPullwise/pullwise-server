@@ -311,7 +311,7 @@ class BillingRoutesTest(unittest.TestCase):
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
-        self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_WORKSPACE")
+        self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_USER")
         self.assertEqual(first.payload["billingUsage"]["used"], 1)
 
     def test_billing_account_payload_ignores_non_finite_usage(self) -> None:

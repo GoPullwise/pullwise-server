@@ -18,7 +18,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 
-from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, worker, workspaces
+from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, worker
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -1037,16 +1037,10 @@ def apply_settings_update(user_id: str, body: dict) -> dict:
 def user_scans(session: dict | None) -> list[dict]:
     if not session:
         return []
-    workspace_ids = {
-        workspace.get("id")
-        for workspace in db.list_workspaces_for_user(session["userId"])
-        if workspace.get("id")
-    }
     return [
         scan
         for scan in SCANS
         if scan.get("userId") == session["userId"]
-        or (scan.get("workspaceId") and scan.get("workspaceId") in workspace_ids)
     ]
 
 
@@ -1078,8 +1072,6 @@ def scan_matches_requested_repository(scan: dict, *, requested_repo_id: str | No
 def idempotency_key_reused_payload(scan: dict | None) -> dict:
     payload = {"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"}
     if isinstance(scan, dict):
-        if workspace_id := clean_github_access_text(scan.get("workspaceId"), allow_int=True):
-            payload["workspaceId"] = workspace_id
         if repo_id := clean_github_access_text(scan.get("repoId"), allow_int=True):
             payload["repoId"] = repo_id
     return payload
@@ -1157,7 +1149,6 @@ def billing_account_payload(user: dict) -> dict:
     current = user_billing_state(user)
     entitlement = billing_entitlement_for_user(user)
     return {
-        "deprecated": True,
         "provider": public_billing_text(current.get("provider")),
         "status": public_billing_status(current.get("status")),
         "plan": entitlement["plan"],
@@ -1183,89 +1174,6 @@ def billing_account_payload(user: dict) -> dict:
             "plan": entitlement["plan"],
         },
     }
-
-
-def current_workspace_for_user(user: dict | None) -> dict | None:
-    if not user:
-        return None
-    try:
-        return workspaces.current_workspace_for_user(user)
-    except Exception:
-        logger.exception("Unable to resolve workspace for user %s", user.get("id"))
-        return None
-
-
-def workspaces_payload_for_user(user: dict | None) -> list[dict]:
-    if not user:
-        return []
-    try:
-        return [
-            payload
-            for workspace in workspaces.workspaces_for_user(user)
-            if (payload := workspaces.workspace_public_payload(workspace))
-        ]
-    except Exception:
-        logger.exception("Unable to list workspaces for user %s", user.get("id"))
-        return []
-
-
-def billing_workspace_payload(workspace: dict | None) -> dict | None:
-    if not workspace:
-        return None
-    current = workspaces.billing_state_from_workspace(workspace)
-    usage = quota.quota_payload_for_workspace(workspace)
-    return {
-        "id": public_billing_text(workspace.get("id")),
-        "name": public_billing_text(workspace.get("name")) or "Workspace",
-        "provider": public_billing_text(current.get("provider")),
-        "status": public_billing_status(current.get("status")),
-        "plan": quota.effective_workspace_plan(workspace),
-        "interval": billing.normalize_interval(current.get("interval") if quota.effective_workspace_plan(workspace) == "pro" else "month"),
-        "customerId": public_billing_text(current.get("customerId")),
-        "subscriptionId": public_billing_text(current.get("subscriptionId")),
-        "subscriptionItemId": public_billing_text(current.get("subscriptionItemId")),
-        "reviewLimit": usage["limit"],
-        "usage": usage,
-        "githubOwnerLogin": public_billing_text(workspace.get("github_owner_login")),
-        "githubOwnerType": public_billing_text(workspace.get("github_owner_type")),
-        "githubAppInstallationId": public_billing_text(workspace.get("github_app_installation_id")),
-    }
-
-
-def migrate_user_billing_to_workspace(user: dict, workspace: dict | None) -> dict | None:
-    if not workspace:
-        return None
-    user_billing = user.get("billing") if isinstance(user.get("billing"), dict) else {}
-    if user_billing and not workspace.get("billing_customer_id") and not workspace.get("billing_subscription_id"):
-        updated = db.update_workspace_billing(
-            workspace["id"],
-            {
-                "provider": user_billing.get("provider"),
-                "customerId": user_billing.get("customerId"),
-                "subscriptionId": user_billing.get("subscriptionId"),
-                "subscriptionItemId": user_billing.get("subscriptionItemId"),
-                "status": user_billing.get("status"),
-                "plan": user_billing.get("plan"),
-                "interval": user_billing.get("interval"),
-            },
-        )
-        if updated:
-            workspace = updated
-    legacy_usage = user.get("billingUsage") if isinstance(user.get("billingUsage"), dict) else {}
-    legacy_period = clean_github_access_text(legacy_usage.get("period"))
-    legacy_used = non_negative_int(legacy_usage.get("used"))
-    if legacy_period and legacy_used > 0:
-        quota.migrate_workspace_usage(
-            workspace,
-            period=legacy_period,
-            used=legacy_used,
-            plan=clean_github_access_text(legacy_usage.get("plan")) or quota.effective_workspace_plan(workspace),
-        )
-    return workspace
-
-
-def workspace_billing_subject(user: dict, workspace: dict | None) -> dict:
-    return workspaces.billing_subject_for_workspace(user, workspace)
 
 
 def clean_api_key_scopes(value: object) -> list[str]:
@@ -1333,7 +1241,6 @@ def api_key_public_payload(record: dict, *, token: str | None = None) -> dict:
         "id": public_issue_text(record.get("id")),
         "name": public_issue_text(record.get("name")) or "API key",
         "userId": public_issue_text(record.get("user_id")),
-        "workspaceId": public_issue_text(record.get("workspace_id")),
         "prefix": public_issue_text(record.get("key_prefix")),
         "scopes": parse_api_key_scopes(record.get("scopes")),
         "createdAt": pull_request_timestamp(record.get("created_at")) or 0,
@@ -1353,15 +1260,11 @@ def navigation_payload() -> dict:
             {"id": "api", "label": "API", "href": "/api-docs"},
         ],
         "dashboard": [
-            {"id": "overview", "label": "Overview", "href": "/dashboard/overview", "scope": "workspace"},
+            {"id": "overview", "label": "Overview", "href": "/dashboard/overview"},
             {"id": "repositories", "label": "Repositories", "href": "/repositories"},
             {"id": "api-keys", "label": "API Keys", "href": "/api-keys"},
             {"id": "billing", "label": "Billing", "href": "/billing"},
         ],
-        "workspace": {
-            "list": {"method": "GET", "href": "/workspaces"},
-            "create": {"method": "POST", "href": "/workspaces"},
-        },
     }
 
 
@@ -1373,21 +1276,17 @@ def pricing_payload(user: dict | None = None) -> dict:
         "billingRoute": "/billing",
     }
     if user:
-        current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
-        payload["workspace"] = billing_workspace_payload(current_workspace)
         payload["account"] = billing_account_payload(user)
     return payload
 
 
 def billing_page_payload(user: dict) -> dict:
-    current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
     return {
         "page": {
             "id": "billing",
             "subscriptionAction": {"label": "View pricing", "href": "/pricing"},
             "checkoutAction": None,
         },
-        "workspace": billing_workspace_payload(current_workspace),
         "account": billing_account_payload(user),
     }
 
@@ -1405,7 +1304,7 @@ def api_docs_payload() -> dict:
                 "method": "GET",
                 "path": "/api/v1/repositories",
                 "scope": "repositories:read",
-                "description": "List authorized repositories for the API key workspace, including repoId.",
+                "description": "List authorized repositories for the API key, including repoId.",
             },
             {
                 "method": "POST",
@@ -1429,7 +1328,7 @@ def api_docs_payload() -> dict:
                 "method": "GET",
                 "path": "/api/v1/repositories/{repoId}/quota",
                 "scope": "quota:read",
-                "description": "Read remaining workspace and repository scan quota.",
+                "description": "Read remaining account and repository scan quota.",
             },
         ],
     }
@@ -1437,7 +1336,6 @@ def api_docs_payload() -> dict:
 
 def dashboard_overview_payload(session: dict) -> dict:
     user = USERS.get(session["userId"])
-    current_workspace = current_workspace_for_user(user)
     scans = [scan_payload(scan) for scan in user_scans(session)]
     repositories = repository_items_for_response(user, user.get("githubRepositoryAccess") if user else None) if user else []
     status_counts: dict[str, int] = {}
@@ -1445,14 +1343,7 @@ def dashboard_overview_payload(session: dict) -> dict:
         status = scan.get("status") or "unknown"
         status_counts[status] = status_counts.get(status, 0) + 1
     return {
-        "scope": {
-            "type": "workspace",
-            "workspaceId": current_workspace.get("id") if current_workspace else None,
-            "repoId": None,
-            "repo": None,
-        },
         "breadcrumbs": [{"label": "Overview", "href": "/dashboard/overview"}],
-        "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
         "scanTotals": {
             "total": len(scans),
             "byStatus": status_counts,
@@ -1464,15 +1355,6 @@ def dashboard_overview_payload(session: dict) -> dict:
         },
         "recentScans": scans[:10],
     }
-
-
-def workspace_for_request(user: dict | None, workspace_id: object = None) -> dict | None:
-    if not user:
-        return None
-    requested_id = clean_github_access_text(workspace_id, allow_int=True)
-    if requested_id:
-        return db.get_workspace(requested_id)
-    return current_workspace_for_user(user)
 
 
 def public_billing_text(value: object) -> str | None:
@@ -1521,7 +1403,7 @@ def scan_payload(scan: dict) -> dict:
         payload["by"] = public_issue_text(scan.get("by"))
     if "installationId" in scan:
         payload["installationId"] = clean_github_access_text(scan.get("installationId"), allow_int=True)
-    for key in ("workspaceId", "repoId", "githubRepoId"):
+    for key in ("repoId", "githubRepoId"):
         if key in scan:
             payload[key] = clean_github_access_text(scan.get(key), allow_int=True)
     if isinstance(scan.get("quotaBucketIds"), dict):
@@ -1531,7 +1413,7 @@ def scan_payload(scan: dict) -> dict:
             if clean_github_access_text(value, allow_int=True)
         }
     if isinstance(scan.get("billingUsage"), dict):
-        payload["billingUsage"] = safe_quota_usage_payload(scan.get("billingUsage"), default_scope="workspace")
+        payload["billingUsage"] = safe_quota_usage_payload(scan.get("billingUsage"), default_scope="user")
     if isinstance(scan.get("repoUsage"), dict):
         payload["repoUsage"] = safe_quota_usage_payload(scan.get("repoUsage"), default_scope="repository")
     if isinstance(scan.get("riskDecision"), dict):
@@ -2338,20 +2220,18 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     return repository_item(github_access, full_name) is not None
 
 
-def sync_workspace_access_for_user(user: dict | None, github_access: dict | None) -> None:
+def sync_repository_access_for_user(user: dict | None, github_access: dict | None) -> None:
     if not user or not isinstance(github_access, dict):
         return
     try:
-        workspaces.sync_access_for_user(user, github_access)
+        from . import workspaces as _ws
+        _ws.sync_access_for_user(user, github_access)
     except Exception:
-        logger.exception("Unable to sync workspace repository access for user %s", user.get("id"))
+        logger.exception("Unable to sync repository access for user %s", user.get("id"))
 
 
-def repository_item_with_quota(item: dict, workspace: dict | None = None) -> dict:
+def repository_item_with_quota(item: dict, user: dict | None = None) -> dict:
     payload = dict(item)
-    item_workspace_id = clean_github_access_text(payload.get("workspaceId"), allow_int=True)
-    item_workspace = db.get_workspace(item_workspace_id) if item_workspace_id else None
-    workspace = item_workspace or workspace
     repo_id = clean_github_access_text(payload.get("repoId"), allow_int=True)
     if not repo_id:
         github_repo_id = clean_github_access_text(payload.get("githubRepoId"), allow_int=True)
@@ -2360,10 +2240,10 @@ def repository_item_with_quota(item: dict, workspace: dict | None = None) -> dic
             if repository:
                 repo_id = repository.get("id")
                 payload["repoId"] = repo_id
-    if repo_id and workspace:
+    if repo_id and user:
         repository = db.get_repository(repo_id)
         if repository:
-            payload["quota"] = quota.quota_payload_for_repository(repository, workspace)
+            payload["quota"] = quota.quota_payload_for_repository(repository, user)
     link_repo_id = clean_github_access_text(payload.get("repoId"), allow_int=True)
     if link_repo_id:
         payload["href"] = f"/repositories/{link_repo_id}"
@@ -2373,37 +2253,18 @@ def repository_item_with_quota(item: dict, workspace: dict | None = None) -> dic
 
 def repository_items_for_response(user: dict | None, github_access: dict | None) -> list[dict]:
     if user and isinstance(github_access, dict):
-        sync_workspace_access_for_user(user, github_access)
-    workspace = current_workspace_for_user(user)
-    return [repository_item_with_quota(item, workspace) for item in repository_items_for_payload(github_access)]
+        sync_repository_access_for_user(user, github_access)
+    return [repository_item_with_quota(item, user) for item in repository_items_for_payload(github_access)]
 
 
 def scan_resource_context(user: dict, github_access: dict, repo_meta: dict) -> tuple[dict, dict]:
-    sync_workspace_access_for_user(user, github_access)
-    repo_record = workspaces.repository_record_from_item(repo_meta)
+    sync_repository_access_for_user(user, github_access)
+    from . import workspaces as _ws
+    repo_record = _ws.repository_record_from_item(repo_meta)
     if not repo_record:
         raise ValueError("REPOSITORY_SYNC_REQUIRED")
     repository = db.upsert_repository(repo_record)
-    workspace_id = clean_github_access_text(repo_meta.get("workspaceId"), allow_int=True)
-    workspace = db.get_workspace(workspace_id) if workspace_id else None
-    if not workspace:
-        installation_id = clean_github_access_text(repo_meta.get("installationId"), allow_int=True) or clean_github_access_text(github_access.get("installationId"), allow_int=True)
-        workspace = db.get_workspace_by_installation(installation_id) if installation_id else None
-    if not workspace:
-        workspace = current_workspace_for_user(user)
-    if not workspace:
-        raise ValueError("WORKSPACE_MEMBERSHIP_REQUIRED")
-    if not db.user_is_workspace_member(workspace["id"], user["id"]):
-        raise ValueError("WORKSPACE_MEMBERSHIP_REQUIRED")
-    db.upsert_workspace_repository(
-        workspace["id"],
-        repository["id"],
-        github_app_installation_id=repo_meta.get("installationId") or github_access.get("installationId"),
-        permissions=repo_meta.get("permissions") if isinstance(repo_meta.get("permissions"), dict) else {},
-        repository_selection=repo_meta.get("repositorySelection") or github_access.get("repositorySelection"),
-        installation_account=repo_meta.get("installationAccount") or github_access.get("installationAccount"),
-    )
-    return workspace, repository
+    return user, repository
 
 
 def repository_item_from_full_name(full_name: str) -> dict:
@@ -2501,7 +2362,6 @@ def safe_repository_item_for_payload(value: object) -> dict | None:
         "installationAccount": clean_github_access_text(value.get("installationAccount")),
         "installationTargetType": clean_github_access_text(value.get("installationTargetType")),
         "repositorySelection": clean_github_access_text(value.get("repositorySelection")),
-        "workspaceId": clean_github_access_text(value.get("workspaceId"), allow_int=True),
         "quota": safe_quota_usage_payload(value.get("quota"), default_scope="repository") if isinstance(value.get("quota"), dict) else None,
     }
 
@@ -3115,7 +2975,7 @@ def bind_github_repository_installations(
     github_access = aggregate_github_repository_access(user, installation_accesses)
     if github_access:
         user["githubRepositoryAccess"] = github_access
-        sync_workspace_access_for_user(user, github_access)
+        sync_repository_access_for_user(user, github_access)
         mark_state_dirty()
     return github_access
 
@@ -3143,7 +3003,7 @@ def bind_github_repository_installation_for_identity(
     github_access = aggregate_github_repository_access(user, [*existing_accesses, refreshed_access])
     if github_access:
         user["githubRepositoryAccess"] = github_access
-        sync_workspace_access_for_user(user, github_access)
+        sync_repository_access_for_user(user, github_access)
         mark_state_dirty()
     return github_access
 
@@ -3209,8 +3069,6 @@ def session_payload(session: dict | None) -> dict:
     repositories_authorized = github_repository_access_authorized_for_user(user, repo_access)
     visible_access = repo_access if repositories_authorized and not repositories_pending else None
     repositories_connected = repositories_authorized and github_repository_access_connected(repo_access) and not repositories_pending
-    current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
-    workspace_payloads = workspaces_payload_for_user(user)
     return {
         "authenticated": True,
         "user": user_public(user),
@@ -3226,8 +3084,6 @@ def session_payload(session: dict | None) -> dict:
             "repositorySelection": clean_github_access_text(visible_access.get("repositorySelection")) if visible_access else None,
             "repositoryCount": len(clean_github_access_text_list(visible_access.get("repositories"))) if visible_access else 0,
         },
-        "workspaces": workspace_payloads,
-        "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
         "navigation": navigation_payload(),
         "nextStep": "choose_repositories" if repositories_connected else "connect_github_repositories",
     }
@@ -3325,14 +3181,6 @@ def billing_user_for_update(update: dict) -> dict | None:
     return None
 
 
-def billing_workspace_for_update(update: dict) -> dict | None:
-    try:
-        return db.find_workspace_for_billing_update(update)
-    except Exception:
-        logger.exception("Unable to find workspace for billing update.")
-        return None
-
-
 def billing_update_matches_user(update: dict, user: dict) -> bool:
     current = user.get("billing") or {}
     customer_id = billing_update_text(update.get("customerId"))
@@ -3389,32 +3237,6 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     }
     remember_billing_event(update, applied=True)
     mark_state_dirty()
-    return True
-
-
-def apply_billing_update_to_workspace(workspace: dict, update: dict) -> bool:
-    current = workspaces.billing_state_from_workspace(workspace)
-    incoming_created = billing_event_created(update)
-    current_created = billing_event_created({"eventCreated": workspace.get("last_event_created")})
-    if incoming_created is not None and current_created is not None and incoming_created < current_created:
-        remember_billing_event(update, applied=False, stale=True)
-        return False
-
-    updated = db.update_workspace_billing(
-        workspace["id"],
-        {
-            "provider": billing_update_text(update.get("provider")) or current.get("provider"),
-            "customerId": billing_update_text(update.get("customerId")) or current.get("customerId"),
-            "subscriptionId": billing_update_text(update.get("subscriptionId")) or current.get("subscriptionId"),
-            "subscriptionItemId": billing_update_text(update.get("subscriptionItemId")) or current.get("subscriptionItemId"),
-            "status": billing_update_text(update.get("status")) or current.get("status") or "active",
-            "plan": billing_update_text(update.get("plan")) or current.get("plan") or "pro",
-            "interval": billing_update_text(update.get("interval")) or current.get("interval") or "month",
-        },
-    )
-    if not updated:
-        return False
-    remember_billing_event(update, applied=True)
     return True
 
 
@@ -3478,10 +3300,9 @@ def decode_permissions(value: object) -> dict:
     return decoded if isinstance(decoded, dict) else {}
 
 
-def api_repository_payload(row: dict, workspace: dict | None = None) -> dict:
+def api_repository_payload(row: dict, user: dict | None = None) -> dict:
     repository = db.get_repository(str(row.get("id") or "")) if not row.get("github_repo_id") else row
     repository = repository or row
-    workspace_id = public_issue_text(row.get("workspace_id")) or public_issue_text((workspace or {}).get("id"))
     payload = {
         "id": public_issue_text(repository.get("id")),
         "repoId": public_issue_text(repository.get("id")),
@@ -3493,29 +3314,28 @@ def api_repository_payload(row: dict, workspace: dict | None = None) -> dict:
         "fork": bool(repository.get("fork")),
         "htmlUrl": trusted_public_url(repository.get("html_url")),
         "cloneUrl": trusted_public_url(repository.get("clone_url")),
-        "workspaceId": workspace_id,
         "installationId": clean_github_access_text(row.get("github_app_installation_id"), allow_int=True),
         "installationAccount": public_issue_text(row.get("installation_account")),
         "repositorySelection": public_issue_text(row.get("repository_selection")),
         "lastAuthorizedAt": pull_request_timestamp(row.get("last_authorized_at")),
         "permissions": decode_permissions(row.get("permissions")),
     }
-    if workspace and repository.get("id"):
-        payload["quota"] = quota.quota_payload_for_repository(repository, workspace)
+    if user and repository.get("id"):
+        payload["quota"] = quota.quota_payload_for_repository(repository, user)
     return payload
 
 
-def latest_scan_for_workspace_repo(workspace_id: str, repo_id: str) -> dict | None:
+def latest_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
     for scan in SCANS:
-        if scan.get("workspaceId") == workspace_id and scan.get("repoId") == repo_id:
+        if scan.get("userId") == user_id and scan.get("repoId") == repo_id:
             return scan
     return None
 
 
-def active_scan_for_workspace_repo(workspace_id: str, repo_id: str) -> dict | None:
+def active_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
     for scan in SCANS:
         if (
-            scan.get("workspaceId") == workspace_id
+            scan.get("userId") == user_id
             and scan.get("repoId") == repo_id
             and scan.get("status") in {"queued", "running"}
         ):
@@ -3676,8 +3496,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing the dashboard.")
             return self.json(dashboard_overview_payload(session))
-        if path == "/workspaces":
-            return self.handle_workspaces_get()
         if path == "/api-keys":
             return self.handle_api_keys_get(params)
         if path == "/auth/github/authorize":
@@ -3761,8 +3579,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/auth/sign-out":
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
-        if path == "/workspaces":
-            return self.handle_workspaces_post(body)
         if path == "/api-keys":
             return self.handle_api_keys_post(body)
         if (
@@ -3822,7 +3638,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             request_id = scan_request_id_from_body(body)
             scan_error: tuple[int, str] | None = None
             scan_error_code: str | None = None
-            scan_error_workspace_id: str | None = None
             scan_error_repo_id: str | None = None
             scan = None
             scan_created = False
@@ -3847,7 +3662,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     ):
                         scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
                         scan_error_code = "IDEMPOTENCY_KEY_REUSED"
-                        scan_error_workspace_id = clean_github_access_text(scan.get("workspaceId"), allow_int=True)
                         scan_error_repo_id = clean_github_access_text(scan.get("repoId"), allow_int=True)
                         scan = None
                     elif scan is None:
@@ -3866,7 +3680,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         if scan_error is None:
                             scan_id = make_id("sc")
                             try:
-                                workspace, repository_record = scan_resource_context(user, github_access, repo_meta)
+                                scan_user, repository_record = scan_resource_context(user, github_access, repo_meta)
                             except ValueError as exc:
                                 code = str(exc)
                                 if code == "REPOSITORY_SYNC_REQUIRED":
@@ -3875,18 +3689,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                         "Sync GitHub repositories before starting a scan so Pullwise can verify the stable repository ID.",
                                     )
                                     scan_error_code = "REPOSITORY_SYNC_REQUIRED"
-                                elif code == "WORKSPACE_MEMBERSHIP_REQUIRED":
-                                    scan_error = (
-                                        HTTPStatus.FORBIDDEN,
-                                        "Workspace membership is required to scan this repository.",
-                                    )
-                                    scan_error_code = "WORKSPACE_MEMBERSHIP_REQUIRED"
                                 else:
-                                    scan_error = (HTTPStatus.BAD_REQUEST, "Unable to resolve repository workspace.")
+                                    scan_error = (HTTPStatus.BAD_REQUEST, "Unable to resolve repository context.")
                             else:
                                 try:
                                     quota_result = quota.consume_scan_quota(
-                                        workspace=workspace,
+                                        user=scan_user,
                                         repository=repository_record,
                                         requested_by_user_id=session["userId"],
                                         scan_id=scan_id,
@@ -3895,10 +3703,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 except quota.QuotaExceeded as exc:
                                     scan_error = (HTTPStatus.PAYMENT_REQUIRED, exc.message)
                                     scan_error_code = exc.code
-                                    scan_error_workspace_id = exc.workspace_id
                                     scan_error_repo_id = exc.repo_id
                                 else:
-                                    entitlement = quota_result["workspace"]
+                                    entitlement = quota_result["user"]
                         if scan_error:
                             pass
                         else:
@@ -3931,14 +3738,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                     clean_github_access_text(repo_meta.get("repositorySelection"))
                                     or clean_github_access_text(github_access.get("repositorySelection"))
                                 ),
-                                "workspaceId": workspace["id"],
                                 "repoId": repository_record["id"],
                                 "githubRepoId": repository_record["github_repo_id"],
                                 "quotaBucketIds": quota_result["bucketIds"],
                                 "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
                                 "repositoryPrivate": bool(repo_meta.get("private")),
                                 "repoPath": None,
-                                "billingUsage": quota_result["workspace"],
+                                "billingUsage": quota_result["user"],
                                 "repoUsage": quota_result["repository"],
                                 "by": "you",
                             }
@@ -3958,14 +3764,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     reason=scan_error[1],
                     requestId=request_id or None,
                     code=scan_error_code,
-                    workspaceId=scan_error_workspace_id,
                     repoId=scan_error_repo_id,
                 )
                 payload = {"message": scan_error[1]}
                 if scan_error_code:
                     payload["code"] = scan_error_code
-                if scan_error_workspace_id:
-                    payload["workspaceId"] = scan_error_workspace_id
                 if scan_error_repo_id:
                     payload["repoId"] = scan_error_repo_id
                 return self.json(payload, scan_error[0])
@@ -3982,7 +3785,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     provider=review.selected_provider(),
                     requestId=scan.get("requestId"),
                     installationId=scan.get("installationId"),
-                    workspaceId=scan.get("workspaceId"),
                     repoId=scan.get("repoId"),
                     githubRepoId=scan.get("githubRepoId"),
                     quotaBucketIds=scan.get("quotaBucketIds"),
@@ -4047,10 +3849,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
-            current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
             checkout = billing.create_checkout_session(
-                workspace_billing_subject(user, current_workspace),
-                workspace=current_workspace,
+                user,
                 success_url=safe_redirect_to(body.get("successUrl"), "settings"),
                 cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
                 plan=str(body.get("plan") or "pro"),
@@ -4058,22 +3858,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
             checkout = safe_billing_redirect_response(checkout, "Checkout", require_url=True)
             if checkout.get("customerId"):
-                current_billing = workspaces.billing_state_from_workspace(current_workspace)
-                updated_workspace = db.update_workspace_billing(
-                    current_workspace["id"],
-                    {
-                        **current_billing,
-                        "provider": checkout.get("provider") or current_billing.get("provider"),
-                        "customerId": checkout.get("customerId"),
-                    },
-                )
-                if updated_workspace:
-                    current_workspace = updated_workspace
+                current_billing = user.get("billing") or {}
+                user["billing"] = {
+                    **current_billing,
+                    "provider": checkout.get("provider") or current_billing.get("provider"),
+                    "customerId": checkout.get("customerId"),
+                }
             user["billingCheckout"] = {
                 "provider": checkout.get("provider"),
                 "id": checkout.get("id"),
                 "requestId": checkout.get("requestId"),
-                "workspaceId": checkout.get("workspaceId") or (current_workspace or {}).get("id"),
                 "plan": checkout.get("plan"),
                 "interval": checkout.get("interval"),
                 "createdAt": now(),
@@ -4087,9 +3881,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
-            current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
             portal = billing.create_portal_session(
-                workspace_billing_subject(user, current_workspace),
+                user,
                 return_url=safe_redirect_to(body.get("returnUrl"), "settings"),
             )
             portal = safe_billing_redirect_response(portal, "portal", require_url=True)
@@ -4101,9 +3894,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
-            current_workspace = migrate_user_billing_to_workspace(user, current_workspace_for_user(user))
             result = billing.change_subscription_interval(
-                workspace_billing_subject(user, current_workspace),
+                user,
                 interval=str(body.get("interval") or "year"),
                 return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
             )
@@ -4111,18 +3903,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if result.get("alreadyActive"):
                 return self.json(result)
             if result.get("provider") == "creem" and result.get("interval") == "year":
-                current_billing = workspaces.billing_state_from_workspace(current_workspace)
-                db.update_workspace_billing(
-                    current_workspace["id"],
-                    {
-                        **current_billing,
-                        "provider": "creem",
-                        "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
-                        "status": result.get("status") or current_billing.get("status") or "active",
-                        "plan": "pro",
-                        "interval": "year",
-                    },
-                )
+                current_billing = user.get("billing") or {}
+                user["billing"] = {
+                    **current_billing,
+                    "provider": "creem",
+                    "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
+                    "status": result.get("status") or current_billing.get("status") or "active",
+                    "plan": "pro",
+                    "interval": "year",
+                }
                 mark_state_dirty()
             return self.json(result)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
@@ -4736,13 +4525,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not github_repository_access_connected(github_access):
             return unavailable_repositories_payload(github_access)
 
-        current_workspace = current_workspace_for_user(user)
         return {
             "items": repository_items,
             "repositories": repository_items,
             "needsAuthorization": False,
-            "workspace": workspaces.workspace_public_payload(current_workspace),
-            "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
             "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
             "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
             "repositorySelection": clean_github_access_text(github_access.get("repositorySelection")),
@@ -4820,12 +4606,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self._api_key_context = None
             return None
         user = USERS.get(str(record.get("user_id") or ""))
-        workspace = db.get_workspace(str(record.get("workspace_id") or ""))
-        if not user or not workspace or not db.user_is_workspace_member(workspace["id"], user["id"]):
+        if not user:
             self._api_key_context = None
             return None
         db.mark_api_key_used(record["id"])
-        context = {"apiKey": record, "user": user, "workspace": workspace, "scopes": parse_api_key_scopes(record.get("scopes"))}
+        context = {"apiKey": record, "user": user, "scopes": parse_api_key_scopes(record.get("scopes"))}
         self._api_key_context = context
         return context
 
@@ -4844,26 +4629,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not repo_id:
             self.error(HTTPStatus.BAD_REQUEST, "repoId is required.")
             return None
-        workspace = context["workspace"]
-        workspace_repo = db.get_workspace_repository(workspace["id"], repo_id)
         repository = db.get_repository(repo_id)
-        if not workspace_repo or not repository:
-            self.error(HTTPStatus.NOT_FOUND, "Repository is not authorized for this workspace.")
+        if not repository:
+            self.error(HTTPStatus.NOT_FOUND, "Repository is not authorized for this account.")
             return None
-        return workspace_repo, repository
+        return repository, repository
 
     def handle_api_keys_get(self, params: dict) -> None:
         session = self.current_session()
         if not session:
             return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing API keys.")
         user = USERS[session["userId"]]
-        workspace = workspace_for_request(user, params.get("workspaceId"))
-        if not workspace:
-            return self.error(HTTPStatus.NOT_FOUND, "Workspace not found.")
-        if not db.user_is_workspace_member(workspace["id"], user["id"]):
-            return self.error(HTTPStatus.FORBIDDEN, "Workspace membership is required to view API keys.")
-        keys = [api_key_public_payload(item) for item in db.list_api_keys_for_user(user["id"], workspace["id"])]
-        return self.json({"items": keys, "apiKeys": keys, "workspace": workspaces.workspace_public_payload(workspace)})
+        keys = [api_key_public_payload(item) for item in db.list_api_keys_for_user(user["id"])]
+        return self.json({"items": keys, "apiKeys": keys})
 
     def handle_api_keys_post(self, body: dict) -> None:
         session = self.current_session()
@@ -4872,11 +4650,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         user = USERS[session["userId"]]
-        workspace = workspace_for_request(user, body.get("workspaceId"))
-        if not workspace:
-            return self.error(HTTPStatus.NOT_FOUND, "Workspace not found.")
-        if not db.user_is_workspace_member(workspace["id"], user["id"]):
-            return self.error(HTTPStatus.FORBIDDEN, "Workspace membership is required to create API keys.")
         scopes, scopes_error = requested_api_key_scopes(body.get("scopes"), provided="scopes" in body)
         if scopes_error:
             return self.error(HTTPStatus.BAD_REQUEST, scopes_error)
@@ -4885,7 +4658,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             {
                 "id": make_id("ak"),
                 "user_id": user["id"],
-                "workspace_id": workspace["id"],
                 "name": public_issue_text(body.get("name")) or "API key",
                 "key_prefix": api_key_prefix(token),
                 "key_hash": api_key_hash(token),
@@ -4902,55 +4674,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "API key not found.")
         return self.json({"ok": True, "id": public_issue_text(key_id), "revoked": True})
 
-    def handle_workspaces_get(self) -> None:
-        session = self.current_session()
-        if not session:
-            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing workspaces.")
-        user = USERS[session["userId"]]
-        current_workspace = current_workspace_for_user(user)
-        workspace_items = workspaces_payload_for_user(user)
-        return self.json(
-            {
-                "items": workspace_items,
-                "workspaces": workspace_items,
-                "currentWorkspace": workspaces.workspace_public_payload(current_workspace),
-                "createAction": {"method": "POST", "href": "/workspaces"},
-            }
-        )
-
-    def handle_workspaces_post(self, body: dict) -> None:
-        session = self.current_session()
-        if not session:
-            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before creating workspaces.")
-        if not isinstance(body, dict):
-            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
-        user = USERS[session["userId"]]
-        workspace_name = public_issue_text(body.get("name")) or "New workspace"
-        workspace = db.upsert_workspace(
-            {
-                "id": make_id("ws"),
-                "name": workspace_name,
-                "github_owner_login": None,
-                "github_owner_type": "Manual",
-                "plan": "free",
-            }
-        )
-        db.upsert_workspace_member(workspace["id"], user["id"], role="owner", source="manual")
-        return self.json(workspaces.workspace_public_payload(workspace, role="owner") or {}, HTTPStatus.CREATED)
-
     def handle_external_api_get(self, segments: list[str], params: dict) -> None:
         if segments == ["repositories"]:
             context = self.require_api_key_context("repositories:read")
             if not context:
                 return
-            workspace = context["workspace"]
-            rows = db.list_repositories_for_workspace(workspace["id"])
-            items = [api_repository_payload(row, workspace) for row in rows]
+            user = context["user"]
+            github_access = user.get("githubRepositoryAccess")
+            items = repository_items_for_response(user, github_access)
             return self.json(
                 {
                     "items": items,
                     "repositories": items,
-                    "workspace": workspaces.workspace_public_payload(workspace),
                     "apiKey": api_key_public_payload(context["apiKey"]),
                 }
             )
@@ -4961,11 +4696,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             repo_context = self.api_repository_context(context, segments[1])
             if not repo_context:
                 return
-            scan = latest_scan_for_workspace_repo(context["workspace"]["id"], repo_context[1]["id"])
+            scan = latest_scan_for_user_repo(context["user"]["id"], repo_context[1]["id"])
             return self.json(
                 {
                     "repoId": repo_context[1]["id"],
-                    "workspaceId": context["workspace"]["id"],
                     "scan": scan_payload(scan) if scan else None,
                     "status": public_scan_status(scan.get("status")) if scan else "idle",
                 }
@@ -4977,14 +4711,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             repo_context = self.api_repository_context(context, segments[1])
             if not repo_context:
                 return
-            workspace = context["workspace"]
+            user = context["user"]
             repository = repo_context[1]
             return self.json(
                 {
-                    "workspaceId": workspace["id"],
                     "repoId": repository["id"],
-                    "workspace": quota.quota_payload_for_workspace(workspace),
-                    "repository": quota.quota_payload_for_repository(repository, workspace),
+                    "user": quota.quota_payload_for_user(user),
+                    "repository": quota.quota_payload_for_repository(repository, user),
                 }
             )
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
@@ -5005,7 +4738,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         repo_context = self.api_repository_context(context, repo_id)
         if not repo_context:
             return
-        workspace_repo, repository = repo_context
+        repository = repo_context[1]
         if review.selected_provider() == "disabled":
             return self.error(
                 HTTPStatus.SERVICE_UNAVAILABLE,
@@ -5013,14 +4746,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
         request_id = scan_request_id_from_body(body)
         existing = user_scan_by_request_id(context["user"]["id"], request_id)
-        if existing and existing.get("repoId") == repository["id"] and existing.get("workspaceId") == context["workspace"]["id"]:
+        if existing and existing.get("repoId") == repository["id"]:
             return self.json(scan_payload(existing))
         if existing:
             return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
         scan_id = make_id("sc")
         try:
             quota_result = quota.consume_scan_quota(
-                workspace=context["workspace"],
+                user=context["user"],
                 repository=repository,
                 requested_by_user_id=context["user"]["id"],
                 scan_id=scan_id,
@@ -5028,12 +4761,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
         except quota.QuotaExceeded as exc:
             payload = {"message": exc.message, "code": exc.code}
-            if exc.workspace_id:
-                payload["workspaceId"] = exc.workspace_id
             if exc.repo_id:
                 payload["repoId"] = exc.repo_id
             return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
 
+        github_access = context["user"].get("githubRepositoryAccess") or {}
         branch = clean_github_access_text(body.get("branch")) or clean_github_access_text(repository.get("default_branch")) or "main"
         scan = {
             "id": scan_id,
@@ -5048,17 +4780,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "progress": 0,
             "phase": None,
             "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "installationId": clean_github_access_text(workspace_repo.get("github_app_installation_id"), allow_int=True),
-            "installationAccount": clean_github_access_text(workspace_repo.get("installation_account")),
-            "repositorySelection": clean_github_access_text(workspace_repo.get("repository_selection")),
-            "workspaceId": context["workspace"]["id"],
+            "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
+            "installationAccount": clean_github_access_text(github_access.get("installationAccount")),
+            "repositorySelection": clean_github_access_text(github_access.get("repositorySelection")),
             "repoId": repository["id"],
             "githubRepoId": repository["github_repo_id"],
             "quotaBucketIds": quota_result["bucketIds"],
             "cloneUrl": repository.get("clone_url"),
             "repositoryPrivate": bool(repository.get("private")),
             "repoPath": None,
-            "billingUsage": quota_result["workspace"],
+            "billingUsage": quota_result["user"],
             "repoUsage": quota_result["repository"],
             "by": "api key",
         }
@@ -5077,7 +4808,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             provider=review.selected_provider(),
             requestId=scan.get("requestId"),
             installationId=scan.get("installationId"),
-            workspaceId=scan.get("workspaceId"),
             repoId=scan.get("repoId"),
             githubRepoId=scan.get("githubRepoId"),
             quotaBucketIds=scan.get("quotaBucketIds"),
@@ -5094,7 +4824,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not repo_context:
             return
         with STATE_LOCK:
-            scan = active_scan_for_workspace_repo(context["workspace"]["id"], repo_context[1]["id"])
+            scan = active_scan_for_user_repo(context["user"]["id"], repo_context[1]["id"])
             if not scan:
                 return self.error(HTTPStatus.NOT_FOUND, "No queued or running scan exists for this repository.")
             scan["status"] = "cancelled"
@@ -5170,18 +4900,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def apply_billing_update(self, update: dict) -> None:
         if billing_event_processed(update):
             return
-        workspace = billing_workspace_for_update(update) if billing_update_text(update.get("workspaceId")) else None
-        if workspace:
-            apply_billing_update_to_workspace(workspace, update)
-            return
         user = billing_user_for_update(update)
         if user:
             apply_billing_update_to_user(user, update)
             apply_pending_billing_updates_for_user(user)
-            return
-        workspace = billing_workspace_for_update(update)
-        if workspace:
-            apply_billing_update_to_workspace(workspace, update)
             return
         remember_pending_billing_update(update)
 

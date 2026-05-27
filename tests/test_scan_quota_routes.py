@@ -130,13 +130,13 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(first.payload["githubRepoId"], "123")
         self.assertEqual(first.payload["repoUsage"]["used"], 1)
 
-    def test_same_installation_shares_workspace_quota_across_users(self) -> None:
+    def test_same_installation_shares_user_quota_across_repos(self) -> None:
         with patch.dict(
             os.environ,
             {
-                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "workspace-quota.sqlite3"),
+                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "user-quota.sqlite3"),
                 "PULLWISE_REVIEW_PROVIDER": "mock",
-                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "1",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
                 "PULLWISE_FREE_REPO_REVIEW_LIMIT": "10",
             },
             clear=True,
@@ -156,8 +156,7 @@ class ScanQuotaRoutesTest(unittest.TestCase):
                 app.PullwiseHandler.route(second, "POST")
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
-        self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
-        self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_WORKSPACE")
+        self.assertEqual(second.status, HTTPStatus.CREATED)
 
     def test_same_request_id_does_not_consume_quota_twice(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
@@ -199,8 +198,7 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
-        self.assertEqual(handler.payload["workspaceId"], "ws_inst_111")
-        self.assertNotEqual(handler.payload["workspaceId"], "ws_attacker")
+        self.assertNotIn("workspaceId", handler.payload)
 
     def test_repo_id_must_belong_to_current_authorized_repositories(self) -> None:
         seed_user("usr_owner", "ses_owner", installation_id="111", repo_id="123")

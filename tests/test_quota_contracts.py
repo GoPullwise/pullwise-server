@@ -11,22 +11,30 @@ from unittest.mock import patch
 from pullwise_server import db, quota
 
 
+def make_user(user_id: str) -> dict:
+    return {
+        "id": user_id,
+        "email": f"{user_id}@example.com",
+        "billing": {"plan": "free", "status": "active"},
+    }
+
+
 class QuotaContractsTest(unittest.TestCase):
-    def test_workspace_and_repository_buckets_are_period_scoped(self) -> None:
+    def test_user_and_repository_buckets_are_period_scoped(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
-                workspace = db.upsert_workspace({"id": "ws_1", "name": "acme", "plan": "free"})
+                user = make_user("usr_1")
                 repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
 
-                workspace_usage = quota.quota_payload_for_workspace(workspace, timestamp=1_770_000_000)
-                repo_usage = quota.quota_payload_for_repository(repository, workspace, timestamp=1_770_000_000)
+                user_usage = quota.quota_payload_for_user(user, timestamp=1_770_000_000)
+                repo_usage = quota.quota_payload_for_repository(repository, user, timestamp=1_770_000_000)
 
-        self.assertEqual(workspace_usage["scope"], "workspace")
+        self.assertEqual(user_usage["scope"], "user")
         self.assertEqual(repo_usage["scope"], "repository")
-        self.assertEqual(workspace_usage["period"], "2026-02")
+        self.assertEqual(user_usage["period"], "2026-02")
         self.assertEqual(repo_usage["period"], "2026-02")
-        self.assertEqual(workspace_usage["limit"], 10)
+        self.assertEqual(user_usage["limit"], 10)
         self.assertEqual(repo_usage["limit"], 3)
 
     def test_quota_bucket_sanitizes_invalid_used_values(self) -> None:
@@ -34,8 +42,8 @@ class QuotaContractsTest(unittest.TestCase):
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
                 bucket = quota.ensure_quota_bucket(
-                    scope_type="workspace",
-                    scope_id="ws_1",
+                    scope_type="user",
+                    scope_id="usr_1",
                     period="2026-05",
                     plan="free",
                     limit=10,
@@ -45,8 +53,8 @@ class QuotaContractsTest(unittest.TestCase):
                         connection.execute("UPDATE quota_buckets SET used = ? WHERE id = ?", ("not-a-number", bucket["id"]))
 
                 sanitized = quota.ensure_quota_bucket(
-                    scope_type="workspace",
-                    scope_id="ws_1",
+                    scope_type="user",
+                    scope_id="usr_1",
                     period="2026-05",
                     plan="free",
                     limit=10,
@@ -61,16 +69,16 @@ class QuotaContractsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "10",
+                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
                     "PULLWISE_FREE_REPO_REVIEW_LIMIT": "1",
                 },
                 clear=True,
             ):
-                workspace = db.upsert_workspace({"id": "ws_1", "name": "acme", "plan": "free"})
+                user = make_user("usr_1")
                 repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
 
                 first = quota.consume_scan_quota(
-                    workspace=workspace,
+                    user=user,
                     repository=repository,
                     requested_by_user_id="usr_1",
                     scan_id="sc_1",
@@ -78,7 +86,7 @@ class QuotaContractsTest(unittest.TestCase):
                 )
                 with self.assertRaises(quota.QuotaExceeded) as context:
                     quota.consume_scan_quota(
-                        workspace=workspace,
+                        user=user,
                         repository=repository,
                         requested_by_user_id="usr_2",
                         scan_id="sc_2",
@@ -88,19 +96,19 @@ class QuotaContractsTest(unittest.TestCase):
         self.assertEqual(first["repository"]["used"], 1)
         self.assertEqual(context.exception.code, "QUOTA_EXCEEDED_REPOSITORY")
 
-    def test_concurrent_consume_does_not_exceed_remaining_workspace_quota(self) -> None:
+    def test_concurrent_consume_does_not_exceed_remaining_user_quota(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "1",
+                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
                     "PULLWISE_FREE_REPO_REVIEW_LIMIT": "10",
                 },
                 clear=True,
             ):
-                workspace = db.upsert_workspace({"id": "ws_1", "name": "acme", "plan": "free"})
+                user = make_user("usr_1")
                 repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
                 successes = []
                 failures = []
@@ -109,7 +117,7 @@ class QuotaContractsTest(unittest.TestCase):
                     try:
                         successes.append(
                             quota.consume_scan_quota(
-                                workspace=workspace,
+                                user=user,
                                 repository=repository,
                                 requested_by_user_id=f"usr_{index}",
                                 scan_id=f"sc_{index}",
@@ -126,24 +134,24 @@ class QuotaContractsTest(unittest.TestCase):
                     thread.join()
 
         self.assertEqual(len(successes), 1)
-        self.assertEqual(failures, ["QUOTA_EXCEEDED_WORKSPACE"])
+        self.assertEqual(failures, ["QUOTA_EXCEEDED_USER"])
 
     def test_same_request_id_is_deduplicated_without_second_ledger_entry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
-                workspace = db.upsert_workspace({"id": "ws_1", "name": "acme", "plan": "free"})
+                user = make_user("usr_1")
                 repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
 
                 quota.consume_scan_quota(
-                    workspace=workspace,
+                    user=user,
                     repository=repository,
                     requested_by_user_id="usr_1",
                     scan_id="sc_1",
                     request_id="req_same",
                 )
                 second = quota.consume_scan_quota(
-                    workspace=workspace,
+                    user=user,
                     repository=repository,
                     requested_by_user_id="usr_1",
                     scan_id="sc_2",
@@ -162,12 +170,12 @@ class QuotaContractsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "10",
+                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
                     "PULLWISE_FREE_REPO_REVIEW_LIMIT": "1",
                 },
                 clear=True,
             ):
-                workspace = db.upsert_workspace({"id": "ws_1", "name": "acme", "plan": "free"})
+                user = make_user("usr_1")
                 first_fork = db.upsert_repository(
                     {
                         "github_repo_id": "fork_1",
@@ -186,7 +194,7 @@ class QuotaContractsTest(unittest.TestCase):
                 )
 
                 quota.consume_scan_quota(
-                    workspace=workspace,
+                    user=user,
                     repository=first_fork,
                     requested_by_user_id="usr_1",
                     scan_id="sc_1",
@@ -194,7 +202,7 @@ class QuotaContractsTest(unittest.TestCase):
                 )
                 with self.assertRaises(quota.QuotaExceeded) as context:
                     quota.consume_scan_quota(
-                        workspace=workspace,
+                        user=user,
                         repository=second_fork,
                         requested_by_user_id="usr_2",
                         scan_id="sc_2",

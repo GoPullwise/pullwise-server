@@ -154,35 +154,6 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(data["subscription_data[metadata][plan]"], "pro")
         self.assertEqual(data["subscription_data[metadata][interval]"], "year")
 
-    def test_stripe_checkout_includes_workspace_metadata_when_available(self) -> None:
-        response = Mock()
-        response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}
-        response.raise_for_status.return_value = None
-
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                    "PULLWISE_STRIPE_PRICE_ID": "price_123",
-                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
-                },
-                clear=True,
-            ),
-            patch("pullwise_server.billing.requests.post", return_value=response) as post,
-        ):
-            session = billing.create_checkout_session(
-                {"id": "usr_1", "email": "dev@example.com"},
-                workspace={"id": "ws_123"},
-                success_url="https://app.pullwise.dev/?billing=success",
-                cancel_url="https://app.pullwise.dev/?billing=cancel",
-            )
-
-        data = post.call_args.kwargs["data"]
-        self.assertEqual(session["workspaceId"], "ws_123")
-        self.assertEqual(data["metadata[workspaceId]"], "ws_123")
-        self.assertEqual(data["subscription_data[metadata][workspaceId]"], "ws_123")
-
     def test_stripe_checkout_reuses_existing_customer_id(self) -> None:
         response = Mock()
         response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}
