@@ -85,11 +85,16 @@ trailing prose. Schema:
       "title": "<= 70 chars, imperative voice",
       "summary": "1-2 sentences: what is wrong",
       "impact": "1 sentence: consequence if not fixed",
+      "detectionReasoning": "2-3 sentences: WHY this was flagged. What pattern, data flow, or evidence triggered detection. Reference the specific code path analyzed.",
+      "reproductionPath": "1-2 sentences: how the user can verify this issue. Include trigger conditions, required environment, or example input that exposes the problem.",
       "file": "repo-relative path; '' if cross-cutting",
       "line": <integer, 1-indexed; 0 if multi-file>,
       "confidence": <float 0.0..1.0>,
+      "confidenceRationale": "1 sentence: why this confidence level. What uncertainty or edge case reduced the score (e.g. 'may be intentional in test fixtures').",
       "autoFix": <bool>,
       "effort": "<rough estimate, e.g. '5 min', '1 hour'>",
+      "fixBenefits": "1-2 sentences: what concretely improves after the fix. Quantify when possible (e.g. 'reduces P95 latency by ~200ms').",
+      "fixRisks": "1-2 sentences: what could go wrong when applying this fix. Breaking changes, migration needs, behavior changes, or downstream consumers affected.",
       "tags": ["<kebab-case>", ...],
       "steps": ["<concrete action>", ...],
       "badCode":  [ {"ln": <int>, "code": "<line>", "t": "del" | null} ],
@@ -105,6 +110,11 @@ is true and you can produce a deterministic patch. For `autoFix: true`,
 `badCode` must be one exact contiguous old block as it appears in `file`, and
 `goodCode` must be the complete replacement block. Do not skip unchanged lines
 inside the old block.
+
+`detectionReasoning`, `reproductionPath`, `confidenceRationale`, `fixBenefits`,
+and `fixRisks` are required string fields. Use an empty string only when the
+information is genuinely unavailable. These fields help users decide whether
+to trust and act on the finding.
 
 # Severity rubric
 
@@ -283,11 +293,16 @@ def _finalize_finding(
         "title": _safe_text(finding.get("title"), "Untitled finding"),
         "summary": _safe_text(finding.get("summary")),
         "impact": _safe_text(finding.get("impact")),
+        "detectionReasoning": _safe_text(finding.get("detectionReasoning")),
+        "reproductionPath": _safe_text(finding.get("reproductionPath")),
         "file": file_path,
         "line": _safe_non_negative_int(finding.get("line")),
         "confidence": _safe_confidence(finding.get("confidence")),
+        "confidenceRationale": _safe_text(finding.get("confidenceRationale")),
         "autoFix": auto_fix,
         "effort": _safe_text(finding.get("effort"), "-"),
+        "fixBenefits": _safe_text(finding.get("fixBenefits")),
+        "fixRisks": _safe_text(finding.get("fixRisks")),
         "tags": _safe_text_list(finding.get("tags")),
         "steps": _safe_text_list(finding.get("steps")),
         "badCode": bad_code,
@@ -401,9 +416,9 @@ def _safe_confidence(value: object) -> float:
     try:
         candidate = float(value)
     except (TypeError, ValueError):
-        return 0.7
+        return 0.0
     if not math.isfinite(candidate):
-        return 0.7
+        return 0.0
     return min(1.0, max(0.0, candidate))
 
 
@@ -461,11 +476,16 @@ def _run_mock(*, repo: str, branch: str, commit: str) -> list[dict]:
             "title": "Hardcoded API key in client bundle",
             "summary": "A Stripe-shaped secret is referenced from a module that ships in the browser bundle.",
             "impact": "Any visitor can extract the key from the deployed JS and incur charges on the account.",
+            "detectionReasoning": "Detected `sk_live_` prefix in a string literal at lib/payments.ts:14. Traced the import chain: lib/payments.ts is imported by src/App.tsx, which is the client entry point. This module is included in the browser bundle via the Vite build config.",
+            "reproductionPath": "Run `pnpm build && grep -r sk_live_ dist/` — the secret will appear in the minified client JS bundle.",
             "file": "lib/payments.ts",
             "line": 14,
             "confidence": 0.97,
+            "confidenceRationale": "The `sk_live_` prefix is unambiguous and the import chain to the client entry point is direct. Minor uncertainty: a bundler plugin could theoretically strip the constant, but none is configured.",
             "autoFix": True,
             "effort": "5 min",
+            "fixBenefits": "Eliminates the ability for any visitor to extract the secret key from the deployed bundle, preventing unauthorized charges.",
+            "fixRisks": "If any client-side code path currently depends on the Stripe instance being available in the browser, those paths will break. Verify no client components call `stripe.*` directly.",
             "tags": ["secrets", "stripe", "client-side"],
             "steps": [
                 "Move the Stripe instance behind a server-only module and import it from server code paths.",
@@ -491,11 +511,16 @@ def _run_mock(*, repo: str, branch: str, commit: str) -> list[dict]:
             "title": "Dashboard triggers N+1 fetch",
             "summary": "Each row issues its own HTTP request inside the render loop.",
             "impact": "First contentful paint regresses from 320 ms to ~3 s on lists with 100+ rows.",
+            "detectionReasoning": "Found a `useEffect` with a `fetch()` call inside a `.map()` render loop at dashboard.tsx:88. Each row component mounts independently and fires its own GET /projects/stats?id=X request. With 100 rows, this produces 100 sequential HTTP requests.",
+            "reproductionPath": "Open the dashboard with a workspace that has 50+ projects. Open DevTools Network tab and observe the waterfall of /projects/stats requests.",
             "file": "src/screens/dashboard.tsx",
             "line": 88,
             "confidence": 0.86,
+            "confidenceRationale": "The pattern is clearly an N+1 in the render loop, but the actual performance impact depends on the server's response time and whether HTTP/2 multiplexing is enabled.",
             "autoFix": False,
             "effort": "20 min",
+            "fixBenefits": "Collapsing 100 individual requests into one batched call reduces P95 dashboard load time from ~3s to ~400ms for large workspaces.",
+            "fixRisks": "The batched endpoint GET /projects/stats?ids=... must be added to the backend API. If the backend does not support batch queries yet, this fix requires a server-side change.",
             "tags": ["n+1", "react-query"],
             "steps": [
                 "Collapse the per-row fetch into a single GET /projects/stats?ids=...",
@@ -511,11 +536,16 @@ def _run_mock(*, repo: str, branch: str, commit: str) -> list[dict]:
             "title": "axios pinned to a version with a known CVE",
             "summary": "package.json pins axios@0.21.1 which is impacted by CVE-2023-45857 (SSRF via redirect).",
             "impact": "Server-side calls that follow user-controlled URLs become SSRF-able.",
+            "detectionReasoning": "package.json:28 pins `axios` at `0.21.1`. Cross-referenced with the NVD database: CVE-2023-45857 affects all axios versions below 1.6.0. The vulnerability allows SSRF through unvalidated redirect targets.",
+            "reproductionPath": "If the application makes server-side HTTP requests using axios (e.g. via an API proxy), craft a request that returns a 302 redirect to an internal IP. Axios will follow the redirect without validation.",
             "file": "package.json",
             "line": 28,
             "confidence": 1.0,
+            "confidenceRationale": "The pinned version and CVE are both unambiguous. The vulnerability is well-documented and the fix version is clearly specified in the advisory.",
             "autoFix": True,
             "effort": "1 min",
+            "fixBenefits": "Eliminates the SSRF vector through redirect following. Also picks up 2 years of bug fixes and performance improvements in axios 1.x.",
+            "fixRisks": "axios 1.x has breaking changes: the default Content-Type for POST requests changed, and the response interceptor signature is slightly different. Review any custom interceptors after upgrading.",
             "tags": ["cve", "npm"],
             "steps": [
                 "Bump axios to ^1.6.7 in package.json.",
@@ -738,11 +768,16 @@ def _findings_schema() -> dict:
         "title": {"type": "string"},
         "summary": {"type": "string"},
         "impact": {"type": "string"},
+        "detectionReasoning": {"type": "string"},
+        "reproductionPath": {"type": "string"},
         "file": {"type": "string"},
         "line": {"type": "integer"},
         "confidence": {"type": "number"},
+        "confidenceRationale": {"type": "string"},
         "autoFix": {"type": "boolean"},
         "effort": {"type": "string"},
+        "fixBenefits": {"type": "string"},
+        "fixRisks": {"type": "string"},
         "tags": {"type": "array", "items": {"type": "string"}},
         "steps": {"type": "array", "items": {"type": "string"}},
         "badCode": {"type": "array", "items": code_line},
