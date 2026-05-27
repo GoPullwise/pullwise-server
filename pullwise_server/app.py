@@ -440,7 +440,10 @@ def first_header_value(handler: BaseHTTPRequestHandler, name: str) -> str | None
 
 def default_redirect(screen: str) -> str:
     app_url = env("PULLWISE_APP_URL", "http://localhost:5173").rstrip("/")
-    return f"{app_url}/?screen={screen}"
+    # Use path-based URLs that match the frontend's client-side routing (e.g. /dashboard, /repos).
+    # The "landing" screen maps to the root path "/".
+    path = "/" if screen == "landing" else f"/{screen}"
+    return f"{app_url}{path}"
 
 
 def now() -> int:
@@ -3270,7 +3273,43 @@ def cookie_attributes() -> str:
     attributes = ["Path=/", "HttpOnly", "SameSite=Lax"]
     if cookie_secure_enabled():
         attributes.append("Secure")
+    domain = cookie_domain()
+    if domain:
+        attributes.append(f"Domain={domain}")
     return "; ".join(attributes)
+
+
+def cookie_domain() -> str:
+    """Extract the registrable domain from the API base URL for cross-subdomain cookie sharing.
+
+    For example, if the API is at api.pull-wise.com, set Domain=.pull-wise.com so the session
+    cookie is shared with the frontend at pull-wise.com. Returns empty string for localhost,
+    IP addresses, or when no suitable domain can be extracted.
+    """
+    configured = os.environ.get("PULLWISE_COOKIE_DOMAIN", "").strip()
+    if configured:
+        return configured if configured.startswith(".") else f".{configured}"
+    public_base = os.environ.get("PULLWISE_API_BASE_URL") or ""
+    if not public_base.startswith("https://"):
+        return ""
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(public_base).hostname or ""
+    except Exception:
+        return ""
+    # Skip localhost, IP addresses, and single-label names.
+    if not host or host in {"localhost", "127.0.0.1", "::1"}:
+        return ""
+    parts = host.split(".")
+    # Need at least two labels (e.g. pull-wise.com) to set a domain cookie.
+    if len(parts) < 2:
+        return ""
+    # Skip IP addresses (all numeric labels).
+    if all(part.isdigit() for part in parts):
+        return ""
+    # Use the last two labels as the registrable domain (e.g. api.pull-wise.com → .pull-wise.com).
+    # This is a simplification — for multi-level TLDs like .co.uk, set PULLWISE_COOKIE_DOMAIN explicitly.
+    return f".{parts[-2]}.{parts[-1]}"
 
 
 def cookie_secure_enabled() -> bool:

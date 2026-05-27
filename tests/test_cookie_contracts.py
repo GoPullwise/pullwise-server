@@ -31,6 +31,25 @@ class CookieContractsTest(unittest.TestCase):
         ):
             self.assertIn("Secure", app.cookie_header("ses_1"))
 
+    def test_session_cookie_sets_domain_for_cross_subdomain_sharing(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_API_BASE_URL": "https://api.pull-wise.com"}, clear=True):
+            cookie = app.cookie_header("ses_1")
+            self.assertIn("Domain=.pull-wise.com", cookie)
+
+    def test_session_cookie_skips_domain_for_localhost(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_API_BASE_URL": "http://localhost:8080"}, clear=True):
+            cookie = app.cookie_header("ses_1")
+            self.assertNotIn("Domain=", cookie)
+
+    def test_session_cookie_domain_can_be_overridden(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"PULLWISE_API_BASE_URL": "https://api.pull-wise.com", "PULLWISE_COOKIE_DOMAIN": ".custom.dev"},
+            clear=True,
+        ):
+            cookie = app.cookie_header("ses_1")
+            self.assertIn("Domain=.custom.dev", cookie)
+
 
 if __name__ == "__main__":
     unittest.main()

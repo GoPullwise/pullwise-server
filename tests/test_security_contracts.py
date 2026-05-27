@@ -158,7 +158,7 @@ class SecurityContractsTest(unittest.TestCase):
         ):
             self.assertEqual(
                 app.safe_redirect_to("https://evil.example/callback", "dashboard"),
-                "https://app.pullwise.dev/?screen=dashboard",
+                "https://app.pullwise.dev/dashboard",
             )
 
     def test_github_login_authorize_defaults_to_dashboard_redirect(self) -> None:
@@ -182,7 +182,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["url"], "https://github.com/login/oauth/authorize")
         record = next(iter(app.GITHUB_STATES.values()))
-        self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/?screen=dashboard")
+        self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/dashboard")
 
     def test_github_callback_rejects_malformed_persisted_state_records(self) -> None:
         cases = {
@@ -4716,7 +4716,7 @@ class SecurityContractsTest(unittest.TestCase):
         with patch.dict(os.environ, {"PULLWISE_APP_URL": "https://app.pullwise.dev"}, clear=True):
             self.assertEqual(
                 app.safe_redirect_to("/repos\r\nSet-Cookie:pw=bad", "dashboard"),
-                "https://app.pullwise.dev/?screen=dashboard",
+                "https://app.pullwise.dev/dashboard",
             )
 
     def test_request_body_size_is_limited(self) -> None:

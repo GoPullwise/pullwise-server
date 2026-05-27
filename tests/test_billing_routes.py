@@ -200,8 +200,8 @@ class BillingRoutesTest(unittest.TestCase):
             app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(create.call_args.kwargs["success_url"], "https://app.pullwise.dev/?screen=settings")
-        self.assertEqual(create.call_args.kwargs["cancel_url"], "https://app.pullwise.dev/?screen=settings")
+        self.assertEqual(create.call_args.kwargs["success_url"], "https://app.pullwise.dev/settings")
+        self.assertEqual(create.call_args.kwargs["cancel_url"], "https://app.pullwise.dev/settings")
 
     def test_portal_session_rejects_non_object_body(self) -> None:
         cookie = seed_session()
