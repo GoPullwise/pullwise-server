@@ -189,6 +189,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(old_token_claim, "POST")
         self.assertEqual(old_token_claim.status, HTTPStatus.UNAUTHORIZED)
 
+        new_token_heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
+            headers={"Authorization": f"Bearer {new_token}"},
+        )
+        app.PullwiseHandler.route(new_token_heartbeat, "POST")
+        self.assertEqual(new_token_heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(new_token_heartbeat.payload["worker"]["worker_id"], worker_id)
+
         delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
         app.PullwiseHandler.route(delete, "DELETE")
         self.assertEqual(delete.status, HTTPStatus.OK)
@@ -246,11 +255,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         public = RouteHarness("/status/system")
         app.PullwiseHandler.route(public, "GET")
         self.assertEqual(public.status, HTTPStatus.OK)
+        public_text = json.dumps(public.payload)
         self.assertIn(public.payload["scanSystemStatus"], {"ok", "degraded", "down"})
         self.assertEqual(public.payload["queuedJobs"], 1)
         self.assertEqual(public.payload["runningJobs"], 1)
-        self.assertNotIn("secret-host", json.dumps(public.payload))
-        self.assertNotIn("internal stack", json.dumps(public.payload))
+        self.assertNotIn("secret-host", public_text)
+        self.assertNotIn("internal stack", public_text)
+        self.assertNotIn("worker_token", public_text)
+        self.assertNotIn("token_hash", public_text)
+        self.assertNotIn(token, public_text)
 
         admin = RouteHarness("/admin/status", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin, "GET")
@@ -262,6 +275,42 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertTrue(admin.payload["workers"][0]["codex_ready"])
         self.assertTrue(admin.payload["workers"][0]["systemd_active"])
 
+    def test_status_capacity_increases_with_multiple_online_workers(self) -> None:
+        payload_one, token_one = self.create_worker()
+        worker_one_id = payload_one["worker_id"]
+        payload_two, token_two = self.create_worker()
+        worker_two_id = payload_two["worker_id"]
+
+        for worker_id, token, capacity, running in (
+            (worker_one_id, token_one, 4, 1),
+            (worker_two_id, token_two, 2, 0),
+        ):
+            heartbeat = RouteHarness(
+                "/worker/heartbeat",
+                {
+                    "worker_id": worker_id,
+                    "provider": "codex",
+                    "version": "0.1.0",
+                    "max_concurrent_jobs": capacity,
+                    "running_jobs": running,
+                    "free_slots": capacity - running,
+                    "doctor_status": "ok",
+                    "codex_ready": True,
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            app.PullwiseHandler.route(heartbeat, "POST")
+            self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        public = RouteHarness("/status/system")
+        app.PullwiseHandler.route(public, "GET")
+
+        self.assertEqual(public.status, HTTPStatus.OK)
+        self.assertEqual(public.payload["onlineWorkerCount"], 2)
+        self.assertEqual(public.payload["totalWorkerCount"], 2)
+        self.assertEqual(public.payload["totalCapacity"], 6)
+        self.assertEqual(public.payload["availableCapacity"], 5)
+
     def test_worker_test_records_audit(self) -> None:
         payload, _token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -272,6 +321,41 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(test.status, HTTPStatus.OK)
         self.assertIn("checks", test.payload["result"])
         self.assertIn("test_worker", [event["action"] for event in db.list_worker_audit_events(worker_id)])
+
+    def test_worker_audit_records_required_fields_for_success_and_failure(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+        update = RouteHarness(
+            f"/admin/workers/{worker_id}",
+            {"name": "Audit worker", "region": "eu-west"},
+            cookie=self.admin_cookie,
+            headers={"X-Request-Id": "req_update"},
+        )
+        app.PullwiseHandler.route(update, "PATCH")
+        missing = RouteHarness(
+            "/admin/workers/missing_worker/disable",
+            cookie=self.admin_cookie,
+            headers={"X-Request-Id": "req_missing"},
+        )
+        app.PullwiseHandler.route(missing, "POST")
+
+        self.assertEqual(update.status, HTTPStatus.OK)
+        self.assertEqual(missing.status, HTTPStatus.NOT_FOUND)
+        events = db.list_worker_audit_events(limit=20)
+        update_event = next(event for event in events if event["action"] == "update_worker")
+        failure_event = next(event for event in events if event["action"] == "disable_worker" and event["success"] == 0)
+
+        self.assertEqual(update_event["actor_user_id"], "usr_admin")
+        self.assertEqual(update_event["worker_id"], worker_id)
+        self.assertEqual(update_event["request_id"], "req_update")
+        self.assertEqual(update_event["success"], 1)
+        self.assertEqual(json.loads(update_event["changed_fields"]), {"name": "Audit worker", "region": "eu-west"})
+        self.assertIsNotNone(update_event["created_at"])
+
+        self.assertEqual(failure_event["actor_user_id"], "usr_admin")
+        self.assertEqual(failure_event["worker_id"], "missing_worker")
+        self.assertEqual(failure_event["request_id"], "req_missing")
+        self.assertEqual(failure_event["error"], "Worker not found.")
 
 
 if __name__ == "__main__":

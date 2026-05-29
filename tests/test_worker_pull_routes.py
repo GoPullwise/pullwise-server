@@ -532,6 +532,24 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIsNotNone(error)
         self.assertEqual(error[2], "QUEUE_FULL_USER")
 
+    def test_global_queue_limit_rejects_new_scan_before_job_creation(self) -> None:
+        app.SCANS = [
+            {
+                "id": "sc_queued",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "queuedAt": app.now(),
+            }
+        ]
+        with patch.dict(os.environ, {"PULLWISE_MAX_QUEUED_SCANS_GLOBAL": "1"}, clear=False):
+            error = app.scan_queue_limit_error("usr_2")
+        self.assertIsNotNone(error)
+        self.assertEqual(error[2], "QUEUE_FULL_GLOBAL")
+
     def test_concurrent_claims_do_not_duplicate_jobs(self) -> None:
         scan = {
             "id": "sc_atomic",
