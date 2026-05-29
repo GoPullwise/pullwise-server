@@ -67,8 +67,8 @@ def effective_user_plan(user: dict[str, Any] | None) -> str:
     if not user:
         return "free"
     billing = user.get("billing") if isinstance(user.get("billing"), dict) else {}
-    status = str(billing.get("status") or user.get("billing_status") or user.get("status") or "").lower()
-    plan = str(billing.get("plan") or user.get("plan") or "free").lower()
+    status = str(billing.get("status") or "").lower()
+    plan = str(billing.get("plan") or "free").lower()
     if plan == "pro" and status in {"active", "trialing", "canceling"}:
         return "pro"
     return "free"
@@ -76,8 +76,8 @@ def effective_user_plan(user: dict[str, Any] | None) -> str:
 
 def user_limit_for_plan(plan: str) -> int:
     if plan == "pro":
-        return max(0, env_int(["PULLWISE_PRO_USER_REVIEW_LIMIT", "PULLWISE_PRO_REVIEW_LIMIT"], 100))
-    return max(0, env_int(["PULLWISE_FREE_USER_REVIEW_LIMIT", "PULLWISE_FREE_REVIEW_LIMIT"], 10))
+        return max(0, env_int("PULLWISE_PRO_USER_REVIEW_LIMIT", 100))
+    return max(0, env_int("PULLWISE_FREE_USER_REVIEW_LIMIT", 10))
 
 
 def repository_limit_for_plan(plan: str) -> int:

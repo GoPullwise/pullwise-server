@@ -54,12 +54,8 @@ def billing_currency() -> str:
 
 def review_limit(plan: str) -> int:
     if plan == "pro":
-        if env("PULLWISE_PRO_USER_REVIEW_LIMIT"):
-            return max(0, env_int("PULLWISE_PRO_USER_REVIEW_LIMIT", 100))
-        return max(0, env_int("PULLWISE_PRO_REVIEW_LIMIT", 100))
-    if env("PULLWISE_FREE_USER_REVIEW_LIMIT"):
-        return max(0, env_int("PULLWISE_FREE_USER_REVIEW_LIMIT", 10))
-    return max(0, env_int("PULLWISE_FREE_REVIEW_LIMIT", 10))
+        return max(0, env_int("PULLWISE_PRO_USER_REVIEW_LIMIT", 100))
+    return max(0, env_int("PULLWISE_FREE_USER_REVIEW_LIMIT", 10))
 
 
 def pro_amount(interval: str) -> str:

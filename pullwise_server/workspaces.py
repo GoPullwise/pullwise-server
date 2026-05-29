@@ -22,11 +22,11 @@ def clean_bool(value: object) -> bool:
 
 
 def github_repo_id_from_item(item: dict[str, Any]) -> str | None:
-    explicit = clean_text(item.get("githubRepoId")) or clean_text(item.get("github_repo_id"))
+    explicit = clean_text(item.get("githubRepoId"))
     if explicit:
         return explicit
     fallback = clean_text(item.get("id"))
-    full_name = clean_text(item.get("fullName")) or clean_text(item.get("full_name"))
+    full_name = clean_text(item.get("fullName"))
     if fallback and fallback != full_name:
         return fallback
     return None
@@ -34,36 +34,34 @@ def github_repo_id_from_item(item: dict[str, Any]) -> str | None:
 
 def repository_record_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
     github_repo_id = github_repo_id_from_item(item)
-    full_name = clean_text(item.get("fullName")) or clean_text(item.get("full_name"))
+    full_name = clean_text(item.get("fullName"))
     if not github_repo_id or not full_name:
         return None
     owner = item.get("owner") if isinstance(item.get("owner"), dict) else {}
-    owner_login = clean_text(item.get("ownerLogin")) or clean_text(item.get("owner_login")) or clean_text(owner.get("login"))
-    owner_id = clean_text(item.get("ownerId")) or clean_text(item.get("owner_id")) or clean_text(owner.get("id"))
+    owner_login = clean_text(item.get("ownerLogin")) or clean_text(owner.get("login"))
+    owner_id = clean_text(item.get("ownerId")) or clean_text(owner.get("id"))
     parent = item.get("parent") if isinstance(item.get("parent"), dict) else {}
     source = item.get("source") if isinstance(item.get("source"), dict) else {}
     return {
         "id": db.repository_id_for_github_repo(github_repo_id),
         "github_repo_id": github_repo_id,
-        "github_node_id": clean_text(item.get("githubNodeId")) or clean_text(item.get("nodeId")) or clean_text(item.get("node_id")),
+        "github_node_id": clean_text(item.get("githubNodeId")) or clean_text(item.get("nodeId")),
         "full_name": full_name,
         "owner_login": owner_login or full_name.split("/", 1)[0],
         "owner_id": owner_id,
-        "default_branch": clean_text(item.get("defaultBranch")) or clean_text(item.get("default_branch")) or "main",
+        "default_branch": clean_text(item.get("defaultBranch")) or "main",
         "private": clean_bool(item.get("private")),
         "fork": clean_bool(item.get("fork")),
         "parent_github_repo_id": (
             clean_text(item.get("parentGithubRepoId"))
-            or clean_text(item.get("parent_github_repo_id"))
             or clean_text(parent.get("id"))
         ),
         "source_github_repo_id": (
             clean_text(item.get("sourceGithubRepoId"))
-            or clean_text(item.get("source_github_repo_id"))
             or clean_text(source.get("id"))
         ),
-        "html_url": clean_text(item.get("htmlUrl")) or clean_text(item.get("html_url")),
-        "clone_url": clean_text(item.get("cloneUrl")) or clean_text(item.get("clone_url")),
+        "html_url": clean_text(item.get("htmlUrl")),
+        "clone_url": clean_text(item.get("cloneUrl")),
     }
 
 
