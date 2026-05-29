@@ -302,7 +302,7 @@ class BillingRoutesTest(unittest.TestCase):
         second = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_2"}, cookie=cookie)
 
         with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_REVIEW_LIMIT": "1"}, clear=True),
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_USER_REVIEW_LIMIT": "1"}, clear=True),
             patch("pullwise_server.review.selected_provider", return_value="codex"),
             patch.object(app.worker, "start_scan"),
         ):

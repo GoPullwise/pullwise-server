@@ -664,7 +664,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload, {"profile": {"name": "Dev", "email": "dev@example.com"}})
 
-    def test_issue_read_routes_sanitize_legacy_issue_fields(self) -> None:
+    def test_issue_read_routes_reject_malformed_issue_fields(self) -> None:
         app.ISSUES[0].update({
             "scanId": {"value": "sc_1"},
             "repo": {"fullName": "owner/repo"},
@@ -700,7 +700,7 @@ class SecurityContractsTest(unittest.TestCase):
             "id": "iss_1",
             "userId": "usr_1",
             "scanId": "",
-            "repo": "owner/repo",
+            "repo": "",
             "branch": "",
             "status": "open",
             "severity": "medium",
@@ -740,7 +740,7 @@ class SecurityContractsTest(unittest.TestCase):
                 issue = handler.payload["items"][0] if path == "/issues" else handler.payload
                 self.assertEqual(issue, expected)
 
-    def test_issue_payload_hides_auto_fix_for_legacy_empty_replacement(self) -> None:
+    def test_issue_payload_hides_auto_fix_for_empty_replacement(self) -> None:
         app.ISSUES[0].update({
             "scanId": "sc_1",
             "repo": "owner/repo",
@@ -755,7 +755,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIs(payload["autoFix"], False)
         self.assertIs(payload["autoFixable"], False)
 
-    def test_issue_payload_hides_auto_fix_for_legacy_non_contiguous_bad_code(self) -> None:
+    def test_issue_payload_hides_auto_fix_for_non_contiguous_bad_code(self) -> None:
         app.ISSUES[0].update({
             "scanId": "sc_1",
             "repo": "owner/repo",
@@ -835,15 +835,15 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(summary["repositoryCount"], 0)
         self.assertFalse(summary["repositoriesNeedSync"])
 
-    def test_safe_installation_summaries_sanitize_legacy_url_aliases(self) -> None:
+    def test_safe_installation_summaries_do_not_emit_url_aliases(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             summaries = app.safe_installation_summaries([
                 {"installationId": "123", "htmlUrl": "javascript:alert(1)", "html_url": "https://evil.example/install"}
             ])
 
         self.assertIsNone(summaries[0]["installationHtmlUrl"])
-        self.assertIsNone(summaries[0]["htmlUrl"])
-        self.assertIsNone(summaries[0]["html_url"])
+        self.assertNotIn("htmlUrl", summaries[0])
+        self.assertNotIn("html_url", summaries[0])
 
     def test_safe_installation_summaries_sanitize_malformed_metadata(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
@@ -869,8 +869,6 @@ class SecurityContractsTest(unittest.TestCase):
                 "installationTargetType": None,
                 "installationAppSlug": None,
                 "installationHtmlUrl": "https://github.com/settings/installations/123",
-                "htmlUrl": "https://github.com/settings/installations/123",
-                "html_url": "https://github.com/settings/installations/123",
                 "repositorySelection": None,
                 "scope": None,
                 "repositoryCount": 0,
@@ -916,7 +914,7 @@ class SecurityContractsTest(unittest.TestCase):
                 self.assertEqual(handler.payload, {"message": message})
                 log_exception.assert_not_called()
 
-    def test_scan_read_routes_sanitize_legacy_scan_fields(self) -> None:
+    def test_scan_read_routes_reject_malformed_scan_fields(self) -> None:
         app.SCANS[0].update({
             "repo": {"fullName": "owner/repo"},
             "repository": "owner/repo",
@@ -946,7 +944,7 @@ class SecurityContractsTest(unittest.TestCase):
         expected = {
             "id": "sc_1",
             "userId": "usr_1",
-            "repo": "owner/repo",
+            "repo": "",
             "branch": "main",
             "commit": "pending",
             "status": "done",
@@ -1535,7 +1533,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(app.SCANS, [])
         self.assertEqual(app.ISSUES, [])
 
-    def test_auth_session_sanitizes_legacy_user_public_fields(self) -> None:
+    def test_auth_session_sanitizes_malformed_user_public_fields(self) -> None:
         app.USERS["usr_1"].update({
             "id": "usr_1\r\nX-Injected: bad",
             "name": "Dev\r\nX-Injected: bad",
@@ -1606,7 +1604,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["github"]["repositoryCount"], 0)
         self.assertEqual(handler.payload["nextStep"], "connect_github_repositories")
 
-    def test_auth_session_does_not_report_legacy_repository_names_only_access_connected(self) -> None:
+    def test_auth_session_does_not_report_repository_names_only_access_connected(self) -> None:
         app.USERS["usr_1"]["githubRepositoryAccess"] = {"repositories": ["owner/repo"]}
         app.SESSIONS = {
             "ses_1": {
@@ -1681,8 +1679,8 @@ class SecurityContractsTest(unittest.TestCase):
             "manage": True,
         }
         app.GITHUB_STATES = {
-            "legacy_bad": "not-a-state-record",
-            "legacy_bad_expiry": {
+            "bad_state": "not-a-state-record",
+            "bad_expiry": {
                 "kind": "install",
                 "userId": "usr_1",
                 "expiresAt": {"value": app.now() + app.GITHUB_STATE_MAX_AGE},
@@ -1707,7 +1705,17 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertFalse(handler.payload["github"]["repositoriesAuthorizationPending"])
         self.assertEqual(handler.payload["nextStep"], "connect_github_repositories")
         self.assertNotIn("githubRepositoryAccessPending", app.USERS["usr_1"])
-        self.assertEqual(app.GITHUB_STATES, {})
+        self.assertEqual(
+            app.GITHUB_STATES,
+            {
+                "bad_state": "not-a-state-record",
+                "bad_expiry": {
+                    "kind": "install",
+                    "userId": "usr_1",
+                    "expiresAt": {"value": app.now() + app.GITHUB_STATE_MAX_AGE},
+                },
+            },
+        )
         log_exception.assert_not_called()
 
     def test_clear_repository_authorization_pending_ignores_malformed_state_records(self) -> None:
@@ -1736,7 +1744,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertNotIn("githubRepositoryAccessPending", app.USERS["usr_1"])
         self.assertEqual(app.GITHUB_STATES, {"other_user": other_user_record})
 
-    def test_auth_session_treats_legacy_install_state_as_pending_repository_authorization(self) -> None:
+    def test_auth_session_requires_explicit_repository_authorization_pending_record(self) -> None:
         app.USERS["usr_1"]["githubLogin"] = "DFerryman"
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
             "mode": "github-app",
@@ -1753,7 +1761,7 @@ class SecurityContractsTest(unittest.TestCase):
             "repositoriesNeedSync": False,
         }
         app.GITHUB_STATES = {
-            "legacy_state": {
+            "install_state": {
                 "kind": "install",
                 "redirectTo": "https://app.pullwise.dev/?screen=repos",
                 "userId": "usr_1",
@@ -1775,13 +1783,13 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertTrue(handler.payload["authenticated"])
         self.assertFalse(handler.payload["github"]["repositoriesConnected"])
-        self.assertTrue(handler.payload["github"]["repositoriesAuthorizationPending"])
+        self.assertFalse(handler.payload["github"]["repositoriesAuthorizationPending"])
 
-    def test_auth_session_ignores_malformed_access_for_legacy_install_pending_state(self) -> None:
+    def test_auth_session_ignores_install_state_without_pending_record(self) -> None:
         app.USERS["usr_1"]["githubLogin"] = "DFerryman"
         app.USERS["usr_1"]["githubRepositoryAccess"] = "not-a-repository-access-record"
         app.GITHUB_STATES = {
-            "legacy_state": {
+            "install_state": {
                 "kind": "install",
                 "redirectTo": "https://app.pullwise.dev/?screen=repos",
                 "userId": "usr_1",
@@ -1805,7 +1813,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertTrue(handler.payload["authenticated"])
         self.assertFalse(handler.payload["github"]["repositoriesConnected"])
-        self.assertTrue(handler.payload["github"]["repositoriesAuthorizationPending"])
+        self.assertFalse(handler.payload["github"]["repositoriesAuthorizationPending"])
         log_exception.assert_not_called()
 
     def test_auth_session_does_not_report_stale_personal_installation_connected_for_current_github_login(self) -> None:
@@ -3914,7 +3922,7 @@ class SecurityContractsTest(unittest.TestCase):
         list_installations.assert_called_once_with("gho_bob")
         list_user_repositories.assert_called_once_with("gho_bob", "222")
 
-    def test_repositories_list_migrates_legacy_single_installation_access_to_aggregate_model(self) -> None:
+    def test_repositories_list_does_not_migrate_single_installation_access_to_aggregate_model(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
@@ -3994,8 +4002,8 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertFalse(handler.payload["needsAuthorization"])
-        self.assertEqual([item["fullName"] for item in handler.payload["items"]], ["octocat/private-repo", "acme/service"])
-        self.assertEqual(app.USERS["usr_1"]["githubRepositoryAccess"]["installationIds"], ["111", "222"])
+        self.assertEqual([item["fullName"] for item in handler.payload["items"]], ["octocat/private-repo"])
+        self.assertNotIn("installationIds", app.USERS["usr_1"]["githubRepositoryAccess"])
 
     def test_repositories_list_repairs_stale_personal_installation_for_current_github_login(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -4430,7 +4438,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertIn("github_error=missing_installation_id", handler.location)
         self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
 
-    def test_github_installation_callback_can_bind_without_state_when_session_user_matches_installation(self) -> None:
+    def test_github_installation_callback_rejects_missing_state(self) -> None:
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
         app.USERS["usr_1"]["githubRepositoryAccess"] = None
         app.SESSIONS = {
@@ -4458,26 +4466,11 @@ class SecurityContractsTest(unittest.TestCase):
                 },
                 clear=True,
             ),
-            patch("pullwise_server.github_auth.user_can_access_installation", return_value=True),
-            patch(
-                "pullwise_server.github_auth.list_current_app_installations_for_user",
-                return_value=[
-                    {
-                        "id": 999,
-                        "repository_selection": "selected",
-                        "target_type": "User",
-                        "account": {"login": "octocat"},
-                        "app_slug": "pullwise",
-                        "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"},
-                    }
-                ],
-            ),
-            patch("pullwise_server.github_auth.list_user_installation_repositories", return_value=[]),
         ):
             app.PullwiseHandler.route(handler, "GET")
 
-        self.assertEqual(handler.status, HTTPStatus.FOUND)
-        self.assertEqual(app.USERS["usr_1"]["githubRepositoryAccess"]["installationId"], "999")
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
 
     def test_github_installation_callback_with_missing_private_key_path_binds_pending_sync(self) -> None:
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
