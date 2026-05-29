@@ -362,6 +362,7 @@ def recover_interrupted_scans() -> int:
         for scan in SCANS:
             if scan.get("status") != "running":
                 continue
+            db.requeue_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=now())
             scan["status"] = "queued"
             scan["progress"] = 0
             scan["phase"] = None
@@ -1695,11 +1696,22 @@ def worker_result_checksum(body: dict) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def expected_worker_attempt_id(job: dict) -> str:
+    worker_id = public_issue_text(job.get("claimed_by_worker_id"))
+    attempt = public_scan_count(job.get("attempt"))
+    if worker_id and attempt:
+        return f"{worker_id}-{attempt}"
+    return f"attempt_{attempt}"
+
+
 def apply_worker_job_result(job: dict, body: dict) -> dict:
     status = public_issue_text(body.get("status")).lower()
     if status not in {"done", "failed"}:
         raise ValueError("status must be done or failed")
-    attempt_id = clean_github_access_text(body.get("attempt_id")) or f"attempt_{public_scan_count(job.get('attempt'))}"
+    expected_attempt_id = expected_worker_attempt_id(job)
+    attempt_id = clean_github_access_text(body.get("attempt_id")) or expected_attempt_id
+    if attempt_id != expected_attempt_id:
+        return {"accepted": False, "conflict": True}
     checksum = worker_result_checksum(body)
     record_result = db.record_scan_job_result(
         str(job["job_id"]),
@@ -5474,25 +5486,33 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return record
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
-        if not self.require_worker(allow_disabled=segments == ["worker", "heartbeat"]):
+        worker_record = self.require_worker(allow_disabled=segments == ["worker", "heartbeat"])
+        if not worker_record:
             return
         if not isinstance(body, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         if segments == ["worker", "heartbeat"]:
-            return self.handle_worker_heartbeat(body)
+            return self.handle_worker_heartbeat(body, worker_record)
         if segments == ["worker", "jobs", "claim"]:
-            return self.handle_worker_job_claim(body)
+            return self.handle_worker_job_claim(body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "progress":
-            return self.handle_worker_job_progress(segments[2], body)
+            return self.handle_worker_job_progress(segments[2], body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "result":
-            return self.handle_worker_job_result(segments[2], body)
+            return self.handle_worker_job_result(segments[2], body, worker_record)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
-    def handle_worker_heartbeat(self, body: dict) -> None:
+    def authenticated_worker_id_matches(self, worker_record: dict, worker_id: str) -> bool:
+        authenticated_worker_id = public_issue_text(worker_record.get("worker_id"))
+        return bool(authenticated_worker_id and worker_id and authenticated_worker_id == worker_id)
+
+    def handle_worker_heartbeat(self, body: dict, worker_record: dict) -> None:
+        worker_id = clean_github_access_text(body.get("worker_id")) or ""
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
         try:
             record = db.upsert_worker_heartbeat(
                 {
-                    "worker_id": clean_github_access_text(body.get("worker_id")) or "",
+                    "worker_id": worker_id,
                     "version": public_issue_text(body.get("version")),
                     "provider": public_issue_text(body.get("provider")) or "codex",
                     "max_concurrent_jobs": public_scan_count(body.get("max_concurrent_jobs")) or 1,
@@ -5521,10 +5541,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             }
         )
 
-    def handle_worker_job_claim(self, body: dict) -> None:
+    def handle_worker_job_claim(self, body: dict, worker_record: dict) -> None:
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
         if not worker_id:
             return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
         max_jobs = public_scan_count(body.get("max_jobs")) or public_scan_count(body.get("free_slots")) or 1
         max_jobs = min(max_jobs, max(1, env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS", 32)))
         try:
@@ -5576,10 +5598,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
         return self.json({"job": payloads[0], "jobs": payloads})
 
-    def handle_worker_job_progress(self, job_id: str, body: dict) -> None:
+    def handle_worker_job_progress(self, job_id: str, body: dict, worker_record: dict) -> None:
         job_id = clean_github_access_text(job_id) or ""
         if not job_id:
             return self.error(HTTPStatus.BAD_REQUEST, "job_id is required.")
+        current_job = db.get_scan_job(job_id)
+        if not current_job:
+            return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
+        if not self.authenticated_worker_id_matches(worker_record, public_issue_text(current_job.get("claimed_by_worker_id"))):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
         job = db.update_scan_job_progress(
             job_id,
             {
@@ -5606,13 +5633,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 mark_state_dirty()
         return self.json({"ok": True, "job": scan_job_payload(job)})
 
-    def handle_worker_job_result(self, job_id: str, body: dict) -> None:
+    def handle_worker_job_result(self, job_id: str, body: dict, worker_record: dict) -> None:
         job_id = clean_github_access_text(job_id) or ""
         if not job_id:
             return self.error(HTTPStatus.BAD_REQUEST, "job_id is required.")
         job = db.get_scan_job(job_id)
         if not job:
             return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
+        if not self.authenticated_worker_id_matches(worker_record, public_issue_text(job.get("claimed_by_worker_id"))):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
         try:
             result = apply_worker_job_result(job, body)
         except ValueError as exc:

@@ -936,6 +936,7 @@ def claim_next_scan_jobs(
                 (current_time - offline_after,),
             )
             _requeue_expired_jobs_locked(connection, current_time)
+            _requeue_stale_worker_jobs_locked(connection, current_time, offline_after)
             claimed: list[dict[str, Any]] = []
             running_rows = connection.execute(
                 """
@@ -1003,16 +1004,45 @@ def claim_next_scan_job(worker_id: str, *, lease_seconds: int = 3600, timestamp:
 def recover_expired_scan_jobs(timestamp: int | None = None) -> list[dict[str, Any]]:
     initialize()
     current_time = int(timestamp if timestamp is not None else time.time())
+    offline_after = max(60, int(os.environ.get("PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", "120") or 120))
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
         try:
             recovered = _requeue_expired_jobs_locked(connection, current_time)
+            recovered.extend(_requeue_stale_worker_jobs_locked(connection, current_time, offline_after))
             connection.commit()
             return recovered
         except Exception:
             connection.rollback()
             raise
+
+
+def requeue_interrupted_scan_job(scan_id: str, *, reason: str = "server_restart", timestamp: int | None = None) -> dict[str, Any] | None:
+    initialize()
+    scan_id = str(scan_id or "").strip()
+    if not scan_id:
+        return None
+    current_time = int(timestamp if timestamp is not None else time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                UPDATE scan_jobs
+                SET status = 'queued',
+                    claimed_by_worker_id = NULL,
+                    claimed_at = NULL,
+                    started_at = NULL,
+                    timeout_at = NULL,
+                    error = ?,
+                    updated_at = ?
+                WHERE scan_id = ?
+                  AND status IN ('claimed', 'running', 'uploading_result')
+                """,
+                (reason, current_time, scan_id),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
 
 
 def _requeue_expired_jobs_locked(connection: sqlite3.Connection, current_time: int) -> list[dict[str, Any]]:
@@ -1098,6 +1128,75 @@ def _requeue_expired_jobs_locked(connection: sqlite3.Connection, current_time: i
     return recovered
 
 
+def _requeue_stale_worker_jobs_locked(
+    connection: sqlite3.Connection,
+    current_time: int,
+    offline_after: int,
+) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT sj.job_id, sj.scan_id, sj.attempt, sj.max_attempts
+        FROM scan_jobs sj
+        JOIN workers w ON w.worker_id = sj.claimed_by_worker_id
+        WHERE sj.status IN ('claimed', 'running', 'uploading_result')
+          AND w.last_heartbeat_at IS NOT NULL
+          AND w.last_heartbeat_at < ?
+        """,
+        (current_time - max(60, int(offline_after)),),
+    ).fetchall()
+    recovered: list[dict[str, Any]] = []
+    for row in rows:
+        if int(row["attempt"]) < int(row["max_attempts"]):
+            connection.execute(
+                """
+                UPDATE scan_jobs
+                SET status = 'queued',
+                    claimed_by_worker_id = NULL,
+                    claimed_at = NULL,
+                    started_at = NULL,
+                    timeout_at = NULL,
+                    error = 'worker_heartbeat_timed_out',
+                    updated_at = ?
+                WHERE job_id = ?
+                """,
+                (current_time, row["job_id"]),
+            )
+            recovered.append(
+                {
+                    "job_id": row["job_id"],
+                    "scan_id": row["scan_id"],
+                    "status": "queued",
+                    "reason": "worker_heartbeat_timed_out",
+                    "attempt": int(row["attempt"]),
+                    "max_attempts": int(row["max_attempts"]),
+                }
+            )
+        else:
+            connection.execute(
+                """
+                UPDATE scan_jobs
+                SET status = 'failed',
+                    completed_at = ?,
+                    timeout_at = NULL,
+                    error = 'worker_heartbeat_timed_out',
+                    updated_at = ?
+                WHERE job_id = ?
+                """,
+                (current_time, current_time, row["job_id"]),
+            )
+            recovered.append(
+                {
+                    "job_id": row["job_id"],
+                    "scan_id": row["scan_id"],
+                    "status": "failed",
+                    "reason": "worker_heartbeat_timed_out",
+                    "attempt": int(row["attempt"]),
+                    "max_attempts": int(row["max_attempts"]),
+                }
+            )
+    return recovered
+
+
 def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str, Any] | None:
     initialize()
     current_time = int(time.time())
@@ -1171,6 +1270,9 @@ def record_scan_job_result(
                 "SELECT status, last_attempt_id FROM scan_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
+            if job and job["status"] == "cancelled":
+                connection.commit()
+                return {"accepted": False, "duplicate": False, "conflict": True}
             if job and job["status"] in {"done", "failed", "cancelled"}:
                 last_attempt_id = str(job["last_attempt_id"] or "")
                 if last_attempt_id and last_attempt_id != attempt_id:
