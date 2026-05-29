@@ -1799,7 +1799,14 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     last_heartbeat = pull_request_timestamp(worker.get("last_heartbeat_at"))
     if not last_heartbeat or last_heartbeat < current_time - worker_heartbeat_timeout_seconds():
         return "offline"
-    if clean_scan_error(worker.get("last_error")) or not worker_version_compatible(worker):
+    doctor_status = public_issue_text(worker.get("doctor_status")).lower()
+    codex_ready = worker.get("codex_ready")
+    if (
+        clean_scan_error(worker.get("last_error"))
+        or not worker_version_compatible(worker)
+        or doctor_status in {"degraded", "failed", "not_ready"}
+        or codex_ready == 0
+    ):
         return "degraded"
     if public_scan_count(worker.get("running_jobs")) >= max(1, public_scan_count(worker.get("max_concurrent_jobs"))):
         return "busy"
@@ -1827,6 +1834,10 @@ def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
     if admin:
         payload["hostname"] = public_issue_text(worker.get("hostname"))
         payload["last_error"] = clean_scan_error(worker.get("last_error"))
+        payload["doctor_status"] = public_issue_text(worker.get("doctor_status"))
+        payload["codex_ready"] = bool(worker.get("codex_ready")) if worker.get("codex_ready") is not None else None
+        payload["systemd_active"] = bool(worker.get("systemd_active")) if worker.get("systemd_active") is not None else None
+        payload["doctor_checked_at"] = pull_request_timestamp(worker.get("doctor_checked_at"))
         payload["test"] = worker_test_payload(worker)
     return payload
 
@@ -1835,19 +1846,176 @@ def worker_create_payload(worker: dict) -> dict:
     public = worker_public_payload(worker, admin=True)
     token = public_issue_text(worker.get("worker_token"))
     server_url = env("PULLWISE_API_BASE_URL", "").rstrip("/") or env("PULLWISE_SERVER_URL", "").rstrip("/") or "http://localhost:8080"
+    install_url = f"{server_url}/install-worker.sh"
+    install_command = (
+        f"curl -fsSL {shell_quote(install_url)} | bash -s -- "
+        f"--server {shell_quote(server_url)} "
+        f"--worker-id {shell_quote(public['worker_id'])} "
+        f"--worker-token {shell_quote(token)} "
+        f"--worker-name {shell_quote(public.get('name') or public['worker_id'])}"
+    )
     payload = {
         "worker": public,
         "worker_id": public["worker_id"],
         "worker_token": token,
         "server_url": server_url,
+        "install_url": install_url,
+        "install_command": install_command,
         "provider": public["provider"],
         "suggested_env": {
             "PULLWISE_SERVER_URL": server_url,
             "PULLWISE_WORKER_ID": public["worker_id"],
             "PULLWISE_WORKER_TOKEN": token,
+            "PULLWISE_PROVIDER": public["provider"],
+            "PULLWISE_MAX_CONCURRENT_JOBS": str(public.get("max_concurrent_jobs") or 1),
+            "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
+            "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
         },
     }
     return payload
+
+
+def shell_quote(value: object) -> str:
+    text = public_issue_text(value)
+    if not text:
+        return "''"
+    return "'" + text.replace("'", "'\"'\"'") + "'"
+
+
+def worker_install_script() -> str:
+    return """#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE_USER="pullwise-worker"
+CONFIG_DIR="/etc/pullwise-worker"
+ENV_FILE="$CONFIG_DIR/worker.env"
+BIN_PATH="/usr/local/bin/pullwise-worker"
+DATA_DIR="/var/lib/pullwise-worker"
+CHECKOUT_ROOT="$DATA_DIR/checkouts"
+LOG_DIR="/var/log/pullwise-worker"
+SERVER_URL=""
+WORKER_ID=""
+WORKER_TOKEN=""
+WORKER_NAME="pullwise-worker"
+MAX_CONCURRENT_JOBS="8"
+PROVIDER="codex"
+WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-pullwise-worker}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --server) SERVER_URL="${2:-}"; shift 2 ;;
+    --worker-id) WORKER_ID="${2:-}"; shift 2 ;;
+    --worker-token) WORKER_TOKEN="${2:-}"; shift 2 ;;
+    --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
+    --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-8}"; shift 2 ;;
+    --provider) PROVIDER="${2:-codex}"; shift 2 ;;
+    --package) WORKER_PACKAGE="${2:-pullwise-worker}"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "$SERVER_URL" ] || [ -z "$WORKER_ID" ] || [ -z "$WORKER_TOKEN" ]; then
+  echo "missing --server, --worker-id, or --worker-token" >&2
+  exit 2
+fi
+
+case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
+case "$(uname -m)" in x86_64|aarch64|arm64) ;; *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;; esac
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run as root so the installer can create service users and systemd units." >&2
+  exit 1
+fi
+
+need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
+need_cmd python3
+need_cmd git
+if ! command -v node >/dev/null 2>&1; then
+  echo "node is required for Codex CLI; install Node.js 20+ then rerun." >&2
+  exit 1
+fi
+if ! command -v codex >/dev/null 2>&1; then
+  if command -v npm >/dev/null 2>&1; then
+    npm install -g @openai/codex
+  else
+    echo "npm is required to install Codex CLI. Install codex manually and rerun." >&2
+    exit 1
+  fi
+fi
+
+id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
+
+python3 -m pip install --upgrade "$WORKER_PACKAGE"
+
+cat > "$ENV_FILE" <<EOF
+PULLWISE_SERVER_URL=$SERVER_URL
+PULLWISE_WORKER_ID=$WORKER_ID
+PULLWISE_WORKER_TOKEN=$WORKER_TOKEN
+PULLWISE_PROVIDER=$PROVIDER
+PULLWISE_MAX_CONCURRENT_JOBS=$MAX_CONCURRENT_JOBS
+PULLWISE_CHECKOUT_ROOT=$CHECKOUT_ROOT
+PULLWISE_LOG_DIR=$LOG_DIR
+PULLWISE_WORKER_PACKAGE=$WORKER_PACKAGE
+EOF
+chown root:"$SERVICE_USER" "$ENV_FILE"
+chmod 0640 "$ENV_FILE"
+
+cat > "$BIN_PATH" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -f /etc/pullwise-worker/worker.env ]; then
+  set -a
+  . /etc/pullwise-worker/worker.env
+  set +a
+fi
+exec python3 -m pullwise_worker.main "$@"
+EOF
+chmod 0755 "$BIN_PATH"
+
+cat > /etc/systemd/system/pullwise-worker.service <<EOF
+[Unit]
+Description=Pullwise Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$DATA_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$BIN_PATH run
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$DATA_DIR $LOG_DIR
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/logrotate.d/pullwise-worker <<EOF
+$LOG_DIR/*.log {
+  daily
+  rotate 14
+  compress
+  missingok
+  notifempty
+  create 0640 $SERVICE_USER $SERVICE_USER
+}
+EOF
+
+systemctl daemon-reload
+systemctl enable pullwise-worker >/dev/null
+systemctl restart pullwise-worker
+"$BIN_PATH" doctor || true
+
+echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
+echo "If Codex is not logged in, run: sudo -u $SERVICE_USER codex login"
+"""
 
 
 def worker_test_payload(worker: dict) -> dict:
@@ -3932,6 +4100,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "scanSystem": scan_system_status_payload(),
                 **readiness_payload(),
             })
+        if path == "/install-worker.sh":
+            return self.text(worker_install_script(), content_type="text/x-shellscript; charset=utf-8")
         if path == "/status/system":
             return self.json(scan_system_status_payload())
         if segments and segments[0] == "admin":
@@ -5330,6 +5500,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "hostname": public_issue_text(body.get("hostname")),
                     "region": public_issue_text(body.get("region")),
                     "last_error": clean_scan_error(body.get("last_error")),
+                    "doctor_status": public_issue_text(body.get("doctor_status")),
+                    "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,
+                    "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
+                    "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
                     "timestamp": now(),
                 }
             )
@@ -5714,6 +5888,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             response_headers = {**getattr(self, "_rate_limit_headers", {}), **(headers or {})}
             for key, value in response_headers.items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(body)
+        except _CLIENT_DISCONNECT_EXCEPTIONS as exc:
+            raise ClientDisconnected("Client disconnected before the response was sent.") from exc
+
+    def text(self, payload: str, status: int = HTTPStatus.OK, *, content_type: str = "text/plain; charset=utf-8") -> None:
+        body = payload.encode("utf-8")
+        try:
+            self.send_response(status)
+            self.send_cors_headers()
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            for key, value in getattr(self, "_rate_limit_headers", {}).items():
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)

@@ -17,6 +17,7 @@ class RouteHarness(app.PullwiseHandler):
         self._raw_body = json.dumps(self._body).encode("utf-8")
         self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie, **(headers or {})}
         self.payload = None
+        self.text_payload = None
         self.status = None
         self.headers_out = {}
         self.client_address = ("203.0.113.10", 51234)
@@ -31,6 +32,11 @@ class RouteHarness(app.PullwiseHandler):
         self.payload = payload
         self.status = status
         self.headers_out = headers or {}
+
+    def text(self, payload: str, status: int = HTTPStatus.OK, *, content_type: str = "text/plain; charset=utf-8") -> None:
+        self.text_payload = payload
+        self.status = status
+        self.headers_out = {"Content-Type": content_type}
 
     def error(self, status: int, message: str) -> None:
         self.json({"message": message}, status)
@@ -66,6 +72,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "PULLWISE_ADMIN_USER_IDS": "usr_admin",
                 "PULLWISE_ADMIN_EMAILS": "admin@example.com",
                 "PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": "120",
+                "PULLWISE_SERVER_URL": "http://localhost:8080",
+                "PULLWISE_API_BASE_URL": "",
             },
             clear=False,
         )
@@ -98,6 +106,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(stored["token_hash"], db.worker_token_hash(token))
         self.assertNotIn("worker_token", payload["worker"])
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_TOKEN"], token)
+        self.assertEqual(payload["install_url"], "http://localhost:8080/install-worker.sh")
+        self.assertIn("--worker-token", payload["install_command"])
+        self.assertIn(token, payload["install_command"])
+        self.assertIn("'US worker'", payload["install_command"])
         self.assertEqual(audit[0]["action"], "create_worker")
         self.assertEqual(audit[0]["actor_user_id"], "usr_admin")
 
@@ -105,6 +117,22 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(detail, "GET")
         self.assertEqual(detail.status, HTTPStatus.OK)
         self.assertNotIn("worker_token", json.dumps(detail.payload))
+
+    def test_public_install_script_contains_deploy_assets_but_no_worker_secrets(self) -> None:
+        install = RouteHarness("/install-worker.sh")
+
+        app.PullwiseHandler.route(install, "GET")
+
+        self.assertEqual(install.status, HTTPStatus.OK)
+        self.assertIn("text/x-shellscript", install.headers_out["Content-Type"])
+        self.assertIn("systemd", install.text_payload)
+        self.assertIn("pullwise-worker.service", install.text_payload)
+        self.assertIn("logrotate", install.text_payload)
+        self.assertIn("doctor", install.text_payload)
+        self.assertIn("codex login", install.text_payload)
+        self.assertIn("PULLWISE_WORKER_PACKAGE", install.text_payload)
+        self.assertNotIn("pww_", install.text_payload)
+        self.assertNotIn("WORKER_TOKEN=pww_", install.text_payload)
 
     def test_non_admin_cannot_access_admin_workers(self) -> None:
         denied = RouteHarness("/admin/workers", cookie=self.user_cookie)
@@ -152,6 +180,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         new_token = rotate.payload["worker_token"]
         self.assertNotEqual(new_token, token)
         self.assertEqual(db.get_worker(worker_id)["token_hash"], db.worker_token_hash(new_token))
+        self.assertIn(new_token, rotate.payload["install_command"])
 
         old_token_claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
         app.PullwiseHandler.route(old_token_claim, "POST")
@@ -182,6 +211,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "hostname": "secret-host",
                 "region": "us-east",
                 "last_error": "",
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "systemd_active": True,
+                "doctor_checked_at": app.now(),
             },
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -192,10 +225,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(worker["max_concurrent_jobs"], 4)
         self.assertEqual(worker["running_jobs"], 2)
         self.assertIsNotNone(worker["last_heartbeat_at"])
+        self.assertEqual(worker["doctor_status"], "ok")
+        self.assertEqual(worker["codex_ready"], 1)
+        self.assertEqual(worker["systemd_active"], 1)
         self.assertEqual(app.computed_worker_status(worker), "idle")
 
         db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "running_jobs": 4, "free_slots": 0, "timestamp": app.now()})
         self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "busy")
+        db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "running_jobs": 0, "free_slots": 4, "doctor_status": "degraded", "codex_ready": 0, "timestamp": app.now()})
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
         db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "last_error": "internal stack", "timestamp": app.now()})
         self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
         with patch("pullwise_server.app.now", return_value=app.now() + 1000):
@@ -217,6 +255,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin.payload["workers"][0]["worker_id"], worker_id)
         self.assertIn("hostname", admin.payload["workers"][0])
         self.assertIn("last_error", admin.payload["workers"][0])
+        self.assertEqual(admin.payload["workers"][0]["doctor_status"], "ok")
+        self.assertTrue(admin.payload["workers"][0]["codex_ready"])
+        self.assertTrue(admin.payload["workers"][0]["systemd_active"])
 
     def test_worker_test_records_audit(self) -> None:
         payload, _token = self.create_worker()

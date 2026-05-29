@@ -207,6 +207,10 @@ def initialize() -> None:
                     hostname TEXT,
                     region TEXT,
                     last_error TEXT,
+                    doctor_status TEXT,
+                    codex_ready INTEGER,
+                    systemd_active INTEGER,
+                    doctor_checked_at INTEGER,
                     status TEXT NOT NULL DEFAULT 'online',
                     first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     last_heartbeat_at INTEGER,
@@ -228,6 +232,10 @@ def initialize() -> None:
                 ("workers", "token_last_used_at", "INTEGER"),
                 ("workers", "disabled_at", "INTEGER"),
                 ("workers", "deleted_at", "INTEGER"),
+                ("workers", "doctor_status", "TEXT"),
+                ("workers", "codex_ready", "INTEGER"),
+                ("workers", "systemd_active", "INTEGER"),
+                ("workers", "doctor_checked_at", "INTEGER"),
             ):
                 ensure_column(connection, table, column, definition)
             connection.execute(
@@ -734,9 +742,9 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                 INSERT INTO workers (
                     worker_id, name, version, provider, enabled, max_concurrent_jobs, running_jobs,
                     free_slots, hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
-                    created_at, updated_at
+                    created_at, updated_at, doctor_status, codex_ready, systemd_active, doctor_checked_at
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
@@ -746,6 +754,10 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     hostname = excluded.hostname,
                     region = COALESCE(excluded.region, workers.region),
                     last_error = excluded.last_error,
+                    doctor_status = COALESCE(excluded.doctor_status, workers.doctor_status),
+                    codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
+                    systemd_active = COALESCE(excluded.systemd_active, workers.systemd_active),
+                    doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
                     status = CASE WHEN workers.enabled = 0 THEN 'disabled' ELSE 'online' END,
                     last_heartbeat_at = excluded.last_heartbeat_at,
                     updated_at = excluded.updated_at
@@ -765,6 +777,10 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     timestamp,
                     timestamp,
                     timestamp,
+                    record.get("doctor_status"),
+                    record.get("codex_ready"),
+                    record.get("systemd_active"),
+                    record.get("doctor_checked_at"),
                 ),
             )
             row = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
