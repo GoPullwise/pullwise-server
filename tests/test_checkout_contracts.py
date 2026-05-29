@@ -79,7 +79,7 @@ class CheckoutContractsTest(unittest.TestCase):
             self.assertNotIn("ghs_secret_token", " ".join(extra_env.values()))
             self.assertIn("http.extraHeader", extra_env.values())
 
-    def test_prepare_checkout_sanitizes_legacy_scan_source_metadata(self) -> None:
+    def test_prepare_checkout_sanitizes_malformed_scan_source_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             scan = {
                 "userId": "usr_1",
@@ -109,7 +109,7 @@ class CheckoutContractsTest(unittest.TestCase):
                 try:
                     checkout.prepare_checkout("sc_123", scan, lambda: False)
                 except RuntimeError as exc:
-                    self.fail(f"prepare_checkout should sanitize legacy scan metadata: {exc}")
+                    self.fail(f"prepare_checkout should sanitize malformed scan metadata: {exc}")
 
             create_token.assert_called_once_with("123")
             command = run_git.call_args.args[0]

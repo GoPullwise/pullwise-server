@@ -465,7 +465,7 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertNotIn(token, json.dumps(pull_request))
         self.assertNotIn(token, json.dumps(app.ISSUES[0]["pullRequest"]))
 
-    def test_pull_request_creation_sanitizes_legacy_source_metadata(self) -> None:
+    def test_pull_request_creation_sanitizes_malformed_source_metadata(self) -> None:
         token = "ghs_secret_token"
         github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
         github_access["installationId"] = "123"

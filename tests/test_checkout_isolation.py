@@ -184,7 +184,7 @@ class ScanQueueTest(unittest.TestCase):
         self.assertEqual(claimed["id"], "sc_2")
         self.assertEqual(app.SCANS[1]["status"], "queued")
 
-    def test_queue_claim_sanitizes_legacy_scan_metadata_snapshot(self) -> None:
+    def test_queue_claim_sanitizes_malformed_scan_metadata_snapshot(self) -> None:
         app.SCANS = [
             {
                 "id": "sc_dirty",
