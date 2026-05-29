@@ -258,11 +258,33 @@ def api_key_prefix(token: str) -> str:
     return token[:16]
 
 
-def worker_token_record(handler: BaseHTTPRequestHandler) -> dict | None:
+def worker_token_record(handler: BaseHTTPRequestHandler, *, allow_disabled: bool = False) -> dict | None:
     token = bearer_token(handler)
     if not token:
         return None
+    if allow_disabled:
+        return db.get_worker_by_token(token, allow_disabled=True)
     return db.get_enabled_worker_token(token)
+
+
+def admin_user_ids() -> set[str]:
+    return {item.strip() for item in env("PULLWISE_ADMIN_USER_IDS", "").split(",") if item.strip()}
+
+
+def admin_emails() -> set[str]:
+    return {item.strip().lower() for item in env("PULLWISE_ADMIN_EMAILS", "").split(",") if item.strip()}
+
+
+def user_is_admin(user: dict | None) -> bool:
+    if not user:
+        return False
+    user_id = str(user.get("id") or "")
+    email = str(user.get("email") or "").strip().lower()
+    return user_id in admin_user_ids() or (email and email in admin_emails())
+
+
+def request_id_from_handler(handler: BaseHTTPRequestHandler) -> str:
+    return public_issue_text(first_header_value(handler, "X-Request-Id") or first_header_value(handler, "X-Correlation-Id"))
 
 
 def local_github_mocks_enabled() -> bool:
@@ -1752,10 +1774,136 @@ def summarize_findings(findings: list[dict]) -> dict:
     return summary
 
 
+def worker_heartbeat_timeout_seconds() -> int:
+    return max(60, env_int("PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", 120))
+
+
+def worker_version_compatible(worker: dict) -> bool:
+    minimum = env("PULLWISE_MIN_WORKER_VERSION", "").strip()
+    version = public_issue_text(worker.get("version"))
+    if not minimum or not version:
+        return True
+    return version >= minimum
+
+
+def worker_supported_provider(worker: dict) -> bool:
+    provider = public_issue_text(worker.get("provider")) or "codex"
+    allowed = {item.strip() for item in env("PULLWISE_WORKER_PROVIDERS", "codex").split(",") if item.strip()}
+    return provider in allowed
+
+
+def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str:
+    current_time = int(timestamp if timestamp is not None else now())
+    if not worker.get("enabled") or worker.get("deleted_at") is not None:
+        return "disabled"
+    last_heartbeat = pull_request_timestamp(worker.get("last_heartbeat_at"))
+    if not last_heartbeat or last_heartbeat < current_time - worker_heartbeat_timeout_seconds():
+        return "offline"
+    if clean_scan_error(worker.get("last_error")) or not worker_version_compatible(worker):
+        return "degraded"
+    if public_scan_count(worker.get("running_jobs")) >= max(1, public_scan_count(worker.get("max_concurrent_jobs"))):
+        return "busy"
+    return "idle"
+
+
+def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
+    payload = {
+        "worker_id": public_issue_text(worker.get("worker_id")),
+        "name": public_issue_text(worker.get("name")) or public_issue_text(worker.get("worker_id")),
+        "provider": public_issue_text(worker.get("provider")) or "codex",
+        "enabled": bool(worker.get("enabled")),
+        "status": computed_worker_status(worker),
+        "last_heartbeat_at": pull_request_timestamp(worker.get("last_heartbeat_at")),
+        "max_concurrent_jobs": public_scan_count(worker.get("max_concurrent_jobs")) or 1,
+        "running_jobs": public_scan_count(worker.get("running_jobs")),
+        "free_slots": public_scan_count(worker.get("free_slots")),
+        "version": public_issue_text(worker.get("version")),
+        "region": public_issue_text(worker.get("region")),
+        "created_at": pull_request_timestamp(worker.get("created_at")),
+        "updated_at": pull_request_timestamp(worker.get("updated_at")),
+        "disabled_at": pull_request_timestamp(worker.get("disabled_at")),
+        "deleted_at": pull_request_timestamp(worker.get("deleted_at")),
+    }
+    if admin:
+        payload["hostname"] = public_issue_text(worker.get("hostname"))
+        payload["last_error"] = clean_scan_error(worker.get("last_error"))
+        payload["test"] = worker_test_payload(worker)
+    return payload
+
+
+def worker_create_payload(worker: dict) -> dict:
+    public = worker_public_payload(worker, admin=True)
+    token = public_issue_text(worker.get("worker_token"))
+    server_url = env("PULLWISE_API_BASE_URL", "").rstrip("/") or env("PULLWISE_SERVER_URL", "").rstrip("/") or "http://localhost:8080"
+    payload = {
+        "worker": public,
+        "worker_id": public["worker_id"],
+        "worker_token": token,
+        "server_url": server_url,
+        "provider": public["provider"],
+        "suggested_env": {
+            "PULLWISE_SERVER_URL": server_url,
+            "PULLWISE_WORKER_ID": public["worker_id"],
+            "PULLWISE_WORKER_TOKEN": token,
+        },
+    }
+    return payload
+
+
+def worker_test_payload(worker: dict) -> dict:
+    token_used_at = pull_request_timestamp(worker.get("token_last_used_at"))
+    checks = {
+        "exists": bool(worker and not worker.get("deleted_at")),
+        "enabled": bool(worker.get("enabled")),
+        "recentHeartbeat": bool(
+            pull_request_timestamp(worker.get("last_heartbeat_at"))
+            and pull_request_timestamp(worker.get("last_heartbeat_at")) >= now() - worker_heartbeat_timeout_seconds()
+        ),
+        "tokenRecentlyUsed": bool(token_used_at),
+        "versionCompatible": worker_version_compatible(worker),
+        "providerSupported": worker_supported_provider(worker),
+        "freeSlotsNormal": public_scan_count(worker.get("free_slots")) <= max(1, public_scan_count(worker.get("max_concurrent_jobs"))),
+        "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
+    }
+    return {"ok": all(checks.values()), "checks": checks}
+
+
+def scan_system_status_payload(*, admin: bool = False) -> dict:
+    workers = [worker_public_payload(worker, admin=admin) for worker in db.list_workers()]
+    queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
+    running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
+    online = [worker for worker in workers if worker["status"] in {"idle", "busy"}]
+    degraded = [worker for worker in workers if worker["status"] == "degraded"]
+    offline = [worker for worker in workers if worker["status"] == "offline"]
+    total_capacity = sum(public_scan_count(worker.get("max_concurrent_jobs")) for worker in online + degraded)
+    available_capacity = sum(public_scan_count(worker.get("free_slots")) for worker in online + degraded)
+    if not workers or (not online and not degraded):
+        system_status = "down"
+    elif degraded or offline:
+        system_status = "degraded"
+    else:
+        system_status = "ok"
+    payload = {
+        "scanSystemStatus": system_status,
+        "onlineWorkerCount": len(online),
+        "totalWorkerCount": len(workers),
+        "totalCapacity": total_capacity,
+        "availableCapacity": available_capacity,
+        "runningJobs": running_jobs,
+        "queuedJobs": queued_jobs,
+        "degradedWorkerCount": len(degraded),
+        "offlineWorkerCount": len(offline),
+    }
+    if admin:
+        payload["workers"] = workers
+    return payload
+
+
 def clean_scan_error(value: object) -> str:
     if not isinstance(value, str):
         return ""
-    return value.replace("\x00", "").splitlines()[0].strip()[:500]
+    lines = value.replace("\x00", "").splitlines()
+    return (lines[0] if lines else "").strip()[:500]
 
 
 def issue_payload(issue: dict) -> dict:
@@ -3338,6 +3486,7 @@ def session_payload(session: dict | None) -> dict:
     return {
         "authenticated": True,
         "user": user_public(user),
+        "admin": user_is_admin(user),
         "github": {
             "identityConnected": has_real_github_identity(user),
             "login": public_issue_text(user.get("githubLogin")) or None,
@@ -3780,8 +3929,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "time": now(),
                 "mode": env("PULLWISE_MODE", "local"),
                 "database": {"type": "sqlite", "path": db.database_path()},
+                "scanSystem": scan_system_status_payload(),
                 **readiness_payload(),
             })
+        if path == "/status/system":
+            return self.json(scan_system_status_payload())
+        if segments and segments[0] == "admin":
+            return self.handle_admin_get(segments, params)
         if path == "/pricing":
             session = self.current_session()
             user = USERS.get(session["userId"]) if session else None
@@ -3882,6 +4036,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_external_api_post(api_segments, body)
         if segments and segments[0] == "worker":
             return self.handle_worker_post(segments, body)
+        if segments and segments[0] == "admin":
+            return self.handle_admin_post(segments, body)
         if path == "/auth/sign-out":
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
@@ -4233,6 +4389,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_patch(self, segments: list[str]) -> None:
         body = self.read_json()
+        if segments and segments[0] == "admin":
+            return self.handle_admin_patch(segments, body)
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "status":
             session = self.current_session()
             if not session:
@@ -4256,6 +4414,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_delete(self, segments: list[str]) -> None:
+        if segments and segments[0] == "admin":
+            return self.handle_admin_delete(segments)
         if len(segments) == 2 and segments[0] == "api-keys":
             return self.handle_api_key_delete(segments[1])
         if len(segments) == 2 and segments[0] == "integrations":
@@ -4989,15 +5149,161 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "API key not found.")
         return self.json({"ok": True, "id": public_issue_text(key_id), "revoked": True})
 
-    def require_worker(self) -> dict | None:
-        record = worker_token_record(self)
+    def require_admin_session(self) -> dict | None:
+        session = self.current_session()
+        if not session:
+            self.error(HTTPStatus.UNAUTHORIZED, "Sign in before using admin APIs.")
+            return None
+        user = USERS.get(session["userId"])
+        if not user_is_admin(user):
+            self.error(HTTPStatus.FORBIDDEN, "Admin access is required.")
+            return None
+        return session
+
+    def audit_worker_action(
+        self,
+        session: dict,
+        action: str,
+        *,
+        worker_id: str | None = None,
+        changed_fields: dict | None = None,
+        success: bool = True,
+        error: str | None = None,
+    ) -> None:
+        db.record_worker_audit_event(
+            {
+                "actor_user_id": session.get("userId"),
+                "action": action,
+                "worker_id": worker_id,
+                "changed_fields": changed_fields or {},
+                "request_id": request_id_from_handler(self),
+                "created_at": now(),
+                "success": success,
+                "error": clean_scan_error(error),
+            }
+        )
+
+    def handle_admin_get(self, segments: list[str], params: dict) -> None:
+        session = self.require_admin_session()
+        if not session:
+            return
+        if segments == ["admin", "status"]:
+            return self.json(scan_system_status_payload(admin=True))
+        if segments == ["admin", "workers"]:
+            workers = [worker_public_payload(worker, admin=True) for worker in db.list_workers()]
+            return self.json({"items": workers, "workers": workers})
+        if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
+            worker = db.get_worker(segments[2], include_deleted=True)
+            if not worker:
+                return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+            audit = db.list_worker_audit_events(segments[2], limit=50)
+            return self.json({"worker": worker_public_payload(worker, admin=True), "auditEvents": audit})
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def handle_admin_post(self, segments: list[str], body: dict) -> None:
+        session = self.require_admin_session()
+        if not session:
+            return
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if segments == ["admin", "workers"]:
+            return self.handle_admin_worker_create(session, body)
+        if len(segments) == 4 and segments[:2] == ["admin", "workers"]:
+            worker_id = clean_github_access_text(segments[2]) or ""
+            action = segments[3]
+            if action == "enable":
+                worker = db.set_worker_enabled(worker_id, True)
+                if not worker:
+                    self.audit_worker_action(session, "enable_worker", worker_id=worker_id, success=False, error="Worker not found.")
+                    return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+                self.audit_worker_action(session, "enable_worker", worker_id=worker_id, changed_fields={"enabled": True})
+                return self.json({"worker": worker_public_payload(worker, admin=True)})
+            if action == "disable":
+                worker = db.set_worker_enabled(worker_id, False)
+                if not worker:
+                    self.audit_worker_action(session, "disable_worker", worker_id=worker_id, success=False, error="Worker not found.")
+                    return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+                self.audit_worker_action(session, "disable_worker", worker_id=worker_id, changed_fields={"enabled": False})
+                return self.json({"worker": worker_public_payload(worker, admin=True)})
+            if action == "rotate-token":
+                worker = db.rotate_worker_token(worker_id)
+                if not worker:
+                    self.audit_worker_action(session, "rotate_worker_token", worker_id=worker_id, success=False, error="Worker not found.")
+                    return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+                self.audit_worker_action(session, "rotate_worker_token", worker_id=worker_id, changed_fields={"tokenHash": "rotated"})
+                return self.json(worker_create_payload(worker))
+            if action == "test":
+                worker = db.get_worker(worker_id, include_deleted=True)
+                if not worker:
+                    self.audit_worker_action(session, "test_worker", worker_id=worker_id, success=False, error="Worker not found.")
+                    return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+                result = worker_test_payload(worker)
+                self.audit_worker_action(session, "test_worker", worker_id=worker_id, changed_fields={"result": result.get("ok")})
+                return self.json({"worker": worker_public_payload(worker, admin=True), "result": result})
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def handle_admin_worker_create(self, session: dict, body: dict) -> None:
+        worker = db.create_worker(
+            {
+                "name": public_issue_text(body.get("name")) or "Worker",
+                "provider": public_issue_text(body.get("provider")) or "codex",
+                "region": public_issue_text(body.get("region")),
+                "version": public_issue_text(body.get("version")),
+                "max_concurrent_jobs": public_scan_count(body.get("max_concurrent_jobs")) or 1,
+            }
+        )
+        self.audit_worker_action(
+            session,
+            "create_worker",
+            worker_id=worker.get("worker_id"),
+            changed_fields={"name": worker.get("name"), "provider": worker.get("provider"), "region": worker.get("region")},
+        )
+        return self.json(worker_create_payload(worker), HTTPStatus.CREATED)
+
+    def handle_admin_patch(self, segments: list[str], body: dict) -> None:
+        session = self.require_admin_session()
+        if not session:
+            return
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
+            worker_id = clean_github_access_text(segments[2]) or ""
+            changed = {
+                key: body.get(key)
+                for key in ("name", "provider", "region", "version", "max_concurrent_jobs")
+                if key in body
+            }
+            worker = db.update_worker(worker_id, changed)
+            if not worker:
+                self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error="Worker not found.")
+                return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+            self.audit_worker_action(session, "update_worker", worker_id=worker_id, changed_fields=changed)
+            return self.json({"worker": worker_public_payload(worker, admin=True)})
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def handle_admin_delete(self, segments: list[str]) -> None:
+        session = self.require_admin_session()
+        if not session:
+            return
+        if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
+            worker_id = clean_github_access_text(segments[2]) or ""
+            worker = db.soft_delete_worker(worker_id)
+            if not worker:
+                self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
+                return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+            self.audit_worker_action(session, "delete_worker", worker_id=worker_id, changed_fields={"deleted": True})
+            return self.json({"worker": worker_public_payload(worker, admin=True), "deleted": True})
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def require_worker(self, *, allow_disabled: bool = False) -> dict | None:
+        record = worker_token_record(self, allow_disabled=allow_disabled)
         if not record:
             self.error(HTTPStatus.UNAUTHORIZED, "A valid worker token is required.")
             return None
         return record
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
-        if not self.require_worker():
+        if not self.require_worker(allow_disabled=segments == ["worker", "heartbeat"]):
             return
         if not isinstance(body, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
@@ -5022,6 +5328,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "running_jobs": public_scan_count(body.get("running_jobs")),
                     "free_slots": public_scan_count(body.get("free_slots")),
                     "hostname": public_issue_text(body.get("hostname")),
+                    "region": public_issue_text(body.get("region")),
                     "last_error": clean_scan_error(body.get("last_error")),
                     "timestamp": now(),
                 }

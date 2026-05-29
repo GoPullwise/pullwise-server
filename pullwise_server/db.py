@@ -196,16 +196,52 @@ def initialize() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS workers (
                     worker_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    token_hash TEXT UNIQUE,
                     version TEXT,
                     provider TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
                     max_concurrent_jobs INTEGER NOT NULL DEFAULT 1,
                     running_jobs INTEGER NOT NULL DEFAULT 0,
                     free_slots INTEGER NOT NULL DEFAULT 0,
                     hostname TEXT,
+                    region TEXT,
                     last_error TEXT,
                     status TEXT NOT NULL DEFAULT 'online',
                     first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                    last_heartbeat_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                    last_heartbeat_at INTEGER,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    token_last_used_at INTEGER,
+                    disabled_at INTEGER,
+                    deleted_at INTEGER
+                )
+                """
+            )
+            for table, column, definition in (
+                ("workers", "name", "TEXT"),
+                ("workers", "token_hash", "TEXT"),
+                ("workers", "enabled", "INTEGER NOT NULL DEFAULT 1"),
+                ("workers", "region", "TEXT"),
+                ("workers", "created_at", "INTEGER"),
+                ("workers", "updated_at", "INTEGER"),
+                ("workers", "token_last_used_at", "INTEGER"),
+                ("workers", "disabled_at", "INTEGER"),
+                ("workers", "deleted_at", "INTEGER"),
+            ):
+                ensure_column(connection, table, column, definition)
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS worker_audit_events (
+                    id TEXT PRIMARY KEY,
+                    actor_user_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    worker_id TEXT,
+                    changed_fields TEXT NOT NULL DEFAULT '{}',
+                    request_id TEXT,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    success INTEGER NOT NULL DEFAULT 1,
+                    error TEXT
                 )
                 """
             )
@@ -266,6 +302,7 @@ def initialize() -> None:
             configured_worker_token = os.environ.get("PULLWISE_WORKER_TOKEN", "").strip()
             if configured_worker_token:
                 token_hash = worker_token_hash(configured_worker_token)
+                env_worker_id = os.environ.get("PULLWISE_WORKER_ID", "").strip() or "env_worker"
                 connection.execute(
                     """
                     INSERT INTO worker_tokens (id, name, token_hash, enabled)
@@ -274,6 +311,28 @@ def initialize() -> None:
                     """,
                     (stable_id("wt", token_hash), "env", token_hash),
                 )
+                connection.execute(
+                    """
+                    INSERT INTO workers (
+                        worker_id, name, token_hash, provider, enabled, status,
+                        created_at, updated_at
+                    )
+                    VALUES (?, 'Environment worker', ?, 'codex', 1, 'offline', strftime('%s', 'now'), strftime('%s', 'now'))
+                    ON CONFLICT(worker_id) DO UPDATE SET
+                        token_hash = excluded.token_hash,
+                        enabled = 1,
+                        deleted_at = NULL,
+                        updated_at = excluded.updated_at
+                    """,
+                    (env_worker_id, token_hash),
+                )
+
+
+def ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    if any(row[1] == column for row in rows):
+        return
+    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def load_state() -> dict[str, Any]:
@@ -437,6 +496,165 @@ def create_worker_token(name: str = "worker") -> dict[str, Any]:
     return record
 
 
+def create_worker(record: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    token = "pww_" + secrets.token_urlsafe(32)
+    token_hash = worker_token_hash(token)
+    worker_id = str(record.get("worker_id") or stable_id("wk", token_hash)).strip()
+    timestamp = int(record.get("timestamp") or time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO workers (
+                    worker_id, name, token_hash, provider, enabled, status,
+                    max_concurrent_jobs, running_jobs, free_slots, version,
+                    hostname, region, last_error, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, 1, 'offline', ?, 0, ?, ?, NULL, ?, NULL, ?, ?)
+                """,
+                (
+                    worker_id,
+                    str(record.get("name") or "Worker")[:120],
+                    token_hash,
+                    str(record.get("provider") or "codex")[:60],
+                    max(1, int(record.get("max_concurrent_jobs") or 1)),
+                    max(1, int(record.get("max_concurrent_jobs") or 1)),
+                    record.get("version"),
+                    record.get("region"),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            worker = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
+    worker["worker_token"] = token
+    return worker
+
+
+def list_workers(*, include_deleted: bool = False) -> list[dict[str, Any]]:
+    initialize()
+    where = "" if include_deleted else "WHERE deleted_at IS NULL"
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            f"SELECT * FROM workers {where} ORDER BY created_at DESC, worker_id ASC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_worker(worker_id: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
+    initialize()
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return None
+    where_deleted = "" if include_deleted else "AND deleted_at IS NULL"
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                f"SELECT * FROM workers WHERE worker_id = ? {where_deleted}",
+                (worker_id,),
+            ).fetchone()
+        )
+
+
+def update_worker(worker_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+    initialize()
+    allowed = {
+        "name": "name",
+        "provider": "provider",
+        "region": "region",
+        "version": "version",
+        "max_concurrent_jobs": "max_concurrent_jobs",
+    }
+    assignments = []
+    values: list[Any] = []
+    for source_key, column in allowed.items():
+        if source_key not in patch:
+            continue
+        value = patch[source_key]
+        if column == "max_concurrent_jobs":
+            value = max(1, int(value or 1))
+        elif value is not None:
+            value = str(value)[:120]
+        assignments.append(f"{column} = ?")
+        values.append(value)
+    if not assignments:
+        return get_worker(worker_id)
+    timestamp = int(time.time())
+    assignments.append("updated_at = ?")
+    values.append(timestamp)
+    values.append(worker_id)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                f"UPDATE workers SET {', '.join(assignments)} WHERE worker_id = ? AND deleted_at IS NULL",
+                tuple(values),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone())
+
+
+def set_worker_enabled(worker_id: str, enabled: bool) -> dict[str, Any] | None:
+    initialize()
+    timestamp = int(time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                UPDATE workers
+                SET enabled = ?,
+                    disabled_at = CASE WHEN ? = 0 THEN ? ELSE NULL END,
+                    updated_at = ?
+                WHERE worker_id = ? AND deleted_at IS NULL
+                """,
+                (1 if enabled else 0, 1 if enabled else 0, timestamp, timestamp, worker_id),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone())
+
+
+def soft_delete_worker(worker_id: str) -> dict[str, Any] | None:
+    initialize()
+    timestamp = int(time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                UPDATE workers
+                SET enabled = 0, deleted_at = ?, disabled_at = COALESCE(disabled_at, ?), updated_at = ?
+                WHERE worker_id = ? AND deleted_at IS NULL
+                """,
+                (timestamp, timestamp, timestamp, worker_id),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone())
+
+
+def rotate_worker_token(worker_id: str) -> dict[str, Any] | None:
+    initialize()
+    token = "pww_" + secrets.token_urlsafe(32)
+    token_hash = worker_token_hash(token)
+    timestamp = int(time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            updated = connection.execute(
+                """
+                UPDATE workers
+                SET token_hash = ?, updated_at = ?
+                WHERE worker_id = ? AND deleted_at IS NULL
+                """,
+                (token_hash, timestamp, worker_id),
+            ).rowcount
+            if updated != 1:
+                return None
+            worker = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
+    worker["worker_token"] = token
+    return worker
+
+
 def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
     initialize()
     token = str(token or "").strip()
@@ -447,13 +665,56 @@ def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
         connection.row_factory = sqlite3.Row
         with connection:
             row = connection.execute(
+                """
+                SELECT * FROM workers
+                WHERE token_hash = ? AND enabled = 1 AND deleted_at IS NULL
+                """,
+                (token_hash,),
+            ).fetchone()
+            if row:
+                connection.execute(
+                    "UPDATE worker_tokens SET last_used_at = strftime('%s', 'now') WHERE token_hash = ?",
+                    (token_hash,),
+                )
+                connection.execute(
+                    "UPDATE workers SET token_last_used_at = strftime('%s', 'now'), updated_at = strftime('%s', 'now') WHERE token_hash = ?",
+                    (token_hash,),
+                )
+                return row_to_dict(row)
+            legacy = connection.execute(
                 "SELECT * FROM worker_tokens WHERE token_hash = ? AND enabled = 1",
+                (token_hash,),
+            ).fetchone()
+            if not legacy:
+                return None
+            connection.execute(
+                "UPDATE worker_tokens SET last_used_at = strftime('%s', 'now') WHERE token_hash = ?",
+                (token_hash,),
+            )
+            return row_to_dict(legacy)
+
+
+def get_worker_by_token(token: str, *, allow_disabled: bool = False) -> dict[str, Any] | None:
+    initialize()
+    token = str(token or "").strip()
+    if not token:
+        return None
+    token_hash = worker_token_hash(token)
+    enabled_clause = "" if allow_disabled else "AND enabled = 1"
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            row = connection.execute(
+                f"""
+                SELECT * FROM workers
+                WHERE token_hash = ? {enabled_clause} AND deleted_at IS NULL
+                """,
                 (token_hash,),
             ).fetchone()
             if not row:
                 return None
             connection.execute(
-                "UPDATE worker_tokens SET last_used_at = strftime('%s', 'now') WHERE token_hash = ?",
+                "UPDATE workers SET token_last_used_at = strftime('%s', 'now'), updated_at = strftime('%s', 'now') WHERE token_hash = ?",
                 (token_hash,),
             )
             return row_to_dict(row)
@@ -471,10 +732,11 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
             connection.execute(
                 """
                 INSERT INTO workers (
-                    worker_id, version, provider, max_concurrent_jobs, running_jobs,
-                    free_slots, hostname, last_error, status, first_seen_at, last_heartbeat_at
+                    worker_id, name, version, provider, enabled, max_concurrent_jobs, running_jobs,
+                    free_slots, hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, ?)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
@@ -482,24 +744,90 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     running_jobs = excluded.running_jobs,
                     free_slots = excluded.free_slots,
                     hostname = excluded.hostname,
+                    region = COALESCE(excluded.region, workers.region),
                     last_error = excluded.last_error,
-                    status = 'online',
-                    last_heartbeat_at = excluded.last_heartbeat_at
+                    status = CASE WHEN workers.enabled = 0 THEN 'disabled' ELSE 'online' END,
+                    last_heartbeat_at = excluded.last_heartbeat_at,
+                    updated_at = excluded.updated_at
                 """,
                 (
                     worker_id,
+                    record.get("name") or worker_id,
                     record.get("version"),
                     record.get("provider") or "codex",
                     max(1, int(record.get("max_concurrent_jobs") or 1)),
                     max(0, int(record.get("running_jobs") or 0)),
                     max(0, int(record.get("free_slots") or 0)),
                     record.get("hostname"),
+                    record.get("region"),
                     record.get("last_error"),
+                    timestamp,
+                    timestamp,
                     timestamp,
                     timestamp,
                 ),
             )
-            return row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
+            row = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
+            if row.get("enabled") == 0:
+                row["status"] = "disabled"
+            return row
+
+
+def record_worker_audit_event(record: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    event_id = str(record.get("id") or stable_id("wae", f"{record.get('action')}:{time.time_ns()}"))
+    changed_fields = record.get("changed_fields")
+    changed_text = changed_fields if isinstance(changed_fields, str) else json.dumps(changed_fields or {}, sort_keys=True)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO worker_audit_events (
+                    id, actor_user_id, action, worker_id, changed_fields,
+                    request_id, created_at, success, error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    str(record.get("actor_user_id") or ""),
+                    str(record.get("action") or ""),
+                    record.get("worker_id"),
+                    changed_text,
+                    record.get("request_id"),
+                    int(record.get("created_at") or time.time()),
+                    1 if record.get("success", True) else 0,
+                    record.get("error"),
+                ),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM worker_audit_events WHERE id = ?", (event_id,)).fetchone()) or {}
+
+
+def list_worker_audit_events(worker_id: str | None = None, *, limit: int = 100) -> list[dict[str, Any]]:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        if worker_id:
+            rows = connection.execute(
+                """
+                SELECT * FROM worker_audit_events
+                WHERE worker_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (worker_id, max(1, min(500, int(limit)))),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT * FROM worker_audit_events
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(500, int(limit))),),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
@@ -575,6 +903,13 @@ def claim_next_scan_jobs(
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
         try:
+            worker = connection.execute(
+                "SELECT enabled, deleted_at FROM workers WHERE worker_id = ?",
+                (worker_id,),
+            ).fetchone()
+            if worker and (int(worker["enabled"] or 0) == 0 or worker["deleted_at"] is not None):
+                connection.commit()
+                return []
             offline_after = max(60, int(os.environ.get("PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", "120") or 120))
             connection.execute(
                 """
