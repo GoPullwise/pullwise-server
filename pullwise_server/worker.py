@@ -1,10 +1,10 @@
 """
 Background scan worker.
 
-`POST /scans` inserts a queued record then calls `start_scan(scan_id)` here.
-The worker walks a fixed phase progression so the frontend can render a
-progress bar, calls into `review.run_review()` during the `ai` phase,
-appends findings to the ISSUES blob, and marks the scan done.
+Legacy in-process scan executor retained for older unit contracts and local
+helpers. The production scan path now stores queued jobs in SQLite and external
+workers pull them through `/worker/jobs/claim`; `POST /scans` must not call
+`start_scan()`.
 
 Concurrency note: actual scan work is processed by a fixed worker pool and
 claimed from queued scans only when global and per-user limits allow it. The

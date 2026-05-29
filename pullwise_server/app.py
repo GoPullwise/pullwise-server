@@ -56,6 +56,7 @@ SESSION_MAX_AGE = 60 * 60 * 24 * 7
 GITHUB_STATE_MAX_AGE = 60 * 10
 ISSUE_STATUSES = {"open", "fixed", "snoozed"}
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
+SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "lost", "retrying"}
 SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
 API_KEY_PREFIX = "pwk_"
@@ -211,7 +212,7 @@ def rate_limit_window_seconds() -> int:
 
 
 def rate_limit_exempt_path(method: str, path: str) -> bool:
-    return method == "OPTIONS" or path == "/health"
+    return method == "OPTIONS" or path == "/health" or path.startswith("/worker/")
 
 
 def request_header(handler: BaseHTTPRequestHandler, name: str) -> str | None:
@@ -255,6 +256,13 @@ def api_key_hash(token: str) -> str:
 
 def api_key_prefix(token: str) -> str:
     return token[:16]
+
+
+def worker_token_record(handler: BaseHTTPRequestHandler) -> dict | None:
+    token = bearer_token(handler)
+    if not token:
+        return None
+    return db.get_enabled_worker_token(token)
 
 
 def local_github_mocks_enabled() -> bool:
@@ -326,7 +334,9 @@ def persist_state(*, force: bool = False) -> None:
 
 def recover_interrupted_scans() -> int:
     recovered = 0
+    recovered_jobs = db.recover_expired_scan_jobs(now())
     with STATE_LOCK:
+        recovered += apply_recovered_scan_jobs_locked(recovered_jobs)
         for scan in SCANS:
             if scan.get("status") != "running":
                 continue
@@ -339,6 +349,46 @@ def recover_interrupted_scans() -> int:
         if recovered:
             mark_state_dirty()
             persist_state()
+    return recovered
+
+
+def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
+    recovered = 0
+    timestamp = now()
+    for job in recovered_jobs:
+        scan_id = public_issue_text(job.get("scan_id"))
+        if not scan_id:
+            continue
+        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        if not scan:
+            continue
+        if job.get("status") == "queued":
+            scan.update(
+                {
+                    "status": "queued",
+                    "progress": 0,
+                    "phase": None,
+                    "claimedAt": None,
+                    "claimedByWorkerId": None,
+                    "recoveredAt": timestamp,
+                    "recoveryReason": public_issue_text(job.get("reason")) or "timed_out",
+                }
+            )
+        elif job.get("status") == "failed":
+            scan.update(
+                {
+                    "status": "failed",
+                    "completedAt": timestamp,
+                    "error": "Scan worker timed out before completing the job.",
+                    "recoveredAt": timestamp,
+                    "recoveryReason": public_issue_text(job.get("reason")) or "timed_out",
+                }
+            )
+        else:
+            continue
+        recovered += 1
+    if recovered:
+        mark_state_dirty()
     return recovered
 
 
@@ -1469,6 +1519,13 @@ def scan_payload(scan: dict) -> dict:
         payload["repositorySelection"] = clean_github_access_text(scan.get("repositorySelection"))
     if "cloneUrl" in scan:
         payload["cloneUrl"] = trusted_github_web_url(scan.get("cloneUrl"))
+    if "jobId" in scan:
+        payload["jobId"] = public_issue_text(scan.get("jobId"))
+    claimed_by_worker_id = public_issue_text(scan.get("claimedByWorkerId"))
+    if claimed_by_worker_id:
+        payload["worker"] = {"id": claimed_by_worker_id}
+    if pull_request_timestamp(scan.get("claimedAt")):
+        payload["claimedAt"] = pull_request_timestamp(scan.get("claimedAt")) or 0
     queue = scan_queue_payload(scan)
     if queue:
         payload["queue"] = queue
@@ -1516,6 +1573,183 @@ def public_scan_issue_counts(value: object) -> dict:
         "low": public_scan_count(counts.get("low")),
         "info": public_scan_count(counts.get("info")),
     }
+
+
+def create_scan_job_for_scan(scan: dict) -> dict:
+    job = db.create_scan_job(
+        {
+            "job_id": make_id("job"),
+            "scan_id": scan.get("id"),
+            "repo": scan.get("repo"),
+            "branch": scan.get("branch"),
+            "commit": scan.get("commit"),
+            "status": "queued",
+            "created_at": scan.get("queuedAt") or scan.get("createdAt") or now(),
+            "user_id": scan.get("userId"),
+            "repo_id": scan.get("repoId"),
+            "github_repo_id": scan.get("githubRepoId"),
+            "installation_id": scan.get("installationId"),
+            "clone_url": scan.get("cloneUrl"),
+            "max_attempts": env_int("PULLWISE_SCAN_JOB_MAX_ATTEMPTS", 3),
+        }
+    )
+    scan["jobId"] = job.get("job_id")
+    return job
+
+
+def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
+    queued = [scan for scan in SCANS if scan.get("status") == "queued"]
+    active = [scan for scan in SCANS if scan.get("status") in {"queued", "running"}]
+    queued_for_user = [scan for scan in queued if str(scan.get("userId") or "") == user_id]
+    running_for_user = [
+        scan
+        for scan in SCANS
+        if scan.get("status") == "running" and str(scan.get("userId") or "") == user_id
+    ]
+    if len(queued) >= max_queued_scans_global():
+        return HTTPStatus.TOO_MANY_REQUESTS, "The global scan queue is full. Try again after queued scans start.", "QUEUE_FULL_GLOBAL"
+    if len(queued_for_user) >= max_queued_scans_per_user():
+        return HTTPStatus.TOO_MANY_REQUESTS, "You have too many queued scans. Wait for one to start before adding another.", "QUEUE_FULL_USER"
+    if len(active) >= max_active_scans_global():
+        return HTTPStatus.TOO_MANY_REQUESTS, "The scan system is at capacity. Try again after scans finish.", "ACTIVE_LIMIT_GLOBAL"
+    if len(running_for_user) >= max_scan_concurrency_per_user() and len(queued_for_user) >= max_queued_scans_per_user():
+        return HTTPStatus.TOO_MANY_REQUESTS, "You have too many active scans. Wait for one to finish before adding another.", "ACTIVE_LIMIT_USER"
+    return None
+
+
+def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
+    payload = {
+        "job_id": public_issue_text(job.get("job_id")),
+        "scan_id": public_issue_text(job.get("scan_id")),
+        "repo": clean_repository_full_name(job.get("repo")),
+        "branch": clean_github_access_text(job.get("branch")) or "main",
+        "commit": clean_github_access_text(job.get("commit")) or "pending",
+        "status": public_issue_text(job.get("status")) if job.get("status") in SCAN_JOB_STATUSES else "queued",
+        "attempt": public_scan_count(job.get("attempt")),
+        "claimed_by_worker_id": public_issue_text(job.get("claimed_by_worker_id")),
+        "claimed_at": pull_request_timestamp(job.get("claimed_at")),
+        "started_at": pull_request_timestamp(job.get("started_at")),
+        "completed_at": pull_request_timestamp(job.get("completed_at")),
+        "timeout_at": pull_request_timestamp(job.get("timeout_at")),
+        "error": clean_scan_error(job.get("error")),
+        "result_checksum": public_issue_text(job.get("result_checksum")),
+        "repo_id": clean_github_access_text(job.get("repo_id"), allow_int=True),
+        "github_repo_id": clean_github_access_text(job.get("github_repo_id"), allow_int=True),
+        "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
+        "clone_url": trusted_github_web_url(job.get("clone_url")),
+    }
+    if include_clone_token:
+        payload["clone_token"] = installation_clone_token_payload(job)
+    return payload
+
+
+def installation_clone_token_payload(job: dict) -> dict | None:
+    installation_id = clean_github_access_text(job.get("installation_id"), allow_int=True)
+    if not installation_id or not github_auth.app_api_configured():
+        return None
+    token_payload = github_auth.create_installation_access_token(installation_id)
+    token = token_payload.get("token")
+    if not token:
+        raise github_auth.GitHubError("GitHub did not return an installation access token.")
+    return {
+        "token": token,
+        "expires_at": public_issue_text(token_payload.get("expires_at")),
+        "repo": clean_repository_full_name(job.get("repo")),
+    }
+
+
+def worker_result_checksum(body: dict) -> str:
+    provided = clean_github_access_text(body.get("result_checksum"))
+    if provided:
+        return provided
+    digest_payload = {
+        "status": body.get("status"),
+        "findings": body.get("findings") if isinstance(body.get("findings"), list) else [],
+        "summary": body.get("summary") if isinstance(body.get("summary"), dict) else {},
+        "duration_ms": body.get("duration_ms"),
+        "error": body.get("error"),
+    }
+    data = json.dumps(db.to_jsonable(digest_payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
+
+
+def apply_worker_job_result(job: dict, body: dict) -> dict:
+    status = public_issue_text(body.get("status")).lower()
+    if status not in {"done", "failed"}:
+        raise ValueError("status must be done or failed")
+    attempt_id = clean_github_access_text(body.get("attempt_id")) or f"attempt_{public_scan_count(job.get('attempt'))}"
+    checksum = worker_result_checksum(body)
+    record_result = db.record_scan_job_result(
+        str(job["job_id"]),
+        attempt_id=attempt_id,
+        status=status,
+        result_checksum=checksum,
+        payload=body,
+    )
+    if record_result.get("conflict"):
+        return {"accepted": False, "conflict": True}
+    if record_result.get("duplicate"):
+        return {"accepted": True, "duplicate": True, "conflict": False}
+
+    findings = body.get("findings") if isinstance(body.get("findings"), list) else []
+    normalized_findings = [worker_finding_payload(job, item, index) for index, item in enumerate(findings)]
+    summary = public_scan_issue_counts(body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings))
+    completed_at = now()
+    with STATE_LOCK:
+        scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+        if scan:
+            scan.update(
+                {
+                    "status": status,
+                    "phase": "report",
+                    "progress": 100 if status == "done" else public_scan_progress(scan.get("progress")),
+                    "completedAt": completed_at,
+                    "durationMs": public_scan_count(body.get("duration_ms")),
+                    "issues": summary,
+                    "error": clean_scan_error(body.get("error")) if status == "failed" else "",
+                    "resultChecksum": checksum,
+                }
+            )
+            if status == "done":
+                ISSUES[:] = [
+                    issue
+                    for issue in ISSUES
+                    if not (issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id"))
+                ]
+                ISSUES.extend(normalized_findings)
+            mark_state_dirty()
+    return {"accepted": True, "duplicate": False, "conflict": False, "issueCount": len(normalized_findings)}
+
+
+def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
+    source = finding if isinstance(finding, dict) else {}
+    scan_id = public_issue_text(job.get("scan_id"))
+    repo = clean_repository_full_name(job.get("repo"))
+    issue = dict(source)
+    issue.setdefault("id", make_id("iss"))
+    issue.update(
+        {
+            "userId": public_issue_text(job.get("user_id")),
+            "scanId": scan_id,
+            "jobId": public_issue_text(job.get("job_id")),
+            "repo": repo,
+            "branch": clean_github_access_text(job.get("branch")) or "main",
+            "status": public_issue_status(issue.get("status")),
+            "createdAt": now(),
+        }
+    )
+    if not public_issue_text(issue.get("title")):
+        issue["title"] = f"Finding {index + 1}"
+    return issue
+
+
+def summarize_findings(findings: list[dict]) -> dict:
+    summary = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for finding in findings:
+        severity = review._safe_severity(finding.get("severity"))
+        if severity in summary:
+            summary[severity] += 1
+    return summary
 
 
 def clean_scan_error(value: object) -> str:
@@ -1638,6 +1872,8 @@ def scan_queue_payload(scan: dict) -> dict | None:
     limits = {
         "global": max_scan_concurrency(),
         "perUser": max_scan_concurrency_per_user(),
+        "queuedGlobal": max_queued_scans_global(),
+        "queuedPerUser": max_queued_scans_per_user(),
     }
     running = [item for item in SCANS if item.get("status") == "running"]
     running_for_user = [item for item in running if str(item.get("userId") or "") == user_id]
@@ -1710,11 +1946,23 @@ def scan_queue_sort_key(scan: dict) -> tuple[int, str]:
 
 
 def max_scan_concurrency() -> int:
-    return max(1, env_int("PULLWISE_MAX_CONCURRENT_SCANS", 1))
+    return max(1, env_int("PULLWISE_MAX_RUNNING_SCANS_GLOBAL", env_int("PULLWISE_MAX_CONCURRENT_SCANS", 1)))
 
 
 def max_scan_concurrency_per_user() -> int:
-    return max(1, env_int("PULLWISE_MAX_CONCURRENT_SCANS_PER_USER", 1))
+    return max(1, env_int("PULLWISE_MAX_RUNNING_SCANS_PER_USER", env_int("PULLWISE_MAX_CONCURRENT_SCANS_PER_USER", 1)))
+
+
+def max_queued_scans_global() -> int:
+    return max(1, env_int("PULLWISE_MAX_QUEUED_SCANS_GLOBAL", 1000))
+
+
+def max_queued_scans_per_user() -> int:
+    return max(1, env_int("PULLWISE_MAX_QUEUED_SCANS_PER_USER", 20))
+
+
+def max_active_scans_global() -> int:
+    return max_scan_concurrency() + max_queued_scans_global()
 
 
 def plural(count: int, word: str) -> str:
@@ -3566,6 +3814,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_github_install_start(params)
         if path == "/integrations/github/manage/start":
             return self.handle_github_manage_start(params)
+        if path == "/dev/magic-links" or path == "/auth/email/callback":
+            return self.error(HTTPStatus.NOT_FOUND, "Route not found")
         if path == "/repositories":
             return self.json(self.repositories_payload())
         if path == "/scans":
@@ -3630,6 +3880,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         api_segments = external_api_segments(segments)
         if api_segments is not None:
             return self.handle_external_api_post(api_segments, body)
+        if segments and segments[0] == "worker":
+            return self.handle_worker_post(segments, body)
         if path == "/auth/sign-out":
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
@@ -3719,18 +3971,25 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         scan_error_repo_id = clean_github_access_text(scan.get("repoId"), allow_int=True)
                         scan = None
                     elif scan is None:
-                        repo_meta, request_key = repository_item_for_scan_request(github_access, body)
-                        if not repo_meta:
-                            scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
-                            scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+                        limit_error = scan_queue_limit_error(session["userId"])
+                        if limit_error:
+                            scan_error = (limit_error[0], limit_error[1])
+                            scan_error_code = limit_error[2]
+                        if scan_error is not None:
+                            pass
                         else:
-                            repository = clean_repository_full_name(repo_meta.get("fullName"), requested_repository)
-                            if not repository:
+                            repo_meta, request_key = repository_item_for_scan_request(github_access, body)
+                            if not repo_meta:
                                 scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
                                 scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
-                            elif request_key != "repoId" and not repository_is_authorized(github_access, repository):
-                                scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
-                                scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+                            else:
+                                repository = clean_repository_full_name(repo_meta.get("fullName"), requested_repository)
+                                if not repository:
+                                    scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                                    scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+                                elif request_key != "repoId" and not repository_is_authorized(github_access, repository):
+                                    scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
+                                    scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
                         if scan_error is None:
                             scan_id = make_id("sc")
                             try:
@@ -3804,6 +4063,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             }
                             if request_id:
                                 scan["requestId"] = request_id
+                            create_scan_job_for_scan(scan)
                             SCANS.insert(0, scan)
                             scan_created = True
                             mark_state_dirty()
@@ -3843,7 +4103,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     githubRepoId=scan.get("githubRepoId"),
                     quotaBucketIds=scan.get("quotaBucketIds"),
                 )
-                worker.start_scan(scan["id"])
+                worker.notify_queue_changed()
             else:
                 scan_logging.log_event(
                     "scan_request_reused",
@@ -3866,6 +4126,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 scan["status"] = "cancelled"
                 scan["completedAt"] = now()
                 mark_state_dirty()
+                db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
             worker.notify_queue_changed()
             return self.json(scan_payload(scan))
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "preview":
@@ -4728,6 +4989,169 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "API key not found.")
         return self.json({"ok": True, "id": public_issue_text(key_id), "revoked": True})
 
+    def require_worker(self) -> dict | None:
+        record = worker_token_record(self)
+        if not record:
+            self.error(HTTPStatus.UNAUTHORIZED, "A valid worker token is required.")
+            return None
+        return record
+
+    def handle_worker_post(self, segments: list[str], body: dict) -> None:
+        if not self.require_worker():
+            return
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if segments == ["worker", "heartbeat"]:
+            return self.handle_worker_heartbeat(body)
+        if segments == ["worker", "jobs", "claim"]:
+            return self.handle_worker_job_claim(body)
+        if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "progress":
+            return self.handle_worker_job_progress(segments[2], body)
+        if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "result":
+            return self.handle_worker_job_result(segments[2], body)
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def handle_worker_heartbeat(self, body: dict) -> None:
+        try:
+            record = db.upsert_worker_heartbeat(
+                {
+                    "worker_id": clean_github_access_text(body.get("worker_id")) or "",
+                    "version": public_issue_text(body.get("version")),
+                    "provider": public_issue_text(body.get("provider")) or "codex",
+                    "max_concurrent_jobs": public_scan_count(body.get("max_concurrent_jobs")) or 1,
+                    "running_jobs": public_scan_count(body.get("running_jobs")),
+                    "free_slots": public_scan_count(body.get("free_slots")),
+                    "hostname": public_issue_text(body.get("hostname")),
+                    "last_error": clean_scan_error(body.get("last_error")),
+                    "timestamp": now(),
+                }
+            )
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        return self.json(
+            {
+                "ok": True,
+                "worker": {
+                    "worker_id": record.get("worker_id"),
+                    "status": record.get("status"),
+                    "last_heartbeat_at": record.get("last_heartbeat_at"),
+                },
+            }
+        )
+
+    def handle_worker_job_claim(self, body: dict) -> None:
+        worker_id = clean_github_access_text(body.get("worker_id")) or ""
+        if not worker_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
+        max_jobs = public_scan_count(body.get("max_jobs")) or public_scan_count(body.get("free_slots")) or 1
+        max_jobs = min(max_jobs, max(1, env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS", 32)))
+        try:
+            recovered_jobs = db.recover_expired_scan_jobs(now())
+            if recovered_jobs:
+                with STATE_LOCK:
+                    apply_recovered_scan_jobs_locked(recovered_jobs)
+            jobs = db.claim_next_scan_jobs(
+                worker_id,
+                max_jobs=max_jobs,
+                lease_seconds=max(60, env_int("PULLWISE_SCAN_JOB_LEASE_SECONDS", 3600)),
+                global_running_limit=max_scan_concurrency(),
+                per_user_running_limit=max_scan_concurrency_per_user(),
+            )
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if not jobs:
+            return self.json({"job": None, "jobs": []})
+        with STATE_LOCK:
+            for job in jobs:
+                scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+                if scan and scan.get("status") == "queued":
+                    scan.update(
+                        {
+                            "status": "running",
+                            "claimedAt": job.get("claimed_at"),
+                            "claimedByWorkerId": worker_id,
+                            "progress": 0,
+                            "phase": "clone",
+                            "jobId": job.get("job_id"),
+                        }
+                    )
+                    mark_state_dirty()
+                scan_logging.log_event(
+                    "worker_job_claimed",
+                    scanId=job.get("scan_id"),
+                    repo=job.get("repo"),
+                    repoId=job.get("repo_id"),
+                    githubRepoId=job.get("github_repo_id"),
+                    branch=job.get("branch"),
+                    commit=job.get("commit"),
+                    workerId=worker_id,
+                    jobId=job.get("job_id"),
+                    attempt=job.get("attempt"),
+                )
+        try:
+            payloads = [scan_job_payload(job, include_clone_token=True) for job in jobs]
+        except github_auth.GitHubError as exc:
+            return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+        return self.json({"job": payloads[0], "jobs": payloads})
+
+    def handle_worker_job_progress(self, job_id: str, body: dict) -> None:
+        job_id = clean_github_access_text(job_id) or ""
+        if not job_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "job_id is required.")
+        job = db.update_scan_job_progress(
+            job_id,
+            {
+                "phase": public_scan_phase(body.get("phase")),
+                "progress": public_scan_progress(body.get("progress")),
+                "message": public_issue_text(body.get("message")),
+                "started_at": pull_request_timestamp(body.get("started_at")) or now(),
+                "logs_summary": public_issue_text(body.get("logs_summary")),
+            },
+        )
+        if not job:
+            return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
+        with STATE_LOCK:
+            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+            if scan and scan.get("status") == "running":
+                scan.update(
+                    {
+                        "phase": public_scan_phase(body.get("phase")),
+                        "progress": public_scan_progress(body.get("progress")),
+                        "startedAt": job.get("started_at"),
+                        "updatedAt": now(),
+                    }
+                )
+                mark_state_dirty()
+        return self.json({"ok": True, "job": scan_job_payload(job)})
+
+    def handle_worker_job_result(self, job_id: str, body: dict) -> None:
+        job_id = clean_github_access_text(job_id) or ""
+        if not job_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "job_id is required.")
+        job = db.get_scan_job(job_id)
+        if not job:
+            return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
+        try:
+            result = apply_worker_job_result(job, body)
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if result.get("conflict"):
+            return self.json({"message": "Result checksum conflicts with an existing attempt result."}, HTTPStatus.CONFLICT)
+        scan_logging.log_event(
+            "worker_job_result",
+            scanId=job.get("scan_id"),
+            repo=job.get("repo"),
+            repoId=job.get("repo_id"),
+            githubRepoId=job.get("github_repo_id"),
+            branch=job.get("branch"),
+            commit=job.get("commit"),
+            jobId=job.get("job_id"),
+            status=body.get("status"),
+            duplicate=result.get("duplicate"),
+            issueCount=result.get("issueCount"),
+        )
+        return self.json({"ok": True, **result})
+
     def handle_external_api_get(self, segments: list[str], params: dict) -> None:
         if segments == ["repositories"]:
             context = self.require_api_key_context("repositories:read")
@@ -4804,6 +5228,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(scan_payload(existing))
         if existing:
             return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
+        limit_error = scan_queue_limit_error(context["user"]["id"])
+        if limit_error:
+            return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
         scan_id = make_id("sc")
         try:
             quota_result = quota.consume_scan_quota(
@@ -4850,6 +5277,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if request_id:
             scan["requestId"] = request_id
         with STATE_LOCK:
+            create_scan_job_for_scan(scan)
             SCANS.insert(0, scan)
             mark_state_dirty()
         scan_logging.log_event(
@@ -4867,7 +5295,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             quotaBucketIds=scan.get("quotaBucketIds"),
             apiKeyId=scan.get("apiKeyId"),
         )
-        worker.start_scan(scan["id"])
+        worker.notify_queue_changed()
         return self.json(scan_payload(scan), HTTPStatus.CREATED)
 
     def handle_external_api_scan_stop(self, repo_id: str) -> None:
@@ -4884,6 +5312,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan["status"] = "cancelled"
             scan["completedAt"] = now()
             mark_state_dirty()
+            db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
         worker.notify_queue_changed()
         return self.json(scan_payload(scan))
 
@@ -5048,7 +5477,6 @@ def main() -> None:
     recovered_scans = recover_interrupted_scans()
     if recovered_scans:
         logger.info("Recovered %s interrupted scan(s).", recovered_scans)
-    worker.ensure_workers()
     httpd = ThreadingHTTPServer((args.host, args.port), PullwiseHandler)
     logger.info("Pullwise API listening on http://%s:%s", args.host, args.port)
     logger.info("Press Ctrl+C to stop.")

@@ -7,7 +7,7 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import patch
 
-from pullwise_server import app
+from pullwise_server import app, db
 
 
 class RouteHarness(app.PullwiseHandler):
@@ -171,7 +171,12 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(second.status, HTTPStatus.OK)
         self.assertEqual(first.payload["id"], second.payload["id"])
         self.assertEqual(first.payload["billingUsage"]["used"], 1)
-        start_scan.assert_called_once_with(first.payload["id"])
+        self.assertIn("jobId", first.payload)
+        job = db.get_scan_job(first.payload["jobId"])
+        self.assertIsNotNone(job)
+        self.assertEqual(job["scan_id"], first.payload["id"])
+        self.assertEqual(job["status"], "queued")
+        start_scan.assert_not_called()
 
     def test_repo_without_stable_id_requires_repository_sync(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")

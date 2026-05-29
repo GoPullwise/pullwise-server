@@ -193,7 +193,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertNotIn("workspaceId", start.payload)
         self.assertEqual(app.SCANS[0]["apiKeyId"], repositories.payload["apiKey"]["id"])
         self.assertEqual(app.SCANS[0]["requestId"], "req_api")
-        start_scan.assert_called_once_with(start.payload["id"])
+        start_scan.assert_not_called()
 
         status = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/current", headers=auth)
         app.PullwiseHandler.route(status, "GET")
@@ -263,7 +263,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(second.payload["code"], "IDEMPOTENCY_KEY_REUSED")
         self.assertEqual(second.payload["repoId"], first.payload["repoId"])
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "req_shared"]), 1)
-        start_scan.assert_called_once_with(first.payload["id"])
+        start_scan.assert_not_called()
 
     def test_pricing_api_docs_and_dashboard_overview_contracts_are_available(self) -> None:
         cookie = seed_session()

@@ -122,7 +122,7 @@ class LoggingConfigTest(unittest.TestCase):
             app.main()
 
         configure_logging.assert_called_once_with(project_root=app.project_root())
-        ensure_workers.assert_called_once_with()
+        ensure_workers.assert_not_called()
         self.assertTrue(server.closed)
 
     def test_http_request_logs_use_access_logger(self) -> None:

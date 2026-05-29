@@ -1080,7 +1080,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["installationAccount"], "acme")
         self.assertEqual(handler.payload["branch"], "develop")
         self.assertEqual(handler.payload["cloneUrl"], "https://github.com/acme/service.git")
-        start_scan.assert_called_once()
+        start_scan.assert_not_called()
 
     def test_scan_creation_sanitizes_malformed_branch_and_commit_inputs(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1134,7 +1134,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["branch"], "main")
         self.assertEqual(handler.payload["commit"], "pending")
         self.assertEqual(app.SCANS[0]["requestId"], "safe_scan_req")
-        start_scan.assert_called_once()
+        start_scan.assert_not_called()
 
     def test_scan_creation_is_idempotent_for_repeated_request_id(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1189,7 +1189,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(second.status, HTTPStatus.OK)
         self.assertEqual(first.payload["id"], second.payload["id"])
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_1"]), 1)
-        start_scan.assert_called_once_with(first.payload["id"])
+        start_scan.assert_not_called()
 
     def test_scan_creation_rejects_request_id_reuse_for_different_repo(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1255,7 +1255,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(second.payload["code"], "IDEMPOTENCY_KEY_REUSED")
         self.assertEqual(second.payload["repoId"], first.payload["repoId"])
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_shared"]), 1)
-        start_scan.assert_called_once_with(first.payload["id"])
+        start_scan.assert_not_called()
 
     def test_repositories_payload_treats_string_false_need_sync_as_connected(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
