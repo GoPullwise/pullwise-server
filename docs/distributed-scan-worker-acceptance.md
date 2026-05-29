@@ -124,3 +124,63 @@ web -> server -> global job queue <- workers
 - [ ] Token rotation 场景：admin rotate token -> 旧 token 失效 -> 新 token 配置后 worker 恢复 heartbeat/claim。
 - [ ] Result 幂等场景：worker 重复上传同一 result -> issues 不重复写入，scan 状态保持一致。
 - [ ] 安全场景：非 admin 调用 /admin/workers 被拒绝；public status 不泄露 worker token、hostname、内部错误。
+
+## 当前自动化验收证据
+
+以下为当前仓库内已用自动化测试覆盖的验收链路。它们证明代码路径成立，但不替代真实 Linux worker、真实 GitHub token、真实 Codex CLI 登录后的部署验收。
+
+- `tests.test_worker_pull_routes`
+  - worker heartbeat -> claim -> progress -> result -> scan done。
+  - 多 worker 按 capacity claim 多个 queued job，无重复 claim。
+  - 超过 capacity 的 job 保持 queued，前序任务完成后可继续 claim。
+  - 全局 queued 限流会在创建 job 前拒绝新 scan。
+  - result 重复上传幂等，同 attempt/checksum 不重复写 issue。
+  - result checksum 冲突返回 conflict。
+  - result attempt 必须匹配当前 claim attempt；旧 attempt late result 被拒绝。
+  - 取消后的 running job 拒绝 late result，不会把 cancelled scan 改回 done。
+  - worker token 不能冒充其他 worker，也不能上传其他 worker claim 的 job。
+  - claim payload 能下发短期 GitHub clone token，不下发 GitHub App 私钥。
+  - 并发 claim 不会重复领取同一个 job。
+  - 超过最大 retry 的 timed out job 标记 failed。
+- `tests.test_scan_recovery`
+  - server 重启后 running scan 会回到 queued。
+  - server 重启恢复会同步 requeue 未过期但仍 claimed 的 SQLite job。
+  - job lease timeout 会 requeue scan/job。
+  - worker heartbeat timeout 会 requeue scan/job。
+  - 终态 done/failed/cancelled scan 不会被恢复逻辑改写。
+- `tests.test_worker_admin_routes`
+  - admin 创建 worker、查看详情、更新 metadata、启用、禁用、soft delete、rotate token。
+  - token 只保存 hash，明文 token 只在创建/rotate 返回。
+  - rotate token 后旧 token 失效，新 token 能恢复 heartbeat。
+  - 非 admin 不能访问 admin worker 管理接口。
+  - disabled/deleted worker 不能 claim 新任务。
+  - heartbeat 更新 capacity、running jobs、free slots、version、hostname、region、doctor 状态。
+  - worker 状态可计算 idle、busy、degraded、offline、disabled。
+  - 多个 online worker 会增加 public status 的 total capacity 和 available capacity。
+  - public status 不泄露 hostname、last error 或 token；admin status 返回 worker 详情。
+  - worker 管理操作写 audit log，并覆盖 actor、action、worker id、request id、changed fields、timestamp、success/failure、error。
+- `pullwise-worker/tests/test_worker_main.py`
+  - worker run_job 上传 progress/result 并清理 checkout。
+  - clone 使用 server 下发的短期 clone token。
+  - Codex CLI 执行结果可解析为 findings。
+  - doctor 能识别 Codex 未登录和 ready 状态。
+  - status/start/stop/restart/update/uninstall lifecycle 命令路径存在。
+  - update 失败会保留 env 配置。
+  - scan summary 日志会脱敏 worker token 和 clone token。
+  - cleanup 只删除 worker checkout 范围内目录。
+  - deploy assets 覆盖 install、systemd、logrotate、cleanup、update、restart、uninstall。
+- `pullwise-web` queue/status tests
+  - web 能渲染 queued 状态、queue position、ahead count 和 capacity limits。
+  - web status 普通用户能看到 scan system summary。
+  - web status 管理员能看到 worker 列表、capacity、last heartbeat、provider/version、region、最近错误。
+
+## 仍需实机验收
+
+以下实机项由部署/运维方后续在真实环境手工执行，不阻塞当前仓库内自动化验收完成。
+
+- 在真实 Linux 主机上运行 `/install-worker.sh`，验证 OS/CPU、Python/Node/Git/Codex CLI、systemd、logrotate、目录权限。
+- 使用真实 GitHub App installation token clone 私有 repo。
+- 使用真实已登录 Codex CLI 完成一次 scan。
+- 部署 2 台以上真实 worker，验证 server 同时接收 heartbeat、capacity 增加、web status 刷新。
+- 验证生产日志中不出现 worker token、GitHub clone token、Codex session 或 repo secret。
+- 验证磁盘空间告警/最大占用策略在真实 checkout 压力下符合预期。

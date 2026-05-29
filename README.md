@@ -498,24 +498,21 @@ The disable switch also accepts `0`, `no`, `off`, or `disabled`.
 
 Pullwise supports either Stripe or Creem. Configure one provider, or set
 `PULLWISE_BILLING_PROVIDER=stripe|creem` if both providers are present.
-The built-in catalog is Free plus Pro. Billing and quota belong to a workspace,
-usually a GitHub App installation, not to the signed-in GitHub account. Free
-defaults to 10 shared workspace scans/month and 3 scans/month for each stable
-GitHub repository id. GitHub forks that report the same source repository share
-the source repository quota bucket. Pro defaults to $29/month or $290/year with
-100 shared workspace scans/month. Monthly review allowance resets each calendar
+The built-in catalog is Free plus Pro. Scan quota is tracked for the signed-in
+user and for each stable GitHub repository id. Free defaults to 10 user
+scans/month and 3 scans/month for each repository. GitHub forks that report the
+same source repository share the source repository quota bucket. Pro defaults
+to $29/month or $290/year with 100 user scans/month. Monthly review allowance resets each calendar
 month and does not roll over.
 
 Quota controls:
 
 ```env
-PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT=10
+PULLWISE_FREE_USER_REVIEW_LIMIT=10
 PULLWISE_FREE_REPO_REVIEW_LIMIT=3
-PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT=100
+PULLWISE_PRO_USER_REVIEW_LIMIT=100
+PULLWISE_PRO_REPO_REVIEW_LIMIT=100
 ```
-
-`PULLWISE_FREE_REVIEW_LIMIT` and `PULLWISE_PRO_REVIEW_LIMIT` remain supported as
-compatibility aliases when the workspace-specific variables are not set.
 
 Stripe:
 
@@ -546,18 +543,17 @@ Implemented billing routes:
 - `POST /webhooks/stripe`
 - `POST /webhooks/creem`
 
-Checkout URLs are created server-side with both `workspaceId` and `userId`
+Checkout URLs are created server-side with `userId`
 metadata. Webhooks verify Stripe `Stripe-Signature` or Creem `creem-signature`
-before updating workspace billing state, falling back to legacy user billing
-when old events do not include a workspace. Stripe monthly-to-yearly changes
-open a Billing Portal confirmation flow; Creem monthly-to-yearly changes use
-the subscription upgrade endpoint.
+before updating billing state. Stripe monthly-to-yearly changes open a Billing
+Portal confirmation flow; Creem monthly-to-yearly changes use the subscription
+upgrade endpoint.
 
 ## User and Billing State
 
 Runtime state is persisted in SQLite. The current lightweight deployment stores
-legacy logical records in `app_state` JSON payloads, `api_rate_limits` rows for
-the database-backed limiter, and normalized workspace/repository/quota tables.
+application records in `app_state` JSON payloads, `api_rate_limits` rows for
+the database-backed limiter, and normalized repository/quota tables.
 User records contain:
 
 - Basic account: `id`, `name`, `email`, `avatarUrl`, `createdAt`, `providers`
@@ -566,25 +562,22 @@ User records contain:
 - Repository access: GitHub App installation ids/accounts, repository
   selection, authorized repository names/items, permission summary, pending
   authorization state, and sync status
-- Legacy billing fallback: provider, customer id, subscription id/item id, plan,
+- Billing state: provider, customer id, subscription id/item id, plan,
   interval, status, period start/end, cancel flags, last processed event
   metadata, and checkout/session metadata
-- Legacy usage fallback only; new scan quota is deducted from workspace and
-  repository quota buckets, not from `user.billingUsage`
+- Scan quota is deducted from user and repository quota buckets
 
-Normalized tables include `workspaces`, `workspace_members`, `repositories`,
-`workspace_repositories`, `quota_buckets`, `quota_ledger`, `api_keys`, and
-`repo_fingerprints`. New scans store `workspaceId`, `repoId`, `githubRepoId`,
-workspace usage, repository usage, quota bucket ids, and checkout fingerprint
-risk decisions. Forks share repository quota through their GitHub source repo id,
-and content fingerprints are recorded after checkout for clone/reuse review.
+Normalized tables include `repositories`, `quota_buckets`, `quota_ledger`,
+`api_keys`, `worker_tokens`, `workers`, `scan_jobs`, `job_results`, and
+`repo_fingerprints`. New scans store `repoId`, `githubRepoId`, user usage,
+repository usage, quota bucket ids, and checkout fingerprint risk decisions.
+Forks share repository quota through their GitHub source repo id, and content
+fingerprints are recorded after checkout for clone/reuse review.
 
-The frontend-facing surfaces are `GET /auth/session` for login, GitHub, and
-workspace state, and `GET /billing/plan` for plan catalog plus current workspace
-billing status. The response keeps a deprecated `account` alias for migration,
-but clients should prefer `workspace`. Webhooks update billing state
-idempotently by event id and can queue subscription updates until the
-checkout/customer mapping exists.
+The frontend-facing surfaces are `GET /auth/session` for login and GitHub state,
+and `GET /billing/plan` for plan catalog plus current billing status. Webhooks
+update billing state idempotently by event id and can queue subscription updates
+until the checkout/customer mapping exists.
 
 ## Cloudflare Worker Boundary
 
