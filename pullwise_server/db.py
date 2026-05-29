@@ -689,17 +689,7 @@ def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
                     (token_hash,),
                 )
                 return row_to_dict(row)
-            legacy = connection.execute(
-                "SELECT * FROM worker_tokens WHERE token_hash = ? AND enabled = 1",
-                (token_hash,),
-            ).fetchone()
-            if not legacy:
-                return None
-            connection.execute(
-                "UPDATE worker_tokens SET last_used_at = strftime('%s', 'now') WHERE token_hash = ?",
-                (token_hash,),
-            )
-            return row_to_dict(legacy)
+            return None
 
 
 def get_worker_by_token(token: str, *, allow_disabled: bool = False) -> dict[str, Any] | None:

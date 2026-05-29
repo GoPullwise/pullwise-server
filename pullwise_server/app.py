@@ -663,32 +663,6 @@ def github_repository_authorization_pending(user: dict | None) -> dict | None:
         user.pop("githubRepositoryAccessPending", None)
         mark_state_dirty()
 
-    expired_states = []
-    for state, record in GITHUB_STATES.items():
-        if not isinstance(record, dict):
-            expired_states.append(state)
-            continue
-        if record.get("kind") != "install" or record.get("userId") != user.get("id"):
-            continue
-        expires_at = pull_request_timestamp(record.get("expiresAt"))
-        if expires_at is None or expires_at < timestamp:
-            expired_states.append(state)
-            continue
-        github_access = user.get("githubRepositoryAccess")
-        if not isinstance(github_access, dict):
-            github_access = {}
-        return {
-            "state": state,
-            "startedAt": record.get("startedAt"),
-            "expiresAt": record.get("expiresAt"),
-            "previousInstallationId": github_access.get("installationId"),
-            "manage": True,
-        }
-
-    for state in expired_states:
-        GITHUB_STATES.pop(state, None)
-    if expired_states:
-        mark_state_dirty()
     return None
 
 
@@ -1140,7 +1114,7 @@ def scan_matches_requested_repository(scan: dict, *, requested_repo_id: str | No
         }
         if requested_repo_id in scan_repo_ids:
             return True
-    if requested_repository and clean_repository_full_name(scan.get("repo"), scan.get("repository")) == requested_repository:
+    if requested_repository and clean_repository_full_name(scan.get("repo")) == requested_repository:
         return True
     return False
 
@@ -1474,7 +1448,7 @@ def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
         "userId": public_issue_text(scan.get("userId")),
-        "repo": clean_repository_full_name(scan.get("repo"), scan.get("repository")),
+        "repo": clean_repository_full_name(scan.get("repo")),
         "branch": clean_github_access_text(scan.get("branch")) or "main",
         "commit": clean_github_access_text(scan.get("commit")) or "pending",
         "status": public_scan_status(scan.get("status")),
@@ -2095,7 +2069,7 @@ def issue_payload(issue: dict) -> dict:
         "id": issue_id,
         "userId": public_issue_text(issue.get("userId")),
         "scanId": public_issue_text(issue.get("scanId")),
-        "repo": clean_repository_full_name(issue.get("repo"), issue.get("repository")),
+        "repo": clean_repository_full_name(issue.get("repo")),
         "branch": public_issue_text(issue.get("branch")),
         "status": public_issue_status(issue.get("status")),
         "severity": review._safe_severity(issue.get("severity")),
@@ -2400,7 +2374,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             raise ValueError("Pull request creation is already in progress for this issue.")
         if not github_auth.app_api_configured():
             raise ValueError("GitHub App API is not configured for pull request creation.")
-        repo = clean_repository_full_name(issue.get("repo"), issue.get("repository"), scan.get("repo"))
+        repo = clean_repository_full_name(issue.get("repo"), scan.get("repo"))
         if not repo:
             raise ValueError("Repository must be a GitHub full name like owner/repo.")
         if not repository_is_authorized(github_access, repo):
@@ -2434,9 +2408,9 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         )
         if not installation_id:
             raise ValueError("Repository is missing a GitHub App installation id.")
-        clone_url = trusted_github_web_url(repo_meta.get("cloneUrl") or repo_meta.get("clone_url"))
+        clone_url = trusted_github_web_url(repo_meta.get("cloneUrl"))
         if not clone_url:
-            clone_url = trusted_github_web_url(scan.get("cloneUrl") or scan.get("clone_url"))
+            clone_url = trusted_github_web_url(scan.get("cloneUrl"))
 
         recovery_token = ""
         if recovering_pending:
@@ -2778,7 +2752,7 @@ def repository_item(github_access: dict | None, full_name: str) -> dict | None:
     if not github_access:
         return None
     for item in repository_items_for_payload(github_access):
-        if item.get("fullName") == full_name or item.get("full_name") == full_name:
+        if item.get("fullName") == full_name:
             return item
     return None
 
@@ -2800,7 +2774,7 @@ def repository_item_for_scan_request(github_access: dict | None, body: dict) -> 
     repo_id = clean_github_access_text(body.get("repoId"), allow_int=True)
     if repo_id:
         return repository_item_by_repo_id(github_access, repo_id), "repoId"
-    full_name = clean_repository_full_name(body.get("repo"), body.get("repository"))
+    full_name = clean_repository_full_name(body.get("repo"))
     if full_name:
         return repository_item(github_access, full_name), "repo"
     return None, None
@@ -2910,7 +2884,7 @@ def repository_items_for_payload(github_access: dict | None) -> list[dict]:
 def safe_repository_item_for_payload(value: object) -> dict | None:
     if not isinstance(value, dict):
         return None
-    full_name = clean_github_access_text(value.get("fullName")) or clean_github_access_text(value.get("full_name"))
+    full_name = clean_github_access_text(value.get("fullName"))
     if not full_name or "/" not in full_name:
         return None
 
@@ -2919,7 +2893,6 @@ def safe_repository_item_for_payload(value: object) -> dict | None:
     raw_repo_id = clean_github_access_text(value.get("id"), allow_int=True)
     github_repo_id = (
         clean_github_access_text(value.get("githubRepoId"), allow_int=True)
-        or clean_github_access_text(value.get("github_repo_id"), allow_int=True)
         or raw_repo_id
     )
     owner = value.get("owner") if isinstance(value.get("owner"), dict) else {}
@@ -2929,7 +2902,7 @@ def safe_repository_item_for_payload(value: object) -> dict | None:
         "id": raw_repo_id or full_name,
         "repoId": clean_github_access_text(value.get("repoId"), allow_int=True),
         "githubRepoId": github_repo_id,
-        "githubNodeId": clean_github_access_text(value.get("githubNodeId")) or clean_github_access_text(value.get("nodeId")) or clean_github_access_text(value.get("node_id")),
+        "githubNodeId": clean_github_access_text(value.get("githubNodeId")) or clean_github_access_text(value.get("nodeId")),
         "name": clean_github_access_text(value.get("name")) or base_item["name"],
         "fullName": full_name,
         "desc": description,
@@ -2939,19 +2912,19 @@ def safe_repository_item_for_payload(value: object) -> dict | None:
             for key in ("login", "id", "type")
             if clean_github_access_text(owner.get(key), allow_int=key == "id")
         },
-        "ownerLogin": clean_github_access_text(value.get("ownerLogin")) or clean_github_access_text(value.get("owner_login")) or clean_github_access_text(owner.get("login")),
-        "ownerId": clean_github_access_text(value.get("ownerId"), allow_int=True) or clean_github_access_text(value.get("owner_id"), allow_int=True) or clean_github_access_text(owner.get("id"), allow_int=True),
+        "ownerLogin": clean_github_access_text(value.get("ownerLogin")) or clean_github_access_text(owner.get("login")),
+        "ownerId": clean_github_access_text(value.get("ownerId"), allow_int=True) or clean_github_access_text(owner.get("id"), allow_int=True),
         "lang": clean_github_access_text(value.get("lang")) or clean_github_access_text(value.get("language")) or "-",
         "private": value.get("private") is True,
         "fork": value.get("fork") is True,
-        "parentGithubRepoId": clean_github_access_text(value.get("parentGithubRepoId"), allow_int=True) or clean_github_access_text(value.get("parent_github_repo_id"), allow_int=True) or clean_github_access_text(parent.get("id"), allow_int=True),
-        "sourceGithubRepoId": clean_github_access_text(value.get("sourceGithubRepoId"), allow_int=True) or clean_github_access_text(value.get("source_github_repo_id"), allow_int=True) or clean_github_access_text(source.get("id"), allow_int=True),
+        "parentGithubRepoId": clean_github_access_text(value.get("parentGithubRepoId"), allow_int=True) or clean_github_access_text(parent.get("id"), allow_int=True),
+        "sourceGithubRepoId": clean_github_access_text(value.get("sourceGithubRepoId"), allow_int=True) or clean_github_access_text(source.get("id"), allow_int=True),
         "stars": clean_github_access_text(value.get("stars")) or "-",
         "branches": clean_github_access_text(value.get("branches")) or "-",
-        "defaultBranch": clean_github_access_text(value.get("defaultBranch")) or clean_github_access_text(value.get("default_branch")) or "main",
+        "defaultBranch": clean_github_access_text(value.get("defaultBranch")) or "main",
         "updated": clean_github_access_text(value.get("updated")) or "",
-        "htmlUrl": trusted_github_web_url(value.get("htmlUrl") or value.get("html_url")),
-        "cloneUrl": trusted_github_web_url(value.get("cloneUrl") or value.get("clone_url")),
+        "htmlUrl": trusted_github_web_url(value.get("htmlUrl")),
+        "cloneUrl": trusted_github_web_url(value.get("cloneUrl")),
         "permissions": github_auth.permissions_to_dict(value.get("permissions") or {}),
         "installationId": clean_github_access_text(value.get("installationId"), allow_int=True),
         "installationAccount": clean_github_access_text(value.get("installationAccount")),
@@ -3040,14 +3013,6 @@ def verified_identity_can_access_user_installation(
     return bool(identity_login and identity_login == installation_account.casefold())
 
 
-def github_repository_access_needs_aggregation_migration(user: dict | None, github_access: dict | None) -> bool:
-    if not user or not github_access or github_access.get("mode") != "github-app":
-        return False
-    if not github_repository_access_authorized_for_user(user, github_access):
-        return False
-    return not bool(github_access.get("installations"))
-
-
 def repository_sync_should_refresh(user: dict | None, github_access: dict | None, body: dict) -> bool:
     if body.get("force") is True:
         return True
@@ -3058,8 +3023,6 @@ def repository_sync_should_refresh(user: dict | None, github_access: dict | None
     if not github_access:
         return True
     if not github_repository_access_authorized_for_user(user, github_access):
-        return True
-    if github_repository_access_needs_aggregation_migration(user, github_access):
         return True
     if github_repositories_need_sync(github_access):
         return True
@@ -3131,17 +3094,15 @@ def safe_installation_summaries(installations: list[dict]) -> list[dict]:
     if not isinstance(installations, list):
         return []
     return [
-        safe_installation_summary(installation, include_url_aliases=True)
+        safe_installation_summary(installation)
         for installation in installations
         if isinstance(installation, dict)
     ]
 
 
-def safe_installation_summary(installation: dict, *, include_url_aliases: bool = False) -> dict:
-    safe_url = trusted_github_web_url(
-        installation.get("installationHtmlUrl") or installation.get("htmlUrl") or installation.get("html_url")
-    )
-    item = {
+def safe_installation_summary(installation: dict) -> dict:
+    safe_url = trusted_github_web_url(installation.get("installationHtmlUrl"))
+    return {
         "installationId": clean_installation_summary_text(installation.get("installationId")),
         "installationAccount": clean_installation_summary_text(installation.get("installationAccount")),
         "installationTargetType": clean_installation_summary_text(installation.get("installationTargetType")),
@@ -3152,10 +3113,6 @@ def safe_installation_summary(installation: dict, *, include_url_aliases: bool =
         "repositoryCount": safe_installation_repository_count(installation.get("repositoryCount")),
         "repositoriesNeedSync": installation.get("repositoriesNeedSync") is True,
     }
-    if include_url_aliases:
-        item["htmlUrl"] = safe_url
-        item["html_url"] = safe_url
-    return item
 
 
 def public_installation_summary(user: dict | None, installation: dict) -> dict:
@@ -3179,7 +3136,7 @@ def installation_summaries_for_access(github_access: dict | None) -> list[dict]:
     installations = github_access.get("installations")
     if isinstance(installations, list) and installations:
         return [
-            safe_installation_summary(installation, include_url_aliases=True)
+            safe_installation_summary(installation)
             for installation in installations
             if isinstance(installation, dict)
         ]
@@ -3329,7 +3286,7 @@ def aggregate_github_repository_access(user: dict, installation_accesses: list[d
     repository_items_by_name: dict[str, dict] = {}
     for access in installation_accesses:
         for item in access.get("repositoryItems") or []:
-            full_name = str(item.get("fullName") or item.get("full_name") or "")
+            full_name = str(item.get("fullName") or "")
             if full_name and full_name not in repository_items_by_name:
                 repository_items_by_name[full_name] = item
 
@@ -4271,7 +4228,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             requested_repo_id = clean_github_access_text(body.get("repoId"), allow_int=True)
-            requested_repository = clean_repository_full_name(body.get("repo"), body.get("repository"))
+            requested_repository = clean_repository_full_name(body.get("repo"))
             if not requested_repo_id and not requested_repository:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
             repository = requested_repository or requested_repo_id or ""
@@ -4393,7 +4350,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 "repoId": repository_record["id"],
                                 "githubRepoId": repository_record["github_repo_id"],
                                 "quotaBucketIds": quota_result["bucketIds"],
-                                "cloneUrl": repo_meta.get("cloneUrl") or repo_meta.get("clone_url"),
+                                "cloneUrl": repo_meta.get("cloneUrl"),
                                 "repositoryPrivate": bool(repo_meta.get("private")),
                                 "repoPath": None,
                                 "billingUsage": quota_result["user"],
@@ -5013,11 +4970,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
 
         installation_id = str(params["installation_id"])
-        if record.get("stateFallback"):
-            user_can_access = github_auth.user_can_access_installation(user.get("githubAccessToken"), installation_id)
-            if user_can_access is not True:
-                raise ValueError("Unable to verify access to this GitHub App installation.")
-
         selected_identity = github_identity_by_id(
             user,
             clean_github_access_text(record.get("selectedGithubIdentityId")),
@@ -5092,19 +5044,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def github_install_record_from_callback(self, params: dict) -> dict:
         state = params.get("state") or ""
-        if state:
-            return pop_github_state("install", state)
-
-        session = self.current_session()
-        if not session:
+        if not state:
             raise ValueError("GitHub authorization state is invalid or expired.")
-        return {
-            "kind": "install",
-            "redirectTo": safe_redirect_to(params.get("redirectTo"), "repos"),
-            "userId": session["userId"],
-            "requestedScope": params.get("scope") or "selected",
-            "stateFallback": True,
-        }
+        return pop_github_state("install", state)
 
     def integrations_payload(self) -> dict:
         session = self.current_session()
@@ -5160,12 +5102,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if github_access and not github_repository_access_authorized_for_user(user, github_access):
             github_access = try_bind_existing_github_repository_access(user, force_refresh=True)
             bound_existing_access = bool(github_access)
-
-        if github_repository_access_needs_aggregation_migration(user, github_access):
-            migrated_access = try_bind_existing_github_repository_access(user, force_refresh=True)
-            if migrated_access:
-                github_access = migrated_access
-                bound_existing_access = True
 
         if not github_access:
             github_access = try_bind_existing_github_repository_access(user)
