@@ -47,6 +47,47 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
         self.persist_state.assert_called_once()
 
+    def test_recover_interrupted_scans_requeues_matching_unexpired_job(self) -> None:
+        timestamp = app.now()
+        app.SCANS = [
+            {
+                "id": "sc_unexpired",
+                "status": "running",
+                "progress": 44,
+                "phase": "ai",
+                "claimedAt": timestamp,
+                "claimedByWorkerId": "wk_1",
+                "createdAt": timestamp - 10,
+                "queuedAt": timestamp - 10,
+            },
+        ]
+        job = db.create_scan_job(
+            {
+                "job_id": "job_unexpired",
+                "scan_id": "sc_unexpired",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 10,
+                "user_id": "usr_1",
+                "max_attempts": 3,
+            }
+        )
+        db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=timestamp)
+
+        with patch("pullwise_server.app.now", return_value=timestamp + 30):
+            recovered = app.recover_interrupted_scans()
+        stored = db.get_scan_job(job["job_id"])
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(stored["status"], "queued")
+        self.assertEqual(stored["error"], "server_restart")
+        self.assertIsNone(stored["claimed_by_worker_id"])
+        self.assertIsNone(stored["timeout_at"])
+        self.assertEqual(app.SCANS[0]["status"], "queued")
+        self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
+
     def test_recover_interrupted_scans_leaves_terminal_scans_unchanged(self) -> None:
         app.SCANS = [
             {"id": "sc_done", "status": "done", "progress": 100, "phase": "report"},
@@ -101,3 +142,57 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertIsNone(app.SCANS[0]["phase"])
         self.assertIsNone(app.SCANS[0]["claimedAt"])
         self.assertIsNone(app.SCANS[0]["claimedByWorkerId"])
+
+    def test_recover_interrupted_scans_requeues_job_when_worker_heartbeat_times_out(self) -> None:
+        timestamp = app.now()
+        with patch.dict(os.environ, {"PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": "60"}, clear=False):
+            db.upsert_worker_heartbeat(
+                {
+                    "worker_id": "wk_stale",
+                    "provider": "codex",
+                    "max_concurrent_jobs": 1,
+                    "running_jobs": 1,
+                    "free_slots": 0,
+                    "timestamp": timestamp,
+                }
+            )
+            app.SCANS = [
+                {
+                    "id": "sc_stale_worker",
+                    "status": "running",
+                    "progress": 35,
+                    "phase": "ai",
+                    "claimedAt": timestamp + 1,
+                    "claimedByWorkerId": "wk_stale",
+                    "createdAt": timestamp,
+                    "queuedAt": timestamp,
+                },
+            ]
+            job = db.create_scan_job(
+                {
+                    "job_id": "job_stale_worker",
+                    "scan_id": "sc_stale_worker",
+                    "repo": "acme/api",
+                    "branch": "main",
+                    "commit": "pending",
+                    "status": "queued",
+                    "created_at": timestamp,
+                    "user_id": "usr_1",
+                    "max_attempts": 3,
+                }
+            )
+            db.claim_next_scan_jobs("wk_stale", max_jobs=1, lease_seconds=3600, timestamp=timestamp + 1)
+
+            with patch("pullwise_server.app.now", return_value=timestamp + 121):
+                recovered = app.recover_interrupted_scans()
+            stored = db.get_scan_job(job["job_id"])
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(stored["status"], "queued")
+        self.assertEqual(stored["error"], "worker_heartbeat_timed_out")
+        self.assertEqual(app.SCANS[0]["status"], "queued")
+        self.assertEqual(app.SCANS[0]["progress"], 0)
+        self.assertIsNone(app.SCANS[0]["phase"])
+        self.assertIsNone(app.SCANS[0]["claimedAt"])
+        self.assertIsNone(app.SCANS[0]["claimedByWorkerId"])
+        self.assertEqual(app.SCANS[0]["recoveryReason"], "worker_heartbeat_timed_out")
