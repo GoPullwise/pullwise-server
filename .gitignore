@@ -19,3 +19,24 @@ Python-3.10.12.tgz
 .tmp-sqlite-test.db
 .tmp-state-read.sqlite3
 *.private-key.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Coverage data
+.coverage.*
+
+# SQLite (catch all tmp/test patterns)
+*.sqlite3
+*.db
