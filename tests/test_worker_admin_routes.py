@@ -131,6 +131,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("doctor", install.text_payload)
         self.assertIn("codex login", install.text_payload)
         self.assertIn("PULLWISE_WORKER_PACKAGE", install.text_payload)
+        self.assertNotIn("$(dirname \"$0\")", install.text_payload)
+        self.assertNotIn("cp \"$(dirname", install.text_payload)
+        self.assertNotIn("\r\n", install.text_payload)
         self.assertNotIn("pww_", install.text_payload)
         self.assertNotIn("WORKER_TOKEN=pww_", install.text_payload)
 

@@ -1883,7 +1883,7 @@ def shell_quote(value: object) -> str:
 
 
 def worker_install_script() -> str:
-    return """#!/usr/bin/env bash
+    script = """#!/usr/bin/env bash
 set -euo pipefail
 
 SERVICE_USER="pullwise-worker"
@@ -2016,6 +2016,7 @@ systemctl restart pullwise-worker
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "If Codex is not logged in, run: sudo -u $SERVICE_USER codex login"
 """
+    return script.replace("\r\n", "\n")
 
 
 def worker_test_payload(worker: dict) -> dict:
