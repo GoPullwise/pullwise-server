@@ -1297,10 +1297,14 @@ def billing_page_payload(user: dict) -> dict:
 def api_docs_payload() -> dict:
     return {
         "page": {"id": "api", "title": "Pullwise API"},
+        "baseUrl": "https://api.pull-wise.com",
+        "website": "https://pull-wise.com",
+        "contact": "contact@pull-wise.com",
         "authentication": {
             "type": "apiKey",
             "headers": ["Authorization: Bearer <api_key>", "X-Pullwise-Api-Key: <api_key>"],
             "createKey": {"method": "POST", "href": "/api-keys"},
+            "scopes": API_KEY_DEFAULT_SCOPES,
         },
         "endpoints": [
             {
@@ -1333,6 +1337,17 @@ def api_docs_payload() -> dict:
                 "scope": "quota:read",
                 "description": "Read remaining account and repository scan quota.",
             },
+        ],
+        "errors": [
+            {"status": 400, "description": "Malformed JSON, invalid scope, invalid repoId, or invalid request body."},
+            {"status": 401, "description": "Missing or invalid Pullwise API key."},
+            {"status": 403, "description": "API key is valid but lacks the required scope."},
+            {"status": 404, "description": "Route not found, repository not authorized, or no active scan exists."},
+            {"status": 409, "description": "requestId was reused for a different repository."},
+            {"status": 402, "description": "Scan quota is exhausted."},
+            {"status": 413, "description": "Request body is too large."},
+            {"status": 429, "description": "Rate limit exceeded when rate limiting is enabled."},
+            {"status": 503, "description": "Review provider is not configured."},
         ],
     }
 

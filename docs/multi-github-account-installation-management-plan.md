@@ -263,7 +263,7 @@ https://github.com/organizations/{org}/settings/installations/{id}
    ```json
    {
      "mode": "github-installation-manage",
-     "url": "https://app.pullwise.dev/api/integrations/github/manage/start?state=..."
+     "url": "https://api.pull-wise.com/integrations/github/manage/start?state=..."
    }
    ```
 
@@ -273,7 +273,7 @@ https://github.com/organizations/{org}/settings/installations/{id}
    ```text
    https://github.com/login/oauth/authorize
      ?client_id=...
-     &redirect_uri=https://app.pullwise.dev/api/auth/github/callback
+     &redirect_uri=https://api.pull-wise.com/auth/github/callback
      &state=...
      &prompt=select_account
    ```
@@ -414,7 +414,7 @@ https://github.com/apps/{app_slug}/installations/new?state=...
 ```json
 {
   "githubIdentityId": "ghi_1",
-  "returnUrl": "https://app.pullwise.dev/?screen=settings"
+  "returnUrl": "https://pull-wise.com/?screen=settings"
 }
 ```
 
@@ -423,7 +423,7 @@ https://github.com/apps/{app_slug}/installations/new?state=...
 ```json
 {
   "mode": "github-installation-manage",
-  "url": "https://app.pullwise.dev/api/integrations/github/manage/start?state=...",
+  "url": "https://api.pull-wise.com/integrations/github/manage/start?state=...",
   "installationId": "999"
 }
 ```

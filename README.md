@@ -196,6 +196,10 @@ paths, those launcher tests skip with an explicit reason.
 
 ## API Authentication and Limits
 
+Production web app URL: `https://pull-wise.com`.
+
+Production public API base URL: `https://api.pull-wise.com`.
+
 Browser requests use the `pw_session` HTTP-only session cookie. The same opaque
 session id is also accepted as `Authorization: Bearer <session-id>` for REST API
 clients or proxies that prefer bearer forwarding. Existing frontend requests do
@@ -206,16 +210,17 @@ arrives by cookie or bearer header. Public OAuth callback routes, billing
 webhooks, and `/health` stay callable without a user session, with webhook
 signature verification enforced by the billing provider integration.
 
-Workspace-scoped automation uses API keys created from the signed-in dashboard:
+Account-scoped automation uses API keys created from the signed-in dashboard:
 
-- `GET /api-keys` lists keys for the current workspace.
+- `GET /api-keys` lists keys for the current account.
 - `POST /api-keys` creates a key and returns the `pwk_...` token once.
 - `DELETE /api-keys/{id}` revokes a key.
 
 External API requests can pass the key as `Authorization: Bearer <api-key>` or
-`X-Pullwise-Api-Key: <api-key>`. API keys are tied to one user and one
-workspace, store only a hash server-side, and grant scopes such as
-`repositories:read`, `scans:write`, `scans:read`, and `quota:read`.
+`X-Pullwise-Api-Key: <api-key>`. API keys are tied to one user account, store
+only a hash server-side, inherit that user's authorized repositories, and grant
+scopes such as `repositories:read`, `scans:write`, `scans:read`, and
+`quota:read`.
 
 API-key endpoints:
 
@@ -224,6 +229,21 @@ API-key endpoints:
 - `POST /api/v1/repositories/{repoId}/scans/stop`
 - `GET /api/v1/repositories/{repoId}/scans/current`
 - `GET /api/v1/repositories/{repoId}/quota`
+
+Example:
+
+```bash
+curl https://api.pull-wise.com/api/v1/repositories \
+  -H "Authorization: Bearer $PULLWISE_API_KEY"
+```
+
+`POST /api/v1/repositories/{repoId}/scans` accepts optional JSON fields
+`branch`, `commit`, and `requestId`. `requestId` is an idempotency key: reuse
+for the same repository returns the existing scan; reuse for a different
+repository returns `409 Conflict`.
+
+The machine-readable API description is available at `GET /api-docs` and
+`GET /api/docs`.
 
 When `PULLWISE_RATE_LIMIT_ENABLED=true`, each request is counted in SQLite in
 the `api_rate_limits` table. The limiter keys by signed-in user id when a valid
