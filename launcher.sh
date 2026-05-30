@@ -1152,17 +1152,11 @@ check_review_provider() {
       ;;
   esac
 
-  global_limit=$(env_value PULLWISE_MAX_CONCURRENT_SCANS "1")
-  user_limit=$(env_value PULLWISE_MAX_CONCURRENT_SCANS_PER_USER "1")
-  if is_positive_int "$global_limit"; then
-    ok "PULLWISE_MAX_CONCURRENT_SCANS=$global_limit"
-  else
-    fail "PULLWISE_MAX_CONCURRENT_SCANS must be a positive integer."
-  fi
+  user_limit=$(env_value PULLWISE_MAX_RUNNING_SCANS_PER_USER "$(env_value PULLWISE_MAX_CONCURRENT_SCANS_PER_USER "1")")
   if is_positive_int "$user_limit"; then
-    ok "PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=$user_limit"
+    ok "PULLWISE_MAX_RUNNING_SCANS_PER_USER=$user_limit"
   else
-    fail "PULLWISE_MAX_CONCURRENT_SCANS_PER_USER must be a positive integer."
+    fail "PULLWISE_MAX_RUNNING_SCANS_PER_USER must be a positive integer."
   fi
 }
 
