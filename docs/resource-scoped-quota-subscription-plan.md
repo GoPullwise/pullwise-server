@@ -1,6 +1,11 @@
 # Pullwise 资源维度订阅与免费额度改造计划
 
-日期：2026-05-25
+日期：2026-05-25 | 实现状态：已实现 (2026-05-30)
+
+> 本方案中描述的资源维度额度系统已实现。`quota.py` 模块提供
+> `consume_scan_quota()` 函数，`quota_buckets` 和 `quota_ledger` 表
+> 提供 workspace/repository 级别的配额追踪。billing 和 scan 创建链路
+> 已改为原子扣减、scope-aware 的模型。
 
 ## 目标
 

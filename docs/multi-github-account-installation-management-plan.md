@@ -1,6 +1,11 @@
 # Pullwise 多 GitHub 账户与 App Installation 管理方案
 
-日期：2026-05-25
+日期：2026-05-25 | 实现状态：已实现 (2026-05-30)
+
+> 本方案中描述的 Manage flow 已实现。后端支持 `manage=1` 参数触发受控 popup
+> 流程，前端通过 `manageGitHubInstallation()` 调用，Server 端有
+> `handle_github_manage_start()` / `handle_github_manage_callback()` /
+> `handle_github_installation_manage_session()` 等完整实现。
 
 ## 问题描述
 

@@ -10,13 +10,18 @@ development.
 Current production-trial scope:
 
 - GitHub identity login
-- GitHub App repository authorization
+- GitHub App repository authorization and multi-account installation management
 - Repository listing and sync
 - Scan creation, queueing, recovery, cancellation, and history
+- Distributed worker system: worker registry, heartbeat, atomic job claiming,
+  progress reporting, result upload, timeout recovery, and retry logic
+- Admin worker management: create, enable, disable, delete, rotate token,
+  and view audit events
 - Workspace creation and API key management for external automation
 - Rich issue findings and manual triage/status changes
 - Deterministic fix preview for auto-fixable findings
 - GitHub pull request creation for deterministic issue fixes
+- Resource-scoped quota system with workspace/repository-level limit tracking
 - Stripe or Creem billing, pricing metadata, API docs metadata, and live
   readiness status
 
@@ -26,6 +31,8 @@ Stage 2 remediation is intentionally narrow:
   through the GitHub App for auto-fixable findings.
 - The GitHub App installation must grant `Contents: write`, `Pull requests:
   write`, and `Metadata: read`.
+- Direct fix application (`POST /issues/{id}/fixes/apply`) explicitly returns
+  `501 Not Implemented` to prevent accidental writes.
 
 Still not implemented:
 
@@ -79,11 +86,13 @@ at `.pullwise/logs/pullwise-YYYY-MM-DD.log`. The day boundary is midnight in
 the server's local time. Override with `PULLWISE_LOG_DIR`,
 `PULLWISE_LOG_LEVEL`, and `PULLWISE_LOG_ROTATION_TIME=HH:MM`.
 
-Current storage is intentionally lightweight: the app stores logical state as
-JSON payloads in SQLite, and scan/issue listing endpoints read the in-process
-state. This is suitable for small deployments and trials. For high-volume or
-multi-tenant production use, move sessions, scans, issues, and billing events to
-dedicated tables with pagination and retention policies before relying on this
+Current storage uses SQLite with structured tables for core entities
+(`app_state`, `repositories`, `quota_buckets`, `quota_ledger`,
+`repo_fingerprints`, `api_keys`, `worker_tokens`, `workers`,
+`worker_audit_events`, `scan_jobs`, `job_results`) alongside in-process
+state for sessions, scans, and issue listings. This is suitable for small
+deployments and trials. For high-volume or multi-tenant production use, add
+pagination, retention policies, and connection pooling before relying on this
 backend as an unbounded system of record.
 
 ## Production Deployment
@@ -127,10 +136,20 @@ PULLWISE_LOG_ROTATION_TIME=00:00
 PULLWISE_RATE_LIMIT_ENABLED=true
 PULLWISE_RATE_LIMIT_REQUESTS=600
 PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
-PULLWISE_MAX_CONCURRENT_SCANS=1
-PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=1
+PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
+PULLWISE_MAX_QUEUED_SCANS_GLOBAL=1000
+PULLWISE_MAX_QUEUED_SCANS_PER_USER=20
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
 PULLWISE_COOKIE_SECURE=true
+PULLWISE_REVIEW_PROVIDER=codex
+PULLWISE_ADMIN_USER_IDS=
+PULLWISE_ADMIN_EMAILS=admin@example.com
+PULLWISE_WORKER_JOB_TIMEOUT_SECONDS=1800
+PULLWISE_WORKER_MAX_RETRIES=3
+PULLWISE_QUOTA_FREE_REVIEWS=10
+PULLWISE_QUOTA_PRO_REVIEWS=100
+PULLWISE_BILLING_TIMEOUT_SECONDS=15
+PULLWISE_BILLING_CURRENCY=USD
 ```
 
 Use `PULLWISE_API_BASE_URL=https://app.your-domain.com/api` when the web app is
@@ -171,8 +190,9 @@ Expected shape:
   },
   "billing": {"provider": "stripe", "enabled": true},
   "limits": {
-    "maxConcurrentScans": 1,
     "maxConcurrentScansPerUser": 1,
+    "maxQueuedScansGlobal": 1000,
+    "maxQueuedScansPerUser": 20,
     "rateLimitEnabled": true
   }
 }
@@ -180,6 +200,75 @@ Expected shape:
 
 The health payload intentionally exposes readiness booleans and provider names,
 not secrets, access tokens, private key contents, or private key paths.
+
+### Distributed Worker System
+
+The server maintains a global FIFO job queue for scans. Workers pull jobs,
+execute them, and report progress and results. Work is dispatched atomically
+so multiple workers never receive the same job.
+
+Administrators manage workers at `/admin/*` endpoints:
+
+- `GET /admin/workers` — list all workers
+- `GET /admin/workers/{id}` — worker detail with audit events
+- `POST /admin/workers` — create a new worker (returns one-time token)
+- `POST /admin/workers/{id}/enable` — enable a disabled worker
+- `POST /admin/workers/{id}/disable` — disable a worker
+- `PATCH /admin/workers/{id}` — update worker metadata
+- `DELETE /admin/workers/{id}` — soft-delete a worker
+- `GET /admin/status` — scan system status (admin view)
+
+Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
+the worker package as a systemd service. The script accepts `--server`,
+`--worker-id`, and `--worker-token` arguments.
+
+Worker endpoints (authenticated via bearer token):
+
+- `POST /worker/heartbeat` — report capacity, running jobs, health
+- `POST /worker/jobs/claim` — atomically claim queued jobs
+- `POST /worker/jobs/{id}/progress` — report scan phase and progress
+- `POST /worker/jobs/{id}/result` — upload completed scan results
+
+Jobs that timeout (no heartbeat or progress) are automatically re-queued up
+to `PULLWISE_WORKER_MAX_RETRIES` times, then marked failed.
+
+### Billing Provider Configuration
+
+Stripe:
+
+```env
+PULLWISE_STRIPE_SECRET_KEY=sk_live_...
+PULLWISE_STRIPE_WEBHOOK_SECRET=whsec_...
+PULLWISE_STRIPE_WEBHOOK_TOLERANCE_SECONDS=300
+```
+
+Creem:
+
+```env
+PULLWISE_CREEM_API_KEY=...
+PULLWISE_CREEM_WEBHOOK_SECRET=...
+```
+
+Only one billing provider may be active. Set `PULLWISE_BILLING_PROVIDER=stripe`
+or `PULLWISE_BILLING_PROVIDER=creem` to explicitly select one. If neither
+provider is configured with keys, billing is disabled automatically.
+
+### GitHub App Configuration
+
+Required for repository authorization, scan access, and pull request creation:
+
+```env
+PULLWISE_GITHUB_APP_ID=123456
+PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=/data/github-app.pem
+# or as base64:
+PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64=LS0t...
+PULLWISE_GITHUB_CLIENT_ID=...
+PULLWISE_GITHUB_CLIENT_SECRET=...
+PULLWISE_GITHUB_WEBHOOK_SECRET=...
+```
+
+The GitHub App must be installed on target accounts and grant:
+`Contents: write`, `Pull requests: write`, `Metadata: read`.
 
 Run verification before deploying:
 
@@ -462,23 +551,26 @@ read-only sandbox, `model_reasoning_effort="xhigh"`, `--output-schema`, and
 continues to own login state and model selection through the CLI account/session
 configuration used by the service account.
 
-On a single machine, keep scan concurrency conservative because Git plus Codex
-or Claude CLI can consume significant CPU and RAM. By default the worker runs
-only one real scan at a time globally and one per user:
+In distributed worker mode, total running scan capacity comes from connected
+workers and their advertised free slots. Each worker controls its local
+parallelism with `PULLWISE_MAX_CONCURRENT_JOBS`. The server keeps only the
+per-user running fairness limit plus queue limits:
 
 ```env
-PULLWISE_MAX_CONCURRENT_SCANS=1
-PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=1
+PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
+PULLWISE_MAX_QUEUED_SCANS_GLOBAL=1000
+PULLWISE_MAX_QUEUED_SCANS_PER_USER=20
 ```
 
-These values limit running scans, not scan creation. If 500 users submit work
-while the global limit is 3, three scans run and the rest remain `queued`.
+If all online workers have no free slots, new scans remain `queued` until a
+worker reports capacity and claims more work. The per-user running limit prevents
+one user from occupying every worker slot in a multi-tenant deployment.
 Queued scan payloads include `queue.position`, `queue.ahead`, `queue.reason`,
-`queue.message`, and the active limits so the frontend can explain why a scan is
-waiting and when it moves to running.
+`queue.message`, and the active fairness/queue limits so the frontend can
+explain why a scan is waiting and when it moves to running.
 
-Raise those values only after sizing CPU, RAM, checkout storage, and provider
-rate limits.
+Raise worker `PULLWISE_MAX_CONCURRENT_JOBS` only after sizing CPU, RAM, checkout
+storage, and provider rate limits on that worker host.
 
 Scan/review flow tracing is enabled by default through the server logger named
 `pullwise_server.scan`. Events are emitted as single-line JSON payloads for
