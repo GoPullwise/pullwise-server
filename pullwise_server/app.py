@@ -433,8 +433,9 @@ def readiness_payload() -> dict:
             "enabled": billing_provider in {"stripe", "creem"},
         },
         "limits": {
-            "maxConcurrentScans": max_scan_concurrency(),
             "maxConcurrentScansPerUser": max_scan_concurrency_per_user(),
+            "maxQueuedScansGlobal": max_queued_scans_global(),
+            "maxQueuedScansPerUser": max_queued_scans_per_user(),
             "rateLimitEnabled": rate_limit_enabled(),
         },
     }
@@ -1596,7 +1597,6 @@ def create_scan_job_for_scan(scan: dict) -> dict:
 
 def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
     queued = [scan for scan in SCANS if scan.get("status") == "queued"]
-    active = [scan for scan in SCANS if scan.get("status") in {"queued", "running"}]
     queued_for_user = [scan for scan in queued if str(scan.get("userId") or "") == user_id]
     running_for_user = [
         scan
@@ -1607,8 +1607,6 @@ def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
         return HTTPStatus.TOO_MANY_REQUESTS, "The global scan queue is full. Try again after queued scans start.", "QUEUE_FULL_GLOBAL"
     if len(queued_for_user) >= max_queued_scans_per_user():
         return HTTPStatus.TOO_MANY_REQUESTS, "You have too many queued scans. Wait for one to start before adding another.", "QUEUE_FULL_USER"
-    if len(active) >= max_active_scans_global():
-        return HTTPStatus.TOO_MANY_REQUESTS, "The scan system is at capacity. Try again after scans finish.", "ACTIVE_LIMIT_GLOBAL"
     if len(running_for_user) >= max_scan_concurrency_per_user() and len(queued_for_user) >= max_queued_scans_per_user():
         return HTTPStatus.TOO_MANY_REQUESTS, "You have too many active scans. Wait for one to finish before adding another.", "ACTIVE_LIMIT_USER"
     return None
@@ -2173,7 +2171,6 @@ def scan_queue_payload(scan: dict) -> dict | None:
 
     user_id = str(scan.get("userId") or "")
     limits = {
-        "global": max_scan_concurrency(),
         "perUser": max_scan_concurrency_per_user(),
         "queuedGlobal": max_queued_scans_global(),
         "queuedPerUser": max_queued_scans_per_user(),
@@ -2216,12 +2213,6 @@ def scan_queue_payload(scan: dict) -> dict | None:
             f"You already have {plural(running_counts['user'], 'scan')} running; "
             "this scan is queued and will start when one finishes."
         )
-    elif running_counts["global"] >= limits["global"]:
-        reason = "global_limit"
-        message = (
-            f"Server is running {running_counts['global']} of {limits['global']} scans; "
-            f"{plural(ahead, 'scan')} ahead."
-        )
     elif ahead > 0:
         reason = "waiting_for_turn"
         message = f"Queued with {plural(ahead, 'scan')} ahead."
@@ -2248,10 +2239,6 @@ def scan_queue_sort_key(scan: dict) -> tuple[int, str]:
     )
 
 
-def max_scan_concurrency() -> int:
-    return max(1, env_int("PULLWISE_MAX_RUNNING_SCANS_GLOBAL", env_int("PULLWISE_MAX_CONCURRENT_SCANS", 1)))
-
-
 def max_scan_concurrency_per_user() -> int:
     return max(1, env_int("PULLWISE_MAX_RUNNING_SCANS_PER_USER", env_int("PULLWISE_MAX_CONCURRENT_SCANS_PER_USER", 1)))
 
@@ -2262,10 +2249,6 @@ def max_queued_scans_global() -> int:
 
 def max_queued_scans_per_user() -> int:
     return max(1, env_int("PULLWISE_MAX_QUEUED_SCANS_PER_USER", 20))
-
-
-def max_active_scans_global() -> int:
-    return max_scan_concurrency() + max_queued_scans_global()
 
 
 def plural(count: int, word: str) -> str:
@@ -5483,7 +5466,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
-        max_jobs = public_scan_count(body.get("max_jobs")) or public_scan_count(body.get("free_slots")) or 1
+        if "max_jobs" in body:
+            max_jobs = public_scan_count(body.get("max_jobs"))
+        elif "free_slots" in body:
+            max_jobs = public_scan_count(body.get("free_slots"))
+        else:
+            max_jobs = 1
+        if max_jobs <= 0:
+            return self.json({"job": None, "jobs": []})
         max_jobs = min(max_jobs, max(1, env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS", 32)))
         try:
             recovered_jobs = db.recover_expired_scan_jobs(now())
@@ -5494,7 +5484,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 worker_id,
                 max_jobs=max_jobs,
                 lease_seconds=max(60, env_int("PULLWISE_SCAN_JOB_LEASE_SECONDS", 3600)),
-                global_running_limit=max_scan_concurrency(),
                 per_user_running_limit=max_scan_concurrency_per_user(),
             )
         except ValueError as exc:

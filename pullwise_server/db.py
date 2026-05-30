@@ -892,7 +892,6 @@ def claim_next_scan_jobs(
     *,
     max_jobs: int = 1,
     lease_seconds: int = 3600,
-    global_running_limit: int = 1,
     per_user_running_limit: int = 1,
     timestamp: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -903,7 +902,6 @@ def claim_next_scan_jobs(
     current_time = int(timestamp if timestamp is not None else time.time())
     timeout_at = current_time + max(60, int(lease_seconds))
     requested = max(1, int(max_jobs or 1))
-    global_limit = max(1, int(global_running_limit or 1))
     per_user_limit = max(1, int(per_user_running_limit or 1))
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
@@ -937,10 +935,6 @@ def claim_next_scan_jobs(
                 """
             ).fetchall()
             running_by_user = {str(row["user_id"] or ""): int(row["count"]) for row in running_rows}
-            running_global = sum(running_by_user.values())
-            if running_global >= global_limit:
-                connection.commit()
-                return []
             rows = connection.execute(
                 """
                 SELECT * FROM scan_jobs
@@ -952,7 +946,7 @@ def claim_next_scan_jobs(
                 connection.commit()
                 return []
             for row in rows:
-                if len(claimed) >= requested or running_global >= global_limit:
+                if len(claimed) >= requested:
                     break
                 user_id = str(row["user_id"] or "")
                 if running_by_user.get(user_id, 0) >= per_user_limit:
@@ -978,7 +972,6 @@ def claim_next_scan_jobs(
                 if claimed_job:
                     claimed.append(claimed_job)
                 running_by_user[user_id] = running_by_user.get(user_id, 0) + 1
-                running_global += 1
             connection.commit()
             return claimed
         except Exception:
