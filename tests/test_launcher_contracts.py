@@ -216,8 +216,7 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64=cHJpdmF0ZS1rZXk=
                 PULLWISE_GITHUB_OAUTH_SCOPE=read:user user:email
                 PULLWISE_REVIEW_PROVIDER=codex
-                PULLWISE_MAX_CONCURRENT_SCANS=1
-                PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=1
+                PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
                 """
             ).strip()
             + "\n",
@@ -250,8 +249,7 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_GITHUB_APP_ID=123
                 PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=secrets/github-app-private-key.pem
                 PULLWISE_REVIEW_PROVIDER=codex
-                PULLWISE_MAX_CONCURRENT_SCANS=1
-                PULLWISE_MAX_CONCURRENT_SCANS_PER_USER=1
+                PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
                 """
             ).strip()
             + "\n",

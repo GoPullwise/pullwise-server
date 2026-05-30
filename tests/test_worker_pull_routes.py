@@ -262,14 +262,73 @@ class WorkerPullRoutesTest(unittest.TestCase):
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 3}, headers=self.auth)
         with patch.dict(
             os.environ,
-            {"PULLWISE_MAX_RUNNING_SCANS_GLOBAL": "2", "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
+            {"PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
             clear=False,
         ):
             app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.OK)
-        self.assertEqual([job["scan_id"] for job in claim.payload["jobs"]], ["sc_1", "sc_2"])
+        self.assertEqual([job["scan_id"] for job in claim.payload["jobs"]], ["sc_1", "sc_2", "sc_3"])
         self.assertEqual(claim.payload["jobs"][0]["status"], "claimed")
+
+    def test_worker_claim_uses_worker_slots_for_global_capacity_and_keeps_user_fairness(self) -> None:
+        for index, user_id in enumerate(["usr_same", "usr_same", "usr_other", "usr_third"], start=1):
+            scan = {
+                "id": f"sc_slots_{index}",
+                "repo": f"acme/slots-{index}",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": user_id,
+                "createdAt": app.now() + index,
+                "queuedAt": app.now() + index,
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "repoId": f"repo_slots_{index}",
+                "githubRepoId": f"slots_{index}",
+            }
+            app.SCANS.append(scan)
+            app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 3}, headers=self.auth)
+        with patch.dict(
+            os.environ,
+            {"PULLWISE_MAX_RUNNING_SCANS_GLOBAL": "1", "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
+            clear=False,
+        ):
+            app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual([job["scan_id"] for job in claim.payload["jobs"]], ["sc_slots_1", "sc_slots_3", "sc_slots_4"])
+        self.assertEqual(app.SCANS[1]["status"], "queued")
+
+    def test_worker_claim_with_no_free_slots_leaves_job_queued(self) -> None:
+        scan = {
+            "id": "sc_no_slots",
+            "repo": "acme/no-slots",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_no_slots",
+            "githubRepoId": "no_slots",
+        }
+        app.SCANS.append(scan)
+        app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "free_slots": 0}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual(claim.payload["jobs"], [])
+        self.assertIsNone(claim.payload["job"])
+        self.assertEqual(scan["status"], "queued")
 
     def test_multi_worker_queue_claims_progress_and_results_complete_without_duplicate_claims(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
@@ -295,7 +354,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {"PULLWISE_MAX_RUNNING_SCANS_GLOBAL": "4", "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
+            {"PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
             clear=False,
         ):
             first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
@@ -342,7 +401,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {"PULLWISE_MAX_RUNNING_SCANS_GLOBAL": "4", "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
+            {"PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
             clear=False,
         ):
             next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
@@ -572,7 +631,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
             jobs = db.claim_next_scan_jobs(
                 worker_id,
                 max_jobs=1,
-                global_running_limit=2,
                 per_user_running_limit=2,
             )
             with lock:
