@@ -266,8 +266,40 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn(public.payload["scanSystemStatus"], {"ok", "degraded", "down"})
         self.assertEqual(public.payload["queuedJobs"], 1)
         self.assertEqual(public.payload["runningJobs"], 1)
+        self.assertEqual(len(public.payload["workers"]), 1)
+        public_worker = public.payload["workers"][0]
+        self.assertEqual(
+            set(public_worker.keys()),
+            {
+                "worker_id",
+                "name",
+                "status",
+                "provider",
+                "region",
+                "version",
+                "running_jobs",
+                "max_concurrent_jobs",
+                "free_slots",
+                "last_heartbeat_at",
+            },
+        )
+        self.assertEqual(public_worker["name"], "US worker")
+        self.assertNotEqual(public_worker["worker_id"], worker_id)
+        self.assertTrue(public_worker["worker_id"].startswith(worker_id[:9]))
+        self.assertEqual(public_worker["status"], "degraded")
+        self.assertEqual(public_worker["provider"], "codex")
+        self.assertEqual(public_worker["region"], "us-east")
+        self.assertEqual(public_worker["version"], "0.1.0")
+        self.assertEqual(public_worker["running_jobs"], 2)
+        self.assertEqual(public_worker["max_concurrent_jobs"], 4)
+        self.assertEqual(public_worker["free_slots"], 2)
+        self.assertIsNotNone(public_worker["last_heartbeat_at"])
         self.assertNotIn("secret-host", public_text)
         self.assertNotIn("internal stack", public_text)
+        self.assertNotIn("doctor_status", public_text)
+        self.assertNotIn("systemd_active", public_text)
+        self.assertNotIn("codex_ready", public_text)
+        self.assertNotIn("auditEvents", public_text)
         self.assertNotIn("worker_token", public_text)
         self.assertNotIn("token_hash", public_text)
         self.assertNotIn(token, public_text)

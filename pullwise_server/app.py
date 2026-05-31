@@ -1797,6 +1797,29 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     return "idle"
 
 
+def public_worker_id(worker_id: object) -> str:
+    value = public_issue_text(worker_id)
+    if len(value) <= 12:
+        return value
+    return f"{value[:9]}..."
+
+
+def worker_status_public_payload(worker: dict) -> dict:
+    short_id = public_worker_id(worker.get("worker_id"))
+    return {
+        "worker_id": short_id,
+        "name": public_issue_text(worker.get("name")) or short_id,
+        "status": computed_worker_status(worker),
+        "provider": public_issue_text(worker.get("provider")) or "codex",
+        "region": public_issue_text(worker.get("region")),
+        "version": public_issue_text(worker.get("version")),
+        "running_jobs": public_scan_count(worker.get("running_jobs")),
+        "max_concurrent_jobs": public_scan_count(worker.get("max_concurrent_jobs")) or 1,
+        "free_slots": public_scan_count(worker.get("free_slots")),
+        "last_heartbeat_at": pull_request_timestamp(worker.get("last_heartbeat_at")),
+    }
+
+
 def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
@@ -2027,7 +2050,10 @@ def worker_test_payload(worker: dict) -> dict:
 
 
 def scan_system_status_payload(*, admin: bool = False) -> dict:
-    workers = [worker_public_payload(worker, admin=admin) for worker in db.list_workers()]
+    workers = [
+        worker_public_payload(worker, admin=True) if admin else worker_status_public_payload(worker)
+        for worker in db.list_workers()
+    ]
     queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
     running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
     online = [worker for worker in workers if worker["status"] in {"idle", "busy"}]
@@ -2052,8 +2078,7 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         "degradedWorkerCount": len(degraded),
         "offlineWorkerCount": len(offline),
     }
-    if admin:
-        payload["workers"] = workers
+    payload["workers"] = workers
     return payload
 
 
