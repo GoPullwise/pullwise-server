@@ -37,6 +37,30 @@ class QuotaContractsTest(unittest.TestCase):
         self.assertEqual(user_usage["limit"], 10)
         self.assertEqual(repo_usage["limit"], 3)
 
+    def test_workspace_limit_aliases_are_respected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_DB_PATH": db_path,
+                    "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "7",
+                    "PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT": "70",
+                },
+                clear=True,
+            ):
+                free_user = make_user("usr_free")
+                pro_user = {
+                    **make_user("usr_pro"),
+                    "billing": {"plan": "pro", "status": "active"},
+                }
+
+                free_usage = quota.quota_payload_for_user(free_user)
+                pro_usage = quota.quota_payload_for_user(pro_user)
+
+        self.assertEqual(free_usage["limit"], 7)
+        self.assertEqual(pro_usage["limit"], 70)
+
     def test_quota_bucket_sanitizes_invalid_used_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

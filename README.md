@@ -220,7 +220,8 @@ Administrators manage workers at `/admin/*` endpoints:
 
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
 the worker package as a systemd service. The script accepts `--server`,
-`--worker-id`, and `--worker-token` arguments.
+`--worker-id`, and `--worker-token-file` arguments, or reads the one-time token
+from `PULLWISE_WORKER_TOKEN`.
 
 Worker endpoints (authenticated via bearer token):
 

@@ -36,6 +36,20 @@ class BillingContractsTest(unittest.TestCase):
         self.assertTrue(plan["plans"][1]["prices"]["month"]["configured"])
         self.assertTrue(plan["plans"][1]["prices"]["year"]["configured"])
 
+    def test_public_plan_accepts_workspace_review_limit_aliases(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "8",
+                "PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT": "80",
+            },
+            clear=True,
+        ):
+            plan = billing.public_plan()
+
+        self.assertEqual(plan["plans"][0]["reviewLimit"], 8)
+        self.assertEqual(plan["plans"][1]["reviewLimit"], 80)
+
     def test_selects_stripe_when_only_stripe_environment_is_configured(self) -> None:
         with patch.dict(
             os.environ,

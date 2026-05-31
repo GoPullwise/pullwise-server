@@ -73,9 +73,6 @@ def initialize() -> None:
                 ON api_rate_limits(subject, route, window_start)
                 """
             )
-            connection.execute("DROP TABLE IF EXISTS workspace_members")
-            connection.execute("DROP TABLE IF EXISTS workspace_repositories")
-            connection.execute("DROP TABLE IF EXISTS workspaces")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS repositories (

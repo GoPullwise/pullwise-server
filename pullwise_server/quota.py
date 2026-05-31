@@ -76,8 +76,28 @@ def effective_user_plan(user: dict[str, Any] | None) -> str:
 
 def user_limit_for_plan(plan: str) -> int:
     if plan == "pro":
-        return max(0, env_int("PULLWISE_PRO_USER_REVIEW_LIMIT", 100))
-    return max(0, env_int("PULLWISE_FREE_USER_REVIEW_LIMIT", 10))
+        return max(
+            0,
+            env_int(
+                [
+                    "PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT",
+                    "PULLWISE_PRO_USER_REVIEW_LIMIT",
+                    "PULLWISE_PRO_REVIEW_LIMIT",
+                ],
+                100,
+            ),
+        )
+    return max(
+        0,
+        env_int(
+            [
+                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT",
+                "PULLWISE_FREE_REVIEW_LIMIT",
+            ],
+            10,
+        ),
+    )
 
 
 def repository_limit_for_plan(plan: str) -> int:

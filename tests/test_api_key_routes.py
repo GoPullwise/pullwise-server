@@ -211,6 +211,31 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(stop.status, HTTPStatus.OK)
         self.assertEqual(stop.payload["status"], "cancelled")
 
+    def test_api_key_cannot_scan_repository_record_outside_authorized_access(self) -> None:
+        _cookie, key = self.create_api_key()
+        victim = db.upsert_repository(
+            {
+                "id": db.repository_id_for_github_repo("456"),
+                "github_repo_id": "456",
+                "full_name": "victim/secret",
+                "owner_login": "victim",
+                "default_branch": "main",
+                "private": True,
+                "clone_url": "https://github.com/victim/secret.git",
+            }
+        )
+
+        start = RouteHarness(
+            f"/api/v1/repositories/{victim['id']}/scans",
+            {"requestId": "req_victim"},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        app.PullwiseHandler.route(start, "POST")
+
+        self.assertEqual(start.status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(start.payload["message"], "Repository is not authorized for this account.")
+        self.assertEqual(app.SCANS, [])
+
     def test_api_key_rejects_request_id_reuse_for_different_repo(self) -> None:
         _cookie, key = self.create_api_key()
         other_repo = db.upsert_repository(

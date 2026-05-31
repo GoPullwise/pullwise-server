@@ -5,7 +5,6 @@
 > 阶段 1 和阶段 2 已基本实现，阶段 3 大部分完成。剩余未实现项：
 > - `/admin/workers/{id}/test` 诊断端点
 > - worker update 失败回滚机制
-> - 部署日志 token 泄露审计
 
 ## 总目标
 
@@ -84,8 +83,8 @@ web -> server -> global job queue <- workers
 ## 阶段 3：Worker 一键部署与运维
 
 - [x] admin 创建 worker 后，server 返回可执行部署命令。
-- [x] 部署命令包含 server URL、worker id、一次性 token 和必要 env。
-- [ ] 部署命令不会在日志中泄露 token。
+- [x] 部署命令包含 server URL、worker id，并通过环境变量或交互输入接收一次性 token。
+- [x] 部署命令不会在日志中泄露 token。
 - [x] install 脚本能检查 OS/CPU 架构。
 - [x] install 脚本能安装或检查 Python/Node/Git。
 - [x] install 脚本能安装或检查 Codex CLI。

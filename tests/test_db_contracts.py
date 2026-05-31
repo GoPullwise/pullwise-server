@@ -119,6 +119,33 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(result["remaining"], 4)
         self.assertEqual(stored_count, 1)
 
+    def test_initialize_preserves_existing_workspace_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute("CREATE TABLE workspaces (id TEXT PRIMARY KEY)")
+                        connection.execute("CREATE TABLE workspace_members (id TEXT PRIMARY KEY)")
+                        connection.execute("CREATE TABLE workspace_repositories (id TEXT PRIMARY KEY)")
+                        connection.execute("INSERT INTO workspaces (id) VALUES ('ws_1')")
+
+                db.initialize()
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    workspace_count = connection.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0]
+                    member_exists = connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_members'"
+                    ).fetchone()
+                    repository_exists = connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_repositories'"
+                    ).fetchone()
+
+        self.assertEqual(workspace_count, 1)
+        self.assertIsNotNone(member_exists)
+        self.assertIsNotNone(repository_exists)
+
 
 if __name__ == "__main__":
     unittest.main()

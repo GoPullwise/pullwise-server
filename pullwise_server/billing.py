@@ -31,11 +31,17 @@ def env_flag(name: str, default: str = "false") -> bool:
     return env(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def env_int(name: str, default: int) -> int:
-    try:
-        return int(env(name, str(default)))
-    except ValueError:
-        return default
+def env_int(name: str | list[str], default: int) -> int:
+    names = [name] if isinstance(name, str) else name
+    for candidate in names:
+        raw = os.environ.get(candidate)
+        if raw is None or raw == "":
+            continue
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+    return default
 
 
 def billing_timeout_seconds() -> int:
@@ -54,8 +60,28 @@ def billing_currency() -> str:
 
 def review_limit(plan: str) -> int:
     if plan == "pro":
-        return max(0, env_int("PULLWISE_PRO_USER_REVIEW_LIMIT", 100))
-    return max(0, env_int("PULLWISE_FREE_USER_REVIEW_LIMIT", 10))
+        return max(
+            0,
+            env_int(
+                [
+                    "PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT",
+                    "PULLWISE_PRO_USER_REVIEW_LIMIT",
+                    "PULLWISE_PRO_REVIEW_LIMIT",
+                ],
+                100,
+            ),
+        )
+    return max(
+        0,
+        env_int(
+            [
+                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT",
+                "PULLWISE_FREE_REVIEW_LIMIT",
+            ],
+            10,
+        ),
+    )
 
 
 def pro_amount(interval: str) -> str:

@@ -1832,10 +1832,11 @@ def worker_create_payload(worker: dict) -> dict:
     server_url = env("PULLWISE_API_BASE_URL", "").rstrip("/") or env("PULLWISE_SERVER_URL", "").rstrip("/") or "http://localhost:8080"
     install_url = f"{server_url}/install-worker.sh"
     install_command = (
+        "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
+        "export PULLWISE_WORKER_TOKEN; "
         f"curl -fsSL {shell_quote(install_url)} | bash -s -- "
         f"--server {shell_quote(server_url)} "
         f"--worker-id {shell_quote(public['worker_id'])} "
-        f"--worker-token {shell_quote(token)} "
         f"--worker-name {shell_quote(public.get('name') or public['worker_id'])}"
     )
     payload = {
@@ -1889,7 +1890,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --server) SERVER_URL="${2:-}"; shift 2 ;;
     --worker-id) WORKER_ID="${2:-}"; shift 2 ;;
-    --worker-token) WORKER_TOKEN="${2:-}"; shift 2 ;;
+    --worker-token-file) WORKER_TOKEN="$(cat "${2:-}")"; shift 2 ;;
     --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
     --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-8}"; shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
@@ -1898,8 +1899,12 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ -z "$WORKER_TOKEN" ] && [ -n "${PULLWISE_WORKER_TOKEN:-}" ]; then
+  WORKER_TOKEN="$PULLWISE_WORKER_TOKEN"
+fi
+
 if [ -z "$SERVER_URL" ] || [ -z "$WORKER_ID" ] || [ -z "$WORKER_TOKEN" ]; then
-  echo "missing --server, --worker-id, or --worker-token" >&2
+  echo "missing --server, --worker-id, or worker token env/file" >&2
   exit 2
 fi
 
@@ -2770,6 +2775,22 @@ def repository_is_authorized(github_access: dict | None, full_name: str) -> bool
     if repositories:
         return full_name in repositories
     return repository_item(github_access, full_name) is not None
+
+
+def api_repository_authorized_for_user(user: dict | None, repository: dict | None) -> bool:
+    if not user or not repository:
+        return False
+    github_access = user.get("githubRepositoryAccess")
+    if not isinstance(github_access, dict):
+        return False
+
+    repository_id = clean_github_access_text(repository.get("id"), allow_int=True)
+    github_repo_id = clean_github_access_text(repository.get("github_repo_id"), allow_int=True)
+    full_name = clean_repository_full_name(repository.get("full_name"))
+    for candidate in (repository_id, github_repo_id):
+        if candidate and repository_item_by_repo_id(github_access, candidate):
+            return True
+    return bool(full_name and repository_is_authorized(github_access, full_name))
 
 
 def sync_repository_access_for_user(user: dict | None, github_access: dict | None) -> None:
@@ -5206,8 +5227,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not repo_id:
             self.error(HTTPStatus.BAD_REQUEST, "repoId is required.")
             return None
+        user = context.get("user") if isinstance(context.get("user"), dict) else None
+        github_access = user.get("githubRepositoryAccess") if user else None
+        if user and isinstance(github_access, dict):
+            sync_repository_access_for_user(user, github_access)
         repository = db.get_repository(repo_id)
-        if not repository:
+        if not repository or not api_repository_authorized_for_user(user, repository):
             self.error(HTTPStatus.NOT_FOUND, "Repository is not authorized for this account.")
             return None
         return repository, repository
