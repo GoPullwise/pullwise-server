@@ -207,7 +207,20 @@ The server maintains a global FIFO job queue for scans. Workers pull jobs,
 execute them, and report progress and results. Work is dispatched atomically
 so multiple workers never receive the same job.
 
+Public status is available at `GET /status/system`. It returns scan-system
+summary fields plus a sanitized `workers` list for the web status page. Public
+worker entries expose capacity and heartbeat status only; hostnames, internal
+errors, worker tokens, token hashes, and audit events remain admin-only.
+
 Administrators manage workers at `/admin/*` endpoints:
+
+These admin APIs are the registry control plane. They manage desired state and
+credentials, including create, enable, disable, metadata update, token rotation,
+diagnostics, detail, audit, and soft delete. They should not remotely execute
+host commands. For restart, update, cleanup, or uninstall operations, use a
+pull-based command model where the admin creates a command, the worker receives
+it during heartbeat or command polling, executes it locally, and reports the
+result. See `docs/worker-management-control-plane.md`.
 
 - `GET /admin/workers` — list all workers
 - `GET /admin/workers/{id}` — worker detail with audit events
