@@ -130,6 +130,7 @@ PULLWISE_MODE=production
 PULLWISE_APP_URL=https://app.your-domain.com
 PULLWISE_ALLOWED_ORIGINS=https://app.your-domain.com
 PULLWISE_API_BASE_URL=https://app.your-domain.com/api
+PULLWISE_WORKER_SERVER_URL=https://api.your-domain.com
 PULLWISE_DB_PATH=/data/pullwise.sqlite3
 PULLWISE_LOG_DIR=/data/logs
 PULLWISE_LOG_ROTATION_TIME=00:00
@@ -156,6 +157,10 @@ Use `PULLWISE_API_BASE_URL=https://app.your-domain.com/api` when the web app is
 deployed to Cloudflare Pages with the included `/api` proxy. OAuth callbacks
 then return through the Pages domain, so browser session cookies are set on the
 same origin used by the frontend.
+
+Use `PULLWISE_WORKER_SERVER_URL` for distributed worker install commands. It
+should point directly at the backend control plane instead of the browser/OAuth
+Pages proxy when those are different origins.
 
 Keep `PULLWISE_ALLOWED_ORIGINS` to exact trusted origins. Wildcard `*` is
 ignored because the API uses credentialed browser requests.
@@ -234,7 +239,9 @@ result. See `docs/worker-management-control-plane.md`.
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
 the worker package as a systemd service. The script accepts `--server`,
 `--worker-id`, and `--worker-token-file` arguments, or reads the one-time token
-from `PULLWISE_WORKER_TOKEN`.
+from `PULLWISE_WORKER_TOKEN`. The default package spec is pinned as
+`pullwise-worker==0.1.0`; override it with `PULLWISE_WORKER_PACKAGE` or
+`--package` during controlled upgrades.
 
 Worker endpoints (authenticated via bearer token):
 
@@ -585,6 +592,11 @@ explain why a scan is waiting and when it moves to running.
 
 Raise worker `PULLWISE_MAX_CONCURRENT_JOBS` only after sizing CPU, RAM, checkout
 storage, and provider rate limits on that worker host.
+Workers poll with bounded exponential backoff when the queue is empty or the
+server is temporarily unreachable. Tune `PULLWISE_WORKER_POLL_SECONDS`,
+`PULLWISE_WORKER_POLL_JITTER_SECONDS`, and
+`PULLWISE_WORKER_MAX_BACKOFF_SECONDS` to avoid thundering-herd polling under
+larger fleets.
 
 Scan/review flow tracing is enabled by default through the server logger named
 `pullwise_server.scan`. Events are emitted as single-line JSON payloads for

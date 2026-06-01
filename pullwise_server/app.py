@@ -358,10 +358,16 @@ def recover_interrupted_scans() -> int:
     recovered = 0
     recovered_jobs = db.recover_expired_scan_jobs(now())
     with STATE_LOCK:
+        recovered += reconcile_completed_scan_job_results_locked()
         recovered += apply_recovered_scan_jobs_locked(recovered_jobs)
         for scan in SCANS:
             if scan.get("status") != "running":
                 continue
+            job_id = public_issue_text(scan.get("jobId"))
+            if job_id:
+                job = db.get_scan_job(job_id)
+                if job and public_issue_text(job.get("status")) in {"done", "failed", "cancelled"}:
+                    continue
             db.requeue_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=now())
             scan["status"] = "queued"
             scan["progress"] = 0
@@ -373,6 +379,19 @@ def recover_interrupted_scans() -> int:
             mark_state_dirty()
             persist_state()
     return recovered
+
+
+def reconcile_completed_scan_job_results_locked() -> int:
+    reconciled = 0
+    for row in db.list_completed_scan_job_results():
+        payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
+        status = public_issue_text(row.get("result_status") or row.get("status")).lower()
+        if status not in {"done", "failed"}:
+            continue
+        checksum = clean_github_access_text(row.get("result_result_checksum") or row.get("result_checksum"))
+        if apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum):
+            reconciled += 1
+    return reconciled
 
 
 def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
@@ -1692,6 +1711,46 @@ def expected_worker_attempt_id(job: dict) -> str:
     return f"attempt_{attempt}"
 
 
+def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: str, checksum: str) -> bool:
+    findings = body.get("findings") if isinstance(body.get("findings"), list) else []
+    normalized_findings = [worker_finding_payload(job, item, index) for index, item in enumerate(findings)]
+    summary = public_scan_issue_counts(body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings))
+    completed_at = pull_request_timestamp(job.get("completed_at")) or now()
+    scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+    changed = False
+    if scan:
+        before = json.dumps(db.to_jsonable(scan), sort_keys=True)
+        scan.update(
+            {
+                "status": status,
+                "phase": "report",
+                "progress": 100 if status == "done" else public_scan_progress(scan.get("progress")),
+                "completedAt": completed_at,
+                "durationMs": public_scan_count(body.get("duration_ms")),
+                "issues": summary,
+                "error": clean_scan_error(body.get("error")) if status == "failed" else "",
+                "resultChecksum": checksum,
+            }
+        )
+        changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
+        if status == "done":
+            before_issues = json.dumps(
+                db.to_jsonable([issue for issue in ISSUES if issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id")]),
+                sort_keys=True,
+            )
+            ISSUES[:] = [
+                issue
+                for issue in ISSUES
+                if not (issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id"))
+            ]
+            ISSUES.extend(normalized_findings)
+            after_issues = json.dumps(db.to_jsonable(normalized_findings), sort_keys=True)
+            changed = changed or before_issues != after_issues
+    if changed:
+        mark_state_dirty()
+    return changed
+
+
 def apply_worker_job_result(job: dict, body: dict) -> dict:
     status = public_issue_text(body.get("status")).lower()
     if status not in {"done", "failed"}:
@@ -1710,37 +1769,11 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     )
     if record_result.get("conflict"):
         return {"accepted": False, "conflict": True}
-    if record_result.get("duplicate"):
-        return {"accepted": True, "duplicate": True, "conflict": False}
-
-    findings = body.get("findings") if isinstance(body.get("findings"), list) else []
-    normalized_findings = [worker_finding_payload(job, item, index) for index, item in enumerate(findings)]
-    summary = public_scan_issue_counts(body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings))
-    completed_at = now()
+    duplicate = bool(record_result.get("duplicate"))
     with STATE_LOCK:
-        scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
-        if scan:
-            scan.update(
-                {
-                    "status": status,
-                    "phase": "report",
-                    "progress": 100 if status == "done" else public_scan_progress(scan.get("progress")),
-                    "completedAt": completed_at,
-                    "durationMs": public_scan_count(body.get("duration_ms")),
-                    "issues": summary,
-                    "error": clean_scan_error(body.get("error")) if status == "failed" else "",
-                    "resultChecksum": checksum,
-                }
-            )
-            if status == "done":
-                ISSUES[:] = [
-                    issue
-                    for issue in ISSUES
-                    if not (issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id"))
-                ]
-                ISSUES.extend(normalized_findings)
-            mark_state_dirty()
-    return {"accepted": True, "duplicate": False, "conflict": False, "issueCount": len(normalized_findings)}
+        apply_worker_job_result_to_state_locked(job, body, status=status, checksum=checksum)
+    findings = body.get("findings") if isinstance(body.get("findings"), list) else []
+    return {"accepted": True, "duplicate": duplicate, "conflict": False, "issueCount": len(findings)}
 
 
 def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
@@ -1813,6 +1846,13 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     return "idle"
 
 
+def worker_can_claim(worker: dict, *, timestamp: int | None = None) -> tuple[bool, str]:
+    status = computed_worker_status(worker, timestamp=timestamp)
+    if status in {"idle", "busy"}:
+        return True, status
+    return False, status
+
+
 def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
@@ -1845,15 +1885,22 @@ def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
 def worker_create_payload(worker: dict) -> dict:
     public = worker_public_payload(worker, admin=True)
     token = public_issue_text(worker.get("worker_token"))
-    server_url = env("PULLWISE_API_BASE_URL", "").rstrip("/") or env("PULLWISE_SERVER_URL", "").rstrip("/") or "http://localhost:8080"
+    server_url = (
+        env("PULLWISE_WORKER_SERVER_URL", "").rstrip("/")
+        or env("PULLWISE_SERVER_URL", "").rstrip("/")
+        or env("PULLWISE_API_BASE_URL", "").rstrip("/")
+        or "http://localhost:8080"
+    )
     install_url = f"{server_url}/install-worker.sh"
+    max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
     install_command = (
         "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
         "export PULLWISE_WORKER_TOKEN; "
         f"curl -fsSL {shell_quote(install_url)} | bash -s -- "
         f"--server {shell_quote(server_url)} "
         f"--worker-id {shell_quote(public['worker_id'])} "
-        f"--worker-name {shell_quote(public.get('name') or public['worker_id'])}"
+        f"--worker-name {shell_quote(public.get('name') or public['worker_id'])} "
+        f"--max-concurrent-jobs {max_concurrent_jobs}"
     )
     payload = {
         "worker": public,
@@ -1868,9 +1915,12 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_WORKER_ID": public["worker_id"],
             "PULLWISE_WORKER_TOKEN": token,
             "PULLWISE_PROVIDER": public["provider"],
-            "PULLWISE_MAX_CONCURRENT_JOBS": str(public.get("max_concurrent_jobs") or 1),
+            "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
             "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
             "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
+            "PULLWISE_WORKER_PACKAGE": "pullwise-worker==0.1.0",
+            "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
+            "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
         },
     }
     return payload
@@ -1898,9 +1948,9 @@ SERVER_URL=""
 WORKER_ID=""
 WORKER_TOKEN=""
 WORKER_NAME="pullwise-worker"
-MAX_CONCURRENT_JOBS="8"
+MAX_CONCURRENT_JOBS="1"
 PROVIDER="codex"
-WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-pullwise-worker}"
+WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-pullwise-worker==0.1.0}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -1908,9 +1958,9 @@ while [ "$#" -gt 0 ]; do
     --worker-id) WORKER_ID="${2:-}"; shift 2 ;;
     --worker-token-file) WORKER_TOKEN="$(cat "${2:-}")"; shift 2 ;;
     --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
-    --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-8}"; shift 2 ;;
+    --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-1}"; shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
-    --package) WORKER_PACKAGE="${2:-pullwise-worker}"; shift 2 ;;
+    --package) WORKER_PACKAGE="${2:-pullwise-worker==0.1.0}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -1962,6 +2012,8 @@ PULLWISE_MAX_CONCURRENT_JOBS=$MAX_CONCURRENT_JOBS
 PULLWISE_CHECKOUT_ROOT=$CHECKOUT_ROOT
 PULLWISE_LOG_DIR=$LOG_DIR
 PULLWISE_WORKER_PACKAGE=$WORKER_PACKAGE
+PULLWISE_WORKER_POLL_JITTER_SECONDS=2
+PULLWISE_WORKER_MAX_BACKOFF_SECONDS=60
 EOF
 chown root:"$SERVICE_USER" "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
@@ -2280,6 +2332,72 @@ def user_issues(session: dict | None) -> list[dict]:
     if not session:
         return []
     return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
+
+
+def pagination_params(params: dict, *, default_limit: int = 50, max_limit: int = 200) -> tuple[int, int]:
+    try:
+        limit = int(params.get("limit") or default_limit)
+    except (TypeError, ValueError):
+        limit = default_limit
+    try:
+        offset = int(params.get("offset") or 0)
+    except (TypeError, ValueError):
+        offset = 0
+    return max(1, min(max_limit, limit)), max(0, offset)
+
+
+def paginated_response(items: list[dict], *, keys: tuple[str, ...], params: dict) -> dict:
+    limit, offset = pagination_params(params)
+    total = len(items)
+    page = items[offset : offset + limit]
+    next_offset = offset + len(page)
+    payload = {
+        "items": page,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": next_offset < total,
+        "nextOffset": next_offset if next_offset < total else None,
+    }
+    for key in keys:
+        payload[key] = page
+    return payload
+
+
+def filter_user_scan_payloads(scans: list[dict], params: dict) -> list[dict]:
+    raw_status = public_issue_text(params.get("status")).lower()
+    status = public_scan_status(raw_status) if raw_status and raw_status != "all" else ""
+    repo = clean_repository_full_name(params.get("repo"))
+    if status:
+        scans = [scan for scan in scans if scan.get("status") == status]
+    if repo:
+        scans = [scan for scan in scans if scan.get("repo") == repo]
+    return sorted(scans, key=lambda scan: (pull_request_timestamp(scan.get("createdAt")) or 0, public_issue_text(scan.get("id"))), reverse=True)
+
+
+def filter_user_issue_payloads(issues: list[dict], params: dict) -> list[dict]:
+    raw_status = public_issue_text(params.get("status")).lower()
+    raw_severity = public_issue_text(params.get("severity")).lower()
+    status = public_issue_status(raw_status) if raw_status and raw_status != "all" else ""
+    severity = review._safe_severity(raw_severity) if raw_severity and raw_severity != "all" else ""
+    scan_id = public_issue_text(params.get("scanId"))
+    query = public_issue_text(params.get("q")).lower()
+    if status:
+        issues = [issue for issue in issues if issue.get("status") == status]
+    if severity:
+        issues = [issue for issue in issues if issue.get("severity") == severity]
+    if scan_id:
+        issues = [issue for issue in issues if issue.get("scanId") == scan_id]
+    if query:
+        issues = [
+            issue
+            for issue in issues
+            if any(
+                query in public_issue_text(value).lower()
+                for value in (issue.get("title"), issue.get("file"), issue.get("repo"), issue.get("category"), issue.get("id"))
+            )
+        ]
+    return issues
 
 
 @contextmanager
@@ -4136,8 +4254,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scans = [scan_payload(scan) for scan in user_scans(session)]
-            return self.json({"items": scans, "scans": scans})
+            scans = filter_user_scan_payloads([scan_payload(scan) for scan in user_scans(session)], params)
+            return self.json(paginated_response(scans, keys=("scans",), params=params))
         if len(segments) == 2 and segments[0] == "scans":
             session = self.current_session()
             if not session:
@@ -4147,12 +4265,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing issues.")
-            issues = user_issues(session)
-            scan_id = params.get("scanId")
-            if scan_id:
-                issues = [issue for issue in issues if issue.get("scanId") == scan_id]
-            issue_payloads = [issue_payload(issue) for issue in issues]
-            return self.json({"items": issue_payloads, "issues": issue_payloads})
+            issue_payloads = filter_user_issue_payloads([issue_payload(issue) for issue in user_issues(session)], params)
+            return self.json(paginated_response(issue_payloads, keys=("issues",), params=params))
         if len(segments) == 2 and segments[0] == "issues":
             session = self.current_session()
             if not session:
@@ -5536,6 +5650,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        allowed, worker_status = worker_can_claim(worker_record)
+        if not allowed:
+            return self.error(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                f"Worker is not ready to claim jobs: {worker_status}.",
+            )
         if "max_jobs" in body:
             max_jobs = public_scan_count(body.get("max_jobs"))
         elif "free_slots" in body:

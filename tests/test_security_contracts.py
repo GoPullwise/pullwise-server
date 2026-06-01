@@ -117,6 +117,106 @@ class SecurityContractsTest(unittest.TestCase):
         }
         return "pw_session=ses_1"
 
+    def test_scans_route_filters_and_paginates_signed_in_user_results(self) -> None:
+        app.SCANS = [
+            {
+                "id": "sc_new",
+                "userId": "usr_1",
+                "status": "done",
+                "repo": "owner/repo",
+                "createdAt": 300,
+            },
+            {
+                "id": "sc_old",
+                "userId": "usr_1",
+                "status": "done",
+                "repo": "owner/repo",
+                "createdAt": 100,
+            },
+            {
+                "id": "sc_other",
+                "userId": "usr_1",
+                "status": "running",
+                "repo": "owner/other",
+                "createdAt": 200,
+            },
+            {
+                "id": "sc_foreign",
+                "userId": "usr_2",
+                "status": "done",
+                "repo": "owner/repo",
+                "createdAt": 400,
+            },
+        ]
+        handler = RouteHarness(
+            "/scans?status=done&repo=owner/repo&limit=1&offset=1",
+            cookie=self.signed_in(),
+        )
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["total"], 2)
+        self.assertEqual(handler.payload["limit"], 1)
+        self.assertEqual(handler.payload["offset"], 1)
+        self.assertFalse(handler.payload["hasMore"])
+        self.assertEqual([scan["id"] for scan in handler.payload["items"]], ["sc_old"])
+        self.assertEqual(handler.payload["scans"], handler.payload["items"])
+
+    def test_issues_route_filters_and_paginates_signed_in_user_results(self) -> None:
+        app.ISSUES = [
+            {
+                "id": "iss_auth",
+                "userId": "usr_1",
+                "status": "open",
+                "severity": "high",
+                "title": "Auth redirect bypass",
+                "repo": "owner/repo",
+                "file": "src/auth.py",
+            },
+            {
+                "id": "iss_fixed",
+                "userId": "usr_1",
+                "status": "fixed",
+                "severity": "high",
+                "title": "Auth token leak",
+                "repo": "owner/repo",
+                "file": "src/auth.py",
+            },
+            {
+                "id": "iss_low",
+                "userId": "usr_1",
+                "status": "open",
+                "severity": "low",
+                "title": "Auth copy issue",
+                "repo": "owner/repo",
+                "file": "src/ui.py",
+            },
+            {
+                "id": "iss_foreign",
+                "userId": "usr_2",
+                "status": "open",
+                "severity": "high",
+                "title": "Auth foreign issue",
+                "repo": "owner/repo",
+                "file": "src/auth.py",
+            },
+        ]
+        handler = RouteHarness(
+            "/issues?status=open&severity=high&q=redirect&limit=1",
+            cookie=self.signed_in(),
+        )
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["total"], 1)
+        self.assertEqual(handler.payload["limit"], 1)
+        self.assertEqual(handler.payload["offset"], 0)
+        self.assertFalse(handler.payload["hasMore"])
+        self.assertEqual([issue["id"] for issue in handler.payload["items"]], ["iss_auth"])
+        self.assertEqual(handler.payload["issues"], handler.payload["items"])
+
     def test_route_ignores_client_disconnect_without_500_response(self) -> None:
         handler = DisconnectingRouteHarness("/auth/session")
 

@@ -112,6 +112,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("--worker-token", payload["install_command"])
         self.assertNotIn(token, payload["install_command"])
         self.assertIn("'US worker'", payload["install_command"])
+        self.assertIn("--max-concurrent-jobs 4", payload["install_command"])
+        self.assertEqual(payload["suggested_env"]["PULLWISE_MAX_CONCURRENT_JOBS"], "4")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], "pullwise-worker==0.1.0")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_MAX_BACKOFF_SECONDS"], "60")
         self.assertEqual(audit[0]["action"], "create_worker")
         self.assertEqual(audit[0]["actor_user_id"], "usr_admin")
 
@@ -133,6 +137,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("doctor", install.text_payload)
         self.assertIn("codex login", install.text_payload)
         self.assertIn("PULLWISE_WORKER_PACKAGE", install.text_payload)
+        self.assertIn("pullwise-worker==0.1.0", install.text_payload)
         self.assertIn("PULLWISE_WORKER_TOKEN", install.text_payload)
         self.assertIn("--worker-token-file", install.text_payload)
         self.assertNotIn("--worker-token) WORKER_TOKEN", install.text_payload)
@@ -394,6 +399,19 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": worker_id,
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 1,
+                "running_jobs": 0,
+                "free_slots": 1,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
 
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
         app.PullwiseHandler.route(claim, "POST")

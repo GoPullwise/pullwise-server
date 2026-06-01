@@ -63,10 +63,36 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.STATE_LOADED = True
         app.STATE_DIRTY = False
         db.initialize()
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 0,
+                "free_slots": 2,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
         self.auth = {"Authorization": "Bearer worker-secret"}
 
     def create_registry_worker(self, worker_id: str) -> tuple[dict, str]:
         worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": worker_id,
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 0,
+                "free_slots": 2,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
         return worker, worker["worker_token"]
 
     def test_worker_heartbeat_claim_progress_and_result_are_idempotent(self) -> None:
@@ -100,6 +126,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "running_jobs": 0,
                 "free_slots": 1,
                 "hostname": "builder-1",
+                "doctor_status": "ok",
+                "codex_ready": True,
             },
             headers=self.auth,
         )
@@ -366,6 +394,42 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIsNone(claim.payload["job"])
         self.assertEqual(scan["status"], "queued")
 
+    def test_worker_claim_requires_ready_worker(self) -> None:
+        scan = {
+            "id": "sc_not_ready",
+            "repo": "acme/not-ready",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS.append(scan)
+        job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 1,
+                "running_jobs": 0,
+                "free_slots": 1,
+                "doctor_status": "degraded",
+                "codex_ready": 0,
+                "timestamp": app.now(),
+            }
+        )
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
+        self.assertEqual(scan["status"], "queued")
+
     def test_multi_worker_queue_claims_progress_and_results_complete_without_duplicate_claims(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
@@ -582,6 +646,19 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with app.STATE_LOCK:
             app.apply_recovered_scan_jobs_locked(recovered)
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 0,
+                "free_slots": 2,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": timestamp + 3701,
+            }
+        )
 
         second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         with patch("pullwise_server.app.now", return_value=timestamp + 3701):

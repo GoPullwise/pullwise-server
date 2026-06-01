@@ -88,6 +88,63 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "queued")
         self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
 
+    def test_recover_interrupted_scans_reconciles_completed_job_result_before_requeue(self) -> None:
+        timestamp = app.now()
+        app.SCANS = [
+            {
+                "id": "sc_done_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "running",
+                "progress": 80,
+                "phase": "ai",
+                "claimedAt": timestamp,
+                "claimedByWorkerId": "wk_1",
+                "jobId": "job_done_in_db",
+                "createdAt": timestamp - 30,
+                "queuedAt": timestamp - 30,
+            },
+        ]
+        job = db.create_scan_job(
+            {
+                "job_id": "job_done_in_db",
+                "scan_id": "sc_done_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 30,
+                "user_id": "usr_1",
+            }
+        )
+        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=timestamp)[0]
+        db.record_scan_job_result(
+            job["job_id"],
+            attempt_id=f"wk_1-{claimed['attempt']}",
+            status="done",
+            result_checksum="checksum-done",
+            payload={
+                "status": "done",
+                "attempt_id": f"wk_1-{claimed['attempt']}",
+                "result_checksum": "checksum-done",
+                "findings": [{"severity": "high", "title": "Recovered finding"}],
+                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+                "duration_ms": 123,
+            },
+        )
+
+        recovered = app.recover_interrupted_scans()
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "done")
+        self.assertEqual(app.SCANS[0]["status"], "done")
+        self.assertEqual(app.SCANS[0]["progress"], 100)
+        self.assertEqual(app.SCANS[0]["issues"]["high"], 1)
+        self.assertEqual(len(app.ISSUES), 1)
+        self.assertEqual(app.ISSUES[0]["title"], "Recovered finding")
+        self.persist_state.assert_called_once()
+
     def test_recover_interrupted_scans_leaves_terminal_scans_unchanged(self) -> None:
         app.SCANS = [
             {"id": "sc_done", "status": "done", "progress": 100, "phase": "report"},

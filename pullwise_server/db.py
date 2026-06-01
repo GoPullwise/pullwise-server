@@ -902,6 +902,37 @@ def get_scan_job(job_id: str) -> dict[str, Any] | None:
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
 
 
+def list_completed_scan_job_results() -> list[dict[str, Any]]:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT
+                sj.*,
+                jr.attempt_id AS result_attempt_id,
+                jr.result_checksum AS result_result_checksum,
+                jr.status AS result_status,
+                jr.payload AS result_payload,
+                jr.created_at AS result_created_at
+            FROM scan_jobs sj
+            JOIN job_results jr ON jr.job_id = sj.job_id
+            WHERE sj.status IN ('done', 'failed')
+              AND jr.attempt_id = sj.last_attempt_id
+            ORDER BY sj.completed_at ASC, sj.job_id ASC
+            """
+        ).fetchall()
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        item = row_to_dict(row) or {}
+        try:
+            item["result_payload"] = json.loads(str(item.get("result_payload") or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            item["result_payload"] = {}
+        results.append(item)
+    return results
+
+
 def claim_next_scan_jobs(
     worker_id: str,
     *,
