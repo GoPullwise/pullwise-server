@@ -304,6 +304,19 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(wrong_result.status, HTTPStatus.FORBIDDEN)
 
     def test_worker_can_claim_multiple_jobs_up_to_capacity_and_limits(self) -> None:
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 3,
+                "running_jobs": 0,
+                "free_slots": 3,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
         for index, user_id in enumerate(["usr_1", "usr_2", "usr_3"], start=1):
             scan = {
                 "id": f"sc_{index}",
@@ -336,6 +349,19 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.payload["jobs"][0]["status"], "claimed")
 
     def test_worker_claim_uses_worker_slots_for_global_capacity_and_keeps_user_fairness(self) -> None:
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 3,
+                "running_jobs": 0,
+                "free_slots": 3,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
         for index, user_id in enumerate(["usr_same", "usr_same", "usr_other", "usr_third"], start=1):
             scan = {
                 "id": f"sc_slots_{index}",
@@ -392,6 +418,47 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.status, HTTPStatus.OK)
         self.assertEqual(claim.payload["jobs"], [])
         self.assertIsNone(claim.payload["job"])
+        self.assertEqual(scan["status"], "queued")
+
+    def test_busy_worker_cannot_claim_by_requesting_extra_jobs(self) -> None:
+        scan = {
+            "id": "sc_busy_worker",
+            "repo": "acme/busy",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_busy",
+            "githubRepoId": "busy",
+        }
+        app.SCANS.append(scan)
+        job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 2,
+                "free_slots": 0,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual(claim.payload["jobs"], [])
+        self.assertIsNone(claim.payload["job"])
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
         self.assertEqual(scan["status"], "queued")
 
     def test_worker_claim_requires_ready_worker(self) -> None:

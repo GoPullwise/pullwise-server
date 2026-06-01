@@ -1853,6 +1853,13 @@ def worker_can_claim(worker: dict, *, timestamp: int | None = None) -> tuple[boo
     return False, status
 
 
+def worker_available_claim_slots(worker: dict) -> int:
+    capacity = max(1, public_scan_count(worker.get("max_concurrent_jobs")) or 1)
+    running = max(0, public_scan_count(worker.get("running_jobs")))
+    reported_free = max(0, public_scan_count(worker.get("free_slots")))
+    return max(0, min(reported_free, capacity - running))
+
+
 def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
@@ -1919,6 +1926,7 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
             "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
             "PULLWISE_WORKER_PACKAGE": "pullwise-worker==0.1.0",
+            "PULLWISE_CODEX_PACKAGE": "@openai/codex@0.135.0",
             "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
             "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
         },
@@ -1951,6 +1959,7 @@ WORKER_NAME="pullwise-worker"
 MAX_CONCURRENT_JOBS="1"
 PROVIDER="codex"
 WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-pullwise-worker==0.1.0}"
+CODEX_PACKAGE="${PULLWISE_CODEX_PACKAGE:-@openai/codex@0.135.0}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -1961,6 +1970,7 @@ while [ "$#" -gt 0 ]; do
     --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-1}"; shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
     --package) WORKER_PACKAGE="${2:-pullwise-worker==0.1.0}"; shift 2 ;;
+    --codex-package) CODEX_PACKAGE="${2:-@openai/codex@0.135.0}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -1991,7 +2001,7 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 if ! command -v codex >/dev/null 2>&1; then
   if command -v npm >/dev/null 2>&1; then
-    npm install -g @openai/codex
+    npm install -g "$CODEX_PACKAGE"
   else
     echo "npm is required to install Codex CLI. Install codex manually and rerun." >&2
     exit 1
@@ -2012,6 +2022,7 @@ PULLWISE_MAX_CONCURRENT_JOBS=$MAX_CONCURRENT_JOBS
 PULLWISE_CHECKOUT_ROOT=$CHECKOUT_ROOT
 PULLWISE_LOG_DIR=$LOG_DIR
 PULLWISE_WORKER_PACKAGE=$WORKER_PACKAGE
+PULLWISE_CODEX_PACKAGE=$CODEX_PACKAGE
 PULLWISE_WORKER_POLL_JITTER_SECONDS=2
 PULLWISE_WORKER_MAX_BACKOFF_SECONDS=60
 EOF
@@ -5664,7 +5675,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             max_jobs = 1
         if max_jobs <= 0:
             return self.json({"job": None, "jobs": []})
-        max_jobs = min(max_jobs, max(1, env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS", 32)))
+        max_jobs = min(
+            max_jobs,
+            worker_available_claim_slots(worker_record),
+            max(1, env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS", 32)),
+        )
+        if max_jobs <= 0:
+            return self.json({"job": None, "jobs": []})
         try:
             recovered_jobs = db.recover_expired_scan_jobs(now())
             if recovered_jobs:

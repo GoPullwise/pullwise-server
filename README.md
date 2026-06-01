@@ -241,7 +241,9 @@ the worker package as a systemd service. The script accepts `--server`,
 `--worker-id`, and `--worker-token-file` arguments, or reads the one-time token
 from `PULLWISE_WORKER_TOKEN`. The default package spec is pinned as
 `pullwise-worker==0.1.0`; override it with `PULLWISE_WORKER_PACKAGE` or
-`--package` during controlled upgrades.
+`--package` during controlled upgrades. The Codex CLI bootstrap package is also
+pinned by default as `@openai/codex@0.135.0`; override it with
+`PULLWISE_CODEX_PACKAGE` or `--codex-package` when rolling out a new CLI.
 
 Worker endpoints (authenticated via bearer token):
 
