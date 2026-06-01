@@ -268,6 +268,7 @@ class SecurityContractsTest(unittest.TestCase):
     def test_resource_routes_decode_percent_encoded_path_ids(self) -> None:
         app.ISSUES[0]["id"] = "iss/with spaces#1"
         app.SCANS[0]["id"] = "sc/with spaces#1"
+        app.SCANS[0]["status"] = "queued"
         cookie = self.signed_in()
 
         issue_read = RouteHarness("/issues/iss%2Fwith%20spaces%231", cookie=cookie)

@@ -1562,6 +1562,22 @@ def public_scan_count(value: object) -> int:
     return max(0, count)
 
 
+def worker_max_concurrency_cap() -> int:
+    return max(1, env_int("PULLWISE_WORKER_MAX_CONCURRENCY_CAP", 32))
+
+
+def worker_admin_capacity(value: object) -> int:
+    capacity = public_scan_count(value) or 1
+    cap = worker_max_concurrency_cap()
+    if capacity > cap:
+        raise ValueError(f"max_concurrent_jobs cannot exceed {cap}.")
+    return capacity
+
+
+def worker_heartbeat_capacity(value: object) -> int:
+    return min(public_scan_count(value) or 1, worker_max_concurrency_cap())
+
+
 def public_scan_issue_counts(value: object) -> dict:
     counts = value if isinstance(value, dict) else {}
     return {
@@ -2050,10 +2066,7 @@ def worker_test_payload(worker: dict) -> dict:
 
 
 def scan_system_status_payload(*, admin: bool = False) -> dict:
-    workers = [
-        worker_public_payload(worker, admin=True) if admin else worker_status_public_payload(worker)
-        for worker in db.list_workers()
-    ]
+    workers = [worker_public_payload(worker, admin=True) for worker in db.list_workers()]
     queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
     running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
     online = [worker for worker in workers if worker["status"] in {"idle", "busy"}]
@@ -2078,7 +2091,8 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         "degradedWorkerCount": len(degraded),
         "offlineWorkerCount": len(offline),
     }
-    payload["workers"] = workers
+    if admin:
+        payload["workers"] = workers
     return payload
 
 
@@ -4448,6 +4462,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before cancelling a scan.")
             with STATE_LOCK:
                 scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+                if scan.get("status") not in {"queued", "running"}:
+                    return self.error(HTTPStatus.CONFLICT, "Only queued or running scans can be cancelled.")
                 scan["status"] = "cancelled"
                 scan["completedAt"] = now()
                 mark_state_dirty()
@@ -5247,7 +5263,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return None
         return context
 
-    def api_repository_context(self, context: dict, repo_id: str) -> tuple[dict, dict] | None:
+    def api_repository_context(self, context: dict, repo_id: str) -> tuple[dict, dict, dict] | None:
         repo_id = clean_github_access_text(repo_id, allow_int=True) or ""
         if not repo_id:
             self.error(HTTPStatus.BAD_REQUEST, "repoId is required.")
@@ -5260,7 +5276,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not repository or not api_repository_authorized_for_user(user, repository):
             self.error(HTTPStatus.NOT_FOUND, "Repository is not authorized for this account.")
             return None
-        return repository, repository
+        repository_item_meta = (
+            repository_item_by_repo_id(github_access, repo_id)
+            or repository_item_by_repo_id(github_access, str(repository.get("id") or ""))
+            or repository_item_by_repo_id(github_access, str(repository.get("github_repo_id") or ""))
+            or repository_item(github_access, str(repository.get("full_name") or ""))
+            or {}
+        )
+        return repository, repository, repository_item_meta
 
     def handle_api_keys_get(self, params: dict) -> None:
         session = self.current_session()
@@ -5395,13 +5418,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_admin_worker_create(self, session: dict, body: dict) -> None:
+        try:
+            max_concurrent_jobs = worker_admin_capacity(body.get("max_concurrent_jobs"))
+        except ValueError as exc:
+            self.audit_worker_action(session, "create_worker", success=False, error=str(exc))
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         worker = db.create_worker(
             {
                 "name": public_issue_text(body.get("name")) or "Worker",
                 "provider": public_issue_text(body.get("provider")) or "codex",
                 "region": public_issue_text(body.get("region")),
                 "version": public_issue_text(body.get("version")),
-                "max_concurrent_jobs": public_scan_count(body.get("max_concurrent_jobs")) or 1,
+                "max_concurrent_jobs": max_concurrent_jobs,
             }
         )
         self.audit_worker_action(
@@ -5425,6 +5453,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 for key in ("name", "provider", "region", "version", "max_concurrent_jobs")
                 if key in body
             }
+            if "max_concurrent_jobs" in changed:
+                try:
+                    changed["max_concurrent_jobs"] = worker_admin_capacity(changed["max_concurrent_jobs"])
+                except ValueError as exc:
+                    self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
+                    return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             worker = db.update_worker(worker_id, changed)
             if not worker:
                 self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error="Worker not found.")
@@ -5455,7 +5489,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return record
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
-        worker_record = self.require_worker(allow_disabled=segments == ["worker", "heartbeat"])
+        allow_disabled = segments == ["worker", "heartbeat"] or (
+            len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] in {"progress", "result"}
+        )
+        worker_record = self.require_worker(allow_disabled=allow_disabled)
         if not worker_record:
             return
         if not isinstance(body, dict):
@@ -5478,18 +5515,23 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        reported_capacity = public_scan_count(body.get("max_concurrent_jobs")) or 1
+        heartbeat_capacity = worker_heartbeat_capacity(body.get("max_concurrent_jobs"))
+        last_error = clean_scan_error(body.get("last_error"))
+        if reported_capacity > heartbeat_capacity:
+            last_error = f"max_concurrent_jobs clamped to {heartbeat_capacity}"
         try:
             record = db.upsert_worker_heartbeat(
                 {
                     "worker_id": worker_id,
                     "version": public_issue_text(body.get("version")),
                     "provider": public_issue_text(body.get("provider")) or "codex",
-                    "max_concurrent_jobs": public_scan_count(body.get("max_concurrent_jobs")) or 1,
+                    "max_concurrent_jobs": heartbeat_capacity,
                     "running_jobs": public_scan_count(body.get("running_jobs")),
                     "free_slots": public_scan_count(body.get("free_slots")),
                     "hostname": public_issue_text(body.get("hostname")),
                     "region": public_issue_text(body.get("region")),
-                    "last_error": clean_scan_error(body.get("last_error")),
+                    "last_error": last_error,
                     "doctor_status": public_issue_text(body.get("doctor_status")),
                     "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,
                     "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
@@ -5540,6 +5582,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if not jobs:
             return self.json({"job": None, "jobs": []})
+        try:
+            payloads = [scan_job_payload(job, include_clone_token=True) for job in jobs]
+        except github_auth.GitHubError as exc:
+            for job in jobs:
+                db.requeue_interrupted_scan_job(
+                    str(job.get("scan_id") or ""),
+                    reason="clone_token_unavailable",
+                    timestamp=now(),
+                )
+            return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
         with STATE_LOCK:
             for job in jobs:
                 scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
@@ -5567,10 +5619,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     jobId=job.get("job_id"),
                     attempt=job.get("attempt"),
                 )
-        try:
-            payloads = [scan_job_payload(job, include_clone_token=True) for job in jobs]
-        except github_auth.GitHubError as exc:
-            return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
         return self.json({"job": payloads[0], "jobs": payloads})
 
     def handle_worker_job_progress(self, job_id: str, body: dict, worker_record: dict) -> None:
@@ -5733,6 +5781,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
 
         github_access = context["user"].get("githubRepositoryAccess") or {}
+        repository_item_meta = repo_context[2] if len(repo_context) > 2 and isinstance(repo_context[2], dict) else {}
         branch = clean_github_access_text(body.get("branch")) or clean_github_access_text(repository.get("default_branch")) or "main"
         scan = {
             "id": scan_id,
@@ -5747,13 +5796,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "progress": 0,
             "phase": None,
             "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
-            "installationAccount": clean_github_access_text(github_access.get("installationAccount")),
-            "repositorySelection": clean_github_access_text(github_access.get("repositorySelection")),
+            "installationId": clean_github_access_text(repository_item_meta.get("installationId"), allow_int=True)
+            or clean_github_access_text(github_access.get("installationId"), allow_int=True),
+            "installationAccount": clean_github_access_text(repository_item_meta.get("installationAccount"))
+            or clean_github_access_text(github_access.get("installationAccount")),
+            "repositorySelection": clean_github_access_text(repository_item_meta.get("repositorySelection"))
+            or clean_github_access_text(github_access.get("repositorySelection")),
             "repoId": repository["id"],
             "githubRepoId": repository["github_repo_id"],
             "quotaBucketIds": quota_result["bucketIds"],
-            "cloneUrl": repository.get("clone_url"),
+            "cloneUrl": trusted_github_web_url(repository_item_meta.get("cloneUrl")) or repository.get("clone_url"),
             "repositoryPrivate": bool(repository.get("private")),
             "repoPath": None,
             "billingUsage": quota_result["user"],

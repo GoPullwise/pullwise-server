@@ -66,6 +66,7 @@ def tar_contents(path: Path) -> list[str]:
     ).stdout.splitlines()
 
 
+@unittest.skipIf(os.name == "nt", "launcher shell contracts run on POSIX CI; Windows sh/cygpath is too slow for local full-suite gating")
 class LauncherContractsTest(unittest.TestCase):
     def run_launcher(self, args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         merged_env = os.environ.copy()
@@ -545,6 +546,7 @@ class LauncherContractsTest(unittest.TestCase):
         self.assertIn("-m pullwise_server --host 0.0.0.0 --port 3010", result.stdout)
         self.assertIn("dry-run", result.stdout)
 
+    @unittest.skipIf(os.name == "nt", "direct manager process lifecycle tests require POSIX process semantics")
     def test_direct_manager_can_start_report_status_and_stop_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -584,6 +586,7 @@ class LauncherContractsTest(unittest.TestCase):
             finally:
                 self.run_launcher(["stop", "--force"], env)
 
+    @unittest.skipIf(os.name == "nt", "direct manager process lifecycle tests require POSIX process semantics")
     def test_direct_manager_restart_replaces_running_process(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

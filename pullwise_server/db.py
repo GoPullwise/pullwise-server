@@ -480,6 +480,21 @@ def worker_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def worker_max_concurrency_cap() -> int:
+    try:
+        cap = int(os.environ.get("PULLWISE_WORKER_MAX_CONCURRENCY_CAP", "32") or 32)
+    except (TypeError, ValueError):
+        cap = 32
+    return max(1, cap)
+
+
+def normalize_worker_capacity(value: Any, *, clamp: bool = True) -> int:
+    capacity = max(1, int(value or 1))
+    if clamp:
+        return min(capacity, worker_max_concurrency_cap())
+    return capacity
+
+
 def create_worker_token(name: str = "worker") -> dict[str, Any]:
     initialize()
     token = "pww_" + secrets.token_urlsafe(32)
@@ -524,8 +539,8 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
                     str(record.get("name") or "Worker")[:120],
                     token_hash,
                     str(record.get("provider") or "codex")[:60],
-                    max(1, int(record.get("max_concurrent_jobs") or 1)),
-                    max(1, int(record.get("max_concurrent_jobs") or 1)),
+                    normalize_worker_capacity(record.get("max_concurrent_jobs")),
+                    normalize_worker_capacity(record.get("max_concurrent_jobs")),
                     record.get("version"),
                     record.get("region"),
                     timestamp,
@@ -580,7 +595,7 @@ def update_worker(worker_id: str, patch: dict[str, Any]) -> dict[str, Any] | Non
             continue
         value = patch[source_key]
         if column == "max_concurrent_jobs":
-            value = max(1, int(value or 1))
+            value = normalize_worker_capacity(value)
         elif value is not None:
             value = str(value)[:120]
         assignments.append(f"{column} = ?")
@@ -721,6 +736,9 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     if not worker_id:
         raise ValueError("worker_id is required")
     timestamp = int(record.get("timestamp") or time.time())
+    max_concurrent_jobs = normalize_worker_capacity(record.get("max_concurrent_jobs"))
+    running_jobs = max(0, min(max_concurrent_jobs, int(record.get("running_jobs") or 0)))
+    free_slots = max(0, min(max_concurrent_jobs, int(record.get("free_slots") or 0)))
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -754,9 +772,9 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("name") or worker_id,
                     record.get("version"),
                     record.get("provider") or "codex",
-                    max(1, int(record.get("max_concurrent_jobs") or 1)),
-                    max(0, int(record.get("running_jobs") or 0)),
-                    max(0, int(record.get("free_slots") or 0)),
+                    max_concurrent_jobs,
+                    running_jobs,
+                    free_slots,
                     record.get("hostname"),
                     record.get("region"),
                     record.get("last_error"),

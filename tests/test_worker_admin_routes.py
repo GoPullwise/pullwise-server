@@ -266,34 +266,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn(public.payload["scanSystemStatus"], {"ok", "degraded", "down"})
         self.assertEqual(public.payload["queuedJobs"], 1)
         self.assertEqual(public.payload["runningJobs"], 1)
-        self.assertEqual(len(public.payload["workers"]), 1)
-        public_worker = public.payload["workers"][0]
-        self.assertEqual(
-            set(public_worker.keys()),
-            {
-                "worker_id",
-                "name",
-                "status",
-                "provider",
-                "region",
-                "version",
-                "running_jobs",
-                "max_concurrent_jobs",
-                "free_slots",
-                "last_heartbeat_at",
-            },
-        )
-        self.assertEqual(public_worker["name"], "US worker")
-        self.assertNotEqual(public_worker["worker_id"], worker_id)
-        self.assertTrue(public_worker["worker_id"].startswith(worker_id[:9]))
-        self.assertEqual(public_worker["status"], "degraded")
-        self.assertEqual(public_worker["provider"], "codex")
-        self.assertEqual(public_worker["region"], "us-east")
-        self.assertEqual(public_worker["version"], "0.1.0")
-        self.assertEqual(public_worker["running_jobs"], 2)
-        self.assertEqual(public_worker["max_concurrent_jobs"], 4)
-        self.assertEqual(public_worker["free_slots"], 2)
-        self.assertIsNotNone(public_worker["last_heartbeat_at"])
+        self.assertNotIn("workers", public.payload)
+        self.assertNotIn("US worker", public_text)
+        self.assertNotIn("us-east", public_text)
+        self.assertNotIn("0.1.0", public_text)
         self.assertNotIn("secret-host", public_text)
         self.assertNotIn("internal stack", public_text)
         self.assertNotIn("doctor_status", public_text)
@@ -349,6 +325,95 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(public.payload["totalWorkerCount"], 2)
         self.assertEqual(public.payload["totalCapacity"], 6)
         self.assertEqual(public.payload["availableCapacity"], 5)
+        self.assertNotIn("workers", public.payload)
+
+    def test_worker_capacity_is_capped_for_admin_writes_and_heartbeat(self) -> None:
+        create = RouteHarness(
+            "/admin/workers",
+            {"name": "Too large", "provider": "codex", "max_concurrent_jobs": 99},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(create, "POST")
+        self.assertEqual(create.status, HTTPStatus.BAD_REQUEST)
+
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        update = RouteHarness(
+            f"/admin/workers/{worker_id}",
+            {"max_concurrent_jobs": 99},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(update, "PATCH")
+        self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {"worker_id": worker_id, "max_concurrent_jobs": 99, "running_jobs": 99, "free_slots": 99},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        stored = db.get_worker(worker_id)
+        self.assertEqual(stored["max_concurrent_jobs"], 32)
+        self.assertEqual(stored["running_jobs"], 32)
+        self.assertEqual(stored["free_slots"], 32)
+        self.assertEqual(stored["last_error"], "max_concurrent_jobs clamped to 32")
+
+    def test_disabling_worker_blocks_new_claims_but_allows_current_job_result(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        scan = {
+            "id": "sc_active",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        disable = RouteHarness(f"/admin/workers/{worker_id}/disable", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(disable, "POST")
+        self.assertEqual(disable.status, HTTPStatus.OK)
+
+        new_claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(new_claim, "POST")
+        self.assertEqual(new_claim.status, HTTPStatus.UNAUTHORIZED)
+
+        progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {"phase": "ai", "progress": 70},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(progress, "POST")
+        self.assertEqual(progress.status, HTTPStatus.OK)
+
+        result_body = {
+            "status": "done",
+            "findings": [],
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "duration_ms": 1000,
+            "attempt_id": f"{worker_id}-1",
+            "result_checksum": "checksum-disabled-worker-finish",
+        }
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            result_body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(result, "POST")
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(app.SCANS[0]["status"], "done")
 
     def test_worker_test_records_audit(self) -> None:
         payload, _token = self.create_worker()

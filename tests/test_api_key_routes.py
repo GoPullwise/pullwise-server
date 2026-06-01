@@ -211,6 +211,68 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(stop.status, HTTPStatus.OK)
         self.assertEqual(stop.payload["status"], "cancelled")
 
+    def test_external_api_scan_uses_repository_item_installation_in_multi_install_access(self) -> None:
+        _cookie, key = self.create_api_key()
+        github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
+        github_access["installationId"] = None
+        github_access["installationIds"] = ["111", "222"]
+        github_access["installationAccounts"] = ["acme", "tools"]
+        github_access["repositories"].append("tools/private")
+        github_access["repositoryItems"].append(
+            {
+                "id": "456",
+                "githubRepoId": "456",
+                "name": "private",
+                "fullName": "tools/private",
+                "installationId": "222",
+                "installationAccount": "tools",
+                "repositorySelection": "selected",
+                "defaultBranch": "main",
+                "cloneUrl": "https://github.com/tools/private.git",
+                "permissions": {"pull": True},
+            }
+        )
+        auth = {"Authorization": f"Bearer {key}"}
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        app.PullwiseHandler.route(repositories, "GET")
+        repo_ids = {item["fullName"]: item["repoId"] for item in repositories.payload["items"]}
+
+        start = RouteHarness(
+            f"/api/v1/repositories/{repo_ids['tools/private']}/scans",
+            {"requestId": "req_multi_install"},
+            headers=auth,
+        )
+        app.PullwiseHandler.route(start, "POST")
+
+        self.assertEqual(start.status, HTTPStatus.CREATED)
+        self.assertEqual(app.SCANS[0]["repo"], "tools/private")
+        self.assertEqual(app.SCANS[0]["installationId"], "222")
+        self.assertEqual(app.SCANS[0]["installationAccount"], "tools")
+        self.assertEqual(app.SCANS[0]["cloneUrl"], "https://github.com/tools/private.git")
+        stored_job = db.get_scan_job(app.SCANS[0]["jobId"])
+        self.assertEqual(stored_job["installation_id"], "222")
+
+    def test_browser_cancel_rejects_terminal_scans(self) -> None:
+        cookie = seed_session()
+        app.SCANS = [
+            {
+                "id": "sc_done",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "done",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "completedAt": app.now(),
+            }
+        ]
+
+        cancel = RouteHarness("/scans/sc_done/cancel", cookie=cookie)
+        app.PullwiseHandler.route(cancel, "POST")
+
+        self.assertEqual(cancel.status, HTTPStatus.CONFLICT)
+        self.assertEqual(app.SCANS[0]["status"], "done")
+
     def test_api_key_cannot_scan_repository_record_outside_authorized_access(self) -> None:
         _cookie, key = self.create_api_key()
         victim = db.upsert_repository(

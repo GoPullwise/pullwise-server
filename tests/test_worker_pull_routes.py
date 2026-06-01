@@ -193,6 +193,42 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["clone_token"]["token"], "short-token")
         self.assertEqual(payload["clone_token"]["repo"], "acme/api")
 
+    def test_claim_token_failure_requeues_job_without_marking_scan_running(self) -> None:
+        scan = {
+            "id": "sc_token_fail",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "installationId": "111",
+            "cloneUrl": "https://github.com/acme/api.git",
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        with (
+            patch.object(app.github_auth, "app_api_configured", return_value=True),
+            patch.object(
+                app.github_auth,
+                "create_installation_access_token",
+                side_effect=app.github_auth.GitHubError("token unavailable"),
+            ),
+        ):
+            claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+            app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        stored_job = db.get_scan_job(job["job_id"])
+        self.assertEqual(stored_job["status"], "queued")
+        self.assertIsNone(stored_job["claimed_by_worker_id"])
+        self.assertEqual(app.SCANS[0]["status"], "queued")
+        self.assertNotIn("claimedByWorkerId", app.SCANS[0])
+
     def test_worker_routes_require_enabled_token(self) -> None:
         denied = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"})
         app.PullwiseHandler.route(denied, "POST")
