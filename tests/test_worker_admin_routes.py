@@ -360,6 +360,23 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(stored["free_slots"], 32)
         self.assertEqual(stored["last_error"], "max_concurrent_jobs clamped to 32")
 
+        heartbeat_with_error = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "max_concurrent_jobs": 99,
+                "running_jobs": 1,
+                "free_slots": 1,
+                "last_error": "disk pressure",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat_with_error, "POST")
+
+        self.assertEqual(heartbeat_with_error.status, HTTPStatus.OK)
+        stored = db.get_worker(worker_id)
+        self.assertEqual(stored["last_error"], "disk pressure; max_concurrent_jobs clamped to 32")
+
     def test_disabling_worker_blocks_new_claims_but_allows_current_job_result(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]

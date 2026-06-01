@@ -1813,29 +1813,6 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     return "idle"
 
 
-def public_worker_id(worker_id: object) -> str:
-    value = public_issue_text(worker_id)
-    if len(value) <= 12:
-        return value
-    return f"{value[:9]}..."
-
-
-def worker_status_public_payload(worker: dict) -> dict:
-    short_id = public_worker_id(worker.get("worker_id"))
-    return {
-        "worker_id": short_id,
-        "name": public_issue_text(worker.get("name")) or short_id,
-        "status": computed_worker_status(worker),
-        "provider": public_issue_text(worker.get("provider")) or "codex",
-        "region": public_issue_text(worker.get("region")),
-        "version": public_issue_text(worker.get("version")),
-        "running_jobs": public_scan_count(worker.get("running_jobs")),
-        "max_concurrent_jobs": public_scan_count(worker.get("max_concurrent_jobs")) or 1,
-        "free_slots": public_scan_count(worker.get("free_slots")),
-        "last_heartbeat_at": pull_request_timestamp(worker.get("last_heartbeat_at")),
-    }
-
-
 def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
@@ -5263,7 +5240,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return None
         return context
 
-    def api_repository_context(self, context: dict, repo_id: str) -> tuple[dict, dict, dict] | None:
+    def api_repository_context(self, context: dict, repo_id: str) -> tuple[dict, dict] | None:
         repo_id = clean_github_access_text(repo_id, allow_int=True) or ""
         if not repo_id:
             self.error(HTTPStatus.BAD_REQUEST, "repoId is required.")
@@ -5283,7 +5260,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             or repository_item(github_access, str(repository.get("full_name") or ""))
             or {}
         )
-        return repository, repository, repository_item_meta
+        return repository, repository_item_meta
 
     def handle_api_keys_get(self, params: dict) -> None:
         session = self.current_session()
@@ -5519,7 +5496,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         heartbeat_capacity = worker_heartbeat_capacity(body.get("max_concurrent_jobs"))
         last_error = clean_scan_error(body.get("last_error"))
         if reported_capacity > heartbeat_capacity:
-            last_error = f"max_concurrent_jobs clamped to {heartbeat_capacity}"
+            clamp_error = f"max_concurrent_jobs clamped to {heartbeat_capacity}"
+            last_error = f"{last_error}; {clamp_error}" if last_error else clamp_error
         try:
             record = db.upsert_worker_heartbeat(
                 {
@@ -5708,10 +5686,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             repo_context = self.api_repository_context(context, segments[1])
             if not repo_context:
                 return
-            scan = latest_scan_for_user_repo(context["user"]["id"], repo_context[1]["id"])
+            repository = repo_context[0]
+            scan = latest_scan_for_user_repo(context["user"]["id"], repository["id"])
             return self.json(
                 {
-                    "repoId": repo_context[1]["id"],
+                    "repoId": repository["id"],
                     "scan": scan_payload(scan) if scan else None,
                     "status": public_scan_status(scan.get("status")) if scan else "idle",
                 }
@@ -5724,7 +5703,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not repo_context:
                 return
             user = context["user"]
-            repository = repo_context[1]
+            repository = repo_context[0]
             return self.json(
                 {
                     "repoId": repository["id"],
@@ -5750,7 +5729,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         repo_context = self.api_repository_context(context, repo_id)
         if not repo_context:
             return
-        repository = repo_context[1]
+        repository = repo_context[0]
         if review.selected_provider() == "disabled":
             return self.error(
                 HTTPStatus.SERVICE_UNAVAILABLE,
@@ -5781,7 +5760,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
 
         github_access = context["user"].get("githubRepositoryAccess") or {}
-        repository_item_meta = repo_context[2] if len(repo_context) > 2 and isinstance(repo_context[2], dict) else {}
+        repository_item_meta = repo_context[1] if isinstance(repo_context[1], dict) else {}
         branch = clean_github_access_text(body.get("branch")) or clean_github_access_text(repository.get("default_branch")) or "main"
         scan = {
             "id": scan_id,
@@ -5844,7 +5823,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not repo_context:
             return
         with STATE_LOCK:
-            scan = active_scan_for_user_repo(context["user"]["id"], repo_context[1]["id"])
+            repository = repo_context[0]
+            scan = active_scan_for_user_repo(context["user"]["id"], repository["id"])
             if not scan:
                 return self.error(HTTPStatus.NOT_FOUND, "No queued or running scan exists for this repository.")
             scan["status"] = "cancelled"
