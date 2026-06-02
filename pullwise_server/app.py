@@ -1900,7 +1900,11 @@ def worker_create_payload(worker: dict) -> dict:
         or "http://localhost:8080"
     )
     install_url = f"{server_url}/install-worker.sh"
-    local_server_url = "http://127.0.0.1:8080"
+    local_server_url = (
+        env("PULLWISE_WORKER_LOCAL_SERVER_URL", "").rstrip("/")
+        or env("PULLWISE_LOCAL_SERVER_URL", "").rstrip("/")
+        or "http://127.0.0.1:18080"
+    )
     local_install_url = f"{local_server_url}/install-worker.sh"
     max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
     install_command = worker_install_command(
