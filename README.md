@@ -142,6 +142,7 @@ PULLWISE_MAX_QUEUED_SCANS_GLOBAL=1000
 PULLWISE_MAX_QUEUED_SCANS_PER_USER=20
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
 PULLWISE_COOKIE_SECURE=true
+PULLWISE_COOKIE_SAME_SITE=Lax
 PULLWISE_REVIEW_PROVIDER=codex
 PULLWISE_ADMIN_USER_IDS=
 PULLWISE_ADMIN_EMAILS=admin@example.com
@@ -169,6 +170,16 @@ If deploying the separate `pullwise-admin` frontend, include its exact origin in
 `PULLWISE_ALLOWED_ORIGINS`. GitHub OAuth secrets and admin authorization still
 remain server-side through `PULLWISE_GITHUB_*`, `PULLWISE_ADMIN_EMAILS`, and
 `PULLWISE_ADMIN_USER_IDS`.
+
+If `pullwise-admin` is deployed on a different site such as
+`https://pullwise-admin.danuberiverferryman.workers.dev` and calls
+`https://api.pull-wise.com` directly, set:
+
+```env
+PULLWISE_ALLOWED_ORIGINS=https://pull-wise.com,https://pullwise-admin.danuberiverferryman.workers.dev
+PULLWISE_COOKIE_SAME_SITE=None
+PULLWISE_COOKIE_SECURE=true
+```
 
 If a trusted reverse proxy supplies `X-Forwarded-Proto`, `X-Forwarded-Host`, and
 `X-Forwarded-Prefix`, you may omit `PULLWISE_API_BASE_URL` and set:

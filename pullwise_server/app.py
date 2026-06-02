@@ -4001,13 +4001,22 @@ def clear_cookie_header() -> str:
 
 
 def cookie_attributes() -> str:
-    attributes = ["Path=/", "HttpOnly", "SameSite=Lax"]
+    attributes = ["Path=/", "HttpOnly", f"SameSite={cookie_same_site()}"]
     if cookie_secure_enabled():
         attributes.append("Secure")
     domain = cookie_domain()
     if domain:
         attributes.append(f"Domain={domain}")
     return "; ".join(attributes)
+
+
+def cookie_same_site() -> str:
+    configured = os.environ.get("PULLWISE_COOKIE_SAME_SITE", "").strip().lower()
+    if configured == "none":
+        return "None"
+    if configured == "strict":
+        return "Strict"
+    return "Lax"
 
 
 def cookie_domain() -> str:
@@ -4044,6 +4053,8 @@ def cookie_domain() -> str:
 
 
 def cookie_secure_enabled() -> bool:
+    if cookie_same_site() == "None":
+        return True
     if os.environ.get("PULLWISE_COOKIE_SECURE", "").strip():
         return env_flag("PULLWISE_COOKIE_SECURE")
     public_base = os.environ.get("PULLWISE_API_BASE_URL") or os.environ.get("PULLWISE_APP_URL") or ""
