@@ -1899,15 +1899,22 @@ def worker_create_payload(worker: dict) -> dict:
         or "http://localhost:8080"
     )
     install_url = f"{server_url}/install-worker.sh"
+    local_server_url = "http://127.0.0.1:8080"
+    local_install_url = f"{local_server_url}/install-worker.sh"
     max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
-    install_command = (
-        "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
-        "export PULLWISE_WORKER_TOKEN; "
-        f"curl -fsSL {shell_quote(install_url)} | bash -s -- "
-        f"--server {shell_quote(server_url)} "
-        f"--worker-id {shell_quote(public['worker_id'])} "
-        f"--worker-name {shell_quote(public.get('name') or public['worker_id'])} "
-        f"--max-concurrent-jobs {max_concurrent_jobs}"
+    install_command = worker_install_command(
+        install_url=install_url,
+        server_url=server_url,
+        worker_id=public["worker_id"],
+        worker_name=public.get("name") or public["worker_id"],
+        max_concurrent_jobs=max_concurrent_jobs,
+    )
+    local_install_command = worker_install_command(
+        install_url=local_install_url,
+        server_url=local_server_url,
+        worker_id=public["worker_id"],
+        worker_name=public.get("name") or public["worker_id"],
+        max_concurrent_jobs=max_concurrent_jobs,
     )
     payload = {
         "worker": public,
@@ -1916,9 +1923,17 @@ def worker_create_payload(worker: dict) -> dict:
         "server_url": server_url,
         "install_url": install_url,
         "install_command": install_command,
+        "local_server_url": local_server_url,
+        "local_install_url": local_install_url,
+        "local_install_command": local_install_command,
+        "install_commands": {
+            "standard": install_command,
+            "local": local_install_command,
+        },
         "provider": public["provider"],
         "suggested_env": {
             "PULLWISE_SERVER_URL": server_url,
+            "PULLWISE_LOCAL_SERVER_URL": local_server_url,
             "PULLWISE_WORKER_ID": public["worker_id"],
             "PULLWISE_WORKER_TOKEN": token,
             "PULLWISE_PROVIDER": public["provider"],
@@ -1932,6 +1947,18 @@ def worker_create_payload(worker: dict) -> dict:
         },
     }
     return payload
+
+
+def worker_install_command(*, install_url: str, server_url: str, worker_id: str, worker_name: str, max_concurrent_jobs: int) -> str:
+    return (
+        "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
+        "export PULLWISE_WORKER_TOKEN; "
+        f"curl -fsSL {shell_quote(install_url)} | bash -s -- "
+        f"--server {shell_quote(server_url)} "
+        f"--worker-id {shell_quote(worker_id)} "
+        f"--worker-name {shell_quote(worker_name)} "
+        f"--max-concurrent-jobs {max_concurrent_jobs}"
+    )
 
 
 def shell_quote(value: object) -> str:
