@@ -497,6 +497,42 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
         self.assertEqual(scan["status"], "queued")
 
+    def test_worker_claim_requires_supported_provider(self) -> None:
+        scan = {
+            "id": "sc_bad_provider",
+            "repo": "acme/bad-provider",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS.append(scan)
+        job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "unknown",
+                "max_concurrent_jobs": 1,
+                "running_jobs": 0,
+                "free_slots": 1,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
+        self.assertEqual(scan["status"], "queued")
+
     def test_multi_worker_queue_claims_progress_and_results_complete_without_duplicate_claims(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}

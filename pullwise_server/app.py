@@ -1837,6 +1837,7 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     if (
         clean_scan_error(worker.get("last_error"))
         or not worker_version_compatible(worker)
+        or not worker_supported_provider(worker)
         or doctor_status in {"degraded", "failed", "not_ready"}
         or codex_ready == 0
     ):
