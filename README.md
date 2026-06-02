@@ -128,7 +128,7 @@ PULLWISE_HOST=0.0.0.0
 PULLWISE_PORT=8080
 PULLWISE_MODE=production
 PULLWISE_APP_URL=https://app.your-domain.com
-PULLWISE_ALLOWED_ORIGINS=https://app.your-domain.com
+PULLWISE_ALLOWED_ORIGINS=https://app.your-domain.com,https://admin.your-domain.com
 PULLWISE_API_BASE_URL=https://app.your-domain.com/api
 PULLWISE_WORKER_SERVER_URL=https://api.your-domain.com
 PULLWISE_DB_PATH=/data/pullwise.sqlite3
@@ -164,6 +164,11 @@ Pages proxy when those are different origins.
 
 Keep `PULLWISE_ALLOWED_ORIGINS` to exact trusted origins. Wildcard `*` is
 ignored because the API uses credentialed browser requests.
+
+If deploying the separate `pullwise-admin` frontend, include its exact origin in
+`PULLWISE_ALLOWED_ORIGINS`. GitHub OAuth secrets and admin authorization still
+remain server-side through `PULLWISE_GITHUB_*`, `PULLWISE_ADMIN_EMAILS`, and
+`PULLWISE_ADMIN_USER_IDS`.
 
 If a trusted reverse proxy supplies `X-Forwarded-Proto`, `X-Forwarded-Host`, and
 `X-Forwarded-Prefix`, you may omit `PULLWISE_API_BASE_URL` and set:
