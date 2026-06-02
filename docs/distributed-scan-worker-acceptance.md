@@ -1,10 +1,8 @@
 # Pullwise 分布式 Scan Worker 总体验收标准
 
-日期：2026-05-29 | 状态更新：2026-05-30
+日期：2026-05-29 | 状态更新：2026-06-02
 
-> 阶段 1 和阶段 2 已基本实现，阶段 3 大部分完成。剩余未实现项：
-> - `/admin/workers/{id}/test` 诊断端点
-> - worker update 失败回滚机制
+> 阶段 1、阶段 2、阶段 3 的仓库内实现和自动化验收已完成。仍需在真实 Linux worker、真实 GitHub App、真实 Codex 登录和线上 Cloudflare/ECS 环境中做实机验收。
 
 ## 总目标
 
@@ -68,7 +66,7 @@ web -> server -> global job queue <- workers
 - [x] heartbeat 超时的 worker 会显示 offline。
 - [x] 有 last_error 或版本不兼容的 worker 会显示 degraded。
 - [x] capacity 用满的 worker 会显示 busy。
-- [ ] /admin/workers/{id}/test 能基于 heartbeat、token 使用情况、version、provider、capacity、last error 给出检测结果。
+- [x] /admin/workers/{id}/test 能基于 heartbeat、token 使用情况、version、provider、capacity、last error 给出检测结果。
 - [x] public status API 能返回 scan system summary。
 - [x] public status 至少包含 ok/degraded/down、online worker count、total worker count、total capacity、running jobs、queued jobs、degraded/offline count。
 - [x] admin status API 能返回 worker 详情。
@@ -103,7 +101,7 @@ web -> server -> global job queue <- workers
 - [x] pullwise-worker status 能显示本地服务状态。
 - [x] pullwise-worker restart 能重启服务。
 - [x] pullwise-worker update 能升级 worker 程序并保留 env 配置。
-- [ ] update 失败时能回滚或保留旧版本可运行。
+- [x] update 失败时能回滚或保留旧版本可运行。
 - [x] pullwise-worker uninstall 能停止并移除 service。
 - [x] uninstall 不误删非 worker 目录。
 - [x] worker 日志支持 rotation。
@@ -126,8 +124,8 @@ web -> server -> global job queue <- workers
 - [x] Worker 掉线场景：worker claim 后停止服务 -> heartbeat 超时 -> job lost/timed_out -> 未超 retry 的任务重新入队 -> 其他 worker 可继续处理。
 - [x] Worker 禁用场景：admin 禁用 worker -> 该 worker 不能 claim 新任务 -> status 显示 disabled。
 - [x] Token rotation 场景：admin rotate token -> 旧 token 失效 -> 新 token 配置后 worker 恢复 heartbeat/claim。
-- [ ] Result 幂等场景：worker 重复上传同一 result -> issues 不重复写入，scan 状态保持一致。
-- [ ] 安全场景：非 admin 调用 /admin/workers 被拒绝；public status 不泄露 worker token、hostname、内部错误。
+- [x] Result 幂等场景：worker 重复上传同一 result -> issues 不重复写入，scan 状态保持一致。
+- [x] 安全场景：非 admin 调用 /admin/workers 被拒绝；public status 不泄露 worker token、hostname、内部错误。
 
 ## 当前自动化验收证据
 
