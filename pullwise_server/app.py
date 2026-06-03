@@ -1992,11 +1992,17 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_WORKER_ID": public["worker_id"],
             "PULLWISE_WORKER_TOKEN": token,
             "PULLWISE_PROVIDER": public["provider"],
+            "PULLWISE_PROVIDER_CHAIN": public["provider"],
             "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
             "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
             "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
             "PULLWISE_WORKER_PACKAGE": worker_package,
             "PULLWISE_CODEX_PACKAGE": "@openai/codex@0.135.0",
+            "PULLWISE_CODEX_MODEL": "",
+            "PULLWISE_CODEX_REASONING_EFFORT": "xhigh",
+            "PULLWISE_OPENCODE_COMMAND": "opencode",
+            "PULLWISE_OPENCODE_MODEL": "",
+            "PULLWISE_OPENCODE_VARIANT": "",
             "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
             "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
         },
@@ -2050,6 +2056,7 @@ WORKER_TOKEN=""
 WORKER_NAME="pullwise-worker"
 MAX_CONCURRENT_JOBS="1"
 PROVIDER="codex"
+PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
 CODEX_PACKAGE="${PULLWISE_CODEX_PACKAGE:-@openai/codex@0.135.0}"
 
@@ -2061,6 +2068,7 @@ while [ "$#" -gt 0 ]; do
     --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
     --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-1}"; shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
+    --provider-chain) PROVIDER_CHAIN="${2:-codex}"; shift 2 ;;
     --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
     --codex-package) CODEX_PACKAGE="${2:-@openai/codex@0.135.0}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -2080,6 +2088,9 @@ if [ -z "$WORKER_PACKAGE" ]; then
 fi
 if [ -z "$WORKER_PACKAGE" ]; then
   WORKER_PACKAGE="__DEFAULT_WORKER_PACKAGE__"
+fi
+if [ -z "$PROVIDER_CHAIN" ]; then
+  PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-$PROVIDER}"
 fi
 
 case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
@@ -2144,11 +2155,17 @@ PULLWISE_SERVER_URL=$SERVER_URL
 PULLWISE_WORKER_ID=$WORKER_ID
 PULLWISE_WORKER_TOKEN=$WORKER_TOKEN
 PULLWISE_PROVIDER=$PROVIDER
+PULLWISE_PROVIDER_CHAIN=$PROVIDER_CHAIN
 PULLWISE_MAX_CONCURRENT_JOBS=$MAX_CONCURRENT_JOBS
 PULLWISE_CHECKOUT_ROOT=$CHECKOUT_ROOT
 PULLWISE_LOG_DIR=$LOG_DIR
 PULLWISE_WORKER_PACKAGE=$WORKER_PACKAGE
 PULLWISE_CODEX_PACKAGE=$CODEX_PACKAGE
+PULLWISE_CODEX_MODEL=${PULLWISE_CODEX_MODEL:-}
+PULLWISE_CODEX_REASONING_EFFORT=${PULLWISE_CODEX_REASONING_EFFORT:-xhigh}
+PULLWISE_OPENCODE_COMMAND=${PULLWISE_OPENCODE_COMMAND:-opencode}
+PULLWISE_OPENCODE_MODEL=${PULLWISE_OPENCODE_MODEL:-}
+PULLWISE_OPENCODE_VARIANT=${PULLWISE_OPENCODE_VARIANT:-}
 PULLWISE_PYTHON_BIN=$PYTHON_BIN
 PULLWISE_SERVICE_PATH=$SERVICE_PATH
 PULLWISE_WORKER_POLL_JITTER_SECONDS=2

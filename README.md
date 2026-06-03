@@ -594,6 +594,12 @@ read-only sandbox, `model_reasoning_effort="xhigh"`, `--output-schema`, and
 continues to own login state and model selection through the CLI account/session
 configuration used by the service account.
 
+Standalone pullwise-worker hosts use their own provider chain. The default is
+Codex only. Set `PULLWISE_PROVIDER_CHAIN=codex,opencode` on the worker host for
+Codex-first fallback, then configure `PULLWISE_CODEX_MODEL`,
+`PULLWISE_CODEX_REASONING_EFFORT`, `PULLWISE_OPENCODE_MODEL`, and
+`PULLWISE_OPENCODE_VARIANT` in that worker's env file.
+
 In distributed worker mode, total running scan capacity comes from connected
 workers and their advertised free slots. Each worker controls its local
 parallelism with `PULLWISE_MAX_CONCURRENT_JOBS`. The server keeps only the
