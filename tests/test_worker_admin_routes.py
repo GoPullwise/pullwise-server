@@ -214,6 +214,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(disabled_heartbeat, "POST")
         self.assertEqual(disabled_heartbeat.status, HTTPStatus.OK)
         self.assertEqual(disabled_heartbeat.payload["worker"]["status"], "disabled")
+        self.assertEqual(db.get_worker(worker_id)["region"], "eu")
 
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
         app.PullwiseHandler.route(claim, "POST")
@@ -246,6 +247,12 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(new_token_heartbeat, "POST")
         self.assertEqual(new_token_heartbeat.status, HTTPStatus.OK)
         self.assertEqual(new_token_heartbeat.payload["worker"]["worker_id"], worker_id)
+        self.assertEqual(db.get_worker(worker_id)["region"], "eu")
+
+        admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(admin_workers, "GET")
+        self.assertEqual(admin_workers.status, HTTPStatus.OK)
+        self.assertEqual(admin_workers.payload["workers"][0]["region"], "eu")
 
         delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
         app.PullwiseHandler.route(delete, "DELETE")

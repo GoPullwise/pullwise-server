@@ -5812,6 +5812,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if reported_capacity > heartbeat_capacity:
             clamp_error = f"max_concurrent_jobs clamped to {heartbeat_capacity}"
             last_error = f"{last_error}; {clamp_error}" if last_error else clamp_error
+        heartbeat_region = public_issue_text(body.get("region")) if "region" in body else ""
         try:
             record = db.upsert_worker_heartbeat(
                 {
@@ -5822,7 +5823,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "running_jobs": public_scan_count(body.get("running_jobs")),
                     "free_slots": public_scan_count(body.get("free_slots")),
                     "hostname": public_issue_text(body.get("hostname")),
-                    "region": public_issue_text(body.get("region")),
+                    "region": heartbeat_region or None,
                     "last_error": last_error,
                     "doctor_status": public_issue_text(body.get("doctor_status")),
                     "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,

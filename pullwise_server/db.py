@@ -793,7 +793,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     running_jobs = excluded.running_jobs,
                     free_slots = excluded.free_slots,
                     hostname = excluded.hostname,
-                    region = COALESCE(excluded.region, workers.region),
+                    region = COALESCE(NULLIF(excluded.region, ''), workers.region),
                     last_error = excluded.last_error,
                     doctor_status = COALESCE(excluded.doctor_status, workers.doctor_status),
                     codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
