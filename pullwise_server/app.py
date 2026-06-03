@@ -2037,6 +2037,7 @@ def worker_install_script() -> str:
 set -euo pipefail
 
 SERVICE_USER="pullwise-worker"
+SERVICE_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CONFIG_DIR="/etc/pullwise-worker"
 ENV_FILE="$CONFIG_DIR/worker.env"
 BIN_PATH="/usr/local/bin/pullwise-worker"
@@ -2090,6 +2091,16 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
+run_as_service_user() {
+  if command -v runuser >/dev/null 2>&1; then
+    runuser -u "$SERVICE_USER" -- env PATH="$SERVICE_PATH" "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -u "$SERVICE_USER" env PATH="$SERVICE_PATH" "$@"
+  else
+    echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
+    return 127
+  fi
+}
 need_cmd python3
 need_cmd git
 python3 - <<'PY'
@@ -2097,6 +2108,7 @@ import sys
 if sys.version_info < (3, 9):
     raise SystemExit("Pullwise worker requires Python 3.9 or newer.")
 PY
+PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
 if ! command -v node >/dev/null 2>&1; then
   echo "node is required for Codex CLI; install Node.js 20+ then rerun." >&2
   exit 1
@@ -2118,6 +2130,13 @@ fi
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
 
+SERVICE_NODE_MAJOR="$(run_as_service_user node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))' 2>/dev/null || true)"
+SERVICE_NODE_VERSION="$(run_as_service_user node --version 2>/dev/null || true)"
+if [ "${SERVICE_NODE_MAJOR:-0}" -lt 20 ]; then
+  echo "Node.js 20+ must be available to $SERVICE_USER. Found ${SERVICE_NODE_VERSION:-not found}." >&2
+  exit 1
+fi
+
 python3 -m pip install --upgrade "$WORKER_PACKAGE"
 
 cat > "$ENV_FILE" <<EOF
@@ -2130,6 +2149,8 @@ PULLWISE_CHECKOUT_ROOT=$CHECKOUT_ROOT
 PULLWISE_LOG_DIR=$LOG_DIR
 PULLWISE_WORKER_PACKAGE=$WORKER_PACKAGE
 PULLWISE_CODEX_PACKAGE=$CODEX_PACKAGE
+PULLWISE_PYTHON_BIN=$PYTHON_BIN
+PULLWISE_SERVICE_PATH=$SERVICE_PATH
 PULLWISE_WORKER_POLL_JITTER_SECONDS=2
 PULLWISE_WORKER_MAX_BACKOFF_SECONDS=60
 EOF
@@ -2144,7 +2165,9 @@ if [ -f /etc/pullwise-worker/worker.env ]; then
   . /etc/pullwise-worker/worker.env
   set +a
 fi
-exec python3 -m pullwise_worker.main "$@"
+export PATH="${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+PYTHON_BIN="${PULLWISE_PYTHON_BIN:-python3}"
+exec "$PYTHON_BIN" -m pullwise_worker.main "$@"
 EOF
 chmod 0755 "$BIN_PATH"
 
@@ -2160,6 +2183,7 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$DATA_DIR
 EnvironmentFile=$ENV_FILE
+Environment=PATH=$SERVICE_PATH
 ExecStart=$BIN_PATH run
 Restart=always
 RestartSec=5
@@ -2186,7 +2210,7 @@ EOF
 systemctl daemon-reload
 systemctl enable pullwise-worker >/dev/null
 systemctl restart pullwise-worker
-"$BIN_PATH" doctor || true
+run_as_service_user "$BIN_PATH" doctor || true
 
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "If Codex is not logged in, run: sudo -u $SERVICE_USER codex login"
