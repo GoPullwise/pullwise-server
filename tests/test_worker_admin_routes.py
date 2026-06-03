@@ -113,17 +113,19 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn(token, payload["install_command"])
         self.assertIn("'US worker'", payload["install_command"])
         self.assertIn("--max-concurrent-jobs 4", payload["install_command"])
+        self.assertIn(f"--package '{app.default_worker_package()}'", payload["install_command"])
         self.assertEqual(payload["local_server_url"], "http://127.0.0.1:18080")
         self.assertEqual(payload["local_install_url"], "http://127.0.0.1:18080/install-worker.sh")
         self.assertIn("http://127.0.0.1:18080/install-worker.sh", payload["local_install_command"])
         self.assertIn("--server 'http://127.0.0.1:18080'", payload["local_install_command"])
         self.assertIn("--max-concurrent-jobs 4", payload["local_install_command"])
+        self.assertIn(f"--package '{app.default_worker_package()}'", payload["local_install_command"])
         self.assertNotIn(token, payload["local_install_command"])
         self.assertEqual(payload["install_commands"]["standard"], payload["install_command"])
         self.assertEqual(payload["install_commands"]["local"], payload["local_install_command"])
         self.assertEqual(payload["suggested_env"]["PULLWISE_MAX_CONCURRENT_JOBS"], "4")
         self.assertEqual(payload["suggested_env"]["PULLWISE_LOCAL_SERVER_URL"], "http://127.0.0.1:18080")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], "pullwise-worker==0.1.0")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], app.default_worker_package())
         self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_PACKAGE"], "@openai/codex@0.135.0")
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_MAX_BACKOFF_SECONDS"], "60")
         self.assertEqual(audit[0]["action"], "create_worker")
@@ -133,6 +135,20 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(detail, "GET")
         self.assertEqual(detail.status, HTTPStatus.OK)
         self.assertNotIn("worker_token", json.dumps(detail.payload))
+
+    def test_admin_worker_version_controls_release_package_in_install_command(self) -> None:
+        handler = RouteHarness(
+            "/admin/workers",
+            {"name": "Versioned worker", "provider": "codex", "version": "0.1.1", "max_concurrent_jobs": 2},
+            cookie=self.admin_cookie,
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        expected = app.worker_release_package("0.1.1")
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], expected)
+        self.assertIn(f"--package '{expected}'", handler.payload["install_command"])
 
     def test_public_install_script_contains_deploy_assets_but_no_worker_secrets(self) -> None:
         install = RouteHarness("/install-worker.sh")
@@ -147,7 +163,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("doctor", install.text_payload)
         self.assertIn("codex login", install.text_payload)
         self.assertIn("PULLWISE_WORKER_PACKAGE", install.text_payload)
-        self.assertIn("pullwise-worker==0.1.0", install.text_payload)
+        self.assertIn(app.default_worker_package(), install.text_payload)
+        self.assertNotIn("pullwise-worker==0.1.0", install.text_payload)
         self.assertIn("PULLWISE_CODEX_PACKAGE", install.text_payload)
         self.assertIn("@openai/codex@0.135.0", install.text_payload)
         self.assertIn("--codex-package", install.text_payload)

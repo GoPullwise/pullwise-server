@@ -110,6 +110,12 @@ DEFAULT_REPOSITORIES: list[dict] = [
 REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
+DEFAULT_WORKER_PACKAGE_VERSION = "0.1.0"
+DEFAULT_WORKER_PACKAGE = (
+    "https://github.com/GoPullwise/pullwise-worker/releases/download/"
+    f"v{DEFAULT_WORKER_PACKAGE_VERSION}/pullwise_worker-{DEFAULT_WORKER_PACKAGE_VERSION}-py3-none-any.whl"
+)
+WORKER_PACKAGE_RELEASE_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 # Re-entrant so worker mutations can call persist_state() while already holding
 # the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
@@ -1890,6 +1896,23 @@ def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
     return payload
 
 
+def worker_release_package(version: str) -> str:
+    return (
+        "https://github.com/GoPullwise/pullwise-worker/releases/download/"
+        f"v{version}/pullwise_worker-{version}-py3-none-any.whl"
+    )
+
+
+def default_worker_package(version: object = None) -> str:
+    explicit_package = env("PULLWISE_DEFAULT_WORKER_PACKAGE", "").strip()
+    if explicit_package:
+        return explicit_package
+    selected_version = public_issue_text(version) or env("PULLWISE_DEFAULT_WORKER_VERSION", "").strip() or DEFAULT_WORKER_PACKAGE_VERSION
+    if not WORKER_PACKAGE_RELEASE_RE.fullmatch(selected_version):
+        selected_version = DEFAULT_WORKER_PACKAGE_VERSION
+    return worker_release_package(selected_version)
+
+
 def worker_create_payload(worker: dict) -> dict:
     public = worker_public_payload(worker, admin=True)
     token = public_issue_text(worker.get("worker_token"))
@@ -1907,12 +1930,14 @@ def worker_create_payload(worker: dict) -> dict:
     )
     local_install_url = f"{local_server_url}/install-worker.sh"
     max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
+    worker_package = default_worker_package(public.get("version"))
     install_command = worker_install_command(
         install_url=install_url,
         server_url=server_url,
         worker_id=public["worker_id"],
         worker_name=public.get("name") or public["worker_id"],
         max_concurrent_jobs=max_concurrent_jobs,
+        worker_package=worker_package,
     )
     local_install_command = worker_install_command(
         install_url=local_install_url,
@@ -1920,6 +1945,7 @@ def worker_create_payload(worker: dict) -> dict:
         worker_id=public["worker_id"],
         worker_name=public.get("name") or public["worker_id"],
         max_concurrent_jobs=max_concurrent_jobs,
+        worker_package=worker_package,
     )
     payload = {
         "worker": public,
@@ -1945,7 +1971,7 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
             "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
             "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
-            "PULLWISE_WORKER_PACKAGE": "pullwise-worker==0.1.0",
+            "PULLWISE_WORKER_PACKAGE": worker_package,
             "PULLWISE_CODEX_PACKAGE": "@openai/codex@0.135.0",
             "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
             "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
@@ -1954,7 +1980,15 @@ def worker_create_payload(worker: dict) -> dict:
     return payload
 
 
-def worker_install_command(*, install_url: str, server_url: str, worker_id: str, worker_name: str, max_concurrent_jobs: int) -> str:
+def worker_install_command(
+    *,
+    install_url: str,
+    server_url: str,
+    worker_id: str,
+    worker_name: str,
+    max_concurrent_jobs: int,
+    worker_package: str,
+) -> str:
     return (
         "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
         "export PULLWISE_WORKER_TOKEN; "
@@ -1962,6 +1996,7 @@ def worker_install_command(*, install_url: str, server_url: str, worker_id: str,
         f"--server {shell_quote(server_url)} "
         f"--worker-id {shell_quote(worker_id)} "
         f"--worker-name {shell_quote(worker_name)} "
+        f"--package {shell_quote(worker_package)} "
         f"--max-concurrent-jobs {max_concurrent_jobs}"
     )
 
@@ -1990,7 +2025,7 @@ WORKER_TOKEN=""
 WORKER_NAME="pullwise-worker"
 MAX_CONCURRENT_JOBS="1"
 PROVIDER="codex"
-WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-pullwise-worker==0.1.0}"
+WORKER_PACKAGE=""
 CODEX_PACKAGE="${PULLWISE_CODEX_PACKAGE:-@openai/codex@0.135.0}"
 
 while [ "$#" -gt 0 ]; do
@@ -2001,7 +2036,7 @@ while [ "$#" -gt 0 ]; do
     --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
     --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-1}"; shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
-    --package) WORKER_PACKAGE="${2:-pullwise-worker==0.1.0}"; shift 2 ;;
+    --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
     --codex-package) CODEX_PACKAGE="${2:-@openai/codex@0.135.0}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -2014,6 +2049,12 @@ fi
 if [ -z "$SERVER_URL" ] || [ -z "$WORKER_ID" ] || [ -z "$WORKER_TOKEN" ]; then
   echo "missing --server, --worker-id, or worker token env/file" >&2
   exit 2
+fi
+if [ -z "$WORKER_PACKAGE" ]; then
+  WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-}"
+fi
+if [ -z "$WORKER_PACKAGE" ]; then
+  WORKER_PACKAGE="__DEFAULT_WORKER_PACKAGE__"
 fi
 
 case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
@@ -2116,7 +2157,7 @@ systemctl restart pullwise-worker
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "If Codex is not logged in, run: sudo -u $SERVICE_USER codex login"
 """
-    return script.replace("\r\n", "\n")
+    return script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package()).replace("\r\n", "\n")
 
 
 def worker_test_payload(worker: dict) -> dict:

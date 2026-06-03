@@ -255,9 +255,12 @@ result. See `docs/worker-management-control-plane.md`.
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
 the worker package as a systemd service. The script accepts `--server`,
 `--worker-id`, and `--worker-token-file` arguments, or reads the one-time token
-from `PULLWISE_WORKER_TOKEN`. The default package spec is pinned as
-`pullwise-worker==0.1.0`; override it with `PULLWISE_WORKER_PACKAGE` or
-`--package` during controlled upgrades. The Codex CLI bootstrap package is also
+from `PULLWISE_WORKER_TOKEN`. By default, the installer downloads the
+`pullwise-worker` wheel from the `GoPullwise/pullwise-worker` GitHub Release
+matching the worker `version` provided at admin creation time, falling back to
+`PULLWISE_DEFAULT_WORKER_VERSION` or `v0.1.0`. Override the full package URL
+with `PULLWISE_DEFAULT_WORKER_PACKAGE`, `PULLWISE_WORKER_PACKAGE`, or
+`--package` during controlled upgrades. The Codex CLI bootstrap package is
 pinned by default as `@openai/codex@0.135.0`; override it with
 `PULLWISE_CODEX_PACKAGE` or `--codex-package` when rolling out a new CLI.
 
