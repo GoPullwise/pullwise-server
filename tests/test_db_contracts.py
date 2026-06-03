@@ -119,32 +119,41 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(result["remaining"], 4)
         self.assertEqual(stored_count, 1)
 
-    def test_initialize_preserves_existing_workspace_tables(self) -> None:
+    def test_initialize_removes_workspace_columns_from_quota_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
-                db.initialize()
                 with closing(sqlite3.connect(db_path)) as connection:
                     with connection:
-                        connection.execute("CREATE TABLE workspaces (id TEXT PRIMARY KEY)")
-                        connection.execute("CREATE TABLE workspace_members (id TEXT PRIMARY KEY)")
-                        connection.execute("CREATE TABLE workspace_repositories (id TEXT PRIMARY KEY)")
-                        connection.execute("INSERT INTO workspaces (id) VALUES ('ws_1')")
+                        connection.execute(
+                            """
+                            CREATE TABLE quota_ledger (
+                                id TEXT PRIMARY KEY,
+                                workspace_id TEXT NOT NULL,
+                                repository_id TEXT NOT NULL,
+                                github_repo_id TEXT NOT NULL,
+                                scan_id TEXT,
+                                requested_by_user_id TEXT NOT NULL,
+                                request_id TEXT,
+                                bucket_id TEXT NOT NULL,
+                                delta INTEGER NOT NULL,
+                                reason TEXT NOT NULL,
+                                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                                FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+                                FOREIGN KEY(repository_id) REFERENCES repositories(id),
+                                FOREIGN KEY(bucket_id) REFERENCES quota_buckets(id)
+                            )
+                            """
+                        )
 
                 db.initialize()
 
                 with closing(sqlite3.connect(db_path)) as connection:
-                    workspace_count = connection.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0]
-                    member_exists = connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_members'"
-                    ).fetchone()
-                    repository_exists = connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_repositories'"
-                    ).fetchone()
+                    columns = [row[1] for row in connection.execute("PRAGMA table_info(quota_ledger)").fetchall()]
+                    foreign_key_tables = [row[2] for row in connection.execute("PRAGMA foreign_key_list(quota_ledger)").fetchall()]
 
-        self.assertEqual(workspace_count, 1)
-        self.assertIsNotNone(member_exists)
-        self.assertIsNotNone(repository_exists)
+        self.assertNotIn("workspace_id", columns)
+        self.assertNotIn("workspaces", foreign_key_tables)
 
 
 if __name__ == "__main__":

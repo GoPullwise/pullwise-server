@@ -36,12 +36,12 @@ class BillingContractsTest(unittest.TestCase):
         self.assertTrue(plan["plans"][1]["prices"]["month"]["configured"])
         self.assertTrue(plan["plans"][1]["prices"]["year"]["configured"])
 
-    def test_public_plan_accepts_workspace_review_limit_aliases(self) -> None:
+    def test_public_plan_accepts_legacy_review_limit_aliases(self) -> None:
         with patch.dict(
             os.environ,
             {
-                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "8",
-                "PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT": "80",
+                "PULLWISE_FREE_REVIEW_LIMIT": "8",
+                "PULLWISE_PRO_REVIEW_LIMIT": "80",
             },
             clear=True,
         ):

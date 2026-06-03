@@ -66,7 +66,7 @@ def repository_record_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def sync_access_for_user(user: dict[str, Any], github_access: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Sync repository records from the user's GitHub access without workspace creation."""
+    """Sync repository records from the user's GitHub access."""
     if not user or not isinstance(github_access, dict):
         return []
 

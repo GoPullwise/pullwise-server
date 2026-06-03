@@ -3073,8 +3073,8 @@ def sync_repository_access_for_user(user: dict | None, github_access: dict | Non
     if not user or not isinstance(github_access, dict):
         return
     try:
-        from . import workspaces as _ws
-        _ws.sync_access_for_user(user, github_access)
+        from . import repository_access
+        repository_access.sync_access_for_user(user, github_access)
     except Exception:
         logger.exception("Unable to sync repository access for user %s", user.get("id"))
 
@@ -3108,8 +3108,8 @@ def repository_items_for_response(user: dict | None, github_access: dict | None)
 
 def scan_resource_context(user: dict, github_access: dict, repo_meta: dict) -> tuple[dict, dict]:
     sync_repository_access_for_user(user, github_access)
-    from . import workspaces as _ws
-    repo_record = _ws.repository_record_from_item(repo_meta)
+    from . import repository_access
+    repo_record = repository_access.repository_record_from_item(repo_meta)
     if not repo_record:
         raise ValueError("REPOSITORY_SYNC_REQUIRED")
     repository = db.upsert_repository(repo_record)

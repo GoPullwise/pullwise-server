@@ -120,7 +120,6 @@ def initialize() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS quota_ledger (
                     id TEXT PRIMARY KEY,
-                    workspace_id TEXT NOT NULL,
                     repository_id TEXT NOT NULL,
                     github_repo_id TEXT NOT NULL,
                     scan_id TEXT,
@@ -135,6 +134,7 @@ def initialize() -> None:
                 )
                 """
             )
+            normalize_quota_ledger_schema(connection)
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_quota_ledger_request
@@ -361,6 +361,60 @@ def ensure_column(connection: sqlite3.Connection, table: str, column: str, defin
     if any(row[1] == column for row in rows):
         return
     connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def normalize_quota_ledger_schema(connection: sqlite3.Connection) -> None:
+    desired_columns = [
+        "id",
+        "repository_id",
+        "github_repo_id",
+        "scan_id",
+        "requested_by_user_id",
+        "request_id",
+        "bucket_id",
+        "delta",
+        "reason",
+        "created_at",
+    ]
+    rows = connection.execute("PRAGMA table_info(quota_ledger)").fetchall()
+    existing_columns = [str(row[1]) for row in rows]
+    if not existing_columns:
+        return
+    foreign_key_tables = {str(row[2]) for row in connection.execute("PRAGMA foreign_key_list(quota_ledger)").fetchall()}
+    if existing_columns == desired_columns and "workspaces" not in foreign_key_tables:
+        return
+
+    connection.execute("DROP TABLE IF EXISTS quota_ledger_old")
+    connection.execute("ALTER TABLE quota_ledger RENAME TO quota_ledger_old")
+    connection.execute(
+        """
+        CREATE TABLE quota_ledger (
+            id TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL,
+            github_repo_id TEXT NOT NULL,
+            scan_id TEXT,
+            requested_by_user_id TEXT NOT NULL,
+            request_id TEXT,
+            bucket_id TEXT NOT NULL,
+            delta INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+            FOREIGN KEY (bucket_id) REFERENCES quota_buckets(id) ON DELETE CASCADE
+        )
+        """
+    )
+    copy_columns = [column for column in desired_columns if column in existing_columns]
+    if copy_columns:
+        columns_sql = ", ".join(copy_columns)
+        connection.execute(
+            f"""
+            INSERT OR IGNORE INTO quota_ledger ({columns_sql})
+            SELECT {columns_sql}
+            FROM quota_ledger_old
+            """
+        )
+    connection.execute("DROP TABLE quota_ledger_old")
 
 
 def load_state() -> dict[str, Any]:

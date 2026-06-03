@@ -105,7 +105,7 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
                 "PULLWISE_REVIEW_PROVIDER": "mock",
-                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT": "10",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
                 "PULLWISE_FREE_REPO_REVIEW_LIMIT": "1",
             },
             clear=True,

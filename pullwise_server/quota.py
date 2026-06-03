@@ -80,7 +80,6 @@ def user_limit_for_plan(plan: str) -> int:
             0,
             env_int(
                 [
-                    "PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT",
                     "PULLWISE_PRO_USER_REVIEW_LIMIT",
                     "PULLWISE_PRO_REVIEW_LIMIT",
                 ],
@@ -91,7 +90,6 @@ def user_limit_for_plan(plan: str) -> int:
         0,
         env_int(
             [
-                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT",
                 "PULLWISE_FREE_REVIEW_LIMIT",
             ],
@@ -300,14 +298,13 @@ def consume_scan_quota(
                 connection.execute(
                     """
                     INSERT INTO quota_ledger (
-                        id, workspace_id, repository_id, github_repo_id, scan_id,
+                        id, repository_id, github_repo_id, scan_id,
                         requested_by_user_id, request_id, bucket_id, delta, reason, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'scan_created', strftime('%s', 'now'))
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'scan_created', strftime('%s', 'now'))
                     """,
                     (
                         db.quota_ledger_id(bucket_id, scan_id, requested_by_user_id, request_id),
-                        user_id,
                         repository_id,
                         github_repo_id,
                         scan_id,

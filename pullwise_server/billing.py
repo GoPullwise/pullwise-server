@@ -64,7 +64,6 @@ def review_limit(plan: str) -> int:
             0,
             env_int(
                 [
-                    "PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT",
                     "PULLWISE_PRO_USER_REVIEW_LIMIT",
                     "PULLWISE_PRO_REVIEW_LIMIT",
                 ],
@@ -75,7 +74,6 @@ def review_limit(plan: str) -> int:
         0,
         env_int(
             [
-                "PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT",
                 "PULLWISE_FREE_REVIEW_LIMIT",
             ],
