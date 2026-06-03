@@ -1867,6 +1867,26 @@ def worker_available_claim_slots(worker: dict) -> int:
     return max(0, min(reported_free, capacity - running))
 
 
+def worker_command_payload(command: dict | None, *, admin: bool = False) -> dict | None:
+    if not command:
+        return None
+    payload = {
+        "id": public_issue_text(command.get("id")),
+        "worker_id": public_issue_text(command.get("worker_id")),
+        "command": public_issue_text(command.get("command")),
+        "status": public_issue_text(command.get("status")),
+        "created_at": pull_request_timestamp(command.get("created_at")),
+        "started_at": pull_request_timestamp(command.get("started_at")),
+        "completed_at": pull_request_timestamp(command.get("completed_at")),
+        "updated_at": pull_request_timestamp(command.get("updated_at")),
+        "error": clean_scan_error(command.get("error")),
+    }
+    if admin:
+        payload["requested_by_user_id"] = public_issue_text(command.get("requested_by_user_id"))
+        payload["request_id"] = public_issue_text(command.get("request_id"))
+    return payload
+
+
 def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
@@ -1893,6 +1913,10 @@ def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
         payload["systemd_active"] = bool(worker.get("systemd_active")) if worker.get("systemd_active") is not None else None
         payload["doctor_checked_at"] = pull_request_timestamp(worker.get("doctor_checked_at"))
         payload["test"] = worker_test_payload(worker)
+        payload["latest_command"] = worker_command_payload(
+            db.get_latest_worker_command(public_issue_text(worker.get("worker_id"))),
+            admin=True,
+        )
     return payload
 
 
@@ -5582,6 +5606,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 4 and segments[:2] == ["admin", "workers"]:
             worker_id = clean_github_access_text(segments[2]) or ""
             action = segments[3]
+            if action == "commands":
+                return self.handle_admin_worker_command(session, worker_id, body)
             if action == "enable":
                 worker = db.set_worker_enabled(worker_id, True)
                 if not worker:
@@ -5636,6 +5662,47 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         return self.json(worker_create_payload(worker), HTTPStatus.CREATED)
 
+    def handle_admin_worker_command(self, session: dict, worker_id: str, body: dict) -> None:
+        command = public_issue_text(body.get("command")).lower()
+        action_name = "delete_worker_service" if command == "uninstall" else "stop_worker_service"
+        try:
+            command = db.normalize_worker_lifecycle_command(command)
+        except ValueError as exc:
+            self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        action_name = "delete_worker_service" if command == "uninstall" else "stop_worker_service"
+        try:
+            worker_command = db.create_worker_command(
+                {
+                    "worker_id": worker_id,
+                    "command": command,
+                    "requested_by_user_id": session.get("userId"),
+                    "request_id": request_id_from_handler(self),
+                    "created_at": now(),
+                }
+            )
+        except ValueError as exc:
+            self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
+            return self.error(HTTPStatus.CONFLICT, str(exc))
+        if not worker_command:
+            self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error="Worker not found.")
+            return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+        self.audit_worker_action(
+            session,
+            action_name,
+            worker_id=worker_id,
+            changed_fields={"command": command, "commandId": worker_command.get("id")},
+        )
+        worker = db.get_worker(worker_id, include_deleted=True) or {}
+        return self.json(
+            {
+                "ok": True,
+                "worker": worker_public_payload(worker, admin=True),
+                "command": worker_command_payload(worker_command, admin=True),
+            },
+            HTTPStatus.ACCEPTED,
+        )
+
     def handle_admin_patch(self, segments: list[str], body: dict) -> None:
         session = self.require_admin_session()
         if not session:
@@ -5687,6 +5754,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
         allow_disabled = segments == ["worker", "heartbeat"] or (
             len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] in {"progress", "result"}
+        ) or (
+            len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status"
         )
         worker_record = self.require_worker(allow_disabled=allow_disabled)
         if not worker_record:
@@ -5701,6 +5770,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_worker_job_progress(segments[2], body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "result":
             return self.handle_worker_job_result(segments[2], body, worker_record)
+        if len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status":
+            return self.handle_worker_command_status(segments[2], body, worker_record)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def authenticated_worker_id_matches(self, worker_record: dict, worker_id: str) -> bool:
@@ -5738,6 +5809,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        command = db.get_next_worker_command(worker_id)
         return self.json(
             {
                 "ok": True,
@@ -5746,8 +5818,34 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "status": record.get("status"),
                     "last_heartbeat_at": record.get("last_heartbeat_at"),
                 },
+                "command": worker_command_payload(command),
             }
         )
+
+    def handle_worker_command_status(self, command_id: str, body: dict, worker_record: dict) -> None:
+        command_id = clean_github_access_text(command_id) or ""
+        if not command_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "command id is required.")
+        worker_id = clean_github_access_text(body.get("worker_id")) or ""
+        if not worker_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        try:
+            command = db.update_worker_command_status(
+                {
+                    "id": command_id,
+                    "worker_id": worker_id,
+                    "status": public_issue_text(body.get("status")),
+                    "error": clean_scan_error(body.get("error")),
+                    "timestamp": now(),
+                }
+            )
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if not command:
+            return self.error(HTTPStatus.NOT_FOUND, "Worker command not found.")
+        return self.json({"ok": True, "command": worker_command_payload(command)})
 
     def handle_worker_job_claim(self, body: dict, worker_record: dict) -> None:
         worker_id = clean_github_access_text(body.get("worker_id")) or ""

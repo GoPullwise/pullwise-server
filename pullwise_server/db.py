@@ -252,6 +252,29 @@ def initialize() -> None:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS worker_commands (
+                    id TEXT PRIMARY KEY,
+                    worker_id TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    requested_by_user_id TEXT,
+                    request_id TEXT,
+                    error TEXT,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    started_at INTEGER,
+                    completed_at INTEGER,
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_worker_commands_worker_status
+                ON worker_commands(worker_id, status, created_at)
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS scan_jobs (
                     job_id TEXT PRIMARY KEY,
                     scan_id TEXT NOT NULL UNIQUE,
@@ -493,6 +516,19 @@ def normalize_worker_capacity(value: Any, *, clamp: bool = True) -> int:
     if clamp:
         return min(capacity, worker_max_concurrency_cap())
     return capacity
+
+
+WORKER_LIFECYCLE_COMMANDS = {"stop", "uninstall"}
+WORKER_COMMAND_ACTIVE_STATUSES = {"pending", "running"}
+WORKER_COMMAND_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+
+
+def normalize_worker_lifecycle_command(command: Any) -> str:
+    value = str(command or "").strip().lower()
+    if value not in WORKER_LIFECYCLE_COMMANDS:
+        allowed = ", ".join(sorted(WORKER_LIFECYCLE_COMMANDS))
+        raise ValueError(f"Worker command must be one of: {allowed}.")
+    return value
 
 
 def create_worker_token(name: str = "worker") -> dict[str, Any]:
@@ -849,6 +885,193 @@ def list_worker_audit_events(worker_id: str | None = None, *, limit: int = 100) 
                 (max(1, min(500, int(limit))),),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
+    initialize()
+    worker_id = str(record.get("worker_id") or "").strip()
+    if not worker_id:
+        raise ValueError("worker_id is required")
+    command = normalize_worker_lifecycle_command(record.get("command"))
+    timestamp = int(record.get("created_at") or time.time())
+    command_id = str(record.get("id") or stable_id("wcmd", f"{worker_id}:{command}:{time.time_ns()}"))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            worker = connection.execute(
+                "SELECT * FROM workers WHERE worker_id = ? AND deleted_at IS NULL",
+                (worker_id,),
+            ).fetchone()
+            if not worker:
+                return None
+            active = connection.execute(
+                """
+                SELECT * FROM worker_commands
+                WHERE worker_id = ? AND status IN ('pending', 'running')
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (worker_id,),
+            ).fetchone()
+            if active:
+                raise ValueError("Worker already has an active lifecycle command.")
+            connection.execute(
+                """
+                INSERT INTO worker_commands (
+                    id, worker_id, command, status, requested_by_user_id,
+                    request_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
+                """,
+                (
+                    command_id,
+                    worker_id,
+                    command,
+                    record.get("requested_by_user_id"),
+                    record.get("request_id"),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE workers
+                SET enabled = 0,
+                    disabled_at = COALESCE(disabled_at, ?),
+                    updated_at = ?
+                WHERE worker_id = ?
+                """,
+                (timestamp, timestamp, worker_id),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM worker_commands WHERE id = ?", (command_id,)).fetchone())
+
+
+def get_worker_command(command_id: str, *, worker_id: str | None = None) -> dict[str, Any] | None:
+    initialize()
+    command_id = str(command_id or "").strip()
+    if not command_id:
+        return None
+    worker_clause = "AND worker_id = ?" if worker_id else ""
+    values: tuple[Any, ...] = (command_id, worker_id) if worker_id else (command_id,)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                f"SELECT * FROM worker_commands WHERE id = ? {worker_clause}",
+                values,
+            ).fetchone()
+        )
+
+
+def get_latest_worker_command(worker_id: str) -> dict[str, Any] | None:
+    initialize()
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                """
+                SELECT * FROM worker_commands
+                WHERE worker_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (worker_id,),
+            ).fetchone()
+        )
+
+
+def get_next_worker_command(worker_id: str) -> dict[str, Any] | None:
+    initialize()
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                """
+                SELECT * FROM worker_commands
+                WHERE worker_id = ? AND status IN ('pending', 'running')
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (worker_id,),
+            ).fetchone()
+        )
+
+
+def update_worker_command_status(record: dict[str, Any]) -> dict[str, Any] | None:
+    initialize()
+    command_id = str(record.get("id") or "").strip()
+    worker_id = str(record.get("worker_id") or "").strip()
+    status = str(record.get("status") or "").strip().lower()
+    if not command_id:
+        raise ValueError("command id is required")
+    if not worker_id:
+        raise ValueError("worker_id is required")
+    if status not in WORKER_COMMAND_ACTIVE_STATUSES | WORKER_COMMAND_TERMINAL_STATUSES:
+        raise ValueError("Worker command status must be pending, running, succeeded, failed, or cancelled.")
+    timestamp = int(record.get("timestamp") or time.time())
+    error = str(record.get("error") or "")[:500] if status == "failed" else None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            command = connection.execute(
+                "SELECT * FROM worker_commands WHERE id = ? AND worker_id = ?",
+                (command_id, worker_id),
+            ).fetchone()
+            if not command:
+                return None
+            existing_status = str(command["status"] or "")
+            if existing_status in WORKER_COMMAND_TERMINAL_STATUSES:
+                return row_to_dict(command)
+            started_at = command["started_at"] or (timestamp if status == "running" else None)
+            completed_at = timestamp if status in WORKER_COMMAND_TERMINAL_STATUSES else command["completed_at"]
+            connection.execute(
+                """
+                UPDATE worker_commands
+                SET status = ?,
+                    error = ?,
+                    started_at = COALESCE(?, started_at),
+                    completed_at = ?,
+                    updated_at = ?
+                WHERE id = ? AND worker_id = ?
+                """,
+                (status, error, started_at, completed_at, timestamp, command_id, worker_id),
+            )
+            if status == "succeeded":
+                if command["command"] == "uninstall":
+                    connection.execute(
+                        """
+                        UPDATE workers
+                        SET enabled = 0,
+                            deleted_at = COALESCE(deleted_at, ?),
+                            disabled_at = COALESCE(disabled_at, ?),
+                            updated_at = ?
+                        WHERE worker_id = ?
+                        """,
+                        (timestamp, timestamp, timestamp, worker_id),
+                    )
+                elif command["command"] == "stop":
+                    connection.execute(
+                        """
+                        UPDATE workers
+                        SET enabled = 0,
+                            disabled_at = COALESCE(disabled_at, ?),
+                            updated_at = ?
+                        WHERE worker_id = ?
+                        """,
+                        (timestamp, timestamp, worker_id),
+                    )
+            return row_to_dict(
+                connection.execute(
+                    "SELECT * FROM worker_commands WHERE id = ? AND worker_id = ?",
+                    (command_id, worker_id),
+                ).fetchone()
+            )
 
 
 def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
