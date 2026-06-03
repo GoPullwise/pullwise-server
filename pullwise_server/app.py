@@ -2077,6 +2077,11 @@ if ! command -v node >/dev/null 2>&1; then
   echo "node is required for Codex CLI; install Node.js 20+ then rerun." >&2
   exit 1
 fi
+NODE_MAJOR="$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))')"
+if [ "${NODE_MAJOR:-0}" -lt 20 ]; then
+  echo "Node.js 20+ is required for Codex CLI. Found $(node --version)." >&2
+  exit 1
+fi
 if ! command -v codex >/dev/null 2>&1; then
   if command -v npm >/dev/null 2>&1; then
     npm install -g "$CODEX_PACKAGE"
