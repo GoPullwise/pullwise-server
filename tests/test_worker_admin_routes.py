@@ -164,6 +164,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("codex login", install.text_payload)
         self.assertIn("PULLWISE_WORKER_PACKAGE", install.text_payload)
         self.assertIn(app.default_worker_package(), install.text_payload)
+        self.assertIn("Python 3.9 or newer", install.text_payload)
         self.assertNotIn("pullwise-worker==0.1.0", install.text_payload)
         self.assertIn("PULLWISE_CODEX_PACKAGE", install.text_payload)
         self.assertIn("@openai/codex@0.135.0", install.text_payload)

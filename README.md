@@ -255,7 +255,8 @@ result. See `docs/worker-management-control-plane.md`.
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
 the worker package as a systemd service. The script accepts `--server`,
 `--worker-id`, and `--worker-token-file` arguments, or reads the one-time token
-from `PULLWISE_WORKER_TOKEN`. By default, the installer downloads the
+from `PULLWISE_WORKER_TOKEN`. The target host must have Python 3.9 or newer.
+By default, the installer downloads the
 `pullwise-worker` wheel from the `GoPullwise/pullwise-worker` GitHub Release
 matching the worker `version` provided at admin creation time, falling back to
 `PULLWISE_DEFAULT_WORKER_VERSION` or `v0.1.0`. Override the full package URL
