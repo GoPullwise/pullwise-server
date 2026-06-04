@@ -62,6 +62,7 @@ BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due"
 API_KEY_PREFIX = "pwk_"
 API_KEY_ALLOWED_SCOPES = {"repositories:read", "scans:read", "scans:write", "quota:read"}
 API_KEY_DEFAULT_SCOPES = ["repositories:read", "scans:read", "scans:write", "quota:read"]
+WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[/\\]")
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
@@ -1826,6 +1827,7 @@ def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
             "createdAt": now(),
         }
     )
+    issue["file"] = public_issue_file(issue.get("file"), job=job)
     if not public_issue_text(issue.get("title")):
         issue["title"] = f"Finding {index + 1}"
     return issue
@@ -2318,6 +2320,47 @@ def clean_scan_error(value: object) -> str:
     return (lines[0] if lines else "").strip()[:500]
 
 
+def public_issue_file(value: object, *, issue: dict | None = None, job: dict | None = None) -> str:
+    path = review._safe_text(value)
+    if not path:
+        return ""
+
+    repo_path = issue_repo_path(issue) if issue else None
+    normalized = review._safe_finding_file(path, repo_path)
+    if normalized:
+        return normalized
+
+    job_id = public_issue_text(job.get("job_id")) if isinstance(job, dict) else ""
+    if not job_id and isinstance(issue, dict):
+        job_id = public_issue_text(issue.get("jobId"))
+    worker_relative = worker_checkout_relative_file(path, job_id)
+    return fix_workflow.safe_issue_file(worker_relative) or ""
+
+
+def issue_repo_path(issue: dict | None) -> str | None:
+    if not isinstance(issue, dict):
+        return None
+    scan_id = public_issue_text(issue.get("scanId"))
+    if not scan_id:
+        return None
+    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+    repo_path = scan.get("repoPath") if isinstance(scan, dict) else None
+    return repo_path if isinstance(repo_path, str) and repo_path else None
+
+
+def worker_checkout_relative_file(path: str, job_id: str) -> str | None:
+    if not path or not job_id:
+        return None
+    normalized = path.replace("\\", "/")
+    if not (normalized.startswith("/") or WINDOWS_DRIVE_PATH_RE.match(path)):
+        return None
+    marker = f"/{job_id}/"
+    index = normalized.casefold().find(marker.casefold())
+    if index < 0:
+        return None
+    return normalized[index + len(marker) :]
+
+
 def issue_payload(issue: dict) -> dict:
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
     auto_fix = issue_auto_fix_contract_ok(issue)
@@ -2336,7 +2379,7 @@ def issue_payload(issue: dict) -> dict:
         "impact": review._safe_text_lenient(issue.get("impact")),
         "detectionReasoning": review._safe_text_lenient(issue.get("detectionReasoning")),
         "reproductionPath": review._safe_text_lenient(issue.get("reproductionPath")),
-        "file": public_issue_text(issue.get("file")),
+        "file": public_issue_file(issue.get("file"), issue=issue),
         "line": review._safe_non_negative_int(issue.get("line")),
         "confidence": review._safe_confidence(issue.get("confidence")),
         "confidenceRationale": review._safe_text_lenient(issue.get("confidenceRationale")),

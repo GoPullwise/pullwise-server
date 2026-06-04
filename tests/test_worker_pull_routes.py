@@ -221,6 +221,56 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["clone_token"]["token"], "short-token")
         self.assertEqual(payload["clone_token"]["repo"], "acme/api")
 
+    def test_worker_result_normalizes_checkout_absolute_issue_file_path(self) -> None:
+        scan = {
+            "id": "sc_worker_file",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-worker-file",
+                "findings": [
+                    {
+                        "severity": "high",
+                        "title": "Leaked checkout path",
+                        "file": f"/var/lib/pullwise-worker/checkouts/{job['job_id']}/src/app.py",
+                        "line": 12,
+                    }
+                ],
+                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(app.ISSUES[0]["file"], "src/app.py")
+
+        app.ISSUES[0]["file"] = f"/var/lib/pullwise-worker/checkouts/{job['job_id']}/src/app.py"
+        self.assertEqual(app.issue_payload(app.ISSUES[0])["file"], "src/app.py")
+
+        app.ISSUES[0]["file"] = "/var/log/pullwise/server.log"
+        self.assertEqual(app.issue_payload(app.ISSUES[0])["file"], "")
+
     def test_claim_token_failure_requeues_job_without_marking_scan_running(self) -> None:
         scan = {
             "id": "sc_token_fail",
