@@ -1250,6 +1250,7 @@ def billing_account_payload(user: dict) -> dict:
             "remaining": scan_usage["remaining"],
             "plan": scan_usage["plan"],
             "scope": scan_usage["scope"],
+            "resetAt": scan_usage["resetAt"],
         },
     }
 

@@ -317,6 +317,8 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(billing_payload["usage"]["used"], 1)
         self.assertEqual(billing_payload["usage"]["limit"], 1)
         self.assertEqual(billing_payload["usage"]["remaining"], 0)
+        self.assertEqual(billing_payload["usage"]["resetAt"], first.payload["billingUsage"]["resetAt"])
+        self.assertGreater(billing_payload["usage"]["resetAt"], app.now())
 
     def test_billing_account_payload_ignores_non_finite_usage(self) -> None:
         seed_session()

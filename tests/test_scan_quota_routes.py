@@ -129,6 +129,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_REPOSITORY")
         self.assertEqual(first.payload["githubRepoId"], "123")
         self.assertEqual(first.payload["repoUsage"]["used"], 1)
+        self.assertEqual(first.payload["billingUsage"]["period"], first.payload["repoUsage"]["period"])
+        self.assertEqual(first.payload["billingUsage"]["resetAt"], first.payload["repoUsage"]["resetAt"])
 
     def test_same_installation_shares_user_quota_across_repos(self) -> None:
         with patch.dict(
