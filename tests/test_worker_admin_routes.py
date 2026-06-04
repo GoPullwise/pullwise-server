@@ -143,6 +143,93 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(detail.status, HTTPStatus.OK)
         self.assertNotIn("worker_token", json.dumps(detail.payload))
 
+    def test_admin_worker_detail_includes_recent_task_activity(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        timestamp = app.now()
+        scan = {
+            "id": "sc_worker_activity",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc123",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "installationId": "111",
+            "repoId": "repo_123",
+            "githubRepoId": "123",
+            "cloneUrl": "https://github.com/acme/api.git",
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        worker_auth = {"Authorization": f"Bearer {token}"}
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.1.0",
+                "max_concurrent_jobs": 4,
+                "running_jobs": 0,
+                "free_slots": 4,
+                "doctor_status": "ok",
+                "codex_ready": True,
+            },
+            headers=worker_auth,
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers=worker_auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual(claim.payload["job"]["job_id"], job["job_id"])
+
+        progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {"phase": "ai", "progress": 70, "message": "reviewing", "started_at": timestamp + 10},
+            headers=worker_auth,
+        )
+        app.PullwiseHandler.route(progress, "POST")
+        self.assertEqual(progress.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": f"{worker_id}-1",
+                "findings": [],
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "duration_ms": 123,
+                "result_checksum": "checksum-worker-activity",
+            },
+            headers=worker_auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+        self.assertEqual(result.status, HTTPStatus.OK)
+
+        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(detail, "GET")
+
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        activity = detail.payload["taskActivity"]
+        self.assertEqual(len(activity), 1)
+        self.assertEqual(activity[0]["worker_id"], worker_id)
+        self.assertEqual(activity[0]["job_id"], job["job_id"])
+        self.assertEqual(activity[0]["scan_id"], scan["id"])
+        self.assertEqual(activity[0]["repo"], "acme/api")
+        self.assertEqual(activity[0]["status"], "done")
+        self.assertIsNotNone(activity[0]["claimed_at"])
+        self.assertEqual(activity[0]["started_at"], timestamp + 10)
+        self.assertIsNotNone(activity[0]["completed_at"])
+        self.assertNotIn("clone_token", json.dumps(activity))
+        self.assertNotIn("result_payload", json.dumps(activity))
+
     def test_admin_worker_version_controls_release_package_in_install_command(self) -> None:
         handler = RouteHarness(
             "/admin/workers",

@@ -11,8 +11,8 @@ from pullwise_server import app, db
 
 
 class RouteHarness(app.PullwiseHandler):
-    def __init__(self, body: dict | None = None, cookie: str = "") -> None:
-        self.path = "/scans"
+    def __init__(self, body: dict | None = None, cookie: str = "", path: str = "/scans") -> None:
+        self.path = path
         self._body = body or {}
         self._raw_body = json.dumps(self._body).encode("utf-8")
         self.headers = {"Host": "api.pullwise.dev", "Cookie": cookie}
@@ -157,6 +157,113 @@ class ScanQuotaRoutesTest(unittest.TestCase):
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.CREATED)
+
+    def test_default_user_quota_allows_one_prior_scan_plus_five_distinct_repos(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "default-user-quota.sqlite3"),
+                "PULLWISE_REVIEW_PROVIDER": "mock",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
+                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "3",
+            },
+            clear=True,
+        ):
+            cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="100")
+            github_access = app.USERS["usr_a"]["githubRepositoryAccess"]
+            repository_items = []
+            for index in range(6):
+                repo_id = str(100 + index)
+                full_name = f"acme/repo-{index}"
+                repository_items.append(
+                    {
+                        "id": repo_id,
+                        "githubRepoId": repo_id,
+                        "name": f"repo-{index}",
+                        "fullName": full_name,
+                        "installationId": "111",
+                        "installationAccount": "acme",
+                        "defaultBranch": "main",
+                        "cloneUrl": f"https://github.com/{full_name}.git",
+                    }
+                )
+            github_access["repositories"] = [item["fullName"] for item in repository_items]
+            github_access["repositoryItems"] = repository_items
+
+            handlers = [
+                RouteHarness({"repo": item["fullName"], "requestId": f"req_{index}"}, cookie=cookie)
+                for index, item in enumerate(repository_items)
+            ]
+            with patch.object(app.worker, "start_scan"):
+                for handler in handlers:
+                    app.PullwiseHandler.route(handler, "POST")
+            repositories = RouteHarness(cookie=cookie, path="/repositories")
+            app.PullwiseHandler.route(repositories, "GET")
+
+        self.assertEqual([handler.status for handler in handlers], [HTTPStatus.CREATED] * 6)
+        self.assertEqual(handlers[-1].payload["billingUsage"]["used"], 6)
+        self.assertEqual(handlers[-1].payload["billingUsage"]["limit"], 10)
+        self.assertEqual(handlers[-1].payload["billingUsage"]["remaining"], 4)
+        self.assertEqual(repositories.status, HTTPStatus.OK)
+        self.assertEqual(repositories.payload["userQuota"]["used"], 6)
+        self.assertEqual(repositories.payload["userQuota"]["remaining"], 4)
+        self.assertEqual(len(app.SCANS), 6)
+
+    def test_scan_preflight_reports_user_quota_without_creating_scans(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "preflight-user-quota.sqlite3"),
+                "PULLWISE_REVIEW_PROVIDER": "mock",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT": "3",
+                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "3",
+            },
+            clear=True,
+        ):
+            cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="100")
+            github_access = app.USERS["usr_a"]["githubRepositoryAccess"]
+            repository_items = []
+            for index in range(5):
+                repo_id = str(100 + index)
+                full_name = f"acme/repo-{index}"
+                repository_items.append(
+                    {
+                        "id": repo_id,
+                        "githubRepoId": repo_id,
+                        "name": f"repo-{index}",
+                        "fullName": full_name,
+                        "installationId": "111",
+                        "installationAccount": "acme",
+                        "defaultBranch": "main",
+                        "cloneUrl": f"https://github.com/{full_name}.git",
+                    }
+                )
+            github_access["repositories"] = [item["fullName"] for item in repository_items]
+            github_access["repositoryItems"] = repository_items
+
+            first = RouteHarness({"repo": "acme/repo-0", "requestId": "req_0"}, cookie=cookie)
+            with patch.object(app.worker, "start_scan"):
+                app.PullwiseHandler.route(first, "POST")
+            preflight = RouteHarness(
+                {
+                    "repositories": [
+                        {"repo": item["fullName"], "branch": "main"}
+                        for item in repository_items[1:]
+                    ]
+                },
+                cookie=cookie,
+                path="/scans/preflight",
+            )
+            app.PullwiseHandler.route(preflight, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(preflight.status, HTTPStatus.OK)
+        self.assertEqual(preflight.payload["requestedCount"], 4)
+        self.assertEqual(preflight.payload["allowedCount"], 2)
+        self.assertEqual(preflight.payload["userQuota"]["used"], 1)
+        self.assertEqual(preflight.payload["userQuota"]["remaining"], 2)
+        self.assertEqual(len(preflight.payload["repositories"]), 4)
+        self.assertEqual(len(app.SCANS), 1)
 
     def test_same_request_id_does_not_consume_quota_twice(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")

@@ -308,11 +308,15 @@ class BillingRoutesTest(unittest.TestCase):
         ):
             app.PullwiseHandler.handle_post(first, "/scans", {}, ["scans"])
             app.PullwiseHandler.handle_post(second, "/scans", {}, ["scans"])
+            billing_payload = app.billing_account_payload(app.USERS["usr_1"])
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
         self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_USER")
         self.assertEqual(first.payload["billingUsage"]["used"], 1)
+        self.assertEqual(billing_payload["usage"]["used"], 1)
+        self.assertEqual(billing_payload["usage"]["limit"], 1)
+        self.assertEqual(billing_payload["usage"]["remaining"], 0)
 
     def test_billing_account_payload_ignores_non_finite_usage(self) -> None:
         seed_session()

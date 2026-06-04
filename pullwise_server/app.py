@@ -1224,10 +1224,11 @@ def consume_review_quota(user: dict) -> tuple[bool, dict]:
 def billing_account_payload(user: dict) -> dict:
     current = user_billing_state(user)
     entitlement = billing_entitlement_for_user(user)
+    scan_usage = quota.quota_payload_for_user(user)
     return {
         "provider": public_billing_text(current.get("provider")),
         "status": public_billing_status(current.get("status")),
-        "plan": entitlement["plan"],
+        "plan": scan_usage["plan"],
         "interval": billing.normalize_interval(entitlement["interval"]),
         "customerId": public_billing_text(current.get("customerId")),
         "subscriptionId": public_billing_text(current.get("subscriptionId")),
@@ -1241,13 +1242,14 @@ def billing_account_payload(user: dict) -> dict:
         "lastEventType": public_billing_text(current.get("lastEventType")),
         "lastEventCreated": pull_request_timestamp(current.get("lastEventCreated")),
         "updatedAt": pull_request_timestamp(current.get("updatedAt")),
-        "reviewLimit": entitlement["limit"],
+        "reviewLimit": scan_usage["limit"],
         "usage": {
-            "period": entitlement["period"],
-            "used": entitlement["used"],
-            "limit": entitlement["limit"],
-            "remaining": entitlement["remaining"],
-            "plan": entitlement["plan"],
+            "period": scan_usage["period"],
+            "used": scan_usage["used"],
+            "limit": scan_usage["limit"],
+            "remaining": scan_usage["remaining"],
+            "plan": scan_usage["plan"],
+            "scope": scan_usage["scope"],
         },
     }
 
@@ -1677,6 +1679,30 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     if include_clone_token:
         payload["clone_token"] = installation_clone_token_payload(job)
     return payload
+
+
+def worker_task_activity_payload(job: dict) -> dict:
+    claimed_at = pull_request_timestamp(job.get("claimed_at"))
+    started_at = pull_request_timestamp(job.get("started_at"))
+    completed_at = pull_request_timestamp(job.get("completed_at"))
+    updated_at = pull_request_timestamp(job.get("updated_at"))
+    created_at = pull_request_timestamp(job.get("created_at"))
+    return {
+        "worker_id": public_issue_text(job.get("claimed_by_worker_id")),
+        "job_id": public_issue_text(job.get("job_id")),
+        "scan_id": public_issue_text(job.get("scan_id")),
+        "repo": clean_repository_full_name(job.get("repo")),
+        "branch": clean_github_access_text(job.get("branch")) or "main",
+        "commit": clean_github_access_text(job.get("commit")) or "pending",
+        "status": public_issue_text(job.get("status")) if job.get("status") in SCAN_JOB_STATUSES else "queued",
+        "attempt": public_scan_count(job.get("attempt")),
+        "progress_phase": public_scan_phase(job.get("progress_phase")),
+        "progress": public_scan_progress(job.get("progress")),
+        "claimed_at": claimed_at,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "last_activity_at": completed_at or started_at or claimed_at or updated_at or created_at,
+    }
 
 
 def installation_clone_token_payload(job: dict) -> dict | None:
@@ -4525,6 +4551,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 )
             payload.update({"ok": True, "syncedAt": now()})
             return self.json(payload)
+        if path == "/scans/preflight":
+            return self.handle_scan_preflight(body)
         if path == "/scans":
             session = self.current_session()
             if not session:
@@ -5382,18 +5410,145 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         items = [github]
         return {"items": items, "github": github}
 
+    def handle_scan_preflight(self, body: dict) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting a scan.")
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        requests = body.get("repositories")
+        if requests is None and (body.get("repo") or body.get("repoId")):
+            requests = [body]
+        if not isinstance(requests, list) or not requests:
+            return self.error(HTTPStatus.BAD_REQUEST, "At least one repository is required to check scan quota.")
+        if len(requests) > 100:
+            return self.error(HTTPStatus.BAD_REQUEST, "At most 100 repositories can be checked at once.")
+        if review.selected_provider() == "disabled":
+            return self.error(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
+            )
+
+        with STATE_LOCK:
+            user = USERS.get(session["userId"])
+            if not user:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before starting a scan.")
+            github_access = user.get("githubRepositoryAccess")
+            if not github_access:
+                return self.error(HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before starting a scan.")
+            if github_repository_authorization_pending(user):
+                return self.error(HTTPStatus.FORBIDDEN, "Complete GitHub repository authorization before starting a scan.")
+            if not github_repository_access_authorized_for_user(user, github_access):
+                return self.error(HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before starting a scan.")
+            if github_repositories_need_sync(github_access):
+                return self.json(
+                    {
+                        "message": "Sync GitHub repositories before starting a scan.",
+                        "code": "REPOSITORY_SYNC_REQUIRED",
+                    },
+                    HTTPStatus.FORBIDDEN,
+                )
+
+            user_quota = quota.quota_payload_for_user(user)
+            user_remaining = non_negative_int(user_quota.get("remaining"))
+            repository_capacity_used: dict[str, int] = {}
+            rows = []
+            repo_available_count = 0
+            for index, request in enumerate(requests):
+                if not isinstance(request, dict):
+                    return self.error(HTTPStatus.BAD_REQUEST, "Each repository request must be a JSON object.")
+                requested_repo_id = clean_github_access_text(request.get("repoId"), allow_int=True)
+                requested_repository = clean_repository_full_name(request.get("repo"))
+                if not requested_repo_id and not requested_repository:
+                    return self.error(HTTPStatus.BAD_REQUEST, "Each repository request requires repo or repoId.")
+                repo_meta, request_key = repository_item_for_scan_request(github_access, request)
+                if not repo_meta:
+                    return self.json(
+                        {
+                            "message": "Repository is not authorized for this GitHub App installation.",
+                            "code": "REPOSITORY_NOT_AUTHORIZED",
+                        },
+                        HTTPStatus.FORBIDDEN,
+                    )
+                repository = clean_repository_full_name(repo_meta.get("fullName"), requested_repository)
+                if not repository or (request_key != "repoId" and not repository_is_authorized(github_access, repository)):
+                    return self.json(
+                        {
+                            "message": "Repository is not authorized for this GitHub App installation.",
+                            "code": "REPOSITORY_NOT_AUTHORIZED",
+                        },
+                        HTTPStatus.FORBIDDEN,
+                    )
+                try:
+                    scan_user, repository_record = scan_resource_context(user, github_access, repo_meta)
+                except ValueError as exc:
+                    code = str(exc)
+                    if code == "REPOSITORY_SYNC_REQUIRED":
+                        return self.json(
+                            {
+                                "message": (
+                                    "Sync GitHub repositories before starting a scan so Pullwise can verify "
+                                    "the stable repository ID."
+                                ),
+                                "code": "REPOSITORY_SYNC_REQUIRED",
+                            },
+                            HTTPStatus.CONFLICT,
+                        )
+                    return self.error(HTTPStatus.BAD_REQUEST, "Unable to resolve repository context.")
+
+                repository_quota = quota.quota_payload_for_repository(repository_record, scan_user)
+                repository_remaining = non_negative_int(repository_quota.get("remaining"))
+                capacity_key = clean_github_access_text(repository_quota.get("bucketId"), allow_int=True) or str(
+                    repository_record["id"]
+                )
+                capacity_used = repository_capacity_used.get(capacity_key, 0)
+                available = repository_remaining > capacity_used
+                if available:
+                    repository_capacity_used[capacity_key] = capacity_used + 1
+                    repo_available_count += 1
+                rows.append(
+                    {
+                        "index": index,
+                        "repo": repository,
+                        "branch": (
+                            clean_github_access_text(request.get("branch"))
+                            or clean_github_access_text(repo_meta.get("defaultBranch"))
+                            or "main"
+                        ),
+                        "repoId": repository_record["id"],
+                        "githubRepoId": repository_record["github_repo_id"],
+                        "requestId": scan_request_id_from_body(request),
+                        "available": available,
+                        "reason": "ok" if available else "repository_quota_exceeded",
+                        "repoQuota": repository_quota,
+                    }
+                )
+
+        allowed_count = min(user_remaining, repo_available_count)
+        return self.json(
+            {
+                "requestedCount": len(requests),
+                "allowedCount": allowed_count,
+                "userQuota": user_quota,
+                "repositories": rows,
+            }
+        )
+
     def repositories_payload(self, refresh: bool = False) -> dict:
         session = self.current_session()
         if not session:
             return {"items": [], "repositories": [], "needsAuthorization": True}
 
         user = USERS.get(session["userId"])
+        user_quota = quota.quota_payload_for_user(user) if user else None
         github_access = user.get("githubRepositoryAccess") if user else None
         bound_existing_access = False
         pending = bool(github_repository_authorization_pending(user))
         if pending:
             if not refresh:
-                return pending_repositories_payload()
+                payload = pending_repositories_payload()
+                payload["userQuota"] = user_quota
+                return payload
             github_access = (
                 bind_pending_selected_github_identity_access(user)
                 or try_bind_existing_github_repository_access(user, force_refresh=True)
@@ -5403,7 +5558,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 pending = False
                 bound_existing_access = True
             else:
-                return pending_repositories_payload()
+                payload = pending_repositories_payload()
+                payload["userQuota"] = user_quota
+                return payload
 
         if github_access and not github_repository_access_authorized_for_user(user, github_access):
             github_access = try_bind_existing_github_repository_access(user, force_refresh=True)
@@ -5413,7 +5570,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             github_access = try_bind_existing_github_repository_access(user)
             bound_existing_access = bool(github_access)
         if not github_access:
-            return {"items": [], "repositories": [], "needsAuthorization": True}
+            return {"items": [], "repositories": [], "needsAuthorization": True, "userQuota": user_quota}
 
         if refresh and not bound_existing_access and github_access.get("mode") == "github-app":
             refreshed_access = try_bind_existing_github_repository_access(user, force_refresh=True)
@@ -5423,11 +5580,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
         repository_items = repository_items_for_response(user, github_access)
         if not github_repository_access_connected(github_access):
-            return unavailable_repositories_payload(github_access)
+            payload = unavailable_repositories_payload(github_access)
+            payload["userQuota"] = user_quota
+            return payload
 
         return {
             "items": repository_items,
             "repositories": repository_items,
+            "userQuota": user_quota,
             "needsAuthorization": False,
             "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
             "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
@@ -5633,7 +5793,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not worker:
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
             audit = db.list_worker_audit_events(segments[2], limit=50)
-            return self.json({"worker": worker_public_payload(worker, admin=True), "auditEvents": audit})
+            task_activity = [
+                worker_task_activity_payload(job)
+                for job in db.list_worker_task_activity(segments[2], limit=50)
+            ]
+            return self.json(
+                {
+                    "worker": worker_public_payload(worker, admin=True),
+                    "auditEvents": audit,
+                    "taskActivity": task_activity,
+                }
+            )
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_admin_post(self, segments: list[str], body: dict) -> None:
@@ -6047,6 +6217,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 {
                     "items": items,
                     "repositories": items,
+                    "userQuota": quota.quota_payload_for_user(user),
                     "apiKey": api_key_public_payload(context["apiKey"]),
                 }
             )

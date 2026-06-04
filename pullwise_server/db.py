@@ -1230,6 +1230,32 @@ def get_scan_job(job_id: str) -> dict[str, Any] | None:
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
 
 
+def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+    initialize()
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return []
+    safe_limit = max(1, min(500, int(limit or 50)))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT * FROM scan_jobs
+            WHERE claimed_by_worker_id = ?
+              AND (
+                claimed_at IS NOT NULL
+                OR started_at IS NOT NULL
+                OR completed_at IS NOT NULL
+              )
+            ORDER BY COALESCE(completed_at, started_at, claimed_at, updated_at, created_at) DESC,
+                     job_id ASC
+            LIMIT ?
+            """,
+            (worker_id, safe_limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def list_completed_scan_job_results() -> list[dict[str, Any]]:
     initialize()
     with _LOCK, closing(connect()) as connection:
