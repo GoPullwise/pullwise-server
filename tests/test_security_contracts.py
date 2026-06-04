@@ -2699,7 +2699,7 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(app.GITHUB_STATES[state]["codeVerifier"], "verifier")
         self.assertEqual(build_authorize_url.call_args.kwargs["prompt"], "select_account")
 
-    def test_github_manage_callback_redirects_to_verified_installation_settings_url(self) -> None:
+    def test_github_manage_callback_redirects_to_app_bridge_before_installation_settings_url(self) -> None:
         state = app.remember_github_state(
             "manage_installation",
             "https://app.pullwise.dev/?screen=repos",
@@ -2743,7 +2743,12 @@ class SecurityContractsTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.FOUND)
-        self.assertEqual(handler.location, "https://github.com/settings/installations/999")
+        self.assertIn("https://app.pullwise.dev/?screen=repos", handler.location)
+        self.assertIn("github_manage_continue_url=", handler.location)
+        self.assertIn(
+            "https%3A%2F%2Fgithub.com%2Fsettings%2Finstallations%2F999",
+            handler.location,
+        )
         self.assertEqual(app.USERS["usr_1"]["githubIdentities"][0]["githubLogin"], "octocat")
         access = app.USERS["usr_1"]["githubIdentityInstallationAccess"][0]
         self.assertTrue(access["canAccess"])

@@ -5192,7 +5192,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             expected_installation_id,
             can_access=True,
         )
-        return self.redirect(html_url)
+        return self.redirect(
+            redirect_with_params(redirect_to, {"github_manage_continue_url": html_url})
+        )
 
     def github_manage_identity_mismatch(self, identity: dict, record: dict) -> bool:
         expected_identity_id = clean_github_access_text(record.get("expectedGithubIdentityId"))
