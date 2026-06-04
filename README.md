@@ -589,10 +589,10 @@ Checkouts are namespaced by user and scan under
 not reused for another user's scan.
 
 The Codex provider uses official non-interactive `codex exec` mode with a
-read-only sandbox, `model_reasoning_effort="xhigh"`, `--output-schema`, and
-`--output-last-message` so the worker can parse structured findings. Codex
-continues to own login state and model selection through the CLI account/session
-configuration used by the service account.
+read-only sandbox, `gpt-5.4`, `model_reasoning_effort="medium"`,
+`--output-schema`, and `--output-last-message` so the worker can parse
+structured findings. Codex continues to own login state through the CLI
+account/session configuration used by the service account.
 
 Standalone pullwise-worker hosts use their own provider chain. The default is
 Codex only. Set `PULLWISE_PROVIDER_CHAIN=codex,opencode` on the worker host for

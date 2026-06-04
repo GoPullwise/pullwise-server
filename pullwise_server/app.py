@@ -1998,11 +1998,11 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
             "PULLWISE_WORKER_PACKAGE": worker_package,
             "PULLWISE_CODEX_PACKAGE": "@openai/codex@0.135.0",
-            "PULLWISE_CODEX_MODEL": "",
-            "PULLWISE_CODEX_REASONING_EFFORT": "xhigh",
+            "PULLWISE_CODEX_MODEL": "gpt-5.4",
+            "PULLWISE_CODEX_REASONING_EFFORT": "medium",
             "PULLWISE_OPENCODE_COMMAND": "opencode",
-            "PULLWISE_OPENCODE_MODEL": "",
-            "PULLWISE_OPENCODE_VARIANT": "",
+            "PULLWISE_OPENCODE_MODEL": "opencode/big-pickle",
+            "PULLWISE_OPENCODE_VARIANT": "medium",
             "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
             "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
         },
@@ -2161,11 +2161,11 @@ PULLWISE_CHECKOUT_ROOT=$CHECKOUT_ROOT
 PULLWISE_LOG_DIR=$LOG_DIR
 PULLWISE_WORKER_PACKAGE=$WORKER_PACKAGE
 PULLWISE_CODEX_PACKAGE=$CODEX_PACKAGE
-PULLWISE_CODEX_MODEL=${PULLWISE_CODEX_MODEL:-}
-PULLWISE_CODEX_REASONING_EFFORT=${PULLWISE_CODEX_REASONING_EFFORT:-xhigh}
+PULLWISE_CODEX_MODEL=${PULLWISE_CODEX_MODEL:-gpt-5.4}
+PULLWISE_CODEX_REASONING_EFFORT=${PULLWISE_CODEX_REASONING_EFFORT:-medium}
 PULLWISE_OPENCODE_COMMAND=${PULLWISE_OPENCODE_COMMAND:-opencode}
-PULLWISE_OPENCODE_MODEL=${PULLWISE_OPENCODE_MODEL:-}
-PULLWISE_OPENCODE_VARIANT=${PULLWISE_OPENCODE_VARIANT:-}
+PULLWISE_OPENCODE_MODEL=${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}
+PULLWISE_OPENCODE_VARIANT=${PULLWISE_OPENCODE_VARIANT:-medium}
 PULLWISE_PYTHON_BIN=$PYTHON_BIN
 PULLWISE_SERVICE_PATH=$SERVICE_PATH
 PULLWISE_WORKER_POLL_JITTER_SECONDS=2
@@ -2230,7 +2230,7 @@ systemctl restart pullwise-worker
 run_as_service_user "$BIN_PATH" doctor || true
 
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
-echo "If Codex is not logged in, run: sudo -u $SERVICE_USER codex login"
+echo "If Codex is not logged in, run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH codex login --device-auth"
 """
     return script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package()).replace("\r\n", "\n")
 
