@@ -155,6 +155,64 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertNotIn("workspace_id", columns)
         self.assertNotIn("workspaces", foreign_key_tables)
 
+    def test_initialize_removes_workspace_foreign_key_from_api_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute("CREATE TABLE workspaces (id TEXT PRIMARY KEY)")
+                        connection.execute("INSERT INTO workspaces (id) VALUES ('ws_1')")
+                        connection.execute(
+                            """
+                            CREATE TABLE api_keys (
+                                id TEXT PRIMARY KEY,
+                                user_id TEXT NOT NULL,
+                                workspace_id TEXT NOT NULL,
+                                name TEXT NOT NULL,
+                                key_prefix TEXT NOT NULL,
+                                key_hash TEXT NOT NULL UNIQUE,
+                                scopes TEXT NOT NULL DEFAULT '[]',
+                                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                                last_used_at INTEGER,
+                                revoked_at INTEGER,
+                                FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+                            )
+                            """
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO api_keys (
+                                id, user_id, workspace_id, name, key_prefix, key_hash,
+                                scopes, created_at, last_used_at, revoked_at
+                            )
+                            VALUES ('ak_old', 'usr_1', 'ws_1', 'Old key', 'pwk_old', 'hash_old', '[]', 100, NULL, NULL)
+                            """
+                        )
+                        connection.execute("DROP TABLE workspaces")
+
+                db.initialize()
+                created = db.create_api_key(
+                    {
+                        "id": "ak_new",
+                        "user_id": "usr_1",
+                        "name": "New key",
+                        "key_prefix": "pwk_new",
+                        "key_hash": "hash_new",
+                        "scopes": [],
+                    }
+                )
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    columns = [row[1] for row in connection.execute("PRAGMA table_info(api_keys)").fetchall()]
+                    foreign_key_tables = [row[2] for row in connection.execute("PRAGMA foreign_key_list(api_keys)").fetchall()]
+                    rows = connection.execute("SELECT id, name FROM api_keys ORDER BY created_at, id").fetchall()
+
+        self.assertEqual(created["id"], "ak_new")
+        self.assertNotIn("workspace_id", columns)
+        self.assertNotIn("workspaces", foreign_key_tables)
+        self.assertEqual(rows, [("ak_old", "Old key"), ("ak_new", "New key")])
+
 
 if __name__ == "__main__":
     unittest.main()
