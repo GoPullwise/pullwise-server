@@ -117,16 +117,19 @@ class ConfigurationContractsTest(unittest.TestCase):
     def test_health_exposes_safe_readiness_details(self) -> None:
         handler = RouteHarness("/health")
 
-        handler.handle_get("/health", {}, ["health"])
+        with patch("pullwise_server.app.review.selected_provider", return_value="codex"):
+            handler.handle_get("/health", {}, ["health"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertIn("reviewProvider", handler.payload)
+        self.assertEqual(handler.payload["reviewProvider"], "configured")
         self.assertIn("github", handler.payload)
         self.assertIn("billing", handler.payload)
         self.assertIn("limits", handler.payload)
         self.assertIn("oauthConfigured", handler.payload["github"])
         self.assertIn("appApiConfigured", handler.payload["github"])
         serialized = json.dumps(handler.payload)
+        self.assertNotIn("codex", serialized.lower())
+        self.assertNotIn("opencode", serialized.lower())
         self.assertNotIn("secret", serialized.lower())
         self.assertNotIn("privateKey", serialized)
         self.assertNotIn("token", serialized.lower())

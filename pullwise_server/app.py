@@ -446,8 +446,9 @@ def readiness_payload() -> dict:
         billing_provider = billing.selected_provider()
     except (billing.BillingConfigurationError, billing.BillingProviderConflict):
         billing_provider = "error"
+    review_provider = review.selected_provider()
     return {
-        "reviewProvider": review.selected_provider(),
+        "reviewProvider": "disabled" if review_provider == "disabled" else "configured",
         "github": {
             "oauthConfigured": github_auth.oauth_configured(),
             "appInstallConfigured": github_auth.app_install_configured(),
@@ -465,6 +466,11 @@ def readiness_payload() -> dict:
             "rateLimitEnabled": rate_limit_enabled(),
         },
     }
+
+
+PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE = (
+    "Code review provider is not configured. Configure the review runner before starting a scan."
+)
 
 
 def allowed_origins() -> set[str]:
@@ -4611,7 +4617,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if review.selected_provider() == "disabled":
                 return self.error(
                     HTTPStatus.SERVICE_UNAVAILABLE,
-                    "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
+                    PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE,
                 )
             request_id = scan_request_id_from_body(body)
             scan_error: tuple[int, str] | None = None
@@ -5472,7 +5478,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if review.selected_provider() == "disabled":
             return self.error(
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
+                PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE,
             )
 
         with STATE_LOCK:
@@ -6321,7 +6327,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if review.selected_provider() == "disabled":
             return self.error(
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                "Code review provider is not configured. Set PULLWISE_REVIEW_PROVIDER to claude_code or codex for real scans. Use mock only for explicit local wire-up.",
+                PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE,
             )
         request_id = scan_request_id_from_body(body)
         existing = user_scan_by_request_id(context["user"]["id"], request_id)
