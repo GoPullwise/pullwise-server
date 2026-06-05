@@ -1631,6 +1631,9 @@ def scan_payload(scan: dict) -> dict:
         "verification": public_scan_verification_counts(scan),
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
+    ai_usage = public_scan_ai_usage(scan.get("aiUsage") or scan.get("ai_usage"))
+    if ai_usage:
+        payload["aiUsage"] = ai_usage
     verification_audit = public_scan_verification_audit(scan)
     if public_scan_verification_audit_has_data(verification_audit):
         payload["verificationAudit"] = verification_audit
@@ -1769,6 +1772,44 @@ def public_scan_issue_counts(value: object) -> dict:
         "low": public_scan_count(counts.get("low")),
         "info": public_scan_count(counts.get("info")),
     }
+
+
+def public_scan_optional_count(value: object) -> int | None:
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    try:
+        count = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
+
+
+def public_scan_ai_usage(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    model = clean_github_access_text(source.get("model") or source.get("modelName") or source.get("model_name"))
+    input_tokens = public_scan_optional_count(first_present(source, "inputTokens", "input_tokens"))
+    output_tokens = public_scan_optional_count(first_present(source, "outputTokens", "output_tokens"))
+    total_tokens = public_scan_optional_count(first_present(source, "totalTokens", "total_tokens"))
+    if total_tokens is None and input_tokens is not None and output_tokens is not None:
+        total_tokens = input_tokens + output_tokens
+    payload = {}
+    if model:
+        payload["model"] = model
+    for key, value in (
+        ("inputTokens", input_tokens),
+        ("outputTokens", output_tokens),
+        ("totalTokens", total_tokens),
+    ):
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+def first_present(source: dict, *keys: str) -> object:
+    for key in keys:
+        if key in source:
+            return source.get(key)
+    return None
 
 
 def public_scan_verification_counts(scan: dict) -> dict:
@@ -3322,6 +3363,7 @@ def worker_result_checksum(body: dict) -> str:
         "summary": body.get("summary") if isinstance(body.get("summary"), dict) else {},
         "duration_ms": body.get("duration_ms"),
         "error": body.get("error"),
+        "ai_usage": public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage")),
         "preflight": public_scan_preflight(body.get("preflight")),
         "verification_audit": public_scan_verification_audit_input(
             body.get("verification_audit") or body.get("verificationAudit")
@@ -3376,6 +3418,7 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
         body.get("verification_audit") or body.get("verificationAudit")
     )
     audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
+    ai_usage = public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage"))
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
     changed = False
@@ -3416,6 +3459,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan["verificationAudit"] = verification_audit
         if audit_swarm:
             scan["auditSwarm"] = audit_swarm
+        if ai_usage:
+            scan["aiUsage"] = ai_usage
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status == "done":
             before_issues = json.dumps(
