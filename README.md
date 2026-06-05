@@ -595,7 +595,7 @@ Checkouts are namespaced by user and scan under
 not reused for another user's scan.
 
 The Codex provider uses official non-interactive `codex exec` mode with a
-read-only sandbox, `gpt-5.4`, `model_reasoning_effort="medium"`,
+read-only sandbox, `gpt-5.5`, `model_reasoning_effort="medium"`,
 `--output-schema`, and `--output-last-message` so the worker can parse
 structured findings. Codex continues to own login state through the CLI
 account/session configuration used by the service account.

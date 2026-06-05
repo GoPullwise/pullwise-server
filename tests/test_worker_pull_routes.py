@@ -299,6 +299,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
             ),
             "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
             "duration_ms": 1234,
+            "ai_usage": {
+                "model": "gpt-5.5",
+                "input_tokens": 123,
+                "output_tokens": 45,
+                "total_tokens": 168,
+            },
             "result_checksum": "checksum-1",
         }
         result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
@@ -308,6 +314,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "done")
         self.assertEqual(len(app.ISSUES), 1)
         final_scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(
+            final_scan_payload["aiUsage"],
+            {
+                "model": "gpt-5.5",
+                "inputTokens": 123,
+                "outputTokens": 45,
+                "totalTokens": 168,
+            },
+        )
         self.assertEqual(final_scan_payload["auditSwarm"]["stage"], "report")
         self.assertEqual(final_scan_payload["auditSwarm"]["counts"]["issueCards"], 1)
         self.assertEqual(final_scan_payload["auditSwarm"]["issueCards"][0]["issueId"], "issue-hardcoded-token")
