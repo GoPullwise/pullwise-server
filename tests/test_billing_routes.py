@@ -180,6 +180,46 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(create.call_args.kwargs["interval"], "year")
 
+    def test_admin_checkout_grants_pro_without_provider_checkout(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(
+            {
+                "interval": "year",
+                "successUrl": "https://app.pullwise.dev/?screen=pricing&billing=success",
+                "cancelUrl": "https://app.pullwise.dev/?screen=pricing&billing=cancel",
+            },
+            cookie=cookie,
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_ADMIN_EMAILS": "dev@example.com",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                },
+                clear=False,
+            ),
+            patch("pullwise_server.billing.create_checkout_session") as create,
+        ):
+            app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["provider"], "admin")
+        self.assertEqual(handler.payload["plan"], "pro")
+        self.assertEqual(handler.payload["interval"], "year")
+        self.assertTrue(handler.payload["granted"])
+        self.assertEqual(handler.payload["url"], "https://app.pullwise.dev/?screen=pricing&billing=success")
+        create.assert_not_called()
+
+        billing_state = app.USERS["usr_1"]["billing"]
+        self.assertEqual(billing_state["provider"], "admin")
+        self.assertEqual(billing_state["status"], "active")
+        self.assertEqual(billing_state["plan"], "pro")
+        self.assertEqual(billing_state["interval"], "year")
+        self.assertIsNone(billing_state["customerId"])
+        self.assertEqual(app.billing_account_payload(app.USERS["usr_1"])["plan"], "pro")
+
     def test_checkout_session_falls_back_for_non_string_redirect_urls(self) -> None:
         cookie = seed_session()
         handler = HandlerHarness(

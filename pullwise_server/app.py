@@ -1586,6 +1586,37 @@ def safe_billing_redirect_response(result: dict, label: str, *, require_url: boo
     return payload
 
 
+def grant_admin_pro_checkout(user: dict, *, success_url: str, plan: str, interval: str) -> dict:
+    plan, interval = billing.validate_checkout_selection(plan, interval)
+    timestamp = now()
+    user["billing"] = {
+        "provider": "admin",
+        "customerId": None,
+        "customerEmail": public_billing_text(user.get("email")),
+        "subscriptionId": None,
+        "subscriptionItemId": None,
+        "status": "active",
+        "plan": plan,
+        "interval": interval,
+        "currentPeriodStart": timestamp,
+        "currentPeriodEnd": None,
+        "cancelAtPeriodEnd": False,
+        "canceledAt": None,
+        "updatedAt": timestamp,
+        "lastEventType": "admin.checkout_granted",
+        "lastEventId": None,
+        "lastEventCreated": timestamp,
+    }
+    return {
+        "provider": "admin",
+        "plan": plan,
+        "interval": interval,
+        "id": make_id("admchk"),
+        "granted": True,
+        "url": success_url,
+    }
+
+
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -7542,13 +7573,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
-            checkout = billing.create_checkout_session(
-                user,
-                success_url=safe_redirect_to(body.get("successUrl"), "settings"),
-                cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
-                plan=str(body.get("plan") or "pro"),
-                interval=str(body.get("interval") or "month"),
-            )
+            success_url = safe_redirect_to(body.get("successUrl"), "settings")
+            plan = str(body.get("plan") or "pro")
+            interval = str(body.get("interval") or "month")
+            if user_is_admin(user):
+                checkout = grant_admin_pro_checkout(user, success_url=success_url, plan=plan, interval=interval)
+            else:
+                checkout = billing.create_checkout_session(
+                    user,
+                    success_url=success_url,
+                    cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
+                    plan=plan,
+                    interval=interval,
+                )
             checkout = safe_billing_redirect_response(checkout, "Checkout", require_url=True)
             if checkout.get("customerId"):
                 current_billing = user.get("billing") or {}
