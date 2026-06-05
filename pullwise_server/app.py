@@ -69,6 +69,17 @@ ISSUE_EVIDENCE_TYPES = {
     "documentation",
     "fix_verification",
 }
+AUDIT_SWARM_EVIDENCE_BLOCK_KINDS = {
+    "summary",
+    "claim",
+    "code_location",
+    "evidence",
+    "command",
+    "verifier_verdict",
+    "false_positive_check",
+    "invariant",
+    "risk",
+}
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
 SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "lost", "retrying"}
 SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
@@ -1881,6 +1892,7 @@ def public_scan_audit_swarm_from_worker_body(body: dict, *, status: str = "") ->
             "counts": verification_audit,
             "issueCards": issue_cards,
             "verificationResults": verification_results,
+            "evidenceBlocks": source.get("evidence_blocks") or source.get("evidenceBlocks"),
         }
     )
     if not payload:
@@ -1888,8 +1900,10 @@ def public_scan_audit_swarm_from_worker_body(body: dict, *, status: str = "") ->
     if not raw_payload:
         return payload
     merged = dict(payload)
-    for key in ("issueCards", "verificationResults", "roles", "shards"):
+    for key in ("issueCards", "verificationResults", "evidenceBlocks", "roles", "shards"):
         if raw_payload.get(key):
+            if key == "evidenceBlocks" and merged.get(key):
+                continue
             merged[key] = raw_payload[key]
     counts = dict(payload.get("counts") if isinstance(payload.get("counts"), dict) else {})
     for source_counts in (raw_payload.get("counts"), verification_audit):
@@ -1911,11 +1925,21 @@ def public_scan_audit_swarm(value: object) -> dict:
     verification_results = public_scan_audit_swarm_verification_results(
         value.get("verificationResults") or value.get("verification_results")
     )
+    evidence_blocks = public_scan_audit_swarm_evidence_blocks(
+        value.get("evidenceBlocks") or value.get("evidence_blocks"),
+        issue_cards,
+        verification_results,
+    )
     roles = review._safe_text_list(value.get("roles"))[:12]
     roles.extend(item.get("agentRole", "") for item in issue_cards)
     roles.extend(item.get("verifierRole", "") for item in verification_results)
+    roles.extend(item.get("role", "") for item in evidence_blocks)
     shards = review._safe_text_list(value.get("shards"))[:20]
     shards.extend(item.get("shardId", "") for item in issue_cards)
+    shards.extend(item.get("shardId", "") for item in evidence_blocks)
+    counts = public_scan_audit_swarm_counts(value.get("counts"), issue_cards, verification_results)
+    if evidence_blocks:
+        counts["evidenceBlocks"] = max(public_scan_count(counts.get("evidenceBlocks")), len(evidence_blocks))
     payload = {
         "protocol": public_issue_text(value.get("protocol")),
         "stage": public_issue_text(value.get("stage")).lower(),
@@ -1925,11 +1949,12 @@ def public_scan_audit_swarm(value: object) -> dict:
         "logsSummary": " ".join(review._safe_text_lenient(value.get("logsSummary") or value.get("logs_summary")).split())[
             :1000
         ],
-        "counts": public_scan_audit_swarm_counts(value.get("counts"), issue_cards, verification_results),
+        "counts": counts,
         "roles": list(dict.fromkeys(item for item in roles if item))[:12],
         "shards": list(dict.fromkeys(item for item in shards if item))[:20],
         "issueCards": issue_cards,
         "verificationResults": verification_results,
+        "evidenceBlocks": evidence_blocks,
     }
     return {key: item for key, item in payload.items() if item not in ("", [], {})}
 
@@ -1951,10 +1976,14 @@ def public_scan_audit_swarm_counts(value: object, issue_cards: list[dict], verif
         "manifestCount",
         "toolCount",
         "verifierRunCount",
+        "evidenceBlocks",
     ):
         count = public_scan_count(source.get(key))
         if count:
             payload[key] = count
+    evidence_block_count = public_scan_count(source.get("evidenceBlocks") or source.get("evidence_blocks"))
+    if evidence_block_count:
+        payload["evidenceBlocks"] = max(public_scan_count(payload.get("evidenceBlocks")), evidence_block_count)
     if issue_cards:
         payload["issueCards"] = max(public_scan_count(payload.get("issueCards")), len(issue_cards))
     if verification_results:
@@ -1963,6 +1992,274 @@ def public_scan_audit_swarm_counts(value: object, issue_cards: list[dict], verif
             len(verification_results),
         )
     return payload
+
+
+def public_scan_audit_swarm_evidence_blocks(
+    value: object,
+    issue_cards: list[dict],
+    verification_results: list[dict],
+) -> list[dict]:
+    raw_blocks = value if isinstance(value, list) else []
+    blocks = [
+        block
+        for block in (public_scan_audit_swarm_evidence_block(item) for item in raw_blocks)
+        if block
+    ]
+    if not blocks:
+        blocks = public_scan_audit_swarm_blocks_from_records(issue_cards, verification_results)
+    return public_scan_audit_swarm_dedupe_blocks(blocks)[:40]
+
+
+def public_scan_audit_swarm_blocks_from_records(
+    issue_cards: list[dict],
+    verification_results: list[dict],
+) -> list[dict]:
+    blocks = []
+    for index, card in enumerate(issue_cards[:8]):
+        issue_id = public_issue_text(card.get("issueId")) or f"audit-candidate-{index + 1}"
+        common = {
+            "issueId": issue_id,
+            "severity": card.get("severity"),
+            "category": card.get("category"),
+            "role": card.get("agentRole"),
+            "shardId": card.get("shardId"),
+            "confidence": card.get("confidence"),
+        }
+        claim = public_issue_text(card.get("claim"))
+        title = public_issue_text(card.get("title")) or f"Audit candidate {index + 1}"
+        if claim:
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{issue_id}:claim",
+                        "kind": "claim",
+                        "title": title,
+                        "summary": claim,
+                        **common,
+                    }
+                )
+            )
+        for location_index, location in enumerate(card.get("locations") if isinstance(card.get("locations"), list) else []):
+            if not isinstance(location, dict):
+                continue
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{issue_id}:location:{location_index}",
+                        "kind": "code_location",
+                        "title": "Code location",
+                        "summary": claim or title,
+                        "file": location.get("file"),
+                        "startLine": location.get("startLine"),
+                        "endLine": location.get("endLine"),
+                        **common,
+                    }
+                )
+            )
+        if not card.get("locations") and public_issue_text(card.get("file")):
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{issue_id}:location:0",
+                        "kind": "code_location",
+                        "title": "Code location",
+                        "summary": claim or title,
+                        "file": card.get("file"),
+                        "startLine": card.get("line"),
+                        "endLine": card.get("line"),
+                        **common,
+                    }
+                )
+            )
+        for evidence_index, evidence in enumerate(card.get("evidence") if isinstance(card.get("evidence"), list) else []):
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{issue_id}:evidence:{evidence_index}",
+                        "kind": "evidence",
+                        "title": "Discovery evidence",
+                        "summary": evidence,
+                        **common,
+                    }
+                )
+            )
+        for check_index, check in enumerate(
+            card.get("falsePositiveChecks") if isinstance(card.get("falsePositiveChecks"), list) else []
+        ):
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{issue_id}:false-positive:{check_index}",
+                        "kind": "false_positive_check",
+                        "title": "False-positive check",
+                        "summary": check,
+                        **common,
+                    }
+                )
+            )
+        for invariant_index, invariant in enumerate(
+            card.get("violatedInvariants") if isinstance(card.get("violatedInvariants"), list) else []
+        ):
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{issue_id}:invariant:{invariant_index}",
+                        "kind": "invariant",
+                        "title": "Violated invariant",
+                        "summary": invariant,
+                        **common,
+                    }
+                )
+            )
+        suggested_test = public_issue_text(card.get("suggestedTest"))
+        if suggested_test:
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{issue_id}:suggested-test",
+                        "kind": "command",
+                        "title": "Suggested test",
+                        "summary": suggested_test,
+                        "status": "suggested",
+                        **common,
+                    }
+                )
+            )
+    for index, result in enumerate(verification_results[:12]):
+        issue_id = public_issue_text(result.get("issueId"))
+        key = issue_id or f"verification-{index + 1}"
+        verdict = public_issue_text(result.get("verdict")).lower()
+        common = {
+            "issueId": issue_id,
+            "role": result.get("verifierRole"),
+            "verdict": verdict,
+            "proofType": result.get("proofType"),
+            "proofStrength": result.get("proofStrength"),
+            "confidence": result.get("confidence"),
+        }
+        summary = public_issue_text(result.get("summary"))
+        blocks.append(
+            public_scan_audit_swarm_evidence_block(
+                {
+                    "id": f"{key}:verdict:{public_issue_text(result.get('verifierRole')) or index}",
+                    "kind": "verifier_verdict",
+                    "title": "Verifier verdict",
+                    "summary": summary or f"{public_issue_text(result.get('verifierRole')) or 'verifier'} returned {verdict or 'a verdict'}.",
+                    **common,
+                }
+            )
+        )
+        commands = result.get("commands") if isinstance(result.get("commands"), list) else []
+        command = public_issue_text(result.get("command"))
+        if command and command not in commands:
+            commands = [command, *commands]
+        for command_index, command_text in enumerate(commands[:3]):
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{key}:command:{command_index}",
+                        "kind": "command",
+                        "title": "Verifier command",
+                        "summary": summary,
+                        "command": command_text,
+                        "status": "executed",
+                        **common,
+                    }
+                )
+            )
+        for evidence_index, evidence in enumerate(result.get("evidence") if isinstance(result.get("evidence"), list) else []):
+            blocks.append(
+                public_scan_audit_swarm_evidence_block(
+                    {
+                        "id": f"{key}:verification-evidence:{evidence_index}",
+                        "kind": "evidence",
+                        "title": "Verifier evidence",
+                        "summary": evidence,
+                        **common,
+                    }
+                )
+            )
+    return blocks
+
+
+def public_scan_audit_swarm_evidence_block(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    kind = public_issue_text(value.get("kind")).lower()
+    if kind not in AUDIT_SWARM_EVIDENCE_BLOCK_KINDS:
+        kind = "evidence"
+    title = " ".join(review._safe_text_lenient(value.get("title") or kind.replace("_", " ").title()).split())[:180]
+    summary = " ".join(
+        review._safe_text_lenient(value.get("summary") or value.get("text") or value.get("claim")).split()
+    )[:900]
+    block = {
+        "id": public_issue_text(value.get("id") or value.get("blockId") or value.get("block_id")),
+        "kind": kind,
+        "title": title,
+        "summary": summary,
+    }
+    for key in (
+        "issueId",
+        "severity",
+        "category",
+        "role",
+        "shardId",
+        "stage",
+        "status",
+        "verdict",
+        "proofType",
+        "command",
+    ):
+        snake_key = re.sub(r"(?<!^)([A-Z])", r"_\1", key).lower()
+        text = public_issue_text(value.get(key) or value.get(snake_key))
+        if key == "verdict" and text and text not in {"confirmed", "rejected", "inconclusive"}:
+            text = ""
+        if text:
+            block[key] = text
+    file_path = public_issue_file(value.get("file") or value.get("path"))
+    if file_path:
+        block["file"] = file_path
+    start_line, end_line = public_scan_audit_swarm_line_range(value)
+    if start_line:
+        block["startLine"] = start_line
+    if end_line:
+        block["endLine"] = end_line
+    proof_strength = public_scan_count(value.get("proofStrength") or value.get("proof_strength"))
+    if proof_strength:
+        block["proofStrength"] = proof_strength
+    if "confidence" in value:
+        try:
+            confidence = float(value.get("confidence"))
+        except (OverflowError, TypeError, ValueError):
+            confidence = 0.0
+        if confidence:
+            block["confidence"] = max(0.0, min(1.0, confidence))
+    items = public_scan_audit_swarm_text_items(value.get("items"))[:8]
+    if items:
+        block["items"] = items
+    return {key: item for key, item in block.items() if item not in ("", [], {})}
+
+
+def public_scan_audit_swarm_dedupe_blocks(blocks: list[dict]) -> list[dict]:
+    deduped = []
+    seen = set()
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        key = (
+            public_issue_text(block.get("kind")),
+            public_issue_text(block.get("issueId")),
+            public_issue_text(block.get("title")),
+            public_issue_text(block.get("summary")),
+            public_issue_text(block.get("command")),
+            public_issue_text(block.get("file")),
+            public_scan_count(block.get("startLine")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(block)
+    return deduped
 
 
 def public_scan_audit_swarm_issue_cards(value: object) -> list[dict]:
@@ -2155,7 +2452,8 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         "issues": issue_payloads,
         "limitations": [
             "This bundle is generated from structured scan records stored by Pullwise.",
-            "Verifier output captured by the worker is embedded under logs/ when available; logPath still records the original worker-side path.",
+            "Verifier stdout/stderr is not embedded in this bundle; logPath values only identify worker-local logs.",
+            "Reproduction commands are exported as untrusted text for manual review, not as executable scripts.",
             "All repository links are pinned to the recorded commit when a valid commit SHA is available.",
         ],
     }
@@ -2187,15 +2485,12 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
     artifacts = [
         audit_bundle_artifact("README.md", "text/markdown", audit_bundle_readme_markdown(bundle)),
         audit_bundle_artifact("report.md", "text/markdown", audit_bundle_report_markdown(bundle)),
-        audit_bundle_artifact("repro.sh", "text/x-shellscript", audit_bundle_repro_script(bundle)),
-        audit_bundle_artifact("Dockerfile", "text/x-dockerfile", audit_bundle_dockerfile(bundle)),
         audit_bundle_artifact("reproduction/commands.txt", "text/plain", audit_bundle_repro_commands_text(bundle)),
         audit_bundle_artifact("environment.json", "application/json", audit_bundle_environment_json(bundle)),
         audit_bundle_artifact("tool-versions.json", "application/json", audit_bundle_tool_versions_json(bundle)),
         audit_bundle_artifact("audit.json", "application/json", audit_bundle_json_text(bundle)),
     ]
     artifacts.extend(audit_bundle_log_artifacts(bundle))
-    artifacts.extend(audit_bundle_issue_repro_artifacts(bundle))
     artifacts.extend(audit_bundle_patch_artifacts(bundle))
     for issue in bundle.get("issues") if isinstance(bundle.get("issues"), list) else []:
         if isinstance(issue, dict):
@@ -2252,23 +2547,7 @@ def audit_bundle_log_artifacts(bundle: dict) -> list[dict]:
 
 
 def audit_bundle_log_artifacts_from_preflight(preflight: dict) -> list[dict]:
-    verifier = preflight.get("verifier") if isinstance(preflight.get("verifier"), dict) else {}
-    runs = verifier.get("runs") if isinstance(verifier.get("runs"), list) else []
-    artifacts = []
-    used_paths = set()
-    for index, run in enumerate(runs):
-        if not isinstance(run, dict):
-            continue
-        output = review._safe_text_lenient(run.get("output"))[:4000]
-        if not output:
-            continue
-        path = audit_bundle_log_artifact_path(run, index)
-        while path in used_paths:
-            stem, dot, suffix = path.rpartition(".")
-            path = f"{stem}-{len(used_paths) + 1}.{suffix}" if dot else f"{path}-{len(used_paths) + 1}"
-        used_paths.add(path)
-        artifacts.append(audit_bundle_artifact(path, "text/plain", audit_bundle_verifier_log_text(run, index, output)))
-    return artifacts[:20]
+    return []
 
 
 def audit_bundle_log_artifact_path(run: dict, index: int) -> str:
@@ -2333,7 +2612,7 @@ def audit_bundle_readme_markdown(bundle: dict) -> str:
             f"Commit: {public_issue_text(scan.get('commit')) or 'pending'}",
             f"Generated at: {pull_request_timestamp(bundle.get('generatedAt')) or 0}",
             "",
-            "This bundle is designed for evidence review. Start with report.md, inspect issues/*.md, then read repro.sh before executing it.",
+            "This bundle is designed for evidence review. Start with report.md, inspect issues/*.md, then review reproduction/commands.txt as untrusted text.",
             "",
             "## Candidate Audit",
             "",
@@ -2344,32 +2623,10 @@ def audit_bundle_readme_markdown(bundle: dict) -> str:
             "",
             "## Reproduction",
             "",
-            "repro.sh prints the reproduction commands by default. To execute all captured commands after review, run:",
-            "",
-            "```sh",
-            "PULLWISE_RUN_REPRO=1 sh repro.sh",
-            "```",
-            "",
-            "To inspect or run commands for a single issue, pass the issue id:",
-            "",
-            "```sh",
-            "sh repro.sh ISSUE_ID",
-            "PULLWISE_RUN_REPRO=1 sh repro.sh ISSUE_ID",
-            "```",
-            "",
-            "Use PULLWISE_REPO_DIR=/path/to/checkout to run against an existing checkout instead of cloning.",
-            "A Dockerfile is included as a reviewable container scaffold for the unzipped bundle:",
-            "",
-            "```sh",
-            "docker build -t pullwise-audit .",
-            "docker run --rm pullwise-audit",
-            "docker run --rm -e PULLWISE_RUN_REPRO=1 pullwise-audit",
-            "```",
-            "",
-            "Install project-specific runtimes or services in Dockerfile before executing commands when the audited repository requires them.",
-            "Per-issue reproduction scripts are stored under reproduction/issues/ when an issue has executable commands.",
+            "Captured reproduction commands are stored only in reproduction/commands.txt and issue markdown files.",
+            "Treat every command as untrusted input. Review the repository, command, and environment before copying any command into a shell manually.",
             "Suggested patch artifacts are stored under patches/ when an issue includes safe before/after code evidence.",
-            "Captured verifier output artifacts, when present, are stored under logs/.",
+            "Verifier stdout/stderr is withheld from the bundle; worker log paths may be listed as references only.",
             "Tool versions captured during preflight are stored in tool-versions.json.",
             "Artifact sizes and sha256 checksums are listed in artifact-manifest.json.",
             "",
@@ -2432,7 +2689,7 @@ def audit_bundle_dockerfile(bundle: dict) -> str:
         [
             "# Pullwise audit reproduction container.",
             "# Build from the unzipped audit bundle with: docker build -t pullwise-audit .",
-            "# Run once without PULLWISE_RUN_REPRO=1 to inspect captured commands before executing them.",
+            "# This scaffold is retained for compatibility and does not run captured commands.",
             "FROM ubuntu:22.04",
             "",
             "ENV DEBIAN_FRONTEND=noninteractive",
@@ -2444,7 +2701,7 @@ def audit_bundle_dockerfile(bundle: dict) -> str:
             "COPY . /audit",
             "",
             "# Add project-specific runtimes, databases, or service dependencies here if required.",
-            "CMD [\"sh\", \"/audit/repro.sh\"]",
+            "CMD [\"sh\", \"-c\", \"printf '%s\\n' 'Pullwise audit bundles do not include executable reproduction scripts.'\"]",
             "",
         ]
     )
@@ -2464,7 +2721,7 @@ def audit_bundle_repro_script(bundle: dict) -> str:
         "ISSUE_ID=${1:-}",
         "if [ -n \"$ISSUE_ID\" ]; then",
         "  SAFE_ISSUE=$(printf '%s' \"$ISSUE_ID\" | sed 's/[^A-Za-z0-9_.-]/_/g; s/^[._]*//; s/[._]*$//')",
-        "  ISSUE_SCRIPT=\"reproduction/issues/${SAFE_ISSUE}.sh\"",
+        "  ISSUE_SCRIPT=\"reproduction/commands/${SAFE_ISSUE}.txt\"",
         "  if [ ! -f \"$ISSUE_SCRIPT\" ]; then",
         "    echo \"No reproduction script found for issue: $ISSUE_ID\" >&2",
         "    exit 2",
@@ -2500,19 +2757,11 @@ def audit_bundle_repro_script(bundle: dict) -> str:
         [
             "PULLWISE_REPRO_COMMANDS",
             "",
-            "if [ \"${PULLWISE_RUN_REPRO:-0}\" != \"1\" ]; then",
-            "  echo \"Commands printed only. Re-run with PULLWISE_RUN_REPRO=1 to execute after review.\"",
-            "  exit 0",
-            "fi",
+            "echo \"Commands printed only. Review manually before copying into a shell.\"",
+            "exit 0",
             "",
         ]
     )
-    for command in commands[:50]:
-        text = public_issue_text(command)
-        if text:
-            lines.append(f"sh -lc {shell_single_quote(text)}")
-    if not commands:
-        lines.append("echo \"No reproduction commands to execute.\"")
     lines.append("")
     return "\n".join(lines)
 
@@ -2531,9 +2780,9 @@ def audit_bundle_issue_repro_artifacts(bundle: dict) -> list[dict]:
         safe_issue_id = audit_bundle_safe_artifact_name(issue_id)
         artifacts.append(
             audit_bundle_artifact(
-                f"reproduction/issues/{safe_issue_id}.sh",
-                "text/x-shellscript",
-                audit_bundle_issue_repro_script(scan, issue, commands),
+                f"reproduction/commands/{safe_issue_id}.txt",
+                "text/plain",
+                "\n".join(commands) + "\n",
             )
         )
     return artifacts[:20]
@@ -2633,14 +2882,11 @@ def audit_bundle_issue_repro_script(scan: dict, issue: dict, commands: list[str]
         [
             "PULLWISE_REPRO_COMMANDS",
             "",
-            "if [ \"${PULLWISE_RUN_REPRO:-0}\" != \"1\" ]; then",
-            "  echo \"Commands printed only. Re-run with PULLWISE_RUN_REPRO=1 to execute after review.\"",
-            "  exit 0",
-            "fi",
+            "echo \"Commands printed only. Review manually before copying into a shell.\"",
+            "exit 0",
             "",
         ]
     )
-    lines.extend(f"sh -lc {shell_single_quote(command)}" for command in commands)
     lines.append("")
     return "\n".join(lines)
 
@@ -2648,8 +2894,14 @@ def audit_bundle_issue_repro_script(scan: dict, issue: dict, commands: list[str]
 def audit_bundle_repro_commands_text(bundle: dict) -> str:
     commands = bundle.get("reproductionCommands") if isinstance(bundle.get("reproductionCommands"), list) else []
     if not commands:
-        return "No executable reproduction commands were captured.\n"
-    return "\n".join(public_issue_text(command) for command in commands[:50] if public_issue_text(command)) + "\n"
+        return "No reproduction commands were captured.\n"
+    lines = [
+        "# Untrusted reproduction commands captured by Pullwise.",
+        "# Review manually before copying any command into a shell.",
+        "",
+    ]
+    lines.extend(public_issue_text(command) for command in commands[:50] if public_issue_text(command))
+    return "\n".join(lines) + "\n"
 
 
 def audit_bundle_environment_json(bundle: dict) -> str:
@@ -2756,9 +3008,6 @@ def audit_bundle_issue_markdown(issue: dict) -> str:
             label = public_issue_text(item.get("label")) or public_issue_text(item.get("type")) or "Evidence"
             summary = review._safe_text_lenient(item.get("summary"))
             lines.append(f"- {label}: {summary}")
-            output = review._safe_text_lenient(item.get("output"))[:4000]
-            if output:
-                lines.extend(["", "```text", output, "```"])
         lines.append("")
     if audit_bundle_issue_patch_diff(issue):
         issue_id = audit_bundle_safe_artifact_name(public_issue_text(issue.get("id")) or "issue")
@@ -2894,8 +3143,8 @@ def public_scan_preflight_verifier(value: object) -> dict:
         output = review._safe_text_lenient(item.get("output"))[:4000]
         if log_path:
             record["logPath"] = log_path
-        if output:
-            record["output"] = output
+        if output or item.get("outputRedacted") is True:
+            record["outputRedacted"] = True
         runs.append(record)
     if runs:
         payload["runs"] = runs[:10]
@@ -2917,9 +3166,8 @@ def public_scan_preflight_verifier_attempts(value: object) -> list[dict]:
             "exitCode": public_optional_int(item.get("exitCode")) or 0,
             "durationMs": public_scan_count(item.get("durationMs")),
         }
-        output = review._safe_text_lenient(item.get("output"))[:1000]
-        if output:
-            record["output"] = output
+        if review._safe_text_lenient(item.get("output")) or item.get("outputRedacted") is True:
+            record["outputRedacted"] = True
         attempts.append(record)
     return attempts[:3]
 
@@ -3034,6 +3282,7 @@ def worker_result_checksum(body: dict) -> str:
         return provided
     digest_payload = {
         "status": body.get("status"),
+        "resolved_commit": worker_result_resolved_commit(body=body),
         "audit_protocol": body.get("audit_protocol") or body.get("auditProtocol"),
         "issue_cards": body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else [],
         "verification_results": (
@@ -3055,6 +3304,25 @@ def worker_result_checksum(body: dict) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def worker_result_resolved_commit(
+    job: dict | None = None,
+    body: dict | None = None,
+    preflight: dict | None = None,
+) -> str:
+    candidates: list[object] = []
+    if isinstance(body, dict):
+        candidates.extend([body.get("resolved_commit"), body.get("resolvedCommit"), body.get("commit")])
+    if isinstance(preflight, dict):
+        candidates.append(preflight.get("commit"))
+    if isinstance(job, dict):
+        candidates.append(job.get("commit"))
+    for value in candidates:
+        commit = clean_github_access_text(value)
+        if commit and commit.lower() != "pending" and GIT_COMMIT_SHA_RE.fullmatch(commit):
+            return commit.lower()
+    return ""
+
+
 def expected_worker_attempt_id(job: dict) -> str:
     worker_id = public_issue_text(job.get("claimed_by_worker_id"))
     attempt = public_scan_count(job.get("attempt"))
@@ -3064,9 +3332,15 @@ def expected_worker_attempt_id(job: dict) -> str:
 
 
 def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: str, checksum: str) -> bool:
-    normalized_findings = worker_audit_swarm_findings(job, body)
-    summary = public_scan_issue_counts(body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings))
     preflight = public_scan_preflight(body.get("preflight"))
+    resolved_commit = worker_result_resolved_commit(job=job, body=body, preflight=preflight)
+    if resolved_commit:
+        preflight["commit"] = resolved_commit
+    job_for_findings = dict(job)
+    if resolved_commit:
+        job_for_findings["commit"] = resolved_commit
+    normalized_findings = worker_audit_swarm_findings(job_for_findings, body)
+    summary = public_scan_issue_counts(body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings))
     verification_audit = public_scan_verification_audit_input(
         body.get("verification_audit") or body.get("verificationAudit")
     )
@@ -3088,6 +3362,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
                 "resultChecksum": checksum,
             }
         )
+        if resolved_commit:
+            scan["commit"] = resolved_commit
         if preflight:
             scan["preflight"] = preflight
         if any(
@@ -3147,6 +3423,13 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     if record_result.get("conflict"):
         return {"accepted": False, "conflict": True}
     duplicate = bool(record_result.get("duplicate"))
+    resolved_commit = worker_result_resolved_commit(job=job, body=body)
+    if resolved_commit:
+        updated_job = db.update_scan_job_commit(str(job["job_id"]), resolved_commit)
+        if updated_job:
+            job = updated_job
+        else:
+            job = {**job, "commit": resolved_commit}
     with STATE_LOCK:
         apply_worker_job_result_to_state_locked(job, body, status=status, checksum=checksum)
     issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
@@ -3359,6 +3642,7 @@ def worker_audit_swarm_evidence(
             summary = review._safe_text_lenient(item.get("summary") or item.get("claim") or item.get("text"))
             file_path = public_issue_file(item.get("file") or item.get("path"), job=job) or public_issue_text(primary.get("file"))
             start_line, end_line = worker_audit_swarm_line_range(item)
+            output_redacted = bool(review._safe_text_lenient(item.get("output")) or item.get("outputRedacted") is True)
             record = {
                 "type": worker_audit_swarm_evidence_type(item.get("type"), "code" if file_path else "path"),
                 "label": public_issue_text(item.get("label")) or "Discovery evidence",
@@ -3369,7 +3653,7 @@ def worker_audit_swarm_evidence(
                 "command": public_issue_text(item.get("command")),
                 "exitCode": public_scan_count(item.get("exitCode") or item.get("exit_code")),
                 "logPath": public_issue_text(item.get("logPath") or item.get("log_path")),
-                "output": review._safe_text_lenient(item.get("output"))[:4000],
+                "outputRedacted": output_redacted,
                 "url": public_issue_text(item.get("url")),
             }
         else:
@@ -3383,10 +3667,10 @@ def worker_audit_swarm_evidence(
                 "command": "",
                 "exitCode": 0,
                 "logPath": "",
-                "output": "",
+                "outputRedacted": False,
                 "url": "",
             }
-        if any(record.get(key) for key in ("summary", "file", "command", "logPath", "output", "url")):
+        if any(record.get(key) for key in ("summary", "file", "command", "logPath", "url")):
             evidence.append(record)
     for result in results:
         if not isinstance(result, dict):
@@ -3406,7 +3690,9 @@ def worker_audit_swarm_evidence(
                     "command": commands[0] if commands else "",
                     "exitCode": 0,
                     "logPath": public_issue_text(result.get("logPath") or result.get("log_path")),
-                    "output": review._safe_text_lenient(result.get("output"))[:4000],
+                    "outputRedacted": bool(
+                        review._safe_text_lenient(result.get("output")) or result.get("outputRedacted") is True
+                    ),
                     "url": "",
                 }
             )
@@ -4171,7 +4457,7 @@ def issue_scan(issue: dict | None) -> dict | None:
 def issue_commit(issue: dict | None, *, job: dict | None = None) -> str:
     if isinstance(issue, dict):
         commit = clean_github_access_text(issue.get("commit"))
-        if commit:
+        if commit and commit.lower() != "pending":
             return commit
         scan = issue_scan(issue)
         if scan:
@@ -4323,7 +4609,7 @@ def public_issue_evidence(
         command = public_issue_text(item.get("command"))
         exit_code = public_optional_int(item.get("exitCode") if "exitCode" in item else item.get("exit_code"))
         log_path = public_issue_text(item.get("logPath") or item.get("log_path"))
-        output = review._safe_text_lenient(item.get("output"))[:4000]
+        output_redacted = bool(review._safe_text_lenient(item.get("output")) or item.get("outputRedacted") is True)
         source_url = trusted_github_web_url(item.get("url"))
         github_url = github_blob_line_url(
             repo=issue.get("repo") or (job or {}).get("repo"),
@@ -4332,7 +4618,7 @@ def public_issue_evidence(
             start_line=start_line,
             end_line=end_line,
         )
-        if not any([summary, file_path, command, log_path, output, source_url, github_url]):
+        if not any([summary, file_path, command, log_path, source_url, github_url]):
             continue
         record = {"type": evidence_type, "label": label, "summary": summary}
         if file_path:
@@ -4346,8 +4632,8 @@ def public_issue_evidence(
             record["exitCode"] = exit_code
         if log_path:
             record["logPath"] = log_path
-        if output:
-            record["output"] = output
+        if output_redacted:
+            record["outputRedacted"] = True
         if source_url or github_url:
             record["url"] = source_url or github_url
         evidence.append(record)
@@ -4390,12 +4676,12 @@ def public_issue_verification_status(
     )
     has_runtime_evidence = has_reproduction_output or any(
         item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and any([item.get("command"), item.get("logPath"), item.get("file"), item.get("output"), item.get("exitCode") is not None])
+        and any([item.get("command"), item.get("logPath"), item.get("file"), item.get("exitCode") is not None])
         for item in evidence
     )
     has_raw_runtime_output = has_reproduction_output or any(
         item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and any([item.get("logPath"), item.get("output")])
+        and bool(item.get("logPath"))
         for item in evidence
     )
     has_static_evidence = bool(affected_locations) or any(
@@ -4433,7 +4719,7 @@ def public_issue_evidence_checklist(
     commit = issue_commit(issue)
     has_runtime = bool(reproduction.get("commands") and reproduction.get("actual")) or any(
         item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and any([item.get("output"), item.get("logPath")])
+        and bool(item.get("logPath"))
         for item in evidence
     )
     return [
@@ -4448,7 +4734,7 @@ def public_issue_evidence_checklist(
         {
             "label": "Raw log or test",
             "met": bool(reproduction.get("logPath") or reproduction.get("testFile"))
-            or any(item.get("logPath") or item.get("output") for item in evidence),
+            or any(item.get("logPath") for item in evidence),
         },
     ]
 
@@ -4536,7 +4822,7 @@ def public_issue_evidence_trace(
             if command:
                 append_public_reasoning_item(runtime_items, f"Command: {command}")
             if log_path:
-                append_public_reasoning_item(runtime_items, f"Raw output: {log_path}")
+                append_public_reasoning_item(runtime_items, f"Worker log: {log_path}")
         elif evidence_type == "fix_verification":
             if summary:
                 append_public_reasoning_item(fix_items, f"{label}: {summary}")
@@ -4630,7 +4916,7 @@ def public_issue_reasoning_breakdown(
             append_public_reasoning_item(facts, f"Command captured: {command}")
         log_path = public_issue_text(item.get("logPath"))
         if log_path and item.get("type") in {"runtime_log", "test", "fix_verification"}:
-            append_public_reasoning_item(facts, f"Raw output artifact recorded at {log_path}.")
+            append_public_reasoning_item(facts, f"Worker log reference recorded at {log_path}.")
 
     commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
     if commands:

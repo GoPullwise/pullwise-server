@@ -258,6 +258,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "summary": "Reviewer agents are discovering issue cards.",
                     "counts": {"issueCards": 2, "manifestCount": 1},
                     "roles": ["security-reviewer"],
+                    "evidenceBlocks": [
+                        {
+                            "kind": "summary",
+                            "title": "Discovery",
+                            "summary": "Reviewer agents are discovering issue cards.",
+                            "stage": "discovery",
+                        }
+                    ],
                 },
             },
             headers=self.auth,
@@ -271,7 +279,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(running_scan_payload["auditSwarm"]["stage"], "discovery")
         self.assertEqual(running_scan_payload["auditSwarm"]["adapter"], "codex")
         self.assertEqual(running_scan_payload["auditSwarm"]["counts"]["issueCards"], 2)
+        self.assertEqual(running_scan_payload["auditSwarm"]["counts"]["evidenceBlocks"], 1)
         self.assertEqual(running_scan_payload["auditSwarm"]["roles"], ["security-reviewer"])
+        self.assertEqual(running_scan_payload["auditSwarm"]["evidenceBlocks"][0]["kind"], "summary")
 
         result_body = {
             "status": "done",
@@ -302,6 +312,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(final_scan_payload["auditSwarm"]["counts"]["issueCards"], 1)
         self.assertEqual(final_scan_payload["auditSwarm"]["issueCards"][0]["issueId"], "issue-hardcoded-token")
         self.assertEqual(final_scan_payload["auditSwarm"]["issueCards"][0]["claim"], "Hardcoded token")
+        final_block_kinds = {block["kind"] for block in final_scan_payload["auditSwarm"]["evidenceBlocks"]}
+        self.assertIn("claim", final_block_kinds)
+        self.assertIn("code_location", final_block_kinds)
 
         duplicate = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
         app.PullwiseHandler.route(duplicate, "POST")
@@ -430,7 +443,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["affectedLocations"][0]["url"], "https://github.com/acme/api/blob/abc1234/src/app.py#L12-L14")
         self.assertEqual(payload["evidence"][0]["url"], "https://github.com/acme/api/blob/abc1234/src/app.py#L12-L14")
         self.assertEqual(payload["evidence"][1]["type"], "test")
-        self.assertIn("AssertionError: expected 400 received 500", payload["evidence"][1]["output"])
+        self.assertTrue(payload["evidence"][1]["outputRedacted"])
+        self.assertNotIn("output", payload["evidence"][1])
         checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
         self.assertTrue(checklist["Fixed commit"])
         self.assertTrue(checklist["Reproduction command"])
@@ -499,6 +513,25 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "pytest tests/repro/test_page_zero.py",
         )
         self.assertEqual(scan_payload["auditSwarm"]["verificationResults"][0]["summary"], "500 internal server error")
+        evidence_blocks = scan_payload["auditSwarm"]["evidenceBlocks"]
+        evidence_block_kinds = {block["kind"] for block in evidence_blocks}
+        self.assertIn("claim", evidence_block_kinds)
+        self.assertIn("code_location", evidence_block_kinds)
+        self.assertIn("false_positive_check", evidence_block_kinds)
+        self.assertIn("verifier_verdict", evidence_block_kinds)
+        self.assertIn("command", evidence_block_kinds)
+        self.assertEqual(
+            next(block for block in evidence_blocks if block["kind"] == "claim")["summary"],
+            "page=0 creates a negative offset.",
+        )
+        self.assertEqual(
+            next(block for block in evidence_blocks if block["kind"] == "code_location")["file"],
+            "src/app.py",
+        )
+        self.assertEqual(
+            next(block for block in evidence_blocks if block["kind"] == "command" and block.get("command"))["command"],
+            "pytest tests/repro/test_page_zero.py",
+        )
         self.assertEqual(
             scan_payload["verificationAudit"]["rejectedReasons"],
             [{"reason": "missing_evidence", "count": 1}],
@@ -700,74 +733,71 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual([issue["id"] for issue in owner.payload["issues"]], ["f_page_zero"])
         self.assertEqual(owner.payload["evidenceSummary"]["evidenceItemCount"], 2)
         self.assertEqual(owner.payload["evidenceSummary"]["reproductionCommandCount"], 1)
-        self.assertEqual(owner.payload["evidenceSummary"]["logArtifactCount"], 1)
+        self.assertEqual(owner.payload["evidenceSummary"]["logArtifactCount"], 0)
         self.assertEqual(
             owner.payload["reproductionCommands"],
             ["npm run test -- tests/repro/page-zero.test.js"],
         )
         self.assertEqual(owner.payload["issues"][0]["verificationStatus"], "verified")
-        self.assertIn(
-            "AssertionError: expected 400 received 500",
-            owner.payload["preflight"]["verifier"]["runs"][0]["output"],
-        )
+        self.assertTrue(owner.payload["preflight"]["verifier"]["runs"][0]["outputRedacted"])
+        self.assertNotIn("output", owner.payload["preflight"]["verifier"]["runs"][0])
         self.assertEqual(
             owner.payload["issues"][0]["affectedLocations"][0]["url"],
             "https://github.com/acme/api/blob/abc1234/src/users.js#L42-L45",
         )
         artifact_paths = [artifact["path"] for artifact in owner.payload["artifacts"]]
         self.assertEqual(
-            artifact_paths[:8],
+            artifact_paths,
             [
                 "README.md",
                 "report.md",
-                "repro.sh",
-                "Dockerfile",
                 "reproduction/commands.txt",
                 "environment.json",
                 "tool-versions.json",
                 "audit.json",
+                "patches/f_page_zero.diff",
+                "issues/f_page_zero.md",
+                "artifact-manifest.json",
             ],
         )
-        self.assertIn("logs/verification/sc_bundle/test.log", artifact_paths)
-        self.assertIn("reproduction/issues/f_page_zero.sh", artifact_paths)
+        self.assertNotIn("logs/verification/sc_bundle/test.log", artifact_paths)
+        self.assertNotIn("repro.sh", artifact_paths)
+        self.assertNotIn("Dockerfile", artifact_paths)
+        self.assertNotIn("reproduction/issues/f_page_zero.sh", artifact_paths)
         self.assertIn("patches/f_page_zero.diff", artifact_paths)
         self.assertIn("issues/f_page_zero.md", artifact_paths)
         self.assertIn("artifact-manifest.json", artifact_paths)
         manifest_paths = [item["path"] for item in owner.payload["artifactManifest"]]
         self.assertEqual(manifest_paths, artifact_paths)
         artifacts = {artifact["path"]: artifact for artifact in owner.payload["artifacts"]}
-        self.assertIn("PULLWISE_RUN_REPRO=1 sh repro.sh", artifacts["README.md"]["content"])
-        self.assertIn("PULLWISE_RUN_REPRO=1 sh repro.sh ISSUE_ID", artifacts["README.md"]["content"])
-        self.assertIn("docker build -t pullwise-audit .", artifacts["README.md"]["content"])
-        self.assertIn("docker run --rm -e PULLWISE_RUN_REPRO=1 pullwise-audit", artifacts["README.md"]["content"])
-        self.assertIn("reproduction/issues/", artifacts["README.md"]["content"])
+        self.assertIn("reproduction/commands.txt as untrusted text", artifacts["README.md"]["content"])
+        self.assertIn("Treat every command as untrusted input", artifacts["README.md"]["content"])
+        self.assertIn("Verifier stdout/stderr is withheld", artifacts["README.md"]["content"])
+        self.assertNotIn("PULLWISE_RUN_REPRO", artifacts["README.md"]["content"])
+        self.assertNotIn("repro.sh", artifacts["README.md"]["content"])
+        self.assertNotIn("docker run", artifacts["README.md"]["content"])
+        self.assertNotIn("reproduction/issues/", artifacts["README.md"]["content"])
         self.assertIn("patches/", artifacts["README.md"]["content"])
-        self.assertIn("Captured verifier output artifacts", artifacts["README.md"]["content"])
         self.assertIn("tool-versions.json", artifacts["README.md"]["content"])
         self.assertIn("artifact-manifest.json", artifacts["README.md"]["content"])
-        self.assertIn("FROM ubuntu:22.04", artifacts["Dockerfile"]["content"])
-        self.assertIn("COPY . /audit", artifacts["Dockerfile"]["content"])
-        self.assertIn('CMD ["sh", "/audit/repro.sh"]', artifacts["Dockerfile"]["content"])
-        self.assertIn("Verifier log artifacts: 1", artifacts["report.md"]["content"])
+        self.assertNotIn("Dockerfile", artifacts)
+        self.assertNotIn("repro.sh", artifacts)
+        self.assertIn("Verifier log artifacts: 0", artifacts["report.md"]["content"])
         self.assertIn(
             "Rejected sample: missing_evidence - Only a vague model guess",
             artifacts["report.md"]["content"],
         )
-        self.assertIn("ISSUE_ID=${1:-}", artifacts["repro.sh"]["content"])
-        self.assertIn("reproduction/issues/${SAFE_ISSUE}.sh", artifacts["repro.sh"]["content"])
-        self.assertIn("git checkout \"$COMMIT\"", artifacts["repro.sh"]["content"])
-        self.assertIn("Commands printed only", artifacts["repro.sh"]["content"])
         self.assertIn(
-            "npm run test -- tests/repro/page-zero.test.js",
+            "# Untrusted reproduction commands captured by Pullwise.",
             artifacts["reproduction/commands.txt"]["content"],
         )
         self.assertIn(
-            "# Pullwise reproduction helper for f_page_zero",
-            artifacts["reproduction/issues/f_page_zero.sh"]["content"],
+            "# Review manually before copying any command into a shell.",
+            artifacts["reproduction/commands.txt"]["content"],
         )
         self.assertIn(
             "npm run test -- tests/repro/page-zero.test.js",
-            artifacts["reproduction/issues/f_page_zero.sh"]["content"],
+            artifacts["reproduction/commands.txt"]["content"],
         )
         self.assertIn("# Pullwise suggested patch", artifacts["patches/f_page_zero.diff"]["content"])
         self.assertIn("--- a/src/users.js", artifacts["patches/f_page_zero.diff"]["content"])
@@ -781,8 +811,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn('"v22.21.0"', artifacts["tool-versions.json"]["content"])
         self.assertIn('"selfExcluded": true', artifacts["artifact-manifest.json"]["content"])
         self.assertIn('"README.md"', artifacts["artifact-manifest.json"]["content"])
-        self.assertIn('"Dockerfile"', artifacts["artifact-manifest.json"]["content"])
-        self.assertIn('"reproduction/issues/f_page_zero.sh"', artifacts["artifact-manifest.json"]["content"])
+        self.assertNotIn('"Dockerfile"', artifacts["artifact-manifest.json"]["content"])
+        self.assertNotIn('"repro.sh"', artifacts["artifact-manifest.json"]["content"])
+        self.assertNotIn('"reproduction/issues/f_page_zero.sh"', artifacts["artifact-manifest.json"]["content"])
         self.assertIn('"patches/f_page_zero.diff"', artifacts["artifact-manifest.json"]["content"])
         self.assertIn('"tool-versions.json"', artifacts["artifact-manifest.json"]["content"])
         self.assertNotIn('"artifact-manifest.json"', artifacts["artifact-manifest.json"]["content"])
@@ -802,17 +833,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn("### Recommendations", artifacts["issues/f_page_zero.md"]["content"])
         self.assertIn("Inspect the suggested patch evidence", artifacts["issues/f_page_zero.md"]["content"])
         self.assertIn("../patches/f_page_zero.diff", artifacts["issues/f_page_zero.md"]["content"])
-        self.assertIn(
-            "AssertionError: expected 400 received 500",
-            artifacts["issues/f_page_zero.md"]["content"],
-        )
-        self.assertIn("Command: npm run test", artifacts["logs/verification/sc_bundle/test.log"]["content"])
-        self.assertIn(
-            "AssertionError: expected 400 received 500",
-            artifacts["logs/verification/sc_bundle/test.log"]["content"],
-        )
+        self.assertNotIn("AssertionError: expected 400 received 500", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Worker log: logs/f_page_zero.log", artifacts["issues/f_page_zero.md"]["content"])
         self.assertRegex(artifacts["README.md"]["sha256"], r"^[0-9a-f]{64}$")
-        self.assertIn("Verifier output captured", owner.payload["limitations"][1])
+        self.assertIn("Verifier stdout/stderr is not embedded", owner.payload["limitations"][1])
+        self.assertIn("untrusted text", owner.payload["limitations"][2])
 
         owner_zip = RouteHarness(
             "/scans/sc_bundle/audit-bundle.zip",
@@ -828,38 +853,20 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         with zipfile.ZipFile(io.BytesIO(owner_zip.binary_payload), "r") as archive:
             self.assertIn("README.md", archive.namelist())
-            self.assertIn("repro.sh", archive.namelist())
-            self.assertIn("Dockerfile", archive.namelist())
+            self.assertNotIn("repro.sh", archive.namelist())
+            self.assertNotIn("Dockerfile", archive.namelist())
             self.assertIn("environment.json", archive.namelist())
             self.assertIn("tool-versions.json", archive.namelist())
             self.assertIn("artifact-manifest.json", archive.namelist())
-            self.assertIn("reproduction/issues/f_page_zero.sh", archive.namelist())
+            self.assertNotIn("reproduction/issues/f_page_zero.sh", archive.namelist())
             self.assertIn("patches/f_page_zero.diff", archive.namelist())
             self.assertIn("issues/f_page_zero.md", archive.namelist())
-            self.assertIn("logs/verification/sc_bundle/test.log", archive.namelist())
-            self.assertIn(
-                "PULLWISE_RUN_REPRO=1 sh repro.sh",
-                archive.read("README.md").decode("utf-8"),
-            )
-            self.assertIn(
-                "PULLWISE_RUN_REPRO=1 sh repro.sh ISSUE_ID",
-                archive.read("README.md").decode("utf-8"),
-            )
-            self.assertIn(
-                "docker build -t pullwise-audit .",
-                archive.read("README.md").decode("utf-8"),
-            )
-            self.assertIn(
-                'CMD ["sh", "/audit/repro.sh"]',
-                archive.read("Dockerfile").decode("utf-8"),
-            )
+            self.assertNotIn("logs/verification/sc_bundle/test.log", archive.namelist())
+            self.assertIn("untrusted text", archive.read("README.md").decode("utf-8"))
+            self.assertNotIn("PULLWISE_RUN_REPRO", archive.read("README.md").decode("utf-8"))
             self.assertIn(
                 "npm run test -- tests/repro/page-zero.test.js",
                 archive.read("reproduction/commands.txt").decode("utf-8"),
-            )
-            self.assertIn(
-                "npm run test -- tests/repro/page-zero.test.js",
-                archive.read("reproduction/issues/f_page_zero.sh").decode("utf-8"),
             )
             self.assertIn(
                 "+const pageNumber = Math.max(1, page)",
@@ -873,9 +880,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 '"selfExcluded": true',
                 archive.read("artifact-manifest.json").decode("utf-8"),
             )
-            self.assertIn(
+            self.assertNotIn(
                 "AssertionError: expected 400 received 500",
-                archive.read("logs/verification/sc_bundle/test.log").decode("utf-8"),
+                archive.read("issues/f_page_zero.md").decode("utf-8"),
             )
 
         other_user = RouteHarness(
@@ -1041,7 +1048,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
         self.assertTrue(checklist["Fixed commit"])
         self.assertFalse(checklist["Reproduction command"])
-        self.assertTrue(checklist["Runtime output"])
+        self.assertFalse(checklist["Runtime output"])
 
     def test_issue_payload_downgrades_verified_runtime_without_raw_output(self) -> None:
         issue = {
@@ -1312,7 +1319,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "exitCode": 1,
                     "durationMs": 1234,
                     "logPath": "verification/job/test.log",
-                    "output": "FAIL\nAssertionError",
+                    "outputRedacted": True,
                 },
                 {
                     "script": "lint",
@@ -1327,18 +1334,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
                             "status": "failed",
                             "exitCode": 1,
                             "durationMs": 100,
-                            "output": "FAIL",
+                            "outputRedacted": True,
                         },
                         {
                             "attempt": 2,
                             "status": "passed",
                             "exitCode": 0,
                             "durationMs": 90,
-                            "output": "PASS",
+                            "outputRedacted": True,
                         },
                     ],
                     "logPath": "verification/job/lint.log",
-                    "output": "--- attempt 1 (failed exit 1) ---\nFAIL\n--- attempt 2 (passed exit 0) ---\nPASS",
+                    "outputRedacted": True,
                 }
             ],
         )
@@ -1350,6 +1357,89 @@ class WorkerPullRoutesTest(unittest.TestCase):
             payload["verificationAudit"]["rejectedReasons"],
             [{"reason": "missing_evidence", "count": 2}],
         )
+
+    def test_worker_result_backfills_pending_commit_with_resolved_sha(self) -> None:
+        resolved_commit = "1234567890abcdef1234567890abcdef12345678"
+        scan = {
+            "id": "sc_resolved_commit",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "resolved_commit": resolved_commit,
+                "result_checksum": "checksum-resolved-commit",
+                **audit_result_fields(
+                    [
+                        audit_issue_card(
+                            "Reject invalid page numbers",
+                            issue_id="f_resolved_commit",
+                            severity="P2",
+                            file="src/app.py",
+                            line=12,
+                            evidence=[
+                                {
+                                    "type": "code",
+                                    "label": "Bounds check",
+                                    "summary": "page is used without a lower bound.",
+                                    "file": "src/app.py",
+                                    "startLine": 12,
+                                    "endLine": 12,
+                                }
+                            ],
+                            reproduction={
+                                "commands": ["pytest tests/repro/test_page_zero.py"],
+                                "actual": "Command exited 1.",
+                                "logPath": "logs/f_resolved_commit.log",
+                            },
+                        )
+                    ],
+                    [
+                        audit_verification(
+                            "f_resolved_commit",
+                            proof_type="failing_test",
+                            proof_strength=3,
+                            commands_run=["pytest tests/repro/test_page_zero.py"],
+                            result_summary="Command exited 1.",
+                            log_path="logs/f_resolved_commit.log",
+                            output="AssertionError",
+                        )
+                    ],
+                ),
+                "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(app.SCANS[0]["commit"], resolved_commit)
+        self.assertEqual(db.get_scan_job(job["job_id"])["commit"], resolved_commit)
+        self.assertEqual(app.ISSUES[0]["commit"], resolved_commit)
+        payload = app.issue_payload(app.ISSUES[0])
+        self.assertEqual(payload["verificationStatus"], "verified")
+        self.assertEqual(payload["audit"]["commit"], resolved_commit)
+        self.assertIn(f"/blob/{resolved_commit}/src/app.py#L12", payload["affectedLocations"][0]["url"])
+        self.assertTrue(payload["evidence"][1]["outputRedacted"])
+        self.assertNotIn("output", payload["evidence"][1])
 
     def test_claim_payload_includes_short_lived_clone_token_when_github_app_is_configured(self) -> None:
         job = {

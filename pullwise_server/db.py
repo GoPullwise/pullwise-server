@@ -1281,6 +1281,28 @@ def get_scan_job(job_id: str) -> dict[str, Any] | None:
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
 
 
+def update_scan_job_commit(job_id: str, commit: str) -> dict[str, Any] | None:
+    initialize()
+    job_id = str(job_id or "").strip()
+    commit = str(commit or "").strip()
+    if not job_id or not commit:
+        return None
+    current_time = int(time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                UPDATE scan_jobs
+                SET "commit" = ?,
+                    updated_at = ?
+                WHERE job_id = ?
+                """,
+                (commit, current_time, job_id),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+
+
 def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
     initialize()
     worker_id = str(worker_id or "").strip()
