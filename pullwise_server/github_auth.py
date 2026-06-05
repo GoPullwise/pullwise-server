@@ -345,6 +345,57 @@ def branch_exists(token: str, repo: str, branch: str) -> bool:
     raise GitHubError("GitHub branch lookup response body was not valid.")
 
 
+def clean_branch_name(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or any(char in value for char in "\r\n\x00"):
+        return None
+    return value
+
+
+def list_repository_branches(token: str, repo: str) -> list[str]:
+    branches: list[str] = []
+    seen: set[str] = set()
+    repo_path = "/".join(quote(part, safe="") for part in str(repo or "").split("/") if part)
+    if "/" not in repo_path:
+        raise GitHubError("GitHub repository branch list requires owner/repo.")
+    url = f"{github_api_url()}/repos/{repo_path}/branches"
+    params = {"per_page": 100}
+    while url:
+        try:
+            response = requests.get(
+                url,
+                headers=github_api_headers(token),
+                params=params,
+                timeout=request_timeout(),
+            )
+        except Exception as exc:
+            raise GitHubError(f"GitHub branch list request failed: {exc}") from exc
+        detail = str(getattr(response, "text", "") or "").strip()
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            message = f"GitHub branch list request failed: {exc}"
+            if detail:
+                message = f"{message}: {detail[:500]}"
+            raise GitHubError(message) from exc
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise GitHubError(f"GitHub branch list response was not valid JSON: {exc}") from exc
+        if not isinstance(payload, list):
+            raise GitHubError("GitHub branch list response body was not a list.")
+        for item in payload:
+            name = clean_branch_name(item.get("name") if isinstance(item, dict) else None)
+            if name and name not in seen:
+                seen.add(name)
+                branches.append(name)
+        url = ((getattr(response, "links", {}) or {}).get("next") or {}).get("url")
+        params = None
+    return branches
+
+
 def create_pull_request(token: str, repo: str, *, title: str, head: str, base: str, body: str) -> dict:
     try:
         response = requests.post(

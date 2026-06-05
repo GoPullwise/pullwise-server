@@ -5857,6 +5857,48 @@ def installation_token(installation_id: str) -> str:
     return token
 
 
+def repository_installation_id(github_access: dict | None, repo_meta: dict | None) -> str:
+    if not repo_meta:
+        return ""
+    return (
+        clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
+        or clean_github_access_text((github_access or {}).get("installationId"), allow_int=True)
+        or ""
+    )
+
+
+def repository_branch_payload(github_access: dict | None, repo_meta: dict) -> dict:
+    repository = clean_repository_full_name(repo_meta.get("fullName"))
+    if not repository:
+        raise ValueError("Repository is not authorized for this GitHub App installation.")
+    installation_id = repository_installation_id(github_access, repo_meta)
+    if not installation_id:
+        raise ValueError("Repository is missing a GitHub App installation id.")
+
+    token = installation_token(installation_id)
+    branches = github_auth.list_repository_branches(token, repository)
+    default_branch = github_auth.clean_branch_name(repo_meta.get("defaultBranch")) or "main"
+    if default_branch and default_branch not in branches:
+        branches = [default_branch, *branches]
+    return {
+        "repoId": (
+            clean_github_access_text(repo_meta.get("repoId"), allow_int=True)
+            or clean_github_access_text(repo_meta.get("githubRepoId"), allow_int=True)
+            or clean_github_access_text(repo_meta.get("id"), allow_int=True)
+            or ""
+        ),
+        "githubRepoId": clean_github_access_text(repo_meta.get("githubRepoId"), allow_int=True) or "",
+        "repo": repository,
+        "defaultBranch": default_branch,
+        "branches": branches,
+    }
+
+
+def scan_branch_is_available(github_access: dict | None, repo_meta: dict, branch: str) -> bool:
+    payload = repository_branch_payload(github_access, repo_meta)
+    return branch in set(payload["branches"])
+
+
 def pull_request_pending_is_stale(pending: dict) -> bool:
     try:
         started_at = int(pending.get("startedAt") or 0)
@@ -7413,6 +7455,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Route not found")
         if path == "/repositories":
             return self.json(self.repositories_payload())
+        if len(segments) == 3 and segments[0] == "repositories" and segments[2] == "branches":
+            return self.handle_repository_branches(segments[1])
         if path == "/scans":
             session = self.current_session()
             if not session:
@@ -7564,6 +7608,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan_error_repo_id: str | None = None
             scan = None
             scan_created = False
+            branch = ""
             with STATE_LOCK:
                 user = USERS.get(session["userId"]) or {}
                 github_access = user.get("githubRepositoryAccess")
@@ -7608,6 +7653,25 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                     scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
                                     scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
                         if scan_error is None:
+                            requested_branch = github_auth.clean_branch_name(body.get("branch"))
+                            branch = (
+                                requested_branch
+                                or github_auth.clean_branch_name(repo_meta.get("defaultBranch"))
+                                or "main"
+                            )
+                            if requested_branch:
+                                try:
+                                    branch_available = scan_branch_is_available(github_access, repo_meta, branch)
+                                except github_auth.GitHubError as exc:
+                                    scan_error = (HTTPStatus.BAD_GATEWAY, str(exc))
+                                    scan_error_code = "BRANCH_LOOKUP_FAILED"
+                                if scan_error is None and not branch_available:
+                                    scan_error = (
+                                        HTTPStatus.BAD_REQUEST,
+                                        "Selected branch is not available for this repository.",
+                                    )
+                                    scan_error_code = "BRANCH_NOT_AVAILABLE"
+                        if scan_error is None:
                             scan_id = make_id("sc")
                             try:
                                 scan_user, repository_record = scan_resource_context(user, github_access, repo_meta)
@@ -7650,11 +7714,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         elif scan is not None:
                             pass
                         else:
-                            branch = (
-                                clean_github_access_text(body.get("branch"))
-                                or clean_github_access_text(repo_meta.get("defaultBranch"))
-                                or "main"
-                            )
                             scan = {
                                 "id": scan_id,
                                 "repo": repository,
@@ -8426,6 +8485,50 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         }
         items = [github]
         return {"items": items, "github": github}
+
+    def handle_repository_branches(self, repo_id: str) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing repository branches.")
+
+        with STATE_LOCK:
+            user = USERS.get(session["userId"])
+            if not user:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing repository branches.")
+            github_access = user.get("githubRepositoryAccess")
+            if not github_access:
+                return self.error(HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before viewing branches.")
+            if github_repository_authorization_pending(user):
+                return self.error(HTTPStatus.FORBIDDEN, "Complete GitHub repository authorization before viewing branches.")
+            if not github_repository_access_authorized_for_user(user, github_access):
+                return self.error(HTTPStatus.FORBIDDEN, "Authorize GitHub repositories before viewing branches.")
+            if github_repositories_need_sync(github_access):
+                return self.json(
+                    {
+                        "message": "Sync GitHub repositories before viewing branches.",
+                        "code": "REPOSITORY_SYNC_REQUIRED",
+                    },
+                    HTTPStatus.FORBIDDEN,
+                )
+            repo_meta = repository_item_by_repo_id(github_access, repo_id)
+            if not repo_meta:
+                full_name = clean_repository_full_name(repo_id)
+                repo_meta = repository_item(github_access, full_name) if full_name else None
+            if not repo_meta:
+                return self.json(
+                    {
+                        "message": "Repository is not authorized for this GitHub App installation.",
+                        "code": "REPOSITORY_NOT_AUTHORIZED",
+                    },
+                    HTTPStatus.FORBIDDEN,
+                )
+            github_access_snapshot = dict(github_access)
+            repo_meta_snapshot = dict(repo_meta)
+
+        try:
+            return self.json(repository_branch_payload(github_access_snapshot, repo_meta_snapshot))
+        except github_auth.GitHubError as exc:
+            return self.error(HTTPStatus.BAD_GATEWAY, str(exc))
 
     def handle_scan_preflight(self, body: dict) -> None:
         session = self.current_session()

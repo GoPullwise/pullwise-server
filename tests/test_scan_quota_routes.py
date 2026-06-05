@@ -269,6 +269,48 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(len(preflight.payload["repositories"]), 4)
         self.assertEqual(len(app.SCANS), 1)
 
+    def test_repository_branches_route_lists_authorized_repo_branches(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        handler = RouteHarness(cookie=cookie, path="/repositories/123/branches")
+
+        with (
+            patch.object(app, "installation_token", return_value="ghs_installation") as token,
+            patch.object(
+                app.github_auth,
+                "list_repository_branches",
+                return_value=["main", "release/1.0"],
+            ) as list_branches,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["repoId"], "123")
+        self.assertEqual(handler.payload["repo"], "acme/api")
+        self.assertEqual(handler.payload["defaultBranch"], "main")
+        self.assertEqual(handler.payload["branches"], ["main", "release/1.0"])
+        token.assert_called_once_with("111")
+        list_branches.assert_called_once_with("ghs_installation", "acme/api")
+
+    def test_scan_start_rejects_branch_not_returned_by_github(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        handler = RouteHarness(
+            {"repoId": "123", "branch": "feature/not-authorized", "requestId": "req_bad_branch"},
+            cookie=cookie,
+        )
+
+        with (
+            patch.object(app, "installation_token", return_value="ghs_installation"),
+            patch.object(app.github_auth, "list_repository_branches", return_value=["main", "develop"]),
+            patch.object(app.worker, "start_scan") as start_scan,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.payload["code"], "BRANCH_NOT_AVAILABLE")
+        self.assertEqual(handler.payload["message"], "Selected branch is not available for this repository.")
+        self.assertEqual(app.SCANS, [])
+        start_scan.assert_not_called()
+
     def test_same_request_id_does_not_consume_quota_twice(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
         first = RouteHarness({"repoId": "123", "requestId": "req_same"}, cookie=cookie)

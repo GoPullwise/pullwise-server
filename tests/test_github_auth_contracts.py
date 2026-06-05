@@ -48,6 +48,34 @@ class GitHubAuthContractsTest(unittest.TestCase):
         self.assertEqual(headers["Accept"], "application/vnd.github+json")
         self.assertIn("X-GitHub-Api-Version", headers)
 
+    def test_list_repository_branches_reads_paginated_branch_names(self) -> None:
+        first = Mock()
+        first.raise_for_status.return_value = None
+        first.json.return_value = [{"name": "main"}, {"name": "release/1.0"}]
+        first.links = {"next": {"url": "https://api.github.test/repos/acme/api/branches?page=2"}}
+        second = Mock()
+        second.raise_for_status.return_value = None
+        second.json.return_value = [{"name": "develop"}, {"name": "bad\r\nbranch"}, {"name": ""}]
+        second.links = {}
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_GITHUB_API_URL": "https://api.github.test"}, clear=True),
+            patch("pullwise_server.github_auth.requests.get", side_effect=[first, second]) as get,
+        ):
+            branches = github_auth.list_repository_branches("ghs_installation", "acme/api")
+
+        self.assertEqual(branches, ["main", "release/1.0", "develop"])
+        self.assertEqual(
+            [call.args[0] for call in get.call_args_list],
+            [
+                "https://api.github.test/repos/acme/api/branches",
+                "https://api.github.test/repos/acme/api/branches?page=2",
+            ],
+        )
+        self.assertEqual(get.call_args_list[0].kwargs["params"], {"per_page": 100})
+        self.assertIsNone(get.call_args_list[1].kwargs["params"])
+        self.assertEqual(get.call_args_list[0].kwargs["headers"]["Authorization"], "Bearer ghs_installation")
+
     def test_app_slug_public_visibility_uses_official_get_app_endpoint(self) -> None:
         response = Mock()
         response.status_code = 200
