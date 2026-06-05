@@ -140,6 +140,10 @@ PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
 PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
 PULLWISE_MAX_QUEUED_SCANS_GLOBAL=1000
 PULLWISE_MAX_QUEUED_SCANS_PER_USER=20
+PULLWISE_SERVER_CLEANUP_INTERVAL_SECONDS=3600
+PULLWISE_SCAN_JOB_RETENTION_SECONDS=2592000
+PULLWISE_WORKER_COMMAND_RETENTION_SECONDS=2592000
+PULLWISE_WORKER_AUDIT_RETENTION_SECONDS=7776000
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
 PULLWISE_COOKIE_SECURE=true
 PULLWISE_COOKIE_SAME_SITE=Lax
@@ -153,6 +157,8 @@ PULLWISE_QUOTA_PRO_REVIEWS=100
 PULLWISE_BILLING_TIMEOUT_SECONDS=15
 PULLWISE_BILLING_CURRENCY=USD
 ```
+
+Server cleanup only prunes operational records: expired sessions/GitHub OAuth state, terminal worker commands/audit rows, and terminal scan job/result duplicates that have already been applied to the user-visible scan state. User scan results in `SCANS`/`ISSUES` are retained.
 
 Use `PULLWISE_API_BASE_URL=https://app.your-domain.com/api` when the web app is
 deployed to Cloudflare Pages with the included `/api` proxy. OAuth callbacks

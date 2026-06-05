@@ -106,6 +106,295 @@ class ReviewContractsTest(unittest.TestCase):
         self.assertEqual(finding["goodCode"], [])
         self.assertEqual(finding["references"], [])
 
+    def test_run_review_downgrades_verified_without_runtime_evidence(self) -> None:
+        provider_finding = {
+            "id": "f_static_only",
+            "title": "Issue",
+            "file": "src/app.py",
+            "line": 7,
+            "verificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 7, "endLine": 9}],
+            "evidence": [
+                {
+                    "type": "code",
+                    "label": "Bounds check",
+                    "summary": "The branch does not validate the lower bound.",
+                    "file": "src/app.py",
+                    "startLine": 7,
+                    "endLine": 9,
+                    "command": "",
+                    "exitCode": 0,
+                    "logPath": "",
+                    "url": "",
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro/test_bounds.py"],
+                "input": "",
+                "expected": "",
+                "actual": "",
+                "testFile": "",
+                "logPath": "",
+            },
+        }
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[provider_finding]),
+        ):
+            findings = review.run_review(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                user_id="usr_1",
+                scan_id="sc_1",
+            )
+
+        finding = findings[0]
+        self.assertEqual(finding["verificationStatus"], "static_proof")
+        self.assertEqual(finding["affectedLocations"], [{"file": "src/app.py", "startLine": 7, "endLine": 9}])
+        self.assertEqual(finding["evidence"][0]["type"], "code")
+
+    def test_run_review_downgrades_verified_runtime_without_reproduction_command(self) -> None:
+        provider_finding = {
+            "id": "f_runtime_no_repro",
+            "title": "Issue",
+            "file": "src/app.py",
+            "line": 7,
+            "verificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 7, "endLine": 9}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Focused test",
+                    "summary": "The focused command failed.",
+                    "file": "",
+                    "startLine": 0,
+                    "endLine": 0,
+                    "command": "pytest tests/repro/test_bounds.py",
+                    "exitCode": 1,
+                    "logPath": "logs/f_runtime_no_repro.log",
+                    "url": "",
+                }
+            ],
+            "reproduction": {
+                "commands": [],
+                "input": "",
+                "expected": "",
+                "actual": "Command exited 1.",
+                "testFile": "",
+                "logPath": "logs/f_runtime_no_repro.log",
+            },
+        }
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[provider_finding]),
+        ):
+            findings = review.run_review(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                user_id="usr_1",
+                scan_id="sc_1",
+            )
+
+        self.assertEqual(findings[0]["verificationStatus"], "static_proof")
+
+    def test_run_review_downgrades_verified_runtime_without_raw_output(self) -> None:
+        provider_finding = {
+            "id": "f_runtime_no_raw",
+            "title": "Issue",
+            "file": "src/app.py",
+            "line": 7,
+            "verificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 7, "endLine": 9}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Focused test",
+                    "summary": "A focused command was suggested.",
+                    "file": "src/app.py",
+                    "startLine": 7,
+                    "endLine": 9,
+                    "command": "pytest tests/repro/test_bounds.py",
+                    "logPath": "",
+                    "url": "",
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro/test_bounds.py"],
+                "input": "",
+                "expected": "",
+                "actual": "",
+                "testFile": "",
+                "logPath": "",
+            },
+        }
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[provider_finding]),
+        ):
+            findings = review.run_review(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                user_id="usr_1",
+                scan_id="sc_1",
+            )
+
+        self.assertEqual(findings[0]["verificationStatus"], "static_proof")
+
+    def test_run_review_downgrades_verified_runtime_with_only_exit_code(self) -> None:
+        provider_finding = {
+            "id": "f_exit_code_only",
+            "title": "Issue",
+            "file": "src/app.py",
+            "line": 7,
+            "verificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 7, "endLine": 9}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Focused test",
+                    "summary": "The focused command exited non-zero, but no output was captured.",
+                    "file": "",
+                    "startLine": 0,
+                    "endLine": 0,
+                    "command": "pytest tests/repro/test_bounds.py",
+                    "exitCode": 1,
+                    "logPath": "",
+                    "output": "",
+                    "url": "",
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro/test_bounds.py"],
+                "input": "",
+                "expected": "",
+                "actual": "",
+                "testFile": "",
+                "logPath": "",
+            },
+        }
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[provider_finding]),
+        ):
+            findings = review.run_review(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                user_id="usr_1",
+                scan_id="sc_1",
+            )
+
+        finding = findings[0]
+        self.assertEqual(finding["verificationStatus"], "static_proof")
+        self.assertEqual(finding["evidence"][0]["exitCode"], 1)
+
+    def test_run_review_keeps_verified_with_reproduction_and_runtime_log(self) -> None:
+        provider_finding = {
+            "id": "f_runtime_verified",
+            "title": "Issue",
+            "file": "src/app.py",
+            "line": 7,
+            "verificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 7, "endLine": 9}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Focused test",
+                    "summary": "The focused command failed with the observed error.",
+                    "file": "",
+                    "startLine": 0,
+                    "endLine": 0,
+                    "command": "pytest tests/repro/test_bounds.py",
+                    "exitCode": 1,
+                    "logPath": "logs/f_runtime_verified.log",
+                    "output": "FAIL tests/repro/test_bounds.py\nAssertionError: expected validation error",
+                    "url": "",
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro/test_bounds.py"],
+                "input": "",
+                "expected": "validation error",
+                "actual": "Command exited 1.",
+                "testFile": "tests/repro/test_bounds.py",
+                "logPath": "logs/f_runtime_verified.log",
+            },
+        }
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[provider_finding]),
+        ):
+            findings = review.run_review(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                user_id="usr_1",
+                scan_id="sc_1",
+            )
+
+        self.assertEqual(findings[0]["verificationStatus"], "verified")
+        self.assertIn("AssertionError", findings[0]["evidence"][0]["output"])
+
+    def test_run_review_preserves_runtime_output_as_raw_evidence(self) -> None:
+        provider_finding = {
+            "id": "f_runtime_output",
+            "title": "Issue",
+            "file": "src/app.py",
+            "line": 7,
+            "verificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 7, "endLine": 9}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Focused test",
+                    "summary": "The focused command failed with the observed assertion.",
+                    "file": "",
+                    "startLine": 0,
+                    "endLine": 0,
+                    "command": "pytest tests/repro/test_bounds.py",
+                    "exitCode": 0,
+                    "logPath": "",
+                    "output": "FAIL tests/repro/test_bounds.py\nAssertionError: expected 400 received 500",
+                    "url": "",
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro/test_bounds.py"],
+                "input": "",
+                "expected": "400 validation error",
+                "actual": "",
+                "testFile": "",
+                "logPath": "",
+            },
+        }
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
+            patch.object(review, "_run_mock", return_value=[provider_finding]),
+        ):
+            findings = review.run_review(
+                repo="owner/repo",
+                branch="main",
+                commit="pending",
+                user_id="usr_1",
+                scan_id="sc_1",
+            )
+
+        finding = findings[0]
+        self.assertEqual(finding["verificationStatus"], "verified")
+        self.assertEqual(
+            finding["evidence"][0]["output"],
+            "FAIL tests/repro/test_bounds.py\nAssertionError: expected 400 received 500",
+        )
+
     def test_run_review_ignores_non_object_findings_and_sanitizes_code_rows(self) -> None:
         provider_findings = [
             "not a finding",

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import tempfile
 import threading
 import unittest
+import zipfile
 from http import HTTPStatus
 from unittest.mock import patch
 
@@ -20,6 +22,8 @@ class RouteHarness(app.PullwiseHandler):
         self.payload = None
         self.status = None
         self.headers_out = {}
+        self.binary_payload = b""
+        self.content_type = ""
         self.client_address = ("203.0.113.10", 51234)
 
     def read_json(self) -> dict:
@@ -33,8 +37,99 @@ class RouteHarness(app.PullwiseHandler):
         self.status = status
         self.headers_out = headers or {}
 
+    def binary(
+        self,
+        payload: bytes,
+        status: int = HTTPStatus.OK,
+        *,
+        content_type: str = "application/octet-stream",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.binary_payload = payload
+        self.status = status
+        self.content_type = content_type
+        self.headers_out = headers or {}
+
     def error(self, status: int, message: str) -> None:
         self.json({"message": message}, status)
+
+
+def audit_issue_card(
+    title: str,
+    *,
+    issue_id: str = "issue-1",
+    severity: str = "P2",
+    category: str = "Quality",
+    file: str = "src/app.py",
+    line: int = 12,
+    end_line: int | None = None,
+    claim: str | None = None,
+    impact: str = "",
+    evidence: list | None = None,
+    reproduction: dict | None = None,
+    reproduction_idea: str = "",
+    suggested_test: str = "",
+    false_positive_checks: list[str] | None = None,
+    limitations: list[str] | None = None,
+) -> dict:
+    return {
+        "issue_id": issue_id,
+        "shard_id": "app",
+        "agent_role": "correctness-reviewer",
+        "title": title,
+        "category": category,
+        "severity": severity,
+        "confidence": 0.9,
+        "locations": [{"file": file, "startLine": line, "endLine": end_line or line}] if file else [],
+        "claim": claim or title,
+        "impact": impact,
+        "evidence": evidence if evidence is not None else ["Concrete evidence was captured."],
+        "reproduction": reproduction or {},
+        "reproduction_idea": reproduction_idea,
+        "suggested_test": suggested_test,
+        "false_positive_checks": (
+            false_positive_checks if false_positive_checks is not None else ["No upstream guard was found."]
+        ),
+        "limitations": limitations or [],
+    }
+
+
+def audit_verification(
+    issue_id: str,
+    *,
+    verdict: str = "confirmed",
+    verifier_role: str = "prover",
+    proof_type: str = "static_proof",
+    proof_strength: int = 2,
+    evidence: list[str] | None = None,
+    commands_run: list[str] | None = None,
+    result_summary: str = "Static proof confirms the candidate.",
+    notes_for_fix: list[str] | None = None,
+    log_path: str = "",
+    output: str = "",
+) -> dict:
+    return {
+        "issue_id": issue_id,
+        "verifier_role": verifier_role,
+        "verdict": verdict,
+        "confidence": 0.86,
+        "proof_type": proof_type,
+        "proof_strength": proof_strength,
+        "evidence": evidence or ["Verifier reviewed the relevant code path."],
+        "commands_run": commands_run or [],
+        "result_summary": result_summary,
+        "notes_for_fix": notes_for_fix or [],
+        "logPath": log_path,
+        "output": output,
+    }
+
+
+def audit_result_fields(issue_cards: list[dict], verification_results: list[dict] | None = None) -> dict:
+    return {
+        "audit_protocol": "audit-swarm/0.1",
+        "issue_cards": issue_cards,
+        "verification_results": verification_results or [],
+    }
 
 
 class WorkerPullRoutesTest(unittest.TestCase):
@@ -151,7 +246,20 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         progress = RouteHarness(
             f"/worker/jobs/{job['job_id']}/progress",
-            {"phase": "ai", "progress": 70, "message": "reviewing", "logs_summary": "ok"},
+            {
+                "phase": "ai",
+                "progress": 70,
+                "message": "reviewing",
+                "logs_summary": "ok",
+                "audit_swarm": {
+                    "protocol": "audit-swarm/0.1",
+                    "stage": "discovery",
+                    "adapter": "codex",
+                    "summary": "Reviewer agents are discovering issue cards.",
+                    "counts": {"issueCards": 2, "manifestCount": 1},
+                    "roles": ["security-reviewer"],
+                },
+            },
             headers=self.auth,
         )
         app.PullwiseHandler.route(progress, "POST")
@@ -159,11 +267,26 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(progress.payload["job"]["status"], "running")
         self.assertEqual(app.SCANS[0]["phase"], "ai")
         self.assertEqual(app.SCANS[0]["progress"], 70)
+        running_scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(running_scan_payload["auditSwarm"]["stage"], "discovery")
+        self.assertEqual(running_scan_payload["auditSwarm"]["adapter"], "codex")
+        self.assertEqual(running_scan_payload["auditSwarm"]["counts"]["issueCards"], 2)
+        self.assertEqual(running_scan_payload["auditSwarm"]["roles"], ["security-reviewer"])
 
         result_body = {
             "status": "done",
             "attempt_id": "wk_1-1",
-            "findings": [{"severity": "high", "title": "Hardcoded token", "file": "app.py", "line": 12}],
+            **audit_result_fields(
+                [
+                    audit_issue_card(
+                        "Hardcoded token",
+                        issue_id="issue-hardcoded-token",
+                        severity="P1",
+                        file="app.py",
+                        line=12,
+                    )
+                ]
+            ),
             "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
             "duration_ms": 1234,
             "result_checksum": "checksum-1",
@@ -174,6 +297,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(result.payload["accepted"])
         self.assertEqual(app.SCANS[0]["status"], "done")
         self.assertEqual(len(app.ISSUES), 1)
+        final_scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(final_scan_payload["auditSwarm"]["stage"], "report")
+        self.assertEqual(final_scan_payload["auditSwarm"]["counts"]["issueCards"], 1)
+        self.assertEqual(final_scan_payload["auditSwarm"]["issueCards"][0]["issueId"], "issue-hardcoded-token")
+        self.assertEqual(final_scan_payload["auditSwarm"]["issueCards"][0]["claim"], "Hardcoded token")
 
         duplicate = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
         app.PullwiseHandler.route(duplicate, "POST")
@@ -193,6 +321,1035 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(late_attempt, "POST")
         self.assertEqual(late_attempt.status, HTTPStatus.CONFLICT)
         self.assertEqual(len(app.ISSUES), 1)
+
+    def test_worker_result_exposes_reproducible_evidence_chain(self) -> None:
+        scan = {
+            "id": "sc_evidence",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-evidence",
+                **audit_result_fields(
+                    [
+                        audit_issue_card(
+                            "Reject invalid page numbers",
+                            issue_id="f_page_zero",
+                            severity="P2",
+                            category="Quality",
+                            file="src/app.py",
+                            line=12,
+                            end_line=14,
+                            claim="page=0 creates a negative offset.",
+                            impact="malformed input returns 500",
+                            evidence=[
+                                {
+                                    "type": "code",
+                                    "label": "Offset calculation",
+                                    "summary": "page is used without a lower bound.",
+                                    "file": "src/app.py",
+                                    "startLine": 12,
+                                    "endLine": 14,
+                                }
+                            ],
+                            reproduction={
+                                "commands": ["pytest tests/repro/test_page_zero.py"],
+                                "input": "GET /users?page=0",
+                                "expected": "400 validation error",
+                                "actual": "500 internal server error",
+                                "testFile": "tests/repro/test_page_zero.py",
+                                "logPath": "logs/f_page_zero.log",
+                            },
+                            false_positive_checks=["The parameter is read from the request query."],
+                            limitations=["A production API gateway could reject page < 1 before the app."],
+                        )
+                    ],
+                    [
+                        audit_verification(
+                            "f_page_zero",
+                            proof_type="failing_test",
+                            proof_strength=3,
+                            evidence=["A focused test reproduces the 500 response."],
+                            commands_run=["pytest tests/repro/test_page_zero.py"],
+                            result_summary="500 internal server error",
+                            log_path="logs/f_page_zero.log",
+                            output="FAIL tests/repro/test_page_zero.py\nAssertionError: expected 400 received 500",
+                        )
+                    ],
+                ),
+                "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+                "verification_audit": {
+                    "candidateCount": 2,
+                    "reportedCount": 1,
+                    "rejectedCount": 1,
+                    "verifiedCount": 1,
+                    "rejectedReasons": [{"reason": "missing_evidence", "count": 1}],
+                    "rejectedSamples": [
+                        {
+                            "reason": "missing_evidence",
+                            "title": "Only a vague model guess",
+                            "severity": "low",
+                            "category": "Quality",
+                            "file": "src/guess.py",
+                            "line": 9,
+                            "verificationStatus": "unverified",
+                            "summary": "This unconfirmed text should not be exposed.",
+                        }
+                    ],
+                    "summary": "2 candidates evaluated; 1 reported; 1 rejected before reporting.",
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        payload = app.issue_payload(app.ISSUES[0])
+        self.assertEqual(payload["verificationStatus"], "verified")
+        self.assertEqual(payload["confidenceLevel"], "high")
+        self.assertEqual(payload["reproduction"]["commands"], ["pytest tests/repro/test_page_zero.py"])
+        self.assertEqual(payload["affectedLocations"][0]["url"], "https://github.com/acme/api/blob/abc1234/src/app.py#L12-L14")
+        self.assertEqual(payload["evidence"][0]["url"], "https://github.com/acme/api/blob/abc1234/src/app.py#L12-L14")
+        self.assertEqual(payload["evidence"][1]["type"], "test")
+        self.assertIn("AssertionError: expected 400 received 500", payload["evidence"][1]["output"])
+        checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
+        self.assertTrue(checklist["Fixed commit"])
+        self.assertTrue(checklist["Reproduction command"])
+        self.assertTrue(checklist["Raw log or test"])
+        self.assertEqual(payload["audit"]["commit"], "abc1234")
+        self.assertEqual(
+            payload["auditSwarm"],
+            {
+                "protocol": "audit-swarm/0.1",
+                "shardId": "app",
+                "agentRole": "correctness-reviewer",
+                "verdict": "confirmed",
+            },
+        )
+        self.assertEqual(payload["whyNotFalsePositive"], ["The parameter is read from the request query."])
+        self.assertEqual(payload["limitations"], ["A production API gateway could reject page < 1 before the app."])
+        trace = {stage["key"]: stage for stage in payload["evidenceTrace"]}
+        self.assertEqual(set(trace), {"code", "path", "trigger", "runtime", "impact", "fix"})
+        self.assertEqual(trace["code"]["status"], "present")
+        self.assertIn("Affected code location: src/app.py:L12-L14", trace["code"]["items"])
+        self.assertEqual(trace["path"]["status"], "present")
+        self.assertIn("Reachability check: The parameter is read from the request query.", trace["path"]["items"])
+        self.assertEqual(trace["trigger"]["status"], "present")
+        self.assertIn("Input: GET /users?page=0", trace["trigger"]["items"])
+        self.assertEqual(trace["runtime"]["status"], "present")
+        self.assertIn("Observed result: 500 internal server error", trace["runtime"]["items"])
+        self.assertEqual(trace["impact"]["status"], "present")
+        self.assertIn("Impact: malformed input returns 500", trace["impact"]["items"])
+        self.assertEqual(trace["fix"]["status"], "missing")
+        self.assertIn("Finding is pinned to commit abc1234.", payload["reasoningBreakdown"]["facts"])
+        self.assertIn(
+            "Offset calculation: page is used without a lower bound.",
+            payload["reasoningBreakdown"]["facts"],
+        )
+        self.assertIn(
+            "Impact: malformed input returns 500",
+            payload["reasoningBreakdown"]["inferences"],
+        )
+        self.assertIn(
+            "After a fix, rerun the captured reproduction command and compare the expected and observed results.",
+            payload["reasoningBreakdown"]["recommendations"],
+        )
+        scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(
+            scan_payload["verification"],
+            {"verified": 1, "static_proof": 0, "potential_risk": 0, "unverified": 0},
+        )
+        self.assertEqual(scan_payload["verificationAudit"]["candidateCount"], 2)
+        self.assertEqual(scan_payload["verificationAudit"]["reportedCount"], 1)
+        self.assertEqual(scan_payload["verificationAudit"]["rejectedCount"], 1)
+        self.assertEqual(scan_payload["auditSwarm"]["protocol"], "audit-swarm/0.1")
+        self.assertEqual(scan_payload["auditSwarm"]["stage"], "report")
+        self.assertEqual(scan_payload["auditSwarm"]["counts"]["issueCards"], 1)
+        self.assertEqual(scan_payload["auditSwarm"]["counts"]["verificationResults"], 1)
+        self.assertEqual(scan_payload["auditSwarm"]["counts"]["candidateCount"], 2)
+        self.assertEqual(scan_payload["auditSwarm"]["issueCards"][0]["claim"], "page=0 creates a negative offset.")
+        self.assertEqual(scan_payload["auditSwarm"]["issueCards"][0]["evidence"][0], "page is used without a lower bound.")
+        self.assertEqual(scan_payload["auditSwarm"]["issueCards"][0].get("suggestedTest", ""), "")
+        self.assertEqual(
+            scan_payload["auditSwarm"]["issueCards"][0]["falsePositiveChecks"],
+            ["The parameter is read from the request query."],
+        )
+        self.assertEqual(scan_payload["auditSwarm"]["verificationResults"][0]["verdict"], "confirmed")
+        self.assertEqual(
+            scan_payload["auditSwarm"]["verificationResults"][0]["command"],
+            "pytest tests/repro/test_page_zero.py",
+        )
+        self.assertEqual(scan_payload["auditSwarm"]["verificationResults"][0]["summary"], "500 internal server error")
+        self.assertEqual(
+            scan_payload["verificationAudit"]["rejectedReasons"],
+            [{"reason": "missing_evidence", "count": 1}],
+        )
+        self.assertEqual(
+            scan_payload["verificationAudit"]["rejectedSamples"],
+            [
+                {
+                    "reason": "missing_evidence",
+                    "title": "Only a vague model guess",
+                    "severity": "low",
+                    "category": "Quality",
+                    "file": "src/guess.py",
+                    "line": 9,
+                    "verificationStatus": "unverified",
+                }
+            ],
+        )
+
+    def test_scan_audit_bundle_route_returns_owner_scoped_evidence(self) -> None:
+        timestamp = app.now()
+        app.USERS = {
+            "usr_1": {"id": "usr_1", "name": "Owner", "providers": []},
+            "usr_2": {"id": "usr_2", "name": "Other", "providers": []},
+        }
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": timestamp,
+                "expiresAt": timestamp + 3600,
+            },
+            "ses_other": {
+                "id": "ses_other",
+                "userId": "usr_2",
+                "createdAt": timestamp,
+                "expiresAt": timestamp + 3600,
+            },
+        }
+        app.SCANS = [
+            {
+                "id": "sc_bundle",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc1234",
+                "status": "done",
+                "userId": "usr_1",
+                "createdAt": timestamp,
+                "completedAt": timestamp,
+                "issues": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+                "preflight": {
+                    "mode": "static",
+                    "execution": "allowlisted_verifier_scripts",
+                    "summary": "Detected npm package scripts and one failed verifier run.",
+                    "packageManagers": ["npm"],
+                    "languages": ["JavaScript"],
+                    "availableScripts": ["test"],
+                    "environment": {
+                        "os": "Linux",
+                        "osRelease": "6.8.0",
+                        "platform": "Linux-6.8.0-x86_64",
+                        "machine": "x86_64",
+                        "pythonVersion": "3.12.3",
+                    },
+                    "toolVersions": [
+                        {
+                            "name": "git",
+                            "command": "git --version",
+                            "available": True,
+                            "exitCode": 0,
+                            "output": "git version 2.45.0",
+                        },
+                        {
+                            "name": "node",
+                            "command": "node --version",
+                            "available": True,
+                            "exitCode": 0,
+                            "output": "v22.21.0",
+                        },
+                    ],
+                    "verifier": {
+                        "enabled": True,
+                        "summary": "1 verifier command failed.",
+                        "runs": [
+                            {
+                                "script": "test",
+                                "command": "npm run test",
+                                "status": "failed",
+                                "exitCode": 1,
+                                "durationMs": 100,
+                                "logPath": "verification/sc_bundle/test.log",
+                                "output": "FAIL tests/repro/page-zero.test.js\nAssertionError: expected 400 received 500",
+                            }
+                        ],
+                    },
+                },
+                "verificationAudit": {
+                    "candidateCount": 3,
+                    "reportedCount": 1,
+                    "rejectedCount": 2,
+                    "verifiedCount": 1,
+                    "rejectedReasons": [{"reason": "missing_evidence", "count": 2}],
+                    "rejectedSamples": [
+                        {"reason": "missing_evidence", "title": "Only a vague model guess", "severity": "low"}
+                    ],
+                    "summary": "3 candidates evaluated; 1 reported; 2 rejected before reporting.",
+                },
+            }
+        ]
+        app.ISSUES = [
+            {
+                "id": "f_page_zero",
+                "scanId": "sc_bundle",
+                "jobId": "job_1",
+                "userId": "usr_1",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc1234",
+                "severity": "medium",
+                "category": "Quality",
+                "title": "page=0 returns 500",
+                "file": "src/users.js",
+                "line": 42,
+                "badCode": [{"ln": 42, "code": "const offset = (page - 1) * limit", "t": "del"}],
+                "goodCode": [
+                    {"ln": 42, "code": "const pageNumber = Math.max(1, page)", "t": "add"},
+                    {"ln": 43, "code": "const offset = (pageNumber - 1) * limit", "t": "add"},
+                ],
+                "verificationStatus": "verified",
+                "verificationSummary": "A focused test reproduces the 500 response.",
+                "affectedLocations": [{"file": "src/users.js", "startLine": 42, "endLine": 45}],
+                "evidence": [
+                    {
+                        "type": "code",
+                        "label": "Offset calculation",
+                        "summary": "page is used without a lower bound.",
+                        "file": "src/users.js",
+                        "startLine": 42,
+                        "endLine": 45,
+                    },
+                    {
+                        "type": "runtime_log",
+                        "label": "Repro run",
+                        "summary": "The focused test failed with the observed 500 response.",
+                        "command": "npm run test -- tests/repro/page-zero.test.js",
+                        "exitCode": 1,
+                        "logPath": "logs/f_page_zero.log",
+                        "output": "FAIL tests/repro/page-zero.test.js\nAssertionError: expected 400 received 500",
+                    },
+                ],
+                "reproduction": {
+                    "commands": ["npm run test -- tests/repro/page-zero.test.js"],
+                    "input": "GET /api/users?page=0",
+                    "expected": "400 validation error",
+                    "actual": "500 internal server error",
+                    "testFile": "tests/repro/page-zero.test.js",
+                    "logPath": "logs/f_page_zero.log",
+                },
+                "whyNotFalsePositive": ["The page parameter is read from the request query."],
+                "limitations": ["A production API gateway could reject page < 1 first."],
+            },
+            {
+                "id": "f_wrong_user",
+                "scanId": "sc_bundle",
+                "userId": "usr_2",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc1234",
+                "severity": "high",
+                "title": "Should not be bundled",
+                "file": "src/other.js",
+                "line": 1,
+            },
+        ]
+
+        owner = RouteHarness(
+            "/scans/sc_bundle/audit-bundle",
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+        )
+        app.PullwiseHandler.route(owner, "GET")
+
+        self.assertEqual(owner.status, HTTPStatus.OK)
+        self.assertEqual(owner.payload["kind"], "pullwise.audit_bundle")
+        self.assertEqual(owner.payload["schemaVersion"], 1)
+        self.assertEqual(owner.payload["scan"]["id"], "sc_bundle")
+        self.assertEqual(owner.payload["preflight"]["verifier"]["runs"][0]["status"], "failed")
+        self.assertEqual(
+            owner.payload["verification"],
+            {"verified": 1, "static_proof": 0, "potential_risk": 0, "unverified": 0},
+        )
+        self.assertEqual(owner.payload["verificationAudit"]["candidateCount"], 3)
+        self.assertEqual(owner.payload["verificationAudit"]["reportedCount"], 1)
+        self.assertEqual(owner.payload["verificationAudit"]["rejectedCount"], 2)
+        self.assertEqual(
+            owner.payload["verificationAudit"]["rejectedSamples"],
+            [{"reason": "missing_evidence", "title": "Only a vague model guess", "severity": "low"}],
+        )
+        self.assertEqual(owner.payload["evidenceSummary"]["issueCount"], 1)
+        self.assertEqual([issue["id"] for issue in owner.payload["issues"]], ["f_page_zero"])
+        self.assertEqual(owner.payload["evidenceSummary"]["evidenceItemCount"], 2)
+        self.assertEqual(owner.payload["evidenceSummary"]["reproductionCommandCount"], 1)
+        self.assertEqual(owner.payload["evidenceSummary"]["logArtifactCount"], 1)
+        self.assertEqual(
+            owner.payload["reproductionCommands"],
+            ["npm run test -- tests/repro/page-zero.test.js"],
+        )
+        self.assertEqual(owner.payload["issues"][0]["verificationStatus"], "verified")
+        self.assertIn(
+            "AssertionError: expected 400 received 500",
+            owner.payload["preflight"]["verifier"]["runs"][0]["output"],
+        )
+        self.assertEqual(
+            owner.payload["issues"][0]["affectedLocations"][0]["url"],
+            "https://github.com/acme/api/blob/abc1234/src/users.js#L42-L45",
+        )
+        artifact_paths = [artifact["path"] for artifact in owner.payload["artifacts"]]
+        self.assertEqual(
+            artifact_paths[:8],
+            [
+                "README.md",
+                "report.md",
+                "repro.sh",
+                "Dockerfile",
+                "reproduction/commands.txt",
+                "environment.json",
+                "tool-versions.json",
+                "audit.json",
+            ],
+        )
+        self.assertIn("logs/verification/sc_bundle/test.log", artifact_paths)
+        self.assertIn("reproduction/issues/f_page_zero.sh", artifact_paths)
+        self.assertIn("patches/f_page_zero.diff", artifact_paths)
+        self.assertIn("issues/f_page_zero.md", artifact_paths)
+        self.assertIn("artifact-manifest.json", artifact_paths)
+        manifest_paths = [item["path"] for item in owner.payload["artifactManifest"]]
+        self.assertEqual(manifest_paths, artifact_paths)
+        artifacts = {artifact["path"]: artifact for artifact in owner.payload["artifacts"]}
+        self.assertIn("PULLWISE_RUN_REPRO=1 sh repro.sh", artifacts["README.md"]["content"])
+        self.assertIn("PULLWISE_RUN_REPRO=1 sh repro.sh ISSUE_ID", artifacts["README.md"]["content"])
+        self.assertIn("docker build -t pullwise-audit .", artifacts["README.md"]["content"])
+        self.assertIn("docker run --rm -e PULLWISE_RUN_REPRO=1 pullwise-audit", artifacts["README.md"]["content"])
+        self.assertIn("reproduction/issues/", artifacts["README.md"]["content"])
+        self.assertIn("patches/", artifacts["README.md"]["content"])
+        self.assertIn("Captured verifier output artifacts", artifacts["README.md"]["content"])
+        self.assertIn("tool-versions.json", artifacts["README.md"]["content"])
+        self.assertIn("artifact-manifest.json", artifacts["README.md"]["content"])
+        self.assertIn("FROM ubuntu:22.04", artifacts["Dockerfile"]["content"])
+        self.assertIn("COPY . /audit", artifacts["Dockerfile"]["content"])
+        self.assertIn('CMD ["sh", "/audit/repro.sh"]', artifacts["Dockerfile"]["content"])
+        self.assertIn("Verifier log artifacts: 1", artifacts["report.md"]["content"])
+        self.assertIn(
+            "Rejected sample: missing_evidence - Only a vague model guess",
+            artifacts["report.md"]["content"],
+        )
+        self.assertIn("ISSUE_ID=${1:-}", artifacts["repro.sh"]["content"])
+        self.assertIn("reproduction/issues/${SAFE_ISSUE}.sh", artifacts["repro.sh"]["content"])
+        self.assertIn("git checkout \"$COMMIT\"", artifacts["repro.sh"]["content"])
+        self.assertIn("Commands printed only", artifacts["repro.sh"]["content"])
+        self.assertIn(
+            "npm run test -- tests/repro/page-zero.test.js",
+            artifacts["reproduction/commands.txt"]["content"],
+        )
+        self.assertIn(
+            "# Pullwise reproduction helper for f_page_zero",
+            artifacts["reproduction/issues/f_page_zero.sh"]["content"],
+        )
+        self.assertIn(
+            "npm run test -- tests/repro/page-zero.test.js",
+            artifacts["reproduction/issues/f_page_zero.sh"]["content"],
+        )
+        self.assertIn("# Pullwise suggested patch", artifacts["patches/f_page_zero.diff"]["content"])
+        self.assertIn("--- a/src/users.js", artifacts["patches/f_page_zero.diff"]["content"])
+        self.assertIn("-const offset = (page - 1) * limit", artifacts["patches/f_page_zero.diff"]["content"])
+        self.assertIn("+const pageNumber = Math.max(1, page)", artifacts["patches/f_page_zero.diff"]["content"])
+        self.assertIn('"verificationAudit"', artifacts["environment.json"]["content"])
+        self.assertIn('"os": "Linux"', artifacts["environment.json"]["content"])
+        self.assertIn('"pythonVersion": "3.12.3"', artifacts["environment.json"]["content"])
+        self.assertIn('"tools"', artifacts["tool-versions.json"]["content"])
+        self.assertIn('"git --version"', artifacts["tool-versions.json"]["content"])
+        self.assertIn('"v22.21.0"', artifacts["tool-versions.json"]["content"])
+        self.assertIn('"selfExcluded": true', artifacts["artifact-manifest.json"]["content"])
+        self.assertIn('"README.md"', artifacts["artifact-manifest.json"]["content"])
+        self.assertIn('"Dockerfile"', artifacts["artifact-manifest.json"]["content"])
+        self.assertIn('"reproduction/issues/f_page_zero.sh"', artifacts["artifact-manifest.json"]["content"])
+        self.assertIn('"patches/f_page_zero.diff"', artifacts["artifact-manifest.json"]["content"])
+        self.assertIn('"tool-versions.json"', artifacts["artifact-manifest.json"]["content"])
+        self.assertNotIn('"artifact-manifest.json"', artifacts["artifact-manifest.json"]["content"])
+        self.assertIn("page=0 returns 500", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("## Confidence Evidence", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Fixed commit: met", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Reproduction command: met", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Runtime output: met", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("## Evidence Trace", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Code [present]", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Path [present]", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Runtime [present]", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Fix [present]", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("## Facts, Inferences, and Recommendations", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("### Facts", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Offset calculation: page is used without a lower bound.", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("### Recommendations", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("Inspect the suggested patch evidence", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn("../patches/f_page_zero.diff", artifacts["issues/f_page_zero.md"]["content"])
+        self.assertIn(
+            "AssertionError: expected 400 received 500",
+            artifacts["issues/f_page_zero.md"]["content"],
+        )
+        self.assertIn("Command: npm run test", artifacts["logs/verification/sc_bundle/test.log"]["content"])
+        self.assertIn(
+            "AssertionError: expected 400 received 500",
+            artifacts["logs/verification/sc_bundle/test.log"]["content"],
+        )
+        self.assertRegex(artifacts["README.md"]["sha256"], r"^[0-9a-f]{64}$")
+        self.assertIn("Verifier output captured", owner.payload["limitations"][1])
+
+        owner_zip = RouteHarness(
+            "/scans/sc_bundle/audit-bundle.zip",
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+        )
+        app.PullwiseHandler.route(owner_zip, "GET")
+
+        self.assertEqual(owner_zip.status, HTTPStatus.OK)
+        self.assertEqual(owner_zip.content_type, "application/zip")
+        self.assertEqual(
+            owner_zip.headers_out["Content-Disposition"],
+            'attachment; filename="pullwise-audit-sc_bundle.zip"',
+        )
+        with zipfile.ZipFile(io.BytesIO(owner_zip.binary_payload), "r") as archive:
+            self.assertIn("README.md", archive.namelist())
+            self.assertIn("repro.sh", archive.namelist())
+            self.assertIn("Dockerfile", archive.namelist())
+            self.assertIn("environment.json", archive.namelist())
+            self.assertIn("tool-versions.json", archive.namelist())
+            self.assertIn("artifact-manifest.json", archive.namelist())
+            self.assertIn("reproduction/issues/f_page_zero.sh", archive.namelist())
+            self.assertIn("patches/f_page_zero.diff", archive.namelist())
+            self.assertIn("issues/f_page_zero.md", archive.namelist())
+            self.assertIn("logs/verification/sc_bundle/test.log", archive.namelist())
+            self.assertIn(
+                "PULLWISE_RUN_REPRO=1 sh repro.sh",
+                archive.read("README.md").decode("utf-8"),
+            )
+            self.assertIn(
+                "PULLWISE_RUN_REPRO=1 sh repro.sh ISSUE_ID",
+                archive.read("README.md").decode("utf-8"),
+            )
+            self.assertIn(
+                "docker build -t pullwise-audit .",
+                archive.read("README.md").decode("utf-8"),
+            )
+            self.assertIn(
+                'CMD ["sh", "/audit/repro.sh"]',
+                archive.read("Dockerfile").decode("utf-8"),
+            )
+            self.assertIn(
+                "npm run test -- tests/repro/page-zero.test.js",
+                archive.read("reproduction/commands.txt").decode("utf-8"),
+            )
+            self.assertIn(
+                "npm run test -- tests/repro/page-zero.test.js",
+                archive.read("reproduction/issues/f_page_zero.sh").decode("utf-8"),
+            )
+            self.assertIn(
+                "+const pageNumber = Math.max(1, page)",
+                archive.read("patches/f_page_zero.diff").decode("utf-8"),
+            )
+            self.assertIn(
+                '"node --version"',
+                archive.read("tool-versions.json").decode("utf-8"),
+            )
+            self.assertIn(
+                '"selfExcluded": true',
+                archive.read("artifact-manifest.json").decode("utf-8"),
+            )
+            self.assertIn(
+                "AssertionError: expected 400 received 500",
+                archive.read("logs/verification/sc_bundle/test.log").decode("utf-8"),
+            )
+
+        other_user = RouteHarness(
+            "/scans/sc_bundle/audit-bundle",
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_other"},
+        )
+        app.PullwiseHandler.route(other_user, "GET")
+        self.assertEqual(other_user.status, HTTPStatus.NOT_FOUND)
+
+        anonymous = RouteHarness("/scans/sc_bundle/audit-bundle")
+        app.PullwiseHandler.route(anonymous, "GET")
+        self.assertEqual(anonymous.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_issue_payload_downgrades_verified_command_without_runtime_output(self) -> None:
+        app.SCANS = [
+            {
+                "id": "sc_command_only",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc1234",
+                "status": "done",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            }
+        ]
+        issue = {
+            "id": "f_command_only",
+            "scanId": "sc_command_only",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "severity": "medium",
+            "category": "Quality",
+            "title": "Command-only proof",
+            "file": "src/app.py",
+            "line": 12,
+            "verificationStatus": "verified",
+            "reportedVerificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 12, "endLine": 14}],
+            "evidence": [
+                {
+                    "type": "code",
+                    "label": "Bounds check",
+                    "summary": "Static code evidence only.",
+                    "file": "src/app.py",
+                    "startLine": 12,
+                    "endLine": 14,
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro/test_bounds.py"],
+                "input": "",
+                "expected": "",
+                "actual": "",
+                "testFile": "",
+                "logPath": "",
+            },
+        }
+
+        payload = app.issue_payload(issue)
+
+        self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(payload["reportedVerificationStatus"], "verified")
+        checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
+        self.assertTrue(checklist["Reproduction command"])
+        self.assertFalse(checklist["Runtime output"])
+        app.ISSUES = [issue]
+        scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(scan_payload["verification"]["static_proof"], 1)
+        self.assertEqual(scan_payload["verificationAudit"]["candidateCount"], 1)
+        self.assertEqual(scan_payload["verificationAudit"]["reportedCount"], 1)
+        self.assertEqual(scan_payload["verificationAudit"]["downgradedCount"], 1)
+
+    def test_issue_payload_downgrades_verified_runtime_without_fixed_commit(self) -> None:
+        app.SCANS = [
+            {
+                "id": "sc_pending_commit",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "done",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            }
+        ]
+        issue = {
+            "id": "f_pending_runtime",
+            "scanId": "sc_pending_commit",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "severity": "medium",
+            "category": "Quality",
+            "title": "Runtime proof without fixed commit",
+            "file": "src/app.py",
+            "line": 12,
+            "verificationStatus": "verified",
+            "reportedVerificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 12, "endLine": 14}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Verifier output",
+                    "summary": "A command failed in the verifier.",
+                    "command": "pytest tests/repro.py",
+                    "exitCode": 1,
+                    "output": "AssertionError",
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro.py"],
+                "actual": "Command exited 1.",
+            },
+        }
+
+        payload = app.issue_payload(issue)
+
+        self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(payload["reportedVerificationStatus"], "verified")
+        checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
+        self.assertFalse(checklist["Fixed commit"])
+        self.assertTrue(checklist["Runtime output"])
+        self.assertIsNone(payload["evidence"][0].get("url"))
+        app.ISSUES = [issue]
+        scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(scan_payload["verification"]["verified"], 0)
+        self.assertEqual(scan_payload["verification"]["static_proof"], 1)
+        self.assertEqual(scan_payload["verificationAudit"]["downgradedCount"], 1)
+
+    def test_issue_payload_downgrades_verified_runtime_without_reproduction_command(self) -> None:
+        issue = {
+            "id": "f_no_repro_command",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "severity": "medium",
+            "category": "Quality",
+            "title": "Runtime proof without copyable command",
+            "file": "src/app.py",
+            "line": 12,
+            "verificationStatus": "verified",
+            "reportedVerificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 12, "endLine": 14}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Verifier output",
+                    "summary": "A command failed in the verifier.",
+                    "command": "pytest tests/repro.py",
+                    "exitCode": 1,
+                    "output": "AssertionError",
+                }
+            ],
+            "reproduction": {"actual": "Command exited 1."},
+        }
+
+        payload = app.issue_payload(issue)
+
+        self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(payload["reportedVerificationStatus"], "verified")
+        checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
+        self.assertTrue(checklist["Fixed commit"])
+        self.assertFalse(checklist["Reproduction command"])
+        self.assertTrue(checklist["Runtime output"])
+
+    def test_issue_payload_downgrades_verified_runtime_without_raw_output(self) -> None:
+        issue = {
+            "id": "f_no_raw_output",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "severity": "medium",
+            "category": "Quality",
+            "title": "Runtime command without raw output",
+            "file": "src/app.py",
+            "line": 12,
+            "verificationStatus": "verified",
+            "reportedVerificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 12, "endLine": 14}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Verifier command",
+                    "summary": "A verifier command was identified.",
+                    "command": "pytest tests/repro.py",
+                }
+            ],
+            "reproduction": {"commands": ["pytest tests/repro.py"]},
+        }
+
+        payload = app.issue_payload(issue)
+
+        self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(payload["reportedVerificationStatus"], "verified")
+        checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
+        self.assertTrue(checklist["Fixed commit"])
+        self.assertTrue(checklist["Reproduction command"])
+        self.assertFalse(checklist["Runtime output"])
+        self.assertFalse(checklist["Raw log or test"])
+
+    def test_issue_payload_downgrades_verified_runtime_with_only_exit_code(self) -> None:
+        issue = {
+            "id": "f_exit_code_only",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "severity": "medium",
+            "category": "Quality",
+            "title": "Runtime command without inspectable output",
+            "file": "src/app.py",
+            "line": 12,
+            "verificationStatus": "verified",
+            "reportedVerificationStatus": "verified",
+            "affectedLocations": [{"file": "src/app.py", "startLine": 12, "endLine": 14}],
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Verifier exit",
+                    "summary": "A verifier command exited non-zero, but no raw output was captured.",
+                    "command": "pytest tests/repro.py",
+                    "exitCode": 1,
+                }
+            ],
+            "reproduction": {"commands": ["pytest tests/repro.py"]},
+        }
+
+        payload = app.issue_payload(issue)
+
+        self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(payload["reportedVerificationStatus"], "verified")
+        checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
+        self.assertTrue(checklist["Reproduction command"])
+        self.assertFalse(checklist["Runtime output"])
+        self.assertFalse(checklist["Raw log or test"])
+        self.assertEqual(payload["evidence"][1]["exitCode"], 1)
+
+    def test_issue_payload_downgrades_verified_runtime_without_precise_line(self) -> None:
+        issue = {
+            "id": "f_no_precise_line",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "severity": "medium",
+            "category": "Quality",
+            "title": "Runtime proof without precise line",
+            "file": "src/app.py",
+            "verificationStatus": "verified",
+            "reportedVerificationStatus": "verified",
+            "evidence": [
+                {
+                    "type": "runtime_log",
+                    "label": "Verifier output",
+                    "summary": "A command failed in the verifier.",
+                    "command": "pytest tests/repro.py",
+                    "exitCode": 1,
+                    "output": "AssertionError",
+                }
+            ],
+            "reproduction": {
+                "commands": ["pytest tests/repro.py"],
+                "actual": "Command exited 1.",
+            },
+        }
+
+        payload = app.issue_payload(issue)
+
+        self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(payload["reportedVerificationStatus"], "verified")
+        checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
+        self.assertTrue(checklist["Fixed commit"])
+        self.assertFalse(checklist["Precise file and line"])
+        self.assertTrue(checklist["Reproduction command"])
+        self.assertTrue(checklist["Runtime output"])
+
+    def test_worker_result_persists_scan_preflight_metadata(self) -> None:
+        scan = {
+            "id": "sc_preflight",
+            "repo": "acme/app",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-preflight",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "preflight": {
+                    "mode": "static",
+                    "execution": "no_project_scripts",
+                    "summary": "Static preflight\nwithout scripts.",
+                    "repo": "acme/app",
+                    "branch": "main",
+                    "commit": "abc1234",
+                    "workerVersion": "0.2.0",
+                    "providerChain": ["codex"],
+                    "environment": {
+                        "os": "Linux",
+                        "osRelease": "6.8.0",
+                        "platform": "Linux-6.8.0-x86_64",
+                        "machine": "x86_64",
+                        "pythonVersion": "3.12.3",
+                        "checkoutRoot": "/srv/pullwise/checkouts/job",
+                    },
+                    "languages": ["JavaScript/TypeScript"],
+                    "packageManagers": ["pnpm"],
+                    "availableScripts": ["build", "test"],
+                    "manifests": [
+                        {"file": "package.json", "type": "node"},
+                        {"file": "../secret", "type": "bad"},
+                    ],
+                    "toolVersions": [
+                        {
+                            "name": "git",
+                            "command": "git --version",
+                            "available": True,
+                            "exitCode": 0,
+                            "output": "git version 2.45.0\nextra",
+                        },
+                        {"name": "", "command": "bad", "available": True, "exitCode": 0, "output": "bad"},
+                    ],
+                    "verifier": {
+                        "enabled": True,
+                        "summary": "Verifier ran 1 command.\n1 failed.",
+                        "runs": [
+                            {
+                                "script": "test",
+                                "command": "npm run test",
+                                "status": "failed",
+                                "exitCode": 1,
+                                "durationMs": 1234,
+                                "logPath": "verification/job/test.log",
+                                "output": "FAIL\nAssertionError",
+                            },
+                            {
+                                "script": "lint",
+                                "command": "npm run lint",
+                                "status": "flaky",
+                                "exitCode": 1,
+                                "durationMs": 2345,
+                                "confirmedFailure": False,
+                                "logPath": "verification/job/lint.log",
+                                "output": "--- attempt 1 (failed exit 1) ---\nFAIL\n--- attempt 2 (passed exit 0) ---\nPASS",
+                                "attempts": [
+                                    {
+                                        "attempt": 1,
+                                        "status": "failed",
+                                        "exitCode": 1,
+                                        "durationMs": 100,
+                                        "output": "FAIL",
+                                    },
+                                    {
+                                        "attempt": 2,
+                                        "status": "passed",
+                                        "exitCode": 0,
+                                        "durationMs": 90,
+                                        "output": "PASS",
+                                    },
+                                ],
+                            },
+                            {"script": "", "command": "", "status": "bad"},
+                        ],
+                    },
+                    "limitations": ["No dependency installation was executed."],
+                },
+                "verification_audit": {
+                    "candidate_count": 4,
+                    "reported_count": 0,
+                    "rejected_count": 2,
+                    "downgraded_count": 1,
+                    "verified_count": 0,
+                    "static_proof_count": 0,
+                    "potential_risk_count": 0,
+                    "unverified_count": 0,
+                    "rejectedReasons": [
+                        {"reason": "missing_evidence", "count": 2},
+                        {"reason": "", "count": 99},
+                    ],
+                    "summary": "4 candidates evaluated.\n2 rejected.",
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(payload["preflight"]["mode"], "static")
+        self.assertEqual(payload["preflight"]["execution"], "no_project_scripts")
+        self.assertEqual(payload["preflight"]["summary"], "Static preflight without scripts.")
+        self.assertEqual(
+            payload["preflight"]["environment"],
+            {
+                "os": "Linux",
+                "osRelease": "6.8.0",
+                "platform": "Linux-6.8.0-x86_64",
+                "machine": "x86_64",
+                "pythonVersion": "3.12.3",
+            },
+        )
+        self.assertNotIn("checkoutRoot", payload["preflight"]["environment"])
+        self.assertEqual(payload["preflight"]["packageManagers"], ["pnpm"])
+        self.assertEqual(payload["preflight"]["availableScripts"], ["build", "test"])
+        self.assertEqual(payload["preflight"]["manifests"], [{"file": "package.json", "type": "node"}])
+        self.assertEqual(payload["preflight"]["toolVersions"][0]["name"], "git")
+        self.assertEqual(payload["preflight"]["toolVersions"][0]["output"], "git version 2.45.0 extra")
+        self.assertTrue(payload["preflight"]["verifier"]["enabled"])
+        self.assertEqual(payload["preflight"]["verifier"]["summary"], "Verifier ran 1 command. 1 failed.")
+        self.assertEqual(
+            payload["preflight"]["verifier"]["runs"],
+            [
+                {
+                    "script": "test",
+                    "command": "npm run test",
+                    "status": "failed",
+                    "exitCode": 1,
+                    "durationMs": 1234,
+                    "logPath": "verification/job/test.log",
+                    "output": "FAIL\nAssertionError",
+                },
+                {
+                    "script": "lint",
+                    "command": "npm run lint",
+                    "status": "flaky",
+                    "exitCode": 1,
+                    "durationMs": 2345,
+                    "confirmedFailure": False,
+                    "attempts": [
+                        {
+                            "attempt": 1,
+                            "status": "failed",
+                            "exitCode": 1,
+                            "durationMs": 100,
+                            "output": "FAIL",
+                        },
+                        {
+                            "attempt": 2,
+                            "status": "passed",
+                            "exitCode": 0,
+                            "durationMs": 90,
+                            "output": "PASS",
+                        },
+                    ],
+                    "logPath": "verification/job/lint.log",
+                    "output": "--- attempt 1 (failed exit 1) ---\nFAIL\n--- attempt 2 (passed exit 0) ---\nPASS",
+                }
+            ],
+        )
+        self.assertEqual(payload["verificationAudit"]["candidateCount"], 4)
+        self.assertEqual(payload["verificationAudit"]["reportedCount"], 0)
+        self.assertEqual(payload["verificationAudit"]["rejectedCount"], 2)
+        self.assertEqual(payload["verificationAudit"]["downgradedCount"], 1)
+        self.assertEqual(
+            payload["verificationAudit"]["rejectedReasons"],
+            [{"reason": "missing_evidence", "count": 2}],
+        )
 
     def test_claim_payload_includes_short_lived_clone_token_when_github_app_is_configured(self) -> None:
         job = {
@@ -248,14 +1405,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": "wk_1-1",
                 "result_checksum": "checksum-worker-file",
-                "findings": [
-                    {
-                        "severity": "high",
-                        "title": "Leaked checkout path",
-                        "file": f"/var/lib/pullwise-worker/checkouts/{job['job_id']}/src/app.py",
-                        "line": 12,
-                    }
-                ],
+                **audit_result_fields(
+                    [
+                        audit_issue_card(
+                            "Leaked checkout path",
+                            issue_id="issue-worker-file",
+                            severity="P1",
+                            file=f"/var/lib/pullwise-worker/checkouts/{job['job_id']}/src/app.py",
+                            line=12,
+                        )
+                    ]
+                ),
                 "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
             },
             headers=self.auth,
@@ -347,7 +1507,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         wrong_result = RouteHarness(
             f"/worker/jobs/{job['job_id']}/result",
-            {"status": "done", "attempt_id": "wk_2-1", "result_checksum": "bad", "findings": []},
+            {"status": "done", "attempt_id": "wk_2-1", "result_checksum": "bad", **audit_result_fields([])},
             headers={"Authorization": f"Bearer {other_token}"},
         )
         app.PullwiseHandler.route(wrong_result, "POST")
@@ -644,7 +1804,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
                         "status": "done",
                         "attempt_id": f"{worker_id}-{job['attempt']}",
                         "result_checksum": f"checksum-{job['job_id']}",
-                        "findings": [{"severity": "medium", "title": f"Finding {job['scan_id']}"}],
+                        **audit_result_fields(
+                            [
+                                audit_issue_card(
+                                    f"Finding {job['scan_id']}",
+                                    issue_id=f"issue-{job['scan_id']}",
+                                    severity="P2",
+                                )
+                            ]
+                        ),
                         "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
                     },
                     headers=auth,
@@ -669,7 +1837,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": f"wk_1-{last_job['attempt']}",
                 "result_checksum": f"checksum-{last_job['job_id']}",
-                "findings": [],
+                **audit_result_fields([]),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
             headers=self.auth,
@@ -707,7 +1875,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": "wk_1-1",
                 "result_checksum": "checksum-cancelled",
-                "findings": [{"severity": "high", "title": "Late result"}],
+                **audit_result_fields(
+                    [audit_issue_card("Late result", issue_id="issue-late-result", severity="P1")]
+                ),
             },
             headers=self.auth,
         )
@@ -744,7 +1914,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": "wk_1-99",
                 "result_checksum": "checksum-wrong-attempt",
-                "findings": [{"severity": "high", "title": "Wrong attempt"}],
+                **audit_result_fields(
+                    [audit_issue_card("Wrong attempt", issue_id="issue-wrong-attempt", severity="P1")]
+                ),
             },
             headers=self.auth,
         )
@@ -760,7 +1932,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": "wk_1-1",
                 "result_checksum": "checksum-current-attempt",
-                "findings": [{"severity": "high", "title": "Current attempt"}],
+                **audit_result_fields(
+                    [audit_issue_card("Current attempt", issue_id="issue-current-attempt", severity="P1")]
+                ),
             },
             headers=self.auth,
         )
@@ -821,7 +1995,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         stale_result = RouteHarness(
             f"/worker/jobs/{job['job_id']}/result",
-            {"status": "done", "attempt_id": "wk_1-1", "result_checksum": "stale", "findings": []},
+            {"status": "done", "attempt_id": "wk_1-1", "result_checksum": "stale", **audit_result_fields([])},
             headers=self.auth,
         )
         app.PullwiseHandler.route(stale_result, "POST")
@@ -831,7 +2005,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         current_result = RouteHarness(
             f"/worker/jobs/{job['job_id']}/result",
-            {"status": "done", "attempt_id": "wk_1-2", "result_checksum": "current", "findings": []},
+            {"status": "done", "attempt_id": "wk_1-2", "result_checksum": "current", **audit_result_fields([])},
             headers=self.auth,
         )
         app.PullwiseHandler.route(current_result, "POST")

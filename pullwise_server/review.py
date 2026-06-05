@@ -40,6 +40,18 @@ VALID_FINDING_CATEGORIES = {
     "docs": "Docs",
     "architecture": "Architecture",
 }
+VALID_VERIFICATION_STATUSES = {"verified", "static_proof", "potential_risk", "unverified"}
+VALID_EVIDENCE_TYPES = {
+    "code",
+    "path",
+    "trigger",
+    "runtime_log",
+    "test",
+    "environment",
+    "tool",
+    "documentation",
+    "fix_verification",
+}
 _REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
@@ -87,6 +99,36 @@ trailing prose. Schema:
       "impact": "1 sentence: consequence if not fixed",
       "detectionReasoning": "2-3 sentences: WHY this was flagged. What pattern, data flow, or evidence triggered detection. Reference the specific code path analyzed.",
       "reproductionPath": "1-2 sentences: how the user can verify this issue. Include trigger conditions, required environment, or example input that exposes the problem.",
+      "verificationStatus": "verified" | "static_proof" | "potential_risk" | "unverified",
+      "verificationSummary": "1 sentence: what evidence was verified, statically proven, or left unconfirmed.",
+      "affectedLocations": [
+        {"file": "repo-relative path", "startLine": <int>, "endLine": <int>}
+      ],
+      "evidence": [
+        {
+          "type": "code" | "path" | "trigger" | "runtime_log" | "test" | "environment" | "tool" | "documentation" | "fix_verification",
+          "label": "<short evidence label>",
+          "summary": "<what this evidence proves>",
+          "file": "repo-relative path or empty",
+          "startLine": <int>,
+          "endLine": <int>,
+          "command": "<single command used to produce this evidence or empty>",
+          "exitCode": <int>,
+          "logPath": "<repo/audit-relative log path or empty>",
+          "output": "<raw command/test output snippet or empty>",
+          "url": "<http(s) URL or empty>"
+        }
+      ],
+      "reproduction": {
+        "commands": ["<copy-pasteable command>", ...],
+        "input": "<trigger input, request, CLI args, fixture, or empty>",
+        "expected": "<expected behavior or empty>",
+        "actual": "<observed behavior or empty>",
+        "testFile": "<repo-relative generated/existing test file or empty>",
+        "logPath": "<repo/audit-relative raw log path or empty>"
+      },
+      "whyNotFalsePositive": ["<negative check that was considered>", ...],
+      "limitations": ["<condition that could reduce production impact>", ...],
       "file": "repo-relative path; '' if cross-cutting",
       "line": <integer, 1-indexed; 0 if multi-file>,
       "confidence": <float 0.0..1.0>,
@@ -115,6 +157,24 @@ inside the old block.
 and `fixRisks` are required string fields. Use an empty string only when the
 information is genuinely unavailable. These fields help users decide whether
 to trust and act on the finding.
+
+Treat LLM analysis as a hypothesis until evidence supports it. Use
+`verificationStatus` this way:
+
+- `verified`: you executed or can point to a command/test/log with observed
+  output that reproduces the failure, and `reproduction.actual`,
+  `reproduction.logPath`, `reproduction.testFile`, or runtime/test evidence is
+  populated.
+- `static_proof`: the issue is proven by code/config/data-flow evidence, but
+  no runtime reproduction was executed.
+- `potential_risk`: this is a risk or improvement suggestion, not a confirmed
+  bug.
+- `unverified`: you found a suspicious pattern but could not prove reachability
+  or impact.
+
+Do not mark a finding `verified` just because the reasoning is plausible. Every
+high-confidence finding needs file/line evidence, a trigger condition, and a
+clear explanation of what would disprove it.
 
 # Severity rubric
 
@@ -270,6 +330,12 @@ def _finalize_finding(
     finding = finding if isinstance(finding, dict) else {}
     finding_id = _safe_text(finding.get("id"))
     file_path = _safe_finding_file(finding.get("file"), repo_path)
+    affected_locations = _safe_affected_locations(finding.get("affectedLocations"), repo_path)
+    if file_path and not affected_locations:
+        line = _safe_non_negative_int(finding.get("line"))
+        affected_locations = [{"file": file_path, "startLine": line, "endLine": line}]
+    evidence = _safe_evidence(finding.get("evidence"), repo_path)
+    reproduction = _safe_reproduction(finding.get("reproduction"), repo_path)
     bad_code = _safe_code_lines(finding.get("badCode"))
     good_code = _safe_code_lines(finding.get("goodCode"))
     auto_fix = _safe_auto_fix(
@@ -295,6 +361,18 @@ def _finalize_finding(
         "impact": _safe_text_lenient(finding.get("impact")),
         "detectionReasoning": _safe_text_lenient(finding.get("detectionReasoning")),
         "reproductionPath": _safe_text_lenient(finding.get("reproductionPath")),
+        "verificationStatus": _safe_verification_status(
+            finding.get("verificationStatus"),
+            affected_locations=affected_locations,
+            evidence=evidence,
+            reproduction=reproduction,
+        ),
+        "verificationSummary": _safe_text_lenient(finding.get("verificationSummary")),
+        "affectedLocations": affected_locations,
+        "evidence": evidence,
+        "reproduction": reproduction,
+        "whyNotFalsePositive": _safe_text_list(finding.get("whyNotFalsePositive")),
+        "limitations": _safe_text_list(finding.get("limitations")),
         "file": file_path,
         "line": _safe_non_negative_int(finding.get("line")),
         "confidence": _safe_confidence(finding.get("confidence")),
@@ -448,6 +526,168 @@ def _safe_text_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [text for item in value if (text := _safe_text(item))]
+
+
+def _safe_http_url(value: object) -> str:
+    url = _safe_text(value)
+    return url if url.startswith(("https://", "http://")) else ""
+
+
+def _safe_optional_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        candidate = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return candidate
+
+
+def _safe_line_range(source: dict) -> tuple[int, int]:
+    start = _safe_non_negative_int(
+        source.get("startLine", source.get("start_line", source.get("line")))
+    )
+    end = _safe_non_negative_int(source.get("endLine", source.get("end_line", start)))
+    if start and end and end < start:
+        end = start
+    if start and not end:
+        end = start
+    return start, end
+
+
+def _safe_affected_locations(value: object, repo_path: str | None = None) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    locations = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        file_path = _safe_finding_file(item.get("file"), repo_path)
+        if not file_path:
+            continue
+        start_line, end_line = _safe_line_range(item)
+        key = (file_path, start_line, end_line)
+        if key in seen:
+            continue
+        seen.add(key)
+        locations.append({"file": file_path, "startLine": start_line, "endLine": end_line})
+    return locations[:10]
+
+
+def _safe_evidence(value: object, repo_path: str | None = None) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    evidence = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        evidence_type = _safe_text(item.get("type")).lower()
+        if evidence_type not in VALID_EVIDENCE_TYPES:
+            evidence_type = "code"
+        label = _safe_text(item.get("label")) or evidence_type.replace("_", " ").title()
+        summary = _safe_text_lenient(item.get("summary"))
+        file_path = _safe_finding_file(item.get("file"), repo_path)
+        start_line, end_line = _safe_line_range(item)
+        command = _safe_text(item.get("command"))
+        log_path = _safe_text(item.get("logPath", item.get("log_path")))
+        url = _safe_http_url(item.get("url"))
+        exit_code = _safe_optional_int(item.get("exitCode", item.get("exit_code")))
+        output = _safe_text_lenient(item.get("output"))[:4000]
+        if not any([summary, file_path, command, log_path, output, url, exit_code is not None]):
+            continue
+        record = {
+            "type": evidence_type,
+            "label": label,
+            "summary": summary,
+        }
+        if file_path:
+            record["file"] = file_path
+        if start_line:
+            record["startLine"] = start_line
+            record["endLine"] = end_line
+        if command:
+            record["command"] = command
+        if exit_code is not None:
+            record["exitCode"] = exit_code
+        if log_path:
+            record["logPath"] = log_path
+        if output:
+            record["output"] = output
+        if url:
+            record["url"] = url
+        evidence.append(record)
+    return evidence[:20]
+
+
+def _safe_reproduction(value: object, repo_path: str | None = None) -> dict:
+    source = value if isinstance(value, dict) else {}
+    test_file = _safe_finding_file(source.get("testFile", source.get("test_file")), repo_path)
+    return {
+        "commands": _safe_text_list(source.get("commands")),
+        "input": _safe_text_lenient(source.get("input")),
+        "expected": _safe_text_lenient(source.get("expected")),
+        "actual": _safe_text_lenient(source.get("actual")),
+        "testFile": test_file,
+        "logPath": _safe_text(source.get("logPath", source.get("log_path"))),
+    }
+
+
+def _safe_verification_status(
+    value: object,
+    *,
+    affected_locations: list[dict],
+    evidence: list[dict],
+    reproduction: dict,
+) -> str:
+    status = _safe_text(value).lower()
+    if status not in VALID_VERIFICATION_STATUSES:
+        status = ""
+    has_precise_location = any(location.get("file") and location.get("startLine") for location in affected_locations)
+    has_reproduction_command = bool(reproduction.get("commands"))
+    has_reproduction_output = has_reproduction_command and any(
+        [reproduction.get("actual"), reproduction.get("logPath"), reproduction.get("testFile")]
+    )
+    has_runtime_evidence = has_reproduction_output or any(
+        item.get("type") in {"runtime_log", "test", "fix_verification"}
+        and any(
+            [
+                item.get("command"),
+                item.get("logPath"),
+                item.get("file"),
+                item.get("output"),
+                item.get("exitCode") is not None,
+            ]
+        )
+        for item in evidence
+    )
+    has_raw_runtime_output = has_reproduction_output or any(
+        item.get("type") in {"runtime_log", "test", "fix_verification"}
+        and any([item.get("logPath"), item.get("output")])
+        for item in evidence
+    )
+    has_static_evidence = bool(affected_locations) or any(
+        item.get("type") in {"code", "path", "trigger", "documentation", "tool"}
+        and any([item.get("file"), item.get("summary"), item.get("command")])
+        for item in evidence
+    )
+    verified_ready = (
+        has_precise_location
+        and has_reproduction_command
+        and has_runtime_evidence
+        and has_raw_runtime_output
+    )
+    if status == "verified" and not verified_ready:
+        return "static_proof" if has_static_evidence else "potential_risk"
+    if status == "static_proof" and not has_static_evidence:
+        return "potential_risk"
+    if status:
+        return status
+    if verified_ready:
+        return "verified"
+    if has_static_evidence:
+        return "static_proof"
+    return "potential_risk"
 
 
 def _safe_code_text(value: object) -> str | None:
@@ -801,6 +1041,72 @@ def _findings_schema() -> dict:
         },
         "required": ["label", "url"],
     }
+    affected_location = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "file": {"type": "string"},
+            "startLine": {"type": "integer"},
+            "endLine": {"type": "integer"},
+        },
+        "required": ["file", "startLine", "endLine"],
+    }
+    evidence = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": [
+                    "code",
+                    "path",
+                    "trigger",
+                    "runtime_log",
+                    "test",
+                    "environment",
+                    "tool",
+                    "documentation",
+                    "fix_verification",
+                ],
+            },
+            "label": {"type": "string"},
+            "summary": {"type": "string"},
+            "file": {"type": "string"},
+            "startLine": {"type": "integer"},
+            "endLine": {"type": "integer"},
+            "command": {"type": "string"},
+            "exitCode": {"type": "integer"},
+            "logPath": {"type": "string"},
+            "output": {"type": "string"},
+            "url": {"type": "string"},
+        },
+        "required": [
+            "type",
+            "label",
+            "summary",
+            "file",
+            "startLine",
+            "endLine",
+            "command",
+            "exitCode",
+            "logPath",
+            "output",
+            "url",
+        ],
+    }
+    reproduction = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "commands": {"type": "array", "items": {"type": "string"}},
+            "input": {"type": "string"},
+            "expected": {"type": "string"},
+            "actual": {"type": "string"},
+            "testFile": {"type": "string"},
+            "logPath": {"type": "string"},
+        },
+        "required": ["commands", "input", "expected", "actual", "testFile", "logPath"],
+    }
     finding_properties = {
         "id": {"type": "string"},
         "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
@@ -810,6 +1116,16 @@ def _findings_schema() -> dict:
         "impact": {"type": "string"},
         "detectionReasoning": {"type": "string"},
         "reproductionPath": {"type": "string"},
+        "verificationStatus": {
+            "type": "string",
+            "enum": ["verified", "static_proof", "potential_risk", "unverified"],
+        },
+        "verificationSummary": {"type": "string"},
+        "affectedLocations": {"type": "array", "items": affected_location},
+        "evidence": {"type": "array", "items": evidence},
+        "reproduction": reproduction,
+        "whyNotFalsePositive": {"type": "array", "items": {"type": "string"}},
+        "limitations": {"type": "array", "items": {"type": "string"}},
         "file": {"type": "string"},
         "line": {"type": "integer"},
         "confidence": {"type": "number"},

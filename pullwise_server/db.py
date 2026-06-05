@@ -1179,6 +1179,57 @@ def update_worker_command_status(record: dict[str, Any]) -> dict[str, Any] | Non
             )
 
 
+def cleanup_operational_records(
+    *,
+    timestamp: int | None = None,
+    worker_command_retention_seconds: int = 30 * 24 * 60 * 60,
+    worker_audit_retention_seconds: int = 90 * 24 * 60 * 60,
+    scan_job_retention_seconds: int = 30 * 24 * 60 * 60,
+    removable_scan_ids: set[str] | None = None,
+) -> dict[str, int]:
+    initialize()
+    current_time = int(timestamp if timestamp is not None else time.time())
+    command_cutoff = current_time - max(0, int(worker_command_retention_seconds))
+    audit_cutoff = current_time - max(0, int(worker_audit_retention_seconds))
+    job_cutoff = current_time - max(0, int(scan_job_retention_seconds))
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            command_deleted = connection.execute(
+                """
+                DELETE FROM worker_commands
+                WHERE status IN ('succeeded', 'failed', 'cancelled')
+                  AND COALESCE(completed_at, updated_at, created_at) < ?
+                """,
+                (command_cutoff,),
+            ).rowcount
+            audit_deleted = connection.execute(
+                """
+                DELETE FROM worker_audit_events
+                WHERE created_at < ?
+                """,
+                (audit_cutoff,),
+            ).rowcount
+            job_deleted = 0
+            if removable_scan_ids:
+                scan_ids = sorted(str(scan_id).strip() for scan_id in removable_scan_ids if str(scan_id).strip())
+                if scan_ids:
+                    placeholders = ",".join("?" for _ in scan_ids)
+                    job_deleted = connection.execute(
+                        f"""
+                        DELETE FROM scan_jobs
+                        WHERE status IN ('done', 'failed', 'cancelled', 'lost')
+                          AND COALESCE(completed_at, updated_at, created_at) < ?
+                          AND scan_id IN ({placeholders})
+                        """,
+                        (job_cutoff, *scan_ids),
+                    ).rowcount
+    return {
+        "worker_commands": max(0, command_deleted),
+        "worker_audit_events": max(0, audit_deleted),
+        "scan_jobs": max(0, job_deleted),
+    }
+
+
 def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
     initialize()
     job_id = str(record.get("job_id") or stable_id("job", record.get("scan_id"))).strip()

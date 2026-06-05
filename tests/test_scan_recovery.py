@@ -8,6 +8,28 @@ from unittest.mock import patch
 from pullwise_server import app, db
 
 
+def audit_result_fields(title: str) -> dict:
+    return {
+        "audit_protocol": "audit-swarm/0.1",
+        "issue_cards": [
+            {
+                "issue_id": "issue-recovered",
+                "shard_id": "app",
+                "agent_role": "correctness-reviewer",
+                "title": title,
+                "category": "Quality",
+                "severity": "P1",
+                "confidence": 0.9,
+                "locations": [{"file": "src/app.py", "startLine": 12, "endLine": 12}],
+                "claim": title,
+                "evidence": ["Recovered completed worker result."],
+                "false_positive_checks": ["Recovered result was already committed by the worker."],
+            }
+        ],
+        "verification_results": [],
+    }
+
+
 class ScanRecoveryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -128,7 +150,7 @@ class ScanRecoveryTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": f"wk_1-{claimed['attempt']}",
                 "result_checksum": "checksum-done",
-                "findings": [{"severity": "high", "title": "Recovered finding"}],
+                **audit_result_fields("Recovered finding"),
                 "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
                 "duration_ms": 123,
             },

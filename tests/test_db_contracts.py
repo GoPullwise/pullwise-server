@@ -213,6 +213,152 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertNotIn("workspaces", foreign_key_tables)
         self.assertEqual(rows, [("ak_old", "Old key"), ("ak_new", "New key")])
 
+    def test_cleanup_operational_records_prunes_only_old_terminal_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            INSERT INTO worker_commands (
+                                id, worker_id, command, status, created_at, updated_at, completed_at
+                            )
+                            VALUES
+                                ('cmd_old_done', 'wk_1', 'stop', 'succeeded', 100, 100, 100),
+                                ('cmd_old_pending', 'wk_1', 'stop', 'pending', 100, 100, NULL),
+                                ('cmd_recent_done', 'wk_1', 'stop', 'succeeded', 990, 990, 990)
+                            """
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO worker_audit_events (
+                                id, actor_user_id, action, worker_id, changed_fields, created_at
+                            )
+                            VALUES
+                                ('audit_old', 'usr_admin', 'update_worker', 'wk_1', '{}', 100),
+                                ('audit_recent', 'usr_admin', 'update_worker', 'wk_1', '{}', 990)
+                            """
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO scan_jobs (
+                                job_id, scan_id, repo, branch, "commit", status,
+                                created_at, updated_at, completed_at
+                            )
+                            VALUES
+                                ('job_old_done', 'sc_old_done', 'acme/api', 'main', 'abc', 'done', 100, 100, 100),
+                                ('job_old_queued', 'sc_old_queued', 'acme/api', 'main', 'abc', 'queued', 100, 100, NULL),
+                                ('job_recent_done', 'sc_recent_done', 'acme/api', 'main', 'abc', 'done', 990, 990, 990)
+                            """
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO job_results (id, job_id, attempt_id, result_checksum, status, payload, created_at)
+                            VALUES ('jr_old', 'job_old_done', 'wk_1-1', 'checksum-old', 'done', '{}', 100)
+                            """
+                        )
+
+                first_removed = db.cleanup_operational_records(
+                    timestamp=1000,
+                    worker_command_retention_seconds=100,
+                    worker_audit_retention_seconds=100,
+                    scan_job_retention_seconds=100,
+                )
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    jobs_before_scan_scope = [
+                        row[0] for row in connection.execute("SELECT job_id FROM scan_jobs ORDER BY job_id")
+                    ]
+                    results_before_scan_scope = [
+                        row[0] for row in connection.execute("SELECT id FROM job_results ORDER BY id")
+                    ]
+
+                removed = db.cleanup_operational_records(
+                    timestamp=1000,
+                    worker_command_retention_seconds=100,
+                    worker_audit_retention_seconds=100,
+                    scan_job_retention_seconds=100,
+                    removable_scan_ids={"sc_old_done"},
+                )
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    commands = [row[0] for row in connection.execute("SELECT id FROM worker_commands ORDER BY id")]
+                    audits = [row[0] for row in connection.execute("SELECT id FROM worker_audit_events ORDER BY id")]
+                    jobs = [row[0] for row in connection.execute("SELECT job_id FROM scan_jobs ORDER BY job_id")]
+                    results = [row[0] for row in connection.execute("SELECT id FROM job_results ORDER BY id")]
+
+        self.assertEqual(first_removed, {"worker_commands": 1, "worker_audit_events": 1, "scan_jobs": 0})
+        self.assertEqual(jobs_before_scan_scope, ["job_old_done", "job_old_queued", "job_recent_done"])
+        self.assertEqual(results_before_scan_scope, ["jr_old"])
+        self.assertEqual(removed, {"worker_commands": 0, "worker_audit_events": 0, "scan_jobs": 1})
+        self.assertEqual(commands, ["cmd_old_pending", "cmd_recent_done"])
+        self.assertEqual(audits, ["audit_recent"])
+        self.assertEqual(jobs, ["job_old_queued", "job_recent_done"])
+        self.assertEqual(results, [])
+
+    def test_server_resource_cleanup_keeps_paid_scan_results(self) -> None:
+        previous = {
+            "USERS": app.USERS,
+            "SESSIONS": app.SESSIONS,
+            "GITHUB_STATES": app.GITHUB_STATES,
+            "SCANS": app.SCANS,
+            "ISSUES": app.ISSUES,
+            "STATE_LOADED": app.STATE_LOADED,
+            "STATE_DIRTY": app.STATE_DIRTY,
+        }
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+                with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                    db.initialize()
+                    app.USERS = {
+                        "usr_1": {
+                            "id": "usr_1",
+                            "githubRepositoryAccessPending": {"state": "expired", "expiresAt": 900},
+                        },
+                        "usr_2": {
+                            "id": "usr_2",
+                            "githubRepositoryAccessPending": {"state": "active", "expiresAt": 1100},
+                        },
+                    }
+                    app.SESSIONS = {
+                        "expired": {"id": "expired", "userId": "usr_1", "expiresAt": 900},
+                        "active": {"id": "active", "userId": "usr_2", "expiresAt": 1100},
+                        "malformed": {"id": "malformed", "userId": "usr_2", "expiresAt": {"bad": 1}},
+                    }
+                    app.GITHUB_STATES = {
+                        "expired_state": {"kind": "login", "expiresAt": 900},
+                        "active_state": {"kind": "login", "expiresAt": 1100},
+                        "malformed_state": {"kind": "login", "expiresAt": {"bad": 1}},
+                    }
+                    app.SCANS = [{"id": "sc_paid", "userId": "usr_1", "status": "done", "completedAt": 100}]
+                    app.ISSUES = [{"id": "iss_paid", "scanId": "sc_paid", "title": "Paid result"}]
+                    app.STATE_LOADED = True
+                    app.STATE_DIRTY = False
+
+                    removed = app.cleanup_server_resources(timestamp=1000)
+
+            self.assertEqual(removed["sessions"], 1)
+            self.assertEqual(removed["github_states"], 1)
+            self.assertEqual(removed["pending_github_authorizations"], 1)
+            self.assertEqual(list(app.SESSIONS), ["active", "malformed"])
+            self.assertEqual(list(app.GITHUB_STATES), ["active_state", "malformed_state"])
+            self.assertNotIn("githubRepositoryAccessPending", app.USERS["usr_1"])
+            self.assertIn("githubRepositoryAccessPending", app.USERS["usr_2"])
+            self.assertEqual(app.SCANS, [{"id": "sc_paid", "userId": "usr_1", "status": "done", "completedAt": 100}])
+            self.assertEqual(app.ISSUES, [{"id": "iss_paid", "scanId": "sc_paid", "title": "Paid result"}])
+            self.assertTrue(app.STATE_DIRTY)
+        finally:
+            app.USERS = previous["USERS"]
+            app.SESSIONS = previous["SESSIONS"]
+            app.GITHUB_STATES = previous["GITHUB_STATES"]
+            app.SCANS = previous["SCANS"]
+            app.ISSUES = previous["ISSUES"]
+            app.STATE_LOADED = previous["STATE_LOADED"]
+            app.STATE_DIRTY = previous["STATE_DIRTY"]
+
 
 if __name__ == "__main__":
     unittest.main()

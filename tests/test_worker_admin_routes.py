@@ -42,6 +42,14 @@ class RouteHarness(app.PullwiseHandler):
         self.json({"message": message}, status)
 
 
+def empty_audit_result_fields() -> dict:
+    return {
+        "audit_protocol": "audit-swarm/0.1",
+        "issue_cards": [],
+        "verification_results": [],
+    }
+
+
 def reset_state() -> None:
     app.USERS = {
         "usr_admin": {"id": "usr_admin", "email": "admin@example.com", "name": "Admin"},
@@ -203,7 +211,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             {
                 "status": "done",
                 "attempt_id": f"{worker_id}-1",
-                "findings": [],
+                **empty_audit_result_fields(),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
                 "duration_ms": 123,
                 "result_checksum": "checksum-worker-activity",
@@ -660,7 +668,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         result_body = {
             "status": "done",
-            "findings": [],
+            **empty_audit_result_fields(),
             "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             "duration_ms": 1000,
             "attempt_id": f"{worker_id}-1",
