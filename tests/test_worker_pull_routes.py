@@ -190,6 +190,47 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         return worker, worker["worker_token"]
 
+    def audit_bundle_cache_fixture(self, *, issue_title: str = "Cached issue") -> dict:
+        timestamp = app.now()
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": timestamp,
+                "expiresAt": timestamp + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_cache",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "done",
+            "userId": "usr_1",
+            "createdAt": timestamp,
+            "completedAt": timestamp,
+            "issues": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.ISSUES = [
+            {
+                "id": "f_cache",
+                "scanId": "sc_cache",
+                "userId": "usr_1",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc1234",
+                "severity": "medium",
+                "category": "Quality",
+                "title": issue_title,
+                "file": "src/app.py",
+                "line": 12,
+                "verificationStatus": "static_proof",
+            }
+        ]
+        return scan
+
     def test_worker_heartbeat_claim_progress_and_result_are_idempotent(self) -> None:
         scan = {
             "id": "sc_1",
@@ -910,6 +951,95 @@ class WorkerPullRoutesTest(unittest.TestCase):
         anonymous = RouteHarness("/scans/sc_bundle/audit-bundle")
         app.PullwiseHandler.route(anonymous, "GET")
         self.assertEqual(anonymous.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_scan_audit_bundle_zip_route_reuses_cached_archive(self) -> None:
+        self.audit_bundle_cache_fixture()
+
+        with patch("pullwise_server.app.scan_audit_bundle_zip_bytes", return_value=b"zip-v1") as build:
+            first = RouteHarness(
+                "/scans/sc_cache/audit-bundle.zip",
+                headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+            )
+            app.PullwiseHandler.route(first, "GET")
+
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertEqual(first.binary_payload, b"zip-v1")
+        build.assert_called_once()
+
+        with patch(
+            "pullwise_server.app.scan_audit_bundle_zip_bytes",
+            side_effect=AssertionError("cached archive was regenerated"),
+        ) as build_again:
+            second = RouteHarness(
+                "/scans/sc_cache/audit-bundle.zip",
+                headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+            )
+            app.PullwiseHandler.route(second, "GET")
+
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertEqual(second.binary_payload, b"zip-v1")
+        build_again.assert_not_called()
+
+    def test_scan_audit_bundle_zip_cache_invalidates_when_issue_content_changes(self) -> None:
+        scan = self.audit_bundle_cache_fixture(issue_title="Original cached issue")
+
+        with patch("pullwise_server.app.scan_audit_bundle_zip_bytes", return_value=b"zip-v1"):
+            self.assertEqual(app.get_or_create_scan_audit_bundle_zip_bytes(scan), b"zip-v1")
+
+        app.ISSUES[0]["title"] = "Updated cached issue"
+        with patch("pullwise_server.app.scan_audit_bundle_zip_bytes", return_value=b"zip-v2") as build:
+            self.assertEqual(app.get_or_create_scan_audit_bundle_zip_bytes(scan), b"zip-v2")
+
+        build.assert_called_once_with(scan)
+        cache_files = os.listdir(app.audit_bundle_cache_dir())
+        self.assertEqual(len([name for name in cache_files if name.endswith(".zip")]), 1)
+
+    def test_scan_audit_bundle_zip_cache_deduplicates_concurrent_generation(self) -> None:
+        scan = self.audit_bundle_cache_fixture()
+        entered = threading.Event()
+        second_entered = threading.Event()
+        release = threading.Event()
+        call_lock = threading.Lock()
+        calls = 0
+        results: list[bytes] = []
+        errors: list[BaseException] = []
+
+        def build_archive(target_scan: dict) -> bytes:
+            nonlocal calls
+            with call_lock:
+                calls += 1
+                current_call = calls
+            if current_call == 1:
+                entered.set()
+            else:
+                second_entered.set()
+            release.wait(timeout=5)
+            return b"zip-shared"
+
+        def download() -> None:
+            try:
+                results.append(app.get_or_create_scan_audit_bundle_zip_bytes(scan))
+            except BaseException as exc:  # pragma: no cover - surfaced by assertion below
+                errors.append(exc)
+
+        with patch("pullwise_server.app.scan_audit_bundle_zip_bytes", side_effect=build_archive):
+            first = threading.Thread(target=download)
+            first.start()
+            self.assertTrue(entered.wait(timeout=2))
+
+            others = [threading.Thread(target=download) for _ in range(4)]
+            for thread in others:
+                thread.start()
+
+            self.assertFalse(second_entered.wait(timeout=0.2))
+            release.set()
+            first.join(timeout=2)
+            for thread in others:
+                thread.join(timeout=2)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(calls, 1)
+        self.assertEqual(results, [b"zip-shared"] * 5)
 
     def test_issue_payload_downgrades_verified_command_without_runtime_output(self) -> None:
         app.SCANS = [

@@ -156,8 +156,16 @@ class PreviewScanLockEntry:
         self.refs = 0
 
 
+class AuditBundleCacheLockEntry:
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.refs = 0
+
+
 PREVIEW_SCAN_LOCKS: dict[str, PreviewScanLockEntry] = {}
 PREVIEW_SCAN_LOCKS_GUARD = threading.Lock()
+AUDIT_BUNDLE_CACHE_LOCKS: dict[str, AuditBundleCacheLockEntry] = {}
+AUDIT_BUNDLE_CACHE_LOCKS_GUARD = threading.Lock()
 MAX_BILLING_EVENT_RECORDS = 5000
 MAX_BILLING_PENDING_UPDATES = 1000
 
@@ -2551,6 +2559,131 @@ def scan_audit_bundle_zip_bytes(scan: dict) -> bytes:
                 continue
             archive.writestr(path, content.encode("utf-8"))
     return buffer.getvalue()
+
+
+def audit_bundle_cache_dir() -> str:
+    configured = env("PULLWISE_AUDIT_BUNDLE_CACHE_DIR", "").strip()
+    if configured:
+        return configured
+    database_parent = os.path.dirname(db.database_path())
+    if database_parent:
+        return os.path.join(database_parent, "audit-bundles")
+    return os.path.join(project_root(), ".pullwise", "audit-bundles")
+
+
+def audit_bundle_cache_source(scan: dict) -> dict:
+    scan_id = public_issue_text(scan.get("id"))
+    scan_user_id = public_issue_text(scan.get("userId"))
+    issues = []
+    for issue in ISSUES:
+        if public_issue_text(issue.get("scanId")) != scan_id:
+            continue
+        issue_user_id = public_issue_text(issue.get("userId"))
+        if scan_user_id and issue_user_id and issue_user_id != scan_user_id:
+            continue
+        issues.append(issue)
+    return {"scan": scan, "issues": issues}
+
+
+def audit_bundle_cache_key(scan: dict) -> str:
+    payload = db.to_jsonable(audit_bundle_cache_source(scan))
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def audit_bundle_cache_path(scan: dict, cache_key: str | None = None) -> str:
+    key = cache_key or audit_bundle_cache_key(scan)
+    scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
+    return os.path.join(audit_bundle_cache_dir(), f"{scan_id}-{key}.zip")
+
+
+@contextmanager
+def audit_bundle_cache_lock(cache_key: str) -> Iterator[None]:
+    with AUDIT_BUNDLE_CACHE_LOCKS_GUARD:
+        entry = AUDIT_BUNDLE_CACHE_LOCKS.get(cache_key)
+        if entry is None:
+            entry = AuditBundleCacheLockEntry()
+            AUDIT_BUNDLE_CACHE_LOCKS[cache_key] = entry
+        entry.refs += 1
+
+    entry.lock.acquire()
+    try:
+        yield
+    finally:
+        entry.lock.release()
+        with AUDIT_BUNDLE_CACHE_LOCKS_GUARD:
+            entry.refs -= 1
+            if entry.refs == 0 and AUDIT_BUNDLE_CACHE_LOCKS.get(cache_key) is entry:
+                AUDIT_BUNDLE_CACHE_LOCKS.pop(cache_key, None)
+
+
+def read_audit_bundle_cache(path: str) -> bytes | None:
+    try:
+        with open(path, "rb") as cache_file:
+            cached = cache_file.read()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        logger.exception("Failed to read audit bundle cache at %s.", path)
+        return None
+    return cached or None
+
+
+def write_audit_bundle_cache(path: str, payload: bytes) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temp_path = f"{path}.{threading.get_ident()}.tmp"
+    with open(temp_path, "wb") as cache_file:
+        cache_file.write(payload)
+    os.replace(temp_path, path)
+
+
+def cleanup_audit_bundle_cache_for_scan(scan: dict, keep_path: str) -> None:
+    cache_dir = audit_bundle_cache_dir()
+    scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
+    prefix = f"{scan_id}-"
+    try:
+        names = os.listdir(cache_dir)
+    except FileNotFoundError:
+        return
+    except OSError:
+        logger.exception("Failed to list audit bundle cache directory at %s.", cache_dir)
+        return
+    keep_path = os.path.abspath(keep_path)
+    for name in names:
+        if not name.startswith(prefix) or not name.endswith(".zip"):
+            continue
+        candidate = os.path.abspath(os.path.join(cache_dir, name))
+        if candidate == keep_path:
+            continue
+        try:
+            os.remove(candidate)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            logger.exception("Failed to remove stale audit bundle cache at %s.", candidate)
+
+
+def get_or_create_scan_audit_bundle_zip_bytes(scan: dict) -> bytes:
+    cache_key = audit_bundle_cache_key(scan)
+    cache_path = audit_bundle_cache_path(scan, cache_key)
+    cached = read_audit_bundle_cache(cache_path)
+    if cached is not None:
+        return cached
+
+    with audit_bundle_cache_lock(cache_key):
+        cached = read_audit_bundle_cache(cache_path)
+        if cached is not None:
+            return cached
+        payload = scan_audit_bundle_zip_bytes(scan)
+        write_audit_bundle_cache(cache_path, payload)
+        cleanup_audit_bundle_cache_for_scan(scan, cache_path)
+        return payload
 
 
 def audit_bundle_artifacts(bundle: dict) -> list[dict]:
@@ -7263,11 +7396,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
             scan = self.find_or_404(user_scans(session), segments[1], "Scan")
             filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
+            cache_key = audit_bundle_cache_key(scan)
             return self.binary(
-                scan_audit_bundle_zip_bytes(scan),
+                get_or_create_scan_audit_bundle_zip_bytes(scan),
                 content_type="application/zip",
                 headers={
-                    "Content-Disposition": f'attachment; filename="pullwise-audit-{filename_scan_id}.zip"'
+                    "Content-Disposition": f'attachment; filename="pullwise-audit-{filename_scan_id}.zip"',
+                    "ETag": f'"{cache_key}"',
+                    "Cache-Control": "private, max-age=3600",
                 },
             )
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "audit-bundle":
