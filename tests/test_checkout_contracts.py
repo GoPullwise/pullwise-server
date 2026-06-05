@@ -40,6 +40,17 @@ class CheckoutContractsTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "host"):
                 checkout.clone_url_for("owner/repo", "https://evil.example/owner/repo.git")
 
+    def test_clone_url_must_match_authorized_repository_path(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "repository"):
+                checkout.clone_url_for("owner/repo", "https://github.com/other/repo.git")
+            with self.assertRaisesRegex(RuntimeError, "repository"):
+                checkout.clone_url_for("owner/repo", "https://github.com/owner/other.git")
+            self.assertEqual(
+                checkout.scan_clone_url_for("owner/repo", "https://github.com/other/repo.git"),
+                "https://github.com/owner/repo.git",
+            )
+
     def test_prepare_checkout_uses_installation_token_without_putting_it_in_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             scan = {

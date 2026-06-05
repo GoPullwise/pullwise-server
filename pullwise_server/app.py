@@ -488,6 +488,8 @@ def recover_interrupted_scans() -> int:
             if job_id:
                 job = db.get_scan_job(job_id)
                 if job and public_issue_text(job.get("status")) in {"done", "failed", "cancelled"}:
+                    if reconcile_terminal_scan_job_locked(scan, job):
+                        recovered += 1
                     continue
             db.requeue_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=now())
             scan["status"] = "queued"
@@ -513,6 +515,33 @@ def reconcile_completed_scan_job_results_locked() -> int:
         if apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum):
             reconciled += 1
     return reconciled
+
+
+def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
+    status = public_issue_text(job.get("status")).lower()
+    if status not in {"done", "failed", "cancelled"}:
+        return False
+    before = json.dumps(db.to_jsonable(scan), sort_keys=True)
+    completed_at = pull_request_timestamp(job.get("completed_at")) or now()
+    update = {
+        "status": status,
+        "completedAt": completed_at,
+        "error": clean_scan_error(job.get("error")),
+        "resultChecksum": public_issue_text(job.get("result_checksum")),
+    }
+    if status == "done":
+        update["phase"] = "report"
+        update["progress"] = 100
+        update["error"] = ""
+    elif status == "failed":
+        update["phase"] = "report"
+    else:
+        update["phase"] = None
+    scan.update(update)
+    changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
+    if changed:
+        mark_state_dirty()
+    return changed
 
 
 def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
@@ -7607,7 +7636,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                     scan_error_repo_id = exc.repo_id
                                 else:
                                     entitlement = quota_result["user"]
+                                    if quota_result.get("deduplicated"):
+                                        scan = user_scan_by_request_id(session["userId"], request_id)
+                                        if scan is None or not scan_matches_requested_repository(
+                                            scan,
+                                            requested_repo_id=requested_repo_id,
+                                            requested_repository=requested_repository,
+                                        ):
+                                            scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
+                                            scan_error_code = "IDEMPOTENCY_KEY_REUSED"
                         if scan_error:
+                            pass
+                        elif scan is not None:
                             pass
                         else:
                             branch = (
@@ -7651,7 +7691,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             }
                             if request_id:
                                 scan["requestId"] = request_id
-                            create_scan_job_for_scan(scan)
+                            try:
+                                create_scan_job_for_scan(scan)
+                            except Exception:
+                                if not quota_result.get("deduplicated"):
+                                    quota.rollback_scan_quota(
+                                        scan_id=scan_id,
+                                        requested_by_user_id=session["userId"],
+                                        request_id=request_id or None,
+                                    )
+                                raise
                             SCANS.insert(0, scan)
                             scan_created = True
                             mark_state_dirty()
@@ -8932,8 +8981,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
         allow_disabled = segments == ["worker", "heartbeat"] or (
-            len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] in {"progress", "result"}
-        ) or (
             len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status"
         )
         worker_record = self.require_worker(allow_disabled=allow_disabled)
@@ -9248,65 +9295,80 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE,
             )
         request_id = scan_request_id_from_body(body)
-        existing = user_scan_by_request_id(context["user"]["id"], request_id)
-        if existing and existing.get("repoId") == repository["id"]:
-            return self.json(scan_payload(existing))
-        if existing:
-            return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
-        limit_error = scan_queue_limit_error(context["user"]["id"])
-        if limit_error:
-            return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
-        scan_id = make_id("sc")
-        try:
-            quota_result = quota.consume_scan_quota(
-                user=context["user"],
-                repository=repository,
-                requested_by_user_id=context["user"]["id"],
-                scan_id=scan_id,
-                request_id=request_id or None,
-            )
-        except quota.QuotaExceeded as exc:
-            payload = {"message": exc.message, "code": exc.code}
-            if exc.repo_id:
-                payload["repoId"] = exc.repo_id
-            return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
-
         github_access = context["user"].get("githubRepositoryAccess") or {}
         repository_item_meta = repo_context[1] if isinstance(repo_context[1], dict) else {}
-        branch = clean_github_access_text(body.get("branch")) or clean_github_access_text(repository.get("default_branch")) or "main"
-        scan = {
-            "id": scan_id,
-            "repo": repository["full_name"],
-            "branch": branch,
-            "commit": clean_github_access_text(body.get("commit")) or "pending",
-            "status": "queued",
-            "userId": context["user"]["id"],
-            "apiKeyId": context["apiKey"]["id"],
-            "createdAt": now(),
-            "queuedAt": now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "installationId": clean_github_access_text(repository_item_meta.get("installationId"), allow_int=True)
-            or clean_github_access_text(github_access.get("installationId"), allow_int=True),
-            "installationAccount": clean_github_access_text(repository_item_meta.get("installationAccount"))
-            or clean_github_access_text(github_access.get("installationAccount")),
-            "repositorySelection": clean_github_access_text(repository_item_meta.get("repositorySelection"))
-            or clean_github_access_text(github_access.get("repositorySelection")),
-            "repoId": repository["id"],
-            "githubRepoId": repository["github_repo_id"],
-            "quotaBucketIds": quota_result["bucketIds"],
-            "cloneUrl": trusted_github_web_url(repository_item_meta.get("cloneUrl")) or repository.get("clone_url"),
-            "repositoryPrivate": bool(repository.get("private")),
-            "repoPath": None,
-            "billingUsage": quota_result["user"],
-            "repoUsage": quota_result["repository"],
-            "by": "api key",
-        }
-        if request_id:
-            scan["requestId"] = request_id
         with STATE_LOCK:
-            create_scan_job_for_scan(scan)
+            existing = user_scan_by_request_id(context["user"]["id"], request_id)
+            if existing and existing.get("repoId") == repository["id"]:
+                return self.json(scan_payload(existing))
+            if existing:
+                return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
+            limit_error = scan_queue_limit_error(context["user"]["id"])
+            if limit_error:
+                return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
+            scan_id = make_id("sc")
+            try:
+                quota_result = quota.consume_scan_quota(
+                    user=context["user"],
+                    repository=repository,
+                    requested_by_user_id=context["user"]["id"],
+                    scan_id=scan_id,
+                    request_id=request_id or None,
+                )
+            except quota.QuotaExceeded as exc:
+                payload = {"message": exc.message, "code": exc.code}
+                if exc.repo_id:
+                    payload["repoId"] = exc.repo_id
+                return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
+            if quota_result.get("deduplicated"):
+                existing = user_scan_by_request_id(context["user"]["id"], request_id)
+                if existing and existing.get("repoId") == repository["id"]:
+                    return self.json(scan_payload(existing))
+                if existing:
+                    return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
+                return self.json({"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"}, HTTPStatus.CONFLICT)
+
+            branch = clean_github_access_text(body.get("branch")) or clean_github_access_text(repository.get("default_branch")) or "main"
+            scan = {
+                "id": scan_id,
+                "repo": repository["full_name"],
+                "branch": branch,
+                "commit": clean_github_access_text(body.get("commit")) or "pending",
+                "status": "queued",
+                "userId": context["user"]["id"],
+                "apiKeyId": context["apiKey"]["id"],
+                "createdAt": now(),
+                "queuedAt": now(),
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "installationId": clean_github_access_text(repository_item_meta.get("installationId"), allow_int=True)
+                or clean_github_access_text(github_access.get("installationId"), allow_int=True),
+                "installationAccount": clean_github_access_text(repository_item_meta.get("installationAccount"))
+                or clean_github_access_text(github_access.get("installationAccount")),
+                "repositorySelection": clean_github_access_text(repository_item_meta.get("repositorySelection"))
+                or clean_github_access_text(github_access.get("repositorySelection")),
+                "repoId": repository["id"],
+                "githubRepoId": repository["github_repo_id"],
+                "quotaBucketIds": quota_result["bucketIds"],
+                "cloneUrl": trusted_github_web_url(repository_item_meta.get("cloneUrl")) or repository.get("clone_url"),
+                "repositoryPrivate": bool(repository.get("private")),
+                "repoPath": None,
+                "billingUsage": quota_result["user"],
+                "repoUsage": quota_result["repository"],
+                "by": "api key",
+            }
+            if request_id:
+                scan["requestId"] = request_id
+            try:
+                create_scan_job_for_scan(scan)
+            except Exception:
+                quota.rollback_scan_quota(
+                    scan_id=scan_id,
+                    requested_by_user_id=context["user"]["id"],
+                    request_id=request_id or None,
+                )
+                raise
             SCANS.insert(0, scan)
             mark_state_dirty()
         scan_logging.log_event(

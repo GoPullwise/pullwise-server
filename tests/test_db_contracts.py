@@ -298,6 +298,73 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(jobs, ["job_old_queued", "job_recent_done"])
         self.assertEqual(results, [])
 
+    def test_record_scan_job_result_requires_current_claimed_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                db.create_scan_job(
+                    {
+                        "job_id": "job_lifecycle",
+                        "scan_id": "sc_lifecycle",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": 100,
+                        "user_id": "usr_1",
+                    }
+                )
+                db.create_scan_job(
+                    {
+                        "job_id": "job_claimed_lifecycle",
+                        "scan_id": "sc_claimed_lifecycle",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": 99,
+                        "user_id": "usr_1",
+                    }
+                )
+
+                queued_result = db.record_scan_job_result(
+                    "job_lifecycle",
+                    attempt_id="wk_1-1",
+                    status="done",
+                    result_checksum="checksum-queued",
+                    payload={"status": "done"},
+                )
+                queued_job = db.get_scan_job("job_lifecycle")
+
+                claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=120)[0]
+                stale_attempt_result = db.record_scan_job_result(
+                    "job_claimed_lifecycle",
+                    attempt_id="wk_1-2",
+                    status="done",
+                    result_checksum="checksum-stale",
+                    payload={"status": "done"},
+                )
+                wrong_worker_result = db.record_scan_job_result(
+                    "job_claimed_lifecycle",
+                    attempt_id="wk_2-1",
+                    status="done",
+                    result_checksum="checksum-wrong-worker",
+                    payload={"status": "done"},
+                )
+                current_job = db.get_scan_job("job_claimed_lifecycle")
+                with closing(sqlite3.connect(db_path)) as connection:
+                    result_count = connection.execute("SELECT COUNT(*) FROM job_results").fetchone()[0]
+
+        self.assertTrue(queued_result["conflict"])
+        self.assertEqual(queued_job["status"], "queued")
+        self.assertEqual(claimed["attempt"], 1)
+        self.assertEqual(claimed["job_id"], "job_claimed_lifecycle")
+        self.assertTrue(stale_attempt_result["conflict"])
+        self.assertTrue(wrong_worker_result["conflict"])
+        self.assertEqual(current_job["status"], "claimed")
+        self.assertEqual(result_count, 0)
+
     def test_server_resource_cleanup_keeps_paid_scan_results(self) -> None:
         previous = {
             "USERS": app.USERS,

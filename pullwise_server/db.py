@@ -1713,9 +1713,12 @@ def record_scan_job_result(
     initialize()
     job_id = str(job_id or "").strip()
     attempt_id = str(attempt_id or "").strip()
+    status = str(status or "").strip().lower()
     result_checksum = str(result_checksum or "").strip()
     if not job_id or not attempt_id or not result_checksum:
         raise ValueError("job_id, attempt_id, and result_checksum are required")
+    if status not in {"done", "failed"}:
+        raise ValueError("status must be done or failed")
     current_time = int(time.time())
     payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
     with _LOCK, closing(connect()) as connection:
@@ -1723,17 +1726,12 @@ def record_scan_job_result(
         connection.execute("BEGIN IMMEDIATE")
         try:
             job = connection.execute(
-                "SELECT status, last_attempt_id FROM scan_jobs WHERE job_id = ?",
+                "SELECT status, last_attempt_id, claimed_by_worker_id, attempt FROM scan_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
-            if job and job["status"] == "cancelled":
+            if not job:
                 connection.commit()
                 return {"accepted": False, "duplicate": False, "conflict": True}
-            if job and job["status"] in {"done", "failed", "cancelled"}:
-                last_attempt_id = str(job["last_attempt_id"] or "")
-                if last_attempt_id and last_attempt_id != attempt_id:
-                    connection.commit()
-                    return {"accepted": False, "duplicate": False, "conflict": True}
             existing = connection.execute(
                 "SELECT * FROM job_results WHERE job_id = ? AND attempt_id = ?",
                 (job_id, attempt_id),
@@ -1744,6 +1742,18 @@ def record_scan_job_result(
                     return {"accepted": True, "duplicate": True, "conflict": False}
                 connection.commit()
                 return {"accepted": False, "duplicate": True, "conflict": True}
+            if job["status"] not in {"claimed", "running", "uploading_result"}:
+                connection.commit()
+                return {"accepted": False, "duplicate": False, "conflict": True}
+            claimed_worker_id = str(job["claimed_by_worker_id"] or "")
+            try:
+                attempt = int(job["attempt"] or 0)
+            except (TypeError, ValueError):
+                attempt = 0
+            expected_attempt_id = f"{claimed_worker_id}-{attempt}" if claimed_worker_id and attempt else ""
+            if not expected_attempt_id or attempt_id != expected_attempt_id:
+                connection.commit()
+                return {"accepted": False, "duplicate": False, "conflict": True}
             connection.execute(
                 """
                 INSERT INTO job_results (id, job_id, attempt_id, result_checksum, status, payload)

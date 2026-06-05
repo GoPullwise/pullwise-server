@@ -494,6 +494,7 @@ def scan_clone_url_for(repo: str, configured_url: object | None = None) -> str:
 
 
 def clone_url_for(repo: str, configured_url: object | None = None) -> str:
+    repo = validate_repo_full_name(repo)
     if configured_url is None:
         clone_url = f"{github_auth.github_web_url()}/{repo}.git"
     elif not isinstance(configured_url, str):
@@ -510,6 +511,11 @@ def clone_url_for(repo: str, configured_url: object | None = None) -> str:
         raise RuntimeError("Repository clone URL must be an HTTP(S) URL.")
     if allowed.netloc and parsed.netloc.lower() != allowed.netloc.lower():
         raise RuntimeError("Repository clone URL host does not match configured GitHub host.")
+    clone_path = parsed.path.rstrip("/")
+    if clone_path.lower().endswith(".git"):
+        clone_path = clone_path[:-4]
+    if clone_path.lower() != f"/{repo.lower()}":
+        raise RuntimeError("Repository clone URL path does not match requested repository.")
     return clone_url
 
 

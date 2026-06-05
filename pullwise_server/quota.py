@@ -330,3 +330,67 @@ def consume_scan_quota(
             if connection.in_transaction:
                 connection.rollback()
             raise
+
+
+def rollback_scan_quota(
+    *,
+    scan_id: str,
+    requested_by_user_id: str,
+    request_id: str | None = None,
+) -> dict[str, int]:
+    db.initialize()
+    scan_id = str(scan_id or "").strip()
+    requested_by_user_id = str(requested_by_user_id or "").strip()
+    request_id = str(request_id or "").strip() if request_id else None
+    if not scan_id or not requested_by_user_id:
+        return {"ledgerRows": 0, "bucketRows": 0}
+    request_clause = "AND request_id = ?" if request_id else "AND request_id IS NULL"
+    params: list[object] = [scan_id, requested_by_user_id]
+    if request_id:
+        params.append(request_id)
+    with closing(db.connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            rows = connection.execute(
+                f"""
+                SELECT id, bucket_id, delta
+                FROM quota_ledger
+                WHERE scan_id = ?
+                  AND requested_by_user_id = ?
+                  {request_clause}
+                  AND reason = 'scan_created'
+                  AND delta > 0
+                """,
+                params,
+            ).fetchall()
+            if not rows:
+                connection.commit()
+                return {"ledgerRows": 0, "bucketRows": 0}
+            bucket_deltas: dict[str, int] = {}
+            ledger_ids: list[str] = []
+            for row in rows:
+                bucket_id = str(row["bucket_id"] or "")
+                delta = non_negative_int(row["delta"])
+                if bucket_id and delta:
+                    bucket_deltas[bucket_id] = bucket_deltas.get(bucket_id, 0) + delta
+                ledger_ids.append(str(row["id"]))
+            bucket_rows = 0
+            for bucket_id, delta in bucket_deltas.items():
+                bucket_rows += connection.execute(
+                    """
+                    UPDATE quota_buckets
+                    SET used = CASE WHEN used >= ? THEN used - ? ELSE 0 END,
+                        updated_at = strftime('%s', 'now')
+                    WHERE id = ?
+                    """,
+                    (delta, delta, bucket_id),
+                ).rowcount
+            placeholders = ",".join("?" for _ in ledger_ids)
+            connection.execute(f"DELETE FROM quota_ledger WHERE id IN ({placeholders})", ledger_ids)
+            connection.commit()
+            return {"ledgerRows": len(ledger_ids), "bucketRows": bucket_rows}
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise

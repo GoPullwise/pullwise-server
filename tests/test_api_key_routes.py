@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -351,6 +352,54 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(second.payload["repoId"], first.payload["repoId"])
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "req_shared"]), 1)
         start_scan.assert_not_called()
+
+    def test_api_key_concurrent_same_request_id_creates_only_one_scan(self) -> None:
+        _cookie, key = self.create_api_key()
+        auth = {"Authorization": f"Bearer {key}"}
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        app.PullwiseHandler.route(repositories, "GET")
+        repo_id = repositories.payload["items"][0]["repoId"]
+        path = f"/api/v1/repositories/{repo_id}/scans"
+        first = RouteHarness(path, {"requestId": "req_race"}, headers=auth)
+        second = RouteHarness(path, {"requestId": "req_race"}, headers=auth)
+        real_consume = app.quota.consume_scan_quota
+        first_consumed = threading.Event()
+        second_consumed = threading.Event()
+        release_first = threading.Event()
+        call_lock = threading.Lock()
+        consume_calls = 0
+
+        def pausing_consume(*args, **kwargs):
+            nonlocal consume_calls
+            result = real_consume(*args, **kwargs)
+            if kwargs.get("request_id") == "req_race":
+                with call_lock:
+                    consume_calls += 1
+                    call_number = consume_calls
+                if call_number == 1:
+                    first_consumed.set()
+                    self.assertTrue(release_first.wait(2), "timed out waiting to release first scan request")
+                elif call_number == 2:
+                    second_consumed.set()
+            return result
+
+        with patch.object(app.quota, "consume_scan_quota", side_effect=pausing_consume):
+            first_thread = threading.Thread(target=app.PullwiseHandler.route, args=(first, "POST"))
+            second_thread = threading.Thread(target=app.PullwiseHandler.route, args=(second, "POST"))
+            first_thread.start()
+            self.assertTrue(first_consumed.wait(2), "first scan request did not reach quota consumption")
+            second_thread.start()
+            second_consumed.wait(0.25)
+            release_first.set()
+            first_thread.join(2)
+            second_thread.join(2)
+
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertEqual(second.payload["id"], first.payload["id"])
+        self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "req_race"]), 1)
 
     def test_pricing_api_docs_and_dashboard_overview_contracts_are_available(self) -> None:
         cookie = seed_session()

@@ -615,7 +615,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         stored = db.get_worker(worker_id)
         self.assertEqual(stored["last_error"], "disk pressure; max_concurrent_jobs clamped to 32")
 
-    def test_disabling_worker_blocks_new_claims_but_allows_current_job_result(self) -> None:
+    def test_disabling_worker_blocks_job_progress_and_result_mutations(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
         scan = {
@@ -664,7 +664,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(progress, "POST")
-        self.assertEqual(progress.status, HTTPStatus.OK)
+        self.assertEqual(progress.status, HTTPStatus.UNAUTHORIZED)
 
         result_body = {
             "status": "done",
@@ -680,8 +680,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(result, "POST")
-        self.assertEqual(result.status, HTTPStatus.OK)
-        self.assertEqual(app.SCANS[0]["status"], "done")
+        self.assertEqual(result.status, HTTPStatus.UNAUTHORIZED)
+        self.assertEqual(app.SCANS[0]["status"], "running")
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
 
     def test_worker_test_records_audit(self) -> None:
         payload, _token = self.create_worker()

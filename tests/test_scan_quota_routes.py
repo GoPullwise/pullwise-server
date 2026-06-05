@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from http import HTTPStatus
 from unittest.mock import patch
 
@@ -286,6 +288,28 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(job["scan_id"], first.payload["id"])
         self.assertEqual(job["status"], "queued")
         start_scan.assert_not_called()
+
+    def test_scan_start_rolls_back_quota_when_job_creation_fails(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        first = RouteHarness({"repoId": "123", "requestId": "req_job_failure"}, cookie=cookie)
+
+        with patch.object(app, "create_scan_job_for_scan", side_effect=RuntimeError("boom")):
+            app.PullwiseHandler.route(first, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.INTERNAL_SERVER_ERROR)
+        self.assertEqual(app.SCANS, [])
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            ledger_count = connection.execute("SELECT COUNT(*) FROM quota_ledger").fetchone()[0]
+            used_total = connection.execute("SELECT COALESCE(SUM(used), 0) FROM quota_buckets").fetchone()[0]
+        self.assertEqual(ledger_count, 0)
+        self.assertEqual(used_total, 0)
+
+        retry = RouteHarness({"repoId": "123", "requestId": "req_job_failure"}, cookie=cookie)
+        app.PullwiseHandler.route(retry, "POST")
+
+        self.assertEqual(retry.status, HTTPStatus.CREATED)
+        self.assertEqual(len(app.SCANS), 1)
+        self.assertEqual(retry.payload["billingUsage"]["used"], 1)
 
     def test_repo_without_stable_id_requires_repository_sync(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")

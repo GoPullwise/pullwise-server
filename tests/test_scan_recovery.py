@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 import os
+import sqlite3
 import tempfile
+from contextlib import closing
 from unittest.mock import patch
 
 from pullwise_server import app, db
@@ -165,6 +167,88 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["issues"]["high"], 1)
         self.assertEqual(len(app.ISSUES), 1)
         self.assertEqual(app.ISSUES[0]["title"], "Recovered finding")
+        self.persist_state.assert_called_once()
+
+    def test_recover_interrupted_scans_reconciles_terminal_jobs_without_results(self) -> None:
+        timestamp = app.now()
+        app.SCANS = [
+            {
+                "id": "sc_failed_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "running",
+                "progress": 80,
+                "phase": "ai",
+                "jobId": "job_failed_in_db",
+                "createdAt": timestamp - 30,
+                "queuedAt": timestamp - 30,
+            },
+            {
+                "id": "sc_cancelled_in_db",
+                "repo": "acme/site",
+                "branch": "main",
+                "commit": "pending",
+                "status": "running",
+                "progress": 20,
+                "phase": "clone",
+                "jobId": "job_cancelled_in_db",
+                "createdAt": timestamp - 20,
+                "queuedAt": timestamp - 20,
+            },
+        ]
+        db.create_scan_job(
+            {
+                "job_id": "job_failed_in_db",
+                "scan_id": "sc_failed_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 30,
+                "user_id": "usr_1",
+            }
+        )
+        db.create_scan_job(
+            {
+                "job_id": "job_cancelled_in_db",
+                "scan_id": "sc_cancelled_in_db",
+                "repo": "acme/site",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 20,
+                "user_id": "usr_1",
+            }
+        )
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET status = 'failed', completed_at = ?, error = 'worker_crashed', updated_at = ?
+                    WHERE job_id = 'job_failed_in_db'
+                    """,
+                    (timestamp + 1, timestamp + 1),
+                )
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET status = 'cancelled', completed_at = ?, error = 'cancelled_by_user', updated_at = ?
+                    WHERE job_id = 'job_cancelled_in_db'
+                    """,
+                    (timestamp + 2, timestamp + 2),
+                )
+
+        recovered = app.recover_interrupted_scans()
+
+        self.assertEqual(recovered, 2)
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["completedAt"], timestamp + 1)
+        self.assertEqual(app.SCANS[0]["error"], "worker_crashed")
+        self.assertEqual(app.SCANS[1]["status"], "cancelled")
+        self.assertEqual(app.SCANS[1]["completedAt"], timestamp + 2)
+        self.assertEqual(app.SCANS[1]["error"], "cancelled_by_user")
         self.persist_state.assert_called_once()
 
     def test_recover_interrupted_scans_leaves_terminal_scans_unchanged(self) -> None:
