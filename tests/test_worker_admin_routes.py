@@ -64,6 +64,7 @@ def reset_state() -> None:
     app.SETTINGS = {}
     app.BILLING_EVENTS = {}
     app.BILLING_PENDING_UPDATES = []
+    app.LATEST_WORKER_RELEASE_CACHE.update({"version": "", "checked_at": 0.0})
     app.STATE_LOADED = True
     app.STATE_DIRTY = False
 
@@ -251,6 +252,26 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], expected)
         self.assertIn(f"--package '{expected}'", handler.payload["install_command"])
+
+    def test_admin_worker_defaults_resolve_latest_release_version(self) -> None:
+        class ReleaseResponse:
+            def __enter__(self) -> "ReleaseResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps({"tag_name": "v0.2.3"}).encode("utf-8")
+
+        with patch("urllib.request.urlopen", return_value=ReleaseResponse()):
+            handler = RouteHarness("/admin/workers/defaults", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        expected_package = app.worker_release_package("0.2.3")
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["workerVersion"], "0.2.3")
+        self.assertEqual(handler.payload["workerPackage"], expected_package)
 
     def test_public_install_script_contains_deploy_assets_but_no_worker_secrets(self) -> None:
         install = RouteHarness("/install-worker.sh")

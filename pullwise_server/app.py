@@ -12,6 +12,8 @@ import re
 import secrets
 import threading
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -143,7 +145,9 @@ DEFAULT_WORKER_PACKAGE = (
     "https://github.com/GoPullwise/pullwise-worker/releases/download/"
     f"v{DEFAULT_WORKER_PACKAGE_VERSION}/pullwise_worker-{DEFAULT_WORKER_PACKAGE_VERSION}-py3-none-any.whl"
 )
+DEFAULT_WORKER_RELEASES_API_URL = "https://api.github.com/repos/GoPullwise/pullwise-worker/releases/latest"
 WORKER_PACKAGE_RELEASE_RE = re.compile(r"^\d+\.\d+\.\d+$")
+LATEST_WORKER_RELEASE_CACHE: dict[str, object] = {"version": "", "checked_at": 0.0}
 
 # Re-entrant so worker mutations can call persist_state() while already holding
 # the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
@@ -4301,6 +4305,71 @@ def worker_release_package(version: str) -> str:
         "https://github.com/GoPullwise/pullwise-worker/releases/download/"
         f"v{version}/pullwise_worker-{version}-py3-none-any.whl"
     )
+
+
+def normalize_worker_release_version(value: object) -> str:
+    version = public_issue_text(value)
+    if version.startswith("v"):
+        version = version[1:]
+    return version if WORKER_PACKAGE_RELEASE_RE.fullmatch(version) else ""
+
+
+def configured_worker_release_version() -> str:
+    return normalize_worker_release_version(env("PULLWISE_DEFAULT_WORKER_VERSION", "")) or DEFAULT_WORKER_PACKAGE_VERSION
+
+
+def fetch_latest_worker_release_version() -> str:
+    api_url = env("PULLWISE_WORKER_RELEASES_API_URL", DEFAULT_WORKER_RELEASES_API_URL).strip()
+    if not api_url:
+        return ""
+    request = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Pullwise",
+        },
+    )
+    timeout = max(1, env_int("PULLWISE_WORKER_RELEASE_FETCH_TIMEOUT_SECONDS", 3))
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        return ""
+    return normalize_worker_release_version(payload.get("tag_name") or payload.get("name"))
+
+
+def latest_worker_release_version() -> str:
+    configured = normalize_worker_release_version(env("PULLWISE_DEFAULT_WORKER_VERSION", ""))
+    if configured:
+        return configured
+
+    ttl = max(0, env_int("PULLWISE_WORKER_RELEASE_CACHE_SECONDS", 300))
+    current_time = now()
+    cached_version = public_issue_text(LATEST_WORKER_RELEASE_CACHE.get("version"))
+    checked_at = float(LATEST_WORKER_RELEASE_CACHE.get("checked_at") or 0)
+    if cached_version and ttl and checked_at > current_time - ttl:
+        return cached_version
+
+    try:
+        latest = fetch_latest_worker_release_version()
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+        latest = ""
+    if latest:
+        LATEST_WORKER_RELEASE_CACHE.update({"version": latest, "checked_at": current_time})
+        return latest
+    return configured_worker_release_version()
+
+
+def worker_defaults_payload() -> dict:
+    version = latest_worker_release_version()
+    package = worker_release_package(version)
+    return {
+        "workerVersion": version,
+        "workerPackage": package,
+        "defaults": {
+            "version": version,
+            "package": package,
+        },
+    }
 
 
 def default_worker_package(version: object = None) -> str:
@@ -8982,6 +9051,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if segments == ["admin", "status"]:
             return self.json(scan_system_status_payload(admin=True))
+        if segments == ["admin", "workers", "defaults"]:
+            return self.json(worker_defaults_payload())
         if segments == ["admin", "workers"]:
             workers = [worker_public_payload(worker, admin=True) for worker in db.list_workers()]
             return self.json({"items": workers, "workers": workers})
