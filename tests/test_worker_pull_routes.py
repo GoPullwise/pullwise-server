@@ -389,12 +389,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         final_scan_payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(
             final_scan_payload["aiUsage"],
-            {
-                "model": "gpt-5.5",
-                "inputTokens": 123,
-                "outputTokens": 45,
-                "totalTokens": 168,
-            },
+            {"model": "gpt-5.5"},
         )
         self.assertEqual(final_scan_payload["auditSwarm"]["stage"], "report")
         self.assertEqual(final_scan_payload["auditSwarm"]["counts"]["issueCards"], 1)

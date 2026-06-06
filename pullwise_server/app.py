@@ -1815,35 +1815,10 @@ def public_scan_issue_counts(value: object) -> dict:
     }
 
 
-def public_scan_optional_count(value: object) -> int | None:
-    if value in (None, "") or isinstance(value, bool):
-        return None
-    try:
-        count = int(value)
-    except (OverflowError, TypeError, ValueError):
-        return None
-    return count if count >= 0 else None
-
-
 def public_scan_ai_usage(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     model = clean_github_access_text(source.get("model") or source.get("modelName") or source.get("model_name"))
-    input_tokens = public_scan_optional_count(first_present(source, "inputTokens", "input_tokens"))
-    output_tokens = public_scan_optional_count(first_present(source, "outputTokens", "output_tokens"))
-    total_tokens = public_scan_optional_count(first_present(source, "totalTokens", "total_tokens"))
-    if total_tokens is None and input_tokens is not None and output_tokens is not None:
-        total_tokens = input_tokens + output_tokens
-    payload = {}
-    if model:
-        payload["model"] = model
-    for key, value in (
-        ("inputTokens", input_tokens),
-        ("outputTokens", output_tokens),
-        ("totalTokens", total_tokens),
-    ):
-        if value is not None:
-            payload[key] = value
-    return payload
+    return {"model": model} if model else {}
 
 
 def first_present(source: dict, *keys: str) -> object:
