@@ -365,6 +365,55 @@ class SecurityContractsTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_issue_status_update_uses_identity_fields_when_issue_ids_collide(self) -> None:
+        app.ISSUES = [
+            {
+                "id": "dup_issue",
+                "userId": "usr_1",
+                "scanId": "sc_1",
+                "jobId": "job_1",
+                "repo": "owner/repo",
+                "file": "src/app.py",
+                "line": 10,
+                "title": "Duplicate issue",
+                "createdAt": 100,
+                "status": "open",
+            },
+            {
+                "id": "dup_issue",
+                "userId": "usr_1",
+                "scanId": "sc_1",
+                "jobId": "job_1",
+                "repo": "owner/repo",
+                "file": "src/app.py",
+                "line": 20,
+                "title": "Duplicate issue",
+                "createdAt": 101,
+                "status": "open",
+            },
+        ]
+        handler = RouteHarness(
+            "/issues/dup_issue/status",
+            {
+                "status": "fixed",
+                "scanId": "sc_1",
+                "jobId": "job_1",
+                "repo": "owner/repo",
+                "file": "src/app.py",
+                "line": 20,
+                "title": "Duplicate issue",
+                "createdAt": 101,
+            },
+            cookie=self.signed_in(),
+        )
+
+        app.PullwiseHandler.route(handler, "PATCH")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(app.ISSUES[0]["status"], "open")
+        self.assertEqual(app.ISSUES[1]["status"], "fixed")
+        self.assertEqual(handler.payload["line"], 20)
+
     def test_resource_routes_decode_percent_encoded_path_ids(self) -> None:
         app.ISSUES[0]["id"] = "iss/with spaces#1"
         app.SCANS[0]["id"] = "sc/with spaces#1"

@@ -231,6 +231,38 @@ class WorkerPullRoutesTest(unittest.TestCase):
         ]
         return scan
 
+    def test_worker_result_findings_make_duplicate_issue_ids_unique(self) -> None:
+        job = {
+            "scan_id": "sc_1",
+            "job_id": "job_1",
+            "user_id": "usr_1",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc123",
+        }
+        app.ISSUES = [
+            {
+                "id": "issue-duplicate",
+                "scanId": "sc_old",
+                "jobId": "job_old",
+                "userId": "usr_1",
+                "status": "open",
+            }
+        ]
+
+        findings = app.worker_audit_swarm_findings(
+            job,
+            audit_result_fields(
+                [
+                    audit_issue_card("First duplicate", issue_id="issue-duplicate", file="src/first.py"),
+                    audit_issue_card("Second duplicate", issue_id="issue-duplicate", file="src/second.py"),
+                ]
+            ),
+            reserved_ids=app.worker_issue_reserved_ids(job),
+        )
+
+        self.assertEqual([finding["id"] for finding in findings], ["issue-duplicate-2", "issue-duplicate-3"])
+
     def test_worker_heartbeat_claim_progress_and_result_are_idempotent(self) -> None:
         scan = {
             "id": "sc_1",

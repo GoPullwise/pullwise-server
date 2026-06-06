@@ -3574,7 +3574,11 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     job_for_findings = dict(job)
     if resolved_commit:
         job_for_findings["commit"] = resolved_commit
-    normalized_findings = worker_audit_swarm_findings(job_for_findings, body)
+    normalized_findings = worker_audit_swarm_findings(
+        job_for_findings,
+        body,
+        reserved_ids=worker_issue_reserved_ids(job_for_findings),
+    )
     summary = public_scan_issue_counts(body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings))
     verification_audit = public_scan_verification_audit_input(
         body.get("verification_audit") or body.get("verificationAudit")
@@ -3674,11 +3678,42 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     return {"accepted": True, "duplicate": duplicate, "conflict": False, "issueCount": len(issue_cards)}
 
 
-def worker_audit_swarm_findings(job: dict, body: dict) -> list[dict]:
+def worker_issue_reserved_ids(job: dict) -> set[str]:
+    user_id = public_issue_text(job.get("user_id"))
+    scan_id = public_issue_text(job.get("scan_id"))
+    job_id = public_issue_text(job.get("job_id"))
+    reserved = set()
+    for issue in ISSUES:
+        if user_id and public_issue_text(issue.get("userId")) != user_id:
+            continue
+        if public_issue_text(issue.get("scanId")) == scan_id and public_issue_text(issue.get("jobId")) == job_id:
+            continue
+        issue_id = public_issue_text(issue.get("id"))
+        if issue_id:
+            reserved.add(issue_id)
+    return reserved
+
+
+def unique_issue_id(base_id: object, used_ids: set[str]) -> str:
+    issue_id = public_issue_text(base_id) or make_id("iss")
+    if issue_id not in used_ids:
+        used_ids.add(issue_id)
+        return issue_id
+    suffix = 2
+    while True:
+        candidate = f"{issue_id}-{suffix}"
+        if candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+        suffix += 1
+
+
+def worker_audit_swarm_findings(job: dict, body: dict, *, reserved_ids: set[str] | None = None) -> list[dict]:
     cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
     results = body.get("verification_results") if isinstance(body.get("verification_results"), list) else []
     results_by_issue = worker_audit_swarm_results_by_issue(results)
     projected = []
+    used_issue_ids = set(reserved_ids or set())
     for index, card in enumerate(cards):
         if not isinstance(card, dict):
             continue
@@ -3688,7 +3723,9 @@ def worker_audit_swarm_findings(job: dict, body: dict) -> list[dict]:
             index,
             job=job,
         )
-        projected.append(worker_finding_payload(job, finding, index))
+        issue = worker_finding_payload(job, finding, index)
+        issue["id"] = unique_issue_id(issue.get("id"), used_issue_ids)
+        projected.append(issue)
     return projected
 
 
@@ -5483,6 +5520,46 @@ def user_issues(session: dict | None) -> list[dict]:
     if not session:
         return []
     return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
+
+
+ISSUE_STATUS_IDENTITY_FIELDS = ("scanId", "jobId", "repo", "file", "line", "title", "createdAt")
+
+
+def issue_status_identity_value(field: str, value: object) -> str:
+    if field == "line":
+        return str(review._safe_non_negative_int(value))
+    if field == "createdAt":
+        timestamp = pull_request_timestamp(value)
+        return str(timestamp) if timestamp is not None else public_issue_text(value)
+    return public_issue_text(value)
+
+
+def issue_status_identity_matches(issue: dict, body: dict) -> bool:
+    matched = False
+    for field in ISSUE_STATUS_IDENTITY_FIELDS:
+        if field not in body:
+            continue
+        matched = True
+        if field == "repo":
+            expected = clean_repository_full_name(body.get(field))
+            actual = clean_repository_full_name(issue.get(field))
+        else:
+            expected = issue_status_identity_value(field, body.get(field))
+            actual = issue_status_identity_value(field, issue.get(field))
+        if actual != expected:
+            return False
+    return matched
+
+
+def find_issue_for_status_update(issues: list[dict], issue_id: str, body: dict) -> dict:
+    matches = [issue for issue in issues if issue.get("id") == issue_id]
+    if not matches:
+        raise ResourceNotFound("Issue")
+    if len(matches) > 1 and isinstance(body, dict):
+        identity_matches = [issue for issue in matches if issue_status_identity_matches(issue, body)]
+        if len(identity_matches) == 1:
+            return identity_matches[0]
+    return matches[0]
 
 
 def pagination_params(params: dict, *, default_limit: int = 50, max_limit: int = 200) -> tuple[int, int]:
@@ -7943,7 +8020,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating issue status.")
-            issue = self.find_or_404(user_issues(session), segments[1], "Issue")
+            issue = find_issue_for_status_update(user_issues(session), segments[1], body)
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             next_status = str(body.get("status") or issue["status"]).strip().lower()
