@@ -91,6 +91,7 @@ API_KEY_ALLOWED_SCOPES = {"repositories:read", "scans:read", "scans:write", "quo
 API_KEY_DEFAULT_SCOPES = ["repositories:read", "scans:read", "scans:write", "quota:read"]
 WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[/\\]")
 GIT_COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+SCAN_REQUEST_COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 USERS: dict[str, dict] = {}
 SESSIONS: dict[str, dict] = {}
@@ -1421,7 +1422,7 @@ def clean_api_key_scopes(value: object) -> list[str]:
         normalized = scope.strip().lower()
         if normalized in API_KEY_ALLOWED_SCOPES and normalized not in scopes:
             scopes.append(normalized)
-    return scopes or list(API_KEY_DEFAULT_SCOPES)
+    return scopes
 
 
 def requested_api_key_scopes(value: object, *, provided: bool) -> tuple[list[str], str | None]:
@@ -1455,6 +1456,15 @@ def scan_request_id_from_body(body: dict) -> str:
         if value and "\x00" not in value:
             return value[:128]
     return ""
+
+
+def scan_commit_from_body(body: dict) -> tuple[str, str | None]:
+    commit = clean_github_access_text(body.get("commit"))
+    if not commit or commit.lower() == "pending":
+        return "pending", None
+    if SCAN_REQUEST_COMMIT_SHA_RE.fullmatch(commit):
+        return commit.lower(), None
+    return "", "Scan commit must be a 7-40 character hexadecimal SHA."
 
 
 def parse_api_key_scopes(value: object) -> list[str]:
@@ -3644,6 +3654,9 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     if record_result.get("conflict"):
         return {"accepted": False, "conflict": True}
     duplicate = bool(record_result.get("duplicate"))
+    if duplicate:
+        issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
+        return {"accepted": True, "duplicate": True, "conflict": False, "issueCount": len(issue_cards)}
     resolved_commit = worker_result_resolved_commit(job=job, body=body)
     if resolved_commit:
         updated_job = db.update_scan_job_commit(str(job["job_id"]), resolved_commit)
@@ -7641,9 +7654,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if os.path.isdir(root):
             # Try to serve the exact file
             rel = path.lstrip("/")
-            candidate = os.path.normpath(os.path.join(root, rel))
+            root_path = os.path.abspath(root)
+            candidate = os.path.abspath(os.path.join(root_path, rel))
             # Prevent path traversal
-            if candidate.startswith(os.path.normpath(root)) and os.path.isfile(candidate):
+            try:
+                inside_root = os.path.commonpath([root_path, candidate]) == root_path
+            except ValueError:
+                inside_root = False
+            if inside_root and os.path.isfile(candidate):
                 return self.serve_static_file(candidate)
             # SPA fallback: serve index.html for any other GET
             return self.serve_spa()
@@ -7730,6 +7748,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan = None
             scan_created = False
             branch = ""
+            commit = "pending"
             with STATE_LOCK:
                 user = USERS.get(session["userId"]) or {}
                 github_access = user.get("githubRepositoryAccess")
@@ -7773,6 +7792,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 elif request_key != "repoId" and not repository_is_authorized(github_access, repository):
                                     scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
                                     scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+                        if scan_error is None:
+                            commit, commit_error = scan_commit_from_body(body)
+                            if commit_error:
+                                scan_error = (HTTPStatus.BAD_REQUEST, commit_error)
+                                scan_error_code = "INVALID_COMMIT"
                         if scan_error is None:
                             requested_branch = github_auth.clean_branch_name(body.get("branch"))
                             branch = (
@@ -7839,7 +7863,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 "id": scan_id,
                                 "repo": repository,
                                 "branch": branch,
-                                "commit": clean_github_access_text(body.get("commit")) or "pending",
+                                "commit": commit,
                                 "status": "queued",
                                 "userId": session["userId"],
                                 "createdAt": now(),
@@ -9529,6 +9553,29 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.json(scan_payload(existing))
             if existing:
                 return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
+            commit, commit_error = scan_commit_from_body(body)
+            if commit_error:
+                return self.json({"message": commit_error, "code": "INVALID_COMMIT"}, HTTPStatus.BAD_REQUEST)
+            requested_branch = github_auth.clean_branch_name(body.get("branch"))
+            branch = (
+                requested_branch
+                or github_auth.clean_branch_name(repository_item_meta.get("defaultBranch"))
+                or github_auth.clean_branch_name(repository.get("default_branch"))
+                or "main"
+            )
+            if requested_branch:
+                try:
+                    branch_available = scan_branch_is_available(github_access, repository_item_meta, branch)
+                except github_auth.GitHubError as exc:
+                    return self.json({"message": str(exc), "code": "BRANCH_LOOKUP_FAILED"}, HTTPStatus.BAD_GATEWAY)
+                if not branch_available:
+                    return self.json(
+                        {
+                            "message": "Selected branch is not available for this repository.",
+                            "code": "BRANCH_NOT_AVAILABLE",
+                        },
+                        HTTPStatus.BAD_REQUEST,
+                    )
             limit_error = scan_queue_limit_error(context["user"]["id"])
             if limit_error:
                 return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
@@ -9554,12 +9601,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
                 return self.json({"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"}, HTTPStatus.CONFLICT)
 
-            branch = clean_github_access_text(body.get("branch")) or clean_github_access_text(repository.get("default_branch")) or "main"
             scan = {
                 "id": scan_id,
                 "repo": repository["full_name"],
                 "branch": branch,
-                "commit": clean_github_access_text(body.get("commit")) or "pending",
+                "commit": commit,
                 "status": "queued",
                 "userId": context["user"]["id"],
                 "apiKeyId": context["apiKey"]["id"],

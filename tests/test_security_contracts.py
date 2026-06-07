@@ -230,6 +230,37 @@ class SecurityContractsTest(unittest.TestCase):
         log_exception.assert_not_called()
         self.assertIsNone(handler.status)
 
+    def test_static_file_guard_does_not_authorize_sibling_directory_by_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = os.path.join(tmpdir, "web")
+            sibling = os.path.join(tmpdir, "web-secret")
+            os.makedirs(root)
+            os.makedirs(sibling)
+            index_path = os.path.join(root, "index.html")
+            secret_path = os.path.join(sibling, "secret.txt")
+            with open(index_path, "w", encoding="utf-8") as handle:
+                handle.write("<div>app</div>")
+            with open(secret_path, "w", encoding="utf-8") as handle:
+                handle.write("secret")
+
+            handler = RouteHarness("/../web-secret/secret.txt")
+            served_paths: list[str] = []
+
+            def capture_static_file(file_path: str) -> None:
+                served_paths.append(os.path.normpath(file_path))
+                handler.status = HTTPStatus.OK
+
+            handler.serve_static_file = capture_static_file
+
+            with (
+                patch.dict(os.environ, {"PULLWISE_WEB_DIR": root}, clear=False),
+                patch.object(app, "ensure_state_loaded"),
+                patch.object(app, "rate_limit_enabled", return_value=False),
+            ):
+                app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(served_paths, [os.path.normpath(index_path)])
+
     def test_json_raises_client_disconnected_for_aborted_socket(self) -> None:
         class FailingWriter:
             def write(self, _: bytes) -> None:

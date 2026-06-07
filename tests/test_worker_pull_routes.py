@@ -418,6 +418,65 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(late_attempt.status, HTTPStatus.CONFLICT)
         self.assertEqual(len(app.ISSUES), 1)
 
+    def test_duplicate_worker_result_with_same_checksum_does_not_reapply_body(self) -> None:
+        scan = {
+            "id": "sc_duplicate_body",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        first = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "same-worker-result",
+                **audit_result_fields(
+                    [audit_issue_card("First result", issue_id="issue-first", severity="P1")]
+                ),
+                "summary": {"critical": 1, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(first, "POST")
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertEqual([issue["id"] for issue in app.ISSUES], ["issue-first"])
+        self.assertEqual(app.SCANS[0]["issues"]["critical"], 1)
+
+        duplicate = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "same-worker-result",
+                **audit_result_fields(
+                    [audit_issue_card("Second result", issue_id="issue-second", severity="P2")]
+                ),
+                "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(duplicate, "POST")
+
+        self.assertEqual(duplicate.status, HTTPStatus.OK)
+        self.assertTrue(duplicate.payload["duplicate"])
+        self.assertEqual([issue["id"] for issue in app.ISSUES], ["issue-first"])
+        self.assertEqual(app.SCANS[0]["issues"]["critical"], 1)
+        self.assertEqual(app.SCANS[0]["issues"]["medium"], 0)
+
     def test_worker_result_exposes_reproducible_evidence_chain(self) -> None:
         scan = {
             "id": "sc_evidence",

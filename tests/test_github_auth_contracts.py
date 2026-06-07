@@ -269,6 +269,20 @@ class GitHubAuthContractsTest(unittest.TestCase):
 
         self.assertEqual(primary_email, "octocat@example.com")
 
+    def test_fetch_primary_email_ignores_unverified_email_records(self) -> None:
+        emails = [
+            {"verified": False, "primary": True, "email": "admin@example.com"},
+            {"verified": False, "primary": False, "email": "backup@example.com"},
+        ]
+
+        with (
+            patch.object(github_auth, "oauth_session", return_value=Mock()),
+            patch.object(github_auth, "authlib_get_json", return_value=emails),
+        ):
+            primary_email = github_auth.fetch_primary_email("gho_user")
+
+        self.assertIsNone(primary_email)
+
     def test_fetch_user_profile_uses_primary_email_fallback_for_malformed_profile_email(self) -> None:
         profile_response = {"login": "octocat", "email": {"address": "bad@example.com"}}
         email_response = [{"verified": True, "primary": True, "email": "octocat@example.com"}]

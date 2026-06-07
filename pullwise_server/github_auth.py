@@ -216,10 +216,6 @@ def fetch_primary_email(access_token: str) -> str | None:
         address = email_record_address(email)
         if address:
             return address
-    for email in email_records:
-        address = email_record_address(email)
-        if address:
-            return address
     return None
 
 

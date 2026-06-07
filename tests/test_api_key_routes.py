@@ -131,6 +131,21 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertTrue(handler.payload["key"].startswith("pwk_"))
         return cookie, handler.payload["key"]
 
+    def create_api_key_with_scopes(self, scopes: list[str]) -> tuple[str, str]:
+        cookie = seed_session()
+        token = f"{app.API_KEY_PREFIX}scoped_test_token"
+        db.create_api_key(
+            {
+                "id": "key_scoped_test",
+                "user_id": "usr_1",
+                "name": "Scoped automation",
+                "key_prefix": app.api_key_prefix(token),
+                "key_hash": app.api_key_hash(token),
+                "scopes": scopes,
+            }
+        )
+        return cookie, token
+
     def test_session_user_can_create_list_and_revoke_api_keys(self) -> None:
         cookie, key = self.create_api_key()
         list_handler = RouteHarness("/api-keys", cookie=cookie)
@@ -168,6 +183,15 @@ class ApiKeyRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(list_handler, "GET")
         self.assertEqual(list_handler.payload["items"], [])
 
+    def test_stored_empty_api_key_scopes_do_not_grant_default_permissions(self) -> None:
+        _cookie, key = self.create_api_key_with_scopes([])
+        handler = RouteHarness("/api/v1/repositories", headers={"Authorization": f"Bearer {key}"})
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+        self.assertIn("repositories:read", handler.payload["message"])
+
     def test_api_key_lists_repositories_and_controls_scan_by_repo_id(self) -> None:
         _cookie, key = self.create_api_key()
         auth = {"Authorization": f"Bearer {key}"}
@@ -181,7 +205,10 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(repo["fullName"], "acme/api")
         self.assertEqual(repo["quota"]["scope"], "repository")
 
-        with patch.object(app.worker, "start_scan") as start_scan:
+        with (
+            patch.object(app.worker, "start_scan") as start_scan,
+            patch.object(app, "scan_branch_is_available", return_value=True) as branch_available,
+        ):
             start = RouteHarness(
                 f"/api/v1/repositories/{repo['repoId']}/scans",
                 {"requestId": "req_bad\r\nX-Test: bad", "idempotencyKey": "req_api", "branch": "main"},
@@ -194,6 +221,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertNotIn("workspaceId", start.payload)
         self.assertEqual(app.SCANS[0]["apiKeyId"], repositories.payload["apiKey"]["id"])
         self.assertEqual(app.SCANS[0]["requestId"], "req_api")
+        branch_available.assert_called_once()
         start_scan.assert_not_called()
 
         status = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/current", headers=auth)
@@ -252,6 +280,58 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["cloneUrl"], "https://github.com/tools/private.git")
         stored_job = db.get_scan_job(app.SCANS[0]["jobId"])
         self.assertEqual(stored_job["installation_id"], "222")
+
+    def test_external_api_scan_rejects_unavailable_requested_branch_before_queueing(self) -> None:
+        _cookie, key = self.create_api_key()
+        auth = {"Authorization": f"Bearer {key}"}
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        app.PullwiseHandler.route(repositories, "GET")
+        repo = repositories.payload["items"][0]
+
+        with patch.object(app, "scan_branch_is_available", return_value=False) as branch_available:
+            start = RouteHarness(
+                f"/api/v1/repositories/{repo['repoId']}/scans",
+                {"requestId": "req_missing_branch", "branch": "missing"},
+                headers=auth,
+            )
+            app.PullwiseHandler.route(start, "POST")
+
+        self.assertEqual(start.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(start.payload["code"], "BRANCH_NOT_AVAILABLE")
+        branch_available.assert_called_once()
+        self.assertEqual(app.SCANS, [])
+
+    def test_external_api_scan_rejects_invalid_commit_before_queueing(self) -> None:
+        _cookie, key = self.create_api_key()
+        auth = {"Authorization": f"Bearer {key}"}
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        app.PullwiseHandler.route(repositories, "GET")
+        repo = repositories.payload["items"][0]
+
+        start = RouteHarness(
+            f"/api/v1/repositories/{repo['repoId']}/scans",
+            {"requestId": "req_bad_commit", "branch": "main", "commit": "not-a-sha"},
+            headers=auth,
+        )
+        app.PullwiseHandler.route(start, "POST")
+
+        self.assertEqual(start.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(start.payload["code"], "INVALID_COMMIT")
+        self.assertEqual(app.SCANS, [])
+
+    def test_browser_scan_rejects_invalid_commit_before_queueing(self) -> None:
+        cookie = seed_session()
+
+        start = RouteHarness(
+            "/scans",
+            {"repoId": "123", "branch": "main", "commit": "not-a-sha"},
+            cookie=cookie,
+        )
+        app.PullwiseHandler.route(start, "POST")
+
+        self.assertEqual(start.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(start.payload["code"], "INVALID_COMMIT")
+        self.assertEqual(app.SCANS, [])
 
     def test_browser_cancel_rejects_terminal_scans(self) -> None:
         cookie = seed_session()
