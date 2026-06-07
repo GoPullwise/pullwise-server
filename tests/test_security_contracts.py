@@ -315,6 +315,55 @@ class SecurityContractsTest(unittest.TestCase):
         record = next(iter(app.GITHUB_STATES.values()))
         self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/dashboard")
 
+    def test_github_login_authorize_can_redirect_to_github_for_browser_navigation(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/authorize?response=redirect&redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers"
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://admin.pull-wise.com",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://admin.pull-wise.com",
+                    "PULLWISE_API_BASE_URL": "https://api.pull-wise.com",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.build_oauth_authorize_url", return_value="https://github.com/login/oauth/authorize?client_id=pw"),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertEqual(handler.location, "https://github.com/login/oauth/authorize?client_id=pw")
+        record = next(iter(app.GITHUB_STATES.values()))
+        self.assertEqual(record["redirectTo"], "https://admin.pull-wise.com/workers")
+
+    def test_local_github_login_authorize_redirect_mode_returns_callback_redirect(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/authorize?response=redirect&redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers"
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_APP_URL": "https://admin.pull-wise.com",
+                "PULLWISE_ALLOWED_ORIGINS": "https://admin.pull-wise.com",
+                "PULLWISE_API_BASE_URL": "https://api.pull-wise.com",
+                "PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS": "true",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertEqual(
+            handler.location,
+            "https://api.pull-wise.com/auth/github/callback?redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers",
+        )
+
     def test_github_login_authorize_uses_trusted_proxy_callback_url(self) -> None:
         handler = RouteHarness(
             "/auth/github/authorize?redirectTo=https%3A%2F%2Fpullwise-admin.danuberiverferryman.workers.dev%2Flogin",

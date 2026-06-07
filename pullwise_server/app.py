@@ -8125,10 +8125,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_github_authorize(self, params: dict) -> None:
         redirect_to = safe_redirect_to(params.get("redirectTo"), "dashboard")
+        redirect_response = params.get("response") == "redirect"
         if not github_auth.oauth_configured():
             if not local_github_mocks_enabled():
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured. Set PULLWISE_GITHUB_CLIENT_ID and PULLWISE_GITHUB_CLIENT_SECRET.")
             callback = f"{api_base_url(self)}/auth/github/callback?{urlencode({'redirectTo': redirect_to})}"
+            if redirect_response:
+                return self.redirect(callback)
             return self.json({"url": callback, "mode": "local"})
 
         verifier = github_auth.make_code_verifier()
@@ -8139,6 +8142,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             state,
             verifier,
         )
+        if redirect_response:
+            return self.redirect(authorize_url)
         return self.json({"url": authorize_url, "mode": "github"})
 
     def handle_github_callback(self, params: dict) -> None:
