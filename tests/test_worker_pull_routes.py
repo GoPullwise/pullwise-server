@@ -1698,6 +1698,237 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["clone_token"]["token"], "short-token")
         self.assertEqual(payload["clone_token"]["repo"], "acme/api")
 
+    def test_claim_payload_includes_previous_convergence_context_across_workers(self) -> None:
+        _worker_two, worker_two_token = self.create_registry_worker("wk_2")
+        worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
+        first_commit = "a" * 40
+        second_commit = "b" * 40
+        first_scan = {
+            "id": "sc_converge_first",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": first_commit,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [first_scan]
+        first_job = app.create_scan_job_for_scan(first_scan)
+        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(first_claim, "POST")
+        self.assertEqual(first_claim.status, HTTPStatus.OK)
+
+        first_result = RouteHarness(
+            f"/worker/jobs/{first_job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-converge-first",
+                **audit_result_fields(
+                    [
+                        audit_issue_card(
+                            "Old bug",
+                            issue_id="issue-old",
+                            severity="P1",
+                            file="src/app.py",
+                            line=12,
+                        )
+                    ]
+                ),
+                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+                "convergence_state": {
+                    "protocol": "pullwise-convergence/0.1",
+                    "scope_key": "repo:acme/api|branch:main",
+                    "head_sha": first_commit,
+                    "open_findings": [
+                        {
+                            "fingerprint": "fp-old",
+                            "issue_id": "issue-old",
+                            "title": "Old bug",
+                            "file": "src/app.py",
+                            "line": 12,
+                            "confidence": 0.93,
+                            "source": "correctness-reviewer",
+                            "status": "open",
+                        }
+                    ],
+                    "resolved_fingerprints": [],
+                    "source_stats": {
+                        "correctness-reviewer": {"reported": 1, "confirmed": 1, "resolved": 0, "rejected": 0}
+                    },
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(first_result, "POST")
+        self.assertEqual(first_result.status, HTTPStatus.OK)
+        self.assertEqual(app.SCANS[0]["convergenceState"]["headSha"], first_commit)
+
+        second_scan = {
+            "id": "sc_converge_second",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": second_commit,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now() + 1,
+            "queuedAt": app.now() + 1,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS.append(second_scan)
+        app.create_scan_job_for_scan(second_scan)
+
+        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
+        app.PullwiseHandler.route(second_claim, "POST")
+
+        self.assertEqual(second_claim.status, HTTPStatus.OK)
+        context = second_claim.payload["job"]["convergence_context"]
+        self.assertEqual(context["protocol"], "pullwise-convergence/0.1")
+        self.assertEqual(context["scope_key"], "repo:acme/api|branch:main")
+        self.assertEqual(context["previous_head_sha"], first_commit)
+        self.assertEqual(context["open_findings"][0]["fingerprint"], "fp-old")
+        self.assertEqual(context["source_stats"]["correctness-reviewer"]["confirmed"], 1)
+
+    def test_worker_result_ignores_convergence_state_for_different_scope(self) -> None:
+        first_commit = "a" * 40
+        scan = {
+            "id": "sc_wrong_scope",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": first_commit,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-wrong-scope",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "convergence_state": {
+                    "protocol": "pullwise-convergence/0.1",
+                    "scope_key": "repo:acme/other|branch:main",
+                    "head_sha": first_commit,
+                    "open_findings": [
+                        {
+                            "fingerprint": "fp-other",
+                            "title": "Other repo bug",
+                            "file": "src/app.py",
+                            "status": "open",
+                        }
+                    ],
+                    "resolved_fingerprints": [],
+                    "source_stats": {},
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertNotIn("convergenceState", app.SCANS[0])
+
+        next_scan = {
+            "id": "sc_wrong_scope_next",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "b" * 40,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now() + 1,
+            "queuedAt": app.now() + 1,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS.append(next_scan)
+        app.create_scan_job_for_scan(next_scan)
+        next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(next_claim, "POST")
+
+        self.assertEqual(next_claim.status, HTTPStatus.OK)
+        self.assertNotIn("convergence_context", next_claim.payload["job"])
+
+    def test_claim_payload_does_not_resurrect_stale_convergence_context(self) -> None:
+        old_done = {
+            "id": "sc_old_convergence",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "a" * 40,
+            "status": "done",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "completedAt": app.now(),
+            "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+            "convergenceState": {
+                "protocol": "pullwise-convergence/0.1",
+                "scopeKey": "repo:acme/api|branch:main",
+                "headSha": "a" * 40,
+                "openFindings": [
+                    {
+                        "fingerprint": "fp-stale",
+                        "issue_id": "issue-stale",
+                        "title": "Stale bug",
+                        "file": "src/app.py",
+                        "status": "open",
+                    }
+                ],
+                "resolvedFingerprints": [],
+                "sourceStats": {},
+            },
+        }
+        newer_done_without_state = {
+            "id": "sc_new_without_state",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "b" * 40,
+            "status": "done",
+            "userId": "usr_1",
+            "createdAt": app.now() + 1,
+            "completedAt": app.now() + 1,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        queued = {
+            "id": "sc_after_missing_state",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "c" * 40,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now() + 2,
+            "queuedAt": app.now() + 2,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [old_done, newer_done_without_state, queued]
+        app.create_scan_job_for_scan(queued)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertNotIn("convergence_context", claim.payload["job"])
+
     def test_worker_result_normalizes_checkout_absolute_issue_file_path(self) -> None:
         scan = {
             "id": "sc_worker_file",

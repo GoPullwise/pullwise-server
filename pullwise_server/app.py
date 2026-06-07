@@ -82,6 +82,7 @@ AUDIT_SWARM_EVIDENCE_BLOCK_KINDS = {
     "invariant",
     "risk",
 }
+CONVERGENCE_PROTOCOL_VERSION = "pullwise-convergence/0.1"
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
 SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "lost", "retrying"}
 SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
@@ -1922,6 +1923,175 @@ def public_scan_ai_usage(value: object) -> dict:
     return {"model": model} if model else {}
 
 
+def public_confidence(value: object) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    try:
+        confidence = float(value or 0)
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(confidence):
+        return 0.0
+    return min(1.0, max(0.0, confidence))
+
+
+def public_convergence_finding_record(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    fingerprint = clean_github_access_text(source.get("fingerprint"))
+    if not fingerprint:
+        return {}
+    status = public_issue_text(source.get("status")).lower()
+    if status not in {"open", "resolved"}:
+        status = "open"
+    record = {
+        "fingerprint": fingerprint,
+        "status": status,
+    }
+    issue_id = public_issue_text(source.get("issue_id") or source.get("issueId"))
+    if issue_id:
+        record["issue_id"] = issue_id
+    title = review._safe_text_lenient(source.get("title"))[:180]
+    if title:
+        record["title"] = " ".join(title.split())
+    file_path = public_issue_file(source.get("file"))
+    if file_path:
+        record["file"] = file_path
+    line = public_scan_count(source.get("line"))
+    if line:
+        record["line"] = line
+    confidence = public_confidence(source.get("confidence"))
+    if confidence:
+        record["confidence"] = confidence
+    source_name = public_issue_text(source.get("source"))[:80]
+    if source_name:
+        record["source"] = source_name
+    return record
+
+
+def public_convergence_source_stats(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    stats = {}
+    for raw_source, raw_counts in value.items():
+        source = public_issue_text(raw_source)[:80]
+        if not source or not isinstance(raw_counts, dict):
+            continue
+        stats[source] = {
+            "reported": public_scan_count(raw_counts.get("reported")),
+            "confirmed": public_scan_count(raw_counts.get("confirmed")),
+            "resolved": public_scan_count(raw_counts.get("resolved")),
+            "rejected": public_scan_count(raw_counts.get("rejected")),
+        }
+        if len(stats) >= 50:
+            break
+    return stats
+
+
+def public_scan_convergence_state(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    head_sha = (clean_github_access_text(source.get("head_sha") or source.get("headSha")) or "").lower()
+    if head_sha and not GIT_COMMIT_SHA_RE.fullmatch(head_sha):
+        head_sha = ""
+    open_findings = []
+    raw_open_findings = source.get("open_findings") or source.get("openFindings")
+    if isinstance(raw_open_findings, list):
+        for item in raw_open_findings:
+            record = public_convergence_finding_record(item)
+            if record and record.get("status") == "open":
+                open_findings.append(record)
+            if len(open_findings) >= 100:
+                break
+    resolved_fingerprints = []
+    raw_resolved = source.get("resolved_fingerprints") or source.get("resolvedFingerprints")
+    if isinstance(raw_resolved, list):
+        for item in raw_resolved:
+            fingerprint = clean_github_access_text(item)
+            if fingerprint:
+                resolved_fingerprints.append(fingerprint)
+            if len(resolved_fingerprints) >= 200:
+                break
+    state = {
+        "protocol": CONVERGENCE_PROTOCOL_VERSION,
+        "scopeKey": public_issue_text(source.get("scope_key") or source.get("scopeKey"))[:240],
+        "headSha": head_sha,
+        "openFindings": open_findings,
+        "resolvedFingerprints": resolved_fingerprints,
+        "sourceStats": public_convergence_source_stats(source.get("source_stats") or source.get("sourceStats")),
+    }
+    return state if state["headSha"] or state["openFindings"] or state["resolvedFingerprints"] else {}
+
+
+def convergence_scope_key(repo: object, branch: object) -> str:
+    repo_name = clean_repository_full_name(repo)
+    branch_name = clean_github_access_text(branch) or "main"
+    if not repo_name:
+        return ""
+    return f"repo:{repo_name.lower()}|branch:{branch_name.lower()}"
+
+
+def convergence_state_for_scan(scan: dict) -> dict:
+    state = public_scan_convergence_state(scan.get("convergenceState") or scan.get("convergence_state"))
+    if not state:
+        return {}
+    expected_scope = convergence_scope_key(scan.get("repo"), scan.get("branch"))
+    state_scope = public_issue_text(state.get("scopeKey"))
+    if expected_scope and state_scope and state_scope.lower() != expected_scope:
+        return {}
+    if expected_scope and not state_scope:
+        state = {**state, "scopeKey": expected_scope}
+    return state
+
+
+def convergence_state_from_worker_result(job: dict, body: dict) -> dict:
+    state = public_scan_convergence_state(body.get("convergence_state") or body.get("convergenceState"))
+    if not state:
+        return {}
+    expected_scope = convergence_scope_key(job.get("repo"), job.get("branch"))
+    state_scope = public_issue_text(state.get("scopeKey"))
+    if expected_scope and state_scope and state_scope.lower() != expected_scope:
+        return {}
+    if expected_scope and not state_scope:
+        state = {**state, "scopeKey": expected_scope}
+    return state
+
+
+def worker_convergence_context_for_job(job: dict) -> dict:
+    repo = clean_repository_full_name(job.get("repo"))
+    branch = clean_github_access_text(job.get("branch")) or "main"
+    user_id = public_issue_text(job.get("user_id"))
+    scan_id = public_issue_text(job.get("scan_id"))
+    if not repo:
+        return {}
+    candidates = []
+    for scan in SCANS:
+        if public_issue_text(scan.get("id")) == scan_id:
+            continue
+        if public_scan_status(scan.get("status")) != "done":
+            continue
+        if clean_repository_full_name(scan.get("repo")) != repo:
+            continue
+        if (clean_github_access_text(scan.get("branch")) or "main") != branch:
+            continue
+        scan_user_id = public_issue_text(scan.get("userId"))
+        if user_id and scan_user_id and scan_user_id != user_id:
+            continue
+        rank = pull_request_timestamp(scan.get("completedAt")) or pull_request_timestamp(scan.get("createdAt")) or 0
+        candidates.append((rank, scan))
+    if not candidates:
+        return {}
+    _rank, latest_scan = sorted(candidates, key=lambda item: item[0])[-1]
+    state = convergence_state_for_scan(latest_scan)
+    if not state:
+        return {}
+    return {
+        "protocol": CONVERGENCE_PROTOCOL_VERSION,
+        "scope_key": state.get("scopeKey") or "",
+        "previous_head_sha": state.get("headSha") or "",
+        "open_findings": state.get("openFindings") or [],
+        "source_stats": state.get("sourceStats") or {},
+    }
+
+
 def first_present(source: dict, *keys: str) -> object:
     for key in keys:
         if key in source:
@@ -3548,6 +3718,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     }
     if include_clone_token:
         payload["clone_token"] = installation_clone_token_payload(job)
+    convergence_context = worker_convergence_context_for_job(job)
+    if convergence_context:
+        payload["convergence_context"] = convergence_context
     return payload
 
 
@@ -3610,6 +3783,9 @@ def worker_result_checksum(body: dict) -> str:
         "verification_audit": public_scan_verification_audit_input(
             body.get("verification_audit") or body.get("verificationAudit")
         ),
+        "convergence_state": public_scan_convergence_state(
+            body.get("convergence_state") or body.get("convergenceState")
+        ),
         "audit_swarm": public_scan_audit_swarm_from_worker_body(
             body,
             status=public_issue_text(body.get("status")).lower(),
@@ -3663,6 +3839,7 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     verification_audit = public_scan_verification_audit_input(
         body.get("verification_audit") or body.get("verificationAudit")
     )
+    convergence_state = convergence_state_from_worker_result(job, body)
     audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
     ai_usage = public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage"))
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
@@ -3707,6 +3884,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan["auditSwarm"] = audit_swarm
         if ai_usage:
             scan["aiUsage"] = ai_usage
+        if status == "done" and convergence_state:
+            scan["convergenceState"] = convergence_state
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status == "done":
             before_issues = json.dumps(
