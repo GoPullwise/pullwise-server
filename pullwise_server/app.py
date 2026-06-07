@@ -2058,9 +2058,10 @@ def convergence_state_from_worker_result(job: dict, body: dict) -> dict:
 def worker_convergence_context_for_job(job: dict) -> dict:
     repo = clean_repository_full_name(job.get("repo"))
     branch = clean_github_access_text(job.get("branch")) or "main"
+    scope_key = convergence_scope_key(repo, branch)
     user_id = public_issue_text(job.get("user_id"))
     scan_id = public_issue_text(job.get("scan_id"))
-    if not repo:
+    if not scope_key:
         return {}
     candidates = []
     for scan in SCANS:
@@ -2068,9 +2069,7 @@ def worker_convergence_context_for_job(job: dict) -> dict:
             continue
         if public_scan_status(scan.get("status")) != "done":
             continue
-        if clean_repository_full_name(scan.get("repo")) != repo:
-            continue
-        if (clean_github_access_text(scan.get("branch")) or "main") != branch:
+        if convergence_scope_key(scan.get("repo"), scan.get("branch")) != scope_key:
             continue
         scan_user_id = public_issue_text(scan.get("userId"))
         if user_id and scan_user_id and scan_user_id != user_id:

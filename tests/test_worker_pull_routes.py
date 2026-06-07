@@ -1795,6 +1795,68 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(context["open_findings"][0]["fingerprint"], "fp-old")
         self.assertEqual(context["source_stats"]["correctness-reviewer"]["confirmed"], 1)
 
+    def test_claim_payload_matches_convergence_context_by_canonical_scope(self) -> None:
+        _worker_two, worker_two_token = self.create_registry_worker("wk_2")
+        worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
+        first_commit = "a" * 40
+        second_commit = "b" * 40
+        first_scan = {
+            "id": "sc_converge_case_first",
+            "repo": "Acme/API",
+            "branch": "Main",
+            "commit": first_commit,
+            "status": "done",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "completedAt": app.now(),
+            "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+            "convergenceState": {
+                "protocol": "pullwise-convergence/0.1",
+                "scopeKey": "repo:acme/api|branch:main",
+                "headSha": first_commit,
+                "openFindings": [
+                    {
+                        "fingerprint": "fp-case",
+                        "issue_id": "issue-case",
+                        "title": "Case-stable bug",
+                        "file": "src/app.py",
+                        "line": 12,
+                        "confidence": 0.93,
+                        "source": "correctness-reviewer",
+                        "status": "open",
+                    }
+                ],
+                "resolvedFingerprints": [],
+                "sourceStats": {
+                    "correctness-reviewer": {"reported": 1, "confirmed": 1, "resolved": 0, "rejected": 0}
+                },
+            },
+        }
+        second_scan = {
+            "id": "sc_converge_case_second",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": second_commit,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now() + 1,
+            "queuedAt": app.now() + 1,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [first_scan, second_scan]
+        app.create_scan_job_for_scan(second_scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        context = claim.payload["job"]["convergence_context"]
+        self.assertEqual(context["scope_key"], "repo:acme/api|branch:main")
+        self.assertEqual(context["previous_head_sha"], first_commit)
+        self.assertEqual(context["open_findings"][0]["fingerprint"], "fp-case")
+
     def test_worker_result_ignores_convergence_state_for_different_scope(self) -> None:
         first_commit = "a" * 40
         scan = {
