@@ -280,6 +280,24 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(findings[0]["verificationStatus"], "potential_risk")
 
+    def test_worker_audit_swarm_confirmed_verdict_with_only_proof_strength_is_not_static_proof(self) -> None:
+        findings = app.worker_audit_swarm_findings(
+            {
+                "scan_id": "sc_1",
+                "job_id": "job_1",
+                "user_id": "usr_1",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc123",
+            },
+            audit_result_fields(
+                [audit_issue_card("Proof strength only confirmation", issue_id="issue-proof-strength")],
+                [{"issue_id": "issue-proof-strength", "verdict": "confirmed", "proof_strength": 3}],
+            ),
+        )
+
+        self.assertEqual(findings[0]["verificationStatus"], "potential_risk")
+
     def test_worker_heartbeat_claim_progress_and_result_are_idempotent(self) -> None:
         scan = {
             "id": "sc_1",
