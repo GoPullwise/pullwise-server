@@ -4091,13 +4091,31 @@ def worker_audit_swarm_line_range(source: dict) -> tuple[int, int]:
 
 def worker_audit_swarm_verdict(results: list[dict]) -> str:
     verdicts = [public_issue_text(result.get("verdict")).lower() for result in results]
-    if "confirmed" in verdicts:
+    if any(
+        public_issue_text(result.get("verdict")).lower() == "confirmed"
+        and worker_audit_swarm_confirmed_verification_has_support(result)
+        for result in results
+    ):
         return "confirmed"
     if verdicts and all(verdict == "rejected" for verdict in verdicts):
         return "rejected"
     if "inconclusive" in verdicts:
         return "inconclusive"
     return "candidate"
+
+
+def worker_audit_swarm_confirmed_verification_has_support(result: dict) -> bool:
+    if review._safe_text_list(result.get("commands_run") or result.get("commandsRun")):
+        return True
+    if review._safe_text_list(result.get("evidence")):
+        return True
+    if review._safe_text_lenient(result.get("result_summary") or result.get("resultSummary") or result.get("summary")):
+        return True
+    if review._safe_text_lenient(result.get("output")):
+        return True
+    if public_issue_text(result.get("logPath") or result.get("log_path")):
+        return True
+    return bool(public_scan_count(result.get("proof_strength") or result.get("proofStrength")))
 
 
 def worker_audit_swarm_verification_status(verdict: str, results: list[dict]) -> str:
