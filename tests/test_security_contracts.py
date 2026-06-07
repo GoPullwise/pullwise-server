@@ -315,6 +315,39 @@ class SecurityContractsTest(unittest.TestCase):
         record = next(iter(app.GITHUB_STATES.values()))
         self.assertEqual(record["redirectTo"], "https://app.pullwise.dev/dashboard")
 
+    def test_github_login_authorize_uses_trusted_proxy_callback_url(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/authorize?redirectTo=https%3A%2F%2Fpullwise-admin.danuberiverferryman.workers.dev%2Flogin",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "pullwise-admin.danuberiverferryman.workers.dev",
+                "X-Forwarded-Prefix": "/api",
+            },
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://pullwise-admin.danuberiverferryman.workers.dev",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://pullwise-admin.danuberiverferryman.workers.dev",
+                    "PULLWISE_API_BASE_URL": "https://api.pull-wise.com",
+                    "PULLWISE_TRUST_PROXY_HEADERS": "true",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.build_oauth_authorize_url", return_value="https://github.com/login/oauth/authorize") as build_authorize_url,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(
+            build_authorize_url.call_args.args[0],
+            "https://pullwise-admin.danuberiverferryman.workers.dev/api/auth/github/callback",
+        )
+
     def test_github_callback_rejects_malformed_persisted_state_records(self) -> None:
         cases = {
             "non_object": "not-a-state-record",
@@ -4972,6 +5005,29 @@ class SecurityContractsTest(unittest.TestCase):
             clear=True,
         ):
             self.assertEqual(app.api_base_url(handler), "http://localhost:8080")
+
+    def test_api_base_url_prefers_trusted_proxy_headers_over_configured_base(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/authorize",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "pullwise-admin.danuberiverferryman.workers.dev",
+                "X-Forwarded-Prefix": "/api",
+            },
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_API_BASE_URL": "https://api.pull-wise.com",
+                "PULLWISE_TRUST_PROXY_HEADERS": "true",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                app.api_base_url(handler),
+                "https://pullwise-admin.danuberiverferryman.workers.dev/api",
+            )
 
     def test_root_relative_redirect_rejects_control_characters(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_APP_URL": "https://app.pullwise.dev"}, clear=True):

@@ -630,13 +630,13 @@ def allowed_origins() -> set[str]:
 
 
 def api_base_url(handler: BaseHTTPRequestHandler) -> str:
-    configured = os.environ.get("PULLWISE_API_BASE_URL")
-    if configured:
-        return configured.rstrip("/")
     if env_flag("PULLWISE_TRUST_PROXY_HEADERS"):
         forwarded = forwarded_api_base_url(handler)
         if forwarded:
             return forwarded
+    configured = os.environ.get("PULLWISE_API_BASE_URL")
+    if configured:
+        return configured.rstrip("/")
     host = trusted_host_header(handler)
     if host:
         return f"http://{host}"
