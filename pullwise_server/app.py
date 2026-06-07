@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
-from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, worker
+from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -594,9 +594,8 @@ def readiness_payload() -> dict:
         billing_provider = billing.selected_provider()
     except (billing.BillingConfigurationError, billing.BillingProviderConflict):
         billing_provider = "error"
-    review_provider = review.selected_provider()
     return {
-        "reviewProvider": "disabled" if review_provider == "disabled" else "configured",
+        "reviewProvider": "worker",
         "github": {
             "oauthConfigured": github_auth.oauth_configured(),
             "appInstallConfigured": github_auth.app_install_configured(),
@@ -614,12 +613,6 @@ def readiness_payload() -> dict:
             "rateLimitEnabled": rate_limit_enabled(),
         },
     }
-
-
-PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE = (
-    "Code review provider is not configured. Configure the review runner before starting a scan."
-)
-
 
 def allowed_origins() -> set[str]:
     raw = env(
@@ -7736,11 +7729,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not requested_repo_id and not requested_repository:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repository is required to start a scan.")
             repository = requested_repository or requested_repo_id or ""
-            if review.selected_provider() == "disabled":
-                return self.error(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE,
-                )
             request_id = scan_request_id_from_body(body)
             scan_error: tuple[int, str] | None = None
             scan_error_code: str | None = None
@@ -7914,7 +7902,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "scan_create_rejected",
                     userId=session["userId"],
                     repo=repository,
-                    provider=review.selected_provider(),
+                    provider="worker",
                     httpStatus=int(scan_error[0]),
                     reason=scan_error[1],
                     requestId=request_id or None,
@@ -7937,14 +7925,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     repo=scan.get("repo"),
                     branch=scan.get("branch"),
                     commit=scan.get("commit"),
-                    provider=review.selected_provider(),
+                    provider="worker",
                     requestId=scan.get("requestId"),
                     installationId=scan.get("installationId"),
                     repoId=scan.get("repoId"),
                     githubRepoId=scan.get("githubRepoId"),
                     quotaBucketIds=scan.get("quotaBucketIds"),
                 )
-                worker.notify_queue_changed()
             else:
                 scan_logging.log_event(
                     "scan_request_reused",
@@ -7953,7 +7940,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     repo=scan.get("repo"),
                     branch=scan.get("branch"),
                     commit=scan.get("commit"),
-                    provider=review.selected_provider(),
+                    provider="worker",
                     requestId=request_id or None,
                     status=scan.get("status"),
                 )
@@ -7970,7 +7957,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 scan["completedAt"] = now()
                 mark_state_dirty()
                 db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
-            worker.notify_queue_changed()
             return self.json(scan_payload(scan))
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "preview":
             session = self.current_session()
@@ -8693,11 +8679,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "At least one repository is required to check scan quota.")
         if len(requests) > 100:
             return self.error(HTTPStatus.BAD_REQUEST, "At most 100 repositories can be checked at once.")
-        if review.selected_provider() == "disabled":
-            return self.error(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE,
-            )
 
         with STATE_LOCK:
             user = USERS.get(session["userId"])
@@ -9544,11 +9525,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not repo_context:
             return
         repository = repo_context[0]
-        if review.selected_provider() == "disabled":
-            return self.error(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                PUBLIC_REVIEW_PROVIDER_DISABLED_MESSAGE,
-            )
         request_id = scan_request_id_from_body(body)
         github_access = context["user"].get("githubRepositoryAccess") or {}
         repository_item_meta = repo_context[1] if isinstance(repo_context[1], dict) else {}
@@ -9655,7 +9631,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             repo=scan.get("repo"),
             branch=scan.get("branch"),
             commit=scan.get("commit"),
-            provider=review.selected_provider(),
+            provider="worker",
             requestId=scan.get("requestId"),
             installationId=scan.get("installationId"),
             repoId=scan.get("repoId"),
@@ -9663,7 +9639,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             quotaBucketIds=scan.get("quotaBucketIds"),
             apiKeyId=scan.get("apiKeyId"),
         )
-        worker.notify_queue_changed()
         return self.json(scan_payload(scan), HTTPStatus.CREATED)
 
     def handle_external_api_scan_stop(self, repo_id: str) -> None:
@@ -9682,7 +9657,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan["completedAt"] = now()
             mark_state_dirty()
             db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
-        worker.notify_queue_changed()
         return self.json(scan_payload(scan))
 
     def clear_current_session(self) -> None:

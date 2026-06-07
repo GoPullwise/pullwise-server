@@ -115,14 +115,12 @@ class LoggingConfigTest(unittest.TestCase):
             patch("sys.argv", ["pullwise-server"]),
             patch.object(app, "load_env_file"),
             patch.object(app.logging_config, "configure_logging") as configure_logging,
-            patch.object(app.worker, "ensure_workers") as ensure_workers,
             patch.object(app, "ThreadingHTTPServer", return_value=server),
             patch("builtins.print"),
         ):
             app.main()
 
         configure_logging.assert_called_once_with(project_root=app.project_root())
-        ensure_workers.assert_not_called()
         self.assertTrue(server.closed)
 
     def test_http_request_logs_use_access_logger(self) -> None:

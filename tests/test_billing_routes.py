@@ -343,8 +343,6 @@ class BillingRoutesTest(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_USER_REVIEW_LIMIT": "1"}, clear=True),
-            patch("pullwise_server.review.selected_provider", return_value="codex"),
-            patch.object(app.worker, "start_scan"),
         ):
             app.PullwiseHandler.handle_post(first, "/scans", {}, ["scans"])
             app.PullwiseHandler.handle_post(second, "/scans", {}, ["scans"])

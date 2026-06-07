@@ -106,7 +106,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
-                "PULLWISE_REVIEW_PROVIDER": "mock",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
                 "PULLWISE_FREE_REPO_REVIEW_LIMIT": "1",
             },
@@ -122,9 +121,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         first = RouteHarness({"repo": "acme/api", "requestId": "req_a"}, cookie=first_cookie)
         second = RouteHarness({"repo": "acme/api", "requestId": "req_b"}, cookie=second_cookie)
 
-        with patch.object(app.worker, "start_scan"):
-            app.PullwiseHandler.route(first, "POST")
-            app.PullwiseHandler.route(second, "POST")
+        app.PullwiseHandler.route(first, "POST")
+        app.PullwiseHandler.route(second, "POST")
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
@@ -139,7 +137,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "user-quota.sqlite3"),
-                "PULLWISE_REVIEW_PROVIDER": "mock",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
                 "PULLWISE_FREE_REPO_REVIEW_LIMIT": "10",
             },
@@ -155,9 +152,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             first = RouteHarness({"repo": "acme/api", "requestId": "req_a"}, cookie=first_cookie)
             second = RouteHarness({"repo": "acme/other", "requestId": "req_b"}, cookie=second_cookie)
 
-            with patch.object(app.worker, "start_scan"):
-                app.PullwiseHandler.route(first, "POST")
-                app.PullwiseHandler.route(second, "POST")
+            app.PullwiseHandler.route(first, "POST")
+            app.PullwiseHandler.route(second, "POST")
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.CREATED)
@@ -167,7 +163,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "default-user-quota.sqlite3"),
-                "PULLWISE_REVIEW_PROVIDER": "mock",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
                 "PULLWISE_FREE_REPO_REVIEW_LIMIT": "3",
             },
@@ -198,9 +193,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
                 RouteHarness({"repo": item["fullName"], "requestId": f"req_{index}"}, cookie=cookie)
                 for index, item in enumerate(repository_items)
             ]
-            with patch.object(app.worker, "start_scan"):
-                for handler in handlers:
-                    app.PullwiseHandler.route(handler, "POST")
+            for handler in handlers:
+                app.PullwiseHandler.route(handler, "POST")
             repositories = RouteHarness(cookie=cookie, path="/repositories")
             app.PullwiseHandler.route(repositories, "GET")
 
@@ -218,7 +212,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "preflight-user-quota.sqlite3"),
-                "PULLWISE_REVIEW_PROVIDER": "mock",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "3",
                 "PULLWISE_FREE_REPO_REVIEW_LIMIT": "3",
             },
@@ -246,8 +239,7 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             github_access["repositoryItems"] = repository_items
 
             first = RouteHarness({"repo": "acme/repo-0", "requestId": "req_0"}, cookie=cookie)
-            with patch.object(app.worker, "start_scan"):
-                app.PullwiseHandler.route(first, "POST")
+            app.PullwiseHandler.route(first, "POST")
             preflight = RouteHarness(
                 {
                     "repositories": [
@@ -301,7 +293,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         with (
             patch.object(app, "installation_token", return_value="ghs_installation"),
             patch.object(app.github_auth, "list_repository_branches", return_value=["main", "develop"]),
-            patch.object(app.worker, "start_scan") as start_scan,
         ):
             app.PullwiseHandler.route(handler, "POST")
 
@@ -309,16 +300,14 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["code"], "BRANCH_NOT_AVAILABLE")
         self.assertEqual(handler.payload["message"], "Selected branch is not available for this repository.")
         self.assertEqual(app.SCANS, [])
-        start_scan.assert_not_called()
 
     def test_same_request_id_does_not_consume_quota_twice(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
         first = RouteHarness({"repoId": "123", "requestId": "req_same"}, cookie=cookie)
         second = RouteHarness({"repoId": "123", "requestId": "req_same"}, cookie=cookie)
 
-        with patch.object(app.worker, "start_scan") as start_scan:
-            app.PullwiseHandler.route(first, "POST")
-            app.PullwiseHandler.route(second, "POST")
+        app.PullwiseHandler.route(first, "POST")
+        app.PullwiseHandler.route(second, "POST")
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.OK)
@@ -329,7 +318,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertIsNotNone(job)
         self.assertEqual(job["scan_id"], first.payload["id"])
         self.assertEqual(job["status"], "queued")
-        start_scan.assert_not_called()
 
     def test_scan_start_rolls_back_quota_when_job_creation_fails(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
@@ -360,12 +348,10 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         item.pop("githubRepoId")
         first = RouteHarness({"repo": "acme/api", "requestId": "req_missing_id"}, cookie=cookie)
 
-        with patch.object(app.worker, "start_scan") as start_scan:
-            app.PullwiseHandler.route(first, "POST")
+        app.PullwiseHandler.route(first, "POST")
 
         self.assertEqual(first.status, HTTPStatus.CONFLICT)
         self.assertEqual(first.payload["code"], "REPOSITORY_SYNC_REQUIRED")
-        start_scan.assert_not_called()
 
     def test_body_workspace_id_is_ignored_for_quota_authority(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
@@ -374,8 +360,7 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             cookie=cookie,
         )
 
-        with patch.object(app.worker, "start_scan"):
-            app.PullwiseHandler.route(handler, "POST")
+        app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertNotIn("workspaceId", handler.payload)
@@ -385,12 +370,10 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         other_cookie = seed_user("usr_other", "ses_other", installation_id="222", repo_id="456")
         handler = RouteHarness({"repoId": "123", "requestId": "req_foreign_repo"}, cookie=other_cookie)
 
-        with patch.object(app.worker, "start_scan") as start_scan:
-            app.PullwiseHandler.route(handler, "POST")
+        app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
         self.assertEqual(handler.payload["code"], "REPOSITORY_NOT_AUTHORIZED")
-        start_scan.assert_not_called()
 
 
 if __name__ == "__main__":

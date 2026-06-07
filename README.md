@@ -2,10 +2,9 @@
 
 A lightweight Python API for `pullwise-web`.
 
-By default the server does not return local mock login callbacks or synthetic
-review findings. Configure real GitHub OAuth, GitHub App, and review provider
-credentials for real scans. Explicit local mock switches are available only for
-development.
+By default the server does not return local mock login callbacks. Configure real
+GitHub OAuth, GitHub App credentials, and at least one external worker for real
+scans. Explicit local mock switches are available only for development.
 
 Current production-trial scope:
 
@@ -104,9 +103,8 @@ host needs:
 
 - Python 3.10.12
 - `git` on `PATH`
-- outbound HTTPS access to GitHub, Stripe, Creem, and the review provider
+- outbound HTTPS access to GitHub, Stripe, Creem, and worker hosts
 - persistent storage for `PULLWISE_DB_PATH` and `PULLWISE_CHECKOUT_ROOT`
-- Codex CLI or Claude Code installed when `PULLWISE_REVIEW_PROVIDER` uses them
 
 Install and run:
 
@@ -147,7 +145,6 @@ PULLWISE_WORKER_AUDIT_RETENTION_SECONDS=7776000
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
 PULLWISE_COOKIE_SECURE=true
 PULLWISE_COOKIE_SAME_SITE=Lax
-PULLWISE_REVIEW_PROVIDER=codex
 PULLWISE_ADMIN_USER_IDS=
 PULLWISE_ADMIN_EMAILS=admin@example.com
 PULLWISE_WORKER_JOB_TIMEOUT_SECONDS=1800
@@ -208,7 +205,7 @@ Expected shape:
 {
   "ok": true,
   "service": "pullwise-server",
-  "reviewProvider": "codex",
+  "reviewProvider": "worker",
   "github": {
     "oauthConfigured": true,
     "appInstallConfigured": true,
@@ -440,8 +437,8 @@ service runs as `User=pullwise` and `Group=pullwise`.
 
 The production audit expects exact HTTPS origins, secure cookies, writable
 persistent paths for the SQLite database, logs, and checkouts, real GitHub
-OAuth/App credentials, and a real review provider (`codex` or `claude_code`)
-with its CLI installed for the same OS user that runs Pullwise.
+OAuth/App credentials, and at least one registered external worker for scan
+processing.
 
 Common operations:
 
@@ -562,43 +559,9 @@ instead of `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`.
 
 ## Review Worker Setup
 
-The scan worker defaults to disabled review provider mode so scans do not create
-synthetic findings by accident. For a real agent run, install `git` plus either
-Claude Code or Codex CLI, then log in with that CLI as the same OS user/session
-that runs Pullwise.
-
-Claude Code:
-
-```env
-PULLWISE_REVIEW_PROVIDER=claude_code
-PULLWISE_CHECKOUT_ROOT=F:\tmp\pullwise-checkouts
-```
-
-Codex:
-
-```env
-PULLWISE_REVIEW_PROVIDER=codex
-PULLWISE_CHECKOUT_ROOT=F:\tmp\pullwise-checkouts
-```
-
-Supported values:
-
-- `claude_code`: clone the selected repo and run Claude Code in the checkout
-- `codex`: clone the selected repo and run Codex in the checkout
-- `mock`: explicit local wire-up only; returns synthetic findings
-
-`claude_code` and `codex` clone the selected repository during the `clone`
-phase. The clone uses `github_auth.create_installation_access_token`, stores the
-checkout path as `repoPath`, and passes that path to `review.run_review`.
-Checkouts are namespaced by user and scan under
-`PULLWISE_CHECKOUT_ROOT/<user-id>/<scan-id>/...`, so one user's working tree is
-not reused for another user's scan.
-
-The Codex provider uses official non-interactive `codex exec` mode with a
-read-only sandbox, `gpt-5.5`, `model_reasoning_effort="medium"`,
-`--output-schema`, and `--output-last-message` so the worker can parse
-structured findings. Codex continues to own login state through the CLI
-account/session configuration used by the service account.
+The server does not execute review jobs locally. It creates queued scan jobs and
+external `pullwise-worker` hosts claim, run, and upload results through the
+worker API.
 
 Standalone pullwise-worker hosts use their own provider chain. The default is
 Codex only. Set `PULLWISE_PROVIDER_CHAIN=codex,opencode` on the worker host for
@@ -634,9 +597,9 @@ larger fleets.
 
 Scan/review flow tracing is enabled by default through the server logger named
 `pullwise_server.scan`. Events are emitted as single-line JSON payloads for
-queue claim, phase start/completion, checkout readiness, provider dispatch,
-finding counts, failures, cancellation, cleanup, and completion. They go to the
-same console and daily log files configured by `PULLWISE_LOG_DIR`.
+queue claim, worker phase updates, worker result upload, finding counts,
+failures, cancellation, cleanup, and completion. They go to the same console
+and daily log files configured by `PULLWISE_LOG_DIR`.
 
 Disable scan trace logs without changing code:
 
@@ -774,11 +737,9 @@ These switches are off by default:
 
 ```env
 PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS=true
-PULLWISE_REVIEW_PROVIDER=mock
 ```
 
-Use them only when testing frontend wiring without real GitHub or a real review
-provider.
+Use local GitHub mocks only when testing frontend wiring without real GitHub.
 
 ## Frontend Contract
 

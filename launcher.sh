@@ -478,7 +478,7 @@ cmd_init_env() {
   say "  - HTTP/runtime: PULLWISE_APP_URL, PULLWISE_ALLOWED_ORIGINS, PULLWISE_API_BASE_URL"
   say "  - Storage: PULLWISE_DB_PATH, PULLWISE_LOG_DIR, PULLWISE_CHECKOUT_ROOT"
   say "  - GitHub OAuth/App: client id/secret, app slug/id, private key path or base64"
-  say "  - Review provider: PULLWISE_REVIEW_PROVIDER plus PULLWISE_CODEX_BIN or PULLWISE_CLAUDE_BIN"
+  say "  - External workers: create at least one worker from the admin API after deploy"
   say "Then run: ./launcher.sh sync-env && ./launcher.sh doctor"
 }
 
@@ -868,7 +868,6 @@ cmd_config() {
   print_config_key PULLWISE_DB_PATH "$(db_path)"
   print_config_key PULLWISE_LOG_DIR "$(log_dir)"
   print_config_key PULLWISE_CHECKOUT_ROOT "$(checkout_root)"
-  print_config_key PULLWISE_REVIEW_PROVIDER "disabled"
   print_config_key PULLWISE_GITHUB_OAUTH_SCOPE "read:user user:email"
   print_config_key PULLWISE_GITHUB_CLIENT_ID ""
   print_config_key PULLWISE_GITHUB_CLIENT_SECRET ""
@@ -1132,26 +1131,7 @@ check_github_config() {
   fi
 }
 
-check_review_provider() {
-  provider=$(env_value PULLWISE_REVIEW_PROVIDER "disabled")
-  case "$provider" in
-    codex)
-      check_required_tool "Codex CLI" PULLWISE_CODEX_BIN codex >/dev/null
-      ;;
-    claude_code)
-      check_required_tool "Claude Code CLI" PULLWISE_CLAUDE_BIN claude >/dev/null
-      ;;
-    disabled|"")
-      fail "PULLWISE_REVIEW_PROVIDER is disabled; set codex or claude_code for real production scans."
-      ;;
-    mock)
-      fail "PULLWISE_REVIEW_PROVIDER=mock is only for explicit local wire-up, not production."
-      ;;
-    *)
-      fail "Unknown PULLWISE_REVIEW_PROVIDER: $provider"
-      ;;
-  esac
-
+check_scan_limits() {
   user_limit=$(env_value PULLWISE_MAX_RUNNING_SCANS_PER_USER "$(env_value PULLWISE_MAX_CONCURRENT_SCANS_PER_USER "1")")
   if is_positive_int "$user_limit"; then
     ok "PULLWISE_MAX_RUNNING_SCANS_PER_USER=$user_limit"
@@ -1259,7 +1239,7 @@ cmd_doctor() {
   check_production_env
   check_storage
   check_github_config
-  check_review_provider
+  check_scan_limits
   check_billing_config
   check_service_config
   check_health_if_running

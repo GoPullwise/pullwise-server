@@ -82,7 +82,7 @@ class LauncherContractsTest(unittest.TestCase):
             errors="replace",
         )
 
-    def write_fake_runtime(self, root: Path) -> tuple[Path, Path, Path]:
+    def write_fake_runtime(self, root: Path) -> tuple[Path, Path]:
         venv_python = root / "venv" / "bin" / "python"
         venv_python.parent.mkdir(parents=True, exist_ok=True)
         write_executable(
@@ -99,7 +99,6 @@ class LauncherContractsTest(unittest.TestCase):
         )
 
         fake_git = root / "bin" / "git"
-        fake_codex = root / "bin" / "codex"
         fake_journalctl = root / "bin" / "journalctl"
         fake_git.parent.mkdir(parents=True)
         write_executable(
@@ -110,20 +109,13 @@ class LauncherContractsTest(unittest.TestCase):
             """,
         )
         write_executable(
-            fake_codex,
-            """
-            #!/usr/bin/env sh
-            echo "codex 1.0.0"
-            """,
-        )
-        write_executable(
             fake_journalctl,
             """
             #!/usr/bin/env sh
             echo "journalctl args: $*"
             """,
         )
-        return venv_python, fake_git, fake_codex
+        return venv_python, fake_git
 
     def write_fake_long_running_python(self, root: Path) -> Path:
         venv_python = root / "venv" / "bin" / "python"
@@ -216,7 +208,6 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_GITHUB_APP_ID=123
                 PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64=cHJpdmF0ZS1rZXk=
                 PULLWISE_GITHUB_OAUTH_SCOPE=read:user user:email
-                PULLWISE_REVIEW_PROVIDER=codex
                 PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
                 """
             ).strip()
@@ -249,7 +240,6 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_GITHUB_APP_SLUG=pullwise
                 PULLWISE_GITHUB_APP_ID=123
                 PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=secrets/github-app-private-key.pem
-                PULLWISE_REVIEW_PROVIDER=codex
                 PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
                 """
             ).strip()
@@ -260,7 +250,7 @@ class LauncherContractsTest(unittest.TestCase):
         return env_file
 
     def base_launcher_env(self, root: Path) -> dict[str, str]:
-        venv_python, fake_git, fake_codex = self.write_fake_runtime(root)
+        venv_python, fake_git = self.write_fake_runtime(root)
         os_release = root / "os-release"
         os_release.write_text('ID=ubuntu\nVERSION_ID="22.04"\n', encoding="utf-8")
         return {
@@ -269,7 +259,6 @@ class LauncherContractsTest(unittest.TestCase):
             "PULLWISE_SYSTEMD_DIR": shell_path(root / "systemd"),
             "PULLWISE_VENV_DIR": shell_path(venv_python.parents[1]),
             "PULLWISE_GIT_BIN": shell_path(fake_git),
-            "PULLWISE_CODEX_BIN": shell_path(fake_codex),
             "PULLWISE_JOURNALCTL_BIN": shell_path(root / "bin" / "journalctl"),
             "PULLWISE_OS_RELEASE_FILE": shell_path(os_release),
             "PULLWISE_LAUNCHER_TESTING": "1",
@@ -349,7 +338,7 @@ class LauncherContractsTest(unittest.TestCase):
         self.assertIn("PULLWISE_GITHUB_CLIENT_ID", created)
         self.assertIn("HTTP/runtime", result.stdout)
         self.assertIn("GitHub OAuth/App", result.stdout)
-        self.assertIn("Review provider", result.stdout)
+        self.assertIn("External workers", result.stdout)
         self.assertIn("doctor", result.stdout)
 
     def test_init_env_does_not_overwrite_without_force(self) -> None:

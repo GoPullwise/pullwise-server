@@ -142,7 +142,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
                 "PULLWISE_WORKER_TOKEN": "worker-secret",
                 "PULLWISE_WORKER_ID": "wk_1",
-                "PULLWISE_REVIEW_PROVIDER": "mock",
             },
             clear=False,
         )

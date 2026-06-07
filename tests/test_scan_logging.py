@@ -7,7 +7,7 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import patch
 
-from pullwise_server import app, review, scan_logging, worker
+from pullwise_server import app, scan_logging
 
 
 class RouteHarness(app.PullwiseHandler):
@@ -45,56 +45,6 @@ class ScanLoggingTest(unittest.TestCase):
         app.ISSUES = []
         app.SCANS = [self._running_scan("sc_trace")]
 
-    def test_execute_scan_logs_traceable_review_flow_by_default(self) -> None:
-        finding = {
-            "id": "f_1",
-            "severity": "high",
-            "category": "Security",
-            "title": "Unsafe redirect",
-            "summary": "A redirect accepts arbitrary URLs.",
-            "impact": "Users can be sent to attacker-controlled pages.",
-            "file": "app.py",
-            "line": 10,
-        }
-
-        with (
-            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
-            patch("pullwise_server.worker.time.sleep"),
-            patch.object(worker.review, "provider_requires_checkout", return_value=False),
-            patch.object(worker.review, "run_review", return_value=[finding]),
-            self.assertLogs("pullwise_server.scan", level="INFO") as logs,
-        ):
-            worker._execute_scan("sc_trace", self._snapshot("sc_trace"), 100)
-
-        output = "\n".join(logs.output)
-        self.assertIn('"event":"scan_started"', output)
-        self.assertIn('"event":"phase_started"', output)
-        self.assertIn('"phase":"clone"', output)
-        self.assertIn('"phase":"ai"', output)
-        self.assertIn('"event":"review_started"', output)
-        self.assertIn('"event":"review_completed"', output)
-        self.assertIn('"findingCount":1', output)
-        self.assertIn('"event":"scan_completed"', output)
-        self.assertIn('"scanId":"sc_trace"', output)
-        self.assertIn('"repo":"owner/repo"', output)
-
-    def test_execute_scan_logs_can_be_disabled_by_environment(self) -> None:
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_REVIEW_PROVIDER": "mock",
-                    "PULLWISE_SCAN_LOGS_ENABLED": "false",
-                },
-                clear=False,
-            ),
-            patch("pullwise_server.worker.time.sleep"),
-            patch.object(worker.review, "provider_requires_checkout", return_value=False),
-            patch.object(worker.review, "run_review", return_value=[]),
-            self.assertNoLogs("pullwise_server.scan", level="INFO"),
-        ):
-            worker._execute_scan("sc_trace", self._snapshot("sc_trace"), 100)
-
     def test_log_event_sanitizes_non_json_serializable_fields(self) -> None:
         with self.assertLogs("pullwise_server.scan", level="INFO") as logs:
             try:
@@ -114,40 +64,6 @@ class ScanLoggingTest(unittest.TestCase):
         self.assertEqual(payload["token"], "\ufffdtoken")
         self.assertEqual(payload["metrics"], {"duration": None, "limit": None})
         self.assertEqual(payload["rows"], [{"value": ["nested"]}])
-
-    def test_run_review_logs_provider_dispatch(self) -> None:
-        raw_finding = {
-            "id": "f_direct",
-            "severity": "medium",
-            "category": "Quality",
-            "title": "Duplicate logic",
-            "summary": "Two branches repeat the same validation.",
-            "impact": "Future edits can drift.",
-            "file": "worker.py",
-            "line": 42,
-        }
-
-        with (
-            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
-            patch.object(review, "_run_mock", return_value=[raw_finding]),
-            self.assertLogs("pullwise_server.scan", level="INFO") as logs,
-        ):
-            findings = review.run_review(
-                repo="owner/repo",
-                branch="main",
-                commit="pending",
-                user_id="usr_1",
-                scan_id="sc_direct",
-            )
-
-        output = "\n".join(logs.output)
-        self.assertEqual(1, len(findings))
-        self.assertIn('"event":"review_provider_started"', output)
-        self.assertIn('"event":"review_provider_completed"', output)
-        self.assertIn('"provider":"mock"', output)
-        self.assertIn('"scanId":"sc_direct"', output)
-        self.assertIn('"rawFindingCount":1', output)
-        self.assertIn('"finalizedFindingCount":1', output)
 
     def test_scan_creation_logs_queued_scan(self) -> None:
         app.USERS = {
@@ -194,11 +110,7 @@ class ScanLoggingTest(unittest.TestCase):
             cookie="pw_session=ses_1",
         )
 
-        with (
-            patch.dict(os.environ, {"PULLWISE_REVIEW_PROVIDER": "mock"}, clear=False),
-            patch.object(app.worker, "start_scan"),
-            self.assertLogs("pullwise_server.scan", level="INFO") as logs,
-        ):
+        with self.assertLogs("pullwise_server.scan", level="INFO") as logs:
             app.PullwiseHandler.route(handler, "POST")
 
         output = "\n".join(logs.output)
@@ -207,7 +119,7 @@ class ScanLoggingTest(unittest.TestCase):
         self.assertIn(f'"scanId":"{handler.payload["id"]}"', output)
         self.assertIn('"repo":"owner/repo"', output)
         self.assertIn('"requestId":"scan_req_1"', output)
-        self.assertIn('"provider":"mock"', output)
+        self.assertIn('"provider":"worker"', output)
 
     def _running_scan(self, scan_id: str) -> dict:
         return {

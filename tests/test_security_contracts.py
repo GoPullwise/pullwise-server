@@ -1330,40 +1330,15 @@ class SecurityContractsTest(unittest.TestCase):
 
                 self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
 
-    def test_scan_creation_rejects_disabled_review_provider(self) -> None:
-        app.SESSIONS = {
-            "ses_1": {
-                "id": "ses_1",
-                "userId": "usr_1",
-                "createdAt": app.now(),
-                "expiresAt": app.now() + 3600,
-            }
-        }
-        initial_scan_count = len(app.SCANS)
-        handler = RouteHarness("/scans", {"repo": "owner/repo"}, cookie="pw_session=ses_1")
-
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(app.worker, "start_scan") as start_scan,
-        ):
-            app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
-        self.assertIn("Code review provider is not configured", handler.payload["message"])
-        self.assertEqual(len(app.SCANS), initial_scan_count)
-        start_scan.assert_not_called()
-
     def test_scan_creation_rejects_non_object_body(self) -> None:
         initial_scan_count = len(app.SCANS)
         handler = RouteHarness("/scans", ["owner/repo"], cookie=self.signed_in())
 
-        with patch.object(app.worker, "start_scan") as start_scan:
-            app.PullwiseHandler.route(handler, "POST")
+        app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(handler.payload["message"], "Request body must be a JSON object.")
         self.assertEqual(len(app.SCANS), initial_scan_count)
-        start_scan.assert_not_called()
 
     def test_scan_creation_uses_repository_item_installation_id(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1413,8 +1388,7 @@ class SecurityContractsTest(unittest.TestCase):
         handler = RouteHarness("/scans", {"repo": "acme/service"}, cookie="pw_session=ses_1")
 
         with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
-            patch.object(app.worker, "start_scan") as start_scan,
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
         ):
             app.PullwiseHandler.route(handler, "POST")
 
@@ -1423,7 +1397,6 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["installationAccount"], "acme")
         self.assertEqual(handler.payload["branch"], "develop")
         self.assertEqual(handler.payload["cloneUrl"], "https://github.com/acme/service.git")
-        start_scan.assert_not_called()
 
     def test_scan_creation_sanitizes_malformed_branch_and_commit_inputs(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1468,8 +1441,7 @@ class SecurityContractsTest(unittest.TestCase):
         )
 
         with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
-            patch.object(app.worker, "start_scan") as start_scan,
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
         ):
             app.PullwiseHandler.route(handler, "POST")
 
@@ -1477,7 +1449,6 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(handler.payload["branch"], "main")
         self.assertEqual(handler.payload["commit"], "pending")
         self.assertEqual(app.SCANS[0]["requestId"], "safe_scan_req")
-        start_scan.assert_not_called()
 
     def test_scan_creation_is_idempotent_for_repeated_request_id(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1522,8 +1493,7 @@ class SecurityContractsTest(unittest.TestCase):
         )
 
         with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
-            patch.object(app.worker, "start_scan") as start_scan,
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
         ):
             app.PullwiseHandler.route(first, "POST")
             app.PullwiseHandler.route(second, "POST")
@@ -1532,7 +1502,6 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(second.status, HTTPStatus.OK)
         self.assertEqual(first.payload["id"], second.payload["id"])
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_1"]), 1)
-        start_scan.assert_not_called()
 
     def test_scan_creation_rejects_request_id_reuse_for_different_repo(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1587,8 +1556,7 @@ class SecurityContractsTest(unittest.TestCase):
         )
 
         with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
-            patch.object(app.worker, "start_scan") as start_scan,
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
         ):
             app.PullwiseHandler.route(first, "POST")
             app.PullwiseHandler.route(second, "POST")
@@ -1598,7 +1566,6 @@ class SecurityContractsTest(unittest.TestCase):
         self.assertEqual(second.payload["code"], "IDEMPOTENCY_KEY_REUSED")
         self.assertEqual(second.payload["repoId"], first.payload["repoId"])
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_shared"]), 1)
-        start_scan.assert_not_called()
 
     def test_repositories_payload_treats_string_false_need_sync_as_connected(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
@@ -1756,15 +1723,13 @@ class SecurityContractsTest(unittest.TestCase):
         handler = RouteHarness("/scans", {"repo": "octocat/stale-repo"}, cookie="pw_session=ses_1")
 
         with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_REVIEW_PROVIDER": "mock"}, clear=True),
-            patch.object(app.worker, "start_scan") as start_scan,
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
         ):
             app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
         self.assertIn("Sync GitHub repositories", handler.payload["message"])
         self.assertEqual(len(app.SCANS), initial_scan_count)
-        start_scan.assert_not_called()
 
     def test_github_disconnect_requires_sign_in(self) -> None:
         handler = RouteHarness("/integrations/github")

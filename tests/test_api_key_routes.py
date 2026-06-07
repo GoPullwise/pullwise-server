@@ -113,7 +113,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
-                "PULLWISE_REVIEW_PROVIDER": "mock",
                 "PULLWISE_RATE_LIMIT_ENABLED": "false",
             },
             clear=False,
@@ -206,7 +205,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(repo["quota"]["scope"], "repository")
 
         with (
-            patch.object(app.worker, "start_scan") as start_scan,
             patch.object(app, "scan_branch_is_available", return_value=True) as branch_available,
         ):
             start = RouteHarness(
@@ -222,7 +220,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["apiKeyId"], repositories.payload["apiKey"]["id"])
         self.assertEqual(app.SCANS[0]["requestId"], "req_api")
         branch_available.assert_called_once()
-        start_scan.assert_not_called()
 
         status = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/current", headers=auth)
         app.PullwiseHandler.route(status, "GET")
@@ -412,26 +409,24 @@ class ApiKeyRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(repositories, "GET")
         repo_ids = {item["fullName"]: item["repoId"] for item in repositories.payload["items"]}
 
-        with patch.object(app.worker, "start_scan") as start_scan:
-            first = RouteHarness(
-                f"/api/v1/repositories/{repo_ids['acme/api']}/scans",
-                {"requestId": "req_shared"},
-                headers=auth,
-            )
-            second = RouteHarness(
-                f"/api/v1/repositories/{repo_ids['acme/other']}/scans",
-                {"requestId": "req_shared"},
-                headers=auth,
-            )
-            app.PullwiseHandler.route(first, "POST")
-            app.PullwiseHandler.route(second, "POST")
+        first = RouteHarness(
+            f"/api/v1/repositories/{repo_ids['acme/api']}/scans",
+            {"requestId": "req_shared"},
+            headers=auth,
+        )
+        second = RouteHarness(
+            f"/api/v1/repositories/{repo_ids['acme/other']}/scans",
+            {"requestId": "req_shared"},
+            headers=auth,
+        )
+        app.PullwiseHandler.route(first, "POST")
+        app.PullwiseHandler.route(second, "POST")
 
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.CONFLICT)
         self.assertEqual(second.payload["code"], "IDEMPOTENCY_KEY_REUSED")
         self.assertEqual(second.payload["repoId"], first.payload["repoId"])
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "req_shared"]), 1)
-        start_scan.assert_not_called()
 
     def test_api_key_concurrent_same_request_id_creates_only_one_scan(self) -> None:
         _cookie, key = self.create_api_key()

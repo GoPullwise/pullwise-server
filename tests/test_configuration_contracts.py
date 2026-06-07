@@ -52,7 +52,7 @@ class ConfigurationContractsTest(unittest.TestCase):
         values = env_example_values()
 
         self.assertNotEqual(values.get("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS"), "true")
-        self.assertNotEqual(values.get("PULLWISE_REVIEW_PROVIDER"), "mock")
+        self.assertNotIn("PULLWISE_REVIEW_PROVIDER", values)
 
     def test_env_example_does_not_include_magic_link_configuration(self) -> None:
         values = env_example_values()
@@ -106,7 +106,6 @@ class ConfigurationContractsTest(unittest.TestCase):
                     patch.object(app.logging_config, "configure_logging"),
                     patch.object(app, "ensure_state_loaded"),
                     patch.object(app, "recover_interrupted_scans", return_value=0),
-                    patch.object(app.worker, "ensure_workers"),
                     patch.object(app, "ThreadingHTTPServer", side_effect=server_factory),
                 ):
                     app.main()
@@ -117,11 +116,10 @@ class ConfigurationContractsTest(unittest.TestCase):
     def test_health_exposes_safe_readiness_details(self) -> None:
         handler = RouteHarness("/health")
 
-        with patch("pullwise_server.app.review.selected_provider", return_value="codex"):
-            handler.handle_get("/health", {}, ["health"])
+        handler.handle_get("/health", {}, ["health"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["reviewProvider"], "configured")
+        self.assertEqual(handler.payload["reviewProvider"], "worker")
         self.assertIn("github", handler.payload)
         self.assertIn("billing", handler.payload)
         self.assertIn("limits", handler.payload)

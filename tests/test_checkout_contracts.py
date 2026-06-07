@@ -6,31 +6,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from pullwise_server import app, checkout, review
+from pullwise_server import app, checkout
 
 
 class CheckoutContractsTest(unittest.TestCase):
-    def test_review_provider_checkout_contract(self) -> None:
-        self.assertFalse(review.provider_requires_checkout("mock"))
-        self.assertTrue(review.provider_requires_checkout("claude_code"))
-        self.assertTrue(review.provider_requires_checkout("codex"))
-
-    def test_review_provider_defaults_to_disabled(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(review.selected_provider(), "disabled")
-            self.assertFalse(review.provider_requires_checkout())
-
-    def test_disabled_review_provider_does_not_emit_mock_findings(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "provider is not configured"):
-                review.run_review(
-                    repo="owner/repo",
-                    branch="main",
-                    commit="pending",
-                    user_id="usr_1",
-                    scan_id="sc_1",
-                )
-
     def test_clone_url_must_stay_on_configured_github_host(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             self.assertEqual(
