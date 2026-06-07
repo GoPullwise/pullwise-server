@@ -112,6 +112,94 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "queued")
         self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
 
+    def test_recover_interrupted_scans_reconstructs_orphan_scan_job(self) -> None:
+        timestamp = app.now()
+        app.USERS = {"usr_1": {"id": "usr_1", "email": "dev@example.com"}}
+        app.SCANS = []
+        repository = db.upsert_repository(
+            {
+                "id": db.repository_id_for_github_repo("123"),
+                "github_repo_id": "123",
+                "full_name": "acme/api",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "private": True,
+                "clone_url": "https://github.com/acme/api.git",
+            }
+        )
+        db.create_scan_job(
+            {
+                "job_id": "job_orphan",
+                "scan_id": "sc_orphan",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp,
+                "user_id": "usr_1",
+                "repo_id": repository["id"],
+                "github_repo_id": "123",
+                "installation_id": "111",
+                "clone_url": "https://github.com/acme/api.git",
+            }
+        )
+
+        recovered = app.recover_interrupted_scans()
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(len(app.SCANS), 1)
+        self.assertEqual(app.SCANS[0]["id"], "sc_orphan")
+        self.assertEqual(app.SCANS[0]["jobId"], "job_orphan")
+        self.assertEqual(app.SCANS[0]["status"], "queued")
+        self.assertEqual(app.SCANS[0]["repoId"], repository["id"])
+        self.assertEqual(app.SCANS[0]["githubRepoId"], "123")
+        self.persist_state.assert_called_once()
+
+    def test_recover_interrupted_scans_rolls_back_quota_without_scan_or_job(self) -> None:
+        timestamp = app.now()
+        app.USERS = {
+            "usr_1": {
+                "id": "usr_1",
+                "email": "dev@example.com",
+                "billing": {"status": "active", "plan": "pro"},
+            }
+        }
+        app.SCANS = []
+        repository = db.upsert_repository(
+            {
+                "id": db.repository_id_for_github_repo("456"),
+                "github_repo_id": "456",
+                "full_name": "acme/worker",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "private": True,
+                "clone_url": "https://github.com/acme/worker.git",
+            }
+        )
+        app.quota.consume_scan_quota(
+            user=app.USERS["usr_1"],
+            repository=repository,
+            requested_by_user_id="usr_1",
+            scan_id="sc_quota_only",
+            request_id="req_quota_only",
+            timestamp=timestamp,
+        )
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            before_ledger_count = connection.execute("SELECT COUNT(*) FROM quota_ledger").fetchone()[0]
+            before_used = connection.execute("SELECT COALESCE(SUM(used), 0) FROM quota_buckets").fetchone()[0]
+
+        recovered = app.recover_interrupted_scans()
+
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            after_ledger_count = connection.execute("SELECT COUNT(*) FROM quota_ledger").fetchone()[0]
+            after_used = connection.execute("SELECT COALESCE(SUM(used), 0) FROM quota_buckets").fetchone()[0]
+        self.assertGreater(before_ledger_count, 0)
+        self.assertGreater(before_used, 0)
+        self.assertEqual(recovered, 1)
+        self.assertEqual(after_ledger_count, 0)
+        self.assertEqual(after_used, 0)
+        self.assertEqual(app.SCANS, [])
+
     def test_recover_interrupted_scans_reconciles_completed_job_result_before_requeue(self) -> None:
         timestamp = app.now()
         app.SCANS = [

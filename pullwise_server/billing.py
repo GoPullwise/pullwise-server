@@ -608,14 +608,24 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
         metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
         customer_details = dict_payload(obj.get("customer_details"))
         user_id = obj.get("client_reference_id") or metadata.get("userId")
-        if not user_id:
+        subscription = obj.get("subscription")
+        subscription_payload = dict_payload(subscription)
+        subscription_id = text_payload(subscription_payload.get("id") if subscription_payload else subscription, "")
+        subscription_status = text_payload(subscription_payload.get("status"), "").strip().lower()
+        payment_status = text_payload(obj.get("payment_status"), "").strip().lower()
+        if (
+            not user_id
+            or not subscription_id
+            or subscription_status not in {"active", "trialing"}
+            or payment_status not in {"paid", "no_payment_required"}
+        ):
             return None
         return {
             "userId": user_id,
             "provider": "stripe",
             "customerId": obj.get("customer"),
             "customerEmail": customer_details.get("email") or obj.get("customer_email"),
-            "subscriptionId": obj.get("subscription"),
+            "subscriptionId": subscription_id,
             "status": "active",
             "plan": normalize_plan(metadata.get("plan") or "pro"),
             "interval": normalize_interval(metadata.get("interval") or "month"),

@@ -121,6 +121,50 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.assertEqual(handler.headers_out, {})
         log_exception.assert_called_once()
 
+    def test_samesite_none_cookie_post_rejects_untrusted_origin_before_sign_out(self) -> None:
+        handler = HandlerHarness(
+            "/auth/sign-out",
+            cookie="pw_session=ses_1",
+            headers={"Origin": "https://evil.example"},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_COOKIE_SAME_SITE": "None",
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+        self.assertIn("ses_1", app.SESSIONS)
+
+    def test_samesite_none_cookie_post_rejects_untrusted_origin_before_checkout_mutation(self) -> None:
+        handler = HandlerHarness(
+            "/billing/checkout-sessions",
+            cookie="pw_session=ses_1",
+            headers={"Origin": "https://evil.example"},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_COOKIE_SAME_SITE": "None",
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                "PULLWISE_ADMIN_USER_IDS": "usr_1",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+        self.assertNotIn("billing", app.USERS["usr_1"])
+        self.assertNotIn("billingCheckout", app.USERS["usr_1"])
+
 
 if __name__ == "__main__":
     unittest.main()

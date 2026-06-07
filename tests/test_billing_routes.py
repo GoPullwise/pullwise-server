@@ -6,6 +6,7 @@ import hmac
 import json
 import time
 import tempfile
+import threading
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -823,6 +824,68 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(billing_state["currentPeriodStart"], 1710000000)
         self.assertEqual(billing_state["currentPeriodEnd"], 1712592000)
         self.assertEqual(billing_state["canceledAt"], 1713000000)
+
+    def test_concurrent_billing_updates_do_not_let_stale_event_overwrite_newer_state(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+        older_reached_write_path = threading.Event()
+        release_older = threading.Event()
+        original_billing_update_text = app.billing_update_text
+
+        def pausing_billing_update_text(value):
+            if (
+                threading.current_thread().name == "older-billing-update"
+                and value == "cus_1"
+                and not older_reached_write_path.is_set()
+            ):
+                older_reached_write_path.set()
+                self.assertTrue(release_older.wait(2), "timed out releasing older billing update")
+            return original_billing_update_text(value)
+
+        older_update = {
+            "userId": "usr_1",
+            "provider": "stripe",
+            "customerId": "cus_1",
+            "status": "canceled",
+            "plan": "pro",
+            "eventType": "customer.subscription.deleted",
+            "eventId": "evt_older",
+            "eventCreated": 100,
+        }
+        newer_update = {
+            "userId": "usr_1",
+            "provider": "stripe",
+            "customerId": "cus_1",
+            "status": "active",
+            "plan": "pro",
+            "eventType": "customer.subscription.updated",
+            "eventId": "evt_newer",
+            "eventCreated": 200,
+        }
+
+        with patch.object(app, "billing_update_text", side_effect=pausing_billing_update_text):
+            older_thread = threading.Thread(
+                target=app.PullwiseHandler.apply_billing_update,
+                args=(handler, older_update),
+                name="older-billing-update",
+            )
+            newer_thread = threading.Thread(
+                target=app.PullwiseHandler.apply_billing_update,
+                args=(handler, newer_update),
+                name="newer-billing-update",
+            )
+            older_thread.start()
+            self.assertTrue(older_reached_write_path.wait(2), "older update did not reach the write path")
+            newer_thread.start()
+            time.sleep(0.05)
+            release_older.set()
+            older_thread.join(2)
+            newer_thread.join(2)
+
+        self.assertFalse(older_thread.is_alive())
+        self.assertFalse(newer_thread.is_alive())
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["lastEventCreated"], 200)
 
     def test_billing_update_ignores_malformed_provider_and_event_type_when_applying(self) -> None:
         seed_session()

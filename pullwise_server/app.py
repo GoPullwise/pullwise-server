@@ -480,10 +480,96 @@ def cleanup_expired_state_records(timestamp: int) -> dict[str, int]:
     }
 
 
+def scan_status_from_recovered_job(job: dict) -> str:
+    status = public_issue_text(job.get("status")).lower()
+    if status in {"claimed", "running", "uploading_result"}:
+        return "running"
+    return public_scan_status(status)
+
+
+def scan_from_recovered_job(job: dict) -> dict | None:
+    scan_id = public_issue_text(job.get("scan_id"))
+    user_id = public_issue_text(job.get("user_id"))
+    repo = clean_repository_full_name(job.get("repo"))
+    if not scan_id or not user_id or not repo or user_id not in USERS:
+        return None
+    created_at = pull_request_timestamp(job.get("created_at")) or now()
+    completed_at = pull_request_timestamp(job.get("completed_at"))
+    repo_id = public_issue_text(job.get("repo_id"))
+    repository = db.get_repository(repo_id) if repo_id else None
+    scan = {
+        "id": scan_id,
+        "repo": repo,
+        "branch": clean_github_access_text(job.get("branch")) or "main",
+        "commit": clean_github_access_text(job.get("commit")) or "pending",
+        "status": scan_status_from_recovered_job(job),
+        "userId": user_id,
+        "createdAt": created_at,
+        "queuedAt": created_at,
+        "progress": public_scan_progress(job.get("progress")),
+        "phase": public_scan_phase(job.get("progress_phase")) or None,
+        "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        "jobId": public_issue_text(job.get("job_id")),
+        "repoId": repo_id,
+        "githubRepoId": public_issue_text(job.get("github_repo_id")),
+        "installationId": clean_github_access_text(job.get("installation_id"), allow_int=True),
+        "cloneUrl": trusted_github_web_url(job.get("clone_url")) or (repository or {}).get("clone_url"),
+        "repositoryPrivate": bool((repository or {}).get("private")),
+        "repoPath": None,
+        "by": "you",
+        "recoveredAt": now(),
+        "recoveryReason": "orphan_scan_job",
+    }
+    if completed_at is not None:
+        scan["completedAt"] = completed_at
+    error = clean_scan_error(job.get("error"))
+    if error:
+        scan["error"] = error
+    return scan
+
+
+def reconstruct_orphan_scan_jobs_locked() -> int:
+    existing_scan_ids = {public_issue_text(scan.get("id")) for scan in SCANS if public_issue_text(scan.get("id"))}
+    reconstructed = 0
+    for job in db.list_scan_jobs_missing_from_state(existing_scan_ids):
+        scan_id = public_issue_text(job.get("scan_id"))
+        if not scan_id or scan_id in existing_scan_ids:
+            continue
+        scan = scan_from_recovered_job(job)
+        if not scan:
+            continue
+        SCANS.insert(0, scan)
+        existing_scan_ids.add(scan_id)
+        reconstructed += 1
+    if reconstructed:
+        mark_state_dirty()
+    return reconstructed
+
+
+def rollback_orphan_scan_quota_locked() -> int:
+    existing_scan_ids = {public_issue_text(scan.get("id")) for scan in SCANS if public_issue_text(scan.get("id"))}
+    rolled_back = 0
+    for row in db.list_orphan_scan_quota_consumptions(existing_scan_ids):
+        scan_id = public_issue_text(row.get("scan_id"))
+        requested_by_user_id = public_issue_text(row.get("requested_by_user_id"))
+        if not scan_id or not requested_by_user_id:
+            continue
+        result = quota.rollback_scan_quota(
+            scan_id=scan_id,
+            requested_by_user_id=requested_by_user_id,
+            request_id=public_issue_text(row.get("request_id")) or None,
+        )
+        if result.get("ledgerRows"):
+            rolled_back += 1
+    return rolled_back
+
+
 def recover_interrupted_scans() -> int:
     recovered = 0
     recovered_jobs = db.recover_expired_scan_jobs(now())
     with STATE_LOCK:
+        recovered += reconstruct_orphan_scan_jobs_locked()
+        recovered += rollback_orphan_scan_quota_locked()
         recovered += reconcile_completed_scan_job_results_locked()
         recovered += apply_recovered_scan_jobs_locked(recovered_jobs)
         for scan in SCANS:
@@ -620,6 +706,18 @@ def allowed_origins() -> set[str]:
         "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
     )
     return {item.strip() for item in raw.split(",") if item.strip() and item.strip() != "*"}
+
+
+def trusted_browser_origins() -> set[str]:
+    allowed = allowed_origins()
+    for value in (
+        env("PULLWISE_APP_URL", "http://localhost:5173"),
+        os.environ.get("PULLWISE_API_BASE_URL", ""),
+    ):
+        origin = url_origin(value)
+        if origin:
+            allowed.add(origin)
+    return allowed
 
 
 def api_base_url(handler: BaseHTTPRequestHandler) -> str:
@@ -6247,6 +6345,18 @@ def api_repository_authorized_for_user(user: dict | None, repository: dict | Non
     return bool(full_name and repository_is_authorized(github_access, full_name))
 
 
+def api_repository_access_denial_for_user(user: dict | None, github_access: dict | None) -> tuple[str, str] | None:
+    if not user or not isinstance(github_access, dict):
+        return None
+    if github_repository_authorization_pending(user):
+        return "REPOSITORY_AUTHORIZATION_PENDING", "Complete GitHub repository authorization before using API repository routes."
+    if not github_repository_access_authorized_for_user(user, github_access):
+        return "REPOSITORY_ACCESS_UNAUTHORIZED", "Authorize GitHub repositories before using API repository routes."
+    if github_repositories_need_sync(github_access):
+        return "REPOSITORY_SYNC_REQUIRED", "Sync GitHub repositories before using API repository routes."
+    return None
+
+
 def sync_repository_access_for_user(user: dict | None, github_access: dict | None) -> None:
     if not user or not isinstance(github_access, dict):
         return
@@ -7346,6 +7456,43 @@ def external_api_segments(segments: list[str]) -> list[str] | None:
     return None
 
 
+def request_uses_session_cookie(handler: BaseHTTPRequestHandler) -> bool:
+    raw_cookie = request_header(handler, "Cookie") or ""
+    if not raw_cookie:
+        return False
+    cookie = SimpleCookie(raw_cookie)
+    morsel = cookie.get(SESSION_COOKIE)
+    return bool(morsel and morsel.value)
+
+
+def request_origin_is_trusted(handler: BaseHTTPRequestHandler) -> bool:
+    origin = first_header_value(handler, "Origin")
+    if origin:
+        return bool(url_origin(origin) in trusted_browser_origins())
+    referer = first_header_value(handler, "Referer")
+    if referer:
+        return bool(url_origin(referer) in trusted_browser_origins())
+    return False
+
+
+def csrf_origin_check_exempt(path: str, segments: list[str]) -> bool:
+    return (
+        path.startswith("/webhooks/")
+        or external_api_segments(segments) is not None
+        or bool(segments and segments[0] == "worker")
+    )
+
+
+def cookie_state_change_needs_origin_check(method: str, path: str, segments: list[str], handler: BaseHTTPRequestHandler) -> bool:
+    if method not in {"POST", "PATCH", "DELETE"}:
+        return False
+    if cookie_same_site() != "None":
+        return False
+    if csrf_origin_check_exempt(path, segments):
+        return False
+    return request_uses_session_cookie(handler)
+
+
 def decode_permissions(value: object) -> dict:
     if isinstance(value, dict):
         return value
@@ -7496,6 +7643,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 if self.apply_rate_limit(method, path):
                     return
                 self.enforce_body_size_limit(method)
+                if cookie_state_change_needs_origin_check(method, path, segments, self) and not request_origin_is_trusted(self):
+                    return self.error(HTTPStatus.FORBIDDEN, "State-changing requests must come from a trusted origin.")
                 if method == "GET":
                     return self.handle_get(path, params, segments)
                 if method == "POST":
@@ -8942,6 +9091,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return None
         user = context.get("user") if isinstance(context.get("user"), dict) else None
         github_access = user.get("githubRepositoryAccess") if user else None
+        if api_repository_access_denial_for_user(user, github_access):
+            self.error(HTTPStatus.NOT_FOUND, "Repository is not authorized for this account.")
+            return None
         if user and isinstance(github_access, dict):
             sync_repository_access_for_user(user, github_access)
         repository = db.get_repository(repo_id)
@@ -9465,6 +9617,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return
             user = context["user"]
             github_access = user.get("githubRepositoryAccess")
+            access_denial = api_repository_access_denial_for_user(user, github_access)
+            if access_denial:
+                code, message = access_denial
+                return self.json({"message": message, "code": code}, HTTPStatus.FORBIDDEN)
             items = repository_items_for_response(user, github_access)
             return self.json(
                 {
@@ -9724,14 +9880,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json({"received": True})
 
     def apply_billing_update(self, update: dict) -> None:
-        if billing_event_processed(update):
-            return
-        user = billing_user_for_update(update)
-        if user:
-            apply_billing_update_to_user(user, update)
-            apply_pending_billing_updates_for_user(user)
-            return
-        remember_pending_billing_update(update)
+        with STATE_LOCK:
+            if billing_event_processed(update):
+                return
+            user = billing_user_for_update(update)
+            if user:
+                apply_billing_update_to_user(user, update)
+                apply_pending_billing_updates_for_user(user)
+                return
+            remember_pending_billing_update(update)
 
     def send_cors_headers(self) -> None:
         origin = self.headers.get("Origin")

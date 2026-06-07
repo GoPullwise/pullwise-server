@@ -1281,6 +1281,55 @@ def get_scan_job(job_id: str) -> dict[str, Any] | None:
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
 
 
+def list_scan_jobs_missing_from_state(scan_ids: list[str] | set[str]) -> list[dict[str, Any]]:
+    initialize()
+    existing_ids = sorted({str(scan_id or "").strip() for scan_id in scan_ids if str(scan_id or "").strip()})
+    query = "SELECT * FROM scan_jobs"
+    params: list[Any] = []
+    if existing_ids:
+        placeholders = ",".join("?" for _ in existing_ids)
+        query += f" WHERE scan_id NOT IN ({placeholders})"
+        params.extend(existing_ids)
+    query += " ORDER BY created_at ASC, job_id ASC"
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return [row_to_dict(row) or {} for row in connection.execute(query, params).fetchall()]
+
+
+def list_orphan_scan_quota_consumptions(scan_ids: list[str] | set[str]) -> list[dict[str, Any]]:
+    initialize()
+    existing_ids = sorted({str(scan_id or "").strip() for scan_id in scan_ids if str(scan_id or "").strip()})
+    params: list[Any] = []
+    existing_clause = ""
+    if existing_ids:
+        placeholders = ",".join("?" for _ in existing_ids)
+        existing_clause = f"AND q.scan_id NOT IN ({placeholders})"
+        params.extend(existing_ids)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            f"""
+            SELECT
+                q.scan_id,
+                q.requested_by_user_id,
+                q.request_id,
+                COUNT(*) AS ledger_rows
+            FROM quota_ledger q
+            LEFT JOIN scan_jobs sj ON sj.scan_id = q.scan_id
+            WHERE q.reason = 'scan_created'
+              AND q.delta > 0
+              AND q.scan_id IS NOT NULL
+              AND q.scan_id != ''
+              AND sj.scan_id IS NULL
+              {existing_clause}
+            GROUP BY q.scan_id, q.requested_by_user_id, q.request_id
+            ORDER BY MIN(q.created_at) ASC, q.scan_id ASC
+            """,
+            params,
+        ).fetchall()
+        return [row_to_dict(row) or {} for row in rows]
+
+
 def update_scan_job_commit(job_id: str, commit: str) -> dict[str, Any] | None:
     initialize()
     job_id = str(job_id or "").strip()

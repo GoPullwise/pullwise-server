@@ -79,7 +79,8 @@ class BillingWebhookTest(unittest.TestCase):
                 "object": {
                     "client_reference_id": "usr_1",
                     "customer": "cus_1",
-                    "subscription": "sub_1",
+                    "subscription": {"id": "sub_1", "status": "active"},
+                    "payment_status": "paid",
                 }
             },
         }
@@ -94,6 +95,46 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["eventId"], "evt_checkout_1")
         self.assertEqual(update["eventCreated"], 1710000000)
 
+    def test_stripe_checkout_completed_unpaid_session_does_not_grant_active_billing(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_checkout_unpaid_1",
+                "created": 1710000001,
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "client_reference_id": "usr_1",
+                        "customer": "cus_1",
+                        "subscription": "sub_1",
+                        "payment_status": "unpaid",
+                        "metadata": {"plan": "pro"},
+                    }
+                },
+            }
+        )
+
+        self.assertIsNone(update)
+
+    def test_stripe_checkout_completed_without_subscription_status_does_not_grant_active_billing(self) -> None:
+        update = billing.billing_update_from_stripe_event(
+            {
+                "id": "evt_checkout_paid_unexpanded_1",
+                "created": 1710000002,
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "client_reference_id": "usr_1",
+                        "customer": "cus_1",
+                        "subscription": "sub_1",
+                        "payment_status": "paid",
+                        "metadata": {"plan": "pro"},
+                    }
+                },
+            }
+        )
+
+        self.assertIsNone(update)
+
     def test_stripe_checkout_ignores_malformed_customer_details(self) -> None:
         update = billing.billing_update_from_stripe_event(
             {
@@ -103,6 +144,8 @@ class BillingWebhookTest(unittest.TestCase):
                     "object": {
                         "client_reference_id": "usr_1",
                         "customer": "cus_1",
+                        "subscription": {"id": "sub_1", "status": "active"},
+                        "payment_status": "paid",
                         "customer_details": [{"email": "bad@example.com"}],
                         "customer_email": "dev@example.com",
                     }

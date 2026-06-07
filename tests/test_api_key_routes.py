@@ -237,6 +237,67 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(stop.status, HTTPStatus.OK)
         self.assertEqual(stop.payload["status"], "cancelled")
 
+    def test_api_key_repository_routes_reject_misbound_github_access(self) -> None:
+        _cookie, key = self.create_api_key()
+        auth = {"Authorization": f"Bearer {key}"}
+        repository = db.upsert_repository(
+            {
+                "id": db.repository_id_for_github_repo("123"),
+                "github_repo_id": "123",
+                "full_name": "acme/api",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "private": True,
+                "clone_url": "https://github.com/acme/api.git",
+            }
+        )
+        app.USERS["usr_1"]["githubRepositoryAccess"]["authorizedUserId"] = "usr_other"
+
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        start = RouteHarness(
+            f"/api/v1/repositories/{repository['id']}/scans",
+            {"requestId": "req_misbound"},
+            headers=auth,
+        )
+
+        app.PullwiseHandler.route(repositories, "GET")
+        app.PullwiseHandler.route(start, "POST")
+
+        self.assertEqual(repositories.status, HTTPStatus.FORBIDDEN)
+        self.assertEqual(start.status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(app.SCANS, [])
+
+    def test_api_key_repository_routes_reject_stale_repository_access(self) -> None:
+        _cookie, key = self.create_api_key()
+        auth = {"Authorization": f"Bearer {key}"}
+        repository = db.upsert_repository(
+            {
+                "id": db.repository_id_for_github_repo("123"),
+                "github_repo_id": "123",
+                "full_name": "acme/api",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "private": True,
+                "clone_url": "https://github.com/acme/api.git",
+            }
+        )
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositoriesNeedSync"] = True
+
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        start = RouteHarness(
+            f"/api/v1/repositories/{repository['id']}/scans",
+            {"requestId": "req_stale_access"},
+            headers=auth,
+        )
+
+        app.PullwiseHandler.route(repositories, "GET")
+        app.PullwiseHandler.route(start, "POST")
+
+        self.assertEqual(repositories.status, HTTPStatus.FORBIDDEN)
+        self.assertEqual(repositories.payload["code"], "REPOSITORY_SYNC_REQUIRED")
+        self.assertEqual(start.status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(app.SCANS, [])
+
     def test_external_api_scan_uses_repository_item_installation_in_multi_install_access(self) -> None:
         _cookie, key = self.create_api_key()
         github_access = app.USERS["usr_1"]["githubRepositoryAccess"]
