@@ -634,6 +634,35 @@ def public_issue_audit_swarm(issue: dict) -> dict:
     return {key: value for key, value in payload.items() if value}
 
 
+def public_issue_review_calibration(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    decision = public_issue_text(source.get("decision")).lower()
+    if decision not in {"reported", "audit_only", "rejected"}:
+        return {}
+    score_band = public_issue_text(source.get("scoreBand") or source.get("score_band")).lower()
+    if score_band not in {"report_band", "audit_band", "reject_band"}:
+        score_band = ""
+    score_kind = public_issue_text(source.get("scoreKind") or source.get("score_kind")).lower()
+    if score_kind not in {"ranking_score", "truth_probability"}:
+        score_kind = ""
+    verification_status = public_issue_text(
+        source.get("verificationStatus") or source.get("verification_status")
+    ).lower()
+    if verification_status not in ISSUE_VERIFICATION_STATUSES:
+        verification_status = ""
+    payload = {
+        "protocol": "pullwise-review-calibration-public/0.1",
+        "decision": decision,
+        "reason": public_issue_text(source.get("reason"))[:120],
+        "scoreBand": score_band,
+        "scoreKind": score_kind,
+        "verificationStatus": verification_status,
+        "auditOnly": source.get("auditOnly") is True or source.get("audit_only") is True,
+        "guardrailApplied": source.get("guardrailApplied") is True or source.get("guardrail_applied") is True,
+    }
+    return {key: item for key, item in payload.items() if item not in ("", [], {})}
+
+
 def issue_payload(issue: dict) -> dict:
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
     auto_fix = issue_auto_fix_contract_ok(issue)
@@ -718,6 +747,11 @@ def issue_payload(issue: dict) -> dict:
     audit_swarm = public_issue_audit_swarm(issue)
     if audit_swarm:
         payload["auditSwarm"] = audit_swarm
+    review_calibration = public_issue_review_calibration(
+        issue.get("reviewCalibration") or issue.get("review_calibration")
+    )
+    if review_calibration:
+        payload["reviewCalibration"] = review_calibration
     reported_verification_status = public_issue_text(issue.get("reportedVerificationStatus")).lower()
     if reported_verification_status in ISSUE_VERIFICATION_STATUSES and reported_verification_status != verification_status:
         payload["reportedVerificationStatus"] = reported_verification_status
@@ -987,5 +1021,4 @@ def filter_user_issue_payloads(issues: list[dict], params: dict) -> list[dict]:
             )
         ]
     return issues
-
 

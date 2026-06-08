@@ -449,7 +449,7 @@ def worker_audit_swarm_card_to_finding(card: dict, results: list[dict], index: i
         "agentRole": public_issue_text(card.get("agent_role") or card.get("agentRole")),
         "verdict": verdict,
     }
-    return {
+    finding = {
         "id": issue_id,
         "severity": worker_audit_swarm_severity(card.get("severity")),
         "category": worker_audit_swarm_category(card),
@@ -483,6 +483,12 @@ def worker_audit_swarm_card_to_finding(card: dict, results: list[dict], index: i
         "references": worker_audit_swarm_references(card),
         "auditSwarm": {key: value for key, value in audit_swarm.items() if value},
     }
+    review_calibration = public_issue_review_calibration(
+        card.get("review_calibration") or card.get("reviewCalibration")
+    )
+    if review_calibration:
+        finding["reviewCalibration"] = review_calibration
+    return finding
 
 
 def worker_audit_swarm_locations(card: dict, *, job: dict | None = None) -> list[dict]:

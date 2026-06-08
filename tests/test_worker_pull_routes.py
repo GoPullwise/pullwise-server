@@ -608,6 +608,77 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(duplicate.payload["duplicate"])
         self.assertEqual(len(db.list_review_decision_events(job_id=job["job_id"])), 1)
 
+    def test_worker_result_exposes_safe_review_calibration_summary_on_issue_payload(self) -> None:
+        scan = {
+            "id": "sc_public_calibration",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_123",
+            "githubRepoId": "123",
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        result_body = {
+            "status": "done",
+            "attempt_id": "wk_1-1",
+            "commit": "a" * 40,
+            **audit_result_fields(
+                [
+                    {
+                        **audit_issue_card("Calibrated issue", issue_id="issue-calibrated"),
+                        "review_calibration": {
+                            "protocol": "pullwise-review-calibration-public/0.1",
+                            "decision": "reported",
+                            "reason": "verified_or_static_proof_guardrail",
+                            "scoreBand": "report_band",
+                            "scoreKind": "ranking_score",
+                            "verificationStatus": "static_proof",
+                            "auditOnly": False,
+                            "guardrailApplied": True,
+                            "rawConfidence": 0.99,
+                            "cohortKey": "source:secret",
+                        },
+                    }
+                ]
+            ),
+            "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+            "result_checksum": "checksum-public-calibration",
+        }
+        result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
+        app.PullwiseHandler.route(result, "POST")
+        self.assertEqual(result.status, HTTPStatus.OK)
+
+        payload = app.issue_payload(app.ISSUES[0])
+
+        self.assertEqual(
+            payload["reviewCalibration"],
+            {
+                "protocol": "pullwise-review-calibration-public/0.1",
+                "decision": "reported",
+                "reason": "verified_or_static_proof_guardrail",
+                "scoreBand": "report_band",
+                "scoreKind": "ranking_score",
+                "verificationStatus": "static_proof",
+                "auditOnly": False,
+                "guardrailApplied": True,
+            },
+        )
+        serialized = json.dumps(payload)
+        self.assertNotIn("rawConfidence", serialized)
+        self.assertNotIn("cohortKey", serialized)
+
     def test_claim_payload_caps_enforce_mode_until_shadow_gate_passes(self) -> None:
         scan = {
             "id": "sc_enforce_gate",
