@@ -33,6 +33,9 @@ def scan_payload(scan: dict) -> dict:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0
     if "error" in scan:
         payload["error"] = clean_scan_error(scan.get("error"))
+    error_code = public_scan_error_code(scan.get("errorCode") or scan.get("error_code"))
+    if error_code:
+        payload["errorCode"] = error_code
     if "time" in scan:
         payload["time"] = public_issue_text(scan.get("time"))
     if "by" in scan:
@@ -55,6 +58,15 @@ def scan_payload(scan: dict) -> dict:
         payload["billingUsage"] = safe_quota_usage_payload(scan.get("billingUsage"), default_scope="user")
     if isinstance(scan.get("repoUsage"), dict):
         payload["repoUsage"] = safe_quota_usage_payload(scan.get("repoUsage"), default_scope="repository")
+    if isinstance(scan.get("quotaRefunded"), dict):
+        refunded = scan["quotaRefunded"]
+        reason = public_scan_error_code(refunded.get("reason"))
+        if reason:
+            payload["quotaRefunded"] = {
+                "reason": reason,
+                "ledgerRows": public_scan_count(refunded.get("ledgerRows")),
+                "bucketRows": public_scan_count(refunded.get("bucketRows")),
+            }
     if isinstance(scan.get("riskDecision"), dict):
         decision = public_issue_text(scan["riskDecision"].get("decision"))
         reason = public_issue_text(scan["riskDecision"].get("reason"))
@@ -799,6 +811,11 @@ def review_calibration_safe_bucket_payload(value: object) -> dict:
         if len(payload) >= 12:
             break
     return payload
+
+
+def public_scan_error_code(value: object) -> str:
+    error_code = public_issue_text(value).replace("-", "_").upper()
+    return error_code if error_code in {"REPOSITORY_TOO_LARGE"} else ""
 
 
 def review_calibration_admin_snapshot_payload(snapshot: dict) -> dict:
@@ -2915,6 +2932,17 @@ def public_scan_preflight(value: object) -> dict:
     environment = public_scan_preflight_environment(value.get("environment"))
     if environment:
         payload["environment"] = environment
+    repository_stats = public_scan_preflight_repository_stats(value.get("repositoryStats"))
+    if repository_stats:
+        payload["repositoryStats"] = repository_stats
+    repository_limits = public_scan_preflight_repository_limits(value.get("repositoryLimits"))
+    if repository_limits:
+        payload["repositoryLimits"] = repository_limits
+    if value.get("repositoryLimitExceeded") is True:
+        payload["repositoryLimitExceeded"] = True
+    repository_limit_reasons = review._safe_text_list(value.get("repositoryLimitReasons"))[:5]
+    if repository_limit_reasons:
+        payload["repositoryLimitReasons"] = repository_limit_reasons
     for key in ("languages", "packageManagers", "availableScripts", "limitations"):
         items = review._safe_text_list(value.get(key))[:20]
         if items:
@@ -2956,6 +2984,27 @@ def public_scan_preflight(value: object) -> dict:
     if verifier:
         payload["verifier"] = verifier
     return payload
+
+
+def public_scan_preflight_repository_stats(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    payload = {
+        "fileCount": public_scan_count(value.get("fileCount")),
+        "totalBytes": public_scan_count(value.get("totalBytes")),
+    }
+    if value.get("scanStoppedEarly") is True:
+        payload["scanStoppedEarly"] = True
+    return payload
+
+
+def public_scan_preflight_repository_limits(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        "maxFiles": public_scan_count(value.get("maxFiles")),
+        "maxBytes": public_scan_count(value.get("maxBytes")),
+    }
 
 
 def public_scan_preflight_environment(value: object) -> dict:

@@ -2207,6 +2207,105 @@ class WorkerPullRoutesTest(unittest.TestCase):
             [{"reason": "missing_evidence", "count": 2}],
         )
 
+    def test_repository_too_large_worker_result_refunds_only_that_scan_quota(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {"usr_1": user}
+        repositories = []
+        for index in range(4):
+            repository = db.upsert_repository(
+                {
+                    "github_repo_id": str(10_000 + index),
+                    "full_name": f"acme/repo-{index}",
+                    "owner_login": "acme",
+                    "default_branch": "main",
+                    "private": False,
+                    "clone_url": f"https://github.com/acme/repo-{index}.git",
+                }
+            )
+            repositories.append(repository)
+            scan_id = f"sc_repo_limit_{index}"
+            quota_result = app.quota.consume_scan_quota(
+                user=user,
+                repository=repository,
+                requested_by_user_id=user["id"],
+                scan_id=scan_id,
+                request_id=f"req_repo_limit_{index}",
+            )
+            scan = {
+                "id": scan_id,
+                "repo": repository["full_name"],
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": user["id"],
+                "createdAt": app.now() + index,
+                "queuedAt": app.now() + index,
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "repoId": repository["id"],
+                "githubRepoId": repository["github_repo_id"],
+                "requestId": f"req_repo_limit_{index}",
+                "quotaBucketIds": quota_result["bucketIds"],
+                "billingUsage": quota_result["user"],
+                "repoUsage": quota_result["repository"],
+            }
+            app.SCANS.append(scan)
+            app.create_scan_job_for_scan(scan)
+
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 4)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed_job = claim.payload["job"]
+        self.assertEqual(claimed_job["scan_id"], "sc_repo_limit_0")
+
+        result = RouteHarness(
+            f"/worker/jobs/{claimed_job['job_id']}/result",
+            {
+                "status": "failed",
+                "attempt_id": f"wk_1-{claimed_job['attempt']}",
+                "result_checksum": "checksum-repository-too-large",
+                "error": "Repository is too large for Pullwise scanning.",
+                "error_code": "REPOSITORY_TOO_LARGE",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "preflight": {
+                    "mode": "static",
+                    "execution": "repository_limit_check",
+                    "summary": "Repository checkout exceeds Pullwise worker repository limits.",
+                    "repositoryStats": {"fileCount": 2001, "totalBytes": 50 * 1024 * 1024 + 1, "scanStoppedEarly": True},
+                    "repositoryLimits": {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024},
+                    "repositoryLimitExceeded": True,
+                    "repositoryLimitReasons": ["file_count", "total_bytes"],
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(result.payload["quotaRollback"]["ledgerRows"], 2)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 3)
+        self.assertEqual(
+            [app.quota.quota_payload_for_repository(repository, user)["used"] for repository in repositories],
+            [0, 1, 1, 1],
+        )
+        payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["errorCode"], "REPOSITORY_TOO_LARGE")
+        self.assertEqual(payload["quotaRefunded"]["reason"], "REPOSITORY_TOO_LARGE")
+        self.assertEqual(payload["billingUsage"]["used"], 3)
+        self.assertEqual(payload["repoUsage"]["used"], 0)
+        self.assertEqual(
+            payload["preflight"]["repositoryStats"],
+            {"fileCount": 2001, "totalBytes": 50 * 1024 * 1024 + 1, "scanStoppedEarly": True},
+        )
+        self.assertEqual(payload["preflight"]["repositoryLimits"], {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024})
+        self.assertTrue(payload["preflight"]["repositoryLimitExceeded"])
+        self.assertEqual(payload["preflight"]["repositoryLimitReasons"], ["file_count", "total_bytes"])
+
     def test_worker_result_backfills_pending_commit_with_resolved_sha(self) -> None:
         resolved_commit = "1234567890abcdef1234567890abcdef12345678"
         scan = {

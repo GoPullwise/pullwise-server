@@ -116,6 +116,12 @@ def installation_clone_token_payload(job: dict) -> dict | None:
     }
 
 
+def worker_result_error_code(body: dict) -> str:
+    if not isinstance(body, dict):
+        return ""
+    return public_scan_error_code(body.get("error_code") or body.get("errorCode"))
+
+
 def worker_result_checksum(body: dict) -> str:
     provided = clean_github_access_text(body.get("result_checksum"))
     if provided:
@@ -131,6 +137,7 @@ def worker_result_checksum(body: dict) -> str:
         "summary": body.get("summary") if isinstance(body.get("summary"), dict) else {},
         "duration_ms": body.get("duration_ms"),
         "error": body.get("error"),
+        "error_code": worker_result_error_code(body),
         "ai_usage": public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage")),
         "preflight": public_scan_preflight(body.get("preflight")),
         "verification_audit": public_scan_verification_audit_input(
@@ -202,6 +209,7 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     convergence_state = convergence_state_from_worker_result(job, body)
     audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
     ai_usage = public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage"))
+    error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
     changed = False
@@ -219,6 +227,10 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
                 "resultChecksum": checksum,
             }
         )
+        if status == "failed" and error_code:
+            scan["errorCode"] = error_code
+        else:
+            scan.pop("errorCode", None)
         if resolved_commit:
             scan["commit"] = resolved_commit
         if preflight:
@@ -289,7 +301,11 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     duplicate = bool(record_result.get("duplicate"))
     if duplicate:
         issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
-        return {"accepted": True, "duplicate": True, "conflict": False, "issueCount": len(issue_cards)}
+        quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
+        result = {"accepted": True, "duplicate": True, "conflict": False, "issueCount": len(issue_cards)}
+        if quota_rollback.get("ledgerRows"):
+            result["quotaRollback"] = quota_rollback
+        return result
     resolved_commit = worker_result_resolved_commit(job=job, body=body)
     if resolved_commit:
         updated_job = db.update_scan_job_commit(str(job["job_id"]), resolved_commit)
@@ -300,14 +316,56 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     event_result = record_worker_review_decision_events(job, body, attempt_id=attempt_id, status=status)
     with STATE_LOCK:
         apply_worker_job_result_to_state_locked(job, body, status=status, checksum=checksum)
+    quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
     issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
-    return {
+    result = {
         "accepted": True,
         "duplicate": duplicate,
         "conflict": False,
         "issueCount": len(issue_cards),
         "reviewDecisionEvents": event_result,
     }
+    if quota_rollback.get("ledgerRows"):
+        result["quotaRollback"] = quota_rollback
+    return result
+
+
+def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, status: str) -> dict:
+    if status != "failed" or worker_result_error_code(body) != "REPOSITORY_TOO_LARGE":
+        return {}
+    scan_id = public_issue_text(job.get("scan_id"))
+    user_id = public_issue_text(job.get("user_id"))
+    if not scan_id or not user_id:
+        return {}
+    rollback_result = quota.rollback_scan_quota(
+        scan_id=scan_id,
+        requested_by_user_id=user_id,
+        match_request_id=False,
+    )
+    if not rollback_result.get("ledgerRows"):
+        return rollback_result
+
+    with STATE_LOCK:
+        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        repo_id = public_issue_text((scan or {}).get("repoId") or job.get("repo_id"))
+    user = USERS.get(user_id)
+    repository = db.get_repository(repo_id) if repo_id else None
+    user_usage = quota.quota_payload_for_user(user) if user else None
+    repo_usage = quota.quota_payload_for_repository(repository, user) if repository else None
+    with STATE_LOCK:
+        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        if scan:
+            if user_usage:
+                scan["billingUsage"] = user_usage
+            if repo_usage:
+                scan["repoUsage"] = repo_usage
+            scan["quotaRefunded"] = {
+                "reason": "REPOSITORY_TOO_LARGE",
+                "ledgerRows": public_scan_count(rollback_result.get("ledgerRows")),
+                "bucketRows": public_scan_count(rollback_result.get("bucketRows")),
+            }
+            mark_state_dirty()
+    return rollback_result
 
 
 def worker_issue_reserved_ids(job: dict) -> set[str]:

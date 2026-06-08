@@ -612,6 +612,7 @@ def reconcile_completed_scan_job_results_locked() -> int:
         checksum = clean_github_access_text(row.get("result_result_checksum") or row.get("result_checksum"))
         if apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum):
             reconciled += 1
+        rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
     return reconciled
 
 

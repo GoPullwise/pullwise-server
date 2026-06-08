@@ -144,6 +144,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_MODEL"], "opencode/big-pickle")
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VARIANT"], "medium")
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_MAX_BACKOFF_SECONDS"], "60")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_MAX_REPO_FILES"], "2000")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_MAX_REPO_BYTES"], "52428800")
         self.assertEqual(audit[0]["action"], "create_worker")
         self.assertEqual(audit[0]["actor_user_id"], "usr_admin")
 
@@ -306,6 +308,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             install.text_payload,
         )
         self.assertIn('write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"', install.text_payload)
+        self.assertIn('write_env_value PULLWISE_MAX_REPO_FILES "2000"', install.text_payload)
+        self.assertIn('write_env_value PULLWISE_MAX_REPO_BYTES "52428800"', install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_COMMAND", install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_MODEL", install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_VARIANT", install.text_payload)

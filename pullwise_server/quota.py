@@ -337,6 +337,7 @@ def rollback_scan_quota(
     scan_id: str,
     requested_by_user_id: str,
     request_id: str | None = None,
+    match_request_id: bool = True,
 ) -> dict[str, int]:
     db.initialize()
     scan_id = str(scan_id or "").strip()
@@ -344,9 +345,11 @@ def rollback_scan_quota(
     request_id = str(request_id or "").strip() if request_id else None
     if not scan_id or not requested_by_user_id:
         return {"ledgerRows": 0, "bucketRows": 0}
-    request_clause = "AND request_id = ?" if request_id else "AND request_id IS NULL"
+    request_clause = ""
+    if match_request_id:
+        request_clause = "AND request_id = ?" if request_id else "AND request_id IS NULL"
     params: list[object] = [scan_id, requested_by_user_id]
-    if request_id:
+    if match_request_id and request_id:
         params.append(request_id)
     with closing(db.connect()) as connection:
         connection.row_factory = sqlite3.Row
