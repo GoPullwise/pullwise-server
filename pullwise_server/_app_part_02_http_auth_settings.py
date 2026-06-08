@@ -748,8 +748,6 @@ def apply_settings_update(user_id: str, body: dict) -> dict:
     review_body = body.get("review") if isinstance(body.get("review"), dict) else {}
     if "outputLanguage" in review_body:
         settings["review"]["outputLanguage"] = clean_review_output_language(review_body.get("outputLanguage"))
-    elif "reviewOutputLanguage" in body:
-        settings["review"]["outputLanguage"] = clean_review_output_language(body.get("reviewOutputLanguage"))
     SETTINGS[user_id] = settings
     mark_state_dirty()
     return settings

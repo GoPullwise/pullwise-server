@@ -774,6 +774,20 @@ class SecurityContractsPart01Test(SecurityContractsBase):
 
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(handler.payload["message"], "Request body must be a JSON object.")
+    def test_settings_update_persists_review_output_language_for_next_read(self) -> None:
+        update = RouteHarness("/settings", {"review": {"outputLanguage": "ja"}}, cookie=self.signed_in())
+
+        app.PullwiseHandler.route(update, "PATCH")
+
+        self.assertEqual(update.status, HTTPStatus.OK)
+        self.assertEqual(update.payload["review"]["outputLanguage"], "ja")
+
+        read = RouteHarness("/settings", cookie=self.signed_in())
+
+        app.PullwiseHandler.route(read, "GET")
+
+        self.assertEqual(read.status, HTTPStatus.OK)
+        self.assertEqual(read.payload["review"]["outputLanguage"], "ja")
     def test_settings_payload_sanitizes_profile_fields(self) -> None:
         app.SETTINGS["usr_1"] = {
             "profile": {

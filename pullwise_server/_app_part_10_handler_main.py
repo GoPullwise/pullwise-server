@@ -2365,7 +2365,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def send_cors_headers(self) -> None:
         origin = self.headers.get("Origin")
-        allowed = allowed_origins()
+        allowed = trusted_browser_origins()
         if origin and origin in allowed:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Credentials", "true")

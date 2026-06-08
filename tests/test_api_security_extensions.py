@@ -205,6 +205,25 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.assertNotIn("billing", app.USERS["usr_1"])
         self.assertNotIn("billingCheckout", app.USERS["usr_1"])
 
+    def test_cors_allows_configured_app_url_origin(self) -> None:
+        headers: list[tuple[str, str]] = []
+        handler = app.PullwiseHandler.__new__(app.PullwiseHandler)
+        handler.headers = {"Origin": "https://app.pullwise.dev"}
+        handler.send_header = lambda key, value: headers.append((key, value))
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://admin.pullwise.dev",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.send_cors_headers(handler)
+
+        self.assertIn(("Access-Control-Allow-Origin", "https://app.pullwise.dev"), headers)
+        self.assertIn(("Access-Control-Allow-Credentials", "true"), headers)
+
 
 if __name__ == "__main__":
     unittest.main()
