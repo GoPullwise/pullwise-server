@@ -379,9 +379,13 @@ def review_calibration_rollout_policy(scope_key: str) -> dict:
         "enforce_gate": gate,
         "shadow_evaluation": {
             "candidate_count": public_scan_count(evaluation.get("candidateCount")),
+            "labeled_outcome_count": public_scan_count(evaluation.get("labeledOutcomeCount")),
             "verified_suppression_count": public_scan_count(evaluation.get("verifiedSuppressionCount")),
             "current_reported_count": public_scan_count(evaluation.get("currentReportedCount")),
             "proposed_reported_count": public_scan_count(evaluation.get("proposedReportedCount")),
+            "current_false_positive_proxy": public_review_float(evaluation.get("currentFalsePositiveProxy")),
+            "proposed_false_positive_proxy": public_review_float(evaluation.get("proposedFalsePositiveProxy")),
+            "estimated_false_positive_reduction": public_review_float(evaluation.get("estimatedFalsePositiveReduction")) or 0.0,
         },
     }
 
@@ -747,14 +751,30 @@ def review_shadow_evaluation(scope_key: str) -> dict:
     metrics = {
         "scopeKey": public_issue_text(scope_key),
         "candidateCount": len(latest_by_observation),
+        "labeledOutcomeCount": 0,
         "currentReportedCount": 0,
+        "currentReportedLabeledCount": 0,
+        "currentReportedValidCount": 0,
+        "currentReportedFalsePositiveCount": 0,
+        "currentFalsePositiveProxy": None,
+        "currentPrecisionProxy": None,
         "proposedReportedCount": 0,
+        "proposedReportedLabeledCount": 0,
+        "proposedReportedValidCount": 0,
+        "proposedReportedFalsePositiveCount": 0,
+        "proposedFalsePositiveProxy": None,
+        "proposedPrecisionProxy": None,
         "proposedAuditOnlyCount": 0,
         "proposedRejectedCount": 0,
+        "auditOnlyReviewedCount": 0,
+        "auditOnlyValidCount": 0,
+        "auditOnlyPromotionRate": None,
+        "estimatedFalsePositiveReduction": 0,
         "verifiedSuppressionCount": 0,
         "byVerificationStatus": {},
+        "scoreDistributionByVerificationStatus": {},
     }
-    for event in latest_by_observation.values():
+    for observation_key, event in latest_by_observation.items():
         current_decision = public_issue_text(event.get("decision")).lower()
         if current_decision == "reported":
             metrics["currentReportedCount"] += 1
@@ -773,9 +793,24 @@ def review_shadow_evaluation(scope_key: str) -> dict:
             status = "potential_risk"
         status_metrics = metrics["byVerificationStatus"].setdefault(
             status,
-            {"candidateCount": 0, "currentReportedCount": 0, "proposedReportedCount": 0, "proposedAuditOnlyCount": 0, "proposedRejectedCount": 0},
+            {
+                "candidateCount": 0,
+                "labeledOutcomeCount": 0,
+                "currentReportedCount": 0,
+                "currentReportedFalsePositiveCount": 0,
+                "proposedReportedCount": 0,
+                "proposedReportedFalsePositiveCount": 0,
+                "proposedAuditOnlyCount": 0,
+                "proposedRejectedCount": 0,
+            },
         )
         status_metrics["candidateCount"] += 1
+        score_band = review_shadow_score_band(event, factors)
+        score_distribution = metrics["scoreDistributionByVerificationStatus"].setdefault(
+            status,
+            {"unknown": 0, "lt_0_60": 0, "0_60_0_70": 0, "0_70_0_82": 0, "0_82_0_90": 0, "0_90_1_00": 0},
+        )
+        score_distribution[score_band] = score_distribution.get(score_band, 0) + 1
         if current_decision == "reported":
             status_metrics["currentReportedCount"] += 1
         if proposed_decision == "reported":
@@ -786,7 +821,63 @@ def review_shadow_evaluation(scope_key: str) -> dict:
             status_metrics["proposedRejectedCount"] += 1
         if status in {"verified", "static_proof"} and proposed_decision != "reported":
             metrics["verifiedSuppressionCount"] += 1
+        label = effective_review_outcome_label(observation_key)
+        outcome = public_issue_text(label.get("outcome_label")).lower()
+        if outcome not in {"valid", "false_positive"}:
+            continue
+        metrics["labeledOutcomeCount"] += 1
+        status_metrics["labeledOutcomeCount"] += 1
+        is_valid = outcome == "valid"
+        is_false_positive = outcome == "false_positive"
+        if current_decision == "reported":
+            metrics["currentReportedLabeledCount"] += 1
+            metrics["currentReportedValidCount"] += 1 if is_valid else 0
+            metrics["currentReportedFalsePositiveCount"] += 1 if is_false_positive else 0
+            status_metrics["currentReportedFalsePositiveCount"] += 1 if is_false_positive else 0
+        if proposed_decision == "reported":
+            metrics["proposedReportedLabeledCount"] += 1
+            metrics["proposedReportedValidCount"] += 1 if is_valid else 0
+            metrics["proposedReportedFalsePositiveCount"] += 1 if is_false_positive else 0
+            status_metrics["proposedReportedFalsePositiveCount"] += 1 if is_false_positive else 0
+        elif proposed_decision == "audit_only":
+            metrics["auditOnlyReviewedCount"] += 1
+            metrics["auditOnlyValidCount"] += 1 if is_valid else 0
+    if metrics["currentReportedLabeledCount"]:
+        metrics["currentFalsePositiveProxy"] = metrics["currentReportedFalsePositiveCount"] / metrics["currentReportedLabeledCount"]
+        metrics["currentPrecisionProxy"] = metrics["currentReportedValidCount"] / metrics["currentReportedLabeledCount"]
+    if metrics["proposedReportedLabeledCount"]:
+        metrics["proposedFalsePositiveProxy"] = metrics["proposedReportedFalsePositiveCount"] / metrics["proposedReportedLabeledCount"]
+        metrics["proposedPrecisionProxy"] = metrics["proposedReportedValidCount"] / metrics["proposedReportedLabeledCount"]
+    if metrics["auditOnlyReviewedCount"]:
+        metrics["auditOnlyPromotionRate"] = metrics["auditOnlyValidCount"] / metrics["auditOnlyReviewedCount"]
+    metrics["estimatedFalsePositiveReduction"] = (
+        metrics["currentReportedFalsePositiveCount"] - metrics["proposedReportedFalsePositiveCount"]
+    )
     return metrics
+
+
+def review_shadow_score_band(event: dict, factors: dict) -> str:
+    score = None
+    for value in (
+        event.get("truth_probability"),
+        factors.get("truthProbability"),
+        event.get("decision_score"),
+        factors.get("decisionScore"),
+    ):
+        score = public_review_probability(value)
+        if score is not None:
+            break
+    if score is None:
+        return "unknown"
+    if score < 0.60:
+        return "lt_0_60"
+    if score < 0.70:
+        return "0_60_0_70"
+    if score < 0.82:
+        return "0_70_0_82"
+    if score < 0.90:
+        return "0_82_0_90"
+    return "0_90_1_00"
 
 
 def review_calibration_scope_key_from_params(params: dict) -> str:
@@ -888,20 +979,33 @@ def review_calibration_drift_summary(snapshots: list[dict]) -> dict:
 
 def review_calibration_enforce_gate(evaluation: dict) -> dict:
     candidate_count = public_scan_count(evaluation.get("candidateCount"))
+    labeled_outcome_count = public_scan_count(evaluation.get("labeledOutcomeCount"))
     verified_suppression_count = public_scan_count(evaluation.get("verifiedSuppressionCount"))
     current_reported = public_scan_count(evaluation.get("currentReportedCount"))
     proposed_reported = public_scan_count(evaluation.get("proposedReportedCount"))
+    estimated_fp_reduction = public_review_float(evaluation.get("estimatedFalsePositiveReduction")) or 0.0
+    false_positive_proxy_not_increased = estimated_fp_reduction >= 0.0
     return {
         "verifiedSuppressionClear": verified_suppression_count == 0,
         "hasShadowCandidates": candidate_count > 0,
+        "hasLabeledShadowOutcomes": labeled_outcome_count > 0,
         "reportedCountNotIncreased": proposed_reported <= current_reported,
-        "canConsiderEnforce": candidate_count > 0 and verified_suppression_count == 0 and proposed_reported <= current_reported,
+        "falsePositiveProxyNotIncreased": false_positive_proxy_not_increased,
+        "canConsiderEnforce": (
+            candidate_count > 0
+            and labeled_outcome_count > 0
+            and verified_suppression_count == 0
+            and proposed_reported <= current_reported
+            and false_positive_proxy_not_increased
+        ),
         "blockers": [
             reason
             for reason, blocked in (
                 ("missing_shadow_candidates", candidate_count <= 0),
+                ("missing_labeled_shadow_outcomes", labeled_outcome_count <= 0),
                 ("verified_static_proof_suppression", verified_suppression_count > 0),
                 ("proposed_reported_count_increase", proposed_reported > current_reported),
+                ("false_positive_proxy_increase", not false_positive_proxy_not_increased),
             )
             if blocked
         ],

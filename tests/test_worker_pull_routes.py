@@ -559,6 +559,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
             reviewer_id="admin_1",
             reason="manual review confirmed the candidate",
         )
+        labeled_evaluation = app.review_shadow_evaluation("user:usr_1|repo:repo_123|branch:main")
+        self.assertEqual(labeled_evaluation["labeledOutcomeCount"], 1)
+        self.assertEqual(labeled_evaluation["currentReportedLabeledCount"], 1)
+        self.assertEqual(labeled_evaluation["currentFalsePositiveProxy"], 0.0)
+        self.assertEqual(labeled_evaluation["proposedFalsePositiveProxy"], 0.0)
+        self.assertEqual(labeled_evaluation["estimatedFalsePositiveReduction"], 0)
+        labeled_gate = app.review_calibration_enforce_gate(labeled_evaluation)
+        self.assertTrue(labeled_gate["hasLabeledShadowOutcomes"])
+        self.assertTrue(labeled_gate["falsePositiveProxyNotIncreased"])
         snapshots = db.list_review_calibration_snapshots("user:usr_1|repo:repo_123|branch:main")
         snapshots_by_cohort = {item["cohort_key"]: item for item in snapshots}
         self.assertIn("source:correctness reviewer", snapshots_by_cohort)
@@ -940,6 +949,86 @@ class WorkerPullRoutesTest(unittest.TestCase):
         effective = app.effective_review_outcome_label("obs_priority")
         self.assertEqual(effective["outcome_label"], "valid")
         self.assertEqual(effective["label_source"], "manual_review")
+
+    def test_review_shadow_evaluation_reports_false_positive_proxy_and_audit_promotion(self) -> None:
+        def event(index: int, *, proposed: str, score: float) -> dict:
+            return {
+                "protocol": "pullwise-review-decision/0.1",
+                "event_id": f"evt_shadow_metrics_{index}",
+                "candidate_observation_key": f"obs_shadow_metrics_{index}",
+                "scan_id": "sc_shadow_metrics",
+                "job_id": "job_shadow_metrics",
+                "attempt_id": "wk_1-1",
+                "user_id": "usr_1",
+                "repo_id": "repo_123",
+                "github_repo_id": "123",
+                "repo_full_name": "acme/api",
+                "branch": "main",
+                "commit_sha": "a" * 40,
+                "candidate_id": f"candidate-{index}",
+                "fingerprint": f"fp-shadow-metrics-{index}",
+                "source": "correctness reviewer",
+                "provider": "codex",
+                "model": "gpt-5.5",
+                "category": "correctness",
+                "severity": "medium",
+                "verification_status": "potential_risk",
+                "file_path": "src/app.py",
+                "line_start": 12,
+                "raw_confidence": score,
+                "calibrated_confidence": score,
+                "decision_score": score,
+                "decision": "reported",
+                "decision_reason": "test",
+                "scoring_protocol": "pullwise-review-score/0.1",
+                "score_factors": {"scoreKind": "ranking_score", "proposedDecision": proposed, "decisionScore": score},
+                "created_at": app.now(),
+            }
+
+        db.record_review_decision_events(
+            [
+                event(1, proposed="reported", score=0.83),
+                event(2, proposed="audit_only", score=0.75),
+                event(3, proposed="audit_only", score=0.55),
+            ]
+        )
+        app.record_manual_review_outcome(
+            event_id="evt_shadow_metrics_1",
+            candidate_observation_key="obs_shadow_metrics_1",
+            outcome_label="valid",
+            reviewer_id="admin_1",
+        )
+        app.record_manual_review_outcome(
+            event_id="evt_shadow_metrics_2",
+            candidate_observation_key="obs_shadow_metrics_2",
+            outcome_label="false_positive",
+            reviewer_id="admin_1",
+        )
+        app.record_manual_review_outcome(
+            event_id="evt_shadow_metrics_3",
+            candidate_observation_key="obs_shadow_metrics_3",
+            outcome_label="valid",
+            reviewer_id="admin_1",
+        )
+
+        evaluation = app.review_shadow_evaluation("user:usr_1|repo:repo_123|branch:main")
+
+        self.assertEqual(evaluation["labeledOutcomeCount"], 3)
+        self.assertEqual(evaluation["currentReportedLabeledCount"], 3)
+        self.assertEqual(evaluation["currentReportedFalsePositiveCount"], 1)
+        self.assertAlmostEqual(evaluation["currentFalsePositiveProxy"], 1 / 3)
+        self.assertEqual(evaluation["proposedReportedLabeledCount"], 1)
+        self.assertEqual(evaluation["proposedReportedFalsePositiveCount"], 0)
+        self.assertEqual(evaluation["estimatedFalsePositiveReduction"], 1)
+        self.assertEqual(evaluation["auditOnlyReviewedCount"], 2)
+        self.assertEqual(evaluation["auditOnlyValidCount"], 1)
+        self.assertEqual(evaluation["auditOnlyPromotionRate"], 0.5)
+        distribution = evaluation["scoreDistributionByVerificationStatus"]["potential_risk"]
+        self.assertEqual(distribution["0_82_0_90"], 1)
+        self.assertEqual(distribution["0_70_0_82"], 1)
+        self.assertEqual(distribution["lt_0_60"], 1)
+        gate = app.review_calibration_enforce_gate(evaluation)
+        self.assertTrue(gate["canConsiderEnforce"])
 
     def test_review_calibration_snapshots_shrink_sparse_cohorts_toward_parent(self) -> None:
         def event(index: int, *, category: str, observation_key: str) -> dict:
