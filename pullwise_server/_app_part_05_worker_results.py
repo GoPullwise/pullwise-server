@@ -17,6 +17,7 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "github_repo_id": scan.get("githubRepoId"),
             "installation_id": scan.get("installationId"),
             "clone_url": scan.get("cloneUrl"),
+            "review_output_language": clean_review_output_language(scan.get("reviewOutputLanguage")),
             "max_attempts": env_int("PULLWISE_SCAN_JOB_MAX_ATTEMPTS", 3),
         }
     )
@@ -62,6 +63,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
         "clone_url": trusted_github_web_url(job.get("clone_url")),
     }
+    language = review_output_language_payload(job.get("review_output_language"))
+    payload["review_output_language"] = language["code"]
+    payload["review_output_language_label"] = language["label"]
     if include_clone_token:
         payload["clone_token"] = installation_clone_token_payload(job)
     convergence_context = worker_convergence_context_for_job(job)

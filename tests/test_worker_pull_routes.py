@@ -2317,6 +2317,31 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["clone_token"]["token"], "short-token")
         self.assertEqual(payload["clone_token"]["repo"], "acme/api")
 
+    def test_claim_payload_includes_review_output_language_from_scan_job(self) -> None:
+        scan = {
+            "id": "sc_language",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "reviewOutputLanguage": "ja",
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual(claim.payload["job"]["review_output_language"], "ja")
+        self.assertEqual(claim.payload["job"]["review_output_language_label"], "Japanese")
+
     def test_claim_payload_includes_previous_convergence_context_across_workers(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}

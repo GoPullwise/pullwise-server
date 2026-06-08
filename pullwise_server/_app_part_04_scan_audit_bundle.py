@@ -37,6 +37,9 @@ def scan_payload(scan: dict) -> dict:
         payload["time"] = public_issue_text(scan.get("time"))
     if "by" in scan:
         payload["by"] = public_issue_text(scan.get("by"))
+    if "reviewOutputLanguage" in scan:
+        language = review_output_language_payload(scan.get("reviewOutputLanguage"))
+        payload["reviewOutputLanguage"] = language["code"]
     if "installationId" in scan:
         payload["installationId"] = clean_github_access_text(scan.get("installationId"), allow_int=True)
     for key in ("repoId", "githubRepoId"):

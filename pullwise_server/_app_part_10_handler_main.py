@@ -453,6 +453,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         elif scan is not None:
                             pass
                         else:
+                            review_output_language = settings_payload(session["userId"])["review"]["outputLanguage"]
                             scan = {
                                 "id": scan_id,
                                 "repo": repository,
@@ -465,6 +466,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 "progress": 0,
                                 "phase": None,
                                 "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                                "reviewOutputLanguage": review_output_language,
                                 "installationId": (
                                     clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
                                     or clean_github_access_text(github_access.get("installationId"), allow_int=True)
@@ -2201,6 +2203,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
                 return self.json({"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"}, HTTPStatus.CONFLICT)
 
+            review_output_language = settings_payload(context["user"]["id"])["review"]["outputLanguage"]
             scan = {
                 "id": scan_id,
                 "repo": repository["full_name"],
@@ -2214,6 +2217,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "progress": 0,
                 "phase": None,
                 "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "reviewOutputLanguage": review_output_language,
                 "installationId": clean_github_access_text(repository_item_meta.get("installationId"), allow_int=True)
                 or clean_github_access_text(github_access.get("installationId"), allow_int=True),
                 "installationAccount": clean_github_access_text(repository_item_meta.get("installationAccount"))

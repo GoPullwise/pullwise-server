@@ -311,10 +311,12 @@ def initialize() -> None:
                     progress_message TEXT,
                     logs_summary TEXT,
                     max_attempts INTEGER NOT NULL DEFAULT 3,
+                    review_output_language TEXT,
                     last_attempt_id TEXT
                 )
                 """
             )
+            ensure_column(connection, "scan_jobs", "review_output_language", "TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable
@@ -1532,10 +1534,11 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     claimed_by_worker_id, claimed_at, started_at, completed_at,
                     timeout_at, error, result_checksum, created_at, updated_at,
                     user_id, repo_id, github_repo_id, installation_id, clone_url,
-                    progress_phase, progress, progress_message, logs_summary, max_attempts
+                    progress_phase, progress, progress_message, logs_summary, max_attempts,
+                    review_output_language
                 )
                 VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?,
-                    ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?)
+                    ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?)
                 ON CONFLICT(scan_id) DO NOTHING
                 """,
                 (
@@ -1553,6 +1556,7 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("installation_id"),
                     record.get("clone_url"),
                     max(1, int(record.get("max_attempts") or 3)),
+                    record.get("review_output_language"),
                 ),
             )
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()) or {}

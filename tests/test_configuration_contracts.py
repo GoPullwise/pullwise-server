@@ -134,6 +134,40 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("privateKey", serialized)
         self.assertNotIn("token", serialized.lower())
 
+    def test_settings_default_review_output_language_is_english(self) -> None:
+        previous_users = app.USERS
+        previous_settings = app.SETTINGS
+        try:
+            app.USERS = {"usr_1": {"id": "usr_1", "name": "Taylor", "email": "taylor@example.com"}}
+            app.SETTINGS = {}
+
+            payload = app.settings_payload("usr_1")
+
+            self.assertEqual(payload["profile"]["name"], "Taylor")
+            self.assertEqual(payload["review"]["outputLanguage"], "en")
+        finally:
+            app.USERS = previous_users
+            app.SETTINGS = previous_settings
+
+    def test_settings_update_accepts_supported_review_output_language(self) -> None:
+        previous_users = app.USERS
+        previous_settings = app.SETTINGS
+        previous_dirty = app.STATE_DIRTY
+        try:
+            app.USERS = {"usr_1": {"id": "usr_1", "name": "Taylor", "email": "taylor@example.com"}}
+            app.SETTINGS = {}
+            app.STATE_DIRTY = False
+
+            payload = app.apply_settings_update("usr_1", {"review": {"outputLanguage": "fr"}})
+
+            self.assertEqual(payload["review"]["outputLanguage"], "fr")
+            self.assertEqual(app.SETTINGS["usr_1"]["review"]["outputLanguage"], "fr")
+            self.assertTrue(app.STATE_DIRTY)
+        finally:
+            app.USERS = previous_users
+            app.SETTINGS = previous_settings
+            app.STATE_DIRTY = previous_dirty
+
 
 if __name__ == "__main__":
     unittest.main()

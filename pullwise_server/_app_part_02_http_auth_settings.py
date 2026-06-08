@@ -623,6 +623,65 @@ def trusted_public_url(value: object) -> str | None:
     return raw
 
 
+DEFAULT_REVIEW_OUTPUT_LANGUAGE = "en"
+REVIEW_OUTPUT_LANGUAGES: dict[str, str] = {
+    "en": "English",
+    "zh-CN": "Chinese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "pt-BR": "Portuguese",
+    "it": "Italian",
+}
+REVIEW_OUTPUT_LANGUAGE_ALIASES = {
+    "english": "en",
+    "en-us": "en",
+    "en-gb": "en",
+    "zh": "zh-CN",
+    "zh-cn": "zh-CN",
+    "zh_hans": "zh-CN",
+    "chinese": "zh-CN",
+    "cn": "zh-CN",
+    "ja-jp": "ja",
+    "japanese": "ja",
+    "jp": "ja",
+    "ko-kr": "ko",
+    "korean": "ko",
+    "kr": "ko",
+    "es-es": "es",
+    "es-mx": "es",
+    "spanish": "es",
+    "fr-fr": "fr",
+    "french": "fr",
+    "de-de": "de",
+    "german": "de",
+    "pt": "pt-BR",
+    "pt-br": "pt-BR",
+    "portuguese": "pt-BR",
+    "it-it": "it",
+    "italian": "it",
+}
+
+
+def clean_review_output_language(value: object, *, default: str | None = DEFAULT_REVIEW_OUTPUT_LANGUAGE) -> str | None:
+    text = public_issue_text(value)
+    if not text:
+        return default
+    if text in REVIEW_OUTPUT_LANGUAGES:
+        return text
+    return REVIEW_OUTPUT_LANGUAGE_ALIASES.get(text.lower(), default)
+
+
+def review_output_language_payload(value: object) -> dict:
+    code = clean_review_output_language(value) or DEFAULT_REVIEW_OUTPUT_LANGUAGE
+    return {
+        "code": code,
+        "label": REVIEW_OUTPUT_LANGUAGES.get(code, REVIEW_OUTPUT_LANGUAGES[DEFAULT_REVIEW_OUTPUT_LANGUAGE]),
+    }
+
+
 def create_session(user: dict) -> dict:
     session_id = make_id("ses")
     session = {
@@ -643,6 +702,9 @@ def default_settings_payload(user_id: str) -> dict:
             "name": public_issue_text(user.get("name")) or "User",
             "email": public_issue_text(user.get("email")),
         },
+        "review": {
+            "outputLanguage": DEFAULT_REVIEW_OUTPUT_LANGUAGE,
+        },
     }
 
 
@@ -661,10 +723,15 @@ def clean_settings_payload(user_id: str, value: object) -> dict:
     base = default_settings_payload(user_id)
     settings = value if isinstance(value, dict) else {}
     profile = settings.get("profile") if isinstance(settings.get("profile"), dict) else {}
+    review_settings = settings.get("review") if isinstance(settings.get("review"), dict) else {}
     return {
         "profile": {
             "name": public_issue_text(profile.get("name")) or base["profile"]["name"],
             "email": public_issue_text(profile.get("email")) or base["profile"]["email"],
+        },
+        "review": {
+            "outputLanguage": clean_review_output_language(review_settings.get("outputLanguage"))
+            or base["review"]["outputLanguage"],
         },
     }
 
@@ -678,6 +745,11 @@ def apply_settings_update(user_id: str, body: dict) -> dict:
         settings["profile"]["name"] = name
     if email:
         settings["profile"]["email"] = email
+    review_body = body.get("review") if isinstance(body.get("review"), dict) else {}
+    if "outputLanguage" in review_body:
+        settings["review"]["outputLanguage"] = clean_review_output_language(review_body.get("outputLanguage"))
+    elif "reviewOutputLanguage" in body:
+        settings["review"]["outputLanguage"] = clean_review_output_language(body.get("reviewOutputLanguage"))
     SETTINGS[user_id] = settings
     mark_state_dirty()
     return settings
