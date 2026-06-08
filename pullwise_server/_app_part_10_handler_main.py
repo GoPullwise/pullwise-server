@@ -1682,6 +1682,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if not isinstance(body, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if segments == ["admin", "review-calibration", "labels"]:
+            try:
+                payload = record_admin_manual_review_outcome(body, reviewer_id=session["userId"])
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            return self.json(payload, HTTPStatus.CREATED)
         if segments == ["admin", "workers"]:
             return self.handle_admin_worker_create(session, body)
         if len(segments) == 4 and segments[:2] == ["admin", "workers"]:

@@ -1356,6 +1356,50 @@ def record_manual_review_outcome(
     )
 
 
+def review_outcome_label_payload(label: dict) -> dict:
+    return {
+        "labelId": public_issue_text(label.get("label_id")),
+        "eventId": public_issue_text(label.get("event_id")),
+        "candidateObservationKey": public_issue_text(label.get("candidate_observation_key")),
+        "outcomeLabel": public_issue_text(label.get("outcome_label")).lower(),
+        "labelSource": public_issue_text(label.get("label_source")).lower(),
+        "outcomeWeight": public_review_float(label.get("outcome_weight")) or 0.0,
+        "labelReason": " ".join(review._safe_text_lenient(label.get("label_reason")).split())[:240],
+        "createdAt": pull_request_timestamp(label.get("created_at")) or 0,
+        "createdBy": public_issue_text(label.get("created_by"))[:120],
+    }
+
+
+def record_admin_manual_review_outcome(body: dict, *, reviewer_id: str) -> dict:
+    observation_key = clean_github_access_text(
+        body.get("candidateObservationKey") or body.get("candidate_observation_key") or body.get("observationKey")
+    )
+    if not observation_key:
+        raise ValueError("candidateObservationKey is required")
+    outcome = public_issue_text(body.get("outcomeLabel") or body.get("outcome_label") or body.get("outcome")).lower()
+    outcome = outcome.replace("-", "_").replace(" ", "_")
+    if isinstance(body.get("falsePositive"), bool):
+        outcome = "false_positive" if body.get("falsePositive") else "valid"
+    if outcome in {"useful", "confirmed", "accepted"}:
+        outcome = "valid"
+    if outcome not in {"valid", "false_positive", "ambiguous"}:
+        raise ValueError("outcomeLabel must be valid, false_positive, or ambiguous")
+    reason = " ".join(
+        review._safe_text_lenient(body.get("reason") or body.get("note") or body.get("message")).split()
+    )[:240]
+    label = record_manual_review_outcome(
+        event_id=clean_github_access_text(body.get("eventId") or body.get("event_id")) or "",
+        candidate_observation_key=observation_key,
+        outcome_label=outcome,
+        reviewer_id=reviewer_id,
+        reason=reason,
+    )
+    return {
+        "label": review_outcome_label_payload(label),
+        "effectiveLabel": review_outcome_label_payload(effective_review_outcome_label(observation_key)),
+    }
+
+
 def record_autofix_outcome(*, event_id: str = "", candidate_observation_key: str, valid: bool, reason: str = "") -> dict:
     return record_review_outcome_label(
         event_id=event_id,
