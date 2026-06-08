@@ -409,10 +409,14 @@ def initialize() -> None:
                     outcome_weight REAL NOT NULL,
                     label_reason TEXT,
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                    created_by TEXT
+                    created_by TEXT,
+                    calibration_success_weight REAL NOT NULL DEFAULT 0,
+                    calibration_failure_weight REAL NOT NULL DEFAULT 0
                 )
                 """
             )
+            ensure_column(connection, "review_outcome_labels", "calibration_success_weight", "REAL NOT NULL DEFAULT 0")
+            ensure_column(connection, "review_outcome_labels", "calibration_failure_weight", "REAL NOT NULL DEFAULT 0")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_review_outcome_labels_observation
@@ -2325,9 +2329,10 @@ def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
                 """
                 INSERT INTO review_outcome_labels (
                     label_id, event_id, candidate_observation_key, outcome_label,
-                    label_source, outcome_weight, label_reason, created_at, created_by
+                    label_source, outcome_weight, label_reason, created_at, created_by,
+                    calibration_success_weight, calibration_failure_weight
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(label_id) DO UPDATE SET
                     event_id = excluded.event_id,
                     candidate_observation_key = excluded.candidate_observation_key,
@@ -2335,7 +2340,20 @@ def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
                     label_source = excluded.label_source,
                     outcome_weight = excluded.outcome_weight,
                     label_reason = excluded.label_reason,
-                    created_by = excluded.created_by
+                    created_at = excluded.created_at,
+                    created_by = excluded.created_by,
+                    calibration_success_weight = CASE
+                        WHEN review_outcome_labels.label_source = 'user_explicit'
+                            AND review_outcome_labels.outcome_label != excluded.outcome_label
+                        THEN review_outcome_labels.calibration_success_weight + excluded.calibration_success_weight
+                        ELSE excluded.calibration_success_weight
+                    END,
+                    calibration_failure_weight = CASE
+                        WHEN review_outcome_labels.label_source = 'user_explicit'
+                            AND review_outcome_labels.outcome_label != excluded.outcome_label
+                        THEN review_outcome_labels.calibration_failure_weight + excluded.calibration_failure_weight
+                        ELSE excluded.calibration_failure_weight
+                    END
                 """,
                 (
                     label_id,
@@ -2347,6 +2365,8 @@ def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
                     label.get("label_reason"),
                     int(label.get("created_at") or time.time()),
                     label.get("created_by"),
+                    float(label.get("calibration_success_weight") or 0.0),
+                    float(label.get("calibration_failure_weight") or 0.0),
                 ),
             )
             row = connection.execute(

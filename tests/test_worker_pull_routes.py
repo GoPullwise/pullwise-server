@@ -944,13 +944,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         false_positive = RouteHarness(
             "/issues/issue-fp/status",
-            {"status": "snoozed", "falsePositive": True, "reason": "Not reachable in this repo."},
+            {"falsePositive": True, "reason": "Not reachable in this repo."},
             headers=headers,
         )
         app.PullwiseHandler.route(false_positive, "PATCH")
 
         self.assertEqual(false_positive.status, HTTPStatus.OK)
-        self.assertEqual(false_positive.payload["status"], "snoozed")
+        self.assertEqual(false_positive.payload["status"], "open")
         fp_labels = db.list_review_outcome_labels("obs_status_fp")
         self.assertEqual(fp_labels[0]["label_source"], "user_explicit")
         self.assertEqual(fp_labels[0]["outcome_label"], "false_positive")
@@ -958,15 +958,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         duplicate = RouteHarness(
             "/issues/issue-duplicate/status",
-            {"status": "snoozed", "feedbackReason": "duplicate", "reason": "Duplicate issue."},
+            {"feedbackReason": "duplicate", "reason": "Duplicate issue."},
             headers=headers,
         )
         app.PullwiseHandler.route(duplicate, "PATCH")
 
         self.assertEqual(duplicate.status, HTTPStatus.OK)
-        self.assertEqual(duplicate.payload["status"], "snoozed")
+        self.assertEqual(duplicate.payload["status"], "open")
         duplicate_labels = db.list_review_outcome_labels("obs_status_duplicate")
-        self.assertEqual(duplicate_labels[0]["label_source"], "weak_lifecycle")
+        self.assertEqual(duplicate_labels[0]["label_source"], "user_explicit")
         self.assertEqual(duplicate_labels[0]["outcome_label"], "ambiguous")
         self.assertEqual(duplicate_labels[0]["label_reason"], "feedback:duplicate - Duplicate issue.")
 
@@ -1003,6 +1003,106 @@ class WorkerPullRoutesTest(unittest.TestCase):
             bucket["bucket_precision"],
             (bucket["positive_truth_weight"] + 3.0) / (bucket["labeled_weight"] + 5.0),
         )
+
+    def test_repeated_user_feedback_uses_latest_selection(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        app.SCANS = [
+            {
+                "id": "sc_feedback_repeat",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc123",
+                "status": "done",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "completedAt": app.now(),
+                "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+                "repoId": "repo_123",
+                "githubRepoId": "123",
+            }
+        ]
+        app.ISSUES = [
+            {
+                "id": "issue-repeat",
+                "userId": "usr_1",
+                "scanId": "sc_feedback_repeat",
+                "jobId": "job_feedback_repeat",
+                "repo": "acme/api",
+                "branch": "main",
+                "status": "open",
+                "severity": "high",
+                "title": "Repeat feedback issue",
+                "file": "src/app.py",
+                "line": 12,
+            }
+        ]
+        db.record_review_decision_events(
+            [
+                {
+                    "protocol": "pullwise-review-decision/0.1",
+                    "event_id": "evt_status_repeat",
+                    "candidate_observation_key": "obs_status_repeat",
+                    "scan_id": "sc_feedback_repeat",
+                    "job_id": "job_feedback_repeat",
+                    "attempt_id": "wk_1-1",
+                    "user_id": "usr_1",
+                    "repo_id": "repo_123",
+                    "repo_full_name": "acme/api",
+                    "branch": "main",
+                    "candidate_id": "issue-repeat",
+                    "source": "correctness-reviewer",
+                    "category": "correctness",
+                    "severity": "high",
+                    "verification_status": "potential_risk",
+                    "file_path": "src/app.py",
+                    "line_start": 12,
+                    "raw_confidence": 0.92,
+                    "normalized_title": "Repeat feedback issue",
+                    "decision": "reported",
+                    "scoring_protocol": "pullwise-review-score/0.1",
+                }
+            ]
+        )
+        headers = {"Cookie": "pw_session=ses_owner"}
+
+        with patch.object(app, "now", return_value=123456):
+            useful = RouteHarness(
+                "/issues/issue-repeat/status",
+                {
+                    "feedbackReason": "useful",
+                    "falsePositive": False,
+                    "reason": "User marked issue useful / valid.",
+                },
+                headers=headers,
+            )
+            app.PullwiseHandler.route(useful, "PATCH")
+            false_positive = RouteHarness(
+                "/issues/issue-repeat/status",
+                {
+                    "feedbackReason": "false_positive",
+                    "falsePositive": True,
+                    "reason": "False positive.",
+                },
+                headers=headers,
+            )
+            app.PullwiseHandler.route(false_positive, "PATCH")
+
+        self.assertEqual(useful.status, HTTPStatus.OK)
+        self.assertEqual(false_positive.status, HTTPStatus.OK)
+        self.assertEqual(false_positive.payload["status"], "open")
+        labels = db.list_review_outcome_labels("obs_status_repeat")
+        self.assertEqual(len(labels), 1)
+        self.assertEqual(labels[0]["label_source"], "user_explicit")
+        self.assertEqual(labels[0]["outcome_label"], "false_positive")
+        self.assertEqual(app.effective_review_outcome_label("obs_status_repeat")["outcome_label"], "false_positive")
 
     def test_worker_result_fallback_checksum_includes_review_decision_events(self) -> None:
         base = {

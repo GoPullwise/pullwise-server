@@ -624,7 +624,9 @@ def review_calibration_observations_for_scope(scope_key: str) -> list[dict]:
     for observation_key, event in latest_by_observation.items():
         label = effective_review_outcome_label(observation_key)
         outcome = public_issue_text(label.get("outcome_label")).lower()
-        if outcome not in {"valid", "false_positive"}:
+        success_weight = public_review_float(label.get("calibration_success_weight")) or 0.0
+        failure_weight = public_review_float(label.get("calibration_failure_weight")) or 0.0
+        if success_weight + failure_weight <= 0 and outcome not in {"valid", "false_positive"}:
             continue
         observations.append({"event": event, "label": label})
     return observations
@@ -642,15 +644,21 @@ def build_review_calibration_snapshots(scope_key: str, *, timestamp: int | None 
         label = observation["label"]
         outcome = public_issue_text(label.get("outcome_label")).lower()
         base_weight = public_review_float(label.get("outcome_weight")) or 0.0
-        decayed_weight = base_weight * review_calibration_decay_weight(
+        success_base_weight = public_review_float(label.get("calibration_success_weight")) or 0.0
+        failure_base_weight = public_review_float(label.get("calibration_failure_weight")) or 0.0
+        if success_base_weight + failure_base_weight <= 0:
+            success_base_weight = base_weight if outcome == "valid" else 0.0
+            failure_base_weight = base_weight if outcome == "false_positive" else 0.0
+        decay_weight = review_calibration_decay_weight(
             label.get("created_at"),
             current_time=current_time,
             half_life_days=half_life_days,
         )
+        success = success_base_weight * decay_weight
+        failure = failure_base_weight * decay_weight
+        decayed_weight = success + failure
         if decayed_weight <= 0:
             continue
-        success = decayed_weight if outcome == "valid" else 0.0
-        failure = decayed_weight if outcome == "false_positive" else 0.0
         bucket_key = review_confidence_bucket(event.get("raw_confidence"))
         for cohort_key in review_calibration_cohort_keys(event):
             stats = cohort_stats.setdefault(
@@ -1299,7 +1307,10 @@ def record_review_outcome_label(
     if not observation_key:
         raise ValueError("candidate_observation_key is required")
     weight = max(0.0, min(1.0, float(outcome_weight or 0.0)))
-    label_id = review_event_hash(observation_key, source, outcome, event_id or "", created_by or "")
+    label_outcome_key = "" if source == "user_explicit" and created_by else outcome
+    label_id = review_event_hash(observation_key, source, label_outcome_key, event_id or "", created_by or "")
+    calibration_success_weight = weight if outcome == "valid" else 0.0
+    calibration_failure_weight = weight if outcome == "false_positive" else 0.0
     label = db.upsert_review_outcome_label(
         {
             "label_id": f"rol_{label_id[:32]}",
@@ -1311,6 +1322,8 @@ def record_review_outcome_label(
             "label_reason": " ".join(review._safe_text_lenient(label_reason).split())[:240],
             "created_at": now(),
             "created_by": public_issue_text(created_by)[:120],
+            "calibration_success_weight": calibration_success_weight,
+            "calibration_failure_weight": calibration_failure_weight,
         }
     )
     refresh_review_calibration_snapshots_for_observation(observation_key)
@@ -1599,6 +1612,16 @@ def record_issue_status_outcome_label(issue: dict, *, next_status: str, body: di
             false_positive=explicit_false_positive,
             user_id=user_id,
             reason=reason or ("marked false positive" if explicit_false_positive else "marked valid"),
+        )
+    if feedback_code:
+        return record_review_outcome_label(
+            event_id=public_issue_text(event.get("event_id")),
+            candidate_observation_key=observation_key,
+            outcome_label="ambiguous",
+            label_source="user_explicit",
+            outcome_weight=1.0,
+            label_reason=reason or feedback_default_reason,
+            created_by=user_id,
         )
     if next_status == "fixed":
         return record_user_feedback_outcome(
