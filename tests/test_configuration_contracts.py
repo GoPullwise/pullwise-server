@@ -123,6 +123,8 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertIn("github", handler.payload)
         self.assertIn("billing", handler.payload)
         self.assertIn("limits", handler.payload)
+        self.assertEqual(handler.payload["database"], {"type": "sqlite", "configured": True})
+        self.assertNotIn("path", handler.payload["database"])
         self.assertIn("oauthConfigured", handler.payload["github"])
         self.assertIn("appApiConfigured", handler.payload["github"])
         serialized = json.dumps(handler.payload)

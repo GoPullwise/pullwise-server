@@ -106,6 +106,46 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
 
         self.assertEqual(rows, [("ip:203.0.113.10", 2)])
 
+    def test_unauthenticated_worker_routes_are_rate_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_DB_PATH": db_path,
+                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+                },
+                clear=True,
+            ):
+                first = HandlerHarness("/worker/heartbeat", {"worker_id": "wk_1"})
+                second = HandlerHarness("/worker/heartbeat", {"worker_id": "wk_1"})
+
+                app.PullwiseHandler.route(first, "POST")
+                app.PullwiseHandler.route(second, "POST")
+
+            self.assertEqual(first.status, HTTPStatus.UNAUTHORIZED)
+            self.assertEqual(second.status, HTTPStatus.TOO_MANY_REQUESTS)
+            self.assertIn("rate limit", second.payload["message"].lower())
+
+    def test_authenticated_worker_routes_keep_worker_rate_limit_exemption(self) -> None:
+        handler = HandlerHarness(
+            "/worker/heartbeat",
+            headers={"Authorization": "Bearer worker-token"},
+        )
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
+            patch.object(app.db, "get_worker_by_token", return_value={"worker_id": "wk_1"}),
+            patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
+        ):
+            limited = handler.apply_rate_limit("POST", "/worker/heartbeat")
+
+        self.assertFalse(limited)
+        record_rate_limit_hit.assert_not_called()
+
     def test_rate_limit_storage_failures_do_not_block_api_requests(self) -> None:
         handler = HandlerHarness("/auth/session")
 

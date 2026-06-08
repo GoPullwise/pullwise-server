@@ -296,10 +296,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("PULLWISE_PROVIDER_CHAIN", install.text_payload)
         self.assertIn("PULLWISE_CODEX_MODEL", install.text_payload)
         self.assertIn("PULLWISE_CODEX_REASONING_EFFORT", install.text_payload)
-        self.assertIn("PULLWISE_CODEX_MODEL=${PULLWISE_CODEX_MODEL:-gpt-5.5}", install.text_payload)
-        self.assertIn("PULLWISE_CODEX_REASONING_EFFORT=${PULLWISE_CODEX_REASONING_EFFORT:-medium}", install.text_payload)
-        self.assertIn("PULLWISE_OPENCODE_MODEL=${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}", install.text_payload)
-        self.assertIn("PULLWISE_OPENCODE_VARIANT=${PULLWISE_OPENCODE_VARIANT:-medium}", install.text_payload)
+        self.assertIn('write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"', install.text_payload)
+        self.assertIn(
+            'write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"',
+            install.text_payload,
+        )
+        self.assertIn(
+            'write_env_value PULLWISE_OPENCODE_MODEL "${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"',
+            install.text_payload,
+        )
+        self.assertIn('write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"', install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_COMMAND", install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_MODEL", install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_VARIANT", install.text_payload)
@@ -308,6 +314,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("@openai/codex@0.135.0", install.text_payload)
         self.assertIn("--codex-package", install.text_payload)
         self.assertIn("--provider-chain", install.text_payload)
+        self.assertIn("write_env_value()", install.text_payload)
+        self.assertIn("environment value for $key must be single-line", install.text_payload)
+        self.assertIn("load_worker_env /etc/pullwise-worker/worker.env", install.text_payload)
+        self.assertNotIn("PULLWISE_WORKER_TOKEN=$WORKER_TOKEN", install.text_payload)
+        self.assertNotIn(". /etc/pullwise-worker/worker.env", install.text_payload)
         self.assertIn("PULLWISE_WORKER_TOKEN", install.text_payload)
         self.assertIn("--worker-token-file", install.text_payload)
         self.assertIn("Restart=on-failure", install.text_payload)
