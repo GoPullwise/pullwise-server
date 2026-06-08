@@ -780,6 +780,9 @@ class SecurityContractsPart01Test(SecurityContractsBase):
                 "name": "Mallory\r\nX-Injected: bad",
                 "email": {"value": "mallory@example.com"},
             },
+            "review": {
+                "outputLanguage": {"value": "fr"},
+            },
             "extra": {"unsafe": True},
         }
         handler = RouteHarness("/settings", cookie=self.signed_in())
@@ -787,7 +790,13 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload, {"profile": {"name": "Dev", "email": "dev@example.com"}})
+        self.assertEqual(
+            handler.payload,
+            {
+                "profile": {"name": "Dev", "email": "dev@example.com"},
+                "review": {"outputLanguage": "en"},
+            },
+        )
 
 
 __all__ = ["SecurityContractsPart01Test"]

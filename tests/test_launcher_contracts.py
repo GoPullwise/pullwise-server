@@ -187,6 +187,8 @@ class LauncherContractsTest(unittest.TestCase):
     def write_state_encryption_key(self, root: Path) -> Path:
         key_file = root / "secrets" / "state-encryption-key"
         key_file.parent.mkdir(parents=True, exist_ok=True)
+        if key_file.exists():
+            key_file.chmod(0o600)
         key_file.write_text("01" * 32 + "\n", encoding="ascii", newline="\n")
         key_file.chmod(0o400)
         return key_file
@@ -684,8 +686,9 @@ class LauncherContractsTest(unittest.TestCase):
             (root / "logs" / "pullwise-2026-05-23.log").write_text("log", encoding="utf-8")
             (root / "checkouts" / "usr" / "scan" / "repo").mkdir(parents=True)
             (root / "checkouts" / "usr" / "scan" / "repo" / "README.md").write_text("repo", encoding="utf-8")
-            (root / "secrets").mkdir()
+            (root / "secrets").mkdir(exist_ok=True)
             (root / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
+            (root / "secrets" / "state-encryption-key").chmod(0o600)
             (root / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
             (root / ".pullwise" / "extra").mkdir(parents=True)
             (root / ".pullwise" / "extra" / "artifact.txt").write_text("artifact", encoding="utf-8")
@@ -722,8 +725,9 @@ class LauncherContractsTest(unittest.TestCase):
             (source / "logs" / "pullwise-2026-05-23.log").write_text("log", encoding="utf-8")
             (source / "checkouts" / "usr" / "scan").mkdir(parents=True)
             (source / "checkouts" / "usr" / "scan" / "repo.txt").write_text("repo", encoding="utf-8")
-            (source / "secrets").mkdir()
+            (source / "secrets").mkdir(exist_ok=True)
             (source / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
+            (source / "secrets" / "state-encryption-key").chmod(0o600)
             (source / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
             archive = workspace / "pullwise-export.tar.gz"
 
