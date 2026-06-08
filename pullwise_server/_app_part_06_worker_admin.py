@@ -15,12 +15,36 @@ def worker_heartbeat_timeout_seconds() -> int:
     return max(60, env_int("PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", 120))
 
 
+def parse_worker_version(value: object) -> tuple[int, ...] | None:
+    version = public_issue_text(value).strip()
+    if version.startswith("v"):
+        version = version[1:]
+    parts = version.split(".")
+    if not parts or any(not part.isdecimal() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def compare_worker_versions(version: tuple[int, ...], minimum: tuple[int, ...]) -> int:
+    length = max(len(version), len(minimum))
+    padded_version = version + (0,) * (length - len(version))
+    padded_minimum = minimum + (0,) * (length - len(minimum))
+    if padded_version == padded_minimum:
+        return 0
+    return 1 if padded_version > padded_minimum else -1
+
+
 def worker_version_compatible(worker: dict) -> bool:
     minimum = env("PULLWISE_MIN_WORKER_VERSION", "").strip()
-    version = public_issue_text(worker.get("version"))
-    if not minimum or not version:
+    if not minimum:
         return True
-    return version >= minimum
+    parsed_minimum = parse_worker_version(minimum)
+    if parsed_minimum is None:
+        return True
+    parsed_version = parse_worker_version(worker.get("version"))
+    if parsed_version is None:
+        return False
+    return compare_worker_versions(parsed_version, parsed_minimum) >= 0
 
 
 def worker_supported_provider(worker: dict) -> bool:

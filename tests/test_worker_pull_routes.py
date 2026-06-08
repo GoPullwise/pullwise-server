@@ -3472,6 +3472,41 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "cancelled")
         self.assertEqual(app.ISSUES, [])
 
+    def test_cancelled_running_job_rejects_late_worker_progress(self) -> None:
+        scan = {
+            "id": "sc_cancel_progress",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        scan["status"] = "cancelled"
+        db.cancel_scan_job_for_scan(scan["id"])
+        progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {"phase": "ai", "progress": 70, "message": "late update"},
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(progress, "POST")
+
+        self.assertEqual(progress.status, HTTPStatus.CONFLICT)
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "cancelled")
+        self.assertEqual(db.get_scan_job(job["job_id"])["progress"], 0)
+        self.assertEqual(app.SCANS[0]["status"], "cancelled")
+        self.assertEqual(app.SCANS[0]["progress"], 0)
+
     def test_worker_result_must_match_current_claim_attempt(self) -> None:
         scan = {
             "id": "sc_attempt",

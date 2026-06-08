@@ -317,6 +317,7 @@ def initialize() -> None:
                 """
             )
             ensure_column(connection, "scan_jobs", "review_output_language", "TEXT")
+            ensure_column(connection, "scan_jobs", "last_attempt_id", "TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable
@@ -1996,7 +1997,7 @@ def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str,
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE scan_jobs
                 SET progress_phase = ?,
@@ -2018,6 +2019,8 @@ def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str,
                     job_id,
                 ),
             )
+            if cursor.rowcount <= 0:
+                return None
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
 
 

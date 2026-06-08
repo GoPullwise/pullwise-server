@@ -2023,6 +2023,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
         if not self.authenticated_worker_id_matches(worker_record, public_issue_text(current_job.get("claimed_by_worker_id"))):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
+        if public_issue_text(current_job.get("status")) not in {"claimed", "running"}:
+            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
         job = db.update_scan_job_progress(
             job_id,
             {
@@ -2034,7 +2036,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             },
         )
         if not job:
-            return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
+            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
         audit_swarm = public_scan_audit_swarm(body.get("audit_swarm") or body.get("auditSwarm"))
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)

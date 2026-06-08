@@ -613,12 +613,9 @@ def billing_update_from_stripe_event(event: dict) -> dict | None:
         subscription_id = text_payload(subscription_payload.get("id") if subscription_payload else subscription, "")
         subscription_status = text_payload(subscription_payload.get("status"), "").strip().lower()
         payment_status = text_payload(obj.get("payment_status"), "").strip().lower()
-        if (
-            not user_id
-            or not subscription_id
-            or subscription_status not in {"active", "trialing"}
-            or payment_status not in {"paid", "no_payment_required"}
-        ):
+        if not user_id or not subscription_id or payment_status not in {"paid", "no_payment_required"}:
+            return None
+        if subscription_payload and subscription_status not in {"active", "trialing"}:
             return None
         return {
             "userId": user_id,

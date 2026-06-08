@@ -255,6 +255,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], expected)
         self.assertIn(f"--package '{expected}'", handler.payload["install_command"])
 
+    def test_worker_minimum_version_uses_numeric_components(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_MIN_WORKER_VERSION": "0.9.0"}, clear=False):
+            self.assertTrue(app.worker_version_compatible({"version": "0.10.0"}))
+            self.assertTrue(app.worker_version_compatible({"version": "v0.9.0"}))
+            self.assertFalse(app.worker_version_compatible({"version": "0.8.9"}))
+            self.assertFalse(app.worker_version_compatible({"version": "not-a-version"}))
+            self.assertFalse(app.worker_version_compatible({"version": "0.10.0-beta"}))
+            self.assertFalse(app.worker_version_compatible({"version": ""}))
+
     def test_admin_worker_defaults_resolve_latest_release_version(self) -> None:
         class ReleaseResponse:
             def __enter__(self) -> "ReleaseResponse":

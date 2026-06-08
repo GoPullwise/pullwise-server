@@ -312,6 +312,72 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertNotIn("workspaces", foreign_key_tables)
         self.assertEqual(rows, [("ak_old", "Old key"), ("ak_new", "New key")])
 
+    def test_initialize_adds_last_attempt_id_to_legacy_scan_jobs_table(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            CREATE TABLE scan_jobs (
+                                job_id TEXT PRIMARY KEY,
+                                scan_id TEXT NOT NULL UNIQUE,
+                                repo TEXT NOT NULL,
+                                branch TEXT NOT NULL,
+                                "commit" TEXT NOT NULL,
+                                status TEXT NOT NULL,
+                                attempt INTEGER NOT NULL DEFAULT 0,
+                                claimed_by_worker_id TEXT,
+                                claimed_at INTEGER,
+                                started_at INTEGER,
+                                completed_at INTEGER,
+                                timeout_at INTEGER,
+                                error TEXT,
+                                result_checksum TEXT,
+                                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                                user_id TEXT,
+                                repo_id TEXT,
+                                github_repo_id TEXT,
+                                installation_id TEXT,
+                                clone_url TEXT,
+                                progress_phase TEXT,
+                                progress INTEGER NOT NULL DEFAULT 0,
+                                progress_message TEXT,
+                                logs_summary TEXT,
+                                max_attempts INTEGER NOT NULL DEFAULT 3,
+                                review_output_language TEXT
+                            )
+                            """
+                        )
+
+                db.initialize()
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    columns = [row[1] for row in connection.execute("PRAGMA table_info(scan_jobs)").fetchall()]
+                results = db.list_completed_scan_job_results()
+
+        self.assertIn("last_attempt_id", columns)
+        self.assertEqual(results, [])
+
+    def test_set_worker_enabled_records_disable_timestamp_and_clears_on_enable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                db.initialize()
+                worker = db.create_worker({"worker_id": "wk_disable_timestamp", "name": "Timestamp worker"})
+
+                with patch("pullwise_server.db.time.time", return_value=1234):
+                    disabled = db.set_worker_enabled(worker["worker_id"], False)
+                with patch("pullwise_server.db.time.time", return_value=1300):
+                    enabled = db.set_worker_enabled(worker["worker_id"], True)
+
+        self.assertEqual(disabled["disabled_at"], 1234)
+        self.assertEqual(disabled["enabled"], 0)
+        self.assertIsNone(enabled["disabled_at"])
+        self.assertEqual(enabled["enabled"], 1)
+
     def test_cleanup_operational_records_prunes_only_old_terminal_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
