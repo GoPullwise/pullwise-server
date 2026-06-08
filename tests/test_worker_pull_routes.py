@@ -876,6 +876,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "verification_status": "static_proof",
                     "file_path": "src/app.py",
                     "line_start": 12,
+                    "raw_confidence": 0.92,
                     "normalized_title": "Fixed issue",
                     "decision": "reported",
                     "scoring_protocol": "pullwise-review-score/0.1",
@@ -898,6 +899,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "verification_status": "potential_risk",
                     "file_path": "src/app.py",
                     "line_start": 22,
+                    "raw_confidence": 0.92,
                     "normalized_title": "False positive issue",
                     "decision": "reported",
                     "scoring_protocol": "pullwise-review-score/0.1",
@@ -920,6 +922,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "verification_status": "potential_risk",
                     "file_path": "src/app.py",
                     "line_start": 32,
+                    "raw_confidence": 0.92,
                     "normalized_title": "Duplicate issue",
                     "decision": "reported",
                     "scoring_protocol": "pullwise-review-score/0.1",
@@ -966,6 +969,40 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(duplicate_labels[0]["label_source"], "weak_lifecycle")
         self.assertEqual(duplicate_labels[0]["outcome_label"], "ambiguous")
         self.assertEqual(duplicate_labels[0]["label_reason"], "feedback:duplicate - Duplicate issue.")
+
+        next_scan = {
+            "id": "sc_feedback_next",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_123",
+            "githubRepoId": "123",
+        }
+        app.SCANS.append(next_scan)
+        app.create_scan_job_for_scan(next_scan)
+        next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(next_claim, "POST")
+
+        self.assertEqual(next_claim.status, HTTPStatus.OK)
+        context = next_claim.payload["job"]["review_calibration_context"]
+        self.assertEqual(context["scope_key"], "user:usr_1|repo:repo_123|branch:main")
+        self.assertAlmostEqual(context["effective_sample_counts"]["global"], 2.0, delta=0.01)
+        self.assertAlmostEqual(context["source_reliability"]["global"]["effective_samples"], 2.0, delta=0.01)
+        self.assertIn("0.90-0.95", context["confidence_calibration"]["global"])
+        bucket = context["confidence_calibration"]["global"]["0.90-0.95"]
+        self.assertAlmostEqual(bucket["positive_truth_weight"], 1.0, delta=0.01)
+        self.assertAlmostEqual(bucket["labeled_weight"], 2.0, delta=0.01)
+        self.assertAlmostEqual(
+            bucket["bucket_precision"],
+            (bucket["positive_truth_weight"] + 3.0) / (bucket["labeled_weight"] + 5.0),
+        )
 
     def test_worker_result_fallback_checksum_includes_review_decision_events(self) -> None:
         base = {
