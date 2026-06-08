@@ -184,8 +184,16 @@ class LauncherContractsTest(unittest.TestCase):
         env["PULLWISE_CURL_LOG"] = shell_path(curl_log)
         return env
 
+    def write_state_encryption_key(self, root: Path) -> Path:
+        key_file = root / "secrets" / "state-encryption-key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("01" * 32 + "\n", encoding="ascii", newline="\n")
+        key_file.chmod(0o400)
+        return key_file
+
     def write_production_env(self, root: Path, *, allowed_origins: str = "https://app.example.com") -> Path:
         env_file = root / "server.env"
+        state_key = self.write_state_encryption_key(root)
         env_file.write_text(
             textwrap.dedent(
                 f"""
@@ -198,6 +206,7 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_DB_PATH={shell_path(root / "data" / "pullwise.sqlite3")}
                 PULLWISE_LOG_DIR={shell_path(root / "logs")}
                 PULLWISE_CHECKOUT_ROOT={shell_path(root / "checkouts")}
+                PULLWISE_STATE_ENCRYPTION_KEY_PATH={shell_path(state_key)}
                 PULLWISE_COOKIE_SECURE=true
                 PULLWISE_RATE_LIMIT_ENABLED=true
                 PULLWISE_RATE_LIMIT_REQUESTS=600
@@ -240,6 +249,7 @@ class LauncherContractsTest(unittest.TestCase):
                 PULLWISE_GITHUB_APP_SLUG=pullwise
                 PULLWISE_GITHUB_APP_ID=123
                 PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=secrets/github-app-private-key.pem
+                PULLWISE_STATE_ENCRYPTION_KEY_PATH=secrets/state-encryption-key
                 PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
                 """
             ).strip()
@@ -402,6 +412,19 @@ class LauncherContractsTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
         self.assertIn("PULLWISE_RATE_LIMIT_ENABLED", result.stderr + result.stdout)
+
+    def test_doctor_rejects_missing_state_encryption_key_in_production(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            state_key = root / "secrets" / "state-encryption-key"
+            state_key.unlink()
+            self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
+
+            result = self.run_launcher(["doctor"], env)
+
+        self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("PULLWISE_STATE_ENCRYPTION_KEY_PATH", result.stderr + result.stdout)
 
     def test_config_loads_env_values_with_spaces_without_sourcing_as_shell(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -663,6 +686,7 @@ class LauncherContractsTest(unittest.TestCase):
             (root / "checkouts" / "usr" / "scan" / "repo" / "README.md").write_text("repo", encoding="utf-8")
             (root / "secrets").mkdir()
             (root / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
+            (root / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
             (root / ".pullwise" / "extra").mkdir(parents=True)
             (root / ".pullwise" / "extra" / "artifact.txt").write_text("artifact", encoding="utf-8")
             archive = root / "pullwise-export.tar.gz"
@@ -682,6 +706,7 @@ class LauncherContractsTest(unittest.TestCase):
                 "pullwise-state/extra/artifact.txt",
             ]:
                 self.assertIn(expected, contents)
+            self.assertNotIn("secrets/state-encryption-key", contents)
 
     def test_import_restores_package_and_renders_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -699,6 +724,7 @@ class LauncherContractsTest(unittest.TestCase):
             (source / "checkouts" / "usr" / "scan" / "repo.txt").write_text("repo", encoding="utf-8")
             (source / "secrets").mkdir()
             (source / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
+            (source / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
             archive = workspace / "pullwise-export.tar.gz"
 
             export_result = self.run_launcher(["export", shell_path(archive)], source_env)

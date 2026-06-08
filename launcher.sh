@@ -55,7 +55,7 @@ Commands:
   doctor                    Audit Ubuntu 22.04 production readiness
   audit                     Alias for doctor
   config                    Print effective non-secret launcher configuration
-  export <archive.tar.gz>   Package env, db, logs, checkouts, PEM, and state
+  export <archive.tar.gz>   Package env, db, logs, checkouts, PEM, and state; excludes state encryption key
   import <archive.tar.gz>   Restore a migration package and render service
   help                      Show this help
 
@@ -231,6 +231,12 @@ path_from_env_file() {
 
 db_path() {
   abs_path "$(env_value PULLWISE_DB_PATH "$APP_DIR/.pullwise/pullwise.sqlite3")"
+}
+
+state_encryption_key_path() {
+  raw=$(env_value PULLWISE_STATE_ENCRYPTION_KEY_PATH "/etc/pullwise/secrets/state-encryption-key")
+  [ -n "$raw" ] || return 0
+  abs_path "$raw"
 }
 
 log_dir() {
@@ -477,7 +483,7 @@ cmd_init_env() {
   say "Edit these required production groups in $LOCAL_ENV_FILE:"
   say "  - HTTP/runtime: PULLWISE_APP_URL, PULLWISE_ALLOWED_ORIGINS, PULLWISE_API_BASE_URL"
   say "  - Storage: PULLWISE_DB_PATH, PULLWISE_LOG_DIR, PULLWISE_CHECKOUT_ROOT"
-  say "  - GitHub OAuth/App: client id/secret, app slug/id, private key path or base64"
+  say "  - Secrets: GitHub OAuth/App credentials and PULLWISE_STATE_ENCRYPTION_KEY_PATH"
   say "  - External workers: create at least one worker from the admin API after deploy"
   say "Then run: ./launcher.sh sync-env && ./launcher.sh doctor"
 }
@@ -866,6 +872,7 @@ cmd_config() {
   print_config_key PULLWISE_RATE_LIMIT_REQUESTS "600"
   print_config_key PULLWISE_RATE_LIMIT_WINDOW_SECONDS "60"
   print_config_key PULLWISE_DB_PATH "$(db_path)"
+  print_config_key PULLWISE_STATE_ENCRYPTION_KEY_PATH "$(state_encryption_key_path)"
   print_config_key PULLWISE_LOG_DIR "$(log_dir)"
   print_config_key PULLWISE_CHECKOUT_ROOT "$(checkout_root)"
   print_config_key PULLWISE_GITHUB_OAUTH_SCOPE "read:user user:email"
@@ -1113,6 +1120,44 @@ check_secret_path() {
   esac
 }
 
+check_state_encryption_key() {
+  key_path=$(state_encryption_key_path)
+  if [ -z "$key_path" ]; then
+    fail "PULLWISE_STATE_ENCRYPTION_KEY_PATH is required in production."
+    return
+  fi
+  if [ -r "$key_path" ]; then
+    ok "State encryption key file is readable"
+  else
+    fail "PULLWISE_STATE_ENCRYPTION_KEY_PATH is not readable: $key_path"
+    return
+  fi
+  case "$key_path" in
+    /etc/pullwise/secrets/*)
+      ok "State encryption key is under /etc/pullwise/secrets"
+      ;;
+    "$APP_DIR"/*)
+      warn "State encryption key is inside the project tree; prefer /etc/pullwise/secrets/state-encryption-key"
+      ;;
+    *)
+      warn "recommended state encryption key path: /etc/pullwise/secrets/state-encryption-key"
+      ;;
+  esac
+
+  mode=$(stat -c '%a' "$key_path" 2>/dev/null || true)
+  case "$mode" in
+    400|440)
+      ok "State encryption key mode is $mode"
+      ;;
+    "")
+      warn "could not inspect state encryption key mode; use chmod 400 or chmod 440"
+      ;;
+    *)
+      fail "State encryption key mode must be 400 or 440, found $mode"
+      ;;
+  esac
+}
+
 check_github_config() {
   [ -n "$(env_value PULLWISE_GITHUB_CLIENT_ID "")" ] || fail "PULLWISE_GITHUB_CLIENT_ID is required for real GitHub sign-in."
   [ -n "$(env_value PULLWISE_GITHUB_CLIENT_SECRET "")" ] || fail "PULLWISE_GITHUB_CLIENT_SECRET is required for real GitHub sign-in."
@@ -1238,6 +1283,7 @@ cmd_doctor() {
   check_required_tool "git" PULLWISE_GIT_BIN git >/dev/null
   check_production_env
   check_storage
+  check_state_encryption_key
   check_github_config
   check_scan_limits
   check_billing_config
@@ -1265,6 +1311,19 @@ copy_file_if_exists() {
   [ -f "$src" ] || return 0
   mkdir -p "$(dirname -- "$dst")" || die "Unable to create $(dirname -- "$dst")"
   cp "$src" "$dst" || die "Unable to copy $src -> $dst"
+}
+
+remove_staged_state_encryption_key() {
+  stage_state_dir=$1
+  key_path=$(state_encryption_key_path)
+  [ -n "$key_path" ] || return 0
+  app_state_dir=$(abs_path "$APP_DIR/.pullwise")
+  case "$key_path" in
+    "$app_state_dir"/*)
+      rel=${key_path#"$app_state_dir"/}
+      rm -f "$stage_state_dir/$rel" 2>/dev/null || true
+      ;;
+  esac
 }
 
 cmd_export() {
@@ -1309,6 +1368,7 @@ MANIFEST
   if [ -d "$APP_DIR/.pullwise" ]; then
     mkdir -p "$stage/pullwise-state"
     copy_dir_contents "$APP_DIR/.pullwise" "$stage/pullwise-state"
+    remove_staged_state_encryption_key "$stage/pullwise-state"
     find "$stage/pullwise-state/run" -type f -name '*.pid' -delete 2>/dev/null || true
   fi
 

@@ -143,6 +143,7 @@ PULLWISE_SCAN_JOB_RETENTION_SECONDS=2592000
 PULLWISE_WORKER_COMMAND_RETENTION_SECONDS=2592000
 PULLWISE_WORKER_AUDIT_RETENTION_SECONDS=7776000
 PULLWISE_CHECKOUT_ROOT=/data/checkouts
+PULLWISE_STATE_ENCRYPTION_KEY_PATH=/etc/pullwise/secrets/state-encryption-key
 PULLWISE_COOKIE_SECURE=true
 PULLWISE_COOKIE_SAME_SITE=Lax
 PULLWISE_ADMIN_USER_IDS=
@@ -156,6 +157,22 @@ PULLWISE_BILLING_CURRENCY=USD
 ```
 
 Server cleanup only prunes operational records: expired sessions/GitHub OAuth state, terminal worker commands/audit rows, and terminal scan job/result duplicates that have already been applied to the user-visible scan state. User scan results in `SCANS`/`ISSUES` are retained.
+
+Production deployments must provide a separate state encryption key file. The
+server uses it to encrypt GitHub OAuth user tokens before writing `app_state`
+JSON to SQLite. Keep this file outside the project tree and outside migration
+packages:
+
+```bash
+sudo install -d -m 750 -o root -g pullwise /etc/pullwise/secrets
+openssl rand -base64 32 | sudo tee /etc/pullwise/secrets/state-encryption-key >/dev/null
+sudo chown root:pullwise /etc/pullwise/secrets/state-encryption-key
+sudo chmod 440 /etc/pullwise/secrets/state-encryption-key
+```
+
+`./launcher.sh export` intentionally does not package this key. When restoring
+or moving an encrypted database, provision the same key separately before
+starting the server.
 
 Use `PULLWISE_API_BASE_URL=https://app.your-domain.com/api` when the web app is
 deployed to Cloudflare Pages with the included `/api` proxy. OAuth callbacks
@@ -428,12 +445,18 @@ PULLWISE_DB_PATH=/var/lib/pullwise/pullwise.sqlite3
 PULLWISE_LOG_DIR=/var/log/pullwise
 PULLWISE_CHECKOUT_ROOT=/var/lib/pullwise/checkouts
 PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=/etc/pullwise/secrets/github-app-private-key.pem
+PULLWISE_STATE_ENCRYPTION_KEY_PATH=/etc/pullwise/secrets/state-encryption-key
 ```
 
 Keep the GitHub App private key outside the repository. The recommended path is
 `/etc/pullwise/secrets/github-app-private-key.pem` with directory permissions
 `root:pullwise 0750` and file permissions `root:pullwise 0640`, while the
 service runs as `User=pullwise` and `Group=pullwise`.
+
+Keep the state encryption key in the same secrets directory, but do not store it
+in the repository or migration archive. The recommended permissions are
+`root:pullwise 0440`, or `root:root 0400` if the service can read it through
+your secret manager or mount configuration.
 
 The production audit expects exact HTTPS origins, secure cookies, writable
 persistent paths for the SQLite database, logs, and checkouts, real GitHub
@@ -489,8 +512,11 @@ sudo ./launcher.sh export /tmp/pullwise-server-$(date +%Y%m%d).tar.gz
 
 The archive includes `server.env`, the SQLite database plus WAL/SHM sidecars
 when present, logs, checkouts, the configured GitHub App private key PEM, and
-other `.pullwise` generated state. On a new host, copy the archive into the
-repository directory and import it:
+other `.pullwise` generated state. It intentionally excludes the state
+encryption key, so provision the same
+`PULLWISE_STATE_ENCRYPTION_KEY_PATH` file separately before starting an
+imported encrypted database. On a new host, copy the archive into the repository
+directory and import it:
 
 ```bash
 sudo ./launcher.sh import /tmp/pullwise-server-20260523.tar.gz
@@ -499,8 +525,9 @@ sudo ./launcher.sh start
 ```
 
 Import restores `/etc/pullwise/server.env`, places artifacts at the paths named
-inside that env file, restores the PEM file when `PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH`
-is set, and renders the systemd service file.
+inside that env file, restores the PEM file when
+`PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH` is set, and renders the systemd service
+file. It does not restore `PULLWISE_STATE_ENCRYPTION_KEY_PATH`.
 
 ## Real GitHub Setup
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import datetime
 import hashlib
 import json
@@ -12,8 +14,14 @@ import time
 from contextlib import closing
 from typing import Any
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 
 _LOCK = threading.Lock()
+DEFAULT_STATE_ENCRYPTION_KEY_PATH = "/etc/pullwise/secrets/state-encryption-key"
+STATE_ENCRYPTION_KEY_PATH_ENV = "PULLWISE_STATE_ENCRYPTION_KEY_PATH"
+STATE_ENCRYPTION_MARKER = "pullwise-state-secret-v1"
+STATE_ENCRYPTION_AAD = b"pullwise-server-state-secret-v1"
 
 
 def project_root() -> str:
@@ -468,6 +476,173 @@ def normalize_api_keys_schema(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE api_keys_old")
 
 
+def state_encryption_key_path() -> str:
+    configured = os.environ.get(STATE_ENCRYPTION_KEY_PATH_ENV)
+    if configured is not None:
+        return configured.strip()
+    return DEFAULT_STATE_ENCRYPTION_KEY_PATH
+
+
+def state_encryption_required() -> bool:
+    mode = os.environ.get("PULLWISE_MODE", "").strip().lower()
+    if mode == "production":
+        return True
+    return STATE_ENCRYPTION_KEY_PATH_ENV in os.environ and bool(state_encryption_key_path())
+
+
+def parse_state_encryption_key(raw: bytes) -> bytes:
+    value = raw.strip()
+    if len(value) == 32:
+        return bytes(value)
+
+    try:
+        text = value.decode("ascii").strip()
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(
+            "State encryption key must be 32 raw bytes, 64 hex characters, or base64-encoded 32 bytes."
+        ) from exc
+
+    if text.startswith("pullwise-state-v1:"):
+        text = text.removeprefix("pullwise-state-v1:").strip()
+    if len(text) == 64 and all(char in "0123456789abcdefABCDEF" for char in text):
+        return bytes.fromhex(text)
+
+    padded = text + ("=" * (-len(text) % 4))
+    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
+        try:
+            key = decoder(padded.encode("ascii"))
+        except (binascii.Error, ValueError):
+            continue
+        if len(key) == 32:
+            return key
+
+    raise RuntimeError("State encryption key must decode to exactly 32 bytes.")
+
+
+def load_state_encryption_key(*, required: bool = False) -> bytes | None:
+    path = state_encryption_key_path()
+    if not path:
+        if required:
+            raise RuntimeError(f"{STATE_ENCRYPTION_KEY_PATH_ENV} must point to a readable 32-byte key file.")
+        return None
+    try:
+        with open(path, "rb") as key_file:
+            raw = key_file.read()
+    except FileNotFoundError:
+        if required:
+            raise RuntimeError(f"{STATE_ENCRYPTION_KEY_PATH_ENV} is not readable: {path}") from None
+        return None
+    except OSError as exc:
+        raise RuntimeError(f"{STATE_ENCRYPTION_KEY_PATH_ENV} is not readable: {path}") from exc
+
+    if not raw.strip():
+        raise RuntimeError(f"{STATE_ENCRYPTION_KEY_PATH_ENV} is empty: {path}")
+    return parse_state_encryption_key(raw)
+
+
+def encrypted_state_secret(value: object) -> bool:
+    return isinstance(value, dict) and value.get("__encrypted") == STATE_ENCRYPTION_MARKER
+
+
+def iter_state_secret_slots(state: dict[str, Any]):
+    users = state.get("users")
+    if not isinstance(users, dict):
+        return
+    for user_id, user in users.items():
+        if not isinstance(user, dict):
+            continue
+        yield user, "githubAccessToken", f"$.users.{user_id}.githubAccessToken"
+        identities = user.get("githubIdentities")
+        if isinstance(identities, list):
+            for index, identity in enumerate(identities):
+                if isinstance(identity, dict):
+                    yield identity, "accessToken", f"$.users.{user_id}.githubIdentities[{index}].accessToken"
+
+
+def state_has_plaintext_secrets(state: dict[str, Any]) -> bool:
+    for container, key, _path in iter_state_secret_slots(state):
+        value = container.get(key)
+        if isinstance(value, str) and value:
+            return True
+    return False
+
+
+def state_has_encrypted_secrets(state: dict[str, Any]) -> bool:
+    for container, key, _path in iter_state_secret_slots(state):
+        if encrypted_state_secret(container.get(key)):
+            return True
+    return False
+
+
+def state_secret_kid(key: bytes) -> str:
+    return hashlib.sha256(key).hexdigest()[:16]
+
+
+def encode_state_secret(value: str, key: bytes) -> dict[str, str]:
+    nonce = secrets.token_bytes(12)
+    ciphertext = AESGCM(key).encrypt(nonce, value.encode("utf-8"), STATE_ENCRYPTION_AAD)
+    return {
+        "__encrypted": STATE_ENCRYPTION_MARKER,
+        "alg": "AES-256-GCM",
+        "kid": state_secret_kid(key),
+        "nonce": base64.urlsafe_b64encode(nonce).decode("ascii"),
+        "ciphertext": base64.urlsafe_b64encode(ciphertext).decode("ascii"),
+    }
+
+
+def decode_state_secret(value: dict, key: bytes, *, path: str) -> str:
+    if value.get("alg") != "AES-256-GCM":
+        raise RuntimeError(f"Unsupported encrypted state secret algorithm at {path}.")
+    try:
+        nonce = base64.urlsafe_b64decode(str(value.get("nonce") or ""))
+        ciphertext = base64.urlsafe_b64decode(str(value.get("ciphertext") or ""))
+        plaintext = AESGCM(key).decrypt(nonce, ciphertext, STATE_ENCRYPTION_AAD)
+        return plaintext.decode("utf-8")
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to decrypt encrypted state secret at {path}. Check {STATE_ENCRYPTION_KEY_PATH_ENV}."
+        ) from exc
+
+
+def state_for_storage(state: dict[str, Any]) -> dict[str, Any]:
+    normalized = to_jsonable(state)
+    if not isinstance(normalized, dict):
+        raise TypeError("State root must be a JSON object.")
+
+    key = load_state_encryption_key(required=state_encryption_required()) if state_has_plaintext_secrets(normalized) else None
+    if not key:
+        return normalized
+
+    for container, slot_key, _path in iter_state_secret_slots(normalized):
+        value = container.get(slot_key)
+        if isinstance(value, str) and value:
+            container[slot_key] = encode_state_secret(value, key)
+    return normalized
+
+
+def state_for_runtime(state: dict[str, Any]) -> dict[str, Any]:
+    if not state_has_encrypted_secrets(state):
+        return state
+
+    key = load_state_encryption_key(required=True)
+    if not key:
+        raise RuntimeError(f"{STATE_ENCRYPTION_KEY_PATH_ENV} must be configured to decrypt state secrets.")
+
+    for container, slot_key, path in iter_state_secret_slots(state):
+        value = container.get(slot_key)
+        if encrypted_state_secret(value):
+            container[slot_key] = decode_state_secret(value, key, path=path)
+    return state
+
+
+def migrate_plaintext_state_secrets(state: dict[str, Any]) -> None:
+    if not state_has_plaintext_secrets(state):
+        return
+    key = load_state_encryption_key(required=state_encryption_required())
+    if key:
+        save_state(state)
+
+
 def load_state() -> dict[str, Any]:
     initialize()
     with _LOCK, closing(connect()) as connection:
@@ -478,11 +653,13 @@ def load_state() -> dict[str, Any]:
             state[name] = json.loads(payload)
         except (TypeError, json.JSONDecodeError):
             continue
-    return state
+    migrate_plaintext_state_secrets(state)
+    return state_for_runtime(state)
 
 
 def save_state(state: dict[str, Any]) -> None:
     initialize()
+    storage_state = state_for_storage(state)
     with _LOCK, closing(connect()) as connection:
         with connection:
             connection.executemany(
@@ -494,8 +671,8 @@ def save_state(state: dict[str, Any]) -> None:
                     updated_at = excluded.updated_at
                 """,
                 [
-                    (name, json.dumps(to_jsonable(payload, path=f"$.{name}"), ensure_ascii=False, allow_nan=False))
-                    for name, payload in state.items()
+                    (name, json.dumps(payload, ensure_ascii=False, allow_nan=False))
+                    for name, payload in storage_state.items()
                 ],
             )
 

@@ -35,6 +35,12 @@ class FakeConnection:
 
 
 class DatabaseContractsTest(unittest.TestCase):
+    def write_state_key(self, temp_dir: str) -> str:
+        key_path = os.path.join(temp_dir, "state-encryption-key")
+        with open(key_path, "w", encoding="ascii") as key_file:
+            key_file.write("01" * 32)
+        return key_path
+
     def test_initialize_closes_sqlite_connection(self) -> None:
         connection = FakeConnection()
 
@@ -84,6 +90,99 @@ class DatabaseContractsTest(unittest.TestCase):
 
             self.assertTrue(app.STATE_DIRTY)
             log_exception.assert_called_once()
+
+    def test_save_state_encrypts_github_oauth_tokens_at_rest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            key_path = self.write_state_key(temp_dir)
+            state = {
+                "users": {
+                    "usr_1": {
+                        "id": "usr_1",
+                        "githubAccessToken": "gho_user_token",
+                        "githubIdentities": [
+                            {"id": "ghi_1", "accessToken": "gho_identity_token"},
+                        ],
+                    }
+                }
+            }
+
+            with patch.dict(
+                os.environ,
+                {"PULLWISE_DB_PATH": db_path, "PULLWISE_STATE_ENCRYPTION_KEY_PATH": key_path},
+                clear=True,
+            ):
+                db.save_state(state)
+                with closing(sqlite3.connect(db_path)) as connection:
+                    payload = connection.execute("SELECT payload FROM app_state WHERE name = 'users'").fetchone()[0]
+                loaded = db.load_state()
+
+        self.assertNotIn("gho_user_token", payload)
+        self.assertNotIn("gho_identity_token", payload)
+        self.assertIn("pullwise-state-secret-v1", payload)
+        self.assertEqual(loaded, state)
+        self.assertEqual(state["users"]["usr_1"]["githubAccessToken"], "gho_user_token")
+
+    def test_load_state_reads_plaintext_tokens_and_migrates_them_to_encrypted_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            key_path = self.write_state_key(temp_dir)
+            with patch.dict(
+                os.environ,
+                {"PULLWISE_DB_PATH": db_path, "PULLWISE_STATE_ENCRYPTION_KEY_PATH": key_path},
+                clear=True,
+            ):
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            "INSERT INTO app_state (name, payload) VALUES (?, ?)",
+                            (
+                                "users",
+                                '{"usr_1": {"id": "usr_1", "githubAccessToken": "gho_plain", '
+                                '"githubIdentities": [{"id": "ghi_1", "accessToken": "gho_identity"}]}}',
+                            ),
+                        )
+
+                loaded = db.load_state()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    payload = connection.execute("SELECT payload FROM app_state WHERE name = 'users'").fetchone()[0]
+
+        self.assertEqual(loaded["users"]["usr_1"]["githubAccessToken"], "gho_plain")
+        self.assertEqual(loaded["users"]["usr_1"]["githubIdentities"][0]["accessToken"], "gho_identity")
+        self.assertNotIn("gho_plain", payload)
+        self.assertNotIn("gho_identity", payload)
+
+    def test_load_state_requires_key_for_encrypted_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            key_path = self.write_state_key(temp_dir)
+            with patch.dict(
+                os.environ,
+                {"PULLWISE_DB_PATH": db_path, "PULLWISE_STATE_ENCRYPTION_KEY_PATH": key_path},
+                clear=True,
+            ):
+                db.save_state({"users": {"usr_1": {"id": "usr_1", "githubAccessToken": "gho_user_token"}}})
+
+            with patch.dict(
+                os.environ,
+                {"PULLWISE_DB_PATH": db_path, "PULLWISE_STATE_ENCRYPTION_KEY_PATH": os.path.join(temp_dir, "missing")},
+                clear=True,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "PULLWISE_STATE_ENCRYPTION_KEY_PATH"):
+                    db.load_state()
+
+    def test_production_save_state_requires_key_before_persisting_github_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path, "PULLWISE_MODE": "production"}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "PULLWISE_STATE_ENCRYPTION_KEY_PATH"):
+                    db.save_state({"users": {"usr_1": {"id": "usr_1", "githubAccessToken": "gho_user_token"}}})
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    rows = connection.execute("SELECT payload FROM app_state WHERE name = 'users'").fetchall()
+
+        self.assertEqual(rows, [])
 
     def test_rate_limit_resets_malformed_stored_request_count(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
