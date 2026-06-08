@@ -336,6 +336,113 @@ def initialize() -> None:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS review_decision_events (
+                    event_id TEXT PRIMARY KEY,
+                    protocol TEXT NOT NULL,
+                    candidate_observation_key TEXT NOT NULL,
+                    scan_id TEXT,
+                    job_id TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    user_id TEXT,
+                    repo_id TEXT,
+                    github_repo_id TEXT,
+                    repo_full_name TEXT,
+                    branch TEXT,
+                    commit_sha TEXT,
+                    base_sha TEXT,
+                    head_sha TEXT,
+                    candidate_id TEXT,
+                    fingerprint TEXT,
+                    source TEXT,
+                    provider TEXT,
+                    model TEXT,
+                    category TEXT,
+                    severity TEXT,
+                    verification_status TEXT,
+                    file_path TEXT,
+                    line_start INTEGER,
+                    line_end INTEGER,
+                    normalized_title TEXT,
+                    raw_confidence REAL,
+                    calibrated_confidence REAL,
+                    source_reliability_mean REAL,
+                    source_reliability_lb REAL,
+                    source_adjustment REAL,
+                    evidence_strength REAL,
+                    delta_relevance REAL,
+                    category_adjustment REAL,
+                    truth_probability REAL,
+                    decision_score REAL,
+                    decision TEXT NOT NULL,
+                    decision_reason TEXT,
+                    scoring_protocol TEXT,
+                    score_factors_json TEXT NOT NULL DEFAULT '{}',
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_decision_events_observation
+                ON review_decision_events(candidate_observation_key, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_decision_events_scope
+                ON review_decision_events(user_id, repo_id, branch, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS review_outcome_labels (
+                    label_id TEXT PRIMARY KEY,
+                    event_id TEXT,
+                    candidate_observation_key TEXT NOT NULL,
+                    outcome_label TEXT NOT NULL,
+                    label_source TEXT NOT NULL,
+                    outcome_weight REAL NOT NULL,
+                    label_reason TEXT,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    created_by TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_outcome_labels_observation
+                ON review_outcome_labels(candidate_observation_key, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS review_calibration_snapshots (
+                    id TEXT PRIMARY KEY,
+                    scope_key TEXT NOT NULL,
+                    cohort_key TEXT NOT NULL,
+                    snapshot_version TEXT NOT NULL,
+                    effective_samples REAL NOT NULL DEFAULT 0,
+                    posterior_alpha REAL,
+                    posterior_beta REAL,
+                    posterior_mean REAL,
+                    posterior_lb REAL,
+                    confidence_buckets_json TEXT NOT NULL DEFAULT '{}',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    drift_state TEXT,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    UNIQUE(scope_key, cohort_key, snapshot_version)
+                )
+                """
+            )
+            ensure_column(connection, "review_calibration_snapshots", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_calibration_snapshots_scope
+                ON review_calibration_snapshots(scope_key, created_at)
+                """
+            )
             configured_worker_token = os.environ.get("PULLWISE_WORKER_TOKEN", "").strip()
             if configured_worker_token:
                 token_hash = worker_token_hash(configured_worker_token)
@@ -2025,6 +2132,314 @@ def record_scan_job_result(
         except Exception:
             connection.rollback()
             raise
+
+
+def record_review_decision_events(events: list[dict[str, Any]]) -> dict[str, int]:
+    initialize()
+    sanitized = [event for event in events if isinstance(event, dict)]
+    if not sanitized:
+        return {"inserted": 0, "duplicates": 0}
+    inserted = 0
+    duplicates = 0
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            for event in sanitized:
+                event_id = str(event.get("event_id") or "").strip()
+                observation_key = str(event.get("candidate_observation_key") or "").strip()
+                job_id = str(event.get("job_id") or "").strip()
+                attempt_id = str(event.get("attempt_id") or "").strip()
+                decision = str(event.get("decision") or "").strip()
+                protocol = str(event.get("protocol") or "").strip()
+                if not event_id or not observation_key or not job_id or not attempt_id or not decision or not protocol:
+                    continue
+                before = connection.total_changes
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO review_decision_events (
+                        event_id, protocol, candidate_observation_key, scan_id, job_id, attempt_id,
+                        user_id, repo_id, github_repo_id, repo_full_name, branch, commit_sha,
+                        base_sha, head_sha, candidate_id, fingerprint, source, provider, model,
+                        category, severity, verification_status, file_path, line_start, line_end,
+                        normalized_title, raw_confidence, calibrated_confidence,
+                        source_reliability_mean, source_reliability_lb, source_adjustment,
+                        evidence_strength, delta_relevance, category_adjustment, truth_probability,
+                        decision_score, decision, decision_reason, scoring_protocol,
+                        score_factors_json, created_at
+                    )
+                    VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    (
+                        event_id,
+                        protocol,
+                        observation_key,
+                        event.get("scan_id"),
+                        job_id,
+                        attempt_id,
+                        event.get("user_id"),
+                        event.get("repo_id"),
+                        event.get("github_repo_id"),
+                        event.get("repo_full_name"),
+                        event.get("branch"),
+                        event.get("commit_sha"),
+                        event.get("base_sha"),
+                        event.get("head_sha"),
+                        event.get("candidate_id"),
+                        event.get("fingerprint"),
+                        event.get("source"),
+                        event.get("provider"),
+                        event.get("model"),
+                        event.get("category"),
+                        event.get("severity"),
+                        event.get("verification_status"),
+                        event.get("file_path"),
+                        event.get("line_start"),
+                        event.get("line_end"),
+                        event.get("normalized_title"),
+                        event.get("raw_confidence"),
+                        event.get("calibrated_confidence"),
+                        event.get("source_reliability_mean"),
+                        event.get("source_reliability_lb"),
+                        event.get("source_adjustment"),
+                        event.get("evidence_strength"),
+                        event.get("delta_relevance"),
+                        event.get("category_adjustment"),
+                        event.get("truth_probability"),
+                        event.get("decision_score"),
+                        decision,
+                        event.get("decision_reason"),
+                        event.get("scoring_protocol"),
+                        json.dumps(to_jsonable(event.get("score_factors") or {}), ensure_ascii=False, sort_keys=True),
+                        int(event.get("created_at") or time.time()),
+                    ),
+                )
+                if connection.total_changes > before:
+                    inserted += 1
+                else:
+                    duplicates += 1
+    return {"inserted": inserted, "duplicates": duplicates}
+
+
+def list_review_decision_events(*, job_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    initialize()
+    max_rows = max(1, min(500, int(limit or 100)))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        if job_id:
+            rows = connection.execute(
+                """
+                SELECT * FROM review_decision_events
+                WHERE job_id = ?
+                ORDER BY created_at DESC, event_id DESC
+                LIMIT ?
+                """,
+                (str(job_id), max_rows),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT * FROM review_decision_events
+                ORDER BY created_at DESC, event_id DESC
+                LIMIT ?
+                """,
+                (max_rows,),
+            ).fetchall()
+    return [row_to_dict(row) or {} for row in rows]
+
+
+def list_review_decision_events_for_scope(
+    *,
+    user_id: str,
+    repo_key: str,
+    branch: str,
+    limit: int = 5000,
+) -> list[dict[str, Any]]:
+    initialize()
+    user_id = str(user_id or "").strip()
+    repo_key = str(repo_key or "").strip()
+    branch = str(branch or "").strip()
+    if not user_id or not repo_key or not branch:
+        return []
+    max_rows = max(1, min(20000, int(limit or 5000)))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM review_decision_events
+            WHERE user_id = ?
+              AND lower(branch) = lower(?)
+              AND (
+                lower(repo_id) = lower(?)
+                OR lower(github_repo_id) = lower(?)
+                OR lower(repo_full_name) = lower(?)
+              )
+            ORDER BY created_at DESC, event_id DESC
+            LIMIT ?
+            """,
+            (user_id, branch, repo_key, repo_key, repo_key, max_rows),
+        ).fetchall()
+    return [row_to_dict(row) or {} for row in rows]
+
+
+def list_review_decision_events_for_observation(candidate_observation_key: str) -> list[dict[str, Any]]:
+    initialize()
+    observation_key = str(candidate_observation_key or "").strip()
+    if not observation_key:
+        return []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM review_decision_events
+            WHERE candidate_observation_key = ?
+            ORDER BY created_at DESC, event_id DESC
+            """,
+            (observation_key,),
+        ).fetchall()
+    return [row_to_dict(row) or {} for row in rows]
+
+
+def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    label_id = str(label.get("label_id") or "").strip()
+    observation_key = str(label.get("candidate_observation_key") or "").strip()
+    outcome_label = str(label.get("outcome_label") or "").strip()
+    label_source = str(label.get("label_source") or "").strip()
+    if not label_id or not observation_key or not outcome_label or not label_source:
+        raise ValueError("label_id, candidate_observation_key, outcome_label, and label_source are required")
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO review_outcome_labels (
+                    label_id, event_id, candidate_observation_key, outcome_label,
+                    label_source, outcome_weight, label_reason, created_at, created_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(label_id) DO UPDATE SET
+                    event_id = excluded.event_id,
+                    candidate_observation_key = excluded.candidate_observation_key,
+                    outcome_label = excluded.outcome_label,
+                    label_source = excluded.label_source,
+                    outcome_weight = excluded.outcome_weight,
+                    label_reason = excluded.label_reason,
+                    created_by = excluded.created_by
+                """,
+                (
+                    label_id,
+                    label.get("event_id"),
+                    observation_key,
+                    outcome_label,
+                    label_source,
+                    float(label.get("outcome_weight") or 0.0),
+                    label.get("label_reason"),
+                    int(label.get("created_at") or time.time()),
+                    label.get("created_by"),
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM review_outcome_labels WHERE label_id = ?",
+                (label_id,),
+            ).fetchone()
+    return row_to_dict(row) or {}
+
+
+def list_review_outcome_labels(candidate_observation_key: str) -> list[dict[str, Any]]:
+    initialize()
+    observation_key = str(candidate_observation_key or "").strip()
+    if not observation_key:
+        return []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT * FROM review_outcome_labels
+            WHERE candidate_observation_key = ?
+            ORDER BY created_at DESC, label_id DESC
+            """,
+            (observation_key,),
+        ).fetchall()
+    return [row_to_dict(row) or {} for row in rows]
+
+
+def upsert_review_calibration_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    initialize()
+    scope_key = str(snapshot.get("scope_key") or "").strip()
+    cohort_key = str(snapshot.get("cohort_key") or "").strip()
+    version = str(snapshot.get("snapshot_version") or "").strip()
+    if not scope_key or not cohort_key or not version:
+        raise ValueError("scope_key, cohort_key, and snapshot_version are required")
+    snapshot_id = str(snapshot.get("id") or stable_id("rcs", f"{scope_key}:{cohort_key}:{version}"))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO review_calibration_snapshots (
+                    id, scope_key, cohort_key, snapshot_version, effective_samples,
+                    posterior_alpha, posterior_beta, posterior_mean, posterior_lb,
+                    confidence_buckets_json, metadata_json, drift_state, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(scope_key, cohort_key, snapshot_version) DO UPDATE SET
+                    effective_samples = excluded.effective_samples,
+                    posterior_alpha = excluded.posterior_alpha,
+                    posterior_beta = excluded.posterior_beta,
+                    posterior_mean = excluded.posterior_mean,
+                    posterior_lb = excluded.posterior_lb,
+                    confidence_buckets_json = excluded.confidence_buckets_json,
+                    metadata_json = excluded.metadata_json,
+                    drift_state = excluded.drift_state,
+                    created_at = excluded.created_at
+                """,
+                (
+                    snapshot_id,
+                    scope_key,
+                    cohort_key,
+                    version,
+                    float(snapshot.get("effective_samples") or 0.0),
+                    snapshot.get("posterior_alpha"),
+                    snapshot.get("posterior_beta"),
+                    snapshot.get("posterior_mean"),
+                    snapshot.get("posterior_lb"),
+                    json.dumps(to_jsonable(snapshot.get("confidence_buckets") or {}), ensure_ascii=False, sort_keys=True),
+                    json.dumps(to_jsonable(snapshot.get("metadata") or {}), ensure_ascii=False, sort_keys=True),
+                    snapshot.get("drift_state"),
+                    int(snapshot.get("created_at") or time.time()),
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM review_calibration_snapshots
+                WHERE scope_key = ? AND cohort_key = ? AND snapshot_version = ?
+                """,
+                (scope_key, cohort_key, version),
+            ).fetchone()
+    return row_to_dict(row) or {}
+
+
+def list_review_calibration_snapshots(scope_key: str) -> list[dict[str, Any]]:
+    initialize()
+    scope_key = str(scope_key or "").strip()
+    if not scope_key:
+        return []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM review_calibration_snapshots
+            WHERE scope_key = ?
+            ORDER BY created_at DESC, cohort_key ASC
+            """,
+            (scope_key,),
+        ).fetchall()
+    return [row_to_dict(row) or {} for row in rows]
 
 
 def repository_id_for_github_repo(github_repo_id: object) -> str:

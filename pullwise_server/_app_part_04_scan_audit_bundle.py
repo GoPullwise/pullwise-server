@@ -333,6 +333,1068 @@ def worker_convergence_context_for_job(job: dict) -> dict:
     }
 
 
+def review_calibration_scope_key_for_job(job: dict) -> str:
+    user_id = public_issue_text(job.get("user_id"))
+    repo_key = (
+        clean_github_access_text(job.get("repo_id"), allow_int=True)
+        or clean_github_access_text(job.get("github_repo_id"), allow_int=True)
+        or clean_repository_full_name(job.get("repo"))
+    )
+    branch = clean_github_access_text(job.get("branch")) or "main"
+    if not user_id or not repo_key:
+        return ""
+    return f"user:{user_id}|repo:{str(repo_key).lower()}|branch:{branch.lower()}"
+
+
+def review_calibration_mode(value: object = None) -> str:
+    mode = public_issue_text(value if value is not None else env("PULLWISE_REVIEW_CALIBRATION_MODE", "shadow")).lower()
+    return mode if mode in {"off", "shadow", "audit_only", "enforce"} else "shadow"
+
+
+def review_calibration_rollout_policy(scope_key: str) -> dict:
+    requested_mode = review_calibration_mode()
+    evaluation = review_shadow_evaluation(scope_key)
+    gate = review_calibration_enforce_gate(evaluation)
+    effective_mode = requested_mode
+    if requested_mode == "enforce" and not gate.get("canConsiderEnforce"):
+        effective_mode = "shadow"
+    return {
+        "requested_mode": requested_mode,
+        "effective_mode": effective_mode,
+        "enforce_gate": gate,
+        "shadow_evaluation": {
+            "candidate_count": public_scan_count(evaluation.get("candidateCount")),
+            "verified_suppression_count": public_scan_count(evaluation.get("verifiedSuppressionCount")),
+            "current_reported_count": public_scan_count(evaluation.get("currentReportedCount")),
+            "proposed_reported_count": public_scan_count(evaluation.get("proposedReportedCount")),
+        },
+    }
+
+
+def worker_review_calibration_context_for_job(job: dict) -> dict:
+    scope_key = review_calibration_scope_key_for_job(job)
+    if not scope_key:
+        return {}
+    rollout_policy = review_calibration_rollout_policy(scope_key)
+    context = {
+        "protocol": REVIEW_CALIBRATION_PROTOCOL_VERSION,
+        "scope_key": scope_key,
+        "mode": rollout_policy["effective_mode"],
+        "rollout_policy": rollout_policy,
+        "source_reliability": {},
+        "confidence_calibration": {},
+        "effective_sample_counts": {},
+        "drift_state": {},
+        "generated_at": now(),
+    }
+    for snapshot in db.list_review_calibration_snapshots(scope_key):
+        cohort_key = public_issue_text(snapshot.get("cohort_key"))[:240]
+        if not cohort_key:
+            continue
+        effective_samples = public_review_float(snapshot.get("effective_samples"))
+        context["effective_sample_counts"][cohort_key] = effective_samples or 0.0
+        reliability = {
+            "posterior_alpha": public_review_float(snapshot.get("posterior_alpha")),
+            "posterior_beta": public_review_float(snapshot.get("posterior_beta")),
+            "posterior_mean": public_review_float(snapshot.get("posterior_mean")),
+            "posterior_lb": public_review_float(snapshot.get("posterior_lb")),
+            "effective_samples": effective_samples,
+        }
+        metadata = review_json_dict(snapshot.get("metadata_json"))
+        for key in ("parent_cohort_key", "shrinkage_weight", "raw_posterior_mean", "raw_posterior_lb"):
+            if key not in metadata:
+                continue
+            if key == "parent_cohort_key":
+                reliability[key] = public_issue_text(metadata.get(key))[:240]
+            else:
+                reliability[key] = public_review_float(metadata.get(key))
+        reliability = {key: value for key, value in reliability.items() if value is not None}
+        if reliability:
+            context["source_reliability"][cohort_key] = reliability
+        buckets = review_json_dict(snapshot.get("confidence_buckets_json"))
+        if buckets:
+            context["confidence_calibration"][cohort_key] = buckets
+        drift_state = public_issue_text(snapshot.get("drift_state")).lower()
+        if drift_state in {"normal", "watch", "audit_only", "suspended"}:
+            context["drift_state"][cohort_key] = drift_state
+        if len(context["source_reliability"]) >= 100:
+            break
+    return context
+
+
+def review_calibration_scope_parts(scope_key: str) -> dict:
+    parts = {}
+    for item in str(scope_key or "").split("|"):
+        if ":" not in item:
+            continue
+        key, value = item.split(":", 1)
+        if key and value:
+            parts[key] = value
+    return parts
+
+
+def review_env_float(name: str, default: float) -> float:
+    try:
+        return float(env(name, str(default)))
+    except ValueError:
+        return default
+
+
+def review_calibration_decay_weight(created_at: object, *, current_time: int, half_life_days: float) -> float:
+    timestamp = pull_request_timestamp(created_at) or current_time
+    age_days = max(0.0, (current_time - timestamp) / 86400)
+    return max(0.05, 0.5 ** (age_days / max(1.0, half_life_days)))
+
+
+def review_calibration_posterior(success_weight: float, failure_weight: float) -> dict:
+    alpha0 = 3.0
+    beta0 = 2.0
+    alpha = alpha0 + max(0.0, success_weight)
+    beta = beta0 + max(0.0, failure_weight)
+    total = alpha + beta
+    mean = alpha / total
+    variance = alpha * beta / ((total * total) * (total + 1))
+    lb = max(0.0, min(1.0, mean - (variance ** 0.5)))
+    return {
+        "posterior_alpha": alpha,
+        "posterior_beta": beta,
+        "posterior_mean": mean,
+        "posterior_lb": lb,
+    }
+
+
+def review_calibration_drift_state(effective_samples: float, posterior_lb: float) -> str:
+    min_samples = max(1, env_int("PULLWISE_REVIEW_CALIBRATION_MIN_EFFECTIVE_SAMPLES", 20))
+    if effective_samples < min_samples:
+        return "normal"
+    if posterior_lb < 0.25:
+        return "audit_only"
+    if posterior_lb < 0.40:
+        return "watch"
+    return "normal"
+
+
+def review_confidence_bucket(raw_confidence: object) -> str:
+    confidence = public_review_probability(raw_confidence)
+    if confidence is None:
+        confidence = 0.0
+    ranges = [
+        (0.0, 0.50, "0.00-0.50"),
+        (0.50, 0.70, "0.50-0.70"),
+        (0.70, 0.80, "0.70-0.80"),
+        (0.80, 0.90, "0.80-0.90"),
+        (0.90, 0.95, "0.90-0.95"),
+        (0.95, 1.01, "0.95-1.00"),
+    ]
+    for lower, upper, label in ranges:
+        if lower <= confidence < upper:
+            return label
+    return "0.95-1.00"
+
+
+def review_calibration_cohort_keys(event: dict) -> list[str]:
+    source = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", public_issue_text(event.get("source")).lower())).strip()[:80]
+    category = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", public_issue_text(event.get("category")).lower())).strip()[:80]
+    status = public_issue_text(event.get("verification_status")).lower()
+    keys = ["global"]
+    if status:
+        keys.append(f"status:{status}")
+    if source:
+        keys.append(f"source:{source}")
+        if status:
+            keys.append(f"source:{source}|status:{status}")
+        if category:
+            keys.append(f"source:{source}|category:{category}")
+            if status:
+                keys.append(f"source:{source}|category:{category}|status:{status}")
+    return keys
+
+
+def review_calibration_parent_cohort_key(cohort_key: str) -> str:
+    key = public_issue_text(cohort_key)
+    if key == "global" or not key:
+        return ""
+    parts = key.split("|")
+    if len(parts) > 1:
+        if parts[-1].startswith("status:"):
+            return "|".join(parts[:-1])
+        if parts[-1].startswith("category:"):
+            return "|".join(parts[:-1])
+    if key.startswith("source:") or key.startswith("status:"):
+        return "global"
+    return "global"
+
+
+def review_calibration_cohort_depth(cohort_key: str) -> int:
+    key = public_issue_text(cohort_key)
+    if key == "global":
+        return 0
+    return key.count("|") + 1
+
+
+def review_calibration_shrunk_posterior(
+    cohort_key: str,
+    stats: dict,
+    raw_posterior: dict,
+    shrunk_posteriors: dict[str, dict],
+) -> dict:
+    effective_samples = stats["success_weight"] + stats["failure_weight"]
+    parent_key = review_calibration_parent_cohort_key(cohort_key)
+    parent = shrunk_posteriors.get(parent_key) if parent_key else None
+    if not parent:
+        return {
+            **raw_posterior,
+            "metadata": {
+                "parent_cohort_key": "",
+                "shrinkage_weight": 1.0,
+                "raw_posterior_mean": raw_posterior["posterior_mean"],
+                "raw_posterior_lb": raw_posterior["posterior_lb"],
+            },
+        }
+    shrinkage_k = max(1.0, review_env_float("PULLWISE_REVIEW_CALIBRATION_SHRINKAGE_K", 20.0))
+    weight = effective_samples / (effective_samples + shrinkage_k)
+    mean = (weight * raw_posterior["posterior_mean"]) + ((1 - weight) * parent["posterior_mean"])
+    lb = (weight * raw_posterior["posterior_lb"]) + ((1 - weight) * parent["posterior_lb"])
+    pseudo_total = max(5.0, effective_samples + 5.0)
+    return {
+        "posterior_alpha": mean * pseudo_total,
+        "posterior_beta": (1 - mean) * pseudo_total,
+        "posterior_mean": mean,
+        "posterior_lb": max(0.0, min(1.0, lb)),
+        "metadata": {
+            "parent_cohort_key": parent_key,
+            "shrinkage_weight": weight,
+            "raw_posterior_mean": raw_posterior["posterior_mean"],
+            "raw_posterior_lb": raw_posterior["posterior_lb"],
+        },
+    }
+
+
+def review_calibration_observations_for_scope(scope_key: str) -> list[dict]:
+    parts = review_calibration_scope_parts(scope_key)
+    events = db.list_review_decision_events_for_scope(
+        user_id=parts.get("user", ""),
+        repo_key=parts.get("repo", ""),
+        branch=parts.get("branch", ""),
+    )
+    latest_by_observation: dict[str, dict] = {}
+    for event in events:
+        observation_key = public_issue_text(event.get("candidate_observation_key"))
+        if not observation_key:
+            continue
+        if observation_key not in latest_by_observation:
+            latest_by_observation[observation_key] = event
+    observations = []
+    for observation_key, event in latest_by_observation.items():
+        label = effective_review_outcome_label(observation_key)
+        outcome = public_issue_text(label.get("outcome_label")).lower()
+        if outcome not in {"valid", "false_positive"}:
+            continue
+        observations.append({"event": event, "label": label})
+    return observations
+
+
+def build_review_calibration_snapshots(scope_key: str, *, timestamp: int | None = None) -> list[dict]:
+    scope_key = public_issue_text(scope_key)
+    if not scope_key:
+        return []
+    current_time = int(timestamp or now())
+    half_life_days = max(1.0, review_env_float("PULLWISE_REVIEW_CALIBRATION_HALF_LIFE_DAYS", 45.0))
+    cohort_stats: dict[str, dict] = {}
+    for observation in review_calibration_observations_for_scope(scope_key):
+        event = observation["event"]
+        label = observation["label"]
+        outcome = public_issue_text(label.get("outcome_label")).lower()
+        base_weight = public_review_float(label.get("outcome_weight")) or 0.0
+        decayed_weight = base_weight * review_calibration_decay_weight(
+            label.get("created_at"),
+            current_time=current_time,
+            half_life_days=half_life_days,
+        )
+        if decayed_weight <= 0:
+            continue
+        success = decayed_weight if outcome == "valid" else 0.0
+        failure = decayed_weight if outcome == "false_positive" else 0.0
+        bucket_key = review_confidence_bucket(event.get("raw_confidence"))
+        for cohort_key in review_calibration_cohort_keys(event):
+            stats = cohort_stats.setdefault(
+                cohort_key,
+                {
+                    "success_weight": 0.0,
+                    "failure_weight": 0.0,
+                    "buckets": {},
+                },
+            )
+            stats["success_weight"] += success
+            stats["failure_weight"] += failure
+            bucket = stats["buckets"].setdefault(bucket_key, {"success_weight": 0.0, "labeled_weight": 0.0})
+            bucket["success_weight"] += success
+            bucket["labeled_weight"] += decayed_weight
+    raw_posteriors = {
+        cohort_key: review_calibration_posterior(stats["success_weight"], stats["failure_weight"])
+        for cohort_key, stats in cohort_stats.items()
+    }
+    shrunk_posteriors: dict[str, dict] = {}
+    for cohort_key in sorted(cohort_stats, key=lambda key: (review_calibration_cohort_depth(key), key)):
+        shrunk_posteriors[cohort_key] = review_calibration_shrunk_posterior(
+            cohort_key,
+            cohort_stats[cohort_key],
+            raw_posteriors[cohort_key],
+            shrunk_posteriors,
+        )
+    snapshots = []
+    for cohort_key, stats in cohort_stats.items():
+        effective_samples = stats["success_weight"] + stats["failure_weight"]
+        posterior = shrunk_posteriors[cohort_key]
+        metadata = posterior.get("metadata") if isinstance(posterior.get("metadata"), dict) else {}
+        buckets = {}
+        for bucket_key, bucket in sorted(stats["buckets"].items()):
+            labeled_weight = bucket["labeled_weight"]
+            success_weight = bucket["success_weight"]
+            buckets[bucket_key] = {
+                "positive_truth_weight": success_weight,
+                "labeled_weight": labeled_weight,
+                "bucket_precision": (success_weight + 3.0) / (labeled_weight + 5.0),
+            }
+        snapshots.append(
+            {
+                "scope_key": scope_key,
+                "cohort_key": cohort_key,
+                "snapshot_version": REVIEW_CALIBRATION_SNAPSHOT_VERSION,
+                "effective_samples": effective_samples,
+                "posterior_alpha": posterior["posterior_alpha"],
+                "posterior_beta": posterior["posterior_beta"],
+                "posterior_mean": posterior["posterior_mean"],
+                "posterior_lb": posterior["posterior_lb"],
+                "confidence_buckets": buckets,
+                "metadata": metadata,
+                "drift_state": review_calibration_drift_state(effective_samples, posterior["posterior_lb"]),
+                "created_at": current_time,
+            }
+        )
+    return snapshots
+
+
+def refresh_review_calibration_snapshots(scope_key: str, *, timestamp: int | None = None) -> list[dict]:
+    snapshots = build_review_calibration_snapshots(scope_key, timestamp=timestamp)
+    return [db.upsert_review_calibration_snapshot(snapshot) for snapshot in snapshots]
+
+
+def refresh_review_calibration_snapshots_for_observation(candidate_observation_key: str) -> list[dict]:
+    scope_keys = set()
+    for event in db.list_review_decision_events_for_observation(candidate_observation_key):
+        scope_key = review_calibration_scope_key_for_job(
+            {
+                "user_id": event.get("user_id"),
+                "repo_id": event.get("repo_id"),
+                "github_repo_id": event.get("github_repo_id"),
+                "repo": event.get("repo_full_name"),
+                "branch": event.get("branch"),
+            }
+        )
+        if scope_key:
+            scope_keys.add(scope_key)
+    refreshed = []
+    for scope_key in sorted(scope_keys):
+        refreshed.extend(refresh_review_calibration_snapshots(scope_key))
+    return refreshed
+
+
+def review_shadow_evaluation(scope_key: str) -> dict:
+    parts = review_calibration_scope_parts(scope_key)
+    events = db.list_review_decision_events_for_scope(
+        user_id=parts.get("user", ""),
+        repo_key=parts.get("repo", ""),
+        branch=parts.get("branch", ""),
+    )
+    latest_by_observation: dict[str, dict] = {}
+    for event in events:
+        observation_key = public_issue_text(event.get("candidate_observation_key"))
+        if observation_key and observation_key not in latest_by_observation:
+            latest_by_observation[observation_key] = event
+    metrics = {
+        "scopeKey": public_issue_text(scope_key),
+        "candidateCount": len(latest_by_observation),
+        "currentReportedCount": 0,
+        "proposedReportedCount": 0,
+        "proposedAuditOnlyCount": 0,
+        "proposedRejectedCount": 0,
+        "verifiedSuppressionCount": 0,
+        "byVerificationStatus": {},
+    }
+    for event in latest_by_observation.values():
+        current_decision = public_issue_text(event.get("decision")).lower()
+        if current_decision == "reported":
+            metrics["currentReportedCount"] += 1
+        factors = review_json_dict(event.get("score_factors_json"))
+        proposed_decision = public_issue_text(factors.get("proposedDecision")).lower()
+        if proposed_decision not in {"reported", "audit_only", "rejected"}:
+            proposed_decision = current_decision if current_decision in {"reported", "audit_only", "rejected"} else "rejected"
+        if proposed_decision == "reported":
+            metrics["proposedReportedCount"] += 1
+        elif proposed_decision == "audit_only":
+            metrics["proposedAuditOnlyCount"] += 1
+        else:
+            metrics["proposedRejectedCount"] += 1
+        status = public_issue_text(event.get("verification_status")).lower()
+        if status not in ISSUE_VERIFICATION_STATUSES:
+            status = "potential_risk"
+        status_metrics = metrics["byVerificationStatus"].setdefault(
+            status,
+            {"candidateCount": 0, "currentReportedCount": 0, "proposedReportedCount": 0, "proposedAuditOnlyCount": 0, "proposedRejectedCount": 0},
+        )
+        status_metrics["candidateCount"] += 1
+        if current_decision == "reported":
+            status_metrics["currentReportedCount"] += 1
+        if proposed_decision == "reported":
+            status_metrics["proposedReportedCount"] += 1
+        elif proposed_decision == "audit_only":
+            status_metrics["proposedAuditOnlyCount"] += 1
+        else:
+            status_metrics["proposedRejectedCount"] += 1
+        if status in {"verified", "static_proof"} and proposed_decision != "reported":
+            metrics["verifiedSuppressionCount"] += 1
+    return metrics
+
+
+def review_calibration_scope_key_from_params(params: dict) -> str:
+    scope_key = public_issue_text(params.get("scope_key") or params.get("scopeKey"))
+    if scope_key:
+        parts = review_calibration_scope_parts(scope_key)
+        if parts.get("user") and parts.get("repo") and parts.get("branch"):
+            return f"user:{parts['user']}|repo:{parts['repo'].lower()}|branch:{parts['branch'].lower()}"
+        return ""
+    return review_calibration_scope_key_for_job(
+        {
+            "user_id": params.get("user_id") or params.get("userId"),
+            "repo_id": params.get("repo_id") or params.get("repoId"),
+            "github_repo_id": params.get("github_repo_id") or params.get("githubRepoId"),
+            "repo": params.get("repo") or params.get("repo_full_name") or params.get("repoFullName"),
+            "branch": params.get("branch") or "main",
+        }
+    )
+
+
+def review_calibration_safe_bucket_payload(value: object) -> dict:
+    buckets = value if isinstance(value, dict) else {}
+    payload = {}
+    for bucket_key, raw_bucket in sorted(buckets.items()):
+        if not isinstance(raw_bucket, dict):
+            continue
+        key = public_issue_text(bucket_key)
+        if not key:
+            continue
+        bucket = {
+            "positiveTruthWeight": public_review_float(raw_bucket.get("positive_truth_weight") or raw_bucket.get("positiveTruthWeight")) or 0.0,
+            "labeledWeight": public_review_float(raw_bucket.get("labeled_weight") or raw_bucket.get("labeledWeight")) or 0.0,
+            "bucketPrecision": public_review_probability(
+                raw_bucket.get("bucket_precision") or raw_bucket.get("bucketPrecision") or raw_bucket.get("precision")
+            )
+            or 0.0,
+        }
+        payload[key] = bucket
+        if len(payload) >= 12:
+            break
+    return payload
+
+
+def review_calibration_admin_snapshot_payload(snapshot: dict) -> dict:
+    metadata = review_json_dict(snapshot.get("metadata_json"))
+    payload = {
+        "cohortKey": public_issue_text(snapshot.get("cohort_key"))[:240],
+        "snapshotVersion": public_issue_text(snapshot.get("snapshot_version"))[:120],
+        "effectiveSamples": public_review_float(snapshot.get("effective_samples")) or 0.0,
+        "posteriorMean": public_review_probability(snapshot.get("posterior_mean")) or 0.0,
+        "posteriorLb": public_review_probability(snapshot.get("posterior_lb")) or 0.0,
+        "driftState": public_issue_text(snapshot.get("drift_state")).lower() or "normal",
+        "createdAt": pull_request_timestamp(snapshot.get("created_at")) or 0,
+        "confidenceBuckets": review_calibration_safe_bucket_payload(review_json_dict(snapshot.get("confidence_buckets_json"))),
+    }
+    parent_key = public_issue_text(metadata.get("parent_cohort_key"))[:240]
+    if parent_key:
+        payload["parentCohortKey"] = parent_key
+    for raw_key, public_key in (
+        ("shrinkage_weight", "shrinkageWeight"),
+        ("raw_posterior_mean", "rawPosteriorMean"),
+        ("raw_posterior_lb", "rawPosteriorLb"),
+    ):
+        value = public_review_float(metadata.get(raw_key))
+        if value is not None:
+            payload[public_key] = value
+    return payload
+
+
+def review_calibration_drift_summary(snapshots: list[dict]) -> dict:
+    summary = {
+        "normal": 0,
+        "watch": 0,
+        "audit_only": 0,
+        "suspended": 0,
+        "attentionCohorts": [],
+    }
+    for snapshot in snapshots:
+        state = public_issue_text(snapshot.get("drift_state")).lower()
+        if state not in {"normal", "watch", "audit_only", "suspended"}:
+            state = "normal"
+        summary[state] += 1
+        if state != "normal" and len(summary["attentionCohorts"]) < 20:
+            summary["attentionCohorts"].append(
+                {
+                    "cohortKey": public_issue_text(snapshot.get("cohort_key"))[:240],
+                    "driftState": state,
+                    "effectiveSamples": public_review_float(snapshot.get("effective_samples")) or 0.0,
+                    "posteriorLb": public_review_probability(snapshot.get("posterior_lb")) or 0.0,
+                }
+            )
+    return summary
+
+
+def review_calibration_enforce_gate(evaluation: dict) -> dict:
+    candidate_count = public_scan_count(evaluation.get("candidateCount"))
+    verified_suppression_count = public_scan_count(evaluation.get("verifiedSuppressionCount"))
+    current_reported = public_scan_count(evaluation.get("currentReportedCount"))
+    proposed_reported = public_scan_count(evaluation.get("proposedReportedCount"))
+    return {
+        "verifiedSuppressionClear": verified_suppression_count == 0,
+        "hasShadowCandidates": candidate_count > 0,
+        "reportedCountNotIncreased": proposed_reported <= current_reported,
+        "canConsiderEnforce": candidate_count > 0 and verified_suppression_count == 0 and proposed_reported <= current_reported,
+        "blockers": [
+            reason
+            for reason, blocked in (
+                ("missing_shadow_candidates", candidate_count <= 0),
+                ("verified_static_proof_suppression", verified_suppression_count > 0),
+                ("proposed_reported_count_increase", proposed_reported > current_reported),
+            )
+            if blocked
+        ],
+    }
+
+
+def review_calibration_admin_payload(scope_key: str) -> dict:
+    scope_key = public_issue_text(scope_key)
+    snapshots = db.list_review_calibration_snapshots(scope_key)
+    evaluation = review_shadow_evaluation(scope_key)
+    rollout_policy = review_calibration_rollout_policy(scope_key)
+    snapshot_payloads = [review_calibration_admin_snapshot_payload(snapshot) for snapshot in snapshots[:100]]
+    return {
+        "protocol": REVIEW_CALIBRATION_PROTOCOL_VERSION,
+        "snapshotVersion": REVIEW_CALIBRATION_SNAPSHOT_VERSION,
+        "scopeKey": scope_key,
+        "generatedAt": now(),
+        "shadowEvaluation": evaluation,
+        "driftSummary": review_calibration_drift_summary(snapshots),
+        "enforceGate": review_calibration_enforce_gate(evaluation),
+        "rolloutPolicy": rollout_policy,
+        "snapshots": snapshot_payloads,
+    }
+
+
+def public_review_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def public_review_probability(value: object) -> float | None:
+    number = public_review_float(value)
+    if number is None:
+        return None
+    return min(1.0, max(0.0, number))
+
+
+def public_review_line(value: object) -> int | None:
+    line = public_scan_count(value)
+    return line or None
+
+
+def review_json_dict(value: object) -> dict:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def public_review_score_factors(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    factors = {}
+    allowed = {
+        "scoreKind",
+        "mode",
+        "model",
+        "proposedDecision",
+        "proposedReason",
+        "originalDecision",
+        "originalReason",
+        "guardrailApplied",
+        "reliabilitySource",
+        "cohortKey",
+        "rawConfidence",
+        "calibratedConfidence",
+        "sourceFactor",
+        "sourceAdjustment",
+        "evidenceStrength",
+        "deltaRelevance",
+        "categoryAdjustment",
+        "decisionScore",
+        "driftState",
+    }
+    for raw_key, raw_value in source.items():
+        key = public_issue_text(raw_key)[:80]
+        if not key or key not in allowed:
+            continue
+        if isinstance(raw_value, bool):
+            factors[key] = raw_value
+        elif isinstance(raw_value, (int, float)) and math.isfinite(float(raw_value)):
+            factors[key] = float(raw_value)
+        elif raw_value is None:
+            continue
+        else:
+            text = " ".join(review._safe_text_lenient(raw_value).split())[:160]
+            if text:
+                factors[key] = text
+        if len(factors) >= 40:
+            break
+    return factors
+
+
+def review_event_hash(*parts: object) -> str:
+    payload = "|".join(public_issue_text(part) for part in parts)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def review_observation_key_for_event(event: dict) -> str:
+    provided = clean_github_access_text(event.get("candidate_observation_key") or event.get("candidateObservationKey"))
+    if provided:
+        return provided
+    return review_event_hash(
+        event.get("user_id"),
+        event.get("repo_id") or event.get("github_repo_id") or event.get("repo_full_name"),
+        event.get("branch"),
+        event.get("commit_sha"),
+        event.get("source"),
+        event.get("fingerprint"),
+        event.get("candidate_id"),
+        event.get("verification_status"),
+    )
+
+
+def review_decision_event_id(event: dict) -> str:
+    provided = clean_github_access_text(event.get("event_id") or event.get("eventId"))
+    if provided:
+        return provided
+    return review_event_hash(
+        event.get("job_id"),
+        event.get("attempt_id"),
+        event.get("candidate_id"),
+        event.get("fingerprint"),
+        event.get("decision"),
+        event.get("scoring_protocol"),
+    )
+
+
+def review_decision_events_from_worker_result(job: dict, body: dict, *, attempt_id: str, status: str) -> list[dict]:
+    if status != "done":
+        return []
+    raw_events = body.get("review_decision_events") or body.get("reviewDecisionEvents")
+    if not isinstance(raw_events, list):
+        return []
+    resolved_commit = worker_result_resolved_commit(job=job, body=body)
+    commit_sha = resolved_commit or clean_github_access_text(job.get("commit")) or ""
+    branch = clean_github_access_text(job.get("branch")) or "main"
+    scope = {
+        "scan_id": public_issue_text(job.get("scan_id")),
+        "job_id": public_issue_text(job.get("job_id")),
+        "attempt_id": public_issue_text(attempt_id),
+        "user_id": public_issue_text(job.get("user_id")),
+        "repo_id": clean_github_access_text(job.get("repo_id"), allow_int=True) or "",
+        "github_repo_id": clean_github_access_text(job.get("github_repo_id"), allow_int=True) or "",
+        "repo_full_name": clean_repository_full_name(job.get("repo")),
+        "branch": branch,
+        "commit_sha": commit_sha,
+    }
+    events = []
+    for raw_event in raw_events[:200]:
+        if not isinstance(raw_event, dict):
+            continue
+        protocol = public_issue_text(raw_event.get("protocol") or raw_event.get("schema_version") or raw_event.get("schemaVersion"))
+        if protocol != REVIEW_DECISION_EVENT_PROTOCOL_VERSION:
+            continue
+        decision = public_issue_text(raw_event.get("decision")).lower()
+        if decision not in {"reported", "audit_only", "rejected"}:
+            continue
+        verification_status = public_issue_text(
+            raw_event.get("verification_status") or raw_event.get("verificationStatus")
+        ).lower()
+        if verification_status not in ISSUE_VERIFICATION_STATUSES:
+            verification_status = "potential_risk"
+        severity = review._safe_severity(raw_event.get("severity"))
+        category = review._safe_category(raw_event.get("category"))
+        event = {
+            **scope,
+            "protocol": protocol,
+            "base_sha": clean_github_access_text(raw_event.get("base_sha") or raw_event.get("baseSha")) or "",
+            "head_sha": clean_github_access_text(raw_event.get("head_sha") or raw_event.get("headSha")) or commit_sha,
+            "candidate_id": public_issue_text(raw_event.get("candidate_id") or raw_event.get("candidateId"))[:160],
+            "fingerprint": clean_github_access_text(raw_event.get("fingerprint")) or "",
+            "source": public_issue_text(raw_event.get("source"))[:80],
+            "provider": public_issue_text(raw_event.get("provider"))[:80],
+            "model": public_issue_text(raw_event.get("model"))[:120],
+            "category": category,
+            "severity": severity,
+            "verification_status": verification_status,
+            "file_path": public_issue_file(raw_event.get("file_path") or raw_event.get("filePath") or raw_event.get("file")),
+            "line_start": public_review_line(raw_event.get("line_start") or raw_event.get("lineStart") or raw_event.get("line")),
+            "line_end": public_review_line(raw_event.get("line_end") or raw_event.get("lineEnd")),
+            "normalized_title": " ".join(
+                review._safe_text_lenient(raw_event.get("normalized_title") or raw_event.get("normalizedTitle") or raw_event.get("title")).split()
+            )[:180],
+            "raw_confidence": public_review_probability(raw_event.get("raw_confidence") or raw_event.get("rawConfidence")),
+            "calibrated_confidence": public_review_probability(
+                raw_event.get("calibrated_confidence") or raw_event.get("calibratedConfidence")
+            ),
+            "source_reliability_mean": public_review_probability(
+                raw_event.get("source_reliability_mean") or raw_event.get("sourceReliabilityMean")
+            ),
+            "source_reliability_lb": public_review_probability(
+                raw_event.get("source_reliability_lb") or raw_event.get("sourceReliabilityLb")
+            ),
+            "source_adjustment": public_review_float(raw_event.get("source_adjustment") or raw_event.get("sourceAdjustment")),
+            "evidence_strength": public_review_float(raw_event.get("evidence_strength") or raw_event.get("evidenceStrength")),
+            "delta_relevance": public_review_float(raw_event.get("delta_relevance") or raw_event.get("deltaRelevance")),
+            "category_adjustment": public_review_float(raw_event.get("category_adjustment") or raw_event.get("categoryAdjustment")),
+            "truth_probability": public_review_probability(raw_event.get("truth_probability") or raw_event.get("truthProbability")),
+            "decision_score": public_review_float(raw_event.get("decision_score") or raw_event.get("decisionScore")),
+            "decision": decision,
+            "decision_reason": public_issue_text(raw_event.get("decision_reason") or raw_event.get("decisionReason"))[:120],
+            "scoring_protocol": public_issue_text(raw_event.get("scoring_protocol") or raw_event.get("scoringProtocol"))[:120],
+            "score_factors": public_review_score_factors(raw_event.get("score_factors") or raw_event.get("scoreFactors")),
+            "created_at": now(),
+        }
+        event["candidate_observation_key"] = (
+            clean_github_access_text(raw_event.get("candidate_observation_key") or raw_event.get("candidateObservationKey"))
+            or review_observation_key_for_event(event)
+        )
+        event["event_id"] = (
+            clean_github_access_text(raw_event.get("event_id") or raw_event.get("eventId"))
+            or review_decision_event_id(event)
+        )
+        if event["event_id"] and event["candidate_observation_key"]:
+            events.append(event)
+    return events
+
+
+def record_worker_review_decision_events(job: dict, body: dict, *, attempt_id: str, status: str) -> dict[str, int]:
+    events = review_decision_events_from_worker_result(job, body, attempt_id=attempt_id, status=status)
+    result = db.record_review_decision_events(events)
+    record_worker_verifier_outcome_labels(events, body)
+    return result
+
+
+def review_outcome_label_priority(label_source: object) -> int:
+    source = public_issue_text(label_source).lower()
+    return {
+        "manual_review": 60,
+        "user_explicit": 50,
+        "verifier_explicit": 40,
+        "deterministic_static": 35,
+        "autofix": 30,
+        "system_weak": 10,
+        "weak_lifecycle": 10,
+    }.get(source, 0)
+
+
+def effective_review_outcome_label(candidate_observation_key: str) -> dict:
+    labels = db.list_review_outcome_labels(candidate_observation_key)
+    if not labels:
+        return {}
+    return sorted(
+        labels,
+        key=lambda item: (
+            review_outcome_label_priority(item.get("label_source")),
+            public_review_float(item.get("outcome_weight")) or 0.0,
+            public_scan_count(item.get("created_at")),
+        ),
+    )[-1]
+
+
+def record_review_outcome_label(
+    *,
+    event_id: str = "",
+    candidate_observation_key: str,
+    outcome_label: str,
+    label_source: str,
+    outcome_weight: float,
+    label_reason: str = "",
+    created_by: str = "",
+) -> dict:
+    outcome = public_issue_text(outcome_label).lower()
+    if outcome not in {"valid", "false_positive", "ambiguous"}:
+        raise ValueError("outcome_label must be valid, false_positive, or ambiguous")
+    source = public_issue_text(label_source).lower()
+    if source not in {"verifier_explicit", "user_explicit", "manual_review", "autofix", "deterministic_static", "system_weak", "weak_lifecycle"}:
+        raise ValueError("label_source is invalid")
+    observation_key = clean_github_access_text(candidate_observation_key) or ""
+    if not observation_key:
+        raise ValueError("candidate_observation_key is required")
+    weight = max(0.0, min(1.0, float(outcome_weight or 0.0)))
+    label_id = review_event_hash(observation_key, source, outcome, event_id or "", created_by or "")
+    label = db.upsert_review_outcome_label(
+        {
+            "label_id": f"rol_{label_id[:32]}",
+            "event_id": clean_github_access_text(event_id) or "",
+            "candidate_observation_key": observation_key,
+            "outcome_label": outcome,
+            "label_source": source,
+            "outcome_weight": weight,
+            "label_reason": " ".join(review._safe_text_lenient(label_reason).split())[:240],
+            "created_at": now(),
+            "created_by": public_issue_text(created_by)[:120],
+        }
+    )
+    refresh_review_calibration_snapshots_for_observation(observation_key)
+    return label
+
+
+def record_verifier_outcome(*, event_id: str = "", candidate_observation_key: str, valid: bool, reason: str = "") -> dict:
+    return record_review_outcome_label(
+        event_id=event_id,
+        candidate_observation_key=candidate_observation_key,
+        outcome_label="valid" if valid else "false_positive",
+        label_source="verifier_explicit",
+        outcome_weight=1.0,
+        label_reason=reason,
+    )
+
+
+def record_user_feedback_outcome(
+    *, event_id: str = "", candidate_observation_key: str, false_positive: bool, user_id: str = "", reason: str = ""
+) -> dict:
+    return record_review_outcome_label(
+        event_id=event_id,
+        candidate_observation_key=candidate_observation_key,
+        outcome_label="false_positive" if false_positive else "valid",
+        label_source="user_explicit",
+        outcome_weight=1.0,
+        label_reason=reason,
+        created_by=user_id,
+    )
+
+
+def record_manual_review_outcome(
+    *, event_id: str = "", candidate_observation_key: str, outcome_label: str, reviewer_id: str = "", reason: str = ""
+) -> dict:
+    return record_review_outcome_label(
+        event_id=event_id,
+        candidate_observation_key=candidate_observation_key,
+        outcome_label=outcome_label,
+        label_source="manual_review",
+        outcome_weight=1.0,
+        label_reason=reason,
+        created_by=reviewer_id,
+    )
+
+
+def record_autofix_outcome(*, event_id: str = "", candidate_observation_key: str, valid: bool, reason: str = "") -> dict:
+    return record_review_outcome_label(
+        event_id=event_id,
+        candidate_observation_key=candidate_observation_key,
+        outcome_label="valid" if valid else "ambiguous",
+        label_source="autofix",
+        outcome_weight=0.9,
+        label_reason=reason,
+    )
+
+
+def record_weak_lifecycle_signal(
+    *, event_id: str = "", candidate_observation_key: str, outcome_label: str = "ambiguous", reason: str = ""
+) -> dict:
+    return record_review_outcome_label(
+        event_id=event_id,
+        candidate_observation_key=candidate_observation_key,
+        outcome_label=outcome_label,
+        label_source="weak_lifecycle",
+        outcome_weight=0.25,
+        label_reason=reason,
+    )
+
+
+def review_verification_result_has_support(result: dict) -> bool:
+    if review._safe_text_list(result.get("commands_run") or result.get("commandsRun")):
+        return True
+    if review._safe_text_list(result.get("evidence")):
+        return True
+    if review._safe_text_lenient(result.get("result_summary") or result.get("resultSummary") or result.get("summary")):
+        return True
+    if review._safe_text_lenient(result.get("output")):
+        return True
+    if public_issue_text(result.get("logPath") or result.get("log_path")):
+        return True
+    return False
+
+
+def review_verifier_outcome_from_results(results: list[dict]) -> tuple[bool | None, str]:
+    verdicts = [public_issue_text(result.get("verdict")).lower() for result in results if isinstance(result, dict)]
+    if any(
+        public_issue_text(result.get("verdict")).lower() == "confirmed"
+        and review_verification_result_has_support(result)
+        for result in results
+        if isinstance(result, dict)
+    ):
+        return True, "verifier confirmed candidate"
+    if verdicts and all(verdict == "rejected" for verdict in verdicts):
+        return False, "verifier rejected candidate"
+    return None, ""
+
+
+def review_verification_results_by_issue(body: dict) -> dict[str, list[dict]]:
+    raw_results = body.get("verification_results") if isinstance(body.get("verification_results"), list) else []
+    grouped: dict[str, list[dict]] = {}
+    for result in raw_results:
+        if not isinstance(result, dict):
+            continue
+        issue_id = public_issue_text(result.get("issue_id") or result.get("issueId"))
+        if issue_id:
+            grouped.setdefault(issue_id, []).append(result)
+    return grouped
+
+
+def record_worker_verifier_outcome_labels(events: list[dict], body: dict) -> dict[str, int]:
+    results_by_issue = review_verification_results_by_issue(body)
+    if not events or not results_by_issue:
+        return {"inserted": 0, "skipped": 0}
+    inserted = 0
+    skipped = 0
+    for event in events:
+        issue_id = public_issue_text(event.get("candidate_id"))
+        observation_key = public_issue_text(event.get("candidate_observation_key"))
+        if not issue_id or not observation_key:
+            skipped += 1
+            continue
+        valid, reason = review_verifier_outcome_from_results(results_by_issue.get(issue_id, []))
+        if valid is None:
+            skipped += 1
+            continue
+        record_verifier_outcome(
+            event_id=public_issue_text(event.get("event_id")),
+            candidate_observation_key=observation_key,
+            valid=valid,
+            reason=reason,
+        )
+        inserted += 1
+    return {"inserted": inserted, "skipped": skipped}
+
+
+def review_normalized_title(value: object) -> str:
+    return " ".join(review._safe_text_lenient(value).split()).lower()
+
+
+def review_decision_event_match_score(issue: dict, event: dict) -> int:
+    score = 0
+    issue_id = public_issue_text(issue.get("id"))
+    if issue_id and public_issue_text(event.get("candidate_id")) == issue_id:
+        score += 8
+    issue_file = public_issue_file(issue.get("file"))
+    event_file = public_issue_file(event.get("file_path") or event.get("filePath"))
+    if issue_file and event_file and issue_file == event_file:
+        score += 3
+    issue_line = public_scan_count(issue.get("line"))
+    event_line = public_scan_count(event.get("line_start") or event.get("lineStart") or event.get("line"))
+    if issue_line and event_line and issue_line == event_line:
+        score += 2
+    if review_normalized_title(issue.get("title")) and review_normalized_title(issue.get("title")) == review_normalized_title(
+        event.get("normalized_title") or event.get("normalizedTitle")
+    ):
+        score += 2
+    issue_status = public_issue_verification_status(issue)
+    if issue_status and public_issue_text(event.get("verification_status")).lower() == issue_status:
+        score += 1
+    return score
+
+
+def review_decision_event_for_issue(issue: dict) -> dict:
+    job_id = public_issue_text(issue.get("jobId") or issue.get("job_id"))
+    if not job_id:
+        return {}
+    events = db.list_review_decision_events(job_id=job_id, limit=500)
+    if not events:
+        return {}
+    scored = [
+        (review_decision_event_match_score(issue, event), event)
+        for event in events
+        if public_issue_text(event.get("candidate_observation_key"))
+    ]
+    scored = [(score, event) for score, event in scored if score > 0]
+    if not scored:
+        return {}
+    scored.sort(key=lambda item: (item[0], public_scan_count(item[1].get("created_at"))), reverse=True)
+    if len(scored) > 1 and scored[0][0] < 8 and scored[0][0] == scored[1][0]:
+        return {}
+    return scored[0][1]
+
+
+def review_user_feedback_false_positive(body: dict) -> bool | None:
+    for key in ("falsePositive", "false_positive", "isFalsePositive", "is_false_positive"):
+        if isinstance(body.get(key), bool):
+            return bool(body.get(key))
+    outcome = public_issue_text(
+        body.get("outcome")
+        or body.get("outcomeLabel")
+        or body.get("outcome_label")
+        or body.get("feedback")
+        or body.get("resolution")
+    ).lower()
+    if outcome in {"false_positive", "false-positive", "false positive", "dismissed_false_positive"}:
+        return True
+    if outcome in {"valid", "confirmed", "accepted", "fixed"}:
+        return False
+    return None
+
+
+def record_issue_status_outcome_label(issue: dict, *, next_status: str, body: dict, user_id: str) -> dict:
+    event = review_decision_event_for_issue(issue)
+    observation_key = public_issue_text(event.get("candidate_observation_key"))
+    if not observation_key:
+        return {}
+    reason = " ".join(review._safe_text_lenient(body.get("reason") or body.get("note") or body.get("message")).split())[:240]
+    explicit_false_positive = review_user_feedback_false_positive(body)
+    if explicit_false_positive is not None:
+        return record_user_feedback_outcome(
+            event_id=public_issue_text(event.get("event_id")),
+            candidate_observation_key=observation_key,
+            false_positive=explicit_false_positive,
+            user_id=user_id,
+            reason=reason or ("marked false positive" if explicit_false_positive else "marked valid"),
+        )
+    if next_status == "fixed":
+        return record_user_feedback_outcome(
+            event_id=public_issue_text(event.get("event_id")),
+            candidate_observation_key=observation_key,
+            false_positive=False,
+            user_id=user_id,
+            reason=reason or "issue marked fixed",
+        )
+    if next_status == "snoozed":
+        return record_weak_lifecycle_signal(
+            event_id=public_issue_text(event.get("event_id")),
+            candidate_observation_key=observation_key,
+            outcome_label="ambiguous",
+            reason=reason or "issue snoozed",
+        )
+    return {}
+
+
 def first_present(source: dict, *keys: str) -> object:
     for key in keys:
         if key in source:
@@ -396,11 +1458,41 @@ def public_scan_verification_audit_input(value: object) -> dict:
         if status in ISSUE_VERIFICATION_STATUSES:
             sample["verificationStatus"] = status
         rejected_samples.append(sample)
+    audit_only_samples = []
+    raw_audit_only_samples = source.get("auditOnlySamples") if isinstance(source.get("auditOnlySamples"), list) else []
+    for item in raw_audit_only_samples:
+        if not isinstance(item, dict):
+            continue
+        reason = public_issue_text(item.get("reason"))
+        if not reason:
+            continue
+        sample = {"reason": reason, "decision": "audit_only"}
+        title = review._safe_text_lenient(item.get("title"))[:160]
+        if title:
+            sample["title"] = " ".join(title.split())
+        if public_issue_text(item.get("severity")):
+            sample["severity"] = review._safe_severity(item.get("severity"))
+        if public_issue_text(item.get("category")):
+            sample["category"] = review._safe_category(item.get("category"))
+        file_path = public_issue_file(item.get("file"))
+        if file_path:
+            sample["file"] = file_path
+        line = review._safe_non_negative_int(item.get("line"))
+        if line:
+            sample["line"] = line
+        status = public_issue_text(item.get("verificationStatus")).lower()
+        if status in ISSUE_VERIFICATION_STATUSES:
+            sample["verificationStatus"] = status
+        audit_only_samples.append(sample)
     payload = {
         "candidateCount": public_scan_count(source.get("candidateCount") or source.get("candidate_count")),
         "reportedCount": public_scan_count(source.get("reportedCount") or source.get("reported_count")),
+        "auditOnlyCount": public_scan_count(source.get("auditOnlyCount") or source.get("audit_only_count")),
         "rejectedCount": public_scan_count(source.get("rejectedCount") or source.get("rejected_count")),
         "downgradedCount": public_scan_count(source.get("downgradedCount") or source.get("downgraded_count")),
+        "verifiedSuppressionCount": public_scan_count(
+            source.get("verifiedSuppressionCount") or source.get("verified_suppression_count")
+        ),
         "verifiedCount": public_scan_count(source.get("verifiedCount") or source.get("verified_count")),
         "staticProofCount": public_scan_count(source.get("staticProofCount") or source.get("static_proof_count")),
         "potentialRiskCount": public_scan_count(source.get("potentialRiskCount") or source.get("potential_risk_count")),
@@ -408,6 +1500,7 @@ def public_scan_verification_audit_input(value: object) -> dict:
         "summary": " ".join(review._safe_text_lenient(source.get("summary")).split()),
         "rejectedReasons": rejected_reasons[:10],
         "rejectedSamples": rejected_samples[:5],
+        "auditOnlySamples": audit_only_samples[:5],
     }
     reason_total = sum(item["count"] for item in payload["rejectedReasons"])
     payload["rejectedCount"] = max(payload["rejectedCount"], reason_total)
@@ -435,24 +1528,33 @@ def public_scan_verification_audit(scan: dict) -> dict:
             if reported_status in ISSUE_VERIFICATION_STATUSES and reported_status != final_status:
                 downgraded_count += 1
     rejected_count = base["rejectedCount"]
-    candidate_count = max(base["candidateCount"], reported_count + rejected_count)
+    audit_only_count = base["auditOnlyCount"]
+    verified_suppression_count = base["verifiedSuppressionCount"]
+    candidate_count = max(base["candidateCount"], reported_count + audit_only_count + rejected_count)
     final_downgraded_count = max(base["downgradedCount"], downgraded_count)
     summary = base["summary"] or f"{candidate_count} candidates evaluated; {reported_count} reported."
+    if audit_only_count and "audit" not in summary.lower():
+        summary = f"{summary.rstrip('.')}; {audit_only_count} retained for audit only."
     if rejected_count and "rejected" not in summary.lower():
         summary = f"{summary.rstrip('.')}; {rejected_count} rejected before reporting."
     if final_downgraded_count and "downgrad" not in summary.lower():
         summary = f"{summary.rstrip('.')}; {final_downgraded_count} downgraded by evidence gates."
+    if verified_suppression_count and "verified suppression" not in summary.lower():
+        summary = f"{summary.rstrip('.')}; {verified_suppression_count} verified/static-proof candidates were not formally reported."
     return {
         "candidateCount": candidate_count,
         "reportedCount": reported_count,
+        "auditOnlyCount": audit_only_count,
         "rejectedCount": rejected_count,
         "downgradedCount": final_downgraded_count,
+        "verifiedSuppressionCount": verified_suppression_count,
         "verifiedCount": counts["verified"],
         "staticProofCount": counts["static_proof"],
         "potentialRiskCount": counts["potential_risk"],
         "unverifiedCount": counts["unverified"],
         "rejectedReasons": base["rejectedReasons"],
         "rejectedSamples": base["rejectedSamples"],
+        "auditOnlySamples": base["auditOnlySamples"],
         "summary": summary[:500],
     }
 
@@ -464,14 +1566,16 @@ def public_scan_verification_audit_has_data(value: object) -> bool:
         for key in (
             "candidateCount",
             "reportedCount",
+            "auditOnlyCount",
             "rejectedCount",
             "downgradedCount",
+            "verifiedSuppressionCount",
             "verifiedCount",
             "staticProofCount",
             "potentialRiskCount",
             "unverifiedCount",
         )
-    ) or bool(audit.get("rejectedReasons")) or bool(audit.get("rejectedSamples"))
+    ) or bool(audit.get("rejectedReasons")) or bool(audit.get("rejectedSamples")) or bool(audit.get("auditOnlySamples"))
 
 
 def public_scan_audit_swarm_from_worker_body(body: dict, *, status: str = "") -> dict:

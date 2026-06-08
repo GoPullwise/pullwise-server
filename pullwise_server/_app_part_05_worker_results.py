@@ -67,6 +67,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     convergence_context = worker_convergence_context_for_job(job)
     if convergence_context:
         payload["convergence_context"] = convergence_context
+    review_calibration_context = worker_review_calibration_context_for_job(job)
+    if review_calibration_context:
+        payload["review_calibration_context"] = review_calibration_context
     return payload
 
 
@@ -128,6 +131,13 @@ def worker_result_checksum(body: dict) -> str:
         "preflight": public_scan_preflight(body.get("preflight")),
         "verification_audit": public_scan_verification_audit_input(
             body.get("verification_audit") or body.get("verificationAudit")
+        ),
+        "review_decision_events": (
+            body.get("review_decision_events")
+            if isinstance(body.get("review_decision_events"), list)
+            else body.get("reviewDecisionEvents")
+            if isinstance(body.get("reviewDecisionEvents"), list)
+            else []
         ),
         "convergence_state": public_scan_convergence_state(
             body.get("convergence_state") or body.get("convergenceState")
@@ -214,8 +224,10 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             for key in (
                 "candidateCount",
                 "reportedCount",
+                "auditOnlyCount",
                 "rejectedCount",
                 "downgradedCount",
+                "verifiedSuppressionCount",
                 "verifiedCount",
                 "staticProofCount",
                 "potentialRiskCount",
@@ -223,6 +235,7 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
                 "summary",
                 "rejectedReasons",
                 "rejectedSamples",
+                "auditOnlySamples",
             )
         ):
             scan["verificationAudit"] = verification_audit
@@ -280,10 +293,17 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
             job = updated_job
         else:
             job = {**job, "commit": resolved_commit}
+    event_result = record_worker_review_decision_events(job, body, attempt_id=attempt_id, status=status)
     with STATE_LOCK:
         apply_worker_job_result_to_state_locked(job, body, status=status, checksum=checksum)
     issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
-    return {"accepted": True, "duplicate": duplicate, "conflict": False, "issueCount": len(issue_cards)}
+    return {
+        "accepted": True,
+        "duplicate": duplicate,
+        "conflict": False,
+        "issueCount": len(issue_cards),
+        "reviewDecisionEvents": event_result,
+    }
 
 
 def worker_issue_reserved_ids(job: dict) -> set[str]:

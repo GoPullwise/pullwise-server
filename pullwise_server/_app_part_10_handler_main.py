@@ -687,6 +687,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if next_status not in ISSUE_STATUSES:
                 return self.error(HTTPStatus.BAD_REQUEST, "Issue status must be open, fixed, or snoozed.")
             issue["status"] = next_status
+            record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
             mark_state_dirty()
             return self.json(issue_payload(issue))
         if len(segments) == 1 and segments[0] == "settings":
@@ -1645,6 +1646,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if segments == ["admin", "status"]:
             return self.json(scan_system_status_payload(admin=True))
+        if segments == ["admin", "review-calibration"]:
+            scope_key = review_calibration_scope_key_from_params(params)
+            if not scope_key:
+                return self.error(HTTPStatus.BAD_REQUEST, "scope_key or user/repo/branch parameters are required.")
+            return self.json(review_calibration_admin_payload(scope_key))
         if segments == ["admin", "workers", "defaults"]:
             return self.json(worker_defaults_payload())
         if segments == ["admin", "workers"]:

@@ -345,6 +345,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.payload["job"]["status"], "claimed")
         self.assertEqual(len(claim.payload["jobs"]), 1)
         self.assertEqual(claim.payload["job"]["scan_id"], "sc_1")
+        calibration_context = claim.payload["job"]["review_calibration_context"]
+        self.assertEqual(calibration_context["protocol"], "pullwise-review-calibration/0.2")
+        self.assertEqual(calibration_context["scope_key"], "user:usr_1|repo:repo_123|branch:main")
+        self.assertEqual(calibration_context["mode"], "shadow")
+        self.assertEqual(calibration_context["rollout_policy"]["effective_mode"], "shadow")
+        self.assertEqual(calibration_context["source_reliability"], {})
         self.assertEqual(app.SCANS[0]["status"], "running")
         self.assertEqual(app.SCANS[0]["claimedByWorkerId"], "wk_1")
 
@@ -452,6 +458,533 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(late_attempt, "POST")
         self.assertEqual(late_attempt.status, HTTPStatus.CONFLICT)
         self.assertEqual(len(app.ISSUES), 1)
+
+    def test_worker_result_persists_review_decision_events_idempotently_and_sanitizes_payload(self) -> None:
+        scan = {
+            "id": "sc_events",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc123",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_123",
+            "githubRepoId": "123",
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        event = {
+            "protocol": "pullwise-review-decision/0.1",
+            "event_id": "evt_shadow_1",
+            "candidate_observation_key": "obs_shadow_1",
+            "candidate_id": "candidate-1",
+            "fingerprint": "fp1",
+            "source": "correctness-reviewer",
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "category": "correctness",
+            "severity": "high",
+            "verification_status": "potential_risk",
+            "file_path": "src/app.py",
+            "line_start": 12,
+            "normalized_title": "hardcoded token",
+            "raw_confidence": 0.9,
+            "calibrated_confidence": 0.88,
+            "decision_score": 0.83,
+            "decision": "reported",
+            "decision_reason": "passed_convergence_gate",
+            "scoring_protocol": "pullwise-review-score/0.1",
+            "score_factors": {
+                "scoreKind": "ranking_score",
+                "proposedDecision": "reported",
+                "rawSnippet": "secret code must not be stored",
+            },
+        }
+        result_body = {
+            "status": "done",
+            "attempt_id": "wk_1-1",
+            **audit_result_fields([audit_issue_card("Hardcoded token", issue_id="issue-hardcoded-token", severity="P1")]),
+            "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+            "review_decision_events": [event, {**event, "event_id": "bad_protocol", "protocol": "unknown"}],
+            "result_checksum": "checksum-events",
+        }
+        result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(result.payload["reviewDecisionEvents"], {"inserted": 1, "duplicates": 0})
+        rows = db.list_review_decision_events(job_id=job["job_id"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["event_id"], "evt_shadow_1")
+        self.assertEqual(rows[0]["user_id"], "usr_1")
+        self.assertEqual(rows[0]["repo_id"], "repo_123")
+        self.assertEqual(rows[0]["decision"], "reported")
+        factors = json.loads(rows[0]["score_factors_json"])
+        self.assertEqual(factors["scoreKind"], "ranking_score")
+        self.assertNotIn("rawSnippet", factors)
+        evaluation = app.review_shadow_evaluation("user:usr_1|repo:repo_123|branch:main")
+        self.assertEqual(evaluation["candidateCount"], 1)
+        self.assertEqual(evaluation["currentReportedCount"], 1)
+        self.assertEqual(evaluation["proposedReportedCount"], 1)
+        self.assertEqual(evaluation["verifiedSuppressionCount"], 0)
+
+        app.record_manual_review_outcome(
+            event_id="evt_shadow_1",
+            candidate_observation_key="obs_shadow_1",
+            outcome_label="valid",
+            reviewer_id="admin_1",
+            reason="manual review confirmed the candidate",
+        )
+        snapshots = db.list_review_calibration_snapshots("user:usr_1|repo:repo_123|branch:main")
+        snapshots_by_cohort = {item["cohort_key"]: item for item in snapshots}
+        self.assertIn("source:correctness reviewer", snapshots_by_cohort)
+        source_snapshot = snapshots_by_cohort["source:correctness reviewer"]
+        self.assertGreater(source_snapshot["posterior_mean"], 0.60)
+        source_buckets = json.loads(source_snapshot["confidence_buckets_json"])
+        self.assertIn("0.90-0.95", source_buckets)
+
+        next_scan = {
+            "id": "sc_events_next",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "def456",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now() + 1,
+            "queuedAt": app.now() + 1,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_123",
+            "githubRepoId": "123",
+        }
+        app.SCANS.append(next_scan)
+        app.create_scan_job_for_scan(next_scan)
+        next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(next_claim, "POST")
+        self.assertEqual(next_claim.status, HTTPStatus.OK)
+        context = next_claim.payload["job"]["review_calibration_context"]
+        self.assertIn("source:correctness reviewer", context["source_reliability"])
+        self.assertIn("global", context["confidence_calibration"])
+        self.assertIn("0.90-0.95", context["confidence_calibration"]["global"])
+
+        duplicate = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
+        app.PullwiseHandler.route(duplicate, "POST")
+        self.assertEqual(duplicate.status, HTTPStatus.OK)
+        self.assertTrue(duplicate.payload["duplicate"])
+        self.assertEqual(len(db.list_review_decision_events(job_id=job["job_id"])), 1)
+
+    def test_claim_payload_caps_enforce_mode_until_shadow_gate_passes(self) -> None:
+        scan = {
+            "id": "sc_enforce_gate",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_123",
+            "githubRepoId": "123",
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        with patch.dict(os.environ, {"PULLWISE_REVIEW_CALIBRATION_MODE": "enforce"}, clear=False):
+            claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+            app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        context = claim.payload["job"]["review_calibration_context"]
+        self.assertEqual(context["rollout_policy"]["requested_mode"], "enforce")
+        self.assertEqual(context["rollout_policy"]["effective_mode"], "shadow")
+        self.assertEqual(context["mode"], "shadow")
+        self.assertIn("missing_shadow_candidates", context["rollout_policy"]["enforce_gate"]["blockers"])
+
+    def test_worker_result_records_verifier_outcome_labels_for_review_events(self) -> None:
+        scan = {
+            "id": "sc_verifier_labels",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc123",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": "repo_123",
+            "githubRepoId": "123",
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        def event(issue_id: str, observation_key: str, verdict: str) -> dict:
+            return {
+                "protocol": "pullwise-review-decision/0.1",
+                "event_id": f"evt_{observation_key}",
+                "candidate_observation_key": observation_key,
+                "candidate_id": issue_id,
+                "fingerprint": f"fp_{issue_id}",
+                "source": "correctness-reviewer",
+                "category": "correctness",
+                "severity": "high",
+                "verification_status": "verified" if verdict == "confirmed" else "unverified",
+                "file_path": "src/app.py",
+                "line_start": 12,
+                "normalized_title": issue_id,
+                "raw_confidence": 0.9,
+                "decision": "reported",
+                "scoring_protocol": "pullwise-review-score/0.1",
+            }
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-verifier-labels",
+                **audit_result_fields(
+                    [
+                        audit_issue_card("Confirmed issue", issue_id="issue-confirmed", severity="P1"),
+                        audit_issue_card("Rejected issue", issue_id="issue-rejected", severity="P2"),
+                    ],
+                    [
+                        audit_verification("issue-confirmed", verdict="confirmed", evidence=["A verifier reproduced it."]),
+                        audit_verification("issue-rejected", verdict="rejected", evidence=[]),
+                    ],
+                ),
+                "review_decision_events": [
+                    event("issue-confirmed", "obs_worker_confirmed", "confirmed"),
+                    event("issue-rejected", "obs_worker_rejected", "rejected"),
+                ],
+                "summary": {"critical": 0, "high": 1, "medium": 1, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(result.payload["reviewDecisionEvents"], {"inserted": 2, "duplicates": 0})
+        confirmed = db.list_review_outcome_labels("obs_worker_confirmed")
+        rejected = db.list_review_outcome_labels("obs_worker_rejected")
+        self.assertEqual(confirmed[0]["label_source"], "verifier_explicit")
+        self.assertEqual(confirmed[0]["outcome_label"], "valid")
+        self.assertEqual(rejected[0]["label_source"], "verifier_explicit")
+        self.assertEqual(rejected[0]["outcome_label"], "false_positive")
+        snapshots = db.list_review_calibration_snapshots("user:usr_1|repo:repo_123|branch:main")
+        self.assertIn("global", {snapshot["cohort_key"] for snapshot in snapshots})
+
+    def test_issue_status_updates_record_user_feedback_outcome_labels(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        app.SCANS = [
+            {
+                "id": "sc_feedback",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc123",
+                "status": "done",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "completedAt": app.now(),
+                "issues": {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0},
+                "repoId": "repo_123",
+                "githubRepoId": "123",
+            }
+        ]
+        app.ISSUES = [
+            {
+                "id": "issue-fixed",
+                "userId": "usr_1",
+                "scanId": "sc_feedback",
+                "jobId": "job_feedback",
+                "repo": "acme/api",
+                "branch": "main",
+                "status": "open",
+                "severity": "high",
+                "title": "Fixed issue",
+                "file": "src/app.py",
+                "line": 12,
+                "verificationStatus": "static_proof",
+            },
+            {
+                "id": "issue-fp",
+                "userId": "usr_1",
+                "scanId": "sc_feedback",
+                "jobId": "job_feedback",
+                "repo": "acme/api",
+                "branch": "main",
+                "status": "open",
+                "severity": "high",
+                "title": "False positive issue",
+                "file": "src/app.py",
+                "line": 22,
+                "verificationStatus": "potential_risk",
+            },
+        ]
+        db.record_review_decision_events(
+            [
+                {
+                    "protocol": "pullwise-review-decision/0.1",
+                    "event_id": "evt_status_fixed",
+                    "candidate_observation_key": "obs_status_fixed",
+                    "scan_id": "sc_feedback",
+                    "job_id": "job_feedback",
+                    "attempt_id": "wk_1-1",
+                    "user_id": "usr_1",
+                    "repo_id": "repo_123",
+                    "repo_full_name": "acme/api",
+                    "branch": "main",
+                    "candidate_id": "issue-fixed",
+                    "source": "correctness-reviewer",
+                    "category": "correctness",
+                    "severity": "high",
+                    "verification_status": "static_proof",
+                    "file_path": "src/app.py",
+                    "line_start": 12,
+                    "normalized_title": "Fixed issue",
+                    "decision": "reported",
+                    "scoring_protocol": "pullwise-review-score/0.1",
+                },
+                {
+                    "protocol": "pullwise-review-decision/0.1",
+                    "event_id": "evt_status_fp",
+                    "candidate_observation_key": "obs_status_fp",
+                    "scan_id": "sc_feedback",
+                    "job_id": "job_feedback",
+                    "attempt_id": "wk_1-1",
+                    "user_id": "usr_1",
+                    "repo_id": "repo_123",
+                    "repo_full_name": "acme/api",
+                    "branch": "main",
+                    "candidate_id": "issue-fp",
+                    "source": "correctness-reviewer",
+                    "category": "correctness",
+                    "severity": "high",
+                    "verification_status": "potential_risk",
+                    "file_path": "src/app.py",
+                    "line_start": 22,
+                    "normalized_title": "False positive issue",
+                    "decision": "reported",
+                    "scoring_protocol": "pullwise-review-score/0.1",
+                },
+            ]
+        )
+        headers = {"Cookie": "pw_session=ses_owner"}
+
+        fixed = RouteHarness("/issues/issue-fixed/status", {"status": "fixed"}, headers=headers)
+        app.PullwiseHandler.route(fixed, "PATCH")
+
+        self.assertEqual(fixed.status, HTTPStatus.OK)
+        self.assertEqual(fixed.payload["status"], "fixed")
+        self.assertNotIn("candidateObservationKey", fixed.payload)
+        self.assertNotIn("reviewDecisionEvents", fixed.payload)
+        fixed_labels = db.list_review_outcome_labels("obs_status_fixed")
+        self.assertEqual(fixed_labels[0]["label_source"], "user_explicit")
+        self.assertEqual(fixed_labels[0]["outcome_label"], "valid")
+
+        false_positive = RouteHarness(
+            "/issues/issue-fp/status",
+            {"status": "snoozed", "falsePositive": True, "reason": "Not reachable in this repo."},
+            headers=headers,
+        )
+        app.PullwiseHandler.route(false_positive, "PATCH")
+
+        self.assertEqual(false_positive.status, HTTPStatus.OK)
+        self.assertEqual(false_positive.payload["status"], "snoozed")
+        fp_labels = db.list_review_outcome_labels("obs_status_fp")
+        self.assertEqual(fp_labels[0]["label_source"], "user_explicit")
+        self.assertEqual(fp_labels[0]["outcome_label"], "false_positive")
+        self.assertEqual(fp_labels[0]["label_reason"], "Not reachable in this repo.")
+
+    def test_worker_result_fallback_checksum_includes_review_decision_events(self) -> None:
+        base = {
+            "status": "done",
+            **audit_result_fields([]),
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        first = app.worker_result_checksum(
+            {
+                **base,
+                "review_decision_events": [
+                    {
+                        "protocol": "pullwise-review-decision/0.1",
+                        "event_id": "evt_checksum_1",
+                        "candidate_observation_key": "obs_checksum_1",
+                    }
+                ],
+            }
+        )
+        second = app.worker_result_checksum(
+            {
+                **base,
+                "review_decision_events": [
+                    {
+                        "protocol": "pullwise-review-decision/0.1",
+                        "event_id": "evt_checksum_2",
+                        "candidate_observation_key": "obs_checksum_2",
+                    }
+                ],
+            }
+        )
+
+        self.assertNotEqual(first, second)
+
+    def test_review_outcome_label_priority_keeps_pipeline_and_weak_signals_separate(self) -> None:
+        self.assertEqual(app.effective_review_outcome_label("missing_observation"), {})
+
+        weak = app.record_weak_lifecycle_signal(
+            candidate_observation_key="obs_priority",
+            outcome_label="false_positive",
+            reason="candidate disappeared later",
+        )
+        self.assertEqual(weak["outcome_label"], "false_positive")
+        manual = app.record_manual_review_outcome(
+            candidate_observation_key="obs_priority",
+            outcome_label="valid",
+            reviewer_id="admin_1",
+            reason="manual review confirmed it",
+        )
+        self.assertEqual(manual["outcome_label"], "valid")
+
+        effective = app.effective_review_outcome_label("obs_priority")
+        self.assertEqual(effective["outcome_label"], "valid")
+        self.assertEqual(effective["label_source"], "manual_review")
+
+    def test_review_calibration_snapshots_shrink_sparse_cohorts_toward_parent(self) -> None:
+        def event(index: int, *, category: str, observation_key: str) -> dict:
+            return {
+                "protocol": "pullwise-review-decision/0.1",
+                "event_id": f"evt_backoff_{index}",
+                "candidate_observation_key": observation_key,
+                "scan_id": "sc_backoff",
+                "job_id": "job_backoff",
+                "attempt_id": "wk_1-1",
+                "user_id": "usr_1",
+                "repo_id": "repo_123",
+                "github_repo_id": "123",
+                "repo_full_name": "acme/api",
+                "branch": "main",
+                "commit_sha": "a" * 40,
+                "candidate_id": f"candidate-{index}",
+                "fingerprint": f"fp-{index}",
+                "source": "correctness reviewer",
+                "provider": "codex",
+                "model": "gpt-5.5",
+                "category": category,
+                "severity": "medium",
+                "verification_status": "potential_risk",
+                "file_path": "src/app.py",
+                "line_start": 12,
+                "raw_confidence": 0.9,
+                "calibrated_confidence": 0.9,
+                "decision_score": 0.8,
+                "decision": "reported",
+                "decision_reason": "test",
+                "scoring_protocol": "pullwise-review-score/0.1",
+                "score_factors": {"scoreKind": "ranking_score", "proposedDecision": "reported"},
+                "created_at": app.now(),
+            }
+
+        events = [event(index, category="correctness", observation_key=f"obs_valid_{index}") for index in range(6)]
+        events.append(event(99, category="docs", observation_key="obs_sparse_docs"))
+        db.record_review_decision_events(events)
+        for index in range(6):
+            app.record_manual_review_outcome(
+                event_id=f"evt_backoff_{index}",
+                candidate_observation_key=f"obs_valid_{index}",
+                outcome_label="valid",
+                reviewer_id="admin_1",
+            )
+        app.record_manual_review_outcome(
+            event_id="evt_backoff_99",
+            candidate_observation_key="obs_sparse_docs",
+            outcome_label="false_positive",
+            reviewer_id="admin_1",
+        )
+
+        snapshots = {
+            item["cohort_key"]: item
+            for item in db.list_review_calibration_snapshots("user:usr_1|repo:repo_123|branch:main")
+        }
+        sparse = snapshots["source:correctness reviewer|category:docs|status:potential_risk"]
+        metadata = json.loads(sparse["metadata_json"])
+        self.assertEqual(metadata["parent_cohort_key"], "source:correctness reviewer|category:docs")
+        self.assertLess(metadata["shrinkage_weight"], 0.1)
+        self.assertGreater(sparse["posterior_mean"], metadata["raw_posterior_mean"])
+        self.assertGreater(sparse["posterior_lb"], metadata["raw_posterior_lb"])
+
+    def test_review_shadow_evaluation_counts_verified_suppression_guardrail(self) -> None:
+        db.record_review_decision_events(
+            [
+                {
+                    "protocol": "pullwise-review-decision/0.1",
+                    "event_id": "evt_verified_suppression",
+                    "candidate_observation_key": "obs_verified_suppression",
+                    "scan_id": "sc_guardrail",
+                    "job_id": "job_guardrail",
+                    "attempt_id": "wk_1-1",
+                    "user_id": "usr_1",
+                    "repo_id": "repo_123",
+                    "github_repo_id": "123",
+                    "repo_full_name": "acme/api",
+                    "branch": "main",
+                    "commit_sha": "a" * 40,
+                    "candidate_id": "candidate-verified",
+                    "fingerprint": "fp-verified",
+                    "source": "static checker",
+                    "provider": "deterministic",
+                    "model": "rules",
+                    "category": "build",
+                    "severity": "high",
+                    "verification_status": "static_proof",
+                    "file_path": "Dockerfile",
+                    "line_start": 4,
+                    "raw_confidence": 0.95,
+                    "calibrated_confidence": 0.95,
+                    "decision_score": 0.95,
+                    "decision": "reported",
+                    "decision_reason": "reported",
+                    "scoring_protocol": "pullwise-review-score/0.1",
+                    "score_factors": {
+                        "scoreKind": "ranking_score",
+                        "proposedDecision": "audit_only",
+                        "proposedReason": "bad source history",
+                    },
+                    "created_at": app.now(),
+                }
+            ]
+        )
+
+        evaluation = app.review_shadow_evaluation("user:usr_1|repo:repo_123|branch:main")
+
+        self.assertEqual(evaluation["candidateCount"], 1)
+        self.assertEqual(evaluation["currentReportedCount"], 1)
+        self.assertEqual(evaluation["proposedAuditOnlyCount"], 1)
+        self.assertEqual(evaluation["verifiedSuppressionCount"], 1)
 
     def test_duplicate_worker_result_with_same_checksum_does_not_reapply_body(self) -> None:
         scan = {
