@@ -507,13 +507,33 @@ def review_confidence_bucket(raw_confidence: object) -> str:
     return "0.95-1.00"
 
 
+def review_calibration_cohort_value(value: object) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", public_issue_text(value).lower())).strip()[:80]
+
+
 def review_calibration_cohort_keys(event: dict) -> list[str]:
-    source = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", public_issue_text(event.get("source")).lower())).strip()[:80]
-    category = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", public_issue_text(event.get("category")).lower())).strip()[:80]
+    provider = review_calibration_cohort_value(event.get("provider"))
+    model = review_calibration_cohort_value(event.get("model"))
+    source = review_calibration_cohort_value(event.get("source"))
+    category = review_calibration_cohort_value(event.get("category"))
     status = public_issue_text(event.get("verification_status")).lower()
     keys = ["global"]
     if status:
         keys.append(f"status:{status}")
+    if provider:
+        keys.append(f"provider:{provider}")
+        if model:
+            keys.append(f"provider:{provider}|model:{model}")
+            if source:
+                keys.append(f"provider:{provider}|model:{model}|source:{source}")
+                if status:
+                    keys.append(f"provider:{provider}|model:{model}|source:{source}|status:{status}")
+                if category:
+                    keys.append(f"provider:{provider}|model:{model}|source:{source}|category:{category}")
+                    if status:
+                        keys.append(
+                            f"provider:{provider}|model:{model}|source:{source}|category:{category}|status:{status}"
+                        )
     if source:
         keys.append(f"source:{source}")
         if status:
@@ -531,11 +551,8 @@ def review_calibration_parent_cohort_key(cohort_key: str) -> str:
         return ""
     parts = key.split("|")
     if len(parts) > 1:
-        if parts[-1].startswith("status:"):
-            return "|".join(parts[:-1])
-        if parts[-1].startswith("category:"):
-            return "|".join(parts[:-1])
-    if key.startswith("source:") or key.startswith("status:"):
+        return "|".join(parts[:-1])
+    if key.startswith("provider:") or key.startswith("source:") or key.startswith("status:"):
         return "global"
     return "global"
 

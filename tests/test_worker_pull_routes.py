@@ -589,6 +589,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(next_claim.status, HTTPStatus.OK)
         context = next_claim.payload["job"]["review_calibration_context"]
         self.assertIn("source:correctness reviewer", context["source_reliability"])
+        self.assertIn("provider:codex|model:gpt 5 5|source:correctness reviewer", context["source_reliability"])
         self.assertIn("global", context["confidence_calibration"])
         self.assertIn("0.90-0.95", context["confidence_calibration"]["global"])
 
@@ -996,12 +997,26 @@ class WorkerPullRoutesTest(unittest.TestCase):
             item["cohort_key"]: item
             for item in db.list_review_calibration_snapshots("user:usr_1|repo:repo_123|branch:main")
         }
+        self.assertIn("provider:codex", snapshots)
+        self.assertIn("provider:codex|model:gpt 5 5", snapshots)
+        self.assertIn("provider:codex|model:gpt 5 5|source:correctness reviewer", snapshots)
         sparse = snapshots["source:correctness reviewer|category:docs|status:potential_risk"]
         metadata = json.loads(sparse["metadata_json"])
         self.assertEqual(metadata["parent_cohort_key"], "source:correctness reviewer|category:docs")
         self.assertLess(metadata["shrinkage_weight"], 0.1)
         self.assertGreater(sparse["posterior_mean"], metadata["raw_posterior_mean"])
         self.assertGreater(sparse["posterior_lb"], metadata["raw_posterior_lb"])
+        provider_sparse = snapshots[
+            "provider:codex|model:gpt 5 5|source:correctness reviewer|category:docs|status:potential_risk"
+        ]
+        provider_metadata = json.loads(provider_sparse["metadata_json"])
+        self.assertEqual(
+            provider_metadata["parent_cohort_key"],
+            "provider:codex|model:gpt 5 5|source:correctness reviewer|category:docs",
+        )
+        self.assertLess(provider_metadata["shrinkage_weight"], 0.1)
+        self.assertGreater(provider_sparse["posterior_mean"], provider_metadata["raw_posterior_mean"])
+        self.assertGreater(provider_sparse["posterior_lb"], provider_metadata["raw_posterior_lb"])
 
     def test_review_shadow_evaluation_counts_verified_suppression_guardrail(self) -> None:
         db.record_review_decision_events(
