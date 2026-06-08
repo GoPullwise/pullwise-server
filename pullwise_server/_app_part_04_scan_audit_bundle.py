@@ -967,8 +967,17 @@ def public_review_score_factors(value: object) -> dict:
         "evidenceStrength",
         "deltaRelevance",
         "categoryAdjustment",
+        "truthProbability",
         "decisionScore",
         "driftState",
+        "providerChain",
+        "workerVersion",
+        "auditProtocol",
+        "promptVersion",
+        "verifierVersion",
+        "staticCheckerVersion",
+        "baseSha",
+        "headSha",
     }
     for raw_key, raw_value in source.items():
         key = public_issue_text(raw_key)[:80]

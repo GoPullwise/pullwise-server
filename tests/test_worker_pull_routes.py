@@ -505,6 +505,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "score_factors": {
                 "scoreKind": "ranking_score",
                 "proposedDecision": "reported",
+                "providerChain": "codex,opencode",
+                "workerVersion": "0.3.5",
+                "auditProtocol": "audit-swarm/0.1",
+                "promptVersion": "pullwise-review-prompt/0.1",
+                "verifierVersion": "pullwise-worker-verifier/0.1",
+                "staticCheckerVersion": "pullwise-static-checker/0.1",
+                "truthProbability": 0.83,
+                "baseSha": "a" * 40,
+                "headSha": "b" * 40,
                 "rawSnippet": "secret code must not be stored",
             },
         }
@@ -529,6 +538,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(rows[0]["decision"], "reported")
         factors = json.loads(rows[0]["score_factors_json"])
         self.assertEqual(factors["scoreKind"], "ranking_score")
+        self.assertEqual(factors["providerChain"], "codex,opencode")
+        self.assertEqual(factors["workerVersion"], "0.3.5")
+        self.assertEqual(factors["auditProtocol"], "audit-swarm/0.1")
+        self.assertEqual(factors["promptVersion"], "pullwise-review-prompt/0.1")
+        self.assertEqual(factors["truthProbability"], 0.83)
+        self.assertEqual(factors["baseSha"], "a" * 40)
+        self.assertEqual(factors["headSha"], "b" * 40)
         self.assertNotIn("rawSnippet", factors)
         evaluation = app.review_shadow_evaluation("user:usr_1|repo:repo_123|branch:main")
         self.assertEqual(evaluation["candidateCount"], 1)
