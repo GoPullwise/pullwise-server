@@ -710,7 +710,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "userId": "usr_1",
                 "createdAt": app.now(),
                 "completedAt": app.now(),
-                "issues": {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0},
+                "issues": {"critical": 0, "high": 3, "medium": 0, "low": 0, "info": 0},
                 "repoId": "repo_123",
                 "githubRepoId": "123",
             }
@@ -742,6 +742,20 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "title": "False positive issue",
                 "file": "src/app.py",
                 "line": 22,
+                "verificationStatus": "potential_risk",
+            },
+            {
+                "id": "issue-duplicate",
+                "userId": "usr_1",
+                "scanId": "sc_feedback",
+                "jobId": "job_feedback",
+                "repo": "acme/api",
+                "branch": "main",
+                "status": "open",
+                "severity": "high",
+                "title": "Duplicate issue",
+                "file": "src/app.py",
+                "line": 32,
                 "verificationStatus": "potential_risk",
             },
         ]
@@ -791,6 +805,28 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "decision": "reported",
                     "scoring_protocol": "pullwise-review-score/0.1",
                 },
+                {
+                    "protocol": "pullwise-review-decision/0.1",
+                    "event_id": "evt_status_duplicate",
+                    "candidate_observation_key": "obs_status_duplicate",
+                    "scan_id": "sc_feedback",
+                    "job_id": "job_feedback",
+                    "attempt_id": "wk_1-1",
+                    "user_id": "usr_1",
+                    "repo_id": "repo_123",
+                    "repo_full_name": "acme/api",
+                    "branch": "main",
+                    "candidate_id": "issue-duplicate",
+                    "source": "correctness-reviewer",
+                    "category": "correctness",
+                    "severity": "high",
+                    "verification_status": "potential_risk",
+                    "file_path": "src/app.py",
+                    "line_start": 32,
+                    "normalized_title": "Duplicate issue",
+                    "decision": "reported",
+                    "scoring_protocol": "pullwise-review-score/0.1",
+                },
             ]
         )
         headers = {"Cookie": "pw_session=ses_owner"}
@@ -819,6 +855,20 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(fp_labels[0]["label_source"], "user_explicit")
         self.assertEqual(fp_labels[0]["outcome_label"], "false_positive")
         self.assertEqual(fp_labels[0]["label_reason"], "Not reachable in this repo.")
+
+        duplicate = RouteHarness(
+            "/issues/issue-duplicate/status",
+            {"status": "snoozed", "feedbackReason": "duplicate", "reason": "Duplicate issue."},
+            headers=headers,
+        )
+        app.PullwiseHandler.route(duplicate, "PATCH")
+
+        self.assertEqual(duplicate.status, HTTPStatus.OK)
+        self.assertEqual(duplicate.payload["status"], "snoozed")
+        duplicate_labels = db.list_review_outcome_labels("obs_status_duplicate")
+        self.assertEqual(duplicate_labels[0]["label_source"], "weak_lifecycle")
+        self.assertEqual(duplicate_labels[0]["outcome_label"], "ambiguous")
+        self.assertEqual(duplicate_labels[0]["label_reason"], "feedback:duplicate - Duplicate issue.")
 
     def test_worker_result_fallback_checksum_includes_review_decision_events(self) -> None:
         base = {

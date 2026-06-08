@@ -1344,6 +1344,28 @@ def review_decision_event_for_issue(issue: dict) -> dict:
     return scored[0][1]
 
 
+REVIEW_USER_FEEDBACK_REASONS = {
+    "useful": "User marked issue useful / valid.",
+    "valid": "User marked issue useful / valid.",
+    "false_positive": "False positive.",
+    "not_relevant": "Not relevant to this PR.",
+    "duplicate": "Duplicate issue.",
+    "expected_behavior": "Expected behavior.",
+    "too_speculative": "Too speculative.",
+    "speculative": "Too speculative.",
+    "low_impact": "Low impact.",
+    "already_fixed": "Already fixed.",
+}
+
+
+def review_user_feedback_reason(body: dict) -> tuple[str, str]:
+    for key in ("feedbackReason", "feedback_reason", "reasonCode", "reason_code"):
+        value = public_issue_text(body.get(key)).lower().replace("-", "_").replace(" ", "_")
+        if value in REVIEW_USER_FEEDBACK_REASONS:
+            return value, REVIEW_USER_FEEDBACK_REASONS[value]
+    return "", ""
+
+
 def review_user_feedback_false_positive(body: dict) -> bool | None:
     for key in ("falsePositive", "false_positive", "isFalsePositive", "is_false_positive"):
         if isinstance(body.get(key), bool):
@@ -1353,11 +1375,13 @@ def review_user_feedback_false_positive(body: dict) -> bool | None:
         or body.get("outcomeLabel")
         or body.get("outcome_label")
         or body.get("feedback")
+        or body.get("feedbackReason")
+        or body.get("feedback_reason")
         or body.get("resolution")
     ).lower()
     if outcome in {"false_positive", "false-positive", "false positive", "dismissed_false_positive"}:
         return True
-    if outcome in {"valid", "confirmed", "accepted", "fixed"}:
+    if outcome in {"valid", "confirmed", "accepted", "fixed", "useful"}:
         return False
     return None
 
@@ -1367,7 +1391,12 @@ def record_issue_status_outcome_label(issue: dict, *, next_status: str, body: di
     observation_key = public_issue_text(event.get("candidate_observation_key"))
     if not observation_key:
         return {}
-    reason = " ".join(review._safe_text_lenient(body.get("reason") or body.get("note") or body.get("message")).split())[:240]
+    feedback_code, feedback_default_reason = review_user_feedback_reason(body)
+    supplied_reason = " ".join(review._safe_text_lenient(body.get("reason") or body.get("note") or body.get("message")).split())
+    if feedback_code:
+        reason = f"feedback:{feedback_code} - {supplied_reason or feedback_default_reason}"[:240]
+    else:
+        reason = supplied_reason[:240]
     explicit_false_positive = review_user_feedback_false_positive(body)
     if explicit_false_positive is not None:
         return record_user_feedback_outcome(
