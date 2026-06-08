@@ -205,6 +205,51 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.assertNotIn("billing", app.USERS["usr_1"])
         self.assertNotIn("billingCheckout", app.USERS["usr_1"])
 
+    def test_samesite_none_settings_patch_rejects_unconfigured_frontend_origin(self) -> None:
+        handler = HandlerHarness(
+            "/settings",
+            {"review": {"outputLanguage": "zh-CN"}},
+            cookie="pw_session=ses_1",
+            headers={"Origin": "https://pull-wise.com"},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_COOKIE_SAME_SITE": "None",
+                "PULLWISE_APP_URL": "https://admin.pull-wise.com",
+                "PULLWISE_ALLOWED_ORIGINS": "https://admin.pull-wise.com",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "PATCH")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+        self.assertNotIn("usr_1", app.SETTINGS)
+
+    def test_samesite_none_settings_patch_accepts_configured_frontend_origin(self) -> None:
+        handler = HandlerHarness(
+            "/settings",
+            {"review": {"outputLanguage": "zh-CN"}},
+            cookie="pw_session=ses_1",
+            headers={"Origin": "https://pull-wise.com"},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_COOKIE_SAME_SITE": "None",
+                "PULLWISE_APP_URL": "https://pull-wise.com",
+                "PULLWISE_ALLOWED_ORIGINS": "https://pull-wise.com",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "PATCH")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["review"]["outputLanguage"], "zh-CN")
+        self.assertEqual(app.SETTINGS["usr_1"]["review"]["outputLanguage"], "zh-CN")
+
     def test_cors_allows_configured_app_url_origin(self) -> None:
         headers: list[tuple[str, str]] = []
         handler = app.PullwiseHandler.__new__(app.PullwiseHandler)
