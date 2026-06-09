@@ -141,7 +141,8 @@ class ConfigurationContractsTest(unittest.TestCase):
             app.USERS = {"usr_1": {"id": "usr_1", "name": "Taylor", "email": "taylor@example.com"}}
             app.SETTINGS = {}
 
-            payload = app.settings_payload("usr_1")
+            with patch.object(app.db, "load_state_item", return_value={}):
+                payload = app.settings_payload("usr_1")
 
             self.assertEqual(payload["profile"]["name"], "Taylor")
             self.assertEqual(payload["review"]["outputLanguage"], "en")

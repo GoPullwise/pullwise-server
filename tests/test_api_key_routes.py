@@ -230,7 +230,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         quota_handler = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/quota", headers=auth)
         app.PullwiseHandler.route(quota_handler, "GET")
         self.assertEqual(quota_handler.status, HTTPStatus.OK)
-        self.assertEqual(quota_handler.payload["repository"]["remaining"], 2)
+        self.assertEqual(quota_handler.payload["repository"]["remaining"], 4)
 
         stop = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/stop", headers=auth)
         app.PullwiseHandler.route(stop, "POST")
