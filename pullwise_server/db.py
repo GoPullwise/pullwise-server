@@ -771,6 +771,38 @@ def load_state() -> dict[str, Any]:
     return state_for_runtime(state)
 
 
+def load_state_item(name: str) -> Any | None:
+    initialize()
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute(
+            "SELECT payload FROM app_state WHERE name = ?",
+            (name,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+
+def save_state_item(name: str, payload: Any) -> None:
+    initialize()
+    storage_payload = to_jsonable(payload)
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO app_state (name, payload, updated_at)
+                VALUES (?, ?, strftime('%s', 'now'))
+                ON CONFLICT(name) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (name, json.dumps(storage_payload, ensure_ascii=False, allow_nan=False)),
+            )
+
+
 def save_state(state: dict[str, Any]) -> None:
     initialize()
     storage_state = state_for_storage(state)

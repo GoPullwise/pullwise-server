@@ -103,6 +103,7 @@ class SecurityContractsBase(unittest.TestCase):
         app.STATE_LOADED = True
         app.STATE_DIRTY = False
         app.GITHUB_STATES = {}
+        app.SETTINGS = {}
         with app.PREVIEW_SCAN_LOCKS_GUARD:
             app.PREVIEW_SCAN_LOCKS.clear()
 
@@ -116,5 +117,4 @@ class SecurityContractsBase(unittest.TestCase):
             }
         }
         return "pw_session=ses_1"
-
 

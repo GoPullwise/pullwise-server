@@ -227,6 +227,30 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(handler.location, "https://github.com/login/oauth/authorize?client_id=pw")
         record = next(iter(app.GITHUB_STATES.values()))
         self.assertEqual(record["redirectTo"], "https://admin.pull-wise.com/workers")
+    def test_github_login_authorize_keeps_pullwise_admin_redirect_when_only_main_origin_is_configured(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/authorize?response=redirect&redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers"
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_GITHUB_CLIENT_ID": "client_id",
+                    "PULLWISE_GITHUB_CLIENT_SECRET": "client_secret",
+                    "PULLWISE_APP_URL": "https://pull-wise.com",
+                    "PULLWISE_ALLOWED_ORIGINS": "https://pull-wise.com",
+                    "PULLWISE_API_BASE_URL": "https://api.pull-wise.com",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.github_auth.build_oauth_authorize_url", return_value="https://github.com/login/oauth/authorize?client_id=pw"),
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        record = next(iter(app.GITHUB_STATES.values()))
+        self.assertEqual(record["redirectTo"], "https://admin.pull-wise.com/workers")
     def test_local_github_login_authorize_redirect_mode_returns_callback_redirect(self) -> None:
         handler = RouteHarness(
             "/auth/github/authorize?response=redirect&redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers"
@@ -788,6 +812,34 @@ class SecurityContractsPart01Test(SecurityContractsBase):
 
         self.assertEqual(read.status, HTTPStatus.OK)
         self.assertEqual(read.payload["review"]["outputLanguage"], "ja")
+    def test_settings_read_prefers_database_user_scope_over_stale_process_cache(self) -> None:
+        app.SETTINGS = {
+            "usr_1": {
+                "profile": {"name": "Dev", "email": "dev@example.com"},
+                "review": {"outputLanguage": "en"},
+            }
+        }
+        app.db.save_state_item(
+            "settings",
+            {
+                "usr_1": {
+                    "profile": {"name": "Dev", "email": "dev@example.com"},
+                    "review": {"outputLanguage": "ja"},
+                },
+                "usr_2": {
+                    "profile": {"name": "Other", "email": "other@example.com"},
+                    "review": {"outputLanguage": "fr"},
+                },
+            },
+        )
+        handler = RouteHarness("/settings", cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["review"]["outputLanguage"], "ja")
+        self.assertEqual(app.SETTINGS["usr_1"]["review"]["outputLanguage"], "ja")
+        self.assertEqual(app.SETTINGS["usr_2"]["review"]["outputLanguage"], "fr")
     def test_settings_payload_sanitizes_profile_fields(self) -> None:
         app.SETTINGS["usr_1"] = {
             "profile": {

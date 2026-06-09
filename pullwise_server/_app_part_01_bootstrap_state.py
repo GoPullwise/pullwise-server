@@ -385,11 +385,14 @@ def mark_state_dirty() -> None:
 
 
 def persist_state(*, force: bool = False) -> None:
-    global STATE_DIRTY
+    global STATE_DIRTY, SETTINGS
     with STATE_LOCK:
         if not STATE_LOADED or (not force and not STATE_DIRTY):
             return
         try:
+            persisted_settings = db.load_state_item("settings")
+            if isinstance(persisted_settings, dict):
+                SETTINGS = persisted_settings
             db.save_state(
                 {
                     "users": USERS,

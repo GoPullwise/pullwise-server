@@ -39,12 +39,23 @@ def trusted_browser_origins() -> set[str]:
     allowed = allowed_origins()
     for value in (
         env("PULLWISE_APP_URL", "http://localhost:5173"),
+        admin_app_url(),
         os.environ.get("PULLWISE_API_BASE_URL", ""),
     ):
         origin = url_origin(value)
         if origin:
             allowed.add(origin)
     return allowed
+
+
+def admin_app_url() -> str:
+    configured = os.environ.get("PULLWISE_ADMIN_APP_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    app_origin = url_origin(env("PULLWISE_APP_URL", "http://localhost:5173"))
+    if app_origin == "https://pull-wise.com":
+        return "https://admin.pull-wise.com"
+    return ""
 
 
 def api_base_url(handler: BaseHTTPRequestHandler) -> str:
@@ -325,9 +336,10 @@ def safe_redirect_to(value: object, screen: str) -> str:
 
     origin = url_origin(value)
     allowed = allowed_origins()
-    app_origin = url_origin(env("PULLWISE_APP_URL", "http://localhost:5173"))
-    if app_origin:
-        allowed.add(app_origin)
+    for trusted in (env("PULLWISE_APP_URL", "http://localhost:5173"), admin_app_url()):
+        trusted_origin = url_origin(trusted)
+        if trusted_origin:
+            allowed.add(trusted_origin)
     if origin and origin in allowed:
         return value
     return fallback
@@ -708,13 +720,27 @@ def default_settings_payload(user_id: str) -> dict:
     }
 
 
+def refresh_settings_from_storage() -> None:
+    global SETTINGS
+    persisted = db.load_state_item("settings")
+    if isinstance(persisted, dict):
+        SETTINGS = persisted
+
+
+def persist_settings_to_storage() -> None:
+    db.save_state_item("settings", SETTINGS)
+
+
 def settings_payload(user_id: str) -> dict:
+    refresh_settings_from_storage()
     return clean_settings_payload(user_id, SETTINGS.get(user_id))
 
 
 def default_settings(user_id: str) -> dict:
+    refresh_settings_from_storage()
     if not isinstance(SETTINGS.get(user_id), dict):
         SETTINGS[user_id] = default_settings_payload(user_id)
+        persist_settings_to_storage()
         mark_state_dirty()
     return SETTINGS[user_id]
 
@@ -749,6 +775,7 @@ def apply_settings_update(user_id: str, body: dict) -> dict:
     if "outputLanguage" in review_body:
         settings["review"]["outputLanguage"] = clean_review_output_language(review_body.get("outputLanguage"))
     SETTINGS[user_id] = settings
+    persist_settings_to_storage()
     mark_state_dirty()
     return settings
 
