@@ -444,10 +444,11 @@ def create_creem_interval_change(billing: dict) -> dict:
 
 
 def creem_api_base_url() -> str:
-    configured = env(
-        "PULLWISE_CREEM_API_BASE_URL",
-        "https://test-api.creem.io" if env_flag("PULLWISE_CREEM_TEST_MODE") else "https://api.creem.io",
-    ).rstrip("/")
+    default_url = "https://test-api.creem.io" if env_flag("PULLWISE_CREEM_TEST_MODE") else "https://api.creem.io"
+    configured = env("PULLWISE_CREEM_API_BASE_URL", default_url).strip().rstrip("/") or default_url
+    parsed = urlparse(configured)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise BillingConfigurationError("PULLWISE_CREEM_API_BASE_URL must be an absolute HTTP(S) URL.")
     return configured[:-3] if configured.endswith("/v1") else configured
 
 

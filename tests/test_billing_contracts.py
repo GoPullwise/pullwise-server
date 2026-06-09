@@ -288,6 +288,13 @@ class BillingContractsTest(unittest.TestCase):
             self.assertEqual(billing.creem_api_base_url(), "https://test-api.creem.io")
         with patch.dict(os.environ, {"PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io/v1"}, clear=True):
             self.assertEqual(billing.creem_api_base_url(), "https://test-api.creem.io")
+        with patch.dict(os.environ, {"PULLWISE_CREEM_API_BASE_URL": ""}, clear=True):
+            self.assertEqual(billing.creem_api_base_url(), "https://api.creem.io")
+
+    def test_creem_api_base_url_rejects_relative_urls(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_CREEM_API_BASE_URL": "/v1"}, clear=True):
+            with self.assertRaisesRegex(billing.BillingConfigurationError, "absolute HTTP"):
+                billing.creem_api_base_url()
 
     def test_provider_redirect_urls_must_be_absolute_http_urls(self) -> None:
         user = {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cust_123"}}
