@@ -209,6 +209,7 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     convergence_state = convergence_state_from_worker_result(job, body)
     audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
     ai_usage = public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage"))
+    repository_graph = public_repository_graph(body.get("repository_graph") or body.get("repositoryGraph"))
     error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
@@ -259,6 +260,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan["auditSwarm"] = audit_swarm
         if ai_usage:
             scan["aiUsage"] = ai_usage
+        if repository_graph:
+            scan["repositoryGraph"] = repository_graph
         if status == "done" and convergence_state:
             scan["convergenceState"] = convergence_state
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)

@@ -2,6 +2,184 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+PUBLIC_REPOSITORY_GRAPH_PROTOCOL_VERSION = "repository-graph/0.1"
+PUBLIC_REPOSITORY_GRAPH_MAX_NODES = 120
+PUBLIC_REPOSITORY_GRAPH_MAX_EDGES = 240
+PUBLIC_REPOSITORY_GRAPH_MAX_PROMPT_CHARS = 2048
+PUBLIC_REPOSITORY_GRAPH_NODE_TYPES = {"entrypoint", "module", "test", "manifest", "workflow", "file"}
+PUBLIC_REPOSITORY_GRAPH_EDGE_TYPES = {"imports", "contains", "calls", "configures", "depends_on"}
+PUBLIC_REPOSITORY_GRAPH_ID_RE = re.compile(r"^[A-Za-z0-9_.:/@-]{1,180}$")
+
+
+def public_repository_graph(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    version = public_issue_text(value.get("version"))
+    if version != PUBLIC_REPOSITORY_GRAPH_PROTOCOL_VERSION:
+        return {}
+    nodes = []
+    seen_node_ids = set()
+    raw_nodes = value.get("nodes") if isinstance(value.get("nodes"), list) else []
+    for item in raw_nodes:
+        node = public_repository_graph_node(item)
+        node_id = node.get("id")
+        if not node or node_id in seen_node_ids:
+            continue
+        seen_node_ids.add(node_id)
+        nodes.append(node)
+        if len(nodes) >= PUBLIC_REPOSITORY_GRAPH_MAX_NODES:
+            break
+    edges = []
+    seen_edge_ids = set()
+    raw_edges = value.get("edges") if isinstance(value.get("edges"), list) else []
+    for item in raw_edges:
+        edge = public_repository_graph_edge(item, seen_node_ids)
+        edge_id = edge.get("id")
+        if not edge or edge_id in seen_edge_ids:
+            continue
+        seen_edge_ids.add(edge_id)
+        edges.append(edge)
+        if len(edges) >= PUBLIC_REPOSITORY_GRAPH_MAX_EDGES:
+            break
+    payload = {
+        "version": version,
+        "generatedAt": pull_request_timestamp(value.get("generatedAt")) or 0,
+        "repo": clean_repository_full_name(value.get("repo")),
+        "branch": clean_github_access_text(value.get("branch")) or "main",
+        "commit": clean_github_access_text(value.get("commit")) or "pending",
+        "stats": public_repository_graph_stats(value.get("stats"), nodes, edges, len(raw_nodes), len(raw_edges)),
+        "nodes": nodes,
+        "edges": edges,
+    }
+    summary = " ".join(review._safe_text_lenient(value.get("summary")).split())[:500]
+    if summary:
+        payload["summary"] = summary
+    architecture_summary = public_repository_graph_architecture_summary(
+        value.get("architectureSummary") or value.get("architecture_summary")
+    )
+    if architecture_summary:
+        payload["architectureSummary"] = architecture_summary
+    return payload
+
+
+def public_repository_graph_node(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    raw_id = value.get("id")
+    if not isinstance(raw_id, str) or any(char in raw_id for char in "\r\n\x00"):
+        return {}
+    node_id = public_issue_text(raw_id)
+    if not PUBLIC_REPOSITORY_GRAPH_ID_RE.match(node_id):
+        return {}
+    node_type = public_issue_text(value.get("type"))
+    if node_type not in PUBLIC_REPOSITORY_GRAPH_NODE_TYPES:
+        return {}
+    path = fix_workflow.safe_issue_file(value.get("path"))
+    if not path:
+        return {}
+    label = public_issue_text(value.get("label"))[:80] or path.rsplit("/", 1)[-1]
+    node = {
+        "id": node_id,
+        "label": label,
+        "type": node_type,
+        "path": path,
+    }
+    importance = public_repository_graph_float(value.get("importance"))
+    if importance is not None:
+        node["importance"] = importance
+    tags = review._safe_text_list(value.get("tags"))[:10]
+    if tags:
+        node["tags"] = tags
+    return node
+
+
+def public_repository_graph_edge(value: object, node_ids: set[str]) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    raw_source = value.get("source")
+    raw_target = value.get("target")
+    if (
+        not isinstance(raw_source, str)
+        or not isinstance(raw_target, str)
+        or any(char in raw_source for char in "\r\n\x00")
+        or any(char in raw_target for char in "\r\n\x00")
+    ):
+        return {}
+    source = public_issue_text(raw_source)
+    target = public_issue_text(raw_target)
+    edge_type = public_issue_text(value.get("type"))
+    if (
+        source not in node_ids
+        or target not in node_ids
+        or source == target
+        or edge_type not in PUBLIC_REPOSITORY_GRAPH_EDGE_TYPES
+    ):
+        return {}
+    raw_id = value.get("id")
+    edge_id = public_issue_text(raw_id) if isinstance(raw_id, str) and not any(char in raw_id for char in "\r\n\x00") else ""
+    if not edge_id or not PUBLIC_REPOSITORY_GRAPH_ID_RE.match(edge_id):
+        edge_id = f"{edge_type}:{source}->{target}"[:180]
+    edge = {"id": edge_id, "source": source, "target": target, "type": edge_type}
+    weight = public_optional_int(value.get("weight"))
+    if weight:
+        edge["weight"] = max(1, min(weight, 100))
+    return edge
+
+
+def public_repository_graph_stats(
+    value: object,
+    nodes: list[dict],
+    edges: list[dict],
+    raw_node_count: int,
+    raw_edge_count: int,
+) -> dict:
+    raw_stats = value if isinstance(value, dict) else {}
+    languages = review._safe_text_list(raw_stats.get("languages"))[:8]
+    stats = {
+        "files": public_scan_count(raw_stats.get("files")),
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "languages": languages,
+        "truncated": (
+            raw_stats.get("truncated") is True
+            or raw_node_count > len(nodes)
+            or raw_edge_count > len(edges)
+        ),
+    }
+    return stats
+
+
+def public_repository_graph_architecture_summary(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    payload = {}
+    for key in ("entrypoints", "modules", "tests", "workflows"):
+        items = []
+        for item in value.get(key) if isinstance(value.get(key), list) else []:
+            path = fix_workflow.safe_issue_file(item)
+            if path:
+                items.append(path)
+        if items:
+            payload[key] = items[:20]
+    review_hints = review._safe_text_list(value.get("reviewHints") or value.get("review_hints"))[:20]
+    if review_hints:
+        payload["reviewHints"] = review_hints
+    prompt_text = review._safe_text_lenient(value.get("promptText") or value.get("prompt_text")).strip()
+    if prompt_text:
+        payload["promptText"] = prompt_text[:PUBLIC_REPOSITORY_GRAPH_MAX_PROMPT_CHARS]
+    return payload
+
+
+def public_repository_graph_float(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return round(max(0.0, min(1.0, number)), 3)
+
+
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -28,6 +206,9 @@ def scan_payload(scan: dict) -> dict:
     audit_swarm = public_scan_audit_swarm(scan.get("auditSwarm") or scan.get("audit_swarm"))
     if audit_swarm:
         payload["auditSwarm"] = audit_swarm
+    repository_graph = public_repository_graph(scan.get("repositoryGraph") or scan.get("repository_graph"))
+    if repository_graph:
+        payload["repositoryGraph"] = repository_graph
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0
@@ -2383,6 +2564,7 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         evidence = issue.get("evidence") if isinstance(issue.get("evidence"), list) else []
         evidence_items += len(evidence)
     preflight = public_scan.get("preflight") or {}
+    repository_graph = public_scan.get("repositoryGraph") if isinstance(public_scan.get("repositoryGraph"), dict) else {}
     log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
     bundle = {
         "schemaVersion": 1,
@@ -2407,6 +2589,8 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
             "All repository links are pinned to the recorded commit when a valid commit SHA is available.",
         ],
     }
+    if repository_graph:
+        bundle["repositoryGraph"] = repository_graph
     artifacts = audit_bundle_artifacts(bundle)
     bundle["artifactManifest"] = [
         {key: artifact[key] for key in ("path", "mediaType", "size", "sha256")}
@@ -2563,8 +2747,16 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
         audit_bundle_artifact("reproduction/commands.txt", "text/plain", audit_bundle_repro_commands_text(bundle)),
         audit_bundle_artifact("environment.json", "application/json", audit_bundle_environment_json(bundle)),
         audit_bundle_artifact("tool-versions.json", "application/json", audit_bundle_tool_versions_json(bundle)),
-        audit_bundle_artifact("audit.json", "application/json", audit_bundle_json_text(bundle)),
     ]
+    if isinstance(bundle.get("repositoryGraph"), dict):
+        artifacts.append(
+            audit_bundle_artifact(
+                "repository-graph.json",
+                "application/json",
+                json.dumps(bundle["repositoryGraph"], ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            )
+        )
+    artifacts.append(audit_bundle_artifact("audit.json", "application/json", audit_bundle_json_text(bundle)))
     artifacts.extend(audit_bundle_log_artifacts(bundle))
     artifacts.extend(audit_bundle_patch_artifacts(bundle))
     for issue in bundle.get("issues") if isinstance(bundle.get("issues"), list) else []:

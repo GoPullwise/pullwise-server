@@ -132,6 +132,42 @@ def audit_result_fields(issue_cards: list[dict], verification_results: list[dict
     }
 
 
+def repository_graph_fixture() -> dict:
+    return {
+        "version": "repository-graph/0.1",
+        "generatedAt": app.now(),
+        "repo": "acme/api",
+        "branch": "main",
+        "commit": "abc123",
+        "summary": "API graph",
+        "stats": {"nodes": 3, "edges": 2, "files": 3, "languages": ["Python"], "truncated": False},
+        "nodes": [
+            {
+                "id": "file:src/app.py",
+                "label": "app.py",
+                "type": "entrypoint",
+                "path": "src/app.py",
+                "importance": 0.9,
+                "tags": ["backend"],
+                "raw": "secret",
+            },
+            {"id": "dir:src", "label": "src", "type": "module", "path": "src"},
+            {"id": "bad\nid", "label": "bad", "type": "unknown", "path": "C:\\worker\\repo\\bad.py"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "file:src/app.py", "target": "dir:src", "type": "imports", "weight": 2},
+            {"id": "e2", "source": "bad\nid", "target": "x", "type": "unknown"},
+        ],
+        "architectureSummary": {
+            "entrypoints": ["src/app.py"],
+            "modules": ["src"],
+            "reviewHints": ["Review request handlers."],
+            "promptText": "Repository architecture: src/app.py handles requests.",
+        },
+        "absolutePath": "C:\\worker\\repo",
+    }
+
+
 class WorkerPullRoutesTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -298,6 +334,19 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(findings[0]["verificationStatus"], "potential_risk")
 
+    def test_public_repository_graph_sanitizes_worker_payload(self) -> None:
+        payload = app.public_repository_graph(repository_graph_fixture())
+
+        self.assertEqual(payload["version"], "repository-graph/0.1")
+        self.assertEqual(payload["nodes"][0]["path"], "src/app.py")
+        self.assertNotIn("raw", payload["nodes"][0])
+        self.assertEqual(len(payload["nodes"]), 2)
+        self.assertEqual(len(payload["edges"]), 1)
+        serialized = json.dumps(payload)
+        self.assertNotIn("C:\\worker", serialized)
+        self.assertNotIn("secret", serialized)
+        self.assertEqual(payload["architectureSummary"]["entrypoints"], ["src/app.py"])
+
     def test_worker_heartbeat_claim_progress_and_result_are_idempotent(self) -> None:
         scan = {
             "id": "sc_1",
@@ -365,6 +414,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "progress": 70,
                 "message": "reviewing",
                 "logs_summary": "ok",
+                "repository_graph": repository_graph_fixture(),
                 "audit_swarm": {
                     "protocol": "audit-swarm/0.1",
                     "stage": "discovery",
@@ -390,6 +440,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["phase"], "ai")
         self.assertEqual(app.SCANS[0]["progress"], 70)
         running_scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(running_scan_payload["repositoryGraph"]["version"], "repository-graph/0.1")
+        self.assertEqual(running_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/app.py"])
         self.assertEqual(running_scan_payload["auditSwarm"]["stage"], "discovery")
         self.assertEqual(running_scan_payload["auditSwarm"]["adapter"], "codex")
         self.assertEqual(running_scan_payload["auditSwarm"]["counts"]["issueCards"], 2)
@@ -397,6 +449,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(running_scan_payload["auditSwarm"]["roles"], ["security-reviewer"])
         self.assertEqual(running_scan_payload["auditSwarm"]["evidenceBlocks"][0]["kind"], "summary")
 
+        final_repository_graph = repository_graph_fixture()
+        final_repository_graph["summary"] = "Final graph"
+        final_repository_graph["architectureSummary"]["entrypoints"] = ["src/final.py"]
         result_body = {
             "status": "done",
             "attempt_id": "wk_1-1",
@@ -419,6 +474,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "output_tokens": 45,
                 "total_tokens": 168,
             },
+            "repository_graph": final_repository_graph,
             "result_checksum": "checksum-1",
         }
         result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
@@ -432,6 +488,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             final_scan_payload["aiUsage"],
             {"model": "gpt-5.5"},
         )
+        self.assertEqual(final_scan_payload["repositoryGraph"]["summary"], "Final graph")
+        self.assertEqual(final_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/final.py"])
         self.assertEqual(final_scan_payload["auditSwarm"]["stage"], "report")
         self.assertEqual(final_scan_payload["auditSwarm"]["counts"]["issueCards"], 1)
         self.assertEqual(final_scan_payload["auditSwarm"]["issueCards"][0]["issueId"], "issue-hardcoded-token")
@@ -1988,6 +2046,24 @@ class WorkerPullRoutesTest(unittest.TestCase):
         anonymous = RouteHarness("/scans/sc_bundle/audit-bundle")
         app.PullwiseHandler.route(anonymous, "GET")
         self.assertEqual(anonymous.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_scan_audit_bundle_includes_repository_graph(self) -> None:
+        scan = self.audit_bundle_cache_fixture()
+        scan["repositoryGraph"] = app.public_repository_graph(repository_graph_fixture())
+
+        owner = RouteHarness(
+            "/scans/sc_cache/audit-bundle",
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+        )
+        app.PullwiseHandler.route(owner, "GET")
+
+        self.assertEqual(owner.status, HTTPStatus.OK)
+        self.assertEqual(owner.payload["repositoryGraph"]["version"], "repository-graph/0.1")
+        archive = app.scan_audit_bundle_zip_bytes(scan)
+        with zipfile.ZipFile(io.BytesIO(archive), "r") as bundle:
+            self.assertIn("repository-graph.json", bundle.namelist())
+            graph = json.loads(bundle.read("repository-graph.json").decode("utf-8"))
+        self.assertEqual(graph["version"], "repository-graph/0.1")
 
     def test_scan_audit_bundle_zip_route_reuses_cached_archive(self) -> None:
         self.audit_bundle_cache_fixture()
