@@ -1186,55 +1186,45 @@ check_scan_limits() {
 }
 
 check_billing_config() {
-  stripe=false
   creem=false
-  stripe_monthly=$(env_value PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID "$(env_value PULLWISE_STRIPE_PRICE_ID "")")
-  stripe_yearly=$(env_value PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID "$(env_value PULLWISE_STRIPE_YEARLY_PRICE_ID "")")
+  creem_products=$(env_value PULLWISE_CREEM_PRO_PRODUCT_IDS "")
   creem_monthly=$(env_value PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID "$(env_value PULLWISE_CREEM_PRODUCT_ID "")")
   creem_yearly=$(env_value PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID "$(env_value PULLWISE_CREEM_YEARLY_PRODUCT_ID "")")
-  if [ -n "$(env_value PULLWISE_STRIPE_SECRET_KEY "")" ] || [ -n "$stripe_monthly" ] || [ -n "$stripe_yearly" ]; then
-    stripe=true
-  fi
-  if [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || [ -n "$creem_monthly" ] || [ -n "$creem_yearly" ]; then
+  if [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || [ -n "$creem_products" ] || [ -n "$creem_monthly" ] || [ -n "$creem_yearly" ]; then
     creem=true
   fi
   provider=$(env_value PULLWISE_BILLING_PROVIDER "")
 
-  if [ "$stripe" = true ] && [ "$creem" = true ] && [ -z "$provider" ]; then
-    fail "Both Stripe and Creem are configured; set PULLWISE_BILLING_PROVIDER=stripe or creem."
-  elif [ -n "$provider" ]; then
+  if [ -n "$provider" ]; then
     case "$provider" in
-      stripe|creem)
-        ok "PULLWISE_BILLING_PROVIDER=$provider"
+      creem)
+        ok "PULLWISE_BILLING_PROVIDER=creem"
         ;;
       *)
-        fail "PULLWISE_BILLING_PROVIDER must be stripe or creem."
+        fail "PULLWISE_BILLING_PROVIDER must be creem."
         ;;
     esac
+  elif [ "$creem" = true ]; then
+    ok "billing provider inferred from Creem environment"
   else
     warn "billing provider is not configured; billing routes will not create checkout sessions"
   fi
 
-  validate_stripe=false
   validate_creem=false
-  if [ "$provider" = "stripe" ]; then
-    validate_stripe=true
-  elif [ "$provider" = "creem" ]; then
+  if [ "$provider" = "creem" ]; then
     validate_creem=true
-  else
-    [ "$stripe" = true ] && validate_stripe=true
-    [ "$creem" = true ] && validate_creem=true
+  elif [ -z "$provider" ] && [ "$creem" = true ]; then
+    validate_creem=true
   fi
 
-  if [ "$validate_stripe" = true ]; then
-    [ -n "$(env_value PULLWISE_STRIPE_SECRET_KEY "")" ] || fail "PULLWISE_STRIPE_SECRET_KEY is required for Stripe billing."
-    [ -n "$stripe_monthly" ] || fail "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID is required for Stripe monthly Pro."
-    [ -n "$stripe_yearly" ] || fail "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID is required for Stripe yearly Pro."
-  fi
   if [ "$validate_creem" = true ]; then
     [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || fail "PULLWISE_CREEM_API_KEY is required for Creem billing."
-    [ -n "$creem_monthly" ] || fail "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID is required for Creem monthly Pro."
-    [ -n "$creem_yearly" ] || fail "PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID is required for Creem yearly Pro."
+    if [ -n "$creem_products" ]; then
+      ok "PULLWISE_CREEM_PRO_PRODUCT_IDS is configured"
+    else
+      [ -n "$creem_monthly" ] || fail "Set PULLWISE_CREEM_PRO_PRODUCT_IDS or PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID."
+      [ -n "$creem_yearly" ] || fail "Set PULLWISE_CREEM_PRO_PRODUCT_IDS or PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID."
+    fi
   fi
 }
 

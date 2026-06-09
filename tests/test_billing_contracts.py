@@ -7,25 +7,56 @@ from unittest.mock import Mock, patch
 from pullwise_server import billing
 
 
+def creem_product(product_id: str, *, price: int, period: str, currency: str = "USD", name: str = "Pullwise Pro") -> dict:
+    return {
+        "id": product_id,
+        "name": name,
+        "description": "Repository review for production teams.",
+        "price": price,
+        "currency": currency,
+        "billing_type": "recurring",
+        "billing_period": period,
+        "status": "active",
+    }
+
+
+def creem_product_get(*products: dict):
+    by_id = {product["id"]: product for product in products}
+
+    def side_effect(*_args, **kwargs):
+        product_id = (kwargs.get("params") or {}).get("product_id")
+        response = Mock()
+        response.json.return_value = by_id[product_id]
+        response.raise_for_status.return_value = None
+        return response
+
+    return side_effect
+
+
 class BillingContractsTest(unittest.TestCase):
     def test_public_plan_exposes_free_and_pro_monthly_yearly_catalog(self) -> None:
         with patch.dict(
             os.environ,
             {
-                "PULLWISE_BILLING_PROVIDER": "stripe",
-                "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
-                "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
+                "PULLWISE_BILLING_PROVIDER": "creem",
+                "PULLWISE_CREEM_API_KEY": "creem_123",
+                "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
+                "PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "5",
                 "PULLWISE_PRO_USER_REVIEW_LIMIT": "60",
-                "PULLWISE_PRO_MONTHLY_AMOUNT": "29",
-                "PULLWISE_PRO_YEARLY_AMOUNT": "290",
             },
             clear=True,
         ):
-            plan = billing.public_plan()
+            with patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_monthly", price=2900, period="every-month", currency="USD"),
+                    creem_product("prod_yearly", price=29000, period="every-year", currency="USD"),
+                ),
+            ):
+                plan = billing.public_plan()
 
-        self.assertEqual(plan["provider"], "stripe")
+        self.assertEqual(plan["provider"], "creem")
         self.assertEqual(plan["currency"], "USD")
         self.assertEqual(plan["plans"][0]["id"], "free")
         self.assertEqual(plan["plans"][0]["reviewLimit"], 5)
@@ -33,8 +64,38 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(plan["plans"][1]["reviewLimit"], 60)
         self.assertEqual(plan["plans"][1]["prices"]["month"]["amount"], "29")
         self.assertEqual(plan["plans"][1]["prices"]["year"]["amount"], "290")
+        self.assertEqual(plan["plans"][1]["prices"]["month"]["productId"], "prod_monthly")
+        self.assertEqual(plan["plans"][1]["prices"]["year"]["productId"], "prod_yearly")
         self.assertTrue(plan["plans"][1]["prices"]["month"]["configured"])
         self.assertTrue(plan["plans"][1]["prices"]["year"]["configured"])
+
+    def test_public_plan_can_infer_creem_product_intervals_from_product_ids(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_BILLING_PROVIDER": "creem",
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_yearly,prod_monthly",
+                },
+                clear=True,
+            ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_yearly", price=29000, period="every-year", currency="EUR"),
+                    creem_product("prod_monthly", price=2999, period="every-month", currency="EUR"),
+                ),
+            ) as get,
+        ):
+            plan = billing.public_plan()
+
+        self.assertEqual(plan["currency"], "EUR")
+        self.assertEqual(plan["plans"][1]["prices"]["month"]["amount"], "29.99")
+        self.assertEqual(plan["plans"][1]["prices"]["year"]["amount"], "290")
+        self.assertEqual(plan["plans"][1]["prices"]["month"]["productId"], "prod_monthly")
+        self.assertEqual(plan["plans"][1]["prices"]["year"]["productId"], "prod_yearly")
+        self.assertEqual(get.call_count, 2)
 
     def test_public_plan_accepts_legacy_review_limit_aliases(self) -> None:
         with patch.dict(
@@ -50,18 +111,29 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(plan["plans"][0]["reviewLimit"], 8)
         self.assertEqual(plan["plans"][1]["reviewLimit"], 80)
 
-    def test_selects_stripe_when_only_stripe_environment_is_configured(self) -> None:
+    def test_unrelated_environment_does_not_enable_billing(self) -> None:
         with patch.dict(
             os.environ,
             {
-                "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                "PULLWISE_STRIPE_PRICE_ID": "price_123",
+                "PULLWISE_LEGACY_BILLING_SECRET": "legacy_123",
+                "PULLWISE_LEGACY_PRODUCT_ID": "legacy_product",
             },
             clear=True,
         ):
-            self.assertEqual(billing.selected_provider(), "stripe")
+            self.assertEqual(billing.selected_provider(), "disabled")
 
-    def test_selects_creem_when_only_creem_environment_is_configured(self) -> None:
+    def test_rejects_non_creem_provider_selection(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_BILLING_PROVIDER": "paypal",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(billing.BillingConfigurationError, "creem"):
+                billing.selected_provider()
+
+    def test_selects_creem_when_creem_environment_is_configured(self) -> None:
         with patch.dict(
             os.environ,
             {
@@ -72,132 +144,9 @@ class BillingContractsTest(unittest.TestCase):
         ):
             self.assertEqual(billing.selected_provider(), "creem")
 
-    def test_creates_stripe_checkout_session(self) -> None:
-        response = Mock()
-        response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}
-        response.raise_for_status.return_value = None
-
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                    "PULLWISE_STRIPE_PRICE_ID": "price_123",
-                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
-                },
-                clear=True,
-            ),
-            patch("pullwise_server.billing.requests.post", return_value=response) as post,
-        ):
-            session = billing.create_checkout_session(
-                {"id": "usr_1", "email": "dev@example.com"},
-                success_url="https://app.pullwise.dev/?billing=success",
-                cancel_url="https://app.pullwise.dev/?billing=cancel",
-            )
-
-        self.assertEqual(session["provider"], "stripe")
-        self.assertEqual(session["url"], "https://checkout.stripe.com/cs/test")
-        post.assert_called_once()
-        self.assertEqual(post.call_args.args[0], "https://api.stripe.com/v1/checkout/sessions")
-        data = post.call_args.kwargs["data"]
-        self.assertEqual(data["mode"], "subscription")
-        self.assertEqual(data["line_items[0][price]"], "price_123")
-        self.assertEqual(data["customer_email"], "dev@example.com")
-
-    def test_billing_provider_requests_use_default_timeout_for_invalid_timeout_env(self) -> None:
-        for timeout_value in ["abc", "0", "-5"]:
-            with self.subTest(timeout_value=timeout_value):
-                response = Mock()
-                response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}
-                response.raise_for_status.return_value = None
-
-                with (
-                    patch.dict(
-                        os.environ,
-                        {
-                            "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                            "PULLWISE_STRIPE_PRICE_ID": "price_123",
-                            "PULLWISE_APP_URL": "https://app.pullwise.dev",
-                            "PULLWISE_BILLING_TIMEOUT_SECONDS": timeout_value,
-                        },
-                        clear=True,
-                    ),
-                    patch("pullwise_server.billing.requests.post", return_value=response) as post,
-                ):
-                    billing.create_checkout_session(
-                        {"id": "usr_1", "email": "dev@example.com"},
-                        success_url="https://app.pullwise.dev/?billing=success",
-                        cancel_url="https://app.pullwise.dev/?billing=cancel",
-                    )
-
-                self.assertEqual(post.call_args.kwargs["timeout"], 15)
-
-    def test_creates_stripe_yearly_checkout_session_with_subscription_metadata(self) -> None:
-        response = Mock()
-        response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}
-        response.raise_for_status.return_value = None
-
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                    "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
-                    "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
-                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
-                },
-                clear=True,
-            ),
-            patch("pullwise_server.billing.requests.post", return_value=response) as post,
-        ):
-            session = billing.create_checkout_session(
-                {"id": "usr_1", "email": "dev@example.com"},
-                success_url="https://app.pullwise.dev/?billing=success",
-                cancel_url="https://app.pullwise.dev/?billing=cancel",
-                interval="year",
-            )
-
-        self.assertEqual(session["plan"], "pro")
-        self.assertEqual(session["interval"], "year")
-        data = post.call_args.kwargs["data"]
-        self.assertEqual(data["line_items[0][price]"], "price_yearly")
-        self.assertEqual(data["metadata[userId]"], "usr_1")
-        self.assertEqual(data["metadata[plan]"], "pro")
-        self.assertEqual(data["metadata[interval]"], "year")
-        self.assertEqual(data["subscription_data[metadata][userId]"], "usr_1")
-        self.assertEqual(data["subscription_data[metadata][plan]"], "pro")
-        self.assertEqual(data["subscription_data[metadata][interval]"], "year")
-
-    def test_stripe_checkout_reuses_existing_customer_id(self) -> None:
-        response = Mock()
-        response.json.return_value = {"id": "cs_test_123", "url": "https://checkout.stripe.com/cs/test"}
-        response.raise_for_status.return_value = None
-
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                    "PULLWISE_STRIPE_PRICE_ID": "price_123",
-                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
-                },
-                clear=True,
-            ),
-            patch("pullwise_server.billing.requests.post", return_value=response) as post,
-        ):
-            billing.create_checkout_session(
-                {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cus_123"}},
-                success_url="https://app.pullwise.dev/?billing=success",
-                cancel_url="https://app.pullwise.dev/?billing=cancel",
-            )
-
-        data = post.call_args.kwargs["data"]
-        self.assertEqual(data["customer"], "cus_123")
-        self.assertNotIn("customer_email", data)
-
     def test_creates_creem_checkout_session(self) -> None:
         response = Mock()
-        response.json.return_value = {"id": "chk_123", "checkout_url": "https://creem.io/checkout/chk_123"}
+        response.json.return_value = {"id": "chk_123", "checkout_url": "https://creem.io/checkout/chk_123", "customer": "cust_123"}
         response.raise_for_status.return_value = None
 
         with (
@@ -211,6 +160,10 @@ class BillingContractsTest(unittest.TestCase):
                 },
                 clear=True,
             ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(creem_product("prod_123", price=2900, period="every-month")),
+            ),
             patch("pullwise_server.billing.requests.post", return_value=response) as post,
         ):
             session = billing.create_checkout_session(
@@ -220,14 +173,76 @@ class BillingContractsTest(unittest.TestCase):
             )
 
         self.assertEqual(session["provider"], "creem")
+        self.assertEqual(session["customerId"], "cust_123")
         self.assertEqual(session["url"], "https://creem.io/checkout/chk_123")
         post.assert_called_once()
         self.assertEqual(post.call_args.args[0], "https://test-api.creem.io/v1/checkouts")
+        self.assertEqual(post.call_args.kwargs["headers"]["x-api-key"], "creem_123")
         json_payload = post.call_args.kwargs["json"]
         self.assertEqual(json_payload["product_id"], "prod_123")
         self.assertEqual(json_payload["customer"]["email"], "dev@example.com")
         self.assertNotIn("id", json_payload["customer"])
         self.assertEqual(json_payload["metadata"]["userId"], "usr_1")
+
+    def test_creem_checkout_reuses_existing_customer_id(self) -> None:
+        response = Mock()
+        response.json.return_value = {"id": "chk_123", "checkout_url": "https://creem.io/checkout/chk_123"}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_PRODUCT_ID": "prod_123",
+                    "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+                },
+                clear=True,
+            ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(creem_product("prod_123", price=2900, period="every-month")),
+            ),
+            patch("pullwise_server.billing.requests.post", return_value=response) as post,
+        ):
+            session = billing.create_checkout_session(
+                {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cust_existing"}},
+                success_url="https://app.pullwise.dev/?billing=success",
+            )
+
+        self.assertEqual(session["customerId"], "cust_existing")
+        self.assertEqual(post.call_args.kwargs["json"]["customer"]["id"], "cust_existing")
+
+    def test_billing_provider_requests_use_default_timeout_for_invalid_timeout_env(self) -> None:
+        for timeout_value in ["abc", "0", "-5"]:
+            with self.subTest(timeout_value=timeout_value):
+                response = Mock()
+                response.json.return_value = {"id": "chk_123", "checkout_url": "https://creem.io/checkout/chk_123"}
+                response.raise_for_status.return_value = None
+
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "PULLWISE_CREEM_API_KEY": "creem_123",
+                            "PULLWISE_CREEM_PRODUCT_ID": "prod_123",
+                            "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+                            "PULLWISE_BILLING_TIMEOUT_SECONDS": timeout_value,
+                        },
+                        clear=True,
+                    ),
+                    patch(
+                        "pullwise_server.billing.requests.get",
+                        side_effect=creem_product_get(creem_product("prod_123", price=2900, period="every-month")),
+                    ),
+                    patch("pullwise_server.billing.requests.post", return_value=response) as post,
+                ):
+                    billing.create_checkout_session(
+                        {"id": "usr_1", "email": "dev@example.com"},
+                        success_url="https://app.pullwise.dev/?billing=success",
+                    )
+
+                self.assertEqual(post.call_args.kwargs["timeout"], 15)
 
     def test_creates_creem_yearly_checkout_session(self) -> None:
         response = Mock()
@@ -246,12 +261,18 @@ class BillingContractsTest(unittest.TestCase):
                 },
                 clear=True,
             ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_monthly", price=2900, period="every-month"),
+                    creem_product("prod_yearly", price=29000, period="every-year"),
+                ),
+            ),
             patch("pullwise_server.billing.requests.post", return_value=response) as post,
         ):
             session = billing.create_checkout_session(
                 {"id": "usr_1", "email": "dev@example.com"},
                 success_url="https://app.pullwise.dev/?billing=success",
-                cancel_url="https://app.pullwise.dev/?billing=cancel",
                 interval="year",
             )
 
@@ -262,14 +283,14 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(json_payload["metadata"]["plan"], "pro")
         self.assertEqual(json_payload["metadata"]["interval"], "year")
 
+    def test_creem_api_base_url_supports_test_mode_and_explicit_v1_url(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_CREEM_TEST_MODE": "true"}, clear=True):
+            self.assertEqual(billing.creem_api_base_url(), "https://test-api.creem.io")
+        with patch.dict(os.environ, {"PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io/v1"}, clear=True):
+            self.assertEqual(billing.creem_api_base_url(), "https://test-api.creem.io")
+
     def test_provider_redirect_urls_must_be_absolute_http_urls(self) -> None:
-        user = {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cus_123"}}
-        stripe_env = {
-            "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-            "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
-            "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
-            "PULLWISE_APP_URL": "https://app.pullwise.dev",
-        }
+        user = {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cust_123"}}
         creem_env = {
             "PULLWISE_CREEM_API_KEY": "creem_123",
             "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
@@ -279,172 +300,57 @@ class BillingContractsTest(unittest.TestCase):
         }
         scenarios = [
             (
-                "stripe checkout",
-                stripe_env,
-                {"id": "cs_test_123", "url": "javascript:alert(1)"},
-                lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success", cancel_url="https://app.pullwise.dev/cancel"),
-            ),
-            (
                 "creem checkout",
-                creem_env,
                 {"id": "chk_123", "checkout_url": "javascript:alert(1)"},
-                lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success", cancel_url="https://app.pullwise.dev/cancel"),
-            ),
-            (
-                "stripe portal",
-                stripe_env,
-                {"id": "bps_123", "url": "javascript:alert(1)"},
-                lambda: billing.create_portal_session(user, return_url="https://app.pullwise.dev/settings"),
+                lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success"),
             ),
             (
                 "creem portal",
-                creem_env,
                 {"customer_portal_link": "javascript:alert(1)"},
                 lambda: billing.create_portal_session(user, return_url="https://app.pullwise.dev/settings"),
             ),
-            (
-                "stripe interval change",
-                stripe_env,
-                {"id": "bps_123", "url": "javascript:alert(1)"},
-                lambda: billing.change_subscription_interval(
-                    {
-                        "id": "usr_1",
-                        "billing": {
-                            "provider": "stripe",
-                            "customerId": "cus_123",
-                            "subscriptionId": "sub_123",
-                            "subscriptionItemId": "si_123",
-                            "plan": "pro",
-                            "interval": "month",
-                            "status": "active",
-                        },
-                    },
-                    interval="year",
-                    return_url="https://app.pullwise.dev/billing",
-                ),
-            ),
         ]
 
-        for name, env_vars, payload, call in scenarios:
+        for name, payload, call in scenarios:
             with self.subTest(name=name):
                 response = Mock()
                 response.json.return_value = payload
                 response.raise_for_status.return_value = None
                 with (
-                    patch.dict(os.environ, env_vars, clear=True),
+                    patch.dict(os.environ, creem_env, clear=True),
+                    patch(
+                        "pullwise_server.billing.requests.get",
+                        side_effect=creem_product_get(
+                            creem_product("prod_monthly", price=2900, period="every-month"),
+                            creem_product("prod_yearly", price=29000, period="every-year"),
+                        ),
+                    ),
                     patch("pullwise_server.billing.requests.post", return_value=response),
                     self.assertRaisesRegex(RuntimeError, "safe .* URL"),
                 ):
                     call()
 
     def test_provider_request_redirect_urls_must_be_absolute_http_urls(self) -> None:
-        user = {"id": "usr_1", "email": "dev@example.com", "billing": {"customerId": "cus_123"}}
-        stripe_env = {
-            "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-            "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
-            "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
-            "PULLWISE_APP_URL": "https://app.pullwise.dev",
-        }
-        creem_env = {
-            "PULLWISE_CREEM_API_KEY": "creem_123",
-            "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
-            "PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly",
-            "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
-            "PULLWISE_APP_URL": "https://app.pullwise.dev",
-        }
-        interval_user = {
-            "id": "usr_1",
-            "billing": {
-                "provider": "stripe",
-                "customerId": "cus_123",
-                "subscriptionId": "sub_123",
-                "subscriptionItemId": "si_123",
-                "plan": "pro",
-                "interval": "month",
-                "status": "active",
-            },
-        }
-        scenarios = [
-            (
-                "stripe checkout success",
-                stripe_env,
-                lambda: billing.create_checkout_session(user, success_url="javascript:alert(1)", cancel_url="https://app.pullwise.dev/cancel"),
-            ),
-            (
-                "stripe checkout cancel",
-                stripe_env,
-                lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success", cancel_url="javascript:alert(1)"),
-            ),
-            (
-                "creem checkout success",
-                creem_env,
-                lambda: billing.create_checkout_session(user, success_url="javascript:alert(1)", cancel_url="https://app.pullwise.dev/cancel"),
-            ),
-            (
-                "stripe portal return",
-                stripe_env,
-                lambda: billing.create_portal_session(user, return_url="javascript:alert(1)"),
-            ),
-            (
-                "stripe interval return",
-                stripe_env,
-                lambda: billing.change_subscription_interval(interval_user, interval="year", return_url="javascript:alert(1)"),
-            ),
-        ]
-
-        for name, env_vars, call in scenarios:
-            with self.subTest(name=name):
-                response = Mock()
-                response.json.return_value = {"id": "safe", "url": "https://provider.example/session"}
-                response.raise_for_status.return_value = None
-                with (
-                    patch.dict(os.environ, env_vars, clear=True),
-                    patch("pullwise_server.billing.requests.post", return_value=response) as post,
-                    self.assertRaisesRegex(billing.BillingConfigurationError, "absolute HTTP"),
-                ):
-                    call()
-                post.assert_not_called()
-
-    def test_stripe_monthly_to_yearly_change_uses_portal_update_confirmation(self) -> None:
+        user = {"id": "usr_1", "email": "dev@example.com"}
         response = Mock()
-        response.json.return_value = {"id": "bps_123", "url": "https://billing.stripe.com/session"}
+        response.json.return_value = {"id": "chk_123", "checkout_url": "https://creem.io/checkout/chk_123"}
         response.raise_for_status.return_value = None
 
         with (
             patch.dict(
                 os.environ,
                 {
-                    "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                    "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
-                    "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_PRODUCT_ID": "prod_123",
+                    "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
                 },
                 clear=True,
             ),
             patch("pullwise_server.billing.requests.post", return_value=response) as post,
+            self.assertRaisesRegex(billing.BillingConfigurationError, "absolute HTTP"),
         ):
-            result = billing.change_subscription_interval(
-                {
-                    "id": "usr_1",
-                    "billing": {
-                        "customerId": "cus_123",
-                        "subscriptionId": "sub_123",
-                        "subscriptionItemId": "si_123",
-                        "plan": "pro",
-                        "interval": "month",
-                        "status": "active",
-                    },
-                },
-                interval="year",
-                return_url="https://app.pullwise.dev/?screen=billing",
-            )
-
-        self.assertEqual(result["provider"], "stripe")
-        self.assertEqual(result["url"], "https://billing.stripe.com/session")
-        data = post.call_args.kwargs["data"]
-        self.assertEqual(data["flow_data[type]"], "subscription_update_confirm")
-        self.assertEqual(data["flow_data[subscription_update_confirm][subscription]"], "sub_123")
-        self.assertEqual(data["flow_data[subscription_update_confirm][items][0][id]"], "si_123")
-        self.assertEqual(data["flow_data[subscription_update_confirm][items][0][price]"], "price_yearly")
+            billing.create_checkout_session(user, success_url="javascript:alert(1)")
+        post.assert_not_called()
 
     def test_creem_monthly_to_yearly_change_uses_upgrade_endpoint(self) -> None:
         response = Mock()
@@ -461,6 +367,13 @@ class BillingContractsTest(unittest.TestCase):
                     "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
                 },
                 clear=True,
+            ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_monthly", price=2900, period="every-month"),
+                    creem_product("prod_yearly", price=29000, period="every-year"),
+                ),
             ),
             patch("pullwise_server.billing.requests.post", return_value=response) as post,
         ):

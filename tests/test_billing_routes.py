@@ -9,9 +9,35 @@ import tempfile
 import threading
 import unittest
 from http import HTTPStatus
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from pullwise_server import app
+
+
+def creem_product(product_id: str, *, price: int, period: str) -> dict:
+    return {
+        "id": product_id,
+        "name": "Pullwise Pro",
+        "description": "Repository review for production teams.",
+        "price": price,
+        "currency": "USD",
+        "billing_type": "recurring",
+        "billing_period": period,
+        "status": "active",
+    }
+
+
+def creem_product_get(*products: dict):
+    by_id = {product["id"]: product for product in products}
+
+    def side_effect(*_args, **kwargs):
+        product_id = (kwargs.get("params") or {}).get("product_id")
+        response = Mock()
+        response.json.return_value = by_id[product_id]
+        response.raise_for_status.return_value = None
+        return response
+
+    return side_effect
 
 
 class HandlerHarness(app.PullwiseHandler):
@@ -114,15 +140,21 @@ class BillingRoutesTest(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "PULLWISE_STRIPE_SECRET_KEY": "sk_test_123",
-                "PULLWISE_STRIPE_PRICE_ID": "price_123",
+                "PULLWISE_CREEM_API_KEY": "creem_123",
+                "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_monthly,prod_yearly",
             },
             clear=True,
+        ), patch(
+            "pullwise_server.billing.requests.get",
+            side_effect=creem_product_get(
+                creem_product("prod_monthly", price=2900, period="every-month"),
+                creem_product("prod_yearly", price=29000, period="every-year"),
+            ),
         ):
             app.PullwiseHandler.handle_get(handler, "/billing/plan", {}, ["billing", "plan"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["provider"], "stripe")
+        self.assertEqual(handler.payload["provider"], "creem")
         self.assertTrue(handler.payload["enabled"])
 
     def test_checkout_requires_sign_in(self) -> None:
@@ -156,11 +188,11 @@ class BillingRoutesTest(unittest.TestCase):
             cookie=cookie,
         )
 
-        with patch("pullwise_server.billing.create_checkout_session", return_value={"provider": "stripe", "id": "cs_1", "url": "https://checkout.stripe.com/cs/test"}) as create:
+        with patch("pullwise_server.billing.create_checkout_session", return_value={"provider": "creem", "id": "chk_1", "url": "https://creem.io/checkout/chk_1"}) as create:
             app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["url"], "https://checkout.stripe.com/cs/test")
+        self.assertEqual(handler.payload["url"], "https://creem.io/checkout/chk_1")
         create.assert_called_once()
         self.assertEqual(create.call_args.args[0]["id"], "usr_1")
 
@@ -175,13 +207,13 @@ class BillingRoutesTest(unittest.TestCase):
             cookie=cookie,
         )
 
-        with patch("pullwise_server.billing.create_checkout_session", return_value={"provider": "stripe", "id": "cs_1", "url": "https://checkout.stripe.com/cs/test"}) as create:
+        with patch("pullwise_server.billing.create_checkout_session", return_value={"provider": "creem", "id": "chk_1", "url": "https://creem.io/checkout/chk_1"}) as create:
             app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(create.call_args.kwargs["interval"], "year")
 
-    def test_admin_checkout_grants_pro_without_provider_checkout(self) -> None:
+    def test_admin_checkout_uses_creem_checkout_without_local_pro(self) -> None:
         cookie = seed_session()
         handler = HandlerHarness(
             {
@@ -201,25 +233,16 @@ class BillingRoutesTest(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch("pullwise_server.billing.create_checkout_session") as create,
+            patch("pullwise_server.billing.create_checkout_session", return_value={"provider": "creem", "id": "chk_1", "url": "https://creem.io/checkout/chk_1"}) as create,
         ):
             app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["provider"], "admin")
-        self.assertEqual(handler.payload["plan"], "pro")
-        self.assertEqual(handler.payload["interval"], "year")
-        self.assertTrue(handler.payload["granted"])
-        self.assertEqual(handler.payload["url"], "https://app.pullwise.dev/?screen=pricing&billing=success")
-        create.assert_not_called()
-
-        billing_state = app.USERS["usr_1"]["billing"]
-        self.assertEqual(billing_state["provider"], "admin")
-        self.assertEqual(billing_state["status"], "active")
-        self.assertEqual(billing_state["plan"], "pro")
-        self.assertEqual(billing_state["interval"], "year")
-        self.assertIsNone(billing_state["customerId"])
-        self.assertEqual(app.billing_account_payload(app.USERS["usr_1"])["plan"], "pro")
+        self.assertEqual(handler.payload["provider"], "creem")
+        self.assertEqual(handler.payload["url"], "https://creem.io/checkout/chk_1")
+        create.assert_called_once()
+        self.assertNotIn("billing", app.USERS["usr_1"])
+        self.assertEqual(app.billing_account_payload(app.USERS["usr_1"])["plan"], "free")
 
     def test_checkout_session_falls_back_for_non_string_redirect_urls(self) -> None:
         cookie = seed_session()
@@ -235,7 +258,7 @@ class BillingRoutesTest(unittest.TestCase):
             patch.dict(os.environ, {"PULLWISE_APP_URL": "https://app.pullwise.dev"}, clear=True),
             patch(
                 "pullwise_server.billing.create_checkout_session",
-                return_value={"provider": "stripe", "id": "cs_1", "url": "https://checkout.stripe.com/cs/test"},
+                return_value={"provider": "creem", "id": "chk_1", "url": "https://creem.io/checkout/chk_1"},
             ) as create,
         ):
             app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
@@ -269,10 +292,9 @@ class BillingRoutesTest(unittest.TestCase):
     def test_change_interval_requires_signed_in_user_and_returns_provider_result(self) -> None:
         cookie = seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
-            "customerId": "cus_1",
+            "provider": "creem",
+            "customerId": "cust_1",
             "subscriptionId": "sub_1",
-            "subscriptionItemId": "si_1",
             "status": "active",
             "plan": "pro",
             "interval": "month",
@@ -282,11 +304,11 @@ class BillingRoutesTest(unittest.TestCase):
             cookie=cookie,
         )
 
-        with patch("pullwise_server.billing.change_subscription_interval", return_value={"provider": "stripe", "url": "https://billing.stripe.com/session", "interval": "year"}) as change:
+        with patch("pullwise_server.billing.change_subscription_interval", return_value={"provider": "creem", "interval": "year", "subscriptionId": "sub_1", "status": "active"}) as change:
             app.PullwiseHandler.handle_post(handler, "/billing/change-interval", {}, ["billing", "change-interval"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["url"], "https://billing.stripe.com/session")
+        self.assertEqual(handler.payload["provider"], "creem")
         self.assertEqual(change.call_args.kwargs["interval"], "year")
 
     def test_billing_redirect_routes_reject_unsafe_internal_urls(self) -> None:
@@ -295,27 +317,26 @@ class BillingRoutesTest(unittest.TestCase):
                 "/billing/checkout-sessions",
                 {},
                 "pullwise_server.billing.create_checkout_session",
-                {"provider": "stripe", "id": "cs_1", "url": "javascript:alert(1)"},
+                {"provider": "creem", "id": "chk_1", "url": "javascript:alert(1)"},
                 lambda: None,
             ),
             (
                 "/billing/portal-sessions",
                 {},
                 "pullwise_server.billing.create_portal_session",
-                {"provider": "stripe", "id": "bps_1", "url": "javascript:alert(1)"},
-                lambda: app.USERS["usr_1"].update({"billing": {"customerId": "cus_1"}}),
+                {"provider": "creem", "url": "javascript:alert(1)"},
+                lambda: app.USERS["usr_1"].update({"billing": {"customerId": "cust_1"}}),
             ),
             (
                 "/billing/change-interval",
                 {"interval": "year"},
                 "pullwise_server.billing.change_subscription_interval",
-                {"provider": "stripe", "interval": "year", "url": "javascript:alert(1)"},
+                {"provider": "creem", "interval": "year", "url": "javascript:alert(1)"},
                 lambda: app.USERS["usr_1"].update({
                     "billing": {
-                        "provider": "stripe",
-                        "customerId": "cus_1",
+                        "provider": "creem",
+                        "customerId": "cust_1",
                         "subscriptionId": "sub_1",
-                        "subscriptionItemId": "si_1",
                         "status": "active",
                         "plan": "pro",
                         "interval": "month",
@@ -406,7 +427,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_account_payload_sanitizes_malformed_public_state(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe\r\nX-Injected: bad",
+            "provider": "creem\r\nX-Injected: bad",
             "status": "active\r\nX-Injected: bad",
             "plan": "pro",
             "interval": {"value": "year"},
@@ -419,7 +440,7 @@ class BillingRoutesTest(unittest.TestCase):
             "cancelAtPeriodEnd": "false",
             "canceledAt": float("nan"),
             "lastEventId": ["evt_1"],
-            "lastEventType": "checkout.session.completed\r\nX-Injected: bad",
+            "lastEventType": "checkout.completed\r\nX-Injected: bad",
             "lastEventCreated": "1710000123",
             "updatedAt": True,
             "raw": {"unsafe": True},
@@ -512,57 +533,6 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(handler.payload["message"], "Request body must be a JSON object.")
 
-    def test_stripe_webhook_rejects_malformed_json_without_parser_details(self) -> None:
-        raw = b"{"
-        timestamp = str(int(time.time()))
-        signed = timestamp.encode("utf-8") + b"." + raw
-        signature = hmac.new(b"whsec_test", signed, hashlib.sha256).hexdigest()
-        handler = HandlerHarness(
-            path="/webhooks/stripe",
-            raw_body=raw,
-            headers={"Content-Length": str(len(raw)), "Stripe-Signature": f"t={timestamp},v1={signature}"},
-        )
-
-        with patch.dict(os.environ, {"PULLWISE_STRIPE_WEBHOOK_SECRET": "whsec_test"}, clear=True):
-            app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
-
-    def test_stripe_webhook_rejects_non_utf8_json_without_decoder_details(self) -> None:
-        raw = b"\xff"
-        timestamp = str(int(time.time()))
-        signed = timestamp.encode("utf-8") + b"." + raw
-        signature = hmac.new(b"whsec_test", signed, hashlib.sha256).hexdigest()
-        handler = HandlerHarness(
-            path="/webhooks/stripe",
-            raw_body=raw,
-            headers={"Content-Length": str(len(raw)), "Stripe-Signature": f"t={timestamp},v1={signature}"},
-        )
-
-        with patch.dict(os.environ, {"PULLWISE_STRIPE_WEBHOOK_SECRET": "whsec_test"}, clear=True):
-            app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(handler.payload["message"], "Request body must be valid JSON.")
-
-    def test_stripe_webhook_rejects_non_object_json_body(self) -> None:
-        raw = b"[]"
-        timestamp = str(int(time.time()))
-        signed = timestamp.encode("utf-8") + b"." + raw
-        signature = hmac.new(b"whsec_test", signed, hashlib.sha256).hexdigest()
-        handler = HandlerHarness(
-            path="/webhooks/stripe",
-            raw_body=raw,
-            headers={"Content-Length": str(len(raw)), "Stripe-Signature": f"t={timestamp},v1={signature}"},
-        )
-
-        with patch.dict(os.environ, {"PULLWISE_STRIPE_WEBHOOK_SECRET": "whsec_test"}, clear=True):
-            app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(handler.payload["message"], "Request body must be a JSON object.")
-
     def test_billing_updates_are_idempotent_by_event_id(self) -> None:
         seed_session()
         handler = HandlerHarness()
@@ -571,11 +541,11 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "subscriptionId": "sub_1",
                 "status": "active",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_1",
                 "eventCreated": 200,
             },
@@ -584,11 +554,11 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "subscriptionId": "sub_1",
                 "status": "canceled",
-                "eventType": "customer.subscription.deleted",
+                "eventType": "subscription.canceled",
                 "eventId": "evt_1",
                 "eventCreated": 300,
             },
@@ -605,11 +575,11 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "subscriptionId": "sub_1",
                 "status": "active",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_new",
                 "eventCreated": 200,
             },
@@ -618,11 +588,11 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "subscriptionId": "sub_1",
                 "status": "canceled",
-                "eventType": "customer.subscription.deleted",
+                "eventType": "subscription.canceled",
                 "eventId": "evt_old",
                 "eventCreated": 100,
             },
@@ -634,7 +604,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_with_malformed_user_id_can_match_existing_customer(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "active",
             "plan": "pro",
@@ -646,11 +616,11 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": ["usr_1"],
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "subscriptionId": "sub_1",
                 "status": "past_due",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_malformed_user",
                 "eventCreated": 400,
             },
@@ -662,7 +632,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_ignores_malformed_identifier_fields_when_applying(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_existing",
             "subscriptionId": "sub_existing",
             "subscriptionItemId": "si_existing",
@@ -676,12 +646,12 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": ["cus_bad"],
                 "subscriptionId": {"id": "sub_bad"},
                 "subscriptionItemId": ["si_bad"],
                 "status": "past_due",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_bad_ids",
                 "eventCreated": 500,
             },
@@ -695,7 +665,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_ignores_malformed_event_id_when_recording_state(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "active",
             "plan": "pro",
@@ -708,10 +678,10 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "status": "past_due",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": {"id": "evt_bad"},
                 "eventCreated": 700,
             },
@@ -724,7 +694,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_ignores_malformed_customer_email_when_applying(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "customerEmail": "dev@example.com",
             "status": "active",
@@ -737,11 +707,11 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "customerEmail": ["bad@example.com"],
                 "status": "past_due",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_bad_email",
                 "eventCreated": 800,
             },
@@ -753,7 +723,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_ignores_malformed_status_plan_and_interval_when_applying(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "active",
             "plan": "pro",
@@ -765,12 +735,12 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "status": {"state": "past_due"},
                 "plan": ["free"],
                 "interval": {"period": "year"},
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_bad_billing_values",
                 "eventCreated": 900,
             },
@@ -784,7 +754,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_ignores_malformed_period_fields_when_applying(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "active",
             "plan": "pro",
@@ -800,14 +770,14 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "status": "past_due",
                 "currentPeriodStart": {"seconds": 1710000001},
                 "currentPeriodEnd": ["1712592001"],
                 "cancelAtPeriodEnd": "false",
                 "canceledAt": {"seconds": 1713000001},
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_bad_periods",
                 "eventCreated": 1000,
             },
@@ -823,7 +793,7 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_ignores_non_finite_period_fields_when_applying(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "active",
             "plan": "pro",
@@ -838,13 +808,13 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "status": "past_due",
                 "currentPeriodStart": float("nan"),
                 "currentPeriodEnd": float("inf"),
                 "canceledAt": float("-inf"),
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_bad_period_numbers",
                 "eventCreated": 1200,
             },
@@ -875,21 +845,21 @@ class BillingRoutesTest(unittest.TestCase):
 
         older_update = {
             "userId": "usr_1",
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "canceled",
             "plan": "pro",
-            "eventType": "customer.subscription.deleted",
+            "eventType": "subscription.canceled",
             "eventId": "evt_older",
             "eventCreated": 100,
         }
         newer_update = {
             "userId": "usr_1",
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "active",
             "plan": "pro",
-            "eventType": "customer.subscription.updated",
+            "eventType": "subscription.update",
             "eventId": "evt_newer",
             "eventCreated": 200,
         }
@@ -921,12 +891,12 @@ class BillingRoutesTest(unittest.TestCase):
     def test_billing_update_ignores_malformed_provider_and_event_type_when_applying(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
-            "provider": "stripe",
+            "provider": "creem",
             "customerId": "cus_1",
             "status": "active",
             "plan": "pro",
             "interval": "month",
-            "lastEventType": "checkout.session.completed",
+            "lastEventType": "checkout.completed",
         }
         handler = HandlerHarness()
 
@@ -934,10 +904,10 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": ["stripe"],
+                "provider": ["creem"],
                 "customerId": "cus_1",
                 "status": "past_due",
-                "eventType": {"type": "customer.subscription.updated"},
+                "eventType": {"type": "subscription.update"},
                 "eventId": "evt_bad_text_fields",
                 "eventCreated": 1100,
             },
@@ -945,8 +915,8 @@ class BillingRoutesTest(unittest.TestCase):
 
         billing_state = app.USERS["usr_1"]["billing"]
         self.assertEqual(billing_state["status"], "past_due")
-        self.assertEqual(billing_state["provider"], "stripe")
-        self.assertEqual(billing_state["lastEventType"], "checkout.session.completed")
+        self.assertEqual(billing_state["provider"], "creem")
+        self.assertEqual(billing_state["lastEventType"], "checkout.completed")
         self.assertIsNone(app.BILLING_EVENTS["evt_bad_text_fields"]["eventType"])
 
     def test_billing_update_ignores_non_finite_event_created_when_applying(self) -> None:
@@ -957,10 +927,10 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "status": "active",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_bad_created",
                 "eventCreated": float("nan"),
             },
@@ -970,18 +940,18 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertIsNone(app.USERS["usr_1"]["billing"].get("lastEventCreated"))
         self.assertIsNone(app.BILLING_EVENTS["evt_bad_created"]["eventCreated"])
 
-    def test_stripe_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
+    def test_creem_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
         seed_session()
         handler = HandlerHarness()
 
         app.PullwiseHandler.apply_billing_update(
             handler,
             {
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "subscriptionId": "sub_1",
                 "status": "past_due",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_subscription",
                 "eventCreated": 300,
             },
@@ -994,12 +964,12 @@ class BillingRoutesTest(unittest.TestCase):
             handler,
             {
                 "userId": "usr_1",
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": "cus_1",
                 "customerEmail": "dev@example.com",
                 "subscriptionId": "sub_1",
                 "status": "active",
-                "eventType": "checkout.session.completed",
+                "eventType": "checkout.completed",
                 "eventId": "evt_checkout",
                 "eventCreated": 200,
             },
@@ -1016,11 +986,11 @@ class BillingRoutesTest(unittest.TestCase):
         app.PullwiseHandler.apply_billing_update(
             handler,
             {
-                "provider": "stripe",
+                "provider": "creem",
                 "customerId": ["cus_bad"],
                 "subscriptionId": {"id": "sub_bad"},
                 "status": "past_due",
-                "eventType": "customer.subscription.updated",
+                "eventType": "subscription.update",
                 "eventId": "evt_bad_pending_ids",
                 "eventCreated": 600,
             },

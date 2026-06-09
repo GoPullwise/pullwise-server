@@ -121,8 +121,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             except billing.BillingProviderResponseError as exc:
                 return self.error(HTTPStatus.BAD_GATEWAY, str(exc))
-            except billing.BillingProviderConflict as exc:
-                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             except billing.BillingConfigurationError as exc:
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, str(exc))
             except Exception as exc:
@@ -267,8 +265,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_post(self, path: str, params: dict, segments: list[str]) -> None:
-        if path == "/webhooks/stripe":
-            return self.handle_stripe_webhook()
         if path == "/webhooks/creem":
             return self.handle_creem_webhook()
         body = self.read_json()
@@ -604,16 +600,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             success_url = safe_redirect_to(body.get("successUrl"), "settings")
             plan = str(body.get("plan") or "pro")
             interval = str(body.get("interval") or "month")
-            if user_is_admin(user):
-                checkout = grant_admin_pro_checkout(user, success_url=success_url, plan=plan, interval=interval)
-            else:
-                checkout = billing.create_checkout_session(
-                    user,
-                    success_url=success_url,
-                    cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
-                    plan=plan,
-                    interval=interval,
-                )
+            checkout = billing.create_checkout_session(
+                user,
+                success_url=success_url,
+                cancel_url=safe_redirect_to(body.get("cancelUrl"), "settings"),
+                plan=plan,
+                interval=interval,
+            )
             checkout = safe_billing_redirect_response(checkout, "Checkout", require_url=True)
             if checkout.get("customerId"):
                 current_billing = user.get("billing") or {}
@@ -2341,18 +2334,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not isinstance(event, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         update = billing.billing_update_from_creem_event(event)
-        if update:
-            self.apply_billing_update(update)
-        return self.json({"received": True})
-
-    def handle_stripe_webhook(self) -> None:
-        raw = self.read_raw_body()
-        if not billing.verify_stripe_webhook(raw, self.headers.get("Stripe-Signature")):
-            return self.error(HTTPStatus.BAD_REQUEST, "Invalid Stripe webhook signature.")
-        event = decode_json_body(raw)
-        if not isinstance(event, dict):
-            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
-        update = billing.billing_update_from_stripe_event(event)
         if update:
             self.apply_billing_update(update)
         return self.json({"received": True})

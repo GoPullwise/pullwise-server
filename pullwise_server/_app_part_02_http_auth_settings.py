@@ -5,7 +5,7 @@ from __future__ import annotations
 def readiness_payload() -> dict:
     try:
         billing_provider = billing.selected_provider()
-    except (billing.BillingConfigurationError, billing.BillingProviderConflict):
+    except billing.BillingConfigurationError:
         billing_provider = "error"
     return {
         "reviewProvider": "worker",
@@ -17,7 +17,7 @@ def readiness_payload() -> dict:
         },
         "billing": {
             "provider": billing_provider,
-            "enabled": billing_provider in {"stripe", "creem"},
+            "enabled": billing_provider == "creem",
         },
         "limits": {
             "maxConcurrentScansPerUser": max_scan_concurrency_per_user(),

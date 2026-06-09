@@ -34,7 +34,7 @@
   - `GET /billing/plan` 返回 `account: billing_account_payload(user)`，也是 user/account 视角。
 - `pullwise_server/billing.py`
   - `review_limit(plan)` 目前只区分 `free` 和 `pro`，默认 free 5 次、pro 60 次。
-  - Stripe / Creem checkout metadata 使用 `userId` 绑定订阅。
+  - Creem checkout metadata 使用 `userId` 绑定订阅。
 - `pullwise_server/github_auth.py`
   - `repo_to_pullwise()` 和 `repo_payload_to_pullwise()` 已经把 GitHub repo 的 `id` 映射到前端 repo item 的 `id`。
   - 目前没有显式保存 `node_id`、owner id、fork parent/source 等反滥用字段。
@@ -461,7 +461,7 @@ Pro workspace:
 
 ```json
 {
-  "provider": "stripe",
+  "provider": "creem",
   "enabled": true,
   "plans": [],
   "workspace": {
@@ -541,7 +541,7 @@ Pro workspace:
 任务：
 
 1. `billing.py` checkout metadata 增加 `workspaceId`，保留 `userId` 作为 actor。
-2. Stripe / Creem webhook 优先按 `workspaceId` 应用订阅状态。
+2. Creem webhook 优先按 `workspaceId` 应用订阅状态。
 3. `billing_user_for_update()` 迁移为 `billing_workspace_for_update()`，保留 customer/subscription fallback。
 4. `GET /billing/plan` 返回 `workspace` 口径。
 5. billing portal/change interval 使用 workspace billing customer/subscription。

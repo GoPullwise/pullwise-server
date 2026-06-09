@@ -21,7 +21,7 @@ Current production-trial scope:
 - Deterministic fix preview for auto-fixable findings
 - GitHub pull request creation for deterministic issue fixes
 - Resource-scoped quota system with workspace/repository-level limit tracking
-- Stripe or Creem billing, pricing metadata, API docs metadata, and live
+- Creem billing, pricing metadata, API docs metadata, and live
   readiness status
 
 Stage 2 remediation is intentionally narrow:
@@ -103,7 +103,7 @@ host needs:
 
 - Python 3.10.12
 - `git` on `PATH`
-- outbound HTTPS access to GitHub, Stripe, Creem, and worker hosts
+- outbound HTTPS access to GitHub, Creem, and worker hosts
 - persistent storage for `PULLWISE_DB_PATH` and `PULLWISE_CHECKOUT_ROOT`
 
 Install and run:
@@ -153,7 +153,6 @@ PULLWISE_WORKER_MAX_RETRIES=3
 PULLWISE_FREE_USER_REVIEW_LIMIT=5
 PULLWISE_PRO_USER_REVIEW_LIMIT=60
 PULLWISE_BILLING_TIMEOUT_SECONDS=15
-PULLWISE_BILLING_CURRENCY=USD
 ```
 
 Server cleanup only prunes operational records: expired sessions/GitHub OAuth state, terminal worker commands/audit rows, and terminal scan job/result duplicates that have already been applied to the user-visible scan state. User scan results in `SCANS`/`ISSUES` are retained.
@@ -229,7 +228,7 @@ Expected shape:
     "appApiConfigured": true,
     "appVisibilityCheck": true
   },
-  "billing": {"provider": "stripe", "enabled": true},
+  "billing": {"provider": "creem", "enabled": true},
   "limits": {
     "maxConcurrentScansPerUser": 1,
     "maxQueuedScansGlobal": 1000,
@@ -297,24 +296,21 @@ to `PULLWISE_WORKER_MAX_RETRIES` times, then marked failed.
 
 ### Billing Provider Configuration
 
-Stripe:
-
-```env
-PULLWISE_STRIPE_SECRET_KEY=sk_live_...
-PULLWISE_STRIPE_WEBHOOK_SECRET=whsec_...
-PULLWISE_STRIPE_WEBHOOK_TOLERANCE_SECONDS=300
-```
-
 Creem:
 
 ```env
 PULLWISE_CREEM_API_KEY=...
+PULLWISE_CREEM_PRO_PRODUCT_IDS=prod_monthly,prod_yearly
 PULLWISE_CREEM_WEBHOOK_SECRET=...
+PULLWISE_CREEM_TEST_MODE=false
+# Optional explicit override. Accepts either the origin or /v1 URL.
+PULLWISE_CREEM_API_BASE_URL=
 ```
 
-Only one billing provider may be active. Set `PULLWISE_BILLING_PROVIDER=stripe`
-or `PULLWISE_BILLING_PROVIDER=creem` to explicitly select one. If neither
-provider is configured with keys, billing is disabled automatically.
+Creem is the only supported billing provider. Set
+`PULLWISE_BILLING_PROVIDER=creem` explicitly, or omit it and billing will be
+enabled when the Creem API key and product IDs are present. If Creem is not
+configured, billing is disabled automatically.
 
 ### GitHub App Configuration
 
@@ -638,14 +634,14 @@ The disable switch also accepts `0`, `no`, `off`, or `disabled`.
 
 ## Billing Setup
 
-Pullwise supports either Stripe or Creem. Configure one provider, or set
-`PULLWISE_BILLING_PROVIDER=stripe|creem` if both providers are present.
+Pullwise uses Creem for billing.
 The built-in catalog is Free plus Pro. Scan quota is tracked for the signed-in
 user and for each stable GitHub repository id. Free defaults to 5 user
 scans/month and 5 scans/month for each repository. GitHub forks that report the
-same source repository share the source repository quota bucket. Pro defaults
-to $29/month or $290/year with 60 user scans/month and 60 scans/month for each
-repository. Monthly review allowance resets on the user's subscription-cycle
+same source repository share the source repository quota bucket. Pro pricing,
+currency, and billing intervals are read from the configured Creem products.
+Pro defaults to 60 user scans/month and 60 scans/month for each repository.
+Monthly review allowance resets on the user's subscription-cycle
 anniversary, or on the free-cycle anniversary when the account is not entitled
 to Pro.
 
@@ -656,24 +652,29 @@ PULLWISE_FREE_USER_REVIEW_LIMIT=5
 PULLWISE_PRO_USER_REVIEW_LIMIT=60
 ```
 
-Stripe:
-
-```env
-PULLWISE_STRIPE_SECRET_KEY=sk_live_or_test
-PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID=price_...
-PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID=price_...
-PULLWISE_STRIPE_WEBHOOK_SECRET=whsec_...
-```
-
 Creem:
 
 ```env
+PULLWISE_BILLING_PROVIDER=creem
 PULLWISE_CREEM_API_KEY=creem_key
-PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID=prod_...
-PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID=prod_...
+PULLWISE_CREEM_PRO_PRODUCT_IDS=prod_monthly,prod_yearly
 PULLWISE_CREEM_WEBHOOK_SECRET=whsec_...
 PULLWISE_CREEM_TEST_MODE=false
+PULLWISE_CREEM_API_BASE_URL=
 ```
+
+Set `PULLWISE_CREEM_TEST_MODE=true` with a Creem test-mode API key and test
+product IDs to use `https://test-api.creem.io/v1`. Leave it `false` for
+production, which uses `https://api.creem.io/v1`. Pullwise retrieves each
+configured product from Creem and infers monthly/yearly pricing from
+`billing_period`, so amount and currency are not configured locally.
+`PULLWISE_CREEM_API_BASE_URL` is an optional override for nonstandard
+environments and may be set to either `https://test-api.creem.io` or
+`https://test-api.creem.io/v1`.
+
+For compatibility, `PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID` and
+`PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID` are still accepted, but
+`PULLWISE_CREEM_PRO_PRODUCT_IDS` is the preferred configuration.
 
 Implemented billing routes:
 
@@ -682,14 +683,11 @@ Implemented billing routes:
 - `POST /billing/checkout-sessions`
 - `POST /billing/portal-sessions`
 - `POST /billing/change-interval`
-- `POST /webhooks/stripe`
 - `POST /webhooks/creem`
 
 Checkout URLs are created server-side with `userId`
-metadata. Webhooks verify Stripe `Stripe-Signature` or Creem `creem-signature`
-before updating billing state. Stripe monthly-to-yearly changes open a Billing
-Portal confirmation flow; Creem monthly-to-yearly changes use the subscription
-upgrade endpoint.
+metadata. Webhooks verify Creem `creem-signature` before updating billing
+state. Monthly-to-yearly changes use the Creem subscription upgrade endpoint.
 
 ## User and Billing State
 
@@ -805,7 +803,6 @@ Implemented endpoints:
 - `POST /billing/checkout-sessions`
 - `POST /billing/portal-sessions`
 - `POST /billing/change-interval`
-- `POST /webhooks/stripe`
 - `POST /webhooks/creem`
 - `GET /api/v1/repositories`
 - `POST /api/v1/repositories/{repoId}/scans`
