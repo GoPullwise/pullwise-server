@@ -40,6 +40,101 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["eventId"], "evt_creem_checkout_1")
         self.assertEqual(update["eventCreated"], 1710000200)
 
+    def test_creem_checkout_completed_maps_real_payload_request_id(self) -> None:
+        event = {
+            "id": "evt_creem_checkout_real_1",
+            "created_at": 1728734325927,
+            "eventType": "checkout.completed",
+            "object": {
+                "id": "ch_1",
+                "request_id": "pw_usr_1_req_1",
+                "order": {
+                    "id": "ord_1",
+                    "customer": "cust_1",
+                    "product": "prod_monthly",
+                    "status": "paid",
+                    "type": "recurring",
+                },
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+                "product": {
+                    "id": "prod_monthly",
+                    "billing_period": "every-month",
+                },
+                "subscription": {
+                    "id": "sub_1",
+                    "customer": "cust_1",
+                    "product": "prod_monthly",
+                    "status": "active",
+                },
+            },
+        }
+
+        update = billing.billing_update_from_creem_event(event)
+
+        self.assertEqual(update["requestId"], "pw_usr_1_req_1")
+        self.assertEqual(update["customerId"], "cust_1")
+        self.assertEqual(update["customerEmail"], "dev@example.com")
+        self.assertEqual(update["subscriptionId"], "sub_1")
+        self.assertEqual(update["status"], "active")
+        self.assertEqual(update["plan"], "pro")
+        self.assertEqual(update["interval"], "month")
+        self.assertEqual(update["eventCreated"], 1728734325)
+
+    def test_creem_subscription_paid_maps_period_and_metadata(self) -> None:
+        event = {
+            "id": "evt_creem_paid_1",
+            "created_at": 1728734327355,
+            "eventType": "subscription.paid",
+            "object": {
+                "id": "sub_1",
+                "status": "active",
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+                "product": {
+                    "id": "prod_yearly",
+                    "billing_period": "every-year",
+                },
+                "current_period_start_date": "2026-06-09T00:00:00.000Z",
+                "current_period_end_date": "2027-06-09T00:00:00.000Z",
+                "metadata": {"userId": "usr_1", "plan": "pro"},
+            },
+        }
+
+        update = billing.billing_update_from_creem_event(event)
+
+        self.assertEqual(update["userId"], "usr_1")
+        self.assertEqual(update["customerId"], "cust_1")
+        self.assertEqual(update["subscriptionId"], "sub_1")
+        self.assertEqual(update["status"], "active")
+        self.assertEqual(update["interval"], "year")
+        self.assertEqual(update["currentPeriodStart"], "2026-06-09T00:00:00.000Z")
+        self.assertEqual(update["currentPeriodEnd"], "2027-06-09T00:00:00.000Z")
+        self.assertEqual(update["eventCreated"], 1728734327)
+
+    def test_creem_subscription_lifecycle_event_type_controls_status(self) -> None:
+        scenarios = {
+            "subscription.canceled": "canceled",
+            "subscription.scheduled_cancel": "canceling",
+            "subscription.past_due": "past_due",
+            "subscription.paused": "paused",
+            "subscription.trialing": "trialing",
+        }
+        for event_type, expected_status in scenarios.items():
+            with self.subTest(event_type=event_type):
+                update = billing.billing_update_from_creem_event(
+                    {
+                        "id": f"evt_{event_type}",
+                        "eventType": event_type,
+                        "object": {
+                            "id": "sub_1",
+                            "status": "active",
+                            "customer": {"id": "cust_1"},
+                            "metadata": {"userId": "usr_1"},
+                        },
+                    }
+                )
+
+                self.assertEqual(update["status"], expected_status)
+
     def test_creem_event_ignores_malformed_event_type(self) -> None:
         update = billing.billing_update_from_creem_event(
             {

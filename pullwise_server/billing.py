@@ -475,6 +475,19 @@ def text_payload(value: object, fallback: str) -> str:
     return value if isinstance(value, str) and value.strip() else fallback
 
 
+def object_id(value: object) -> str | None:
+    if isinstance(value, dict):
+        return text_payload(value.get("id"), "") or None
+    return text_payload(value, "") or None
+
+
+def product_payload(value: object) -> dict | None:
+    if isinstance(value, dict):
+        return value
+    product_id = object_id(value)
+    return {"id": product_id} if product_id else None
+
+
 def billing_update_from_creem_event(event: dict) -> dict | None:
     event_type = text_payload(event.get("eventType") or event.get("type"), "")
     obj = dict_payload(event.get("object"))
@@ -492,26 +505,38 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     }:
         return None
 
+    order = dict_payload(obj.get("order"))
+    request_id = text_payload(obj.get("request_id") or obj.get("requestId") or order.get("request_id") or order.get("requestId"), "")
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
     customer = obj.get("customer") if isinstance(obj.get("customer"), dict) else {}
     subscription = obj.get("subscription") if isinstance(obj.get("subscription"), dict) else obj
     subscription_metadata = subscription.get("metadata") if isinstance(subscription.get("metadata"), dict) else {}
-    product = obj.get("product") if isinstance(obj.get("product"), dict) else None
-    if not product and isinstance(subscription, dict) and isinstance(subscription.get("product"), dict):
-        product = subscription.get("product")
+    product = product_payload(obj.get("product"))
+    if not product and isinstance(subscription, dict):
+        product = product_payload(subscription.get("product"))
+    if not product:
+        product = product_payload(order.get("product"))
     user_id = (
         metadata.get("userId")
+        or metadata.get("user_id")
         or metadata.get("internal_customer_id")
+        or metadata.get("internalCustomerId")
+        or metadata.get("referenceId")
+        or metadata.get("reference_id")
         or subscription_metadata.get("userId")
+        or subscription_metadata.get("user_id")
         or subscription_metadata.get("internal_customer_id")
+        or subscription_metadata.get("internalCustomerId")
+        or subscription_metadata.get("referenceId")
+        or subscription_metadata.get("reference_id")
     )
     subscription_customer = subscription.get("customer") if isinstance(subscription, dict) else None
     if isinstance(subscription_customer, dict):
         subscription_customer_id = subscription_customer.get("id")
     else:
         subscription_customer_id = subscription_customer
-    customer_id = customer.get("id") or subscription_customer_id
-    if not user_id and not customer_id:
+    customer_id = object_id(customer) or object_id(subscription_customer_id) or object_id(order.get("customer"))
+    if not user_id and not customer_id and not request_id:
         return None
 
     plan = normalize_plan(metadata.get("plan") or subscription_metadata.get("plan") or "pro")
@@ -523,6 +548,7 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     )
     return {
         "userId": user_id,
+        "requestId": request_id or None,
         "provider": "creem",
         "customerId": customer_id,
         "customerEmail": customer.get("email"),
@@ -532,6 +558,7 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         "interval": interval,
         "currentPeriodStart": subscription.get("current_period_start_date") if isinstance(subscription, dict) else None,
         "currentPeriodEnd": subscription.get("current_period_end_date") if isinstance(subscription, dict) else None,
+        "cancelAtPeriodEnd": subscription.get("cancel_at_period_end") if isinstance(subscription, dict) else None,
         "canceledAt": subscription.get("canceled_at") if isinstance(subscription, dict) else None,
         "eventType": event_type,
         "eventId": event.get("id") or event.get("eventId"),
@@ -540,21 +567,25 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
 
 
 def event_created(event: dict) -> int | None:
-    value = event.get("created") or event.get("createdAt")
+    value = event.get("created") or event.get("createdAt") or event.get("created_at")
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
         if not math.isfinite(value):
             return None
-        return int(value)
+        candidate = int(value)
+        return candidate // 1000 if candidate >= 10_000_000_000 else candidate
     if isinstance(value, str) and value.isdigit():
-        return int(value)
+        candidate = int(value)
+        return candidate // 1000 if candidate >= 10_000_000_000 else candidate
     return None
 
 
 def normalize_subscription_status(status: object) -> str:
     normalized = text_payload(status, "active").strip().lower()
-    if normalized in {"active", "trialing", "paid"}:
+    if normalized == "trialing":
+        return "trialing"
+    if normalized in {"active", "paid"}:
         return "active"
     if normalized in {"scheduled_cancel"}:
         return "canceling"
@@ -566,8 +597,20 @@ def normalize_subscription_status(status: object) -> str:
 
 
 def normalize_creem_subscription_status(event_type: str | None, status: object) -> str:
+    if event_type == "subscription.canceled":
+        return "canceled"
+    if event_type == "subscription.scheduled_cancel":
+        return "canceling"
+    if event_type == "subscription.past_due":
+        return "past_due"
     if event_type == "subscription.expired":
         return "past_due"
+    if event_type == "subscription.paused":
+        return "paused"
+    if event_type == "subscription.trialing":
+        return "trialing"
+    if event_type in {"subscription.active", "subscription.paid"}:
+        return "active"
     return normalize_subscription_status(status)
 
 

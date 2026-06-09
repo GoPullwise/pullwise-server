@@ -213,6 +213,32 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(create.call_args.kwargs["interval"], "year")
 
+    def test_checkout_session_rejects_active_pro_subscription(self) -> None:
+        cookie = seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+        }
+        handler = HandlerHarness(
+            {
+                "interval": "month",
+                "successUrl": "https://app.pullwise.dev/?screen=billing&billing=success",
+                "cancelUrl": "https://app.pullwise.dev/?screen=billing&billing=cancel",
+            },
+            cookie=cookie,
+        )
+
+        with patch("pullwise_server.billing.create_checkout_session") as create:
+            app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
+
+        self.assertEqual(handler.status, HTTPStatus.CONFLICT)
+        self.assertIn("active Pro subscription", handler.payload["message"])
+        create.assert_not_called()
+
     def test_admin_checkout_uses_creem_checkout_without_local_pro(self) -> None:
         cookie = seed_session()
         handler = HandlerHarness(
@@ -465,6 +491,44 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(payload["lastEventCreated"], 1710000123)
         self.assertIsNone(payload["updatedAt"])
         self.assertNotIn("raw", payload)
+
+    def test_billing_account_payload_includes_current_subscription_record_for_legacy_state(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+            "lastEventType": "checkout.completed",
+            "lastEventId": "evt_1",
+            "lastEventCreated": 1728734325,
+            "updatedAt": 1728734330,
+        }
+
+        payload = app.billing_account_payload(app.USERS["usr_1"])
+
+        self.assertEqual(payload["subscriptions"], [
+            {
+                "provider": "creem",
+                "customerId": "cust_1",
+                "customerEmail": None,
+                "subscriptionId": "sub_1",
+                "subscriptionItemId": None,
+                "status": "active",
+                "plan": "pro",
+                "interval": "month",
+                "currentPeriodStart": None,
+                "currentPeriodEnd": None,
+                "cancelAtPeriodEnd": None,
+                "canceledAt": None,
+                "lastEventType": "checkout.completed",
+                "lastEventId": "evt_1",
+                "lastEventCreated": 1728734325,
+                "updatedAt": 1728734330,
+            }
+        ])
 
     def test_checkout_returns_not_implemented_when_billing_is_disabled(self) -> None:
         cookie = seed_session()
@@ -998,6 +1062,126 @@ class BillingRoutesTest(unittest.TestCase):
 
         self.assertNotIn("billing", app.USERS["usr_1"])
         self.assertEqual(app.BILLING_PENDING_UPDATES, [])
+
+
+class BillingWebhookPersistenceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.db_path = os.path.join(self.temp_dir.name, "pullwise.sqlite3")
+        self.db_patcher = patch.dict(
+            os.environ,
+            {
+                "PULLWISE_DB_PATH": self.db_path,
+                "PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test",
+                "PULLWISE_PRO_USER_REVIEW_LIMIT": "60",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT": "5",
+            },
+            clear=False,
+        )
+        self.db_patcher.start()
+        self.addCleanup(self.db_patcher.stop)
+
+    def test_creem_webhook_persists_billing_and_refreshes_quota_bucket(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billingCheckout"] = {
+            "provider": "creem",
+            "id": "ch_1",
+            "requestId": "pw_usr_1_req_1",
+            "plan": "pro",
+            "interval": "month",
+            "createdAt": app.now(),
+        }
+        raw = json.dumps(
+            {
+                "id": "evt_creem_checkout_real_1",
+                "eventType": "checkout.completed",
+                "created_at": 1728734325927,
+                "object": {
+                    "id": "ch_1",
+                    "request_id": "pw_usr_1_req_1",
+                    "customer": {"id": "cust_1", "email": "dev@example.com"},
+                    "product": {"id": "prod_monthly", "billing_period": "every-month"},
+                    "subscription": {
+                        "id": "sub_1",
+                        "customer": "cust_1",
+                        "product": "prod_monthly",
+                        "status": "active",
+                    },
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/creem",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "creem-signature": signature},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        persisted_state = app.db.load_state()
+        persisted_user = persisted_state["users"]["usr_1"]
+        self.assertEqual(persisted_user["billing"]["provider"], "creem")
+        self.assertEqual(persisted_user["billing"]["status"], "active")
+        self.assertEqual(persisted_user["billing"]["plan"], "pro")
+        self.assertEqual(persisted_user["billing"]["customerId"], "cust_1")
+        self.assertEqual(persisted_user["billing"]["subscriptionId"], "sub_1")
+        self.assertEqual(persisted_user["billingCheckout"]["status"], "completed")
+        self.assertEqual(
+            persisted_user["billingSubscriptions"],
+            [
+                {
+                    "provider": "creem",
+                    "customerId": "cust_1",
+                    "customerEmail": "dev@example.com",
+                    "subscriptionId": "sub_1",
+                    "subscriptionItemId": None,
+                    "status": "active",
+                    "plan": "pro",
+                    "interval": "month",
+                    "currentPeriodStart": None,
+                    "currentPeriodEnd": None,
+                    "cancelAtPeriodEnd": None,
+                    "canceledAt": None,
+                    "lastEventType": "checkout.completed",
+                    "lastEventId": "evt_creem_checkout_real_1",
+                    "lastEventCreated": 1728734325,
+                    "updatedAt": persisted_user["billingSubscriptions"][0]["updatedAt"],
+                }
+            ],
+        )
+        self.assertIn("evt_creem_checkout_real_1", persisted_state["billingEvents"])
+
+        app.USERS = {}
+        app.SESSIONS = {}
+        app.BILLING_EVENTS = {}
+        app.BILLING_PENDING_UPDATES = []
+        app.STATE_LOADED = False
+        app.ensure_state_loaded()
+        billing_payload = app.billing_account_payload(app.USERS["usr_1"])
+
+        self.assertEqual(billing_payload["plan"], "pro")
+        self.assertEqual(billing_payload["status"], "active")
+        self.assertEqual(billing_payload["usage"]["limit"], 60)
+        self.assertEqual(billing_payload["usage"]["remaining"], 60)
+        self.assertEqual(billing_payload["usage"]["plan"], "pro")
+        self.assertEqual(len(billing_payload["subscriptions"]), 1)
+        self.assertEqual(billing_payload["subscriptions"][0]["subscriptionId"], "sub_1")
+        self.assertEqual(billing_payload["subscriptions"][0]["status"], "active")
+        self.assertEqual(billing_payload["subscriptions"][0]["plan"], "pro")
+        self.assertEqual(billing_payload["subscriptions"][0]["interval"], "month")
+        self.assertEqual(billing_payload["subscriptions"][0]["lastEventId"], "evt_creem_checkout_real_1")
+        connection = app.db.connect()
+        try:
+            rows = connection.execute(
+                "SELECT scope_type, scope_id, plan, quota_limit, used FROM quota_buckets WHERE scope_type = 'user'"
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(rows, [("user", "usr_1", "pro", 60, 0)])
 
 
 if __name__ == "__main__":

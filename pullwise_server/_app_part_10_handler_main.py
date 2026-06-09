@@ -597,6 +597,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
+            if effective_billing_plan(user) == "pro":
+                return self.error(HTTPStatus.CONFLICT, "An active Pro subscription already exists. Manage billing from the Billing page.")
             success_url = safe_redirect_to(body.get("successUrl"), "settings")
             plan = str(body.get("plan") or "pro")
             interval = str(body.get("interval") or "month")

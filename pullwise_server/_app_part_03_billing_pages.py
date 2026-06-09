@@ -98,6 +98,51 @@ def consume_review_quota(user: dict) -> tuple[bool, dict]:
     return True, billing_entitlement_for_user(user)
 
 
+def billing_subscription_record_payload(record: dict) -> dict:
+    return {
+        "provider": public_billing_text(record.get("provider")),
+        "customerId": public_billing_text(record.get("customerId")),
+        "customerEmail": public_billing_text(record.get("customerEmail")),
+        "subscriptionId": public_billing_text(record.get("subscriptionId")),
+        "subscriptionItemId": public_billing_text(record.get("subscriptionItemId")),
+        "status": public_billing_status(record.get("status")),
+        "plan": public_billing_text(record.get("plan")) if public_billing_text(record.get("plan")) in {"free", "pro"} else None,
+        "interval": billing.normalize_interval(record.get("interval")),
+        "currentPeriodStart": pull_request_timestamp(record.get("currentPeriodStart")),
+        "currentPeriodEnd": pull_request_timestamp(record.get("currentPeriodEnd")),
+        "cancelAtPeriodEnd": record.get("cancelAtPeriodEnd") if isinstance(record.get("cancelAtPeriodEnd"), bool) else None,
+        "canceledAt": pull_request_timestamp(record.get("canceledAt")),
+        "lastEventType": public_billing_text(record.get("lastEventType")),
+        "lastEventId": public_billing_text(record.get("lastEventId")),
+        "lastEventCreated": pull_request_timestamp(record.get("lastEventCreated")),
+        "updatedAt": pull_request_timestamp(record.get("updatedAt")),
+    }
+
+
+def billing_subscription_records_payload(user: dict) -> list[dict]:
+    records = user.get("billingSubscriptions") if isinstance(user.get("billingSubscriptions"), list) else []
+    payloads = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        payload = billing_subscription_record_payload(record)
+        if payload["subscriptionId"] or payload["customerId"]:
+            payloads.append(payload)
+    current_payload = billing_subscription_record_payload(user_billing_state(user))
+    if current_payload["subscriptionId"] or current_payload["customerId"]:
+        current_subscription_id = current_payload["subscriptionId"]
+        current_customer_id = current_payload["customerId"]
+        already_present = any(
+            (current_subscription_id and item["subscriptionId"] == current_subscription_id)
+            or (not current_subscription_id and current_customer_id and item["customerId"] == current_customer_id)
+            for item in payloads
+        )
+        if not already_present:
+            payloads.insert(0, current_payload)
+    payloads.sort(key=lambda item: item.get("updatedAt") or 0, reverse=True)
+    return payloads[:25]
+
+
 def billing_account_payload(user: dict) -> dict:
     current = user_billing_state(user)
     entitlement = billing_entitlement_for_user(user)
@@ -129,6 +174,7 @@ def billing_account_payload(user: dict) -> dict:
             "scope": scan_usage["scope"],
             "resetAt": scan_usage["resetAt"],
         },
+        "subscriptions": billing_subscription_records_payload(user),
     }
 
 

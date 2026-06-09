@@ -2,6 +2,9 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+MAX_BILLING_SUBSCRIPTION_RECORDS = 25
+
+
 def billing_event_id(update: dict) -> str:
     return billing_update_text(update.get("eventId"))
 
@@ -96,14 +99,74 @@ def billing_user_for_update(update: dict) -> dict | None:
 
 def billing_update_matches_user(update: dict, user: dict) -> bool:
     current = user.get("billing") or {}
+    checkout = user.get("billingCheckout") if isinstance(user.get("billingCheckout"), dict) else {}
     customer_id = billing_update_text(update.get("customerId"))
     subscription_id = billing_update_text(update.get("subscriptionId"))
     user_id = billing_update_text(update.get("userId"))
+    request_id = billing_update_text(update.get("requestId"))
     if customer_id and current.get("customerId") == customer_id:
         return True
     if subscription_id and current.get("subscriptionId") == subscription_id:
         return True
+    if request_id and checkout.get("requestId") == request_id:
+        return True
     return bool(user_id and user_id == user.get("id"))
+
+
+def ensure_billing_quota_bucket_for_user(user: dict) -> None:
+    entitlement = quota.quota_entitlement_for_user(user)
+    quota.ensure_quota_bucket(
+        scope_type="user",
+        scope_id=str(user["id"]),
+        period=entitlement["period"],
+        plan=entitlement["plan"],
+        limit=entitlement["userLimit"],
+        reset_at=entitlement["resetAt"],
+    )
+
+
+def upsert_billing_subscription_record(user: dict, billing_state: dict) -> None:
+    subscription_id = billing_update_text(billing_state.get("subscriptionId"))
+    customer_id = billing_update_text(billing_state.get("customerId"))
+    provider = billing_update_text(billing_state.get("provider"))
+    if not (subscription_id or customer_id):
+        return
+
+    record = {
+        "provider": provider or None,
+        "customerId": customer_id or None,
+        "customerEmail": billing_update_text(billing_state.get("customerEmail")) or None,
+        "subscriptionId": subscription_id or None,
+        "subscriptionItemId": billing_update_text(billing_state.get("subscriptionItemId")) or None,
+        "status": billing_update_text(billing_state.get("status")) or None,
+        "plan": billing_update_text(billing_state.get("plan")) or None,
+        "interval": billing_update_text(billing_state.get("interval")) or None,
+        "currentPeriodStart": billing_update_scalar(billing_state.get("currentPeriodStart")),
+        "currentPeriodEnd": billing_update_scalar(billing_state.get("currentPeriodEnd")),
+        "cancelAtPeriodEnd": billing_update_bool(billing_state.get("cancelAtPeriodEnd")),
+        "canceledAt": billing_update_scalar(billing_state.get("canceledAt")),
+        "lastEventType": billing_update_text(billing_state.get("lastEventType")) or None,
+        "lastEventId": billing_update_text(billing_state.get("lastEventId")) or None,
+        "lastEventCreated": billing_event_created({"eventCreated": billing_state.get("lastEventCreated")}),
+        "updatedAt": billing_event_created({"eventCreated": billing_state.get("updatedAt")}) or now(),
+    }
+    existing_records = user.get("billingSubscriptions") if isinstance(user.get("billingSubscriptions"), list) else []
+    records = [item for item in existing_records if isinstance(item, dict)]
+    replaced = False
+    for index, existing in enumerate(records):
+        existing_subscription_id = billing_update_text(existing.get("subscriptionId"))
+        existing_customer_id = billing_update_text(existing.get("customerId"))
+        existing_provider = billing_update_text(existing.get("provider"))
+        matches_subscription = bool(subscription_id and existing_subscription_id == subscription_id)
+        matches_customer = bool(not subscription_id and customer_id and existing_customer_id == customer_id and existing_provider == provider)
+        if matches_subscription or matches_customer:
+            records[index] = {**existing, **record}
+            replaced = True
+            break
+    if not replaced:
+        records.insert(0, record)
+    records.sort(key=lambda item: billing_event_created({"eventCreated": item.get("updatedAt")}) or 0, reverse=True)
+    user["billingSubscriptions"] = records[:MAX_BILLING_SUBSCRIPTION_RECORDS]
 
 
 def apply_billing_update_to_user(user: dict, update: dict) -> bool:
@@ -128,6 +191,8 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     provider = billing_update_text(update.get("provider"))
     event_type = billing_update_text(update.get("eventType"))
     event_id = billing_event_id(update)
+    request_id = billing_update_text(update.get("requestId"))
+    updated_at = now()
 
     user["billing"] = {
         **current,
@@ -143,11 +208,21 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
         "currentPeriodEnd": current_period_end if current_period_end is not None else current.get("currentPeriodEnd"),
         "cancelAtPeriodEnd": cancel_at_period_end if cancel_at_period_end is not None else current.get("cancelAtPeriodEnd"),
         "canceledAt": canceled_at if canceled_at is not None else current.get("canceledAt"),
-        "updatedAt": now(),
+        "updatedAt": updated_at,
         "lastEventType": event_type or current.get("lastEventType"),
         "lastEventId": event_id or current.get("lastEventId"),
         "lastEventCreated": incoming_created if incoming_created is not None else current.get("lastEventCreated"),
     }
+    checkout = user.get("billingCheckout") if isinstance(user.get("billingCheckout"), dict) else {}
+    if request_id and checkout.get("requestId") == request_id:
+        user["billingCheckout"] = {
+            **checkout,
+            "status": "completed",
+            "completedAt": updated_at,
+            "eventId": event_id or checkout.get("eventId"),
+        }
+    upsert_billing_subscription_record(user, user["billing"])
+    ensure_billing_quota_bucket_for_user(user)
     remember_billing_event(update, applied=True)
     mark_state_dirty()
     return True
