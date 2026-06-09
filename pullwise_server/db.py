@@ -2747,6 +2747,52 @@ def revoke_api_key(api_key_id: str, user_id: str) -> bool:
         return updated > 0
 
 
+def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | None = None) -> dict[str, int]:
+    initialize()
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return {}
+    target_scan_ids = [str(scan_id) for scan_id in (scan_ids or []) if str(scan_id or "").strip()]
+    counts: dict[str, int] = {}
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            counts["apiKeys"] = connection.execute(
+                "DELETE FROM api_keys WHERE user_id = ?",
+                (target_user_id,),
+            ).rowcount
+            counts["quotaLedger"] = connection.execute(
+                "DELETE FROM quota_ledger WHERE requested_by_user_id = ?",
+                (target_user_id,),
+            ).rowcount
+            counts["rateLimits"] = connection.execute(
+                "DELETE FROM api_rate_limits WHERE subject = ?",
+                (f"user:{target_user_id}",),
+            ).rowcount
+            counts["reviewOutcomeLabels"] = connection.execute(
+                "DELETE FROM review_outcome_labels WHERE created_by = ?",
+                (target_user_id,),
+            ).rowcount
+            counts["reviewDecisionEvents"] = connection.execute(
+                "DELETE FROM review_decision_events WHERE user_id = ?",
+                (target_user_id,),
+            ).rowcount
+            counts["reviewCalibrationSnapshots"] = connection.execute(
+                "DELETE FROM review_calibration_snapshots WHERE scope_key LIKE ?",
+                (f"%user:{target_user_id}%",),
+            ).rowcount
+            counts["scanJobs"] = connection.execute(
+                "DELETE FROM scan_jobs WHERE user_id = ?",
+                (target_user_id,),
+            ).rowcount
+            if target_scan_ids:
+                placeholders = ",".join("?" for _ in target_scan_ids)
+                counts["scanJobs"] += connection.execute(
+                    f"DELETE FROM scan_jobs WHERE scan_id IN ({placeholders})",
+                    target_scan_ids,
+                ).rowcount
+    return counts
+
+
 def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> str:
     return stable_id("qb", f"{scope_type}:{scope_id}:{period}:{plan}")
 

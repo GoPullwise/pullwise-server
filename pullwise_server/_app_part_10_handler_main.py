@@ -1644,6 +1644,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if segments == ["admin", "status"]:
             return self.json(scan_system_status_payload(admin=True))
+        if segments == ["admin", "users"]:
+            return self.json(admin_users_payload(current_user_id=session["userId"]))
         if segments == ["admin", "review-calibration"]:
             scope_key = review_calibration_scope_key_from_params(params)
             if not scope_key:
@@ -1825,6 +1827,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
             self.audit_worker_action(session, "delete_worker", worker_id=worker_id, changed_fields={"deleted": True})
             return self.json({"worker": worker_public_payload(worker, admin=True), "deleted": True})
+        if len(segments) == 3 and segments[:2] == ["admin", "users"]:
+            user_id = clean_github_access_text(segments[2]) or ""
+            try:
+                return self.json(delete_authorized_user(user_id, actor_user_id=session["userId"]))
+            except ResourceNotFound:
+                return self.error(HTTPStatus.NOT_FOUND, "User not found.")
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def require_worker(self, *, allow_disabled: bool = False) -> dict | None:

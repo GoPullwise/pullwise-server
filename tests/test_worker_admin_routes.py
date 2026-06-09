@@ -349,6 +349,92 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
 
+    def test_admin_can_list_authorized_users(self) -> None:
+        app.SCANS = [
+            {"id": "sc_user", "userId": "usr_user", "repo": "owner/repo", "status": "done"},
+            {"id": "sc_admin", "userId": "usr_admin", "repo": "owner/repo", "status": "done"},
+        ]
+        app.ISSUES = [
+            {"id": "issue_user", "scanId": "sc_user", "title": "User issue"},
+            {"id": "issue_admin", "scanId": "sc_admin", "title": "Admin issue"},
+        ]
+
+        handler = RouteHarness("/admin/users", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        users = {user["id"]: user for user in handler.payload["users"]}
+        self.assertEqual(set(users), {"usr_admin", "usr_user"})
+        self.assertTrue(users["usr_admin"]["admin"])
+        self.assertTrue(users["usr_admin"]["current"])
+        self.assertFalse(users["usr_user"]["admin"])
+        self.assertEqual(users["usr_user"]["scanCount"], 1)
+        self.assertEqual(users["usr_user"]["issueCount"], 1)
+
+    def test_admin_delete_user_removes_sessions_state_and_database_records(self) -> None:
+        app.USERS["usr_user"]["githubRepositoryAccess"] = {
+            "repositoryItems": [{"id": "repo_123", "fullName": "owner/repo"}],
+        }
+        app.SETTINGS["usr_user"] = {"profile": {"name": "User"}}
+        app.GITHUB_STATES["state_user"] = {"kind": "install", "userId": "usr_user", "expiresAt": app.now() + 600}
+        app.SCANS = [
+            {
+                "id": "sc_user",
+                "userId": "usr_user",
+                "repo": "owner/repo",
+                "branch": "main",
+                "commit": "abc1234",
+                "status": "queued",
+            },
+            {"id": "sc_admin", "userId": "usr_admin", "repo": "owner/repo", "status": "done"},
+        ]
+        app.ISSUES = [
+            {"id": "issue_user", "scanId": "sc_user", "title": "User issue"},
+            {"id": "issue_admin", "scanId": "sc_admin", "title": "Admin issue"},
+        ]
+        db.create_api_key(
+            {
+                "id": "ak_user",
+                "user_id": "usr_user",
+                "name": "User key",
+                "key_prefix": "pwk_user",
+                "key_hash": "hash_user",
+                "scopes": ["scans:read"],
+            }
+        )
+        job = app.create_scan_job_for_scan(app.SCANS[0])
+
+        handler = RouteHarness("/admin/users/usr_user", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(handler, "DELETE")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["deleted"])
+        self.assertNotIn("usr_user", app.USERS)
+        self.assertNotIn("ses_user", app.SESSIONS)
+        self.assertNotIn("usr_user", app.SETTINGS)
+        self.assertNotIn("state_user", app.GITHUB_STATES)
+        self.assertEqual([scan["id"] for scan in app.SCANS], ["sc_admin"])
+        self.assertEqual([issue["id"] for issue in app.ISSUES], ["issue_admin"])
+        self.assertEqual(db.list_api_keys_for_user("usr_user"), [])
+        self.assertIsNone(db.get_scan_job(job["job_id"]))
+        self.assertEqual(handler.payload["removed"]["sessions"], 1)
+        self.assertEqual(handler.payload["removed"]["scans"], 1)
+        self.assertEqual(handler.payload["removed"]["issues"], 1)
+
+    def test_admin_cannot_delete_current_user(self) -> None:
+        handler = RouteHarness("/admin/users/usr_admin", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(handler, "DELETE")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("cannot delete", handler.payload["message"])
+        self.assertIn("usr_admin", app.USERS)
+
+    def test_non_admin_cannot_access_admin_users(self) -> None:
+        denied = RouteHarness("/admin/users", cookie=self.user_cookie)
+        app.PullwiseHandler.route(denied, "GET")
+
+        self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
+
     def test_admin_review_calibration_summary_is_admin_only_and_sanitized(self) -> None:
         event = {
             "protocol": "pullwise-review-decision/0.1",

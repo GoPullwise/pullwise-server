@@ -363,6 +363,126 @@ def user_public(user: dict) -> dict:
     }
 
 
+def admin_user_payload(user: dict, *, current_user_id: str | None = None) -> dict:
+    user_id = public_issue_text(user.get("id"))
+    github_access = user.get("githubRepositoryAccess")
+    repository_count = 0
+    if isinstance(github_access, dict):
+        repository_count = len(repository_items_for_payload(github_access))
+    scan_count = sum(1 for scan in SCANS if scan_user_id(scan) == user_id)
+    scan_ids = {
+        public_issue_text(scan.get("id"))
+        for scan in SCANS
+        if isinstance(scan, dict) and scan_user_id(scan) == user_id and public_issue_text(scan.get("id"))
+    }
+    issue_count = sum(
+        1
+        for issue in ISSUES
+        if issue_user_id(issue) == user_id or issue_scan_id(issue) in scan_ids
+    )
+    return {
+        **user_public(user),
+        "githubLogin": public_issue_text(user.get("githubLogin")),
+        "githubId": public_issue_text(user.get("githubId")),
+        "admin": user_is_admin(user),
+        "current": bool(current_user_id and user_id == current_user_id),
+        "lastGitHubAccessTokenUpdatedAt": pull_request_timestamp(user.get("githubAccessTokenUpdatedAt")),
+        "repositoryCount": repository_count,
+        "scanCount": scan_count,
+        "issueCount": issue_count,
+    }
+
+
+def admin_users_payload(current_user_id: str | None = None) -> dict:
+    users = [
+        admin_user_payload(user, current_user_id=current_user_id)
+        for user in USERS.values()
+        if isinstance(user, dict)
+    ]
+    users.sort(key=lambda item: (str(item.get("email") or item.get("name") or "").lower(), str(item.get("id") or "")))
+    return {"items": users, "users": users}
+
+
+def scan_user_id(scan: dict | None) -> str:
+    if not isinstance(scan, dict):
+        return ""
+    return public_issue_text(scan.get("userId") or scan.get("user_id"))
+
+
+def issue_user_id(issue: dict | None) -> str:
+    if not isinstance(issue, dict):
+        return ""
+    return public_issue_text(issue.get("userId") or issue.get("user_id"))
+
+
+def issue_scan_id(issue: dict | None) -> str:
+    if not isinstance(issue, dict):
+        return ""
+    return public_issue_text(issue.get("scanId") or issue.get("scan_id"))
+
+
+def delete_authorized_user(user_id: str, *, actor_user_id: str | None = None) -> dict:
+    target_user_id = public_issue_text(user_id)
+    if not target_user_id:
+        raise ValueError("User id is required.")
+    if actor_user_id and target_user_id == actor_user_id:
+        raise ValueError("Admins cannot delete their own user account.")
+    target_user = USERS.get(target_user_id)
+    if not isinstance(target_user, dict):
+        raise ResourceNotFound("User")
+
+    with STATE_LOCK:
+        target_scan_ids = {
+            public_issue_text(scan.get("id"))
+            for scan in SCANS
+            if isinstance(scan, dict) and scan_user_id(scan) == target_user_id and public_issue_text(scan.get("id"))
+        }
+        removed_scans = len(target_scan_ids)
+        removed_issues = 0
+        SCANS[:] = [
+            scan
+            for scan in SCANS
+            if not (isinstance(scan, dict) and scan_user_id(scan) == target_user_id)
+        ]
+        kept_issues = []
+        for issue in ISSUES:
+            if isinstance(issue, dict) and (
+                issue_user_id(issue) == target_user_id or issue_scan_id(issue) in target_scan_ids
+            ):
+                removed_issues += 1
+                continue
+            kept_issues.append(issue)
+        ISSUES[:] = kept_issues
+        removed_sessions = 0
+        for session_id, session in list(SESSIONS.items()):
+            if isinstance(session, dict) and session.get("userId") == target_user_id:
+                SESSIONS.pop(session_id, None)
+                removed_sessions += 1
+        removed_github_states = 0
+        for state_id, state in list(GITHUB_STATES.items()):
+            if isinstance(state, dict) and state.get("userId") == target_user_id:
+                GITHUB_STATES.pop(state_id, None)
+                removed_github_states += 1
+        removed_settings = 1 if SETTINGS.pop(target_user_id, None) is not None else 0
+        USERS.pop(target_user_id, None)
+        mark_state_dirty()
+
+    database_counts = db.delete_user_related_records(target_user_id, target_scan_ids)
+    return {
+        "user": admin_user_payload(target_user, current_user_id=actor_user_id),
+        "deleted": True,
+        "removed": {
+            "users": 1,
+            "sessions": removed_sessions,
+            "githubStates": removed_github_states,
+            "settings": removed_settings,
+            "scans": removed_scans,
+            "issues": removed_issues,
+            **database_counts,
+        },
+    }
+
+
 def get_or_create_github_user() -> dict:
     login = env("PULLWISE_DEV_GITHUB_LOGIN", "taylor-dev")
     email = env("PULLWISE_DEV_EMAIL", "taylor@acme.io")
