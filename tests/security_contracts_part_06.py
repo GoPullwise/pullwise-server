@@ -778,7 +778,7 @@ class SecurityContractsPart06Test(SecurityContractsBase):
             clear=True,
         ):
             self.assertEqual(app.api_base_url(handler), "http://localhost:8080")
-    def test_api_base_url_prefers_trusted_proxy_headers_over_configured_base(self) -> None:
+    def test_api_base_url_prefers_configured_base_over_trusted_proxy_headers(self) -> None:
         handler = RouteHarness(
             "/auth/github/authorize",
             headers={
@@ -796,6 +796,21 @@ class SecurityContractsPart06Test(SecurityContractsBase):
             },
             clear=True,
         ):
+            self.assertEqual(
+                app.api_base_url(handler),
+                "https://api.pull-wise.com",
+            )
+    def test_api_base_url_uses_trusted_proxy_headers_when_configured_base_is_missing(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/authorize",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "pullwise-admin.danuberiverferryman.workers.dev",
+                "X-Forwarded-Prefix": "/api",
+            },
+        )
+
+        with patch.dict(os.environ, {"PULLWISE_TRUST_PROXY_HEADERS": "true"}, clear=True):
             self.assertEqual(
                 app.api_base_url(handler),
                 "https://pullwise-admin.danuberiverferryman.workers.dev/api",

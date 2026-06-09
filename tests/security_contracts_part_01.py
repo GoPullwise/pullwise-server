@@ -273,7 +273,7 @@ class SecurityContractsPart01Test(SecurityContractsBase):
             handler.location,
             "https://api.pull-wise.com/auth/github/callback?redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers",
         )
-    def test_github_login_authorize_uses_trusted_proxy_callback_url(self) -> None:
+    def test_github_login_authorize_prefers_configured_callback_url_over_proxy_headers(self) -> None:
         handler = RouteHarness(
             "/auth/github/authorize?redirectTo=https%3A%2F%2Fpullwise-admin.danuberiverferryman.workers.dev%2Flogin",
             headers={
@@ -303,7 +303,7 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(
             build_authorize_url.call_args.args[0],
-            "https://pullwise-admin.danuberiverferryman.workers.dev/api/auth/github/callback",
+            "https://api.pull-wise.com/auth/github/callback",
         )
     def test_github_callback_rejects_malformed_persisted_state_records(self) -> None:
         cases = {
