@@ -1468,9 +1468,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return create_session(user)
 
     def current_session(self) -> dict | None:
-        session_id = self.current_session_id()
-        if not session_id:
-            return None
+        for session_id in self.current_session_id_candidates():
+            session = self.current_session_for_id(session_id)
+            if session:
+                return session
+        return None
+
+    def current_session_for_id(self, session_id: str) -> dict | None:
         session = SESSIONS.get(session_id)
         if not session:
             return None
@@ -1500,13 +1504,25 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return session
 
     def current_session_id(self) -> str | None:
+        candidates = self.current_session_id_candidates()
+        for session_id in candidates:
+            if self.current_session_for_id(session_id):
+                return session_id
+        return candidates[0] if candidates else None
+
+    def current_session_id_candidates(self) -> list[str]:
         authorization_token = bearer_token(self)
         if authorization_token and not authorization_token.startswith(API_KEY_PREFIX):
-            return authorization_token
+            return [authorization_token]
         raw_cookie = request_header(self, "Cookie") or ""
-        cookie = SimpleCookie(raw_cookie)
-        morsel = cookie.get(SESSION_COOKIE)
-        return morsel.value if morsel else None
+        session_ids: list[str] = []
+        for item in raw_cookie.split(";"):
+            name, separator, value = item.partition("=")
+            if separator and name.strip() == SESSION_COOKIE:
+                session_id = value.strip().strip('"')
+                if session_id:
+                    session_ids.append(session_id)
+        return session_ids
 
     def current_api_key_context(self) -> dict | None:
         cached = getattr(self, "_api_key_context", None)

@@ -36,6 +36,22 @@ class SecurityContractsPart03Test(SecurityContractsBase):
         self.assertTrue(active_handler.payload["authenticated"])
         self.assertFalse(expired_handler.payload["authenticated"])
         self.assertNotIn("expired", app.SESSIONS)
+    def test_auth_session_uses_valid_session_when_duplicate_session_cookies_exist(self) -> None:
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/auth/session", cookie="pw_session=ses_1; pw_session=stale_host_cookie")
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertEqual(handler.payload["user"]["id"], "usr_1")
     def test_auth_session_ignores_malformed_persisted_sessions(self) -> None:
         cases = {
             "non_object": "not-a-session",

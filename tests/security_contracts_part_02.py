@@ -815,6 +815,22 @@ class SecurityContractsPart02Test(SecurityContractsBase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertNotIn("ses_1", app.SESSIONS)
         self.assertIn("Max-Age=0", handler.headers_out["Set-Cookie"])
+    def test_sign_out_clears_valid_session_when_duplicate_session_cookies_exist(self) -> None:
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + app.SESSION_MAX_AGE,
+            }
+        }
+        handler = RouteHarness("/auth/sign-out", cookie="pw_session=ses_1; pw_session=stale_host_cookie")
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertNotIn("ses_1", app.SESSIONS)
+        self.assertIn("Max-Age=0", handler.headers_out["Set-Cookie"])
 
 
 __all__ = ["SecurityContractsPart02Test"]
