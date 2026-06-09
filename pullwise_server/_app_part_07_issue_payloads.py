@@ -663,6 +663,44 @@ def public_issue_review_calibration(value: object) -> dict:
     return {key: item for key, item in payload.items() if item not in ("", [], {})}
 
 
+def public_issue_feedback_reason(value: object) -> str:
+    reason = public_issue_text(value).lower().replace("-", "_").replace(" ", "_")
+    if reason == "valid":
+        return "useful"
+    if reason == "speculative":
+        return "too_speculative"
+    return reason if reason in REVIEW_USER_FEEDBACK_REASONS else ""
+
+
+def public_issue_feedback_reason_from_label(label: dict) -> str:
+    if public_issue_text(label.get("label_source")).lower() != "user_explicit":
+        return ""
+    reason = " ".join(review._safe_text_lenient(label.get("label_reason")).split())
+    prefix = "feedback:"
+    if not reason.lower().startswith(prefix):
+        return ""
+    value = reason[len(prefix) :].split(" ", 1)[0]
+    return public_issue_feedback_reason(value)
+
+
+def public_issue_feedback(issue: dict) -> dict:
+    fallback_reason = public_issue_feedback_reason(issue.get("feedbackReason") or issue.get("feedback_reason"))
+    event = review_decision_event_for_issue(issue)
+    observation_key = public_issue_text(event.get("candidate_observation_key"))
+    if observation_key:
+        user_id = public_issue_text(issue.get("userId"))
+        for label in db.list_review_outcome_labels(observation_key):
+            if user_id and public_issue_text(label.get("created_by")) not in {"", user_id}:
+                continue
+            feedback_reason = public_issue_feedback_reason_from_label(label)
+            if feedback_reason:
+                return {
+                    "reason": feedback_reason,
+                    "label": review_outcome_label_payload(label),
+                }
+    return {"reason": fallback_reason} if fallback_reason else {}
+
+
 def issue_payload(issue: dict) -> dict:
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
     auto_fix = issue_auto_fix_contract_ok(issue)
@@ -752,6 +790,11 @@ def issue_payload(issue: dict) -> dict:
     )
     if review_calibration:
         payload["reviewCalibration"] = review_calibration
+    feedback = public_issue_feedback(issue)
+    if feedback:
+        payload["feedbackReason"] = feedback["reason"]
+        if feedback.get("label"):
+            payload["feedbackLabel"] = feedback["label"]
     reported_verification_status = public_issue_text(issue.get("reportedVerificationStatus")).lower()
     if reported_verification_status in ISSUE_VERIFICATION_STATUSES and reported_verification_status != verification_status:
         payload["reportedVerificationStatus"] = reported_verification_status
@@ -1021,4 +1064,3 @@ def filter_user_issue_payloads(issues: list[dict], params: dict) -> list[dict]:
             )
         ]
     return issues
-

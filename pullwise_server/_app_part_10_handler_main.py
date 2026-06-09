@@ -689,6 +689,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if next_status not in ISSUE_STATUSES:
                 return self.error(HTTPStatus.BAD_REQUEST, "Issue status must be open, fixed, or snoozed.")
             issue["status"] = next_status
+            feedback_reason, _ = review_user_feedback_reason(body)
+            if feedback_reason:
+                issue["feedbackReason"] = feedback_reason
             record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
             mark_state_dirty()
             return self.json(issue_payload(issue))

@@ -965,6 +965,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(duplicate.status, HTTPStatus.OK)
         self.assertEqual(duplicate.payload["status"], "open")
+        self.assertEqual(duplicate.payload["feedbackReason"], "duplicate")
         duplicate_labels = db.list_review_outcome_labels("obs_status_duplicate")
         self.assertEqual(duplicate_labels[0]["label_source"], "user_explicit")
         self.assertEqual(duplicate_labels[0]["outcome_label"], "ambiguous")
@@ -1096,13 +1097,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(false_positive, "PATCH")
 
         self.assertEqual(useful.status, HTTPStatus.OK)
+        self.assertEqual(useful.payload["feedbackReason"], "useful")
         self.assertEqual(false_positive.status, HTTPStatus.OK)
         self.assertEqual(false_positive.payload["status"], "open")
+        self.assertEqual(false_positive.payload["feedbackReason"], "false_positive")
         labels = db.list_review_outcome_labels("obs_status_repeat")
         self.assertEqual(len(labels), 1)
         self.assertEqual(labels[0]["label_source"], "user_explicit")
         self.assertEqual(labels[0]["outcome_label"], "false_positive")
         self.assertEqual(app.effective_review_outcome_label("obs_status_repeat")["outcome_label"], "false_positive")
+        app.ISSUES[0].pop("feedbackReason", None)
+        self.assertEqual(app.issue_payload(app.ISSUES[0])["feedbackReason"], "false_positive")
 
     def test_worker_result_fallback_checksum_includes_review_decision_events(self) -> None:
         base = {
