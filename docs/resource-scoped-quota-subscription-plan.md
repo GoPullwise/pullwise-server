@@ -33,7 +33,7 @@
   - scan 记录里保存了 `installationId`、`installationAccount`、`repositorySelection`、`cloneUrl` 和当时的 `billingUsage`。
   - `GET /billing/plan` 返回 `account: billing_account_payload(user)`，也是 user/account 视角。
 - `pullwise_server/billing.py`
-  - `review_limit(plan)` 目前只区分 `free` 和 `pro`，默认 free 5 次、pro 100 次。
+  - `review_limit(plan)` 目前只区分 `free` 和 `pro`，默认 free 5 次、pro 60 次。
   - Stripe / Creem checkout metadata 使用 `userId` 绑定订阅。
 - `pullwise_server/github_auth.py`
   - `repo_to_pullwise()` 和 `repo_payload_to_pullwise()` 已经把 GitHub repo 的 `id` 映射到前端 repo item 的 `id`。
@@ -265,9 +265,9 @@ Pro workspace:
 
 建议默认值：
 
-- `PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT=10`
-- `PULLWISE_FREE_REPO_REVIEW_LIMIT=3`
-- `PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT=100`
+- `PULLWISE_FREE_WORKSPACE_REVIEW_LIMIT=5`
+- repo 级默认与用户/workspace 级保持一致：free 5、pro 60
+- `PULLWISE_PRO_WORKSPACE_REVIEW_LIMIT=60`
 
 保留当前 `PULLWISE_FREE_REVIEW_LIMIT` 和 `PULLWISE_PRO_REVIEW_LIMIT` 一段时间作为兼容别名，但新语义应迁移到 workspace/repo。
 

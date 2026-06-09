@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import datetime
 import math
 import os
 import sqlite3
@@ -33,7 +34,11 @@ def env_int(names: str | list[str], default: int) -> int:
 
 
 def current_period(timestamp: int | None = None) -> str:
-    return time.strftime("%Y-%m", time.gmtime(timestamp or int(time.time())))
+    return time.strftime("%Y-%m", time.gmtime(current_timestamp(timestamp)))
+
+
+def current_timestamp(timestamp: int | None = None) -> int:
+    return int(time.time()) if timestamp is None else int(timestamp)
 
 
 def reset_at_for_period(period: str) -> int:
@@ -52,6 +57,61 @@ def reset_at_for_period(period: str) -> int:
         return calendar.timegm((now.tm_year + (1 if now.tm_mon == 12 else 0), 1 if now.tm_mon == 12 else now.tm_mon + 1, 1, 0, 0, 0))
 
 
+def timestamp_value(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        if not math.isfinite(value):
+            return None
+        candidate = int(value)
+        return candidate if candidate >= 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+        try:
+            normalized = text.replace("Z", "+00:00")
+            parsed = datetime.datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+        candidate = int(parsed.timestamp())
+        return candidate if candidate >= 0 else None
+    return None
+
+
+def add_months_utc(timestamp: int, months: int) -> int:
+    current = time.gmtime(timestamp)
+    month_index = current.tm_year * 12 + current.tm_mon - 1 + months
+    year = month_index // 12
+    month = month_index % 12 + 1
+    day = min(current.tm_mday, calendar.monthrange(year, month)[1])
+    return calendar.timegm((year, month, day, current.tm_hour, current.tm_min, current.tm_sec))
+
+
+def monthly_cycle_bounds(anchor: int, timestamp: int) -> tuple[int, int]:
+    if timestamp < anchor:
+        return anchor, add_months_utc(anchor, 1)
+    anchor_time = time.gmtime(anchor)
+    timestamp_time = time.gmtime(timestamp)
+    months = (timestamp_time.tm_year - anchor_time.tm_year) * 12 + timestamp_time.tm_mon - anchor_time.tm_mon
+    start = add_months_utc(anchor, months)
+    if start > timestamp:
+        months -= 1
+        start = add_months_utc(anchor, months)
+    reset_at = add_months_utc(anchor, months + 1)
+    while reset_at <= timestamp:
+        months += 1
+        start = reset_at
+        reset_at = add_months_utc(anchor, months + 1)
+    return start, reset_at
+
+
+def cycle_period(start: int) -> str:
+    return f"cycle:{start}"
+
+
 def non_negative_int(value: object) -> int:
     if isinstance(value, bool):
         return 0
@@ -63,12 +123,19 @@ def non_negative_int(value: object) -> int:
         return 0
 
 
-def effective_user_plan(user: dict[str, Any] | None) -> str:
+def effective_user_plan(user: dict[str, Any] | None, *, timestamp: int | None = None) -> str:
     if not user:
         return "free"
+    current_time = current_timestamp(timestamp)
     billing = user.get("billing") if isinstance(user.get("billing"), dict) else {}
     status = str(billing.get("status") or "").lower()
     plan = str(billing.get("plan") or "free").lower()
+    current_period_start = timestamp_value(billing.get("currentPeriodStart"))
+    current_period_end = timestamp_value(billing.get("currentPeriodEnd"))
+    if current_period_start is not None and current_period_start > current_time:
+        return "free"
+    if current_period_end is not None and current_period_end <= current_time:
+        return "free"
     if plan == "pro" and status in {"active", "trialing", "canceling"}:
         return "pro"
     return "free"
@@ -83,7 +150,7 @@ def user_limit_for_plan(plan: str) -> int:
                     "PULLWISE_PRO_USER_REVIEW_LIMIT",
                     "PULLWISE_PRO_REVIEW_LIMIT",
                 ],
-                100,
+                60,
             ),
         )
     return max(
@@ -93,15 +160,61 @@ def user_limit_for_plan(plan: str) -> int:
                 "PULLWISE_FREE_USER_REVIEW_LIMIT",
                 "PULLWISE_FREE_REVIEW_LIMIT",
             ],
-            10,
+            5,
         ),
     )
 
 
 def repository_limit_for_plan(plan: str) -> int:
+    return user_limit_for_plan(plan)
+
+
+def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: int | None = None) -> tuple[str, int]:
+    current_time = current_timestamp(timestamp)
+    billing = user.get("billing") if user and isinstance(user.get("billing"), dict) else {}
+    anchor: int | None = None
+    period_end: int | None = None
     if plan == "pro":
-        return max(0, env_int("PULLWISE_PRO_REPO_REVIEW_LIMIT", user_limit_for_plan("pro")))
-    return max(0, env_int("PULLWISE_FREE_REPO_REVIEW_LIMIT", 3))
+        current_period_start = timestamp_value(billing.get("currentPeriodStart"))
+        current_period_end = timestamp_value(billing.get("currentPeriodEnd"))
+        if current_period_start is not None:
+            anchor = current_period_start
+        elif current_period_end is not None and current_period_end > current_time:
+            anchor = add_months_utc(current_period_end, -1)
+        else:
+            anchor = (
+                timestamp_value(billing.get("lastEventCreated"))
+                or timestamp_value(billing.get("updatedAt"))
+                or timestamp_value(user.get("createdAt") if user else None)
+            )
+        period_end = current_period_end if current_period_end is not None and current_period_end > current_time else None
+    else:
+        expired_at = timestamp_value(billing.get("currentPeriodEnd"))
+        if expired_at is not None and expired_at <= current_time:
+            anchor = expired_at
+        else:
+            anchor = timestamp_value(user.get("createdAt") if user else None)
+
+    if anchor is not None and anchor <= current_time:
+        start, reset_at = monthly_cycle_bounds(anchor, current_time)
+        if period_end is not None and current_time < period_end < reset_at:
+            reset_at = period_end
+        return cycle_period(start), reset_at
+
+    period = current_period(current_time)
+    return period, reset_at_for_period(period)
+
+
+def quota_entitlement_for_user(user: dict[str, Any] | None, *, timestamp: int | None = None) -> dict[str, Any]:
+    plan = effective_user_plan(user, timestamp=timestamp)
+    period, reset_at = quota_cycle_for_user(user, plan, timestamp=timestamp)
+    return {
+        "plan": plan,
+        "period": period,
+        "resetAt": reset_at,
+        "userLimit": user_limit_for_plan(plan),
+        "repositoryLimit": repository_limit_for_plan(plan),
+    }
 
 
 def repository_quota_scope_id(repository: dict[str, Any]) -> str:
@@ -119,13 +232,14 @@ def ensure_quota_bucket(
     period: str | None = None,
     plan: str = "free",
     limit: int,
+    reset_at: int | None = None,
 ) -> dict[str, Any]:
     db.initialize()
     period = period or current_period()
     with closing(db.connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
-            return _ensure_quota_bucket(connection, scope_type=scope_type, scope_id=scope_id, period=period, plan=plan, limit=limit)
+            return _ensure_quota_bucket(connection, scope_type=scope_type, scope_id=scope_id, period=period, plan=plan, limit=limit, reset_at=reset_at)
 
 
 def _ensure_quota_bucket(
@@ -136,18 +250,21 @@ def _ensure_quota_bucket(
     period: str,
     plan: str,
     limit: int,
+    reset_at: int | None = None,
 ) -> dict[str, Any]:
     bucket_id = db.quota_bucket_id(scope_type, scope_id, period, plan)
     limit = max(0, int(limit or 0))
+    reset_at = non_negative_int(reset_at) or reset_at_for_period(period)
     connection.execute(
         """
         INSERT INTO quota_buckets (id, scope_type, scope_id, period, plan, quota_limit, used, reset_at, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 0, ?, strftime('%s', 'now'), strftime('%s', 'now'))
         ON CONFLICT(scope_type, scope_id, period, plan) DO UPDATE SET
             quota_limit = excluded.quota_limit,
+            reset_at = excluded.reset_at,
             updated_at = excluded.updated_at
         """,
-        (bucket_id, scope_type, scope_id, period, plan, limit, reset_at_for_period(period)),
+        (bucket_id, scope_type, scope_id, period, plan, limit, reset_at),
     )
     row = connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (bucket_id,)).fetchone()
     bucket = dict(row)
@@ -174,25 +291,27 @@ def quota_payload(bucket: dict[str, Any], *, scope: str) -> dict[str, Any]:
 
 
 def quota_payload_for_user(user: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any]:
-    plan = effective_user_plan(user)
+    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
     bucket = ensure_quota_bucket(
         scope_type="user",
         scope_id=str(user["id"]),
-        period=current_period(timestamp),
-        plan=plan,
-        limit=user_limit_for_plan(plan),
+        period=entitlement["period"],
+        plan=entitlement["plan"],
+        limit=entitlement["userLimit"],
+        reset_at=entitlement["resetAt"],
     )
     return quota_payload(bucket, scope="user")
 
 
 def quota_payload_for_repository(repository: dict[str, Any], user: dict[str, Any] | None = None, *, timestamp: int | None = None) -> dict[str, Any]:
-    plan = effective_user_plan(user)
+    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
     bucket = ensure_quota_bucket(
         scope_type="repository",
         scope_id=repository_quota_scope_id(repository),
-        period=current_period(timestamp),
-        plan=plan,
-        limit=repository_limit_for_plan(plan),
+        period=entitlement["period"],
+        plan=entitlement["plan"],
+        limit=entitlement["repositoryLimit"],
+        reset_at=entitlement["resetAt"],
     )
     return quota_payload(bucket, scope="repository")
 
@@ -207,10 +326,12 @@ def consume_scan_quota(
     timestamp: int | None = None,
 ) -> dict[str, Any]:
     db.initialize()
-    plan = effective_user_plan(user)
-    period = current_period(timestamp)
-    user_limit = user_limit_for_plan(plan)
-    repository_limit = repository_limit_for_plan(plan)
+    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+    plan = entitlement["plan"]
+    period = entitlement["period"]
+    reset_at = entitlement["resetAt"]
+    user_limit = entitlement["userLimit"]
+    repository_limit = entitlement["repositoryLimit"]
     user_id = str(user["id"])
     repository_id = str(repository["id"])
     repository_scope_id = repository_quota_scope_id(repository)
@@ -241,6 +362,7 @@ def consume_scan_quota(
                 period=period,
                 plan=plan,
                 limit=user_limit,
+                reset_at=reset_at,
             )
             repository_bucket = _ensure_quota_bucket(
                 connection,
@@ -249,6 +371,7 @@ def consume_scan_quota(
                 period=period,
                 plan=plan,
                 limit=repository_limit,
+                reset_at=reset_at,
             )
             if existing_request:
                 connection.commit()

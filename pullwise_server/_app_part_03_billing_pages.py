@@ -11,18 +11,11 @@ def idempotency_key_reused_payload(scan: dict | None) -> dict:
 
 
 def current_review_usage_period(timestamp: int | None = None) -> str:
-    return time.strftime("%Y-%m", time.gmtime(timestamp or now()))
+    return quota.current_period(timestamp or now())
 
 
 def effective_billing_plan(user: dict | None) -> str:
-    if not user:
-        return "free"
-    current = user_billing_state(user)
-    status = str(current.get("status") or "").lower()
-    plan = billing.normalize_plan(current.get("plan"))
-    if plan == "pro" and status in {"active", "trialing", "canceling"}:
-        return "pro"
-    return "free"
+    return quota.effective_user_plan(user)
 
 
 def user_billing_state(user: dict) -> dict:
@@ -53,28 +46,55 @@ def billing_usage_for_user(user: dict, plan_id: str, *, timestamp: int | None = 
 
 
 def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = None, mutate: bool = False) -> dict:
-    plan_id = effective_billing_plan(user)
-    limit = billing.review_limit(plan_id)
-    usage = billing_usage_for_user(user or {}, plan_id, timestamp=timestamp, mutate=mutate) if user else {"period": current_review_usage_period(timestamp), "plan": plan_id, "used": 0}
-    used = non_negative_int(usage.get("used"))
     current = user_billing_state(user) if user else {}
+    if user:
+        usage = quota.quota_payload_for_user(user, timestamp=timestamp)
+    else:
+        entitlement = quota.quota_entitlement_for_user(None, timestamp=timestamp)
+        usage = {
+            "period": entitlement["period"],
+            "plan": entitlement["plan"],
+            "used": 0,
+            "limit": entitlement["userLimit"],
+            "remaining": entitlement["userLimit"],
+        }
+    plan_id = usage["plan"]
     return {
         "plan": plan_id,
         "interval": current.get("interval") if plan_id == "pro" else "month",
         "period": usage["period"],
-        "used": used,
-        "limit": limit,
-        "remaining": max(0, limit - used),
+        "used": usage["used"],
+        "limit": usage["limit"],
+        "remaining": usage["remaining"],
     }
 
 
 def consume_review_quota(user: dict) -> tuple[bool, dict]:
-    entitlement = billing_entitlement_for_user(user, mutate=True)
-    if entitlement["remaining"] <= 0:
-        return False, entitlement
-    usage = billing_usage_for_user(user, entitlement["plan"], mutate=True)
-    usage["used"] = int(usage.get("used") or 0) + 1
-    mark_state_dirty()
+    entitlement = quota.quota_entitlement_for_user(user)
+    bucket = quota.ensure_quota_bucket(
+        scope_type="user",
+        scope_id=str(user["id"]),
+        period=entitlement["period"],
+        plan=entitlement["plan"],
+        limit=entitlement["userLimit"],
+        reset_at=entitlement["resetAt"],
+    )
+    payload = quota.quota_payload(bucket, scope="user")
+    if payload["remaining"] <= 0:
+        return False, billing_entitlement_for_user(user)
+    connection = db.connect()
+    try:
+        with connection:
+            connection.execute(
+                """
+                UPDATE quota_buckets
+                SET used = used + 1, updated_at = strftime('%s', 'now')
+                WHERE id = ? AND used < quota_limit
+                """,
+                (bucket["id"],),
+            )
+    finally:
+        connection.close()
     return True, billing_entitlement_for_user(user)
 
 
@@ -337,36 +357,5 @@ def safe_billing_redirect_response(result: dict, label: str, *, require_url: boo
         return payload
     payload["url"] = billing.provider_redirect_url(payload.get("url"), provider, label)
     return payload
-
-
-def grant_admin_pro_checkout(user: dict, *, success_url: str, plan: str, interval: str) -> dict:
-    plan, interval = billing.validate_checkout_selection(plan, interval)
-    timestamp = now()
-    user["billing"] = {
-        "provider": "admin",
-        "customerId": None,
-        "customerEmail": public_billing_text(user.get("email")),
-        "subscriptionId": None,
-        "subscriptionItemId": None,
-        "status": "active",
-        "plan": plan,
-        "interval": interval,
-        "currentPeriodStart": timestamp,
-        "currentPeriodEnd": None,
-        "cancelAtPeriodEnd": False,
-        "canceledAt": None,
-        "updatedAt": timestamp,
-        "lastEventType": "admin.checkout_granted",
-        "lastEventId": None,
-        "lastEventCreated": timestamp,
-    }
-    return {
-        "provider": "admin",
-        "plan": plan,
-        "interval": interval,
-        "id": make_id("admchk"),
-        "granted": True,
-        "url": success_url,
-    }
 
 

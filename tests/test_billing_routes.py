@@ -340,7 +340,22 @@ class BillingRoutesTest(unittest.TestCase):
         cookie = seed_session()
         authorize_repo_for_seed_user()
         first = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_1"}, cookie=cookie)
-        second = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_2"}, cookie=cookie)
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositories"].append("owner/other")
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositoryItems"].append(
+            {
+                "id": "owner/other",
+                "githubRepoId": "456",
+                "name": "other",
+                "fullName": "owner/other",
+                "defaultBranch": "main",
+                "installationId": "123",
+                "installationAccount": "dev",
+                "repositorySelection": "selected",
+                "cloneUrl": "https://github.com/owner/other.git",
+                "private": True,
+            }
+        )
+        second = HandlerHarness({"repo": "owner/other", "requestId": "scan_req_2"}, cookie=cookie)
 
         with (
             patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_USER_REVIEW_LIMIT": "1"}, clear=True),
@@ -358,6 +373,22 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(billing_payload["usage"]["remaining"], 0)
         self.assertEqual(billing_payload["usage"]["resetAt"], first.payload["billingUsage"]["resetAt"])
         self.assertGreater(billing_payload["usage"]["resetAt"], app.now())
+
+    def test_legacy_consume_review_quota_uses_db_backed_user_quota(self) -> None:
+        seed_session()
+
+        with patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_USER_REVIEW_LIMIT": "1"}, clear=True):
+            first_ok, first_payload = app.consume_review_quota(app.USERS["usr_1"])
+            second_ok, second_payload = app.consume_review_quota(app.USERS["usr_1"])
+            account_payload = app.billing_account_payload(app.USERS["usr_1"])
+
+        self.assertTrue(first_ok)
+        self.assertFalse(second_ok)
+        self.assertEqual(first_payload["used"], 1)
+        self.assertEqual(second_payload["used"], 1)
+        self.assertEqual(second_payload["remaining"], 0)
+        self.assertEqual(account_payload["usage"]["used"], 1)
+        self.assertNotIn("billingUsage", app.USERS["usr_1"])
 
     def test_billing_account_payload_ignores_non_finite_usage(self) -> None:
         seed_session()

@@ -106,8 +106,7 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
-                "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
-                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "1",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
             },
             clear=True,
         )
@@ -138,7 +137,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "user-quota.sqlite3"),
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
-                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "10",
             },
             clear=True,
         ):
@@ -158,13 +156,11 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.CREATED)
 
-    def test_default_user_quota_allows_one_prior_scan_plus_five_distinct_repos(self) -> None:
+    def test_default_user_quota_allows_five_distinct_repos_per_month(self) -> None:
         with patch.dict(
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "default-user-quota.sqlite3"),
-                "PULLWISE_FREE_USER_REVIEW_LIMIT": "10",
-                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "3",
             },
             clear=True,
         ):
@@ -198,14 +194,15 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             repositories = RouteHarness(cookie=cookie, path="/repositories")
             app.PullwiseHandler.route(repositories, "GET")
 
-        self.assertEqual([handler.status for handler in handlers], [HTTPStatus.CREATED] * 6)
-        self.assertEqual(handlers[-1].payload["billingUsage"]["used"], 6)
-        self.assertEqual(handlers[-1].payload["billingUsage"]["limit"], 10)
-        self.assertEqual(handlers[-1].payload["billingUsage"]["remaining"], 4)
+        self.assertEqual([handler.status for handler in handlers], [HTTPStatus.CREATED] * 5 + [HTTPStatus.PAYMENT_REQUIRED])
+        self.assertEqual(handlers[-1].payload["code"], "QUOTA_EXCEEDED_USER")
+        self.assertEqual(handlers[-2].payload["billingUsage"]["used"], 5)
+        self.assertEqual(handlers[-2].payload["billingUsage"]["limit"], 5)
+        self.assertEqual(handlers[-2].payload["billingUsage"]["remaining"], 0)
         self.assertEqual(repositories.status, HTTPStatus.OK)
-        self.assertEqual(repositories.payload["userQuota"]["used"], 6)
-        self.assertEqual(repositories.payload["userQuota"]["remaining"], 4)
-        self.assertEqual(len(app.SCANS), 6)
+        self.assertEqual(repositories.payload["userQuota"]["used"], 5)
+        self.assertEqual(repositories.payload["userQuota"]["remaining"], 0)
+        self.assertEqual(len(app.SCANS), 5)
 
     def test_scan_preflight_reports_user_quota_without_creating_scans(self) -> None:
         with patch.dict(
@@ -213,7 +210,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "preflight-user-quota.sqlite3"),
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "3",
-                "PULLWISE_FREE_REPO_REVIEW_LIMIT": "3",
             },
             clear=True,
         ):

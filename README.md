@@ -150,8 +150,8 @@ PULLWISE_ADMIN_USER_IDS=
 PULLWISE_ADMIN_EMAILS=admin@example.com
 PULLWISE_WORKER_JOB_TIMEOUT_SECONDS=1800
 PULLWISE_WORKER_MAX_RETRIES=3
-PULLWISE_QUOTA_FREE_REVIEWS=10
-PULLWISE_QUOTA_PRO_REVIEWS=100
+PULLWISE_FREE_USER_REVIEW_LIMIT=5
+PULLWISE_PRO_USER_REVIEW_LIMIT=60
 PULLWISE_BILLING_TIMEOUT_SECONDS=15
 PULLWISE_BILLING_CURRENCY=USD
 ```
@@ -641,19 +641,19 @@ The disable switch also accepts `0`, `no`, `off`, or `disabled`.
 Pullwise supports either Stripe or Creem. Configure one provider, or set
 `PULLWISE_BILLING_PROVIDER=stripe|creem` if both providers are present.
 The built-in catalog is Free plus Pro. Scan quota is tracked for the signed-in
-user and for each stable GitHub repository id. Free defaults to 10 user
-scans/month and 3 scans/month for each repository. GitHub forks that report the
+user and for each stable GitHub repository id. Free defaults to 5 user
+scans/month and 5 scans/month for each repository. GitHub forks that report the
 same source repository share the source repository quota bucket. Pro defaults
-to $29/month or $290/year with 100 user scans/month. Monthly review allowance resets each calendar
-month and does not roll over.
+to $29/month or $290/year with 60 user scans/month and 60 scans/month for each
+repository. Monthly review allowance resets on the user's subscription-cycle
+anniversary, or on the free-cycle anniversary when the account is not entitled
+to Pro.
 
 Quota controls:
 
 ```env
-PULLWISE_FREE_USER_REVIEW_LIMIT=10
-PULLWISE_FREE_REPO_REVIEW_LIMIT=3
-PULLWISE_PRO_USER_REVIEW_LIMIT=100
-PULLWISE_PRO_REPO_REVIEW_LIMIT=100
+PULLWISE_FREE_USER_REVIEW_LIMIT=5
+PULLWISE_PRO_USER_REVIEW_LIMIT=60
 ```
 
 Stripe:

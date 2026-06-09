@@ -17,7 +17,7 @@ class BillingContractsTest(unittest.TestCase):
                 "PULLWISE_STRIPE_PRO_MONTHLY_PRICE_ID": "price_monthly",
                 "PULLWISE_STRIPE_PRO_YEARLY_PRICE_ID": "price_yearly",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "5",
-                "PULLWISE_PRO_USER_REVIEW_LIMIT": "100",
+                "PULLWISE_PRO_USER_REVIEW_LIMIT": "60",
                 "PULLWISE_PRO_MONTHLY_AMOUNT": "29",
                 "PULLWISE_PRO_YEARLY_AMOUNT": "290",
             },
@@ -30,7 +30,7 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(plan["plans"][0]["id"], "free")
         self.assertEqual(plan["plans"][0]["reviewLimit"], 5)
         self.assertEqual(plan["plans"][1]["id"], "pro")
-        self.assertEqual(plan["plans"][1]["reviewLimit"], 100)
+        self.assertEqual(plan["plans"][1]["reviewLimit"], 60)
         self.assertEqual(plan["plans"][1]["prices"]["month"]["amount"], "29")
         self.assertEqual(plan["plans"][1]["prices"]["year"]["amount"], "290")
         self.assertTrue(plan["plans"][1]["prices"]["month"]["configured"])

@@ -67,7 +67,7 @@ def review_limit(plan: str) -> int:
                     "PULLWISE_PRO_USER_REVIEW_LIMIT",
                     "PULLWISE_PRO_REVIEW_LIMIT",
                 ],
-                100,
+                60,
             ),
         )
     return max(
@@ -77,7 +77,7 @@ def review_limit(plan: str) -> int:
                 "PULLWISE_FREE_USER_REVIEW_LIMIT",
                 "PULLWISE_FREE_REVIEW_LIMIT",
             ],
-            10,
+            5,
         ),
     )
 
