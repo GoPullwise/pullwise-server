@@ -424,22 +424,24 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(update["status"], "canceled")
 
     def test_creem_subscription_trialing_and_update_events_are_supported(self) -> None:
-        for event_type, status in [("subscription.trialing", "trialing"), ("subscription.update", "active")]:
-            with self.subTest(event_type=event_type):
-                update = billing.billing_update_from_creem_event(
-                    {
-                        "eventType": event_type,
-                        "object": {
-                            "id": "sub_123",
-                            "status": status,
-                            "customer": {"id": "cust_123", "email": "dev@example.com"},
-                        },
-                    }
-                )
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            for event_type, status in [("subscription.trialing", "trialing"), ("subscription.update", "active")]:
+                with self.subTest(event_type=event_type):
+                    update = billing.billing_update_from_creem_event(
+                        {
+                            "eventType": event_type,
+                            "object": {
+                                "id": "sub_123",
+                                "status": status,
+                                "product": {"id": "prod_monthly", "billing_period": "every-month"},
+                                "customer": {"id": "cust_123", "email": "dev@example.com"},
+                            },
+                        }
+                    )
 
-                self.assertIsNotNone(update)
-                self.assertEqual(update["customerId"], "cust_123")
-                self.assertEqual(update["subscriptionId"], "sub_123")
+                    self.assertIsNotNone(update)
+                    self.assertEqual(update["customerId"], "cust_123")
+                    self.assertEqual(update["subscriptionId"], "sub_123")
 
 
 if __name__ == "__main__":

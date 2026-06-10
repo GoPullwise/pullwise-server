@@ -25,12 +25,14 @@ class BillingWebhookTest(unittest.TestCase):
             "eventType": "checkout.completed",
             "object": {
                 "customer": {"id": "cust_1", "email": "dev@example.com"},
+                "product": {"id": "prod_monthly", "billing_period": "every-month"},
                 "subscription": {"id": "sub_1", "status": "active"},
                 "metadata": {"userId": "usr_1"},
             },
         }
 
-        update = billing.billing_update_from_creem_event(event)
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["userId"], "usr_1")
         self.assertEqual(update["provider"], "creem")
@@ -69,7 +71,8 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        update = billing.billing_update_from_creem_event(event)
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["requestId"], "pw_usr_1_req_1")
         self.assertEqual(update["customerId"], "cust_1")
@@ -99,7 +102,8 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        update = billing.billing_update_from_creem_event(event)
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["userId"], "usr_1")
         self.assertEqual(update["customerId"], "cust_1")
@@ -118,22 +122,24 @@ class BillingWebhookTest(unittest.TestCase):
             "subscription.paused": "paused",
             "subscription.trialing": "trialing",
         }
-        for event_type, expected_status in scenarios.items():
-            with self.subTest(event_type=event_type):
-                update = billing.billing_update_from_creem_event(
-                    {
-                        "id": f"evt_{event_type}",
-                        "eventType": event_type,
-                        "object": {
-                            "id": "sub_1",
-                            "status": "active",
-                            "customer": {"id": "cust_1"},
-                            "metadata": {"userId": "usr_1"},
-                        },
-                    }
-                )
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            for event_type, expected_status in scenarios.items():
+                with self.subTest(event_type=event_type):
+                    update = billing.billing_update_from_creem_event(
+                        {
+                            "id": f"evt_{event_type}",
+                            "eventType": event_type,
+                            "object": {
+                                "id": "sub_1",
+                                "status": "active",
+                                "product": {"id": "prod_monthly", "billing_period": "every-month"},
+                                "customer": {"id": "cust_1"},
+                                "metadata": {"userId": "usr_1"},
+                            },
+                        }
+                    )
 
-                self.assertEqual(update["status"], expected_status)
+                    self.assertEqual(update["status"], expected_status)
 
     def test_creem_event_ignores_malformed_event_type(self) -> None:
         update = billing.billing_update_from_creem_event(
@@ -158,17 +164,19 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertIsNone(update)
 
     def test_creem_event_defaults_malformed_status_plan_and_interval(self) -> None:
-        update = billing.billing_update_from_creem_event(
-            {
-                "id": "evt_creem_malformed_values_1",
-                "eventType": "checkout.completed",
-                "object": {
-                    "customer": {"id": "cust_1"},
-                    "subscription": {"id": "sub_1", "status": {"state": "active"}},
-                    "metadata": {"userId": "usr_1", "plan": {"tier": "pro"}, "interval": ["year"]},
-                },
-            }
-        )
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(
+                {
+                    "id": "evt_creem_malformed_values_1",
+                    "eventType": "checkout.completed",
+                    "object": {
+                        "customer": {"id": "cust_1"},
+                        "product": {"id": "prod_monthly", "billing_period": "every-month"},
+                        "subscription": {"id": "sub_1", "status": {"state": "active"}},
+                        "metadata": {"userId": "usr_1", "plan": {"tier": "pro"}, "interval": ["year"]},
+                    },
+                }
+            )
 
         self.assertEqual(update["status"], "active")
         self.assertEqual(update["plan"], "pro")
@@ -192,6 +200,41 @@ class BillingWebhookTest(unittest.TestCase):
 
         self.assertEqual(update["interval"], "year")
 
+    def test_creem_checkout_completed_rejects_unknown_product_id(self) -> None:
+        event = {
+            "id": "evt_creem_unknown_checkout_product_1",
+            "eventType": "checkout.completed",
+            "object": {
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+                "product": {"id": "prod_attacker", "billing_period": "every-month"},
+                "subscription": {"id": "sub_1", "status": "active"},
+                "metadata": {"userId": "usr_1"},
+            },
+        }
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
+
+        self.assertIsNone(update)
+
+    def test_creem_subscription_update_rejects_unknown_product_id_for_pro_status(self) -> None:
+        event = {
+            "id": "evt_creem_unknown_subscription_product_1",
+            "eventType": "subscription.update",
+            "object": {
+                "id": "sub_1",
+                "status": "active",
+                "product": {"id": "prod_attacker", "billing_period": "every-month"},
+                "customer": {"id": "cust_1"},
+                "metadata": {"userId": "usr_1"},
+            },
+        }
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
+
+        self.assertIsNone(update)
+
     def test_creem_expired_subscription_is_not_mapped_to_canceled(self) -> None:
         event = {
             "id": "evt_creem_expired_1",
@@ -211,7 +254,8 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        update = billing.billing_update_from_creem_event(event)
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["status"], "past_due")
         self.assertEqual(update["interval"], "year")

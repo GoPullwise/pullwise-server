@@ -547,6 +547,7 @@ class BillingRoutesTest(unittest.TestCase):
                 "eventType": "checkout.completed",
                 "object": {
                     "customer": {"id": "cust_1", "email": "dev@example.com"},
+                    "product": {"id": "prod_monthly", "billing_period": "every-month"},
                     "subscription": {"id": "sub_1", "status": "active"},
                     "metadata": {"userId": "usr_1"},
                 },
@@ -556,7 +557,14 @@ class BillingRoutesTest(unittest.TestCase):
         signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
         handler = HandlerHarness(raw_body=raw, headers={"creem-signature": signature})
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test"}, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test",
+                "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
+            },
+            clear=True,
+        ):
             app.PullwiseHandler.handle_post(handler, "/webhooks/creem", {}, ["webhooks", "creem"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
@@ -1074,6 +1082,7 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
             {
                 "PULLWISE_DB_PATH": self.db_path,
                 "PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test",
+                "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
                 "PULLWISE_PRO_USER_REVIEW_LIMIT": "60",
                 "PULLWISE_FREE_USER_REVIEW_LIMIT": "5",
             },

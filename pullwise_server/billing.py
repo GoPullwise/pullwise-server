@@ -19,6 +19,9 @@ class BillingProviderResponseError(RuntimeError):
     pass
 
 
+CREEM_PRO_ENTITLEMENT_STATUSES = {"active", "trialing", "canceling"}
+
+
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
@@ -488,6 +491,11 @@ def product_payload(value: object) -> dict | None:
     return {"id": product_id} if product_id else None
 
 
+def creem_product_configured_for_pro(product: dict | None) -> bool:
+    product_id = object_id(product)
+    return bool(product_id and product_id in creem_configured_product_ids())
+
+
 def billing_update_from_creem_event(event: dict) -> dict | None:
     event_type = text_payload(event.get("eventType") or event.get("type"), "")
     obj = dict_payload(event.get("object"))
@@ -540,6 +548,9 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         return None
 
     plan = normalize_plan(metadata.get("plan") or subscription_metadata.get("plan") or "pro")
+    status = normalize_creem_subscription_status(event_type, subscription.get("status") if isinstance(subscription, dict) else "active")
+    if plan == "pro" and status in CREEM_PRO_ENTITLEMENT_STATUSES and not creem_product_configured_for_pro(product):
+        return None
     interval = normalize_interval(
         metadata.get("interval")
         or subscription_metadata.get("interval")
@@ -553,7 +564,7 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         "customerId": customer_id,
         "customerEmail": customer.get("email"),
         "subscriptionId": subscription.get("id") if isinstance(subscription, dict) else None,
-        "status": normalize_creem_subscription_status(event_type, subscription.get("status") if isinstance(subscription, dict) else "active"),
+        "status": status,
         "plan": plan,
         "interval": interval,
         "currentPeriodStart": subscription.get("current_period_start_date") if isinstance(subscription, dict) else None,
