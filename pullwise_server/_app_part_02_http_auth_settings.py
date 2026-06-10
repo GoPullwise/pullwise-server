@@ -367,6 +367,31 @@ def public_user_email(value: object) -> str:
     return github_auth.clean_account_email_address(value) or ""
 
 
+def admin_user_subscription_payload(user: dict) -> dict:
+    current = user_billing_state(user)
+    plan = (public_billing_text(current.get("plan")) or "").lower()
+    if plan not in {"free", "pro"}:
+        plan = "free"
+    return {
+        "provider": public_billing_text(current.get("provider")),
+        "status": public_billing_status(current.get("status")),
+        "plan": plan,
+        "effectivePlan": effective_billing_plan(user),
+        "interval": billing.normalize_interval(current.get("interval")),
+        "customerId": public_billing_text(current.get("customerId")),
+        "customerEmail": public_billing_text(current.get("customerEmail")),
+        "subscriptionId": public_billing_text(current.get("subscriptionId")),
+        "subscriptionItemId": public_billing_text(current.get("subscriptionItemId")),
+        "currentPeriodStart": pull_request_timestamp(current.get("currentPeriodStart")),
+        "currentPeriodEnd": pull_request_timestamp(current.get("currentPeriodEnd")),
+        "cancelAtPeriodEnd": current.get("cancelAtPeriodEnd") if isinstance(current.get("cancelAtPeriodEnd"), bool) else None,
+        "canceledAt": pull_request_timestamp(current.get("canceledAt")),
+        "lastEventType": public_billing_text(current.get("lastEventType")),
+        "lastEventCreated": pull_request_timestamp(current.get("lastEventCreated")),
+        "updatedAt": pull_request_timestamp(current.get("updatedAt")),
+    }
+
+
 def admin_user_payload(user: dict, *, current_user_id: str | None = None) -> dict:
     user_id = public_issue_text(user.get("id"))
     github_access = user.get("githubRepositoryAccess")
@@ -394,6 +419,7 @@ def admin_user_payload(user: dict, *, current_user_id: str | None = None) -> dic
         "repositoryCount": repository_count,
         "scanCount": scan_count,
         "issueCount": issue_count,
+        "subscription": admin_user_subscription_payload(user),
     }
 
 

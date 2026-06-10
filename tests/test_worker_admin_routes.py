@@ -382,6 +382,22 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
 
     def test_admin_can_list_authorized_users(self) -> None:
+        app.USERS["usr_user"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_user",
+            "customerEmail": "user@example.com",
+            "subscriptionId": "sub_user",
+            "subscriptionItemId": "item_user",
+            "status": "active",
+            "plan": "pro",
+            "interval": "year",
+            "currentPeriodStart": 1710000000,
+            "currentPeriodEnd": 4102444800,
+            "cancelAtPeriodEnd": False,
+            "lastEventType": "subscription.active",
+            "lastEventCreated": 1710000123,
+            "updatedAt": 1710000130,
+        }
         app.SCANS = [
             {"id": "sc_user", "userId": "usr_user", "repo": "owner/repo", "status": "done"},
             {"id": "sc_admin", "userId": "usr_admin", "repo": "owner/repo", "status": "done"},
@@ -402,6 +418,27 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertFalse(users["usr_user"]["admin"])
         self.assertEqual(users["usr_user"]["scanCount"], 1)
         self.assertEqual(users["usr_user"]["issueCount"], 1)
+        self.assertEqual(
+            users["usr_user"]["subscription"],
+            {
+                "provider": "creem",
+                "status": "active",
+                "plan": "pro",
+                "effectivePlan": "pro",
+                "interval": "year",
+                "customerId": "cust_user",
+                "customerEmail": "user@example.com",
+                "subscriptionId": "sub_user",
+                "subscriptionItemId": "item_user",
+                "currentPeriodStart": 1710000000,
+                "currentPeriodEnd": 4102444800,
+                "cancelAtPeriodEnd": False,
+                "canceledAt": None,
+                "lastEventType": "subscription.active",
+                "lastEventCreated": 1710000123,
+                "updatedAt": 1710000130,
+            },
+        )
 
     def test_admin_delete_user_removes_sessions_state_and_database_records(self) -> None:
         app.USERS["usr_user"]["githubRepositoryAccess"] = {
