@@ -11,6 +11,7 @@ import requests
 
 DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_USER_AGENT = "PullwiseDevAPI/0.1"
+GITHUB_NOREPLY_EMAIL_DOMAIN = "users.noreply.github.com"
 
 
 class GitHubError(ValueError):
@@ -193,7 +194,7 @@ def fetch_user_profile(access_token: str) -> dict:
     if not login:
         raise GitHubError("GitHub user profile response is missing login.")
     profile["login"] = login
-    profile["primaryEmail"] = clean_email_address(profile.get("email")) or fetch_primary_email(access_token)
+    profile["primaryEmail"] = clean_account_email_address(profile.get("email")) or fetch_primary_email(access_token)
     return profile
 
 
@@ -220,11 +221,25 @@ def fetch_primary_email(access_token: str) -> str | None:
 
 
 def email_record_address(email: dict) -> str | None:
-    return clean_email_address(email.get("email"))
+    return clean_account_email_address(email.get("email"))
 
 
 def clean_email_address(address: object) -> str | None:
     return clean_profile_text(address)
+
+
+def clean_account_email_address(address: object) -> str | None:
+    email = clean_email_address(address)
+    if not email or is_github_noreply_email(email):
+        return None
+    return email
+
+
+def is_github_noreply_email(address: object) -> bool:
+    email = clean_email_address(address)
+    if not email or "@" not in email:
+        return False
+    return email.rsplit("@", 1)[1].lower() == GITHUB_NOREPLY_EMAIL_DOMAIN
 
 
 def clean_profile_text(value: object) -> str | None:

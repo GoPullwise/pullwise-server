@@ -511,8 +511,8 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
     user_id = "usr_github_" + github_id
     profile_name = clean_user_profile_text(profile.get("name"))
     email = (
-        clean_user_profile_text(profile.get("primaryEmail"))
-        or clean_user_profile_text(profile.get("email"))
+        github_auth.clean_account_email_address(profile.get("primaryEmail"))
+        or github_auth.clean_account_email_address(profile.get("email"))
         or f"{login}@users.noreply.github.com"
     )
     avatar_url = trusted_public_url(profile.get("avatar_url"))
