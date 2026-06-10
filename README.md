@@ -499,7 +499,10 @@ PULLWISE_WATCH_RUN_SYNC_ENV=true PULLWISE_WATCH_RUN_DOCTOR=true ./git-watch.sh
 
 The watcher refuses to update a dirty working tree unless
 `PULLWISE_WATCH_ALLOW_DIRTY=true` is set, uses `git pull --ff-only`, and writes
-logs to `.pullwise/git-watch.log`.
+logs to `.pullwise/git-watch.log`. It records the last successfully deployed
+commit in `.pullwise/git-watch.deployed-head`; if setup, tests, restart, or
+health checks fail after a pull, the next polling cycle retries deployment even
+when Git is already at the latest upstream commit.
 
 For server migration or backup, export the runtime state:
 

@@ -13,6 +13,7 @@ REMOTE=${PULLWISE_WATCH_REMOTE:-origin}
 BRANCH=${PULLWISE_WATCH_BRANCH:-}
 LOG_FILE=${PULLWISE_WATCH_LOG_FILE:-$APP_DIR/.pullwise/git-watch.log}
 LOCK_DIR=${PULLWISE_WATCH_LOCK_DIR:-$APP_DIR/.pullwise/git-watch.lock}
+DEPLOYED_HEAD_FILE=${PULLWISE_WATCH_DEPLOYED_HEAD_FILE:-$APP_DIR/.pullwise/git-watch.deployed-head}
 
 RUN_SETUP=${PULLWISE_WATCH_RUN_SETUP:-true}
 RUN_TESTS=${PULLWISE_WATCH_RUN_TESTS:-true}
@@ -44,6 +45,7 @@ Common environment overrides:
   PULLWISE_WATCH_BRANCH=main
   PULLWISE_WATCH_RUN_SYNC_ENV=false
   PULLWISE_WATCH_RUN_DOCTOR=false
+  PULLWISE_WATCH_DEPLOYED_HEAD_FILE=.pullwise/git-watch.deployed-head
   PULLWISE_WATCH_RESTART_COMMAND='./launcher.sh restart'
 
 Default update flow:
@@ -85,6 +87,17 @@ run_command() {
   command_text=$2
   log "running $label: $command_text"
   sh -c "$command_text"
+}
+
+read_deployed_head() {
+  [ -f "$DEPLOYED_HEAD_FILE" ] || return 1
+  sed -n '1p' "$DEPLOYED_HEAD_FILE" | tr -cd '0-9a-fA-F'
+}
+
+write_deployed_head() {
+  head=$1
+  mkdir -p "$(dirname -- "$DEPLOYED_HEAD_FILE")" || return 1
+  printf '%s\n' "$head" > "$DEPLOYED_HEAD_FILE"
 }
 
 current_branch() {
@@ -139,6 +152,21 @@ deploy_after_pull() {
   fi
 }
 
+deploy_current_head() {
+  reason=$1
+  head=$(git rev-parse HEAD) || return 1
+  log "deploying $reason at $head"
+  deploy_after_pull || return 1
+  write_deployed_head "$head" || return 1
+  log "deployed HEAD $head"
+}
+
+current_head_needs_deploy() {
+  current_head=$(git rev-parse HEAD) || return 1
+  deployed_head=$(read_deployed_head 2>/dev/null || true)
+  [ "$current_head" != "$deployed_head" ]
+}
+
 check_once() {
   cd "$APP_DIR" || return 1
   mkdir -p "$(dirname -- "$LOG_FILE")" || return 1
@@ -158,11 +186,19 @@ check_once() {
   remote_head=$(git rev-parse FETCH_HEAD) || return 1
 
   if [ "$local_head" = "$remote_head" ]; then
+    if current_head_needs_deploy; then
+      deploy_current_head "current HEAD has not completed deployment"
+      return $?
+    fi
     log "no update; HEAD is $local_head"
     return 0
   fi
 
   if git merge-base --is-ancestor "$remote_head" HEAD; then
+    if current_head_needs_deploy; then
+      deploy_current_head "local HEAD is ahead of $remote_ref and has not completed deployment"
+      return $?
+    fi
     log "local HEAD is ahead of $remote_ref; skipping deploy"
     return 0
   fi
@@ -174,7 +210,7 @@ check_once() {
 
   log "updating $branch: $local_head -> $remote_head"
   git pull --ff-only "$REMOTE" "$branch" || return 1
-  deploy_after_pull
+  deploy_current_head "updated $branch"
 }
 
 with_lock() {
