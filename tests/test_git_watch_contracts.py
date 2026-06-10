@@ -47,8 +47,9 @@ class GitWatchContractsTest(unittest.TestCase):
         run_git(["checkout", "-b", "main"], source)
         run_git(["config", "user.email", "test@example.com"], source)
         run_git(["config", "user.name", "Test User"], source)
+        (source / ".gitignore").write_text(".pullwise/\n", encoding="utf-8")
         (source / "README.md").write_text("initial\n", encoding="utf-8")
-        run_git(["add", "README.md"], source)
+        run_git(["add", ".gitignore", "README.md"], source)
         run_git(["commit", "-m", "initial"], source)
 
         remote = root / "origin.git"
