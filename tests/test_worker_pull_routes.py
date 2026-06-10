@@ -495,6 +495,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         running_scan_payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(running_scan_payload["repositoryGraph"]["version"], "repository-graph/0.1")
         self.assertEqual(running_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/app.py"])
+        self.assertEqual(running_scan_payload["semanticGraph"]["version"], "semantic-code-graph/0.1")
+        self.assertEqual(running_scan_payload["semanticGraph"]["stats"]["source"], "static")
         self.assertEqual(running_scan_payload["auditSwarm"]["stage"], "discovery")
         self.assertEqual(running_scan_payload["auditSwarm"]["adapter"], "codex")
         self.assertEqual(running_scan_payload["auditSwarm"]["counts"]["issueCards"], 2)
@@ -543,6 +545,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         self.assertEqual(final_scan_payload["repositoryGraph"]["summary"], "Final graph")
         self.assertEqual(final_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/final.py"])
+        self.assertEqual(final_scan_payload["semanticGraph"]["summary"], "API semantic graph")
         self.assertEqual(final_scan_payload["auditSwarm"]["stage"], "report")
         self.assertEqual(final_scan_payload["auditSwarm"]["counts"]["issueCards"], 1)
         self.assertEqual(final_scan_payload["auditSwarm"]["issueCards"][0]["issueId"], "issue-hardcoded-token")
@@ -2112,11 +2115,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(owner.status, HTTPStatus.OK)
         self.assertEqual(owner.payload["repositoryGraph"]["version"], "repository-graph/0.1")
+        self.assertEqual(owner.payload["semanticGraph"]["version"], "semantic-code-graph/0.1")
         archive = app.scan_audit_bundle_zip_bytes(scan)
         with zipfile.ZipFile(io.BytesIO(archive), "r") as bundle:
             self.assertIn("repository-graph.json", bundle.namelist())
+            self.assertIn("semantic-graph.json", bundle.namelist())
             graph = json.loads(bundle.read("repository-graph.json").decode("utf-8"))
+            semantic_graph = json.loads(bundle.read("semantic-graph.json").decode("utf-8"))
         self.assertEqual(graph["version"], "repository-graph/0.1")
+        self.assertEqual(semantic_graph["version"], "semantic-code-graph/0.1")
 
     def test_scan_audit_bundle_zip_route_reuses_cached_archive(self) -> None:
         self.audit_bundle_cache_fixture()

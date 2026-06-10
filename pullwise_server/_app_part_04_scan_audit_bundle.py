@@ -359,6 +359,9 @@ def scan_payload(scan: dict) -> dict:
     repository_graph = public_repository_graph(scan.get("repositoryGraph") or scan.get("repository_graph"))
     if repository_graph:
         payload["repositoryGraph"] = repository_graph
+        semantic_graph = repository_graph.get("semanticGraph") if isinstance(repository_graph.get("semanticGraph"), dict) else {}
+        if semantic_graph:
+            payload["semanticGraph"] = semantic_graph
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0
@@ -2715,6 +2718,7 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         evidence_items += len(evidence)
     preflight = public_scan.get("preflight") or {}
     repository_graph = public_scan.get("repositoryGraph") if isinstance(public_scan.get("repositoryGraph"), dict) else {}
+    semantic_graph = public_scan.get("semanticGraph") if isinstance(public_scan.get("semanticGraph"), dict) else {}
     log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
     bundle = {
         "schemaVersion": 1,
@@ -2741,6 +2745,8 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
     }
     if repository_graph:
         bundle["repositoryGraph"] = repository_graph
+    if semantic_graph:
+        bundle["semanticGraph"] = semantic_graph
     artifacts = audit_bundle_artifacts(bundle)
     bundle["artifactManifest"] = [
         {key: artifact[key] for key in ("path", "mediaType", "size", "sha256")}
@@ -2904,6 +2910,14 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
                 "repository-graph.json",
                 "application/json",
                 json.dumps(bundle["repositoryGraph"], ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            )
+        )
+    if isinstance(bundle.get("semanticGraph"), dict):
+        artifacts.append(
+            audit_bundle_artifact(
+                "semantic-graph.json",
+                "application/json",
+                json.dumps(bundle["semanticGraph"], ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             )
         )
     artifacts.append(audit_bundle_artifact("audit.json", "application/json", audit_bundle_json_text(bundle)))
