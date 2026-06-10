@@ -220,6 +220,128 @@ def semantic_graph_fixture() -> dict:
     }
 
 
+def impact_graph_fixture() -> dict:
+    return {
+        "version": "impact-graph/0.1",
+        "mode": "repository",
+        "summary": "Impact graph: 1 target, 1 test link, 1 doc link, 1 config link.",
+        "stats": {
+            "targets": 1,
+            "testedTargets": 1,
+            "documentedTargets": 1,
+            "configuredTargets": 1,
+            "testsEdges": 1,
+            "documentsEdges": 1,
+            "configuresEdges": 1,
+            "changedFiles": 1,
+            "truncated": False,
+        },
+        "changedFiles": ["src/app.py", "C:\\worker\\repo\\secret.py"],
+        "targets": [
+            {
+                "id": "file:src/app.py",
+                "path": "src/app.py",
+                "label": "app.py",
+                "type": "file",
+                "risk": 0.74,
+                "relations": {
+                    "tests": [
+                        {
+                            "id": "file:tests/test_app.py",
+                            "path": "tests/test_app.py",
+                            "label": "test_app.py",
+                            "type": "test",
+                            "confidence": 0.95,
+                            "evidenceKind": "import",
+                            "evidence": [
+                                {
+                                    "kind": "import",
+                                    "file": "tests/test_app.py",
+                                    "line": 3,
+                                    "text": "from src.app import app\nwith newline",
+                                }
+                            ],
+                        }
+                    ],
+                    "documents": [{"id": "file:docs/api.md", "path": "docs/api.md", "type": "doc"}],
+                    "configures": [{"id": "file:package.json", "path": "package.json", "type": "config"}],
+                    "importedBy": [{"id": "file:src/server.py", "path": "src/server.py", "type": "file"}],
+                    "symbols": [
+                        {
+                            "id": "symbol:src/app.py:health",
+                            "path": "src/app.py",
+                            "label": "health",
+                            "type": "function",
+                            "line": 6,
+                        }
+                    ],
+                },
+                "gaps": ["no_direct_docs"],
+            },
+            {"id": "file:bad", "path": "C:\\worker\\repo\\bad.py", "label": "bad", "type": "file"},
+        ],
+        "coverage": {
+            "sourceFilesWithoutTests": ["src/untested.py"],
+            "sourceFilesWithoutDocs": ["src/app.py"],
+            "testsWithoutTargets": ["tests/orphan_test.py"],
+            "docsWithoutTargets": ["docs/orphan.md"],
+        },
+        "promptText": "Impact context:\n- src/app.py -> tests: tests/test_app.py\n- C:\\worker\\repo\\secret.py leaked",
+    }
+
+
+def repository_graph_v2_fixture() -> dict:
+    payload = repository_graph_fixture()
+    payload["version"] = "repository-graph/0.2"
+    payload["nodes"] = [
+        *payload["nodes"][:2],
+        {"id": "file:tests/test_app.py", "label": "test_app.py", "type": "test", "path": "tests/test_app.py"},
+        {"id": "file:docs/api.md", "label": "api.md", "type": "doc", "path": "docs/api.md"},
+        {"id": "file:package.json", "label": "package.json", "type": "config", "path": "package.json"},
+    ]
+    payload["edges"] = [
+        *payload["edges"][:1],
+        {
+            "id": "tests:file:tests/test_app.py->file:src/app.py",
+            "source": "file:tests/test_app.py",
+            "target": "file:src/app.py",
+            "type": "tests",
+            "weight": 1,
+            "confidence": 0.946,
+            "evidence": [
+                {
+                    "kind": "import",
+                    "file": "tests/test_app.py",
+                    "line": 3,
+                    "text": "from src.app import app",
+                },
+                {
+                    "kind": "absolute",
+                    "file": "C:\\worker\\repo\\secret.py",
+                    "line": 4,
+                    "text": "secret\nline",
+                },
+            ],
+        },
+        {
+            "id": "documents:file:docs/api.md->file:src/app.py",
+            "source": "file:docs/api.md",
+            "target": "file:src/app.py",
+            "type": "documents",
+            "confidence": 0.85,
+        },
+        {
+            "id": "configures:file:package.json->dir:src",
+            "source": "file:package.json",
+            "target": "dir:src",
+            "type": "configures",
+            "confidence": 0.75,
+        },
+    ]
+    payload["impactGraph"] = impact_graph_fixture()
+    return payload
+
+
 class WorkerPullRoutesTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -406,6 +528,98 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(len(semantic_payload["edges"]), 1)
         self.assertEqual(semantic_payload["stats"]["source"], "static")
 
+    def test_public_repository_graph_accepts_v2_traceability_and_impact_graph(self) -> None:
+        payload = app.public_repository_graph(repository_graph_v2_fixture())
+
+        self.assertEqual(payload["version"], "repository-graph/0.2")
+        node_types = {node["type"] for node in payload["nodes"]}
+        self.assertIn("doc", node_types)
+        self.assertIn("config", node_types)
+        edge_types = {edge["type"] for edge in payload["edges"]}
+        self.assertIn("tests", edge_types)
+        self.assertIn("documents", edge_types)
+        self.assertIn("configures", edge_types)
+        tests_edge = next(edge for edge in payload["edges"] if edge["type"] == "tests")
+        self.assertEqual(tests_edge["confidence"], 0.946)
+        self.assertEqual(tests_edge["evidence"][0]["file"], "tests/test_app.py")
+        self.assertNotIn("file", tests_edge["evidence"][1])
+        self.assertNotIn("\n", tests_edge["evidence"][1]["text"])
+        self.assertEqual(payload["impactGraph"]["version"], "impact-graph/0.1")
+        self.assertEqual(payload["impactGraph"]["targets"][0]["relations"]["tests"][0]["path"], "tests/test_app.py")
+        serialized = json.dumps(payload)
+        self.assertNotIn("C:\\worker", serialized)
+        self.assertNotIn("secret.py", serialized)
+
+    def test_public_impact_graph_drops_absolute_paths_from_text_fields(self) -> None:
+        raw = impact_graph_fixture()
+        raw["summary"] = "Impact graph from C:\\worker\\repo\\secret.py"
+        raw["promptText"] = "Impact context:\n- src/app.py is safe\n- /home/runner/work/repo/secret.py leaked"
+        raw["targets"][0]["id"] = "file:C:/worker/repo/src/app.py"
+        raw["targets"][0]["label"] = "C:\\worker\\repo\\src\\app.py"
+        raw["targets"][0]["gaps"] = ["safe_gap", "C:\\worker\\repo\\gap"]
+        raw["targets"][0]["evidence"] = [
+            {
+                "kind": "C:\\worker\\repo\\kind",
+                "file": "C:\\worker\\repo\\src\\app.py",
+                "line": 4,
+                "text": "opened C:\\worker\\repo\\src\\app.py",
+            }
+        ]
+        relation = raw["targets"][0]["relations"]["tests"][0]
+        relation["id"] = "file:C:/worker/repo/tests/test_app.py"
+        relation["label"] = "C:\\worker\\repo\\tests\\test_app.py"
+        relation["signature"] = "loads /home/runner/work/repo/src/app.py"
+        relation["evidenceKind"] = "C:\\worker\\repo\\kind"
+        relation["evidence"].append(
+            {
+                "kind": "trace",
+                "file": "C:\\worker\\repo\\secret.py",
+                "line": 9,
+                "text": "uses C:\\worker\\repo\\secret.py",
+            }
+        )
+
+        payload = app.public_impact_graph(raw)
+        serialized = json.dumps(payload, sort_keys=True)
+
+        self.assertEqual(payload["targets"][0]["id"], "file:src/app.py")
+        self.assertEqual(payload["targets"][0]["label"], "app.py")
+        self.assertEqual(payload["targets"][0]["gaps"], ["safe_gap"])
+        self.assertEqual(payload["targets"][0]["relations"]["tests"][0]["id"], "file:tests/test_app.py")
+        self.assertEqual(payload["targets"][0]["relations"]["tests"][0]["label"], "test_app.py")
+        self.assertNotIn("summary", payload)
+        self.assertEqual(payload["promptText"], "Impact context:\n- src/app.py is safe")
+        self.assertNotIn("C:\\worker", serialized)
+        self.assertNotIn("C:/worker", serialized)
+        self.assertNotIn("/home/runner", serialized)
+        self.assertNotIn("secret.py", serialized)
+
+    def test_scan_job_payload_includes_changeset_context_from_scan_state(self) -> None:
+        scan = {
+            "id": "sc_changes",
+            "repo": "acme/api",
+            "branch": "feature/impact",
+            "commit": "abc123",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "changedFiles": ["src/app.py", "C:\\worker\\repo\\secret.py"],
+            "baseCommit": "def456",
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        payload = app.scan_job_payload(job)
+        scan_public = app.scan_payload(scan)
+
+        self.assertEqual(payload["changed_files"], ["src/app.py"])
+        self.assertEqual(payload["base_commit"], "def456")
+        self.assertEqual(scan_public["changedFiles"], ["src/app.py"])
+        self.assertEqual(scan_public["baseCommit"], "def456")
+
     def test_worker_heartbeat_claim_progress_and_result_are_idempotent(self) -> None:
         scan = {
             "id": "sc_1",
@@ -475,6 +689,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "logs_summary": "ok",
                 "repository_graph": repository_graph_fixture(),
                 "semantic_graph": semantic_graph_fixture(),
+                "impact_graph": impact_graph_fixture(),
                 "audit_swarm": {
                     "protocol": "audit-swarm/0.1",
                     "stage": "discovery",
@@ -504,6 +719,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(running_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/app.py"])
         self.assertNotIn("semanticGraph", running_scan_payload["repositoryGraph"])
         self.assertEqual(running_scan_payload["semanticGraph"]["version"], "semantic-code-graph/0.1")
+        self.assertEqual(running_scan_payload["impactGraph"]["version"], "impact-graph/0.1")
+        self.assertEqual(running_scan_payload["impactGraph"]["targets"][0]["path"], "src/app.py")
         self.assertEqual(running_scan_payload["semanticGraph"]["stats"]["source"], "static")
         self.assertEqual(running_scan_payload["auditSwarm"]["stage"], "discovery")
         self.assertEqual(running_scan_payload["auditSwarm"]["adapter"], "codex")
@@ -539,6 +756,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             },
             "repository_graph": final_repository_graph,
             "semantic_graph": semantic_graph_fixture(),
+            "impactGraph": impact_graph_fixture(),
             "result_checksum": "checksum-1",
         }
         result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
@@ -554,6 +772,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         self.assertEqual(final_scan_payload["repositoryGraph"]["summary"], "Final graph")
         self.assertEqual(final_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/final.py"])
+        self.assertEqual(final_scan_payload["impactGraph"]["coverage"]["sourceFilesWithoutDocs"], ["src/app.py"])
+        self.assertEqual(final_scan_payload["repositoryGraph"]["impactGraph"]["version"], "impact-graph/0.1")
         self.assertNotIn("semanticGraph", final_scan_payload["repositoryGraph"])
         self.assertEqual(final_scan_payload["semanticGraph"]["summary"], "API semantic graph")
         self.assertEqual(final_scan_payload["auditSwarm"]["stage"], "report")
@@ -2115,8 +2335,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
     def test_scan_audit_bundle_includes_repository_graph(self) -> None:
         scan = self.audit_bundle_cache_fixture()
-        scan["repositoryGraph"] = app.public_repository_graph(repository_graph_fixture())
+        scan["repositoryGraph"] = app.public_repository_graph(repository_graph_v2_fixture())
         scan["semanticGraph"] = app.public_repository_semantic_graph(semantic_graph_fixture())
+        scan["impactGraph"] = app.public_impact_graph(impact_graph_fixture(), repository_graph=scan["repositoryGraph"])
 
         owner = RouteHarness(
             "/scans/sc_cache/audit-bundle",
@@ -2125,16 +2346,48 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(owner, "GET")
 
         self.assertEqual(owner.status, HTTPStatus.OK)
-        self.assertEqual(owner.payload["repositoryGraph"]["version"], "repository-graph/0.1")
+        self.assertEqual(owner.payload["repositoryGraph"]["version"], "repository-graph/0.2")
         self.assertEqual(owner.payload["semanticGraph"]["version"], "semantic-code-graph/0.1")
+        self.assertEqual(owner.payload["impactGraph"]["version"], "impact-graph/0.1")
         archive = app.scan_audit_bundle_zip_bytes(scan)
         with zipfile.ZipFile(io.BytesIO(archive), "r") as bundle:
             self.assertIn("repository-graph.json", bundle.namelist())
             self.assertIn("semantic-graph.json", bundle.namelist())
+            self.assertIn("impact-graph.json", bundle.namelist())
+            self.assertIn("impact-summary.md", bundle.namelist())
             graph = json.loads(bundle.read("repository-graph.json").decode("utf-8"))
             semantic_graph = json.loads(bundle.read("semantic-graph.json").decode("utf-8"))
-        self.assertEqual(graph["version"], "repository-graph/0.1")
+            impact_graph = json.loads(bundle.read("impact-graph.json").decode("utf-8"))
+            impact_summary = bundle.read("impact-summary.md").decode("utf-8")
+        self.assertEqual(graph["version"], "repository-graph/0.2")
         self.assertEqual(semantic_graph["version"], "semantic-code-graph/0.1")
+        self.assertEqual(impact_graph["version"], "impact-graph/0.1")
+        self.assertIn("src/app.py", impact_summary)
+
+    def test_scan_impact_graph_routes_return_full_and_focused_views(self) -> None:
+        scan = self.audit_bundle_cache_fixture()
+        scan["repositoryGraph"] = app.public_repository_graph(repository_graph_v2_fixture())
+        scan["impactGraph"] = app.public_impact_graph(impact_graph_fixture(), repository_graph=scan["repositoryGraph"])
+
+        owner = RouteHarness(
+            "/scans/sc_cache/impact-graph",
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+        )
+        app.PullwiseHandler.route(owner, "GET")
+
+        self.assertEqual(owner.status, HTTPStatus.OK)
+        self.assertEqual(owner.payload["impactGraph"]["targets"][0]["path"], "src/app.py")
+
+        focus = RouteHarness(
+            "/scans/sc_cache/impact-graph/focus?path=src/app.py",
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+        )
+        app.PullwiseHandler.route(focus, "GET")
+
+        self.assertEqual(focus.status, HTTPStatus.OK)
+        self.assertEqual(focus.payload["focus"], {"path": "src/app.py", "nodeId": "file:src/app.py"})
+        self.assertEqual(focus.payload["target"]["path"], "src/app.py")
+        self.assertIn("subgraph", focus.payload)
 
     def test_scan_audit_bundle_zip_route_reuses_cached_archive(self) -> None:
         self.audit_bundle_cache_fixture()

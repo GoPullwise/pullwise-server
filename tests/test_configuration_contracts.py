@@ -123,6 +123,10 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertIn("github", handler.payload)
         self.assertIn("billing", handler.payload)
         self.assertIn("limits", handler.payload)
+        self.assertEqual(
+            handler.payload["limits"]["repository"],
+            {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024},
+        )
         self.assertEqual(handler.payload["database"], {"type": "sqlite", "configured": True})
         self.assertNotIn("path", handler.payload["database"])
         self.assertIn("oauthConfigured", handler.payload["github"])

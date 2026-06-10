@@ -3,24 +3,57 @@ from __future__ import annotations
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 PUBLIC_REPOSITORY_GRAPH_PROTOCOL_VERSION = "repository-graph/0.1"
+PUBLIC_REPOSITORY_GRAPH_PROTOCOL_VERSIONS = {"repository-graph/0.1", "repository-graph/0.2"}
+PUBLIC_REPOSITORY_IMPACT_GRAPH_PROTOCOL_VERSION = "impact-graph/0.1"
 PUBLIC_REPOSITORY_SEMANTIC_GRAPH_PROTOCOL_VERSION = "semantic-code-graph/0.1"
 PUBLIC_REPOSITORY_GRAPH_MAX_NODES = 120
 PUBLIC_REPOSITORY_GRAPH_MAX_EDGES = 240
 PUBLIC_REPOSITORY_GRAPH_MAX_SEMANTIC_NODES = 120
 PUBLIC_REPOSITORY_GRAPH_MAX_SEMANTIC_EDGES = 240
 PUBLIC_REPOSITORY_GRAPH_MAX_PROMPT_CHARS = 2048
-PUBLIC_REPOSITORY_GRAPH_NODE_TYPES = {"entrypoint", "module", "test", "manifest", "workflow", "file"}
-PUBLIC_REPOSITORY_GRAPH_EDGE_TYPES = {"imports", "contains", "calls", "configures", "depends_on"}
+PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_TARGETS = 120
+PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_RELATIONS = 40
+PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_PROMPT_CHARS = 2048
+PUBLIC_REPOSITORY_GRAPH_NODE_TYPES = {
+    "entrypoint",
+    "module",
+    "test",
+    "manifest",
+    "workflow",
+    "doc",
+    "config",
+    "file",
+}
+PUBLIC_REPOSITORY_GRAPH_EDGE_TYPES = {
+    "imports",
+    "contains",
+    "calls",
+    "configures",
+    "depends_on",
+    "tests",
+    "documents",
+}
 PUBLIC_REPOSITORY_SEMANTIC_NODE_TYPES = {"class", "component", "function", "method", "route", "variable"}
 PUBLIC_REPOSITORY_SEMANTIC_EDGE_TYPES = {"calls", "defines", "extends", "handles", "imports", "implements", "uses"}
+PUBLIC_REPOSITORY_IMPACT_GRAPH_MODES = {"repository", "changeset", "issue"}
+PUBLIC_REPOSITORY_IMPACT_GRAPH_RELATION_KEYS = ("tests", "documents", "configures", "imports", "importedBy", "symbols")
+PUBLIC_REPOSITORY_IMPACT_GRAPH_COVERAGE_KEYS = (
+    "sourceFilesWithoutTests",
+    "sourceFilesWithoutDocs",
+    "testsWithoutTargets",
+    "docsWithoutTargets",
+)
 PUBLIC_REPOSITORY_GRAPH_ID_RE = re.compile(r"^[A-Za-z0-9_.:/@-]{1,180}$")
+PUBLIC_REPOSITORY_GRAPH_ABSOLUTE_PATH_RE = re.compile(
+    r"([A-Za-z]:[\\/]|\\\\|(?:^|[\s'\"(=\[:])//|(?:^|[\s'\"(=\[:])/(?:Users|home|tmp|var|workspace|workspaces|mnt|opt|srv|private|runner)/)"
+)
 
 
 def public_repository_graph(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
     version = public_issue_text(value.get("version"))
-    if version != PUBLIC_REPOSITORY_GRAPH_PROTOCOL_VERSION:
+    if version not in PUBLIC_REPOSITORY_GRAPH_PROTOCOL_VERSIONS:
         return {}
     nodes = []
     seen_node_ids = set()
@@ -56,7 +89,7 @@ def public_repository_graph(value: object) -> dict:
         "nodes": nodes,
         "edges": edges,
     }
-    summary = " ".join(review._safe_text_lenient(value.get("summary")).split())[:500]
+    summary = public_repository_graph_text(value.get("summary"), limit=500)
     if summary:
         payload["summary"] = summary
     architecture_summary = public_repository_graph_architecture_summary(
@@ -64,17 +97,17 @@ def public_repository_graph(value: object) -> dict:
     )
     if architecture_summary:
         payload["architectureSummary"] = architecture_summary
+    impact_graph = public_impact_graph(value.get("impactGraph") or value.get("impact_graph"), repository_graph=payload)
+    if impact_graph:
+        payload["impactGraph"] = impact_graph
     return payload
 
 
 def public_repository_graph_node(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
-    raw_id = value.get("id")
-    if not isinstance(raw_id, str) or any(char in raw_id for char in "\r\n\x00"):
-        return {}
-    node_id = public_issue_text(raw_id)
-    if not PUBLIC_REPOSITORY_GRAPH_ID_RE.match(node_id):
+    node_id = public_repository_graph_id(value.get("id"))
+    if not node_id:
         return {}
     node_type = public_issue_text(value.get("type"))
     if node_type not in PUBLIC_REPOSITORY_GRAPH_NODE_TYPES:
@@ -82,7 +115,7 @@ def public_repository_graph_node(value: object) -> dict:
     path = fix_workflow.safe_issue_file(value.get("path"))
     if not path:
         return {}
-    label = public_issue_text(value.get("label"))[:80] or path.rsplit("/", 1)[-1]
+    label = public_repository_graph_text(value.get("label"), limit=80) or path.rsplit("/", 1)[-1]
     node = {
         "id": node_id,
         "label": label,
@@ -92,7 +125,7 @@ def public_repository_graph_node(value: object) -> dict:
     importance = public_repository_graph_float(value.get("importance"))
     if importance is not None:
         node["importance"] = importance
-    tags = review._safe_text_list(value.get("tags"))[:10]
+    tags = public_repository_graph_text_list(value.get("tags"), limit=10, item_limit=80)
     if tags:
         node["tags"] = tags
     return node
@@ -110,24 +143,32 @@ def public_repository_graph_edge(value: object, node_ids: set[str]) -> dict:
         or any(char in raw_target for char in "\r\n\x00")
     ):
         return {}
-    source = public_issue_text(raw_source)
-    target = public_issue_text(raw_target)
+    source = public_repository_graph_id(raw_source)
+    target = public_repository_graph_id(raw_target)
     edge_type = public_issue_text(value.get("type"))
     if (
-        source not in node_ids
+        not source
+        or not target
+        or source not in node_ids
         or target not in node_ids
         or source == target
         or edge_type not in PUBLIC_REPOSITORY_GRAPH_EDGE_TYPES
     ):
         return {}
     raw_id = value.get("id")
-    edge_id = public_issue_text(raw_id) if isinstance(raw_id, str) and not any(char in raw_id for char in "\r\n\x00") else ""
-    if not edge_id or not PUBLIC_REPOSITORY_GRAPH_ID_RE.match(edge_id):
+    edge_id = public_repository_graph_id(raw_id)
+    if not edge_id:
         edge_id = f"{edge_type}:{source}->{target}"[:180]
     edge = {"id": edge_id, "source": source, "target": target, "type": edge_type}
     weight = public_optional_int(value.get("weight"))
     if weight:
         edge["weight"] = max(1, min(weight, 100))
+    confidence = public_repository_graph_float(value.get("confidence"))
+    if confidence is not None:
+        edge["confidence"] = confidence
+    evidence = public_repository_graph_evidence(value.get("evidence"))
+    if evidence:
+        edge["evidence"] = evidence
     return edge
 
 
@@ -166,12 +207,19 @@ def public_repository_graph_architecture_summary(value: object) -> dict:
                 items.append(path)
         if items:
             payload[key] = items[:20]
-    review_hints = review._safe_text_list(value.get("reviewHints") or value.get("review_hints"))[:20]
+    review_hints = public_repository_graph_text_list(
+        value.get("reviewHints") or value.get("review_hints"),
+        limit=20,
+        item_limit=180,
+    )
     if review_hints:
         payload["reviewHints"] = review_hints
-    prompt_text = review._safe_text_lenient(value.get("promptText") or value.get("prompt_text")).strip()
+    prompt_text = public_repository_graph_multiline_text(
+        value.get("promptText") or value.get("prompt_text"),
+        limit=PUBLIC_REPOSITORY_GRAPH_MAX_PROMPT_CHARS,
+    )
     if prompt_text:
-        payload["promptText"] = prompt_text[:PUBLIC_REPOSITORY_GRAPH_MAX_PROMPT_CHARS]
+        payload["promptText"] = prompt_text
     return payload
 
 
@@ -183,6 +231,402 @@ def public_repository_graph_float(value: object) -> float | None:
     if not math.isfinite(number):
         return None
     return round(max(0.0, min(1.0, number)), 3)
+
+
+def public_repository_graph_contains_absolute_path(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.replace("\\", "/")
+    return bool(PUBLIC_REPOSITORY_GRAPH_ABSOLUTE_PATH_RE.search(normalized))
+
+
+def public_repository_graph_id(value: object) -> str:
+    if not isinstance(value, str) or any(char in value for char in "\r\n\x00"):
+        return ""
+    text = public_issue_text(value)
+    if not text or public_repository_graph_contains_absolute_path(text):
+        return ""
+    if not PUBLIC_REPOSITORY_GRAPH_ID_RE.match(text):
+        return ""
+    return text
+
+
+def public_repository_graph_text(value: object, *, limit: int) -> str:
+    text = " ".join(review._safe_text_lenient(value).replace("\x00", " ").split())
+    if not text or public_repository_graph_contains_absolute_path(text):
+        return ""
+    return text[:limit]
+
+
+def public_repository_graph_multiline_text(value: object, *, limit: int) -> str:
+    raw_text = review._safe_text_lenient(value).replace("\x00", "").strip()
+    if not raw_text:
+        return ""
+    lines = []
+    for line in raw_text.splitlines():
+        clean_line = " ".join(line.split())
+        if not clean_line:
+            lines.append("")
+            continue
+        if public_repository_graph_contains_absolute_path(clean_line):
+            continue
+        lines.append(clean_line)
+    return "\n".join(lines).strip()[:limit]
+
+
+def public_repository_graph_text_list(value: object, *, limit: int, item_limit: int) -> list[str]:
+    items = []
+    seen = set()
+    for item in review._safe_text_list(value):
+        text = public_repository_graph_text(item, limit=item_limit)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+        if len(items) >= limit:
+            break
+    return items
+
+
+def public_changed_files(value: object) -> list[str]:
+    raw_items = value if isinstance(value, list) else []
+    files = []
+    seen = set()
+    for item in raw_items:
+        path = fix_workflow.safe_issue_file(item)
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        files.append(path)
+        if len(files) >= PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_TARGETS:
+            break
+    return files
+
+
+def public_impact_graph(value: object, *, repository_graph: dict | None = None) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    version = public_issue_text(value.get("version"))
+    if version != PUBLIC_REPOSITORY_IMPACT_GRAPH_PROTOCOL_VERSION:
+        return {}
+    targets = public_impact_graph_targets(value.get("targets"))
+    coverage = public_impact_graph_coverage(value.get("coverage"))
+    changed_files = public_changed_files(value.get("changedFiles") or value.get("changed_files"))
+    stats = public_impact_graph_stats(value.get("stats"), targets, coverage, changed_files)
+    mode = public_issue_text(value.get("mode")).lower()
+    if mode not in PUBLIC_REPOSITORY_IMPACT_GRAPH_MODES:
+        mode = "changeset" if changed_files else "repository"
+    payload = {
+        "version": version,
+        "mode": mode,
+        "stats": stats,
+        "changedFiles": changed_files,
+        "targets": targets,
+        "coverage": coverage,
+    }
+    summary = public_repository_graph_text(value.get("summary"), limit=500)
+    if summary:
+        payload["summary"] = summary
+    prompt_text = public_impact_graph_prompt_text(value.get("promptText") or value.get("prompt_text"))
+    if prompt_text:
+        payload["promptText"] = prompt_text[:PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_PROMPT_CHARS]
+    subgraph = public_impact_graph_subgraph(value.get("subgraph"), repository_graph=repository_graph)
+    if subgraph:
+        payload["subgraph"] = subgraph
+    return {key: item for key, item in payload.items() if item not in ("", [], {})}
+
+
+def public_impact_graph_targets(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    targets = []
+    seen = set()
+    for item in raw_items:
+        target = public_impact_graph_target(item)
+        path = target.get("path")
+        target_id = target.get("id")
+        if not target or not path or target_id in seen:
+            continue
+        seen.add(target_id)
+        targets.append(target)
+        if len(targets) >= PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_TARGETS:
+            break
+    return targets
+
+
+def public_impact_graph_prompt_text(value: object) -> str:
+    return public_repository_graph_multiline_text(
+        value,
+        limit=PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_PROMPT_CHARS,
+    )
+
+
+def public_impact_graph_target(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    path = fix_workflow.safe_issue_file(value.get("path") or value.get("file"))
+    if not path:
+        return {}
+    target_id = public_repository_graph_id(value.get("id"))
+    if not target_id:
+        target_id = f"file:{path}"[:180]
+    target_type = public_issue_text(value.get("type")).lower()
+    if target_type not in PUBLIC_REPOSITORY_GRAPH_NODE_TYPES:
+        target_type = "file"
+    label = public_repository_graph_text(value.get("label"), limit=80) or path.rsplit("/", 1)[-1]
+    payload = {
+        "id": target_id,
+        "path": path,
+        "label": label,
+        "type": target_type,
+    }
+    risk = public_repository_graph_float(value.get("risk"))
+    if risk is not None:
+        payload["risk"] = risk
+    relations = public_impact_graph_relations(value.get("relations"))
+    if relations:
+        payload["relations"] = relations
+    gaps = public_repository_graph_text_list(value.get("gaps"), limit=12, item_limit=180)
+    if gaps:
+        payload["gaps"] = gaps
+    evidence = public_repository_graph_evidence(value.get("evidence"))
+    if evidence:
+        payload["evidence"] = evidence
+    return payload
+
+
+def public_impact_graph_relations(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    payload = {}
+    for key in PUBLIC_REPOSITORY_IMPACT_GRAPH_RELATION_KEYS:
+        raw_items = source.get(key) if isinstance(source.get(key), list) else []
+        items = []
+        seen = set()
+        for raw_item in raw_items:
+            item = public_impact_graph_relation(raw_item, relation_key=key)
+            identity = item.get("id") or item.get("path") or item.get("label")
+            if not item or identity in seen:
+                continue
+            seen.add(identity)
+            items.append(item)
+            if len(items) >= PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_RELATIONS:
+                break
+        if items:
+            payload[key] = items
+    return payload
+
+
+def public_impact_graph_relation(value: object, *, relation_key: str) -> dict:
+    if isinstance(value, str):
+        path = fix_workflow.safe_issue_file(value)
+        if not path:
+            return {}
+        return {"id": f"file:{path}"[:180], "path": path, "label": path.rsplit("/", 1)[-1], "type": "file"}
+    if not isinstance(value, dict):
+        return {}
+    path = fix_workflow.safe_issue_file(value.get("path") or value.get("file"))
+    item_id = public_repository_graph_id(value.get("id"))
+    if not item_id and path:
+        item_id = f"file:{path}"[:180]
+    label = public_repository_graph_text(value.get("label"), limit=80)
+    if not label and path:
+        label = path.rsplit("/", 1)[-1]
+    item_type = public_issue_text(value.get("type")).lower()[:40]
+    if relation_key == "symbols" and item_type not in PUBLIC_REPOSITORY_SEMANTIC_NODE_TYPES:
+        item_type = "symbol"
+    elif relation_key != "symbols" and item_type not in PUBLIC_REPOSITORY_GRAPH_NODE_TYPES:
+        item_type = "file"
+    if not item_id and not path and not label:
+        return {}
+    record = {}
+    if item_id:
+        record["id"] = item_id
+    if path:
+        record["path"] = path
+    if label:
+        record["label"] = label
+    if item_type:
+        record["type"] = item_type
+    line = public_optional_int(value.get("line"))
+    if line and line > 0:
+        record["line"] = line
+    signature = public_repository_graph_text(value.get("signature"), limit=180)
+    if signature:
+        record["signature"] = signature
+    confidence = public_repository_graph_float(value.get("confidence"))
+    if confidence is not None:
+        record["confidence"] = confidence
+    evidence_kind = public_repository_graph_text(value.get("evidenceKind") or value.get("evidence_kind"), limit=40)
+    if evidence_kind:
+        record["evidenceKind"] = evidence_kind
+    evidence = public_repository_graph_evidence(value.get("evidence"))
+    if evidence:
+        record["evidence"] = evidence
+    return record
+
+
+def public_impact_graph_coverage(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    payload = {}
+    for key in PUBLIC_REPOSITORY_IMPACT_GRAPH_COVERAGE_KEYS:
+        files = public_changed_files(source.get(key))
+        if files:
+            payload[key] = files
+    return payload
+
+
+def public_impact_graph_stats(
+    value: object,
+    targets: list[dict],
+    coverage: dict,
+    changed_files: list[str],
+) -> dict:
+    source = value if isinstance(value, dict) else {}
+    payload = {}
+    for key in (
+        "targets",
+        "testedTargets",
+        "documentedTargets",
+        "configuredTargets",
+        "testsEdges",
+        "documentsEdges",
+        "configuresEdges",
+        "changedFiles",
+    ):
+        count = public_scan_count(source.get(key))
+        if count:
+            payload[key] = count
+    payload["targets"] = max(public_scan_count(payload.get("targets")), len(targets))
+    payload["changedFiles"] = max(public_scan_count(payload.get("changedFiles")), len(changed_files))
+    if source.get("truncated") is True:
+        payload["truncated"] = True
+    elif len(targets) >= PUBLIC_REPOSITORY_IMPACT_GRAPH_MAX_TARGETS:
+        payload["truncated"] = True
+    else:
+        payload["truncated"] = False
+    for key, stat_key in (
+        ("sourceFilesWithoutTests", "sourceFilesWithoutTests"),
+        ("sourceFilesWithoutDocs", "sourceFilesWithoutDocs"),
+        ("testsWithoutTargets", "testsWithoutTargets"),
+        ("docsWithoutTargets", "docsWithoutTargets"),
+    ):
+        if coverage.get(key):
+            payload[stat_key] = len(coverage[key])
+    return payload
+
+
+def public_impact_graph_subgraph(value: object, *, repository_graph: dict | None = None) -> dict:
+    source = value if isinstance(value, dict) else {}
+    if not source and not repository_graph:
+        return {}
+    raw_nodes = source.get("nodes") if isinstance(source.get("nodes"), list) else []
+    raw_edges = source.get("edges") if isinstance(source.get("edges"), list) else []
+    if not raw_nodes and isinstance(repository_graph, dict):
+        raw_nodes = repository_graph.get("nodes") if isinstance(repository_graph.get("nodes"), list) else []
+    nodes = []
+    seen_node_ids = set()
+    for item in raw_nodes:
+        node = public_repository_graph_node(item)
+        node_id = node.get("id")
+        if not node or node_id in seen_node_ids:
+            continue
+        seen_node_ids.add(node_id)
+        nodes.append(node)
+        if len(nodes) >= PUBLIC_REPOSITORY_GRAPH_MAX_NODES:
+            break
+    if not raw_edges and isinstance(repository_graph, dict):
+        raw_edges = repository_graph.get("edges") if isinstance(repository_graph.get("edges"), list) else []
+    edges = []
+    seen_edge_ids = set()
+    for item in raw_edges:
+        edge = public_repository_graph_edge(item, seen_node_ids)
+        edge_id = edge.get("id")
+        if not edge or edge_id in seen_edge_ids:
+            continue
+        seen_edge_ids.add(edge_id)
+        edges.append(edge)
+        if len(edges) >= PUBLIC_REPOSITORY_GRAPH_MAX_EDGES:
+            break
+    payload = {}
+    if nodes:
+        payload["nodes"] = nodes
+    if edges:
+        payload["edges"] = edges
+    return payload
+
+
+def public_impact_graph_focus(impact_graph: dict, path: object, *, repository_graph: dict | None = None) -> dict:
+    focus_path = fix_workflow.safe_issue_file(path)
+    if not focus_path or not isinstance(impact_graph, dict):
+        return {}
+    node_id = f"file:{focus_path}"
+    targets = impact_graph.get("targets") if isinstance(impact_graph.get("targets"), list) else []
+    target = next(
+        (
+            item
+            for item in targets
+            if isinstance(item, dict)
+            and (
+                item.get("path") == focus_path
+                or item.get("id") == node_id
+                or item.get("id") == f"module:{focus_path}"
+            )
+        ),
+        None,
+    )
+    subgraph = public_impact_graph_focus_subgraph(
+        focus_path,
+        target if isinstance(target, dict) else {},
+        repository_graph=repository_graph,
+    )
+    return {
+        "focus": {"path": focus_path, "nodeId": public_issue_text((target or {}).get("id")) or node_id},
+        "target": target if isinstance(target, dict) else {},
+        "subgraph": subgraph,
+    }
+
+
+def public_impact_graph_focus_subgraph(
+    focus_path: str,
+    target: dict,
+    *,
+    repository_graph: dict | None = None,
+) -> dict:
+    node_ids = {f"file:{focus_path}", public_issue_text(target.get("id"))}
+    for items in (target.get("relations") if isinstance(target.get("relations"), dict) else {}).values():
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            item_id = public_issue_text(item.get("id"))
+            item_path = fix_workflow.safe_issue_file(item.get("path"))
+            if item_id:
+                node_ids.add(item_id)
+            if item_path:
+                node_ids.add(f"file:{item_path}")
+    nodes = []
+    edges = []
+    seen_nodes = set()
+    seen_edges = set()
+    graph_nodes = []
+    graph_edges = []
+    if isinstance(repository_graph, dict):
+        graph_nodes = repository_graph.get("nodes") if isinstance(repository_graph.get("nodes"), list) else []
+        graph_edges = repository_graph.get("edges") if isinstance(repository_graph.get("edges"), list) else []
+    for item in graph_nodes:
+        node = public_repository_graph_node(item)
+        if not node or node.get("id") not in node_ids or node.get("id") in seen_nodes:
+            continue
+        seen_nodes.add(node["id"])
+        nodes.append(node)
+    valid_node_ids = {item["id"] for item in nodes}
+    for item in graph_edges:
+        edge = public_repository_graph_edge(item, valid_node_ids)
+        if not edge or edge.get("id") in seen_edges:
+            continue
+        if edge.get("source") not in node_ids and edge.get("target") not in node_ids:
+            continue
+        seen_edges.add(edge["id"])
+        edges.append(edge)
+    return {"nodes": nodes, "edges": edges}
 
 
 def public_repository_semantic_graph(value: object) -> dict:
@@ -223,10 +667,14 @@ def public_repository_semantic_graph(value: object) -> dict:
         "nodes": nodes,
         "edges": edges,
     }
-    summary = " ".join(review._safe_text_lenient(value.get("summary")).split())[:500]
+    summary = public_repository_graph_text(value.get("summary"), limit=500)
     if summary:
         payload["summary"] = summary
-    review_hints = review._safe_text_list(value.get("reviewHints") or value.get("review_hints"))[:20]
+    review_hints = public_repository_graph_text_list(
+        value.get("reviewHints") or value.get("review_hints"),
+        limit=20,
+        item_limit=180,
+    )
     if review_hints:
         payload["reviewHints"] = review_hints
     return payload
@@ -235,11 +683,8 @@ def public_repository_semantic_graph(value: object) -> dict:
 def public_repository_semantic_node(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
-    raw_id = value.get("id")
-    if not isinstance(raw_id, str) or any(char in raw_id for char in "\r\n\x00"):
-        return {}
-    node_id = public_issue_text(raw_id)
-    if not PUBLIC_REPOSITORY_GRAPH_ID_RE.match(node_id):
+    node_id = public_repository_graph_id(value.get("id"))
+    if not node_id:
         return {}
     node_type = public_issue_text(value.get("type"))
     if node_type not in PUBLIC_REPOSITORY_SEMANTIC_NODE_TYPES:
@@ -247,7 +692,7 @@ def public_repository_semantic_node(value: object) -> dict:
     path = fix_workflow.safe_issue_file(value.get("path"))
     if not path:
         return {}
-    label = public_issue_text(value.get("label"))[:80] or path.rsplit("/", 1)[-1]
+    label = public_repository_graph_text(value.get("label"), limit=80) or path.rsplit("/", 1)[-1]
     node = {
         "id": node_id,
         "label": label,
@@ -263,7 +708,7 @@ def public_repository_semantic_node(value: object) -> dict:
     importance = public_repository_graph_float(value.get("importance"))
     if importance is not None:
         node["importance"] = importance
-    tags = review._safe_text_list(value.get("tags"))[:10]
+    tags = public_repository_graph_text_list(value.get("tags"), limit=10, item_limit=80)
     if tags:
         node["tags"] = tags
     return node
@@ -281,25 +726,53 @@ def public_repository_semantic_edge(value: object, node_ids: set[str]) -> dict:
         or any(char in raw_target for char in "\r\n\x00")
     ):
         return {}
-    source = public_issue_text(raw_source)
-    target = public_issue_text(raw_target)
+    source = public_repository_graph_id(raw_source)
+    target = public_repository_graph_id(raw_target)
     edge_type = public_issue_text(value.get("type"))
     if (
-        source not in node_ids
+        not source
+        or not target
+        or source not in node_ids
         or target not in node_ids
         or source == target
         or edge_type not in PUBLIC_REPOSITORY_SEMANTIC_EDGE_TYPES
     ):
         return {}
     raw_id = value.get("id")
-    edge_id = public_issue_text(raw_id) if isinstance(raw_id, str) and not any(char in raw_id for char in "\r\n\x00") else ""
-    if not edge_id or not PUBLIC_REPOSITORY_GRAPH_ID_RE.match(edge_id):
+    edge_id = public_repository_graph_id(raw_id)
+    if not edge_id:
         edge_id = f"{edge_type}:{source}->{target}"[:180]
     edge = {"id": edge_id, "source": source, "target": target, "type": edge_type}
     weight = public_optional_int(value.get("weight"))
     if weight:
         edge["weight"] = max(1, min(weight, 100))
     return edge
+
+
+def public_repository_graph_evidence(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    items = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        kind = public_repository_graph_text(item.get("kind"), limit=40)
+        file_path = fix_workflow.safe_issue_file(item.get("file"))
+        line = public_optional_int(item.get("line"))
+        text = public_repository_graph_text(item.get("text"), limit=180)
+        record = {}
+        if kind:
+            record["kind"] = kind
+        if file_path:
+            record["file"] = file_path
+        if line and line > 0:
+            record["line"] = line
+        if text:
+            record["text"] = text
+        if record:
+            items.append(record)
+        if len(items) >= 4:
+            break
+    return items
 
 
 def public_repository_semantic_stats(
@@ -364,6 +837,20 @@ def scan_payload(scan: dict) -> dict:
         )
     if semantic_graph:
         payload["semanticGraph"] = semantic_graph
+    raw_impact_graph = scan.get("impactGraph") or scan.get("impact_graph")
+    if not raw_impact_graph and isinstance(raw_repository_graph, dict):
+        raw_impact_graph = raw_repository_graph.get("impactGraph") or raw_repository_graph.get("impact_graph")
+    impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
+    if impact_graph:
+        payload["impactGraph"] = impact_graph
+        if isinstance(payload.get("repositoryGraph"), dict):
+            payload["repositoryGraph"]["impactGraph"] = impact_graph
+    changed_files = public_changed_files(scan.get("changedFiles") or scan.get("changed_files"))
+    if changed_files:
+        payload["changedFiles"] = changed_files
+    base_commit = clean_github_access_text(scan.get("baseCommit") or scan.get("base_commit"))
+    if base_commit:
+        payload["baseCommit"] = base_commit
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0
@@ -2721,6 +3208,7 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
     preflight = public_scan.get("preflight") or {}
     repository_graph = public_scan.get("repositoryGraph") if isinstance(public_scan.get("repositoryGraph"), dict) else {}
     semantic_graph = public_scan.get("semanticGraph") if isinstance(public_scan.get("semanticGraph"), dict) else {}
+    impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
     log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
     bundle = {
         "schemaVersion": 1,
@@ -2749,6 +3237,8 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         bundle["repositoryGraph"] = repository_graph
     if semantic_graph:
         bundle["semanticGraph"] = semantic_graph
+    if impact_graph:
+        bundle["impactGraph"] = impact_graph
     artifacts = audit_bundle_artifacts(bundle)
     bundle["artifactManifest"] = [
         {key: artifact[key] for key in ("path", "mediaType", "size", "sha256")}
@@ -2922,6 +3412,21 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
                 json.dumps(bundle["semanticGraph"], ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             )
         )
+    if isinstance(bundle.get("impactGraph"), dict):
+        artifacts.append(
+            audit_bundle_artifact(
+                "impact-graph.json",
+                "application/json",
+                json.dumps(bundle["impactGraph"], ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            )
+        )
+        artifacts.append(
+            audit_bundle_artifact(
+                "impact-summary.md",
+                "text/markdown",
+                audit_bundle_impact_summary_markdown(bundle["impactGraph"]),
+            )
+        )
     artifacts.append(audit_bundle_artifact("audit.json", "application/json", audit_bundle_json_text(bundle)))
     artifacts.extend(audit_bundle_log_artifacts(bundle))
     artifacts.extend(audit_bundle_patch_artifacts(bundle))
@@ -2956,6 +3461,58 @@ def audit_bundle_artifact(path: str, media_type: str, content: str) -> dict:
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "content": content,
     }
+
+
+def audit_bundle_impact_summary_markdown(impact_graph: dict) -> str:
+    graph = impact_graph if isinstance(impact_graph, dict) else {}
+    stats = graph.get("stats") if isinstance(graph.get("stats"), dict) else {}
+    coverage = graph.get("coverage") if isinstance(graph.get("coverage"), dict) else {}
+    targets = graph.get("targets") if isinstance(graph.get("targets"), list) else []
+    lines = [
+        "# Impact Graph",
+        "",
+        f"Mode: {public_issue_text(graph.get('mode')) or 'repository'}",
+        f"Summary: {public_issue_text(graph.get('summary')) or 'No summary recorded.'}",
+        "",
+        "## Stats",
+        "",
+        f"- Targets: {public_scan_count(stats.get('targets'))}",
+        f"- Tested targets: {public_scan_count(stats.get('testedTargets'))}",
+        f"- Documented targets: {public_scan_count(stats.get('documentedTargets'))}",
+        f"- Configured targets: {public_scan_count(stats.get('configuredTargets'))}",
+        f"- Test edges: {public_scan_count(stats.get('testsEdges'))}",
+        f"- Document edges: {public_scan_count(stats.get('documentsEdges'))}",
+        f"- Config edges: {public_scan_count(stats.get('configuresEdges'))}",
+        "",
+    ]
+    changed_files = public_changed_files(graph.get("changedFiles"))
+    if changed_files:
+        lines.extend(["## Changed Files", ""])
+        lines.extend(f"- {path}" for path in changed_files[:40])
+        lines.append("")
+    lines.extend(["## Top Targets", ""])
+    for target in targets[:20]:
+        if not isinstance(target, dict):
+            continue
+        path = fix_workflow.safe_issue_file(target.get("path"))
+        if not path:
+            continue
+        relations = target.get("relations") if isinstance(target.get("relations"), dict) else {}
+        lines.append(
+            f"- {path}: tests={len(relations.get('tests') or [])}, "
+            f"docs={len(relations.get('documents') or [])}, "
+            f"config={len(relations.get('configures') or [])}"
+        )
+    lines.append("")
+    if coverage:
+        lines.extend(["## Coverage Gaps", ""])
+        for key in PUBLIC_REPOSITORY_IMPACT_GRAPH_COVERAGE_KEYS:
+            items = public_changed_files(coverage.get(key))
+            if items:
+                lines.append(f"### {key}")
+                lines.extend(f"- {item}" for item in items[:40])
+                lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def audit_bundle_artifact_manifest_json(artifacts: list[dict]) -> str:

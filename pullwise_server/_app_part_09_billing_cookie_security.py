@@ -183,6 +183,8 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     subscription_item_id = billing_update_text(update.get("subscriptionItemId"))
     status = billing_update_text(update.get("status"))
     plan = billing_update_text(update.get("plan"))
+    if plan and plan not in set(billing.PLAN_IDS):
+        plan = ""
     interval = billing_update_text(update.get("interval"))
     current_period_start = billing_update_scalar(update.get("currentPeriodStart"))
     current_period_end = billing_update_scalar(update.get("currentPeriodEnd"))

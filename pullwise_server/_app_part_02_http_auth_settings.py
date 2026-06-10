@@ -2,6 +2,17 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+DEFAULT_SCAN_REPOSITORY_MAX_FILES = 2000
+DEFAULT_SCAN_REPOSITORY_MAX_BYTES = 50 * 1024 * 1024
+
+
+def repository_scan_limits_payload() -> dict:
+    return {
+        "maxFiles": max(1, env_int("PULLWISE_MAX_REPO_FILES", DEFAULT_SCAN_REPOSITORY_MAX_FILES)),
+        "maxBytes": max(1, env_int("PULLWISE_MAX_REPO_BYTES", DEFAULT_SCAN_REPOSITORY_MAX_BYTES)),
+    }
+
+
 def readiness_payload() -> dict:
     try:
         billing_provider = billing.selected_provider()
@@ -23,6 +34,7 @@ def readiness_payload() -> dict:
             "maxConcurrentScansPerUser": max_scan_concurrency_per_user(),
             "maxQueuedScansGlobal": max_queued_scans_global(),
             "maxQueuedScansPerUser": max_queued_scans_per_user(),
+            "repository": repository_scan_limits_payload(),
             "rateLimitEnabled": rate_limit_enabled(),
         },
     }
@@ -370,7 +382,7 @@ def public_user_email(value: object) -> str:
 def admin_user_subscription_payload(user: dict) -> dict:
     current = user_billing_state(user)
     plan = (public_billing_text(current.get("plan")) or "").lower()
-    if plan not in {"free", "pro"}:
+    if plan not in set(billing.PLAN_IDS):
         plan = "free"
     return {
         "provider": public_billing_text(current.get("provider")),

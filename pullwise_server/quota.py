@@ -12,6 +12,10 @@ from typing import Any
 from . import db
 
 
+PAID_PLAN_IDS = {"pro", "max"}
+PLAN_IDS = {"free", *PAID_PLAN_IDS}
+
+
 class QuotaExceeded(Exception):
     def __init__(self, code: str, message: str, *, repo_id: str | None = None) -> None:
         super().__init__(message)
@@ -123,26 +127,44 @@ def non_negative_int(value: object) -> int:
         return 0
 
 
+def normalize_plan(plan: object, default: str = "free") -> str:
+    normalized_default = default if default in PLAN_IDS else "free"
+    normalized = str(plan or normalized_default).strip().lower()
+    return normalized if normalized in PLAN_IDS else normalized_default
+
+
 def effective_user_plan(user: dict[str, Any] | None, *, timestamp: int | None = None) -> str:
     if not user:
         return "free"
     current_time = current_timestamp(timestamp)
     billing = user.get("billing") if isinstance(user.get("billing"), dict) else {}
     status = str(billing.get("status") or "").lower()
-    plan = str(billing.get("plan") or "free").lower()
+    plan = normalize_plan(billing.get("plan"), default="free")
     current_period_start = timestamp_value(billing.get("currentPeriodStart"))
     current_period_end = timestamp_value(billing.get("currentPeriodEnd"))
     if current_period_start is not None and current_period_start > current_time:
         return "free"
     if current_period_end is not None and current_period_end <= current_time:
         return "free"
-    if plan == "pro" and status in {"active", "trialing", "canceling"}:
-        return "pro"
+    if plan in PAID_PLAN_IDS and status in {"active", "trialing", "canceling"}:
+        return plan
     return "free"
 
 
 def user_limit_for_plan(plan: str) -> int:
-    if plan == "pro":
+    normalized_plan = normalize_plan(plan)
+    if normalized_plan == "max":
+        return max(
+            0,
+            env_int(
+                [
+                    "PULLWISE_MAX_USER_REVIEW_LIMIT",
+                    "PULLWISE_MAX_REVIEW_LIMIT",
+                ],
+                90,
+            ),
+        )
+    if normalized_plan == "pro":
         return max(
             0,
             env_int(
@@ -166,7 +188,45 @@ def user_limit_for_plan(plan: str) -> int:
 
 
 def repository_limit_for_plan(plan: str) -> int:
-    return user_limit_for_plan(plan)
+    normalized_plan = normalize_plan(plan)
+    if normalized_plan == "max":
+        return max(
+            0,
+            env_int(
+                [
+                    "PULLWISE_MAX_REPO_REVIEW_LIMIT",
+                    "PULLWISE_MAX_REPOSITORY_REVIEW_LIMIT",
+                    "PULLWISE_MAX_USER_REVIEW_LIMIT",
+                    "PULLWISE_MAX_REVIEW_LIMIT",
+                ],
+                90,
+            ),
+        )
+    if normalized_plan == "pro":
+        return max(
+            0,
+            env_int(
+                [
+                    "PULLWISE_PRO_REPO_REVIEW_LIMIT",
+                    "PULLWISE_PRO_REPOSITORY_REVIEW_LIMIT",
+                    "PULLWISE_PRO_USER_REVIEW_LIMIT",
+                    "PULLWISE_PRO_REVIEW_LIMIT",
+                ],
+                60,
+            ),
+        )
+    return max(
+        0,
+        env_int(
+            [
+                "PULLWISE_FREE_REPO_REVIEW_LIMIT",
+                "PULLWISE_FREE_REPOSITORY_REVIEW_LIMIT",
+                "PULLWISE_FREE_USER_REVIEW_LIMIT",
+                "PULLWISE_FREE_REVIEW_LIMIT",
+            ],
+            5,
+        ),
+    )
 
 
 def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: int | None = None) -> tuple[str, int]:
@@ -174,7 +234,7 @@ def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: i
     billing = user.get("billing") if user and isinstance(user.get("billing"), dict) else {}
     anchor: int | None = None
     period_end: int | None = None
-    if plan == "pro":
+    if plan in PAID_PLAN_IDS:
         current_period_start = timestamp_value(billing.get("currentPeriodStart"))
         current_period_end = timestamp_value(billing.get("currentPeriodEnd"))
         if current_period_start is not None:

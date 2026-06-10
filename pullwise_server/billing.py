@@ -19,7 +19,12 @@ class BillingProviderResponseError(RuntimeError):
     pass
 
 
-CREEM_PRO_ENTITLEMENT_STATUSES = {"active", "trialing", "canceling"}
+PAID_PLAN_IDS = ("pro", "max")
+PLAN_IDS = ("free", *PAID_PLAN_IDS)
+PLAN_RANK = {"free": 0, "pro": 1, "max": 2}
+PAID_PLAN_ENTITLEMENT_STATUSES = {"active", "trialing", "canceling"}
+CREEM_PRO_ENTITLEMENT_STATUSES = PAID_PLAN_ENTITLEMENT_STATUSES
+CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-charge", "proration-none"}
 
 
 def env(name: str, default: str = "") -> str:
@@ -49,7 +54,19 @@ def billing_timeout_seconds() -> int:
 
 
 def review_limit(plan: str) -> int:
-    if plan == "pro":
+    normalized_plan = normalize_plan(plan, default="free")
+    if normalized_plan == "max":
+        return max(
+            0,
+            env_int(
+                [
+                    "PULLWISE_MAX_USER_REVIEW_LIMIT",
+                    "PULLWISE_MAX_REVIEW_LIMIT",
+                ],
+                90,
+            ),
+        )
+    if normalized_plan == "pro":
         return max(
             0,
             env_int(
@@ -72,8 +89,36 @@ def review_limit(plan: str) -> int:
     )
 
 
-def creem_product_id(interval: str) -> str:
-    product = creem_product_for_interval(interval)
+def review_reasoning_effort(plan: str) -> str:
+    normalized_plan = normalize_plan(plan, default="free")
+    defaults = {"free": "medium", "pro": "medium", "max": "xhigh"}
+    env_name = f"PULLWISE_{normalized_plan.upper()}_CODEX_REASONING_EFFORT"
+    return env(env_name, defaults[normalized_plan]).strip() or defaults[normalized_plan]
+
+
+def review_opencode_variant(plan: str) -> str:
+    normalized_plan = normalize_plan(plan, default="free")
+    defaults = {"free": "medium", "pro": "medium", "max": "xhigh"}
+    env_name = f"PULLWISE_{normalized_plan.upper()}_OPENCODE_VARIANT"
+    return env(env_name, defaults[normalized_plan]).strip() or defaults[normalized_plan]
+
+
+def review_agent_config(plan: str) -> dict:
+    normalized_plan = normalize_plan(plan, default="free")
+    return {
+        "plan": normalized_plan,
+        "codex": {
+            "reasoningEffort": review_reasoning_effort(normalized_plan),
+            "reasoning_effort": review_reasoning_effort(normalized_plan),
+        },
+        "opencode": {
+            "variant": review_opencode_variant(normalized_plan),
+        },
+    }
+
+
+def creem_product_id(interval: str, plan: str = "pro") -> str:
+    product = creem_product_for_interval(interval, plan=plan)
     if isinstance(product, dict):
         product_id = product.get("id")
         return product_id if isinstance(product_id, str) else ""
@@ -98,17 +143,20 @@ def selected_provider() -> str:
     return "disabled"
 
 
-def creem_configured_product_ids() -> list[str]:
-    raw_ids: list[str] = []
-    combined = env("PULLWISE_CREEM_PRO_PRODUCT_IDS")
-    if combined:
-        raw_ids.extend(combined.split(","))
-    raw_ids.extend(
-        [
+def creem_configured_product_ids_for_plan(plan: str) -> list[str]:
+    normalized_plan = normalize_plan(plan)
+    if normalized_plan not in PAID_PLAN_IDS:
+        return []
+    raw_ids = creem_configured_paid_product_ids()
+    if normalized_plan == "pro" and not raw_ids:
+        raw_ids = [
             env("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID", env("PULLWISE_CREEM_PRODUCT_ID")),
             env("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID", env("PULLWISE_CREEM_YEARLY_PRODUCT_ID")),
         ]
-    )
+    elif normalized_plan == "pro":
+        raw_ids = raw_ids[:2]
+    else:
+        raw_ids = raw_ids[2:]
 
     product_ids: list[str] = []
     seen: set[str] = set()
@@ -117,6 +165,32 @@ def creem_configured_product_ids() -> list[str]:
         if product_id and product_id not in seen:
             product_ids.append(product_id)
             seen.add(product_id)
+    return product_ids
+
+
+def creem_configured_paid_product_ids() -> list[str]:
+    raw_ids: list[str] = []
+    combined = env("PULLWISE_CREEM_PRO_PRODUCT_IDS")
+    if combined:
+        raw_ids.extend(combined.split(","))
+    product_ids: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_ids:
+        product_id = raw.strip()
+        if product_id and product_id not in seen:
+            product_ids.append(product_id)
+            seen.add(product_id)
+    return product_ids
+
+
+def creem_configured_product_ids() -> list[str]:
+    product_ids: list[str] = []
+    seen: set[str] = set()
+    for plan in PAID_PLAN_IDS:
+        for product_id in creem_configured_product_ids_for_plan(plan):
+            if product_id and product_id not in seen:
+                product_ids.append(product_id)
+                seen.add(product_id)
     return product_ids
 
 
@@ -138,19 +212,22 @@ def fetch_creem_product(product_id: str) -> dict:
     return payload
 
 
-def creem_product_catalog() -> dict[str, dict]:
-    catalog: dict[str, dict] = {}
-    for product_id in creem_configured_product_ids():
-        product = fetch_creem_product(product_id)
-        interval = interval_from_creem_product(product)
-        if interval in {"month", "year"}:
-            catalog[interval] = product
+def creem_product_catalog(plan: str | None = None) -> dict:
+    catalog: dict[str, dict[str, dict]] = {plan_id: {} for plan_id in PAID_PLAN_IDS}
+    for plan_id in PAID_PLAN_IDS:
+        for product_id in creem_configured_product_ids_for_plan(plan_id):
+            product = fetch_creem_product(product_id)
+            interval = interval_from_creem_product(product)
+            if interval in {"month", "year"}:
+                catalog[plan_id][interval] = product
+    if plan is not None:
+        return catalog.get(normalize_plan(plan), {})
     return catalog
 
 
-def creem_product_for_interval(interval: str) -> dict | None:
+def creem_product_for_interval(interval: str, *, plan: str = "pro") -> dict | None:
     normalized_interval = normalize_interval(interval)
-    return creem_product_catalog().get(normalized_interval)
+    return creem_product_catalog(plan).get(normalized_interval)
 
 
 def creem_product_text(product: dict | None, field: str) -> str:
@@ -158,11 +235,13 @@ def creem_product_text(product: dict | None, field: str) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
-def creem_catalog_currency(products: dict[str, dict]) -> str:
-    for interval in ("month", "year"):
-        currency = creem_product_text(products.get(interval), "currency").upper()
-        if currency:
-            return currency
+def creem_catalog_currency(products: dict) -> str:
+    for plan_id in PAID_PLAN_IDS:
+        plan_products = products.get(plan_id) if isinstance(products.get(plan_id), dict) else products
+        for interval in ("month", "year"):
+            currency = creem_product_text(plan_products.get(interval), "currency").upper()
+            if currency:
+                return currency
     return "USD"
 
 
@@ -209,27 +288,17 @@ def creem_price_payload(product: dict | None, interval: str) -> dict:
 def public_plan() -> dict:
     provider = selected_provider()
     products = creem_product_catalog() if provider == "creem" else {}
-    monthly_product = products.get("month")
-    yearly_product = products.get("year")
     currency = creem_catalog_currency(products)
-    pro_name = creem_product_text(monthly_product, "name") or creem_product_text(yearly_product, "name") or "Pullwise Pro"
-    pro_description = (
-        creem_product_text(monthly_product, "description")
-        or creem_product_text(yearly_product, "description")
-        or "Repository review for production teams."
-    )
-    pro_prices = {
-        "month": creem_price_payload(monthly_product, "month"),
-        "year": creem_price_payload(yearly_product, "year"),
-    }
+    pro_plan = public_paid_plan_payload("pro", products.get("pro") if isinstance(products, dict) else {}, currency)
+    max_plan = public_paid_plan_payload("max", products.get("max") if isinstance(products, dict) else {}, currency)
     return {
         "provider": provider,
         "enabled": provider != "disabled",
         "currency": currency,
-        "name": pro_name,
-        "description": pro_description,
+        "name": pro_plan["name"],
+        "description": pro_plan["description"],
         "interval": "month",
-        "amount": pro_prices["month"]["amount"],
+        "amount": pro_plan["prices"]["month"]["amount"],
         "plans": [
             {
                 "id": "free",
@@ -246,21 +315,40 @@ def public_plan() -> dict:
                     }
                 },
             },
-            {
-                "id": "pro",
-                "name": pro_name,
-                "description": f"{pro_description} Quota is shared across your account and repositories.",
-                "currency": currency,
-                "reviewLimit": review_limit("pro"),
-                "prices": pro_prices,
-            },
+            pro_plan,
+            max_plan,
         ],
     }
 
 
-def provider_price_configured(provider: str, interval: str) -> bool:
+def public_paid_plan_payload(plan: str, products: dict, currency: str) -> dict:
+    normalized_plan = normalize_plan(plan)
+    title = "Pullwise Max" if normalized_plan == "max" else "Pullwise Pro"
+    default_description = (
+        "Higher-capacity repository review for production teams."
+        if normalized_plan == "max"
+        else "Repository review for production teams."
+    )
+    monthly_product = products.get("month") if isinstance(products, dict) else None
+    yearly_product = products.get("year") if isinstance(products, dict) else None
+    name = creem_product_text(monthly_product, "name") or creem_product_text(yearly_product, "name") or title
+    description = creem_product_text(monthly_product, "description") or creem_product_text(yearly_product, "description") or default_description
+    return {
+        "id": normalized_plan,
+        "name": name,
+        "description": f"{description} Quota is shared across your account and repositories.",
+        "currency": currency,
+        "reviewLimit": review_limit(normalized_plan),
+        "prices": {
+            "month": creem_price_payload(monthly_product, "month"),
+            "year": creem_price_payload(yearly_product, "year"),
+        },
+    }
+
+
+def provider_price_configured(provider: str, interval: str, plan: str = "pro") -> bool:
     if provider == "creem":
-        return creem_price_payload(creem_product_for_interval(interval), interval)["configured"]
+        return creem_price_payload(creem_product_for_interval(interval, plan=plan), interval)["configured"]
     return False
 
 
@@ -309,10 +397,10 @@ def create_checkout_session(
 
 
 def validate_checkout_selection(plan: str, interval: str) -> tuple[str, str]:
-    normalized_plan = (plan or "pro").strip().lower()
+    normalized_plan = normalize_plan(plan)
     normalized_interval = (interval or "month").strip().lower()
-    if normalized_plan != "pro":
-        raise BillingConfigurationError("Only the Pro plan can be purchased.")
+    if normalized_plan not in PAID_PLAN_IDS:
+        raise BillingConfigurationError("Only paid plans can be purchased.")
     if normalized_interval not in {"month", "year"}:
         raise BillingConfigurationError("Billing interval must be month or year.")
     return normalized_plan, normalized_interval
@@ -320,9 +408,9 @@ def validate_checkout_selection(plan: str, interval: str) -> tuple[str, str]:
 
 def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, interval: str) -> dict:
     success_url = request_redirect_url(success_url, default_success_url(), "success")
-    product_id = creem_product_id(interval)
+    product_id = creem_product_id(interval, plan=plan)
     if not product_id:
-        raise BillingConfigurationError(f"Creem Pro {interval} product is not configured.")
+        raise BillingConfigurationError(f"Creem {plan.title()} {interval} product is not configured.")
     request_id = f"pw_{user['id']}_{secrets.token_urlsafe(8)}"
     customer = {}
     existing_customer_id = (user.get("billing") or {}).get("customerId")
@@ -394,42 +482,54 @@ def create_creem_portal_session(customer_id: str) -> dict:
     return {"provider": "creem", "url": portal_url}
 
 
-def change_subscription_interval(user: dict, *, interval: str, return_url: str | None = None) -> dict:
-    target_interval = (interval or "").strip().lower()
-    if target_interval != "year":
-        raise BillingConfigurationError("Only switching Pro monthly subscriptions to yearly is supported.")
+def change_subscription_interval(user: dict, *, interval: str, plan: str | None = None, return_url: str | None = None) -> dict:
+    target_plan = normalize_plan(plan or (user.get("billing") or {}).get("plan") or "pro")
+    target_interval = normalize_interval(interval)
+    if target_plan not in PAID_PLAN_IDS:
+        raise BillingConfigurationError("Only paid subscriptions can be changed.")
     billing = user.get("billing") or {}
-    if (billing.get("plan") or "pro") != "pro":
-        raise BillingConfigurationError("Only Pro subscriptions can be changed.")
-    if billing.get("interval") == "year":
-        return {"provider": billing.get("provider") or selected_provider(), "plan": "pro", "interval": "year", "alreadyActive": True}
-    if billing.get("interval") not in {None, "", "month"}:
-        raise BillingConfigurationError("Only monthly Pro subscriptions can switch to yearly.")
+    current_plan = normalize_plan(billing.get("plan") or "pro")
+    current_interval = normalize_interval(billing.get("interval"))
+    if current_plan not in PAID_PLAN_IDS:
+        raise BillingConfigurationError("Only paid subscriptions can be changed.")
+    if current_plan == target_plan and current_interval == target_interval:
+        return {
+            "provider": billing.get("provider") or selected_provider(),
+            "plan": target_plan,
+            "interval": target_interval,
+            "alreadyActive": True,
+        }
     if (billing.get("status") or "").lower() not in {"active", "trialing"}:
-        raise BillingConfigurationError("Only active subscriptions can switch to yearly.")
+        raise BillingConfigurationError("Only active subscriptions can be changed.")
 
     provider = selected_provider()
     billing_provider = (billing.get("provider") or provider).lower()
     if billing_provider and billing_provider != provider:
         raise BillingConfigurationError("Configured billing provider does not match this subscription.")
     if provider == "creem":
-        return create_creem_interval_change(billing)
+        return create_creem_subscription_change(billing, plan=target_plan, interval=target_interval)
     raise BillingConfigurationError("Billing is not configured.")
 
 
-def create_creem_interval_change(billing: dict) -> dict:
+def create_creem_subscription_change(billing: dict, *, plan: str, interval: str) -> dict:
     subscription_id = billing.get("subscriptionId")
-    yearly_product = creem_product_id("year")
+    product_id = creem_product_id(interval, plan=plan)
     if not subscription_id:
         raise BillingConfigurationError("No active Creem subscription is linked to this account.")
-    if not yearly_product:
-        raise BillingConfigurationError("Creem Pro yearly product is not configured.")
+    if not product_id:
+        raise BillingConfigurationError(f"Creem {plan.title()} {interval} product is not configured.")
+    update_behavior = creem_subscription_update_behavior(
+        normalize_plan(billing.get("plan") or "pro"),
+        normalize_interval(billing.get("interval")),
+        plan,
+        interval,
+    )
     response = requests.post(
         urljoin(creem_api_base_url() + "/", f"v1/subscriptions/{subscription_id}/upgrade"),
         headers=creem_api_headers(),
         json={
-            "product_id": yearly_product,
-            "update_behavior": env("PULLWISE_CREEM_UPGRADE_BEHAVIOR", "proration-charge-immediately"),
+            "product_id": product_id,
+            "update_behavior": update_behavior,
         },
         timeout=billing_timeout_seconds(),
     )
@@ -437,10 +537,85 @@ def create_creem_interval_change(billing: dict) -> dict:
     payload = response.json()
     return {
         "provider": "creem",
-        "plan": "pro",
-        "interval": "year",
+        "plan": plan,
+        "interval": interval,
+        "updateBehavior": update_behavior,
         "subscriptionId": payload.get("id") or subscription_id,
         "status": normalize_subscription_status(payload.get("status")),
+        "currentPeriodStart": payload.get("current_period_start_date"),
+        "currentPeriodEnd": payload.get("current_period_end_date"),
+    }
+
+
+def creem_subscription_update_behavior(current_plan: str, current_interval: str, target_plan: str, target_interval: str) -> str:
+    if subscription_change_is_upgrade(current_plan, current_interval, target_plan, target_interval):
+        return normalize_creem_update_behavior(env("PULLWISE_CREEM_UPGRADE_BEHAVIOR"), "proration-charge-immediately")
+    return normalize_creem_update_behavior(env("PULLWISE_CREEM_DOWNGRADE_BEHAVIOR"), "proration-none")
+
+
+def subscription_change_is_upgrade(current_plan: str, current_interval: str, target_plan: str, target_interval: str) -> bool:
+    current_rank = PLAN_RANK.get(normalize_plan(current_plan, default="free"), 0)
+    target_rank = PLAN_RANK.get(normalize_plan(target_plan, default="free"), 0)
+    if target_rank > current_rank:
+        return not (normalize_interval(current_interval) == "year" and normalize_interval(target_interval) == "month")
+    if target_rank == current_rank and normalize_interval(current_interval) == "month" and normalize_interval(target_interval) == "year":
+        return True
+    return False
+
+
+def normalize_creem_update_behavior(value: object, default: str) -> str:
+    normalized = text_payload(value, default).strip().lower()
+    return normalized if normalized in CREEM_UPDATE_BEHAVIORS else default
+
+
+def cancel_subscription(user: dict, *, mode: str = "scheduled", return_url: str | None = None) -> dict:
+    billing = user.get("billing") or {}
+    current_plan = normalize_plan(billing.get("plan") or "free", default="free")
+    if current_plan not in PAID_PLAN_IDS:
+        raise BillingConfigurationError("No paid subscription is linked to this account.")
+    status = (billing.get("status") or "").lower()
+    if status == "canceling":
+        return {
+            "provider": billing.get("provider") or selected_provider(),
+            "plan": current_plan,
+            "interval": normalize_interval(billing.get("interval")),
+            "status": "canceling",
+            "alreadyScheduled": True,
+        }
+    if status not in {"active", "trialing"}:
+        raise BillingConfigurationError("Only active subscriptions can be canceled.")
+    normalized_mode = (mode or "scheduled").strip().lower()
+    if normalized_mode != "scheduled":
+        raise BillingConfigurationError("Only scheduled cancellation is supported.")
+    provider = selected_provider()
+    billing_provider = (billing.get("provider") or provider).lower()
+    if billing_provider and billing_provider != provider:
+        raise BillingConfigurationError("Configured billing provider does not match this subscription.")
+    if provider == "creem":
+        return create_creem_subscription_cancel(billing, mode=normalized_mode)
+    raise BillingConfigurationError("Billing is not configured.")
+
+
+def create_creem_subscription_cancel(billing: dict, *, mode: str = "scheduled") -> dict:
+    subscription_id = billing.get("subscriptionId")
+    if not subscription_id:
+        raise BillingConfigurationError("No active Creem subscription is linked to this account.")
+    response = requests.post(
+        urljoin(creem_api_base_url() + "/", f"v1/subscriptions/{subscription_id}/cancel"),
+        headers=creem_api_headers(),
+        json={"mode": mode},
+        timeout=billing_timeout_seconds(),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return {
+        "provider": "creem",
+        "plan": normalize_plan(billing.get("plan") or "pro"),
+        "interval": normalize_interval(billing.get("interval")),
+        "subscriptionId": payload.get("id") or subscription_id,
+        "status": normalize_subscription_status(payload.get("status") or "scheduled_cancel"),
+        "cancelAtPeriodEnd": True,
+        "canceledAt": payload.get("canceled_at"),
         "currentPeriodStart": payload.get("current_period_start_date"),
         "currentPeriodEnd": payload.get("current_period_end_date"),
     }
@@ -491,9 +666,23 @@ def product_payload(value: object) -> dict | None:
     return {"id": product_id} if product_id else None
 
 
-def creem_product_configured_for_pro(product: dict | None) -> bool:
+def creem_product_configured_for_plan(product: dict | None, plan: str) -> bool:
     product_id = object_id(product)
-    return bool(product_id and product_id in creem_configured_product_ids())
+    return bool(product_id and product_id in creem_configured_product_ids_for_plan(plan))
+
+
+def creem_product_configured_for_pro(product: dict | None) -> bool:
+    return creem_product_configured_for_plan(product, "pro")
+
+
+def creem_plan_from_product(product: dict | None) -> str | None:
+    product_id = object_id(product)
+    if not product_id:
+        return None
+    for plan in PAID_PLAN_IDS:
+        if product_id in creem_configured_product_ids_for_plan(plan):
+            return plan
+    return None
 
 
 def billing_update_from_creem_event(event: dict) -> dict | None:
@@ -547,9 +736,10 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     if not user_id and not customer_id and not request_id:
         return None
 
-    plan = normalize_plan(metadata.get("plan") or subscription_metadata.get("plan") or "pro")
+    product_plan = creem_plan_from_product(product)
+    plan = product_plan or normalize_plan(metadata.get("plan") or subscription_metadata.get("plan") or "pro")
     status = normalize_creem_subscription_status(event_type, subscription.get("status") if isinstance(subscription, dict) else "active")
-    if plan == "pro" and status in CREEM_PRO_ENTITLEMENT_STATUSES and not creem_product_configured_for_pro(product):
+    if plan in PAID_PLAN_IDS and status in PAID_PLAN_ENTITLEMENT_STATUSES and not creem_product_configured_for_plan(product, plan):
         return None
     interval = normalize_interval(
         metadata.get("interval")
@@ -625,9 +815,10 @@ def normalize_creem_subscription_status(event_type: str | None, status: object) 
     return normalize_subscription_status(status)
 
 
-def normalize_plan(plan: object) -> str:
-    normalized = text_payload(plan, "pro").strip().lower()
-    return normalized if normalized in {"free", "pro"} else "pro"
+def normalize_plan(plan: object, default: str = "pro") -> str:
+    normalized_default = default if default in PLAN_IDS else "pro"
+    normalized = text_payload(plan, normalized_default).strip().lower()
+    return normalized if normalized in PLAN_IDS else normalized_default
 
 
 def normalize_interval(interval: object) -> str:

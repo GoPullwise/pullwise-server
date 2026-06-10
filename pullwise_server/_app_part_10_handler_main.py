@@ -216,6 +216,28 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
             scan = self.find_or_404(user_scans(session), segments[1], "Scan")
             return self.json(scan_audit_bundle_payload(scan))
+        if len(segments) == 3 and segments[0] == "scans" and segments[2] == "impact-graph":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
+            scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+            public_scan = scan_payload(scan)
+            impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
+            return self.json({"impactGraph": impact_graph})
+        if len(segments) == 4 and segments[0] == "scans" and segments[2] == "impact-graph" and segments[3] == "focus":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
+            scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+            focus_path = fix_workflow.safe_issue_file(params.get("path"))
+            if not focus_path:
+                return self.error(HTTPStatus.BAD_REQUEST, "A repo-relative path is required.")
+            public_scan = scan_payload(scan)
+            impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
+            repository_graph = (
+                public_scan.get("repositoryGraph") if isinstance(public_scan.get("repositoryGraph"), dict) else {}
+            )
+            return self.json(public_impact_graph_focus(impact_graph, focus_path, repository_graph=repository_graph))
         if len(segments) == 2 and segments[0] == "scans":
             session = self.current_session()
             if not session:
@@ -339,6 +361,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan_created = False
             branch = ""
             commit = "pending"
+            changed_files = public_changed_files(body.get("changedFiles") or body.get("changed_files"))
+            base_commit = clean_github_access_text(body.get("baseCommit") or body.get("base_commit"))
             with STATE_LOCK:
                 user = USERS.get(session["userId"]) or {}
                 github_access = user.get("githubRepositoryAccess")
@@ -487,6 +511,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             }
                             if request_id:
                                 scan["requestId"] = request_id
+                            if changed_files:
+                                scan["changedFiles"] = changed_files
+                            if base_commit:
+                                scan["baseCommit"] = base_commit
                             try:
                                 create_scan_job_for_scan(scan)
                             except Exception:
@@ -2069,6 +2097,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             semantic_graph = public_repository_semantic_graph(
                 raw_repository_graph.get("semanticGraph") or raw_repository_graph.get("semantic_graph")
             )
+        raw_impact_graph = body.get("impact_graph") or body.get("impactGraph")
+        if not raw_impact_graph and isinstance(raw_repository_graph, dict):
+            raw_impact_graph = raw_repository_graph.get("impactGraph") or raw_repository_graph.get("impact_graph")
+        impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
+        if repository_graph and impact_graph:
+            repository_graph["impactGraph"] = impact_graph
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
             if scan and scan.get("status") == "running":
@@ -2084,6 +2118,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     update["repositoryGraph"] = repository_graph
                 if semantic_graph:
                     update["semanticGraph"] = semantic_graph
+                if impact_graph:
+                    update["impactGraph"] = impact_graph
                 scan.update(update)
                 mark_state_dirty()
         return self.json({"ok": True, "job": scan_job_payload(job)})

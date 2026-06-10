@@ -25,6 +25,13 @@ def create_scan_job_for_scan(scan: dict) -> dict:
     return job
 
 
+def worker_agent_config_for_job(job: dict, scan: dict | None = None) -> dict:
+    user_id = str(job.get("user_id") or (scan or {}).get("userId") or "").strip()
+    user = USERS.get(user_id) if user_id else None
+    plan = quota.effective_user_plan(user)
+    return billing.review_agent_config(plan)
+
+
 def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
     queued = [scan for scan in SCANS if scan.get("status") == "queued"]
     queued_for_user = [scan for scan in queued if str(scan.get("userId") or "") == user_id]
@@ -43,6 +50,7 @@ def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
 
 
 def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
+    scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
     payload = {
         "job_id": public_issue_text(job.get("job_id")),
         "scan_id": public_issue_text(job.get("scan_id")),
@@ -63,6 +71,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
         "clone_url": trusted_github_web_url(job.get("clone_url")),
     }
+    agent_config = worker_agent_config_for_job(job, scan)
+    payload["agent_config"] = agent_config
+    payload["agentConfig"] = agent_config
     language = review_output_language_payload(job.get("review_output_language"))
     payload["review_output_language"] = language["code"]
     payload["review_output_language_label"] = language["label"]
@@ -74,6 +85,15 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     review_calibration_context = worker_review_calibration_context_for_job(job)
     if review_calibration_context:
         payload["review_calibration_context"] = review_calibration_context
+    if isinstance(scan, dict):
+        changed_files = public_changed_files(scan.get("changedFiles") or scan.get("changed_files"))
+        if changed_files:
+            payload["changed_files"] = changed_files
+            payload["changedFiles"] = changed_files
+        base_commit = clean_github_access_text(scan.get("baseCommit") or scan.get("base_commit"))
+        if base_commit:
+            payload["base_commit"] = base_commit
+            payload["baseCommit"] = base_commit
     return payload
 
 
@@ -216,6 +236,12 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
         semantic_graph = public_repository_semantic_graph(
             raw_repository_graph.get("semanticGraph") or raw_repository_graph.get("semantic_graph")
         )
+    raw_impact_graph = body.get("impact_graph") or body.get("impactGraph")
+    if not raw_impact_graph and isinstance(raw_repository_graph, dict):
+        raw_impact_graph = raw_repository_graph.get("impactGraph") or raw_repository_graph.get("impact_graph")
+    impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
+    if repository_graph and impact_graph:
+        repository_graph["impactGraph"] = impact_graph
     error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
@@ -270,6 +296,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan["repositoryGraph"] = repository_graph
         if semantic_graph:
             scan["semanticGraph"] = semantic_graph
+        if impact_graph:
+            scan["impactGraph"] = impact_graph
         if status == "done" and convergence_state:
             scan["convergenceState"] = convergence_state
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)

@@ -61,7 +61,7 @@ def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = N
     plan_id = usage["plan"]
     return {
         "plan": plan_id,
-        "interval": current.get("interval") if plan_id == "pro" else "month",
+        "interval": current.get("interval") if plan_id in billing.PAID_PLAN_IDS else "month",
         "period": usage["period"],
         "used": usage["used"],
         "limit": usage["limit"],
@@ -106,7 +106,7 @@ def billing_subscription_record_payload(record: dict) -> dict:
         "subscriptionId": public_billing_text(record.get("subscriptionId")),
         "subscriptionItemId": public_billing_text(record.get("subscriptionItemId")),
         "status": public_billing_status(record.get("status")),
-        "plan": public_billing_text(record.get("plan")) if public_billing_text(record.get("plan")) in {"free", "pro"} else None,
+        "plan": public_billing_text(record.get("plan")) if public_billing_text(record.get("plan")) in set(billing.PLAN_IDS) else None,
         "interval": billing.normalize_interval(record.get("interval")),
         "currentPeriodStart": pull_request_timestamp(record.get("currentPeriodStart")),
         "currentPeriodEnd": pull_request_timestamp(record.get("currentPeriodEnd")),
