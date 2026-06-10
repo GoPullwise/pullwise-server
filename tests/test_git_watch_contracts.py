@@ -13,13 +13,10 @@ def project_root() -> Path:
 
 
 def shell_executable() -> str:
-    shell = shutil.which("sh")
-    if shell:
-        return shell
     bash = shutil.which("bash")
     if bash:
         return bash
-    raise unittest.SkipTest("No POSIX shell is available for git-watch tests.")
+    raise unittest.SkipTest("bash is required for git-watch tests.")
 
 
 def git_executable() -> str:
