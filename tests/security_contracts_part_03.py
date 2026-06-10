@@ -157,6 +157,14 @@ class SecurityContractsPart03Test(SecurityContractsBase):
         self.assertIsNone(handler.payload["github"]["login"])
         self.assertIsNone(handler.payload["github"]["repositoryScope"])
         self.assertIsNone(handler.payload["github"]["authorizedAt"])
+    def test_auth_session_filters_github_noreply_user_email(self) -> None:
+        app.USERS["usr_1"]["email"] = "SanChai20@users.noreply.github.com"
+        handler = RouteHarness("/auth/session", cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertTrue(handler.payload["authenticated"])
+        self.assertEqual(handler.payload["user"]["email"], "")
     def test_auth_session_does_not_report_pending_empty_repository_access_connected(self) -> None:
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
             "mode": "github-app",

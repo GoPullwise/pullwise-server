@@ -373,9 +373,24 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         )
 
         self.assertEqual(user["name"], "OctoCat")
-        self.assertEqual(user["email"], "OctoCat@users.noreply.github.com")
+        self.assertEqual(user["email"], "")
         self.assertIsNone(user["avatarUrl"])
         self.assertIsNone(user["githubHtmlUrl"])
+    def test_real_github_user_does_not_store_github_noreply_email(self) -> None:
+        app.USERS = {}
+
+        user = app.get_or_create_real_github_user(
+            {
+                "id": 123,
+                "login": "OctoCat",
+                "primaryEmail": "OctoCat@users.noreply.github.com",
+                "email": "123+OctoCat@users.noreply.github.com",
+                "name": "Octo Cat",
+            },
+            {"access_token": "gho_user", "token_type": "bearer", "scope": "read:user"},
+        )
+
+        self.assertEqual(user["email"], "")
     def test_issue_status_update_requires_sign_in(self) -> None:
         handler = RouteHarness("/issues/iss_1/status", {"status": "ignored"})
 
@@ -863,6 +878,22 @@ class SecurityContractsPart01Test(SecurityContractsBase):
                 "review": {"outputLanguage": "en"},
             },
         )
+
+    def test_settings_payload_filters_persisted_github_noreply_email(self) -> None:
+        app.USERS["usr_1"]["email"] = "Dev@users.noreply.github.com"
+        app.SETTINGS["usr_1"] = {
+            "profile": {
+                "name": "Dev",
+                "email": "SanChai20@users.noreply.github.com",
+            },
+            "review": {"outputLanguage": "en"},
+        }
+        handler = RouteHarness("/settings", cookie=self.signed_in())
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["profile"]["email"], "")
 
 
 __all__ = ["SecurityContractsPart01Test"]

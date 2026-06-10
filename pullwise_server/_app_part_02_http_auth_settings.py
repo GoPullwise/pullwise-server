@@ -356,11 +356,15 @@ def user_public(user: dict) -> dict:
     return {
         "id": public_issue_text(user.get("id")),
         "name": public_issue_text(user.get("name")) or "User",
-        "email": public_issue_text(user.get("email")),
+        "email": public_user_email(user.get("email")),
         "avatarUrl": trusted_public_url(user.get("avatarUrl")),
         "createdAt": pull_request_timestamp(user.get("createdAt")) or 0,
         "providers": review._safe_text_list(user.get("providers")),
     }
+
+
+def public_user_email(value: object) -> str:
+    return github_auth.clean_account_email_address(value) or ""
 
 
 def admin_user_payload(user: dict, *, current_user_id: str | None = None) -> dict:
@@ -513,7 +517,7 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
     email = (
         github_auth.clean_account_email_address(profile.get("primaryEmail"))
         or github_auth.clean_account_email_address(profile.get("email"))
-        or f"{login}@users.noreply.github.com"
+        or ""
     )
     avatar_url = trusted_public_url(profile.get("avatar_url"))
     github_html_url = trusted_github_web_url(profile.get("html_url"))
@@ -832,7 +836,7 @@ def default_settings_payload(user_id: str) -> dict:
     return {
         "profile": {
             "name": public_issue_text(user.get("name")) or "User",
-            "email": public_issue_text(user.get("email")),
+            "email": public_user_email(user.get("email")),
         },
         "review": {
             "outputLanguage": DEFAULT_REVIEW_OUTPUT_LANGUAGE,
@@ -873,7 +877,7 @@ def clean_settings_payload(user_id: str, value: object) -> dict:
     return {
         "profile": {
             "name": public_issue_text(profile.get("name")) or base["profile"]["name"],
-            "email": public_issue_text(profile.get("email")) or base["profile"]["email"],
+            "email": public_user_email(profile.get("email")) or base["profile"]["email"],
         },
         "review": {
             "outputLanguage": clean_review_output_language(review_settings.get("outputLanguage"))
@@ -886,7 +890,7 @@ def apply_settings_update(user_id: str, body: dict) -> dict:
     settings = settings_payload(user_id)
     profile = body.get("profile") if isinstance(body.get("profile"), dict) else {}
     name = public_issue_text(profile.get("name"))
-    email = public_issue_text(profile.get("email"))
+    email = github_auth.clean_account_email_address(profile.get("email"))
     if name:
         settings["profile"]["name"] = name
     if email:
