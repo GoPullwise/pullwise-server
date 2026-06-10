@@ -79,6 +79,22 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
 
+    def test_env_example_declares_max_subscription_configuration(self) -> None:
+        values = env_example_values()
+
+        self.assertEqual(values.get("PULLWISE_PRO_USER_REVIEW_LIMIT"), "60")
+        self.assertEqual(values.get("PULLWISE_PRO_REPO_REVIEW_LIMIT"), "60")
+        self.assertEqual(values.get("PULLWISE_MAX_USER_REVIEW_LIMIT"), "90")
+        self.assertEqual(values.get("PULLWISE_MAX_REPO_REVIEW_LIMIT"), "90")
+        self.assertEqual(values.get("PULLWISE_PRO_CODEX_REASONING_EFFORT"), "medium")
+        self.assertEqual(values.get("PULLWISE_MAX_CODEX_REASONING_EFFORT"), "xhigh")
+        self.assertEqual(values.get("PULLWISE_PRO_OPENCODE_VARIANT"), "medium")
+        self.assertEqual(values.get("PULLWISE_MAX_OPENCODE_VARIANT"), "xhigh")
+        self.assertIn("PULLWISE_CREEM_PRO_PRODUCT_IDS", values)
+        self.assertIn("PULLWISE_CREEM_MAX_PRODUCT_IDS", values)
+        self.assertEqual(values.get("PULLWISE_CREEM_UPGRADE_BEHAVIOR"), "proration-charge-immediately")
+        self.assertEqual(values.get("PULLWISE_CREEM_DOWNGRADE_BEHAVIOR"), "proration-none")
+
     def test_main_uses_default_port_for_invalid_port_env(self) -> None:
         class ServerStub:
             def __init__(self) -> None:

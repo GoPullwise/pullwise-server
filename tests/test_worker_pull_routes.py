@@ -3647,6 +3647,38 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual([job["scan_id"] for job in claim.payload["jobs"]], ["sc_1", "sc_2", "sc_3"])
         self.assertEqual(claim.payload["jobs"][0]["status"], "claimed")
 
+    def test_worker_claim_includes_max_plan_agent_config(self) -> None:
+        app.USERS["usr_max"] = {
+            "id": "usr_max",
+            "name": "Max User",
+            "billing": {"plan": "max", "status": "active"},
+        }
+        scan = {
+            "id": "sc_max_agent",
+            "repo": "acme/max-agent",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_max",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS.append(scan)
+        app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 1}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        agent_config = claim.payload["job"]["agentConfig"]
+        self.assertEqual(agent_config["plan"], "max")
+        self.assertEqual(agent_config["codex"]["reasoningEffort"], "xhigh")
+        self.assertEqual(agent_config["codex"]["reasoning_effort"], "xhigh")
+        self.assertEqual(agent_config["opencode"]["variant"], "xhigh")
+
     def test_worker_claim_uses_worker_slots_for_global_capacity_and_keeps_user_fairness(self) -> None:
         db.upsert_worker_heartbeat(
             {

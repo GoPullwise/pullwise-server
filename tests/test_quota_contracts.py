@@ -47,6 +47,7 @@ class QuotaContractsTest(unittest.TestCase):
                     "PULLWISE_DB_PATH": db_path,
                     "PULLWISE_FREE_USER_REVIEW_LIMIT": "7",
                     "PULLWISE_PRO_USER_REVIEW_LIMIT": "70",
+                    "PULLWISE_MAX_USER_REVIEW_LIMIT": "90",
                 },
                 clear=True,
             ):
@@ -55,12 +56,18 @@ class QuotaContractsTest(unittest.TestCase):
                     **make_user("usr_pro"),
                     "billing": {"plan": "pro", "status": "active"},
                 }
+                max_user = {
+                    **make_user("usr_max"),
+                    "billing": {"plan": "max", "status": "active"},
+                }
 
                 free_usage = quota.quota_payload_for_user(free_user)
                 pro_usage = quota.quota_payload_for_user(pro_user)
+                max_usage = quota.quota_payload_for_user(max_user)
 
         self.assertEqual(free_usage["limit"], 7)
         self.assertEqual(pro_usage["limit"], 70)
+        self.assertEqual(max_usage["limit"], 90)
 
     def test_quota_bucket_sanitizes_invalid_used_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -245,11 +252,13 @@ class QuotaContractsTest(unittest.TestCase):
                     "PULLWISE_DB_PATH": db_path,
                     "PULLWISE_FREE_USER_REVIEW_LIMIT": "8",
                     "PULLWISE_PRO_USER_REVIEW_LIMIT": "80",
+                    "PULLWISE_MAX_USER_REVIEW_LIMIT": "90",
                 },
                 clear=True,
             ):
                 self.assertEqual(quota.repository_limit_for_plan("free"), 8)
                 self.assertEqual(quota.repository_limit_for_plan("pro"), 80)
+                self.assertEqual(quota.repository_limit_for_plan("max"), 90)
 
     def test_active_pro_quota_uses_subscription_monthly_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

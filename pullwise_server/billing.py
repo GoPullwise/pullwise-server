@@ -24,7 +24,7 @@ PLAN_IDS = ("free", *PAID_PLAN_IDS)
 PLAN_RANK = {"free": 0, "pro": 1, "max": 2}
 PAID_PLAN_ENTITLEMENT_STATUSES = {"active", "trialing", "canceling"}
 CREEM_PRO_ENTITLEMENT_STATUSES = PAID_PLAN_ENTITLEMENT_STATUSES
-CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-charge", "proration-none"}
+CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
 
 
 def env(name: str, default: str = "") -> str:
@@ -147,16 +147,17 @@ def creem_configured_product_ids_for_plan(plan: str) -> list[str]:
     normalized_plan = normalize_plan(plan)
     if normalized_plan not in PAID_PLAN_IDS:
         return []
-    raw_ids = creem_configured_paid_product_ids()
+    raw_ids = creem_configured_paid_product_ids(normalized_plan)
     if normalized_plan == "pro" and not raw_ids:
         raw_ids = [
             env("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID", env("PULLWISE_CREEM_PRODUCT_ID")),
             env("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID", env("PULLWISE_CREEM_YEARLY_PRODUCT_ID")),
         ]
-    elif normalized_plan == "pro":
-        raw_ids = raw_ids[:2]
-    else:
-        raw_ids = raw_ids[2:]
+    elif normalized_plan == "max" and not raw_ids:
+        raw_ids = [
+            env("PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID"),
+            env("PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID"),
+        ]
 
     product_ids: list[str] = []
     seen: set[str] = set()
@@ -168,9 +169,12 @@ def creem_configured_product_ids_for_plan(plan: str) -> list[str]:
     return product_ids
 
 
-def creem_configured_paid_product_ids() -> list[str]:
+def creem_configured_paid_product_ids(plan: str) -> list[str]:
+    normalized_plan = normalize_plan(plan)
+    if normalized_plan not in PAID_PLAN_IDS:
+        return []
     raw_ids: list[str] = []
-    combined = env("PULLWISE_CREEM_PRO_PRODUCT_IDS")
+    combined = env(f"PULLWISE_CREEM_{normalized_plan.upper()}_PRODUCT_IDS")
     if combined:
         raw_ids.extend(combined.split(","))
     product_ids: list[str] = []
@@ -565,6 +569,8 @@ def subscription_change_is_upgrade(current_plan: str, current_interval: str, tar
 
 def normalize_creem_update_behavior(value: object, default: str) -> str:
     normalized = text_payload(value, default).strip().lower()
+    if normalized == "proration-charge":
+        return "proration-charge-immediately"
     return normalized if normalized in CREEM_UPDATE_BEHAVIORS else default
 
 
@@ -666,6 +672,24 @@ def product_payload(value: object) -> dict | None:
     return {"id": product_id} if product_id else None
 
 
+def first_subscription_item(subscription: dict, order: dict) -> dict:
+    for source in (subscription.get("items"), order.get("items")):
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            if isinstance(item, dict):
+                return item
+    return {}
+
+
+def product_payload_from_subscription_item(item: dict) -> dict | None:
+    product = product_payload(item.get("product"))
+    if product:
+        return product
+    product_id = object_id(item.get("product_id") or item.get("productId"))
+    return {"id": product_id} if product_id else None
+
+
 def creem_product_configured_for_plan(product: dict | None, plan: str) -> bool:
     product_id = object_id(product)
     return bool(product_id and product_id in creem_configured_product_ids_for_plan(plan))
@@ -735,6 +759,11 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     customer_id = object_id(customer) or object_id(subscription_customer_id) or object_id(order.get("customer"))
     if not user_id and not customer_id and not request_id:
         return None
+
+    subscription_item = first_subscription_item(subscription, order) if isinstance(subscription, dict) else {}
+    item_product = product_payload_from_subscription_item(subscription_item)
+    if not product:
+        product = item_product
 
     product_plan = creem_plan_from_product(product)
     plan = product_plan or normalize_plan(metadata.get("plan") or subscription_metadata.get("plan") or "pro")
@@ -833,27 +862,35 @@ def interval_from_legacy_creem_product_id(product_id: object) -> str | None:
     yearly_ids = {
         env("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID").strip(),
         env("PULLWISE_CREEM_YEARLY_PRODUCT_ID").strip(),
+        env("PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID").strip(),
     }
     monthly_ids = {
         env("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID").strip(),
         env("PULLWISE_CREEM_PRODUCT_ID").strip(),
+        env("PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID").strip(),
     }
     if normalized_product_id in yearly_ids - {""}:
         return "year"
     if normalized_product_id in monthly_ids - {""}:
         return "month"
+    for plan in PAID_PLAN_IDS:
+        configured_ids = creem_configured_paid_product_ids(plan)
+        if configured_ids[:1] == [normalized_product_id]:
+            return "month"
+        if len(configured_ids) > 1 and configured_ids[1] == normalized_product_id:
+            return "year"
     return None
 
 
 def interval_from_creem_product(product: dict | None) -> str | None:
     if not isinstance(product, dict):
         return None
-    inferred = interval_from_legacy_creem_product_id(product.get("id"))
-    if inferred:
-        return inferred
     period = str(product.get("billing_period") or "").strip().lower()
     if period in {"every-year", "year", "yearly", "annual", "annually"}:
         return "year"
     if period in {"every-month", "month", "monthly"}:
         return "month"
+    inferred = interval_from_legacy_creem_product_id(product.get("id"))
+    if inferred:
+        return inferred
     return None

@@ -69,6 +69,40 @@ class BillingContractsTest(unittest.TestCase):
         self.assertTrue(plan["plans"][1]["prices"]["month"]["configured"])
         self.assertTrue(plan["plans"][1]["prices"]["year"]["configured"])
 
+    def test_public_plan_exposes_max_monthly_yearly_catalog(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_BILLING_PROVIDER": "creem",
+                "PULLWISE_CREEM_API_KEY": "creem_123",
+                "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_pro_monthly,prod_pro_yearly",
+                "PULLWISE_CREEM_MAX_PRODUCT_IDS": "prod_max_monthly,prod_max_yearly",
+                "PULLWISE_MAX_USER_REVIEW_LIMIT": "90",
+            },
+            clear=True,
+        ):
+            with patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_pro_monthly", price=2900, period="every-month", currency="USD"),
+                    creem_product("prod_pro_yearly", price=29000, period="every-year", currency="USD"),
+                    creem_product("prod_max_monthly", price=4900, period="every-month", currency="USD", name="Pullwise Max"),
+                    creem_product("prod_max_yearly", price=49000, period="every-year", currency="USD", name="Pullwise Max"),
+                ),
+            ):
+                plan = billing.public_plan()
+
+        self.assertEqual([item["id"] for item in plan["plans"]], ["free", "pro", "max"])
+        max_plan = plan["plans"][2]
+        self.assertEqual(max_plan["name"], "Pullwise Max")
+        self.assertEqual(max_plan["reviewLimit"], 90)
+        self.assertEqual(max_plan["prices"]["month"]["amount"], "49")
+        self.assertEqual(max_plan["prices"]["year"]["amount"], "490")
+        self.assertEqual(max_plan["prices"]["month"]["productId"], "prod_max_monthly")
+        self.assertEqual(max_plan["prices"]["year"]["productId"], "prod_max_yearly")
+        self.assertTrue(max_plan["prices"]["month"]["configured"])
+        self.assertTrue(max_plan["prices"]["year"]["configured"])
+
     def test_public_plan_can_infer_creem_product_intervals_from_product_ids(self) -> None:
         with (
             patch.dict(
@@ -283,6 +317,45 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(json_payload["metadata"]["plan"], "pro")
         self.assertEqual(json_payload["metadata"]["interval"], "year")
 
+    def test_creates_creem_max_checkout_session(self) -> None:
+        response = Mock()
+        response.json.return_value = {"id": "chk_123", "checkout_url": "https://creem.io/checkout/chk_123"}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_MAX_PRODUCT_IDS": "prod_max_monthly,prod_max_yearly",
+                    "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+                    "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                },
+                clear=True,
+            ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_max_monthly", price=4900, period="every-month", name="Pullwise Max"),
+                    creem_product("prod_max_yearly", price=49000, period="every-year", name="Pullwise Max"),
+                ),
+            ),
+            patch("pullwise_server.billing.requests.post", return_value=response) as post,
+        ):
+            session = billing.create_checkout_session(
+                {"id": "usr_1", "email": "dev@example.com"},
+                success_url="https://app.pullwise.dev/?billing=success",
+                plan="max",
+                interval="year",
+            )
+
+        self.assertEqual(session["plan"], "max")
+        self.assertEqual(session["interval"], "year")
+        json_payload = post.call_args.kwargs["json"]
+        self.assertEqual(json_payload["product_id"], "prod_max_yearly")
+        self.assertEqual(json_payload["metadata"]["plan"], "max")
+        self.assertEqual(json_payload["metadata"]["interval"], "year")
+
     def test_creem_api_base_url_supports_test_mode_and_explicit_v1_url(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_CREEM_TEST_MODE": "true"}, clear=True):
             self.assertEqual(billing.creem_api_base_url(), "https://test-api.creem.io")
@@ -406,6 +479,32 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["json"]["product_id"], "prod_yearly")
         self.assertEqual(post.call_args.kwargs["json"]["update_behavior"], "proration-charge-immediately")
 
+    def test_creem_update_behavior_distinguishes_plan_and_interval_upgrades(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                billing.creem_subscription_update_behavior("pro", "month", "max", "month"),
+                "proration-charge-immediately",
+            )
+            self.assertEqual(
+                billing.creem_subscription_update_behavior("max", "month", "pro", "month"),
+                "proration-none",
+            )
+            self.assertEqual(
+                billing.creem_subscription_update_behavior("max", "month", "max", "year"),
+                "proration-charge-immediately",
+            )
+            self.assertEqual(
+                billing.creem_subscription_update_behavior("max", "year", "max", "month"),
+                "proration-none",
+            )
+
+    def test_creem_update_behavior_maps_deprecated_proration_charge_to_immediate(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_CREEM_UPGRADE_BEHAVIOR": "proration-charge"}, clear=True):
+            self.assertEqual(
+                billing.creem_subscription_update_behavior("pro", "month", "max", "month"),
+                "proration-charge-immediately",
+            )
+
     def test_creem_subscription_event_can_update_by_customer_id_without_metadata(self) -> None:
         update = billing.billing_update_from_creem_event(
             {
@@ -442,6 +541,45 @@ class BillingContractsTest(unittest.TestCase):
                     self.assertIsNotNone(update)
                     self.assertEqual(update["customerId"], "cust_123")
                     self.assertEqual(update["subscriptionId"], "sub_123")
+
+    def test_creem_subscription_event_maps_max_product_to_max_plan(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_CREEM_MAX_PRODUCT_IDS": "prod_max_monthly,prod_max_yearly"}, clear=True):
+            update = billing.billing_update_from_creem_event(
+                {
+                    "eventType": "subscription.update",
+                    "object": {
+                        "id": "sub_123",
+                        "status": "active",
+                        "product": {"id": "prod_max_monthly", "billing_period": "every-month"},
+                        "customer": {"id": "cust_123", "email": "dev@example.com"},
+                        "metadata": {"userId": "usr_1"},
+                    },
+                }
+            )
+
+        self.assertIsNotNone(update)
+        self.assertEqual(update["plan"], "max")
+        self.assertEqual(update["interval"], "month")
+        self.assertEqual(update["status"], "active")
+
+    def test_creem_subscription_event_maps_product_id_from_subscription_items(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_CREEM_MAX_PRODUCT_IDS": "prod_max_monthly,prod_max_yearly"}, clear=True):
+            update = billing.billing_update_from_creem_event(
+                {
+                    "eventType": "subscription.update",
+                    "object": {
+                        "id": "sub_123",
+                        "status": "active",
+                        "customer": {"id": "cust_123", "email": "dev@example.com"},
+                        "metadata": {"userId": "usr_1"},
+                        "items": [{"product_id": "prod_max_yearly"}],
+                    },
+                }
+            )
+
+        self.assertIsNotNone(update)
+        self.assertEqual(update["plan"], "max")
+        self.assertEqual(update["interval"], "year")
 
 
 if __name__ == "__main__":

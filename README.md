@@ -151,7 +151,11 @@ PULLWISE_ADMIN_EMAILS=admin@example.com
 PULLWISE_WORKER_JOB_TIMEOUT_SECONDS=1800
 PULLWISE_WORKER_MAX_RETRIES=3
 PULLWISE_FREE_USER_REVIEW_LIMIT=5
+PULLWISE_FREE_REPO_REVIEW_LIMIT=5
 PULLWISE_PRO_USER_REVIEW_LIMIT=60
+PULLWISE_PRO_REPO_REVIEW_LIMIT=60
+PULLWISE_MAX_USER_REVIEW_LIMIT=90
+PULLWISE_MAX_REPO_REVIEW_LIMIT=90
 PULLWISE_BILLING_TIMEOUT_SECONDS=15
 ```
 
@@ -302,8 +306,11 @@ Creem:
 ```env
 PULLWISE_CREEM_API_KEY=...
 PULLWISE_CREEM_PRO_PRODUCT_IDS=prod_monthly,prod_yearly
+PULLWISE_CREEM_MAX_PRODUCT_IDS=prod_max_monthly,prod_max_yearly
 PULLWISE_CREEM_WEBHOOK_SECRET=...
 PULLWISE_CREEM_TEST_MODE=false
+PULLWISE_CREEM_UPGRADE_BEHAVIOR=proration-charge-immediately
+PULLWISE_CREEM_DOWNGRADE_BEHAVIOR=proration-none
 # Optional explicit override. Accepts either the origin or /v1 URL.
 PULLWISE_CREEM_API_BASE_URL=
 ```
@@ -639,21 +646,31 @@ The disable switch also accepts `0`, `no`, `off`, or `disabled`.
 ## Billing Setup
 
 Pullwise uses Creem for billing.
-The built-in catalog is Free plus Pro. Scan quota is tracked for the signed-in
-user and for each stable GitHub repository id. Free defaults to 5 user
-scans/month and 5 scans/month for each repository. GitHub forks that report the
-same source repository share the source repository quota bucket. Pro pricing,
-currency, and billing intervals are read from the configured Creem products.
-Pro defaults to 60 user scans/month and 60 scans/month for each repository.
+The built-in catalog is Free, Pro, and Max. Scan quota is tracked for the
+signed-in user and for each stable GitHub repository id. Free defaults to 5
+user scans/month and 5 scans/month for each repository. GitHub forks that
+report the same source repository share the source repository quota bucket.
+Pro and Max pricing, currency, and billing intervals are read from the
+configured Creem products. Pro defaults to 60 user scans/month and 60
+scans/month for each repository. Max defaults to 90 user scans/month and 90
+scans/month for each repository.
 Monthly review allowance resets on the user's subscription-cycle
 anniversary, or on the free-cycle anniversary when the account is not entitled
-to Pro.
+to a paid plan.
 
 Quota controls:
 
 ```env
 PULLWISE_FREE_USER_REVIEW_LIMIT=5
+PULLWISE_FREE_REPO_REVIEW_LIMIT=5
 PULLWISE_PRO_USER_REVIEW_LIMIT=60
+PULLWISE_PRO_REPO_REVIEW_LIMIT=60
+PULLWISE_MAX_USER_REVIEW_LIMIT=90
+PULLWISE_MAX_REPO_REVIEW_LIMIT=90
+PULLWISE_PRO_CODEX_REASONING_EFFORT=medium
+PULLWISE_MAX_CODEX_REASONING_EFFORT=xhigh
+PULLWISE_PRO_OPENCODE_VARIANT=medium
+PULLWISE_MAX_OPENCODE_VARIANT=xhigh
 ```
 
 Creem:
@@ -662,9 +679,12 @@ Creem:
 PULLWISE_BILLING_PROVIDER=creem
 PULLWISE_CREEM_API_KEY=creem_key
 PULLWISE_CREEM_PRO_PRODUCT_IDS=prod_monthly,prod_yearly
+PULLWISE_CREEM_MAX_PRODUCT_IDS=prod_max_monthly,prod_max_yearly
 PULLWISE_CREEM_WEBHOOK_SECRET=whsec_...
 PULLWISE_CREEM_TEST_MODE=false
 PULLWISE_CREEM_API_BASE_URL=
+PULLWISE_CREEM_UPGRADE_BEHAVIOR=proration-charge-immediately
+PULLWISE_CREEM_DOWNGRADE_BEHAVIOR=proration-none
 ```
 
 Set `PULLWISE_CREEM_TEST_MODE=true` with a Creem test-mode API key and test
@@ -679,6 +699,10 @@ environments and may be set to either `https://test-api.creem.io` or
 For compatibility, `PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID` and
 `PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID` are still accepted, but
 `PULLWISE_CREEM_PRO_PRODUCT_IDS` is the preferred configuration.
+Max uses the same shape through `PULLWISE_CREEM_MAX_PRODUCT_IDS`; optional
+`PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID` and
+`PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID` are accepted for explicit interval
+configuration.
 
 Implemented billing routes:
 
@@ -687,11 +711,19 @@ Implemented billing routes:
 - `POST /billing/checkout-sessions`
 - `POST /billing/portal-sessions`
 - `POST /billing/change-interval`
+- `POST /billing/cancel-subscription`
 - `POST /webhooks/creem`
 
 Checkout URLs are created server-side with `userId`
 metadata. Webhooks verify Creem `creem-signature` before updating billing
-state. Monthly-to-yearly changes use the Creem subscription upgrade endpoint.
+state. Plan and interval changes use the Creem subscription upgrade endpoint
+with proration behavior selected by upgrade/downgrade direction. Cancellation
+is scheduled for the end of the paid period; Pullwise does not issue automatic
+refunds for the remaining period.
+`PULLWISE_CREEM_UPGRADE_BEHAVIOR` defaults to immediate proration for upgrades
+such as Pro to Max or monthly to yearly. `PULLWISE_CREEM_DOWNGRADE_BEHAVIOR`
+defaults to `proration-none` for downgrades such as Max to Pro or yearly to
+monthly, avoiding prorated credits/refunds during the current period.
 
 ## User and Billing State
 
@@ -807,6 +839,7 @@ Implemented endpoints:
 - `POST /billing/checkout-sessions`
 - `POST /billing/portal-sessions`
 - `POST /billing/change-interval`
+- `POST /billing/cancel-subscription`
 - `POST /webhooks/creem`
 - `GET /api/v1/repositories`
 - `POST /api/v1/repositories/{repoId}/scans`

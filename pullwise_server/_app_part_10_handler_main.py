@@ -625,8 +625,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
-            if effective_billing_plan(user) == "pro":
-                return self.error(HTTPStatus.CONFLICT, "An active Pro subscription already exists. Manage billing from the Billing page.")
+            if effective_billing_plan(user) in billing.PAID_PLAN_IDS:
+                return self.error(HTTPStatus.CONFLICT, "An active paid subscription already exists. Change or manage billing from the Billing page.")
             success_url = safe_redirect_to(body.get("successUrl"), "settings")
             plan = str(body.get("plan") or "pro")
             interval = str(body.get("interval") or "month")
@@ -678,20 +678,54 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             result = billing.change_subscription_interval(
                 user,
                 interval=str(body.get("interval") or "year"),
+                plan=str(body.get("plan") or ""),
                 return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
             )
             result = safe_billing_redirect_response(result, "portal")
             if result.get("alreadyActive"):
                 return self.json(result)
-            if result.get("provider") == "creem" and result.get("interval") == "year":
+            if result.get("provider") == "creem":
                 current_billing = user.get("billing") or {}
                 user["billing"] = {
                     **current_billing,
                     "provider": "creem",
                     "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
                     "status": result.get("status") or current_billing.get("status") or "active",
-                    "plan": "pro",
-                    "interval": "year",
+                    "plan": billing.normalize_plan(result.get("plan") or current_billing.get("plan") or "pro"),
+                    "interval": billing.normalize_interval(result.get("interval") or current_billing.get("interval")),
+                    "currentPeriodStart": result.get("currentPeriodStart") or current_billing.get("currentPeriodStart"),
+                    "currentPeriodEnd": result.get("currentPeriodEnd") or current_billing.get("currentPeriodEnd"),
+                }
+                mark_state_dirty()
+            return self.json(result)
+        if path == "/billing/cancel-subscription":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before canceling your subscription.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            user = USERS[session["userId"]]
+            result = billing.cancel_subscription(
+                user,
+                mode=str(body.get("mode") or "scheduled"),
+                return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
+            )
+            result = safe_billing_redirect_response(result, "portal")
+            if result.get("provider") == "creem":
+                current_billing = user.get("billing") or {}
+                user["billing"] = {
+                    **current_billing,
+                    "provider": "creem",
+                    "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
+                    "status": result.get("status") or current_billing.get("status") or "canceling",
+                    "plan": billing.normalize_plan(result.get("plan") or current_billing.get("plan") or "pro"),
+                    "interval": billing.normalize_interval(result.get("interval") or current_billing.get("interval")),
+                    "cancelAtPeriodEnd": result.get("cancelAtPeriodEnd")
+                    if isinstance(result.get("cancelAtPeriodEnd"), bool)
+                    else current_billing.get("cancelAtPeriodEnd"),
+                    "canceledAt": result.get("canceledAt") or current_billing.get("canceledAt"),
+                    "currentPeriodStart": result.get("currentPeriodStart") or current_billing.get("currentPeriodStart"),
+                    "currentPeriodEnd": result.get("currentPeriodEnd") or current_billing.get("currentPeriodEnd"),
                 }
                 mark_state_dirty()
             return self.json(result)

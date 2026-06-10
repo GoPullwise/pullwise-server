@@ -213,7 +213,7 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(create.call_args.kwargs["interval"], "year")
 
-    def test_checkout_session_rejects_active_pro_subscription(self) -> None:
+    def test_checkout_session_rejects_active_paid_subscription(self) -> None:
         cookie = seed_session()
         app.USERS["usr_1"]["billing"] = {
             "provider": "creem",
@@ -236,7 +236,7 @@ class BillingRoutesTest(unittest.TestCase):
             app.PullwiseHandler.handle_post(handler, "/billing/checkout-sessions", {}, ["billing", "checkout-sessions"])
 
         self.assertEqual(handler.status, HTTPStatus.CONFLICT)
-        self.assertIn("active Pro subscription", handler.payload["message"])
+        self.assertIn("active paid subscription", handler.payload["message"])
         create.assert_not_called()
 
     def test_admin_checkout_uses_creem_checkout_without_local_pro(self) -> None:
@@ -336,6 +336,83 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["provider"], "creem")
         self.assertEqual(change.call_args.kwargs["interval"], "year")
+        self.assertEqual(change.call_args.kwargs["plan"], "")
+
+    def test_change_interval_passes_target_plan_and_updates_local_billing_state(self) -> None:
+        cookie = seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+        }
+        handler = HandlerHarness(
+            {"plan": "max", "interval": "month", "returnUrl": "https://app.pullwise.dev/?screen=billing"},
+            cookie=cookie,
+        )
+
+        with patch(
+            "pullwise_server.billing.change_subscription_interval",
+            return_value={
+                "provider": "creem",
+                "plan": "max",
+                "interval": "month",
+                "subscriptionId": "sub_1",
+                "status": "active",
+            },
+        ) as change:
+            app.PullwiseHandler.handle_post(handler, "/billing/change-interval", {}, ["billing", "change-interval"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(change.call_args.kwargs["plan"], "max")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["plan"], "max")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["interval"], "month")
+
+    def test_cancel_subscription_schedules_creem_cancellation(self) -> None:
+        cookie = seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "max",
+            "interval": "year",
+        }
+        handler = HandlerHarness(
+            {"mode": "scheduled", "returnUrl": "https://app.pullwise.dev/?screen=billing"},
+            cookie=cookie,
+        )
+
+        with patch(
+            "pullwise_server.billing.cancel_subscription",
+            return_value={
+                "provider": "creem",
+                "plan": "max",
+                "interval": "year",
+                "subscriptionId": "sub_1",
+                "status": "canceling",
+                "cancelAtPeriodEnd": True,
+            },
+        ) as cancel:
+            app.PullwiseHandler.handle_post(handler, "/billing/cancel-subscription", {}, ["billing", "cancel-subscription"])
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(cancel.call_args.kwargs["mode"], "scheduled")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "canceling")
+        self.assertTrue(app.USERS["usr_1"]["billing"]["cancelAtPeriodEnd"])
+
+    def test_cancel_subscription_rejects_non_object_body(self) -> None:
+        cookie = seed_session()
+        handler = HandlerHarness(["invalid"], cookie=cookie)
+
+        with patch("pullwise_server.billing.cancel_subscription") as cancel:
+            app.PullwiseHandler.handle_post(handler, "/billing/cancel-subscription", {}, ["billing", "cancel-subscription"])
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("JSON object", handler.payload["message"])
+        cancel.assert_not_called()
 
     def test_billing_redirect_routes_reject_unsafe_internal_urls(self) -> None:
         scenarios = [
