@@ -856,6 +856,22 @@ def normalize_interval(interval: object) -> str:
 
 
 def interval_from_legacy_creem_product_id(product_id: object) -> str | None:
+    inferred = interval_from_explicit_creem_product_id(product_id)
+    if inferred:
+        return inferred
+    if not isinstance(product_id, str) or not product_id.strip():
+        return None
+    normalized_product_id = product_id.strip()
+    for plan in PAID_PLAN_IDS:
+        configured_ids = creem_configured_paid_product_ids(plan)
+        if configured_ids[:1] == [normalized_product_id]:
+            return "month"
+        if len(configured_ids) > 1 and configured_ids[1] == normalized_product_id:
+            return "year"
+    return None
+
+
+def interval_from_explicit_creem_product_id(product_id: object) -> str | None:
     if not isinstance(product_id, str) or not product_id.strip():
         return None
     normalized_product_id = product_id.strip()
@@ -873,18 +889,15 @@ def interval_from_legacy_creem_product_id(product_id: object) -> str | None:
         return "year"
     if normalized_product_id in monthly_ids - {""}:
         return "month"
-    for plan in PAID_PLAN_IDS:
-        configured_ids = creem_configured_paid_product_ids(plan)
-        if configured_ids[:1] == [normalized_product_id]:
-            return "month"
-        if len(configured_ids) > 1 and configured_ids[1] == normalized_product_id:
-            return "year"
     return None
 
 
 def interval_from_creem_product(product: dict | None) -> str | None:
     if not isinstance(product, dict):
         return None
+    inferred = interval_from_explicit_creem_product_id(product.get("id"))
+    if inferred:
+        return inferred
     period = str(product.get("billing_period") or "").strip().lower()
     if period in {"every-year", "year", "yearly", "annual", "annually"}:
         return "year"
