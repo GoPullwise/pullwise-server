@@ -64,9 +64,6 @@ def public_repository_graph(value: object) -> dict:
     )
     if architecture_summary:
         payload["architectureSummary"] = architecture_summary
-    semantic_graph = public_repository_semantic_graph(value.get("semanticGraph") or value.get("semantic_graph"))
-    if semantic_graph:
-        payload["semanticGraph"] = semantic_graph
     return payload
 
 
@@ -356,12 +353,17 @@ def scan_payload(scan: dict) -> dict:
     audit_swarm = public_scan_audit_swarm(scan.get("auditSwarm") or scan.get("audit_swarm"))
     if audit_swarm:
         payload["auditSwarm"] = audit_swarm
-    repository_graph = public_repository_graph(scan.get("repositoryGraph") or scan.get("repository_graph"))
+    raw_repository_graph = scan.get("repositoryGraph") or scan.get("repository_graph")
+    repository_graph = public_repository_graph(raw_repository_graph)
     if repository_graph:
         payload["repositoryGraph"] = repository_graph
-        semantic_graph = repository_graph.get("semanticGraph") if isinstance(repository_graph.get("semanticGraph"), dict) else {}
-        if semantic_graph:
-            payload["semanticGraph"] = semantic_graph
+    semantic_graph = public_repository_semantic_graph(scan.get("semanticGraph") or scan.get("semantic_graph"))
+    if not semantic_graph and isinstance(raw_repository_graph, dict):
+        semantic_graph = public_repository_semantic_graph(
+            raw_repository_graph.get("semanticGraph") or raw_repository_graph.get("semantic_graph")
+        )
+    if semantic_graph:
+        payload["semanticGraph"] = semantic_graph
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0

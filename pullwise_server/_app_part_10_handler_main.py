@@ -2062,7 +2062,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not job:
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
         audit_swarm = public_scan_audit_swarm(body.get("audit_swarm") or body.get("auditSwarm"))
-        repository_graph = public_repository_graph(body.get("repository_graph") or body.get("repositoryGraph"))
+        raw_repository_graph = body.get("repository_graph") or body.get("repositoryGraph")
+        repository_graph = public_repository_graph(raw_repository_graph)
+        semantic_graph = public_repository_semantic_graph(body.get("semantic_graph") or body.get("semanticGraph"))
+        if not semantic_graph and isinstance(raw_repository_graph, dict):
+            semantic_graph = public_repository_semantic_graph(
+                raw_repository_graph.get("semanticGraph") or raw_repository_graph.get("semantic_graph")
+            )
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
             if scan and scan.get("status") == "running":
@@ -2076,6 +2082,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     update["auditSwarm"] = audit_swarm
                 if repository_graph:
                     update["repositoryGraph"] = repository_graph
+                if semantic_graph:
+                    update["semanticGraph"] = semantic_graph
                 scan.update(update)
                 mark_state_dirty()
         return self.json({"ok": True, "job": scan_job_payload(job)})

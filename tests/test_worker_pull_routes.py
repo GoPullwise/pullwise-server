@@ -164,56 +164,59 @@ def repository_graph_fixture() -> dict:
             "reviewHints": ["Review request handlers."],
             "promptText": "Repository architecture: src/app.py handles requests.",
         },
-        "semanticGraph": {
-            "version": "semantic-code-graph/0.1",
-            "summary": "API semantic graph",
-            "stats": {
-                "files": 1,
-                "symbols": 3,
-                "relationships": 1,
-                "routes": 1,
-                "source": "static",
-                "truncated": False,
-            },
-            "nodes": [
-                {
-                    "id": "symbol:src/app.py:GET_/health",
-                    "label": "GET /health",
-                    "type": "route",
-                    "path": "src/app.py",
-                    "line": 5,
-                    "signature": "GET /health",
-                    "importance": 0.95,
-                    "tags": ["route"],
-                },
-                {
-                    "id": "symbol:src/app.py:health",
-                    "label": "health",
-                    "type": "function",
-                    "path": "src/app.py",
-                    "line": 6,
-                    "signature": "health()",
-                },
-                {
-                    "id": "symbol:bad",
-                    "label": "bad",
-                    "type": "function",
-                    "path": "C:\\worker\\repo\\bad.py",
-                },
-            ],
-            "edges": [
-                {
-                    "id": "handles:symbol:src/app.py:GET_/health->symbol:src/app.py:health",
-                    "source": "symbol:src/app.py:GET_/health",
-                    "target": "symbol:src/app.py:health",
-                    "type": "handles",
-                    "weight": 1,
-                },
-                {"id": "bad", "source": "symbol:bad", "target": "missing", "type": "calls"},
-            ],
-            "reviewHints": ["Start with API routes."],
-        },
         "absolutePath": "C:\\worker\\repo",
+    }
+
+
+def semantic_graph_fixture() -> dict:
+    return {
+        "version": "semantic-code-graph/0.1",
+        "summary": "API semantic graph",
+        "stats": {
+            "files": 1,
+            "symbols": 3,
+            "relationships": 1,
+            "routes": 1,
+            "source": "static",
+            "truncated": False,
+        },
+        "nodes": [
+            {
+                "id": "symbol:src/app.py:GET_/health",
+                "label": "GET /health",
+                "type": "route",
+                "path": "src/app.py",
+                "line": 5,
+                "signature": "GET /health",
+                "importance": 0.95,
+                "tags": ["route"],
+            },
+            {
+                "id": "symbol:src/app.py:health",
+                "label": "health",
+                "type": "function",
+                "path": "src/app.py",
+                "line": 6,
+                "signature": "health()",
+            },
+            {
+                "id": "symbol:bad",
+                "label": "bad",
+                "type": "function",
+                "path": "C:\\worker\\repo\\bad.py",
+            },
+        ],
+        "edges": [
+            {
+                "id": "handles:symbol:src/app.py:GET_/health->symbol:src/app.py:health",
+                "source": "symbol:src/app.py:GET_/health",
+                "target": "symbol:src/app.py:health",
+                "type": "handles",
+                "weight": 1,
+            },
+            {"id": "bad", "source": "symbol:bad", "target": "missing", "type": "calls"},
+        ],
+        "reviewHints": ["Start with API routes."],
     }
 
 
@@ -395,10 +398,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertNotIn("C:\\worker", serialized)
         self.assertNotIn("secret", serialized)
         self.assertEqual(payload["architectureSummary"]["entrypoints"], ["src/app.py"])
-        self.assertEqual(payload["semanticGraph"]["version"], "semantic-code-graph/0.1")
-        self.assertEqual(len(payload["semanticGraph"]["nodes"]), 2)
-        self.assertEqual(len(payload["semanticGraph"]["edges"]), 1)
-        self.assertEqual(payload["semanticGraph"]["stats"]["source"], "static")
+        self.assertNotIn("semanticGraph", payload)
+
+        semantic_payload = app.public_repository_semantic_graph(semantic_graph_fixture())
+        self.assertEqual(semantic_payload["version"], "semantic-code-graph/0.1")
+        self.assertEqual(len(semantic_payload["nodes"]), 2)
+        self.assertEqual(len(semantic_payload["edges"]), 1)
+        self.assertEqual(semantic_payload["stats"]["source"], "static")
 
     def test_worker_heartbeat_claim_progress_and_result_are_idempotent(self) -> None:
         scan = {
@@ -468,6 +474,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "message": "reviewing",
                 "logs_summary": "ok",
                 "repository_graph": repository_graph_fixture(),
+                "semantic_graph": semantic_graph_fixture(),
                 "audit_swarm": {
                     "protocol": "audit-swarm/0.1",
                     "stage": "discovery",
@@ -495,6 +502,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         running_scan_payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(running_scan_payload["repositoryGraph"]["version"], "repository-graph/0.1")
         self.assertEqual(running_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/app.py"])
+        self.assertNotIn("semanticGraph", running_scan_payload["repositoryGraph"])
         self.assertEqual(running_scan_payload["semanticGraph"]["version"], "semantic-code-graph/0.1")
         self.assertEqual(running_scan_payload["semanticGraph"]["stats"]["source"], "static")
         self.assertEqual(running_scan_payload["auditSwarm"]["stage"], "discovery")
@@ -530,6 +538,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "total_tokens": 168,
             },
             "repository_graph": final_repository_graph,
+            "semantic_graph": semantic_graph_fixture(),
             "result_checksum": "checksum-1",
         }
         result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
@@ -545,6 +554,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         self.assertEqual(final_scan_payload["repositoryGraph"]["summary"], "Final graph")
         self.assertEqual(final_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/final.py"])
+        self.assertNotIn("semanticGraph", final_scan_payload["repositoryGraph"])
         self.assertEqual(final_scan_payload["semanticGraph"]["summary"], "API semantic graph")
         self.assertEqual(final_scan_payload["auditSwarm"]["stage"], "report")
         self.assertEqual(final_scan_payload["auditSwarm"]["counts"]["issueCards"], 1)
@@ -2106,6 +2116,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
     def test_scan_audit_bundle_includes_repository_graph(self) -> None:
         scan = self.audit_bundle_cache_fixture()
         scan["repositoryGraph"] = app.public_repository_graph(repository_graph_fixture())
+        scan["semanticGraph"] = app.public_repository_semantic_graph(semantic_graph_fixture())
 
         owner = RouteHarness(
             "/scans/sc_cache/audit-bundle",
