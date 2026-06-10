@@ -2360,25 +2360,42 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_creem_webhook(self) -> None:
         raw = self.read_raw_body()
         if not billing.verify_creem_webhook(raw, self.headers.get("creem-signature")):
+            logger.warning("Rejected Creem webhook with invalid signature.")
             return self.error(HTTPStatus.BAD_REQUEST, "Invalid Creem webhook signature.")
         event = decode_json_body(raw)
         if not isinstance(event, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         update = billing.billing_update_from_creem_event(event)
         if update:
-            self.apply_billing_update(update)
+            result = self.apply_billing_update(update)
+            logger.info(
+                "Processed Creem webhook eventType=%s eventId=%s result=%s",
+                update.get("eventType"),
+                update.get("eventId"),
+                result,
+            )
+        else:
+            logger.info(
+                "Ignored Creem webhook eventType=%s eventId=%s result=unsupported_or_unmapped",
+                event.get("eventType") or event.get("type"),
+                event.get("id") or event.get("eventId"),
+            )
         return self.json({"received": True})
 
-    def apply_billing_update(self, update: dict) -> None:
+    def apply_billing_update(self, update: dict) -> str:
         with STATE_LOCK:
             if billing_event_processed(update):
-                return
+                return "duplicate"
             user = billing_user_for_update(update)
             if user:
-                apply_billing_update_to_user(user, update)
+                applied = apply_billing_update_to_user(user, update)
                 apply_pending_billing_updates_for_user(user)
-                return
+                return "applied" if applied else "stale"
+            pending_count = len(BILLING_PENDING_UPDATES)
             remember_pending_billing_update(update)
+            if len(BILLING_PENDING_UPDATES) > pending_count:
+                return "pending"
+            return "unmatched"
 
     def send_cors_headers(self) -> None:
         origin = self.headers.get("Origin")
