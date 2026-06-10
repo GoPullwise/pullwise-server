@@ -1269,6 +1269,44 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
             connection.close()
         self.assertEqual(rows, [("user", "usr_1", "pro", 60, 0)])
 
+    def test_creem_terminal_webhook_without_product_preserves_existing_plan(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "max",
+            "interval": "year",
+        }
+        raw = json.dumps(
+            {
+                "id": "evt_creem_cancel_no_product_1",
+                "eventType": "subscription.canceled",
+                "created_at": 1728734337932,
+                "object": {
+                    "id": "sub_1",
+                    "status": "canceled",
+                    "customer": {"id": "cust_1", "email": "dev@example.com"},
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/creem",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "creem-signature": signature},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        persisted_user = app.db.load_state()["users"]["usr_1"]
+        self.assertEqual(persisted_user["billing"]["status"], "canceled")
+        self.assertEqual(persisted_user["billing"]["plan"], "max")
+        self.assertEqual(persisted_user["billingSubscriptions"][0]["plan"], "max")
+
 
 if __name__ == "__main__":
     unittest.main()

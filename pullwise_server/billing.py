@@ -766,8 +766,11 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         product = item_product
 
     product_plan = creem_plan_from_product(product)
-    plan = product_plan or normalize_plan(metadata.get("plan") or subscription_metadata.get("plan") or "pro")
+    metadata_plan = text_payload(metadata.get("plan") or subscription_metadata.get("plan"), "").strip().lower()
+    plan = product_plan or (metadata_plan if metadata_plan in PLAN_IDS else None)
     status = normalize_creem_subscription_status(event_type, subscription.get("status") if isinstance(subscription, dict) else "active")
+    if status in PAID_PLAN_ENTITLEMENT_STATUSES and object_id(product) and not product_plan:
+        return None
     if plan in PAID_PLAN_IDS and status in PAID_PLAN_ENTITLEMENT_STATUSES and not creem_product_configured_for_plan(product, plan):
         return None
     interval = normalize_interval(
