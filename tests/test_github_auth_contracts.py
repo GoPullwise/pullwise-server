@@ -297,6 +297,25 @@ class GitHubAuthContractsTest(unittest.TestCase):
 
         self.assertEqual(primary_email, "octocat@example.com")
 
+    def test_fetch_user_profile_keeps_all_verified_emails_for_admin_allowlist(self) -> None:
+        profile_response = {"login": "octocat", "email": "primary@example.com"}
+        email_response = [
+            {"verified": True, "primary": True, "email": "primary@example.com"},
+            {"verified": True, "primary": False, "email": "Admin@Example.com"},
+            {"verified": False, "primary": False, "email": "unverified@example.com"},
+            {"verified": True, "primary": False, "email": "123+octocat@users.noreply.github.com"},
+        ]
+
+        with (
+            patch.object(github_auth, "oauth_session", return_value=Mock()),
+            patch.object(github_auth, "authlib_get_json", side_effect=[profile_response, email_response]) as get_json,
+        ):
+            profile = github_auth.fetch_user_profile("gho_user")
+
+        self.assertEqual(profile["primaryEmail"], "primary@example.com")
+        self.assertEqual(profile["verifiedEmails"], ["primary@example.com", "Admin@Example.com"])
+        self.assertEqual([call.args[1] for call in get_json.call_args_list], ["/user", "/user/emails"])
+
     def test_fetch_user_profile_uses_primary_email_fallback_for_malformed_profile_email(self) -> None:
         profile_response = {"login": "octocat", "email": {"address": "bad@example.com"}}
         email_response = [{"verified": True, "primary": True, "email": "octocat@example.com"}]

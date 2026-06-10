@@ -519,6 +519,9 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
         or github_auth.clean_account_email_address(profile.get("email"))
         or ""
     )
+    verified_emails = github_auth.clean_account_email_addresses(profile.get("verifiedEmails"))
+    if email:
+        verified_emails = github_auth.unique_account_email_addresses([email, *verified_emails])
     avatar_url = trusted_public_url(profile.get("avatar_url"))
     github_html_url = trusted_github_web_url(profile.get("html_url"))
     if user_id not in USERS:
@@ -530,6 +533,7 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
             "createdAt": now(),
             "providers": ["github"],
             "githubRepositoryAccess": None,
+            "githubVerifiedEmails": verified_emails,
         }
         mark_state_dirty()
 
@@ -539,6 +543,7 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
             "name": profile_name or clean_user_profile_text(user.get("name")) or login,
             "email": email,
             "avatarUrl": avatar_url,
+            "githubVerifiedEmails": verified_emails,
             "githubId": github_id,
             "githubLogin": login,
             "githubHtmlUrl": github_html_url,

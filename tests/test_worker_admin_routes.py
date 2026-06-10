@@ -103,6 +103,38 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         return handler.payload, handler.payload["worker_token"]
 
+    def test_admin_access_can_match_verified_github_email_alias(self) -> None:
+        app.USERS["usr_admin"].update(
+            {
+                "email": "primary@example.com",
+                "githubId": "123456",
+                "githubVerifiedEmails": ["primary@example.com", "Admin@Example.com"],
+            }
+        )
+
+        with patch.dict(
+            os.environ,
+            {"PULLWISE_ADMIN_USER_IDS": "", "PULLWISE_ADMIN_EMAILS": "admin@example.com"},
+            clear=False,
+        ):
+            handler = RouteHarness("/admin/status", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+
+    def test_admin_access_can_match_github_user_id(self) -> None:
+        app.USERS["usr_admin"].update({"email": "user@example.com", "githubId": "123456"})
+
+        with patch.dict(
+            os.environ,
+            {"PULLWISE_ADMIN_USER_IDS": "123456", "PULLWISE_ADMIN_EMAILS": ""},
+            clear=False,
+        ):
+            handler = RouteHarness("/admin/status", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+
     def test_admin_can_create_worker_and_token_is_only_returned_once_as_hash(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]

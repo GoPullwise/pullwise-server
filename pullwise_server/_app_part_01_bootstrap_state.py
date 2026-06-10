@@ -325,16 +325,35 @@ def admin_user_ids() -> set[str]:
     return {item.strip() for item in env("PULLWISE_ADMIN_USER_IDS", "").split(",") if item.strip()}
 
 
+def normalized_admin_email(value: object) -> str:
+    email = github_auth.clean_account_email_address(value)
+    return email.lower() if email else ""
+
+
 def admin_emails() -> set[str]:
-    return {item.strip().lower() for item in env("PULLWISE_ADMIN_EMAILS", "").split(",") if item.strip()}
+    return {email for item in env("PULLWISE_ADMIN_EMAILS", "").split(",") if (email := normalized_admin_email(item))}
+
+
+def user_admin_email_candidates(user: dict) -> set[str]:
+    candidates = {email for email in [normalized_admin_email(user.get("email"))] if email}
+    github_emails = user.get("githubVerifiedEmails")
+    if isinstance(github_emails, list):
+        candidates.update(email for item in github_emails if (email := normalized_admin_email(item)))
+    return candidates
 
 
 def user_is_admin(user: dict | None) -> bool:
     if not user:
         return False
     user_id = str(user.get("id") or "")
-    email = str(user.get("email") or "").strip().lower()
-    return user_id in admin_user_ids() or (email and email in admin_emails())
+    github_id = str(user.get("githubId") or "")
+    allowed_user_ids = admin_user_ids()
+    allowed_emails = admin_emails()
+    return (
+        user_id in allowed_user_ids
+        or github_id in allowed_user_ids
+        or bool(user_admin_email_candidates(user) & allowed_emails)
+    )
 
 
 def request_id_from_handler(handler: BaseHTTPRequestHandler) -> str:

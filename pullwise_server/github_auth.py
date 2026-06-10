@@ -194,30 +194,41 @@ def fetch_user_profile(access_token: str) -> dict:
     if not login:
         raise GitHubError("GitHub user profile response is missing login.")
     profile["login"] = login
-    profile["primaryEmail"] = clean_account_email_address(profile.get("email")) or fetch_primary_email(access_token)
+    profile_email = clean_account_email_address(profile.get("email"))
+    verified_emails = fetch_verified_emails(access_token)
+    profile["primaryEmail"] = profile_email or (verified_emails[0] if verified_emails else None)
+    profile["verifiedEmails"] = unique_account_email_addresses([profile["primaryEmail"], *verified_emails])
     return profile
 
 
 def fetch_primary_email(access_token: str) -> str | None:
+    emails = fetch_verified_emails(access_token)
+    return emails[0] if emails else None
+
+
+def fetch_verified_emails(access_token: str) -> list[str]:
     client = oauth_session(token={"access_token": access_token, "token_type": "bearer"})
     try:
         emails = authlib_get_json(client, "/user/emails")
     except GitHubError:
-        return None
+        return []
     if not isinstance(emails, list):
-        return None
+        return []
 
     email_records = [email for email in emails if isinstance(email, dict)]
-    verified = [email for email in email_records if email.get("verified") is True]
-    for email in verified:
+    primary: list[str] = []
+    secondary: list[str] = []
+    for email in email_records:
+        if email.get("verified") is not True:
+            continue
         address = email_record_address(email)
-        if email.get("primary") is True and address:
-            return address
-    for email in verified:
-        address = email_record_address(email)
-        if address:
-            return address
-    return None
+        if not address:
+            continue
+        if email.get("primary") is True:
+            primary.append(address)
+        else:
+            secondary.append(address)
+    return unique_account_email_addresses([*primary, *secondary])
 
 
 def email_record_address(email: dict) -> str | None:
@@ -233,6 +244,27 @@ def clean_account_email_address(address: object) -> str | None:
     if not email or is_github_noreply_email(email):
         return None
     return email
+
+
+def clean_account_email_addresses(addresses: object) -> list[str]:
+    if not isinstance(addresses, list):
+        return []
+    return unique_account_email_addresses(addresses)
+
+
+def unique_account_email_addresses(addresses: list[object]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for address in addresses:
+        email = clean_account_email_address(address)
+        if not email:
+            continue
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(email)
+    return result
 
 
 def is_github_noreply_email(address: object) -> bool:
