@@ -332,7 +332,7 @@ def shell_quote(value: object) -> str:
 
 
 def worker_install_script() -> str:
-    script = """#!/usr/bin/env bash
+    script = r"""#!/usr/bin/env bash
 set -euo pipefail
 
 SERVICE_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
