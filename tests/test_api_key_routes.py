@@ -550,6 +550,8 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(pricing.status, HTTPStatus.OK)
         self.assertEqual(pricing.payload["page"]["checkoutAction"]["href"], "/billing/checkout-sessions")
         self.assertEqual(docs.status, HTTPStatus.OK)
+        self.assertEqual(docs.payload["subscriptionPlans"]["href"], "/docs/subscription-plans")
+        self.assertIn("/docs/subscription-plans", [item["path"] for item in docs.payload["endpoints"]])
         self.assertIn("/api/v1/repositories/{repoId}/quota", [item["path"] for item in docs.payload["endpoints"]])
         self.assertEqual(overview.status, HTTPStatus.OK)
         self.assertEqual(overview.payload["authorizedRepositories"]["href"], "/repositories")
@@ -557,6 +559,36 @@ class ApiKeyRoutesTest(unittest.TestCase):
             overview.payload["authorizedRepositories"]["items"][0]["href"],
             f"/repositories/{db.repository_id_for_github_repo('123')}",
         )
+
+    def test_subscription_plan_docs_route_returns_server_agent_config(self) -> None:
+        handler = RouteHarness("/docs/subscription-plans")
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_PRO_CODEX_CLI": "codex-docs-cli",
+                "PULLWISE_PRO_CODEX_MODEL": "gpt-docs-pro",
+                "PULLWISE_PRO_CODEX_REASONING_EFFORT": "high",
+                "PULLWISE_MAX_AGENT_CLI": "opencode",
+                "PULLWISE_MAX_OPENCODE_MODEL": "opencode/docs-max",
+                "PULLWISE_MAX_OPENCODE_VARIANT": "high",
+            },
+            clear=False,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual([plan["id"] for plan in handler.payload["plans"]], ["free", "pro", "max"])
+        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["cli"], "codex-docs-cli")
+        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["command"], "codex-docs-cli")
+        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["model"], "gpt-docs-pro")
+        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["reasoningEffort"], "high")
+        self.assertEqual(handler.payload["agentConfigs"]["max"]["agent"]["cli"], "opencode")
+        self.assertEqual(handler.payload["agentConfigs"]["max"]["agent"]["model"], "opencode/docs-max")
+        self.assertEqual(handler.payload["agentConfigs"]["max"]["providerChain"], ["opencode"])
+        self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["model"], "opencode/docs-max")
+        self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["variant"], "high")
+        self.assertEqual(handler.payload["plans"][1]["agentConfig"], handler.payload["agentConfigs"]["pro"])
 
     def test_billing_page_points_subscription_action_to_pricing(self) -> None:
         cookie = seed_session()

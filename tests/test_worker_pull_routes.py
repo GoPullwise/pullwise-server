@@ -3647,19 +3647,100 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual([job["scan_id"] for job in claim.payload["jobs"]], ["sc_1", "sc_2", "sc_3"])
         self.assertEqual(claim.payload["jobs"][0]["status"], "claimed")
 
-    def test_worker_claim_includes_max_plan_agent_config(self) -> None:
-        app.USERS["usr_max"] = {
-            "id": "usr_max",
-            "name": "Max User",
-            "billing": {"plan": "max", "status": "active"},
+    def test_worker_claim_includes_plan_agent_configs(self) -> None:
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 3,
+                "running_jobs": 0,
+                "free_slots": 3,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "timestamp": app.now(),
+            }
+        )
+        for index, plan in enumerate(("free", "pro", "max"), start=1):
+            user_id = f"usr_{plan}_agent"
+            app.USERS[user_id] = {
+                "id": user_id,
+                "name": f"{plan.title()} User",
+                "billing": {"plan": plan, "status": "active"},
+            }
+            scan = {
+                "id": f"sc_{plan}_agent",
+                "repo": f"acme/{plan}-agent",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": user_id,
+                "createdAt": app.now() + index,
+                "queuedAt": app.now() + index,
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            }
+            app.SCANS.append(scan)
+            app.create_scan_job_for_scan(scan)
+
+        blank_agent_env = {
+            f"PULLWISE_{plan}_{key}": ""
+            for plan in ("FREE", "PRO", "MAX")
+            for key in (
+                "CODEX_CLI",
+                "CODEX_COMMAND",
+                "CODEX_MODEL",
+                "CODEX_REASONING_EFFORT",
+                "OPENCODE_CLI",
+                "OPENCODE_COMMAND",
+                "OPENCODE_MODEL",
+                "OPENCODE_VARIANT",
+                "AGENT_CLI",
+                "AGENT_PROVIDER_CHAIN",
+                "PROVIDER_CHAIN",
+            )
+        }
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 3}, headers=self.auth)
+        with patch.dict(os.environ, blank_agent_env, clear=False):
+            app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        configs = {job["agentConfig"]["plan"]: job["agentConfig"] for job in claim.payload["jobs"]}
+        self.assertEqual(set(configs), {"free", "pro", "max"})
+        for plan, effort in (("free", "medium"), ("pro", "medium"), ("max", "xhigh")):
+            with self.subTest(plan=plan):
+                codex = configs[plan]["codex"]
+                opencode = configs[plan]["opencode"]
+                self.assertEqual(configs[plan]["agent"]["cli"], "codex")
+                self.assertEqual(configs[plan]["agent"]["model"], "gpt-5.5")
+                self.assertEqual(configs[plan]["agent"]["reasoningEffort"], effort)
+                self.assertEqual(configs[plan]["provider"], "codex")
+                self.assertEqual(configs[plan]["providerChain"], ["codex"])
+                self.assertEqual(configs[plan]["provider_chain"], ["codex"])
+                self.assertEqual(codex["cli"], "codex")
+                self.assertEqual(codex["command"], "codex")
+                self.assertEqual(codex["model"], "gpt-5.5")
+                self.assertEqual(codex["reasoningEffort"], effort)
+                self.assertEqual(codex["reasoning_effort"], effort)
+                self.assertEqual(opencode["cli"], "opencode")
+                self.assertEqual(opencode["command"], "opencode")
+                self.assertEqual(opencode["model"], "opencode/big-pickle")
+                self.assertEqual(opencode["variant"], effort)
+
+    def test_worker_claim_agent_config_uses_plan_env_overrides(self) -> None:
+        app.USERS["usr_pro_agent"] = {
+            "id": "usr_pro_agent",
+            "name": "Pro User",
+            "billing": {"plan": "pro", "status": "active"},
         }
         scan = {
-            "id": "sc_max_agent",
-            "repo": "acme/max-agent",
+            "id": "sc_pro_agent_override",
+            "repo": "acme/pro-agent-override",
             "branch": "main",
             "commit": "pending",
             "status": "queued",
-            "userId": "usr_max",
+            "userId": "usr_pro_agent",
             "createdAt": app.now(),
             "queuedAt": app.now(),
             "progress": 0,
@@ -3670,14 +3751,41 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.create_scan_job_for_scan(scan)
 
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 1}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_PRO_AGENT_PROVIDER_CHAIN": "opencode,codex",
+                "PULLWISE_PRO_CODEX_CLI": "codex-pro-cli",
+                "PULLWISE_PRO_CODEX_COMMAND": "codex-pro-command",
+                "PULLWISE_PRO_CODEX_MODEL": "gpt-pro",
+                "PULLWISE_PRO_CODEX_REASONING_EFFORT": "high",
+                "PULLWISE_PRO_OPENCODE_CLI": "opencode-pro-cli",
+                "PULLWISE_PRO_OPENCODE_COMMAND": "opencode-pro-command",
+                "PULLWISE_PRO_OPENCODE_MODEL": "opencode/pro-model",
+                "PULLWISE_PRO_OPENCODE_VARIANT": "high",
+            },
+            clear=False,
+        ):
+            app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.OK)
         agent_config = claim.payload["job"]["agentConfig"]
-        self.assertEqual(agent_config["plan"], "max")
-        self.assertEqual(agent_config["codex"]["reasoningEffort"], "xhigh")
-        self.assertEqual(agent_config["codex"]["reasoning_effort"], "xhigh")
-        self.assertEqual(agent_config["opencode"]["variant"], "xhigh")
+        self.assertEqual(agent_config["plan"], "pro")
+        self.assertEqual(agent_config["agent"]["cli"], "opencode")
+        self.assertEqual(agent_config["agent"]["model"], "opencode/pro-model")
+        self.assertEqual(agent_config["agent"]["reasoningEffort"], "high")
+        self.assertEqual(agent_config["provider"], "opencode")
+        self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
+        self.assertEqual(agent_config["provider_chain"], ["opencode", "codex"])
+        self.assertEqual(agent_config["codex"]["cli"], "codex-pro-cli")
+        self.assertEqual(agent_config["codex"]["command"], "codex-pro-command")
+        self.assertEqual(agent_config["codex"]["model"], "gpt-pro")
+        self.assertEqual(agent_config["codex"]["reasoningEffort"], "high")
+        self.assertEqual(agent_config["codex"]["reasoning_effort"], "high")
+        self.assertEqual(agent_config["opencode"]["cli"], "opencode-pro-cli")
+        self.assertEqual(agent_config["opencode"]["command"], "opencode-pro-command")
+        self.assertEqual(agent_config["opencode"]["model"], "opencode/pro-model")
+        self.assertEqual(agent_config["opencode"]["variant"], "high")
 
     def test_worker_claim_uses_worker_slots_for_global_capacity_and_keeps_user_fairness(self) -> None:
         db.upsert_worker_heartbeat(

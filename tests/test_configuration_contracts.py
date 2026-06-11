@@ -93,7 +93,7 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertIn("PULLWISE_CREEM_PRO_PRODUCT_IDS", values)
         self.assertIn("PULLWISE_CREEM_MAX_PRODUCT_IDS", values)
         self.assertEqual(values.get("PULLWISE_CREEM_UPGRADE_BEHAVIOR"), "proration-charge-immediately")
-        self.assertEqual(values.get("PULLWISE_CREEM_DOWNGRADE_BEHAVIOR"), "proration-none")
+        self.assertNotIn("PULLWISE_CREEM_DOWNGRADE_BEHAVIOR", values)
 
     def test_main_uses_default_port_for_invalid_port_env(self) -> None:
         class ServerStub:

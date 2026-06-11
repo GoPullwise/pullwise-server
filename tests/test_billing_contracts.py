@@ -384,11 +384,6 @@ class BillingContractsTest(unittest.TestCase):
                 {"id": "chk_123", "checkout_url": "javascript:alert(1)"},
                 lambda: billing.create_checkout_session(user, success_url="https://app.pullwise.dev/success"),
             ),
-            (
-                "creem portal",
-                {"customer_portal_link": "javascript:alert(1)"},
-                lambda: billing.create_portal_session(user, return_url="https://app.pullwise.dev/settings"),
-            ),
         ]
 
         for name, payload, call in scenarios:
@@ -479,24 +474,42 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["json"]["product_id"], "prod_yearly")
         self.assertEqual(post.call_args.kwargs["json"]["update_behavior"], "proration-charge-immediately")
 
-    def test_creem_update_behavior_distinguishes_plan_and_interval_upgrades(self) -> None:
+    def test_creem_update_behavior_allows_only_plan_and_interval_upgrades(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(
                 billing.creem_subscription_update_behavior("pro", "month", "max", "month"),
                 "proration-charge-immediately",
             )
             self.assertEqual(
-                billing.creem_subscription_update_behavior("max", "month", "pro", "month"),
-                "proration-none",
-            )
-            self.assertEqual(
                 billing.creem_subscription_update_behavior("max", "month", "max", "year"),
                 "proration-charge-immediately",
             )
-            self.assertEqual(
-                billing.creem_subscription_update_behavior("max", "year", "max", "month"),
-                "proration-none",
-            )
+            with self.assertRaisesRegex(billing.BillingConfigurationError, "Only subscription upgrades"):
+                billing.creem_subscription_update_behavior("max", "month", "pro", "month")
+            with self.assertRaisesRegex(billing.BillingConfigurationError, "Only subscription upgrades"):
+                billing.creem_subscription_update_behavior("max", "year", "max", "month")
+
+    def test_creem_rejects_subscription_changes_that_are_not_upgrades(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch("pullwise_server.billing.requests.post") as post:
+            for plan, interval in [("pro", "year"), ("max", "month")]:
+                with self.subTest(plan=plan, interval=interval):
+                    with self.assertRaisesRegex(billing.BillingConfigurationError, "Only subscription upgrades"):
+                        billing.change_subscription_interval(
+                            {
+                                "id": "usr_1",
+                                "billing": {
+                                    "provider": "creem",
+                                    "customerId": "cust_123",
+                                    "subscriptionId": "sub_123",
+                                    "plan": "max",
+                                    "interval": "year",
+                                    "status": "active",
+                                },
+                            },
+                            plan=plan,
+                            interval=interval,
+                        )
+            post.assert_not_called()
 
     def test_creem_update_behavior_maps_deprecated_proration_charge_to_immediate(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_CREEM_UPGRADE_BEHAVIOR": "proration-charge"}, clear=True):

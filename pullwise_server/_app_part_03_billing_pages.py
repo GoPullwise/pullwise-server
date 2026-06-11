@@ -98,7 +98,7 @@ def consume_review_quota(user: dict) -> tuple[bool, dict]:
     return True, billing_entitlement_for_user(user)
 
 
-def billing_subscription_record_payload(record: dict) -> dict:
+def billing_subscription_event_payload(record: dict) -> dict:
     return {
         "provider": public_billing_text(record.get("provider")),
         "customerId": public_billing_text(record.get("customerId")),
@@ -112,35 +112,25 @@ def billing_subscription_record_payload(record: dict) -> dict:
         "currentPeriodEnd": pull_request_timestamp(record.get("currentPeriodEnd")),
         "cancelAtPeriodEnd": record.get("cancelAtPeriodEnd") if isinstance(record.get("cancelAtPeriodEnd"), bool) else None,
         "canceledAt": pull_request_timestamp(record.get("canceledAt")),
-        "lastEventType": public_billing_text(record.get("lastEventType")),
-        "lastEventId": public_billing_text(record.get("lastEventId")),
-        "lastEventCreated": pull_request_timestamp(record.get("lastEventCreated")),
-        "updatedAt": pull_request_timestamp(record.get("updatedAt")),
+        "eventType": public_billing_text(record.get("eventType")),
+        "eventId": public_billing_text(record.get("eventId")),
+        "eventCreated": pull_request_timestamp(record.get("eventCreated")),
+        "processedAt": pull_request_timestamp(record.get("processedAt")),
+        "stale": record.get("stale") if isinstance(record.get("stale"), bool) else False,
     }
 
 
-def billing_subscription_records_payload(user: dict) -> list[dict]:
-    records = user.get("billingSubscriptions") if isinstance(user.get("billingSubscriptions"), list) else []
+def billing_subscription_events_payload(user: dict) -> list[dict]:
+    records = user.get("billingSubscriptionEvents") if isinstance(user.get("billingSubscriptionEvents"), list) else []
     payloads = []
     for record in records:
         if not isinstance(record, dict):
             continue
-        payload = billing_subscription_record_payload(record)
-        if payload["subscriptionId"] or payload["customerId"]:
+        payload = billing_subscription_event_payload(record)
+        if payload["eventId"] and (payload["subscriptionId"] or payload["customerId"]):
             payloads.append(payload)
-    current_payload = billing_subscription_record_payload(user_billing_state(user))
-    if current_payload["subscriptionId"] or current_payload["customerId"]:
-        current_subscription_id = current_payload["subscriptionId"]
-        current_customer_id = current_payload["customerId"]
-        already_present = any(
-            (current_subscription_id and item["subscriptionId"] == current_subscription_id)
-            or (not current_subscription_id and current_customer_id and item["customerId"] == current_customer_id)
-            for item in payloads
-        )
-        if not already_present:
-            payloads.insert(0, current_payload)
-    payloads.sort(key=lambda item: item.get("updatedAt") or 0, reverse=True)
-    return payloads[:25]
+    payloads.sort(key=lambda item: (item.get("eventCreated") or 0, item.get("processedAt") or 0), reverse=True)
+    return payloads[:50]
 
 
 def billing_account_payload(user: dict) -> dict:
@@ -174,7 +164,7 @@ def billing_account_payload(user: dict) -> dict:
             "scope": scan_usage["scope"],
             "resetAt": scan_usage["resetAt"],
         },
-        "subscriptions": billing_subscription_records_payload(user),
+        "subscriptionEvents": billing_subscription_events_payload(user),
     }
 
 
@@ -302,12 +292,31 @@ def billing_page_payload(user: dict) -> dict:
     }
 
 
+def subscription_plan_agent_configs_payload() -> dict:
+    agent_configs = {plan_id: billing.review_agent_config(plan_id) for plan_id in billing.PLAN_IDS}
+    plan_names = {"free": "Free", "pro": "Pro", "max": "Max"}
+    return {
+        "page": {"id": "subscription-plans", "title": "Pullwise subscription plans"},
+        "plans": [
+            {
+                "id": plan_id,
+                "name": plan_names[plan_id],
+                "reviewLimit": billing.review_limit(plan_id),
+                "agentConfig": agent_configs[plan_id],
+            }
+            for plan_id in billing.PLAN_IDS
+        ],
+        "agentConfigs": agent_configs,
+    }
+
+
 def api_docs_payload() -> dict:
     return {
         "page": {"id": "api", "title": "Pullwise API"},
         "baseUrl": "https://api.pull-wise.com",
         "website": "https://pull-wise.com",
         "contact": "contact@pull-wise.com",
+        "subscriptionPlans": {"method": "GET", "href": "/docs/subscription-plans"},
         "authentication": {
             "type": "apiKey",
             "headers": ["Authorization: Bearer <api_key>", "X-Pullwise-Api-Key: <api_key>"],
@@ -315,6 +324,12 @@ def api_docs_payload() -> dict:
             "scopes": API_KEY_DEFAULT_SCOPES,
         },
         "endpoints": [
+            {
+                "method": "GET",
+                "path": "/docs/subscription-plans",
+                "scope": None,
+                "description": "Read server-configured subscription plan agent settings for public docs.",
+            },
             {
                 "method": "GET",
                 "path": "/api/v1/repositories",

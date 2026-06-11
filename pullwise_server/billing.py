@@ -24,7 +24,14 @@ PLAN_IDS = ("free", *PAID_PLAN_IDS)
 PLAN_RANK = {"free": 0, "pro": 1, "max": 2}
 PAID_PLAN_ENTITLEMENT_STATUSES = {"active", "trialing", "canceling"}
 CREEM_PRO_ENTITLEMENT_STATUSES = PAID_PLAN_ENTITLEMENT_STATUSES
-CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
+CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately"}
+REVIEW_CODEX_COMMAND_DEFAULT = "codex"
+REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
+REVIEW_OPENCODE_COMMAND_DEFAULT = "opencode"
+REVIEW_OPENCODE_MODEL_DEFAULT = "opencode/big-pickle"
+REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
+REVIEW_AGENT_PROVIDERS = ("codex", "opencode")
+REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
 
 
 def env(name: str, default: str = "") -> str:
@@ -89,30 +96,108 @@ def review_limit(plan: str) -> int:
     )
 
 
+def review_agent_env(plan: str, keys: list[str], default: str) -> str:
+    normalized_plan = normalize_plan(plan, default="free")
+    for key in keys:
+        value = clean_review_agent_config_text(env(f"PULLWISE_{normalized_plan.upper()}_{key}", ""))
+        if value:
+            return value
+    return default
+
+
+def clean_review_agent_config_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip()
+    if not normalized or len(normalized) > REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH:
+        return ""
+    if any(char in normalized for char in "\r\n\x00"):
+        return ""
+    if any(char.isspace() for char in normalized):
+        return ""
+    return normalized
+
+
+def clean_review_agent_provider(value: object) -> str:
+    provider = clean_review_agent_config_text(value).lower()
+    return provider if provider in REVIEW_AGENT_PROVIDERS else ""
+
+
+def review_agent_provider_chain(plan: str) -> list[str]:
+    normalized_plan = normalize_plan(plan, default="free")
+    raw = env(f"PULLWISE_{normalized_plan.upper()}_AGENT_PROVIDER_CHAIN", "")
+    if not raw:
+        raw = env(f"PULLWISE_{normalized_plan.upper()}_PROVIDER_CHAIN", "")
+    providers: list[str] = []
+    for item in raw.split(","):
+        provider = clean_review_agent_provider(item)
+        if provider and provider not in providers:
+            providers.append(provider)
+    if providers:
+        return providers
+    provider = clean_review_agent_provider(env(f"PULLWISE_{normalized_plan.upper()}_AGENT_CLI", ""))
+    return [provider or "codex"]
+
+
 def review_reasoning_effort(plan: str) -> str:
     normalized_plan = normalize_plan(plan, default="free")
-    defaults = {"free": "medium", "pro": "medium", "max": "xhigh"}
-    env_name = f"PULLWISE_{normalized_plan.upper()}_CODEX_REASONING_EFFORT"
-    return env(env_name, defaults[normalized_plan]).strip() or defaults[normalized_plan]
+    default = REVIEW_AGENT_EFFORT_DEFAULTS[normalized_plan]
+    effort = review_agent_env(normalized_plan, ["CODEX_REASONING_EFFORT"], default).lower()
+    return effort if effort in {"low", "medium", "high", "xhigh"} else default
 
 
 def review_opencode_variant(plan: str) -> str:
     normalized_plan = normalize_plan(plan, default="free")
-    defaults = {"free": "medium", "pro": "medium", "max": "xhigh"}
-    env_name = f"PULLWISE_{normalized_plan.upper()}_OPENCODE_VARIANT"
-    return env(env_name, defaults[normalized_plan]).strip() or defaults[normalized_plan]
+    default = REVIEW_AGENT_EFFORT_DEFAULTS[normalized_plan]
+    variant = review_agent_env(normalized_plan, ["OPENCODE_VARIANT"], default).lower()
+    return variant if variant in {"low", "medium", "high", "xhigh"} else default
 
 
 def review_agent_config(plan: str) -> dict:
     normalized_plan = normalize_plan(plan, default="free")
+    codex_cli = review_agent_env(normalized_plan, ["CODEX_CLI", "CODEX_COMMAND"], REVIEW_CODEX_COMMAND_DEFAULT)
+    codex_command = review_agent_env(normalized_plan, ["CODEX_COMMAND", "CODEX_CLI"], REVIEW_CODEX_COMMAND_DEFAULT)
+    codex_model = review_agent_env(normalized_plan, ["CODEX_MODEL"], REVIEW_CODEX_MODEL_DEFAULT)
+    codex_effort = review_reasoning_effort(normalized_plan)
+    opencode_cli = review_agent_env(
+        normalized_plan,
+        ["OPENCODE_CLI", "OPENCODE_COMMAND"],
+        REVIEW_OPENCODE_COMMAND_DEFAULT,
+    )
+    opencode_command = review_agent_env(
+        normalized_plan,
+        ["OPENCODE_COMMAND", "OPENCODE_CLI"],
+        REVIEW_OPENCODE_COMMAND_DEFAULT,
+    )
+    opencode_model = review_agent_env(normalized_plan, ["OPENCODE_MODEL"], REVIEW_OPENCODE_MODEL_DEFAULT)
+    opencode_variant = review_opencode_variant(normalized_plan)
+    provider_chain = review_agent_provider_chain(normalized_plan)
+    primary_provider = provider_chain[0]
+    primary_model = opencode_model if primary_provider == "opencode" else codex_model
+    primary_effort = opencode_variant if primary_provider == "opencode" else codex_effort
     return {
         "plan": normalized_plan,
+        "agent": {
+            "cli": primary_provider,
+            "model": primary_model,
+            "reasoningEffort": primary_effort,
+            "reasoning_effort": primary_effort,
+        },
+        "provider": primary_provider,
+        "providerChain": provider_chain,
+        "provider_chain": provider_chain,
         "codex": {
-            "reasoningEffort": review_reasoning_effort(normalized_plan),
-            "reasoning_effort": review_reasoning_effort(normalized_plan),
+            "cli": codex_cli,
+            "command": codex_command,
+            "model": codex_model,
+            "reasoningEffort": codex_effort,
+            "reasoning_effort": codex_effort,
         },
         "opencode": {
-            "variant": review_opencode_variant(normalized_plan),
+            "cli": opencode_cli,
+            "command": opencode_command,
+            "model": opencode_model,
+            "variant": opencode_variant,
         },
     }
 
@@ -462,30 +547,6 @@ def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, in
     }
 
 
-def create_portal_session(user: dict, *, return_url: str | None = None) -> dict:
-    provider = selected_provider()
-    billing = user.get("billing") or {}
-    customer_id = billing.get("customerId")
-    if not customer_id:
-        raise BillingConfigurationError("No billing customer is linked to this account yet.")
-    if provider == "creem":
-        return create_creem_portal_session(customer_id)
-    raise BillingConfigurationError("Billing is not configured.")
-
-
-def create_creem_portal_session(customer_id: str) -> dict:
-    response = requests.post(
-        urljoin(creem_api_base_url() + "/", "v1/customers/billing"),
-        headers=creem_api_headers(),
-        json={"customer_id": customer_id},
-        timeout=billing_timeout_seconds(),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    portal_url = provider_redirect_url(payload.get("customer_portal_link") or payload.get("url"), "Creem", "portal")
-    return {"provider": "creem", "url": portal_url}
-
-
 def change_subscription_interval(user: dict, *, interval: str, plan: str | None = None, return_url: str | None = None) -> dict:
     target_plan = normalize_plan(plan or (user.get("billing") or {}).get("plan") or "pro")
     target_interval = normalize_interval(interval)
@@ -503,6 +564,8 @@ def change_subscription_interval(user: dict, *, interval: str, plan: str | None 
             "interval": target_interval,
             "alreadyActive": True,
         }
+    if not subscription_change_is_upgrade(current_plan, current_interval, target_plan, target_interval):
+        raise BillingConfigurationError("Only subscription upgrades are supported.")
     if (billing.get("status") or "").lower() not in {"active", "trialing"}:
         raise BillingConfigurationError("Only active subscriptions can be changed.")
 
@@ -552,9 +615,9 @@ def create_creem_subscription_change(billing: dict, *, plan: str, interval: str)
 
 
 def creem_subscription_update_behavior(current_plan: str, current_interval: str, target_plan: str, target_interval: str) -> str:
-    if subscription_change_is_upgrade(current_plan, current_interval, target_plan, target_interval):
-        return normalize_creem_update_behavior(env("PULLWISE_CREEM_UPGRADE_BEHAVIOR"), "proration-charge-immediately")
-    return normalize_creem_update_behavior(env("PULLWISE_CREEM_DOWNGRADE_BEHAVIOR"), "proration-none")
+    if not subscription_change_is_upgrade(current_plan, current_interval, target_plan, target_interval):
+        raise BillingConfigurationError("Only subscription upgrades are supported.")
+    return normalize_creem_update_behavior(env("PULLWISE_CREEM_UPGRADE_BEHAVIOR"), "proration-charge-immediately")
 
 
 def subscription_change_is_upgrade(current_plan: str, current_interval: str, target_plan: str, target_interval: str) -> bool:

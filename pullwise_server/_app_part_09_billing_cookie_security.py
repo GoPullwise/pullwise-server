@@ -3,6 +3,7 @@ from __future__ import annotations
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 MAX_BILLING_SUBSCRIPTION_RECORDS = 25
+MAX_BILLING_SUBSCRIPTION_EVENTS = 100
 
 
 def billing_event_id(update: dict) -> str:
@@ -169,11 +170,57 @@ def upsert_billing_subscription_record(user: dict, billing_state: dict) -> None:
     user["billingSubscriptions"] = records[:MAX_BILLING_SUBSCRIPTION_RECORDS]
 
 
+def append_billing_subscription_event(user: dict, update: dict, billing_state: dict, *, stale: bool = False, processed_at: int | None = None) -> None:
+    event_id = billing_event_id(update)
+    event_type = billing_update_text(update.get("eventType"))
+    if not event_id or not event_type:
+        return
+
+    subscription_id = billing_update_text(update.get("subscriptionId")) or billing_update_text(billing_state.get("subscriptionId"))
+    customer_id = billing_update_text(update.get("customerId")) or billing_update_text(billing_state.get("customerId"))
+    provider = billing_update_text(update.get("provider")) or billing_update_text(billing_state.get("provider"))
+    if not (subscription_id or customer_id):
+        return
+
+    recorded_at = processed_at or now()
+    record = {
+        "provider": provider or None,
+        "customerId": customer_id or None,
+        "customerEmail": billing_update_text(update.get("customerEmail")) or billing_update_text(billing_state.get("customerEmail")) or None,
+        "subscriptionId": subscription_id or None,
+        "subscriptionItemId": billing_update_text(update.get("subscriptionItemId")) or billing_update_text(billing_state.get("subscriptionItemId")) or None,
+        "status": billing_update_text(update.get("status")) or billing_update_text(billing_state.get("status")) or None,
+        "plan": billing_update_text(update.get("plan")) or billing_update_text(billing_state.get("plan")) or None,
+        "interval": billing_update_text(update.get("interval")) or billing_update_text(billing_state.get("interval")) or None,
+        "currentPeriodStart": billing_update_scalar(update.get("currentPeriodStart")) if billing_update_scalar(update.get("currentPeriodStart")) is not None else billing_update_scalar(billing_state.get("currentPeriodStart")),
+        "currentPeriodEnd": billing_update_scalar(update.get("currentPeriodEnd")) if billing_update_scalar(update.get("currentPeriodEnd")) is not None else billing_update_scalar(billing_state.get("currentPeriodEnd")),
+        "cancelAtPeriodEnd": billing_update_bool(update.get("cancelAtPeriodEnd")) if billing_update_bool(update.get("cancelAtPeriodEnd")) is not None else billing_update_bool(billing_state.get("cancelAtPeriodEnd")),
+        "canceledAt": billing_update_scalar(update.get("canceledAt")) if billing_update_scalar(update.get("canceledAt")) is not None else billing_update_scalar(billing_state.get("canceledAt")),
+        "eventType": event_type,
+        "eventId": event_id,
+        "eventCreated": billing_event_created(update),
+        "processedAt": recorded_at,
+        "stale": stale,
+    }
+    existing_events = user.get("billingSubscriptionEvents") if isinstance(user.get("billingSubscriptionEvents"), list) else []
+    events = [item for item in existing_events if isinstance(item, dict) and billing_update_text(item.get("eventId")) != event_id]
+    events.insert(0, record)
+    events.sort(
+        key=lambda item: (
+            billing_event_created({"eventCreated": item.get("eventCreated")}) or 0,
+            billing_event_created({"eventCreated": item.get("processedAt")}) or 0,
+        ),
+        reverse=True,
+    )
+    user["billingSubscriptionEvents"] = events[:MAX_BILLING_SUBSCRIPTION_EVENTS]
+
+
 def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     current = user.get("billing") or {}
     incoming_created = billing_event_created(update)
     current_created = billing_event_created({"eventCreated": current.get("lastEventCreated")})
     if incoming_created is not None and current_created is not None and incoming_created < current_created:
+        append_billing_subscription_event(user, update, current, stale=True)
         remember_billing_event(update, applied=False, stale=True)
         return False
 
@@ -224,6 +271,7 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
             "eventId": event_id or checkout.get("eventId"),
         }
     upsert_billing_subscription_record(user, user["billing"])
+    append_billing_subscription_event(user, update, user["billing"], processed_at=updated_at)
     ensure_billing_quota_bucket_for_user(user)
     remember_billing_event(update, applied=True)
     mark_state_dirty()

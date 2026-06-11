@@ -293,16 +293,14 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(create.call_args.kwargs["success_url"], "https://app.pullwise.dev/settings")
         self.assertEqual(create.call_args.kwargs["cancel_url"], "https://app.pullwise.dev/settings")
 
-    def test_portal_session_rejects_non_object_body(self) -> None:
+    def test_portal_session_route_is_not_available(self) -> None:
         cookie = seed_session()
-        handler = HandlerHarness(["invalid"], cookie=cookie)
+        handler = HandlerHarness({}, cookie=cookie)
 
-        with patch("pullwise_server.billing.create_portal_session") as create:
-            app.PullwiseHandler.handle_post(handler, "/billing/portal-sessions", {}, ["billing", "portal-sessions"])
+        app.PullwiseHandler.handle_post(handler, "/billing/portal-sessions", {}, ["billing", "portal-sessions"])
 
-        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("JSON object", handler.payload["message"])
-        create.assert_not_called()
+        self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+        self.assertIn("Route not found", handler.payload["message"])
 
     def test_change_interval_rejects_non_object_body(self) -> None:
         cookie = seed_session()
@@ -422,13 +420,6 @@ class BillingRoutesTest(unittest.TestCase):
                 "pullwise_server.billing.create_checkout_session",
                 {"provider": "creem", "id": "chk_1", "url": "javascript:alert(1)"},
                 lambda: None,
-            ),
-            (
-                "/billing/portal-sessions",
-                {},
-                "pullwise_server.billing.create_portal_session",
-                {"provider": "creem", "url": "javascript:alert(1)"},
-                lambda: app.USERS["usr_1"].update({"billing": {"customerId": "cust_1"}}),
             ),
             (
                 "/billing/change-interval",
@@ -569,7 +560,7 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertIsNone(payload["updatedAt"])
         self.assertNotIn("raw", payload)
 
-    def test_billing_account_payload_includes_current_subscription_record_for_legacy_state(self) -> None:
+    def test_billing_account_payload_does_not_expose_legacy_subscription_records(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
             "provider": "creem",
@@ -586,26 +577,8 @@ class BillingRoutesTest(unittest.TestCase):
 
         payload = app.billing_account_payload(app.USERS["usr_1"])
 
-        self.assertEqual(payload["subscriptions"], [
-            {
-                "provider": "creem",
-                "customerId": "cust_1",
-                "customerEmail": None,
-                "subscriptionId": "sub_1",
-                "subscriptionItemId": None,
-                "status": "active",
-                "plan": "pro",
-                "interval": "month",
-                "currentPeriodStart": None,
-                "currentPeriodEnd": None,
-                "cancelAtPeriodEnd": None,
-                "canceledAt": None,
-                "lastEventType": "checkout.completed",
-                "lastEventId": "evt_1",
-                "lastEventCreated": 1728734325,
-                "updatedAt": 1728734330,
-            }
-        ])
+        self.assertNotIn("subscriptions", payload)
+        self.assertEqual(payload["subscriptionEvents"], [])
 
     def test_checkout_returns_not_implemented_when_billing_is_disabled(self) -> None:
         cookie = seed_session()
@@ -715,6 +688,9 @@ class BillingRoutesTest(unittest.TestCase):
 
         self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
         self.assertIn("evt_1", app.BILLING_EVENTS)
+        self.assertEqual(len(app.USERS["usr_1"]["billingSubscriptionEvents"]), 1)
+        self.assertEqual(app.USERS["usr_1"]["billingSubscriptionEvents"][0]["eventType"], "subscription.update")
+        self.assertEqual(app.USERS["usr_1"]["billingSubscriptionEvents"][0]["status"], "active")
 
     def test_billing_updates_ignore_events_older_than_current_billing_state(self) -> None:
         seed_session()
@@ -749,6 +725,66 @@ class BillingRoutesTest(unittest.TestCase):
 
         self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
         self.assertIn("evt_old", app.BILLING_EVENTS)
+        self.assertEqual([event["eventId"] for event in app.USERS["usr_1"]["billingSubscriptionEvents"]], ["evt_new", "evt_old"])
+        self.assertFalse(app.USERS["usr_1"]["billingSubscriptionEvents"][0]["stale"])
+        self.assertTrue(app.USERS["usr_1"]["billingSubscriptionEvents"][1]["stale"])
+
+    def test_billing_subscription_events_keep_lifecycle_history_for_same_subscription(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+
+        for update in [
+            {
+                "userId": "usr_1",
+                "provider": "creem",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "active",
+                "plan": "pro",
+                "interval": "month",
+                "eventType": "checkout.completed",
+                "eventId": "evt_checkout",
+                "eventCreated": 100,
+            },
+            {
+                "userId": "usr_1",
+                "provider": "creem",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "active",
+                "plan": "max",
+                "interval": "month",
+                "eventType": "subscription.update",
+                "eventId": "evt_update",
+                "eventCreated": 200,
+            },
+            {
+                "userId": "usr_1",
+                "provider": "creem",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "canceling",
+                "plan": "max",
+                "interval": "month",
+                "eventType": "subscription.scheduled_cancel",
+                "eventId": "evt_cancel",
+                "eventCreated": 300,
+            },
+        ]:
+            app.PullwiseHandler.apply_billing_update(handler, update)
+
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "canceling")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["plan"], "max")
+        self.assertEqual(len(app.USERS["usr_1"]["billingSubscriptions"]), 1)
+        self.assertEqual(app.USERS["usr_1"]["billingSubscriptions"][0]["lastEventId"], "evt_cancel")
+        self.assertEqual(
+            [event["eventType"] for event in app.USERS["usr_1"]["billingSubscriptionEvents"]],
+            ["subscription.scheduled_cancel", "subscription.update", "checkout.completed"],
+        )
+        payload = app.billing_account_payload(app.USERS["usr_1"])
+        self.assertEqual([event["eventId"] for event in payload["subscriptionEvents"]], ["evt_cancel", "evt_update", "evt_checkout"])
+        self.assertEqual(payload["subscriptionEvents"][0]["status"], "canceling")
+        self.assertEqual(payload["subscriptionEvents"][1]["plan"], "max")
 
     def test_billing_update_with_malformed_user_id_can_match_existing_customer(self) -> None:
         seed_session()
@@ -1239,6 +1275,30 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
                 }
             ],
         )
+        self.assertEqual(
+            persisted_user["billingSubscriptionEvents"],
+            [
+                {
+                    "provider": "creem",
+                    "customerId": "cust_1",
+                    "customerEmail": "dev@example.com",
+                    "subscriptionId": "sub_1",
+                    "subscriptionItemId": None,
+                    "status": "active",
+                    "plan": "pro",
+                    "interval": "month",
+                    "currentPeriodStart": None,
+                    "currentPeriodEnd": None,
+                    "cancelAtPeriodEnd": None,
+                    "canceledAt": None,
+                    "eventType": "checkout.completed",
+                    "eventId": "evt_creem_checkout_real_1",
+                    "eventCreated": 1728734325,
+                    "processedAt": persisted_user["billingSubscriptionEvents"][0]["processedAt"],
+                    "stale": False,
+                }
+            ],
+        )
         self.assertIn("evt_creem_checkout_real_1", persisted_state["billingEvents"])
 
         app.USERS = {}
@@ -1254,12 +1314,12 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         self.assertEqual(billing_payload["usage"]["limit"], 60)
         self.assertEqual(billing_payload["usage"]["remaining"], 60)
         self.assertEqual(billing_payload["usage"]["plan"], "pro")
-        self.assertEqual(len(billing_payload["subscriptions"]), 1)
-        self.assertEqual(billing_payload["subscriptions"][0]["subscriptionId"], "sub_1")
-        self.assertEqual(billing_payload["subscriptions"][0]["status"], "active")
-        self.assertEqual(billing_payload["subscriptions"][0]["plan"], "pro")
-        self.assertEqual(billing_payload["subscriptions"][0]["interval"], "month")
-        self.assertEqual(billing_payload["subscriptions"][0]["lastEventId"], "evt_creem_checkout_real_1")
+        self.assertNotIn("subscriptions", billing_payload)
+        self.assertEqual(len(billing_payload["subscriptionEvents"]), 1)
+        self.assertEqual(billing_payload["subscriptionEvents"][0]["eventId"], "evt_creem_checkout_real_1")
+        self.assertEqual(billing_payload["subscriptionEvents"][0]["eventType"], "checkout.completed")
+        self.assertEqual(billing_payload["subscriptionEvents"][0]["subscriptionId"], "sub_1")
+        self.assertEqual(billing_payload["subscriptionEvents"][0]["status"], "active")
         connection = app.db.connect()
         try:
             rows = connection.execute(

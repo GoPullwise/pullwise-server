@@ -47,7 +47,7 @@
 前端已经有 billing、repo 选择、scan 创建、错误跳转的页面基础，但 UI 仍是 account 用量口径。
 
 - `src/api/pullwise.js`
-  - 已有 `billing.getPlan()`、`billing.createCheckoutSession()`、`billing.createPortalSession()`、`billing.changeSubscriptionInterval()`。
+  - 已有 `billing.getPlan()`、`billing.createCheckoutSession()`、`billing.changeSubscriptionInterval()`、`billing.cancelSubscription()`；不再暴露 Creem customer portal。
   - scan 创建仍只提交 `{ repo, branch, commit, requestId }`。
 - `src/lib/pullwise-data.js`
   - `normalizeRepo()` 保留 repo item 原始字段，但没有 workspace/quota 语义。
@@ -544,7 +544,7 @@ Pro workspace:
 2. Creem webhook 优先按 `workspaceId` 应用订阅状态。
 3. `billing_user_for_update()` 迁移为 `billing_workspace_for_update()`，保留 customer/subscription fallback。
 4. `GET /billing/plan` 返回 `workspace` 口径。
-5. billing portal/change interval 使用 workspace billing customer/subscription。
+5. change interval/cancel 使用 workspace billing customer/subscription；不暴露 Creem customer portal，避免用户绕过 Pullwise 的订阅变更限制。
 
 验收：
 

@@ -310,7 +310,6 @@ PULLWISE_CREEM_MAX_PRODUCT_IDS=prod_max_monthly,prod_max_yearly
 PULLWISE_CREEM_WEBHOOK_SECRET=...
 PULLWISE_CREEM_TEST_MODE=false
 PULLWISE_CREEM_UPGRADE_BEHAVIOR=proration-charge-immediately
-PULLWISE_CREEM_DOWNGRADE_BEHAVIOR=proration-none
 # Optional explicit override. Accepts either the origin or /v1 URL.
 PULLWISE_CREEM_API_BASE_URL=
 ```
@@ -684,7 +683,6 @@ PULLWISE_CREEM_WEBHOOK_SECRET=whsec_...
 PULLWISE_CREEM_TEST_MODE=false
 PULLWISE_CREEM_API_BASE_URL=
 PULLWISE_CREEM_UPGRADE_BEHAVIOR=proration-charge-immediately
-PULLWISE_CREEM_DOWNGRADE_BEHAVIOR=proration-none
 ```
 
 Set `PULLWISE_CREEM_TEST_MODE=true` with a Creem test-mode API key and test
@@ -709,21 +707,18 @@ Implemented billing routes:
 - `GET /billing/plan`
 - `GET /billing`
 - `POST /billing/checkout-sessions`
-- `POST /billing/portal-sessions`
 - `POST /billing/change-interval`
 - `POST /billing/cancel-subscription`
 - `POST /webhooks/creem`
 
 Checkout URLs are created server-side with `userId`
 metadata. Webhooks verify Creem `creem-signature` before updating billing
-state. Plan and interval changes use the Creem subscription upgrade endpoint
-with proration behavior selected by upgrade/downgrade direction. Cancellation
+state. Plan and interval upgrades use the Creem subscription upgrade endpoint.
+Pullwise supports higher-tier changes and monthly-to-yearly changes, with
+`PULLWISE_CREEM_UPGRADE_BEHAVIOR` defaulting to immediate proration. Lower-tier
+changes and yearly-to-monthly changes are not offered by Pullwise. Cancellation
 is scheduled for the end of the paid period; Pullwise does not issue automatic
 refunds for the remaining period.
-`PULLWISE_CREEM_UPGRADE_BEHAVIOR` defaults to immediate proration for upgrades
-such as Pro to Max or monthly to yearly. `PULLWISE_CREEM_DOWNGRADE_BEHAVIOR`
-defaults to `proration-none` for downgrades such as Max to Pro or yearly to
-monthly, avoiding prorated credits/refunds during the current period.
 
 ## User and Billing State
 
@@ -837,7 +832,6 @@ Implemented endpoints:
 - `PATCH /settings`
 - `GET /billing/plan`
 - `POST /billing/checkout-sessions`
-- `POST /billing/portal-sessions`
 - `POST /billing/change-interval`
 - `POST /billing/cancel-subscription`
 - `POST /webhooks/creem`

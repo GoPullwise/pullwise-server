@@ -154,6 +154,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             user = USERS.get(session["userId"]) if session else None
             return self.json(pricing_payload(user))
+        if path in {"/docs/subscription-plans", "/subscription-plans/agent-configs"}:
+            return self.json(subscription_plan_agent_configs_payload())
         if path in {"/api-docs", "/api/docs"}:
             return self.json(api_docs_payload())
         api_segments = external_api_segments(segments)
@@ -626,7 +628,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
             user = USERS[session["userId"]]
             if effective_billing_plan(user) in billing.PAID_PLAN_IDS:
-                return self.error(HTTPStatus.CONFLICT, "An active paid subscription already exists. Change or manage billing from the Billing page.")
+                return self.error(HTTPStatus.CONFLICT, "An active paid subscription already exists. Change or cancel billing from the Billing page.")
             success_url = safe_redirect_to(body.get("successUrl"), "settings")
             plan = str(body.get("plan") or "pro")
             interval = str(body.get("interval") or "month")
@@ -655,19 +657,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             }
             mark_state_dirty()
             return self.json(checkout)
-        if path == "/billing/portal-sessions":
-            session = self.current_session()
-            if not session:
-                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before opening the billing portal.")
-            if not isinstance(body, dict):
-                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
-            user = USERS[session["userId"]]
-            portal = billing.create_portal_session(
-                user,
-                return_url=safe_redirect_to(body.get("returnUrl"), "settings"),
-            )
-            portal = safe_billing_redirect_response(portal, "portal", require_url=True)
-            return self.json(portal)
         if path == "/billing/change-interval":
             session = self.current_session()
             if not session:
@@ -681,7 +670,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 plan=str(body.get("plan") or ""),
                 return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
             )
-            result = safe_billing_redirect_response(result, "portal")
+            result = safe_billing_redirect_response(result, "subscription change")
             if result.get("alreadyActive"):
                 return self.json(result)
             if result.get("provider") == "creem":
@@ -710,7 +699,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 mode=str(body.get("mode") or "scheduled"),
                 return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
             )
-            result = safe_billing_redirect_response(result, "portal")
+            result = safe_billing_redirect_response(result, "subscription cancellation")
             if result.get("provider") == "creem":
                 current_billing = user.get("billing") or {}
                 user["billing"] = {
