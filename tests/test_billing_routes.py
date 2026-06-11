@@ -1307,6 +1307,195 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         self.assertEqual(persisted_user["billing"]["plan"], "max")
         self.assertEqual(persisted_user["billingSubscriptions"][0]["plan"], "max")
 
+    def test_creem_refund_webhook_revokes_access_and_refreshes_free_quota(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+            "currentPeriodStart": 1728734318,
+            "currentPeriodEnd": 1731412718,
+            "lastEventCreated": 1728734325,
+        }
+        raw = json.dumps(
+            {
+                "id": "evt_creem_refund_1",
+                "eventType": "refund.created",
+                "created_at": 1728734351631,
+                "object": {
+                    "id": "ref_1",
+                    "status": "succeeded",
+                    "transaction": {
+                        "id": "tran_1",
+                        "status": "refunded",
+                        "subscription": "sub_1",
+                    },
+                    "subscription": {
+                        "id": "sub_1",
+                        "product": "prod_monthly",
+                        "customer": "cust_1",
+                        "status": "active",
+                        "current_period_start_date": "2024-10-12T11:58:38.000Z",
+                        "current_period_end_date": "2024-11-12T11:58:38.000Z",
+                    },
+                    "checkout": {
+                        "id": "ch_1",
+                        "request_id": "pw_usr_1_req_1",
+                        "metadata": {"userId": "usr_1", "plan": "pro", "interval": "month"},
+                    },
+                    "customer": {"id": "cust_1", "email": "dev@example.com"},
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/creem",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "creem-signature": signature},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        persisted_user = app.db.load_state()["users"]["usr_1"]
+        self.assertEqual(persisted_user["billing"]["status"], "canceled")
+        self.assertEqual(persisted_user["billing"]["plan"], "pro")
+        self.assertEqual(persisted_user["billing"]["lastEventType"], "refund.created")
+        self.assertEqual(persisted_user["billing"]["lastEventId"], "evt_creem_refund_1")
+
+        billing_payload = app.billing_account_payload(app.USERS["usr_1"])
+        self.assertEqual(billing_payload["status"], "canceled")
+        self.assertEqual(billing_payload["plan"], "free")
+        self.assertEqual(billing_payload["usage"]["plan"], "free")
+        self.assertEqual(billing_payload["usage"]["limit"], 5)
+
+    def test_creem_one_time_refund_webhook_does_not_revoke_active_subscription(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+            "lastEventType": "checkout.completed",
+            "lastEventId": "evt_checkout_1",
+            "lastEventCreated": 1728734325,
+        }
+        app.persist_state(force=True)
+        raw = json.dumps(
+            {
+                "id": "evt_creem_onetime_refund_1",
+                "eventType": "refund.created",
+                "created_at": 1728734351631,
+                "object": {
+                    "id": "ref_1",
+                    "status": "succeeded",
+                    "transaction": {
+                        "id": "tran_1",
+                        "status": "refunded",
+                        "order": "ord_1",
+                        "customer": "cust_1",
+                    },
+                    "order": {
+                        "id": "ord_1",
+                        "customer": "cust_1",
+                        "product": "prod_onetime",
+                        "status": "paid",
+                        "type": "onetime",
+                    },
+                    "checkout": {
+                        "id": "ch_1",
+                        "request_id": "pw_usr_1_onetime",
+                        "metadata": {"userId": "usr_1"},
+                    },
+                    "customer": {"id": "cust_1", "email": "dev@example.com"},
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/creem",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "creem-signature": signature},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "active")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["plan"], "pro")
+        self.assertEqual(app.USERS["usr_1"]["billing"]["lastEventId"], "evt_checkout_1")
+        self.assertNotIn("evt_creem_onetime_refund_1", app.BILLING_EVENTS)
+        persisted_state = app.db.load_state()
+        persisted_user = persisted_state["users"]["usr_1"]
+        self.assertEqual(persisted_user["billing"]["status"], "active")
+        self.assertEqual(persisted_user["billing"]["plan"], "pro")
+        self.assertNotIn("evt_creem_onetime_refund_1", persisted_state["billingEvents"])
+
+    def test_creem_dispute_webhook_matches_existing_subscription_without_metadata(self) -> None:
+        seed_session()
+        app.USERS["usr_1"]["billing"] = {
+            "provider": "creem",
+            "customerId": "cust_1",
+            "subscriptionId": "sub_1",
+            "status": "active",
+            "plan": "pro",
+            "interval": "month",
+            "lastEventCreated": 1728734325,
+        }
+        raw = json.dumps(
+            {
+                "id": "evt_creem_dispute_1",
+                "eventType": "dispute.created",
+                "created_at": 1750941264812,
+                "object": {
+                    "id": "disp_1",
+                    "transaction": {
+                        "id": "tran_1",
+                        "status": "chargeback",
+                        "subscription": "sub_1",
+                        "customer": "cust_1",
+                    },
+                    "subscription": {
+                        "id": "sub_1",
+                        "product": "prod_monthly",
+                        "customer": "cust_1",
+                        "status": "active",
+                    },
+                    "customer": {"id": "cust_1", "email": "dev@example.com"},
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/creem",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "creem-signature": signature},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        persisted_user = app.db.load_state()["users"]["usr_1"]
+        self.assertEqual(persisted_user["billing"]["status"], "past_due")
+        self.assertEqual(persisted_user["billing"]["plan"], "pro")
+        self.assertEqual(persisted_user["billing"]["subscriptionId"], "sub_1")
+        self.assertEqual(persisted_user["billing"]["lastEventType"], "dispute.created")
+        self.assertEqual(persisted_user["billing"]["lastEventId"], "evt_creem_dispute_1")
+
+        billing_payload = app.billing_account_payload(app.USERS["usr_1"])
+        self.assertEqual(billing_payload["status"], "past_due")
+        self.assertEqual(billing_payload["plan"], "free")
+        self.assertEqual(billing_payload["usage"]["plan"], "free")
+        self.assertEqual(billing_payload["usage"]["limit"], 5)
+
 
 if __name__ == "__main__":
     unittest.main()

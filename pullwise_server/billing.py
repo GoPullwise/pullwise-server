@@ -690,6 +690,49 @@ def product_payload_from_subscription_item(item: dict) -> dict | None:
     return {"id": product_id} if product_id else None
 
 
+def first_text_value(*values: object) -> str:
+    for value in values:
+        text = text_payload(value, "")
+        if text:
+            return text
+    return ""
+
+
+def metadata_value(field: str, *metadata_objects: dict) -> object:
+    for metadata in metadata_objects:
+        if isinstance(metadata, dict) and metadata.get(field):
+            return metadata.get(field)
+    return None
+
+
+def creem_event_subscription_payload(event_type: str, obj: dict) -> dict:
+    raw_subscription = obj.get("subscription")
+    if isinstance(raw_subscription, dict):
+        return raw_subscription
+    if event_type.startswith("subscription."):
+        return obj
+    checkout = dict_payload(obj.get("checkout"))
+    checkout_subscription = checkout.get("subscription")
+    return checkout_subscription if isinstance(checkout_subscription, dict) else {}
+
+
+def creem_event_subscription_id(event_type: str, obj: dict, subscription: dict, transaction: dict, checkout: dict) -> str | None:
+    return (
+        object_id(subscription)
+        or object_id(obj.get("subscription"))
+        or object_id(transaction.get("subscription"))
+        or object_id(checkout.get("subscription"))
+        or (object_id(obj) if event_type.startswith("subscription.") else None)
+    )
+
+
+def creem_event_customer_payload(*values: object) -> dict:
+    for value in values:
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
 def creem_product_configured_for_plan(product: dict | None, plan: str) -> bool:
     product_id = object_id(product)
     return bool(product_id and product_id in creem_configured_product_ids_for_plan(plan))
@@ -714,6 +757,8 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     obj = dict_payload(event.get("object"))
     if event_type not in {
         "checkout.completed",
+        "refund.created",
+        "dispute.created",
         "subscription.active",
         "subscription.paid",
         "subscription.canceled",
@@ -722,41 +767,54 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         "subscription.expired",
         "subscription.trialing",
         "subscription.paused",
+        "subscription.unpaid",
         "subscription.update",
     }:
         return None
 
+    checkout = dict_payload(obj.get("checkout"))
     order = dict_payload(obj.get("order"))
-    request_id = text_payload(obj.get("request_id") or obj.get("requestId") or order.get("request_id") or order.get("requestId"), "")
+    transaction = dict_payload(obj.get("transaction"))
+    request_id = first_text_value(
+        obj.get("request_id"),
+        obj.get("requestId"),
+        checkout.get("request_id"),
+        checkout.get("requestId"),
+        order.get("request_id"),
+        order.get("requestId"),
+    )
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
-    customer = obj.get("customer") if isinstance(obj.get("customer"), dict) else {}
-    subscription = obj.get("subscription") if isinstance(obj.get("subscription"), dict) else obj
+    checkout_metadata = checkout.get("metadata") if isinstance(checkout.get("metadata"), dict) else {}
+    order_metadata = order.get("metadata") if isinstance(order.get("metadata"), dict) else {}
+    subscription = creem_event_subscription_payload(event_type, obj)
     subscription_metadata = subscription.get("metadata") if isinstance(subscription.get("metadata"), dict) else {}
     product = product_payload(obj.get("product"))
     if not product and isinstance(subscription, dict):
         product = product_payload(subscription.get("product"))
     if not product:
         product = product_payload(order.get("product"))
+    if not product:
+        product = product_payload(transaction.get("product"))
     user_id = (
-        metadata.get("userId")
-        or metadata.get("user_id")
-        or metadata.get("internal_customer_id")
-        or metadata.get("internalCustomerId")
-        or metadata.get("referenceId")
-        or metadata.get("reference_id")
-        or subscription_metadata.get("userId")
-        or subscription_metadata.get("user_id")
-        or subscription_metadata.get("internal_customer_id")
-        or subscription_metadata.get("internalCustomerId")
-        or subscription_metadata.get("referenceId")
-        or subscription_metadata.get("reference_id")
+        metadata_value("userId", metadata, checkout_metadata, order_metadata, subscription_metadata)
+        or metadata_value("user_id", metadata, checkout_metadata, order_metadata, subscription_metadata)
+        or metadata_value("internal_customer_id", metadata, checkout_metadata, order_metadata, subscription_metadata)
+        or metadata_value("internalCustomerId", metadata, checkout_metadata, order_metadata, subscription_metadata)
+        or metadata_value("referenceId", metadata, checkout_metadata, order_metadata, subscription_metadata)
+        or metadata_value("reference_id", metadata, checkout_metadata, order_metadata, subscription_metadata)
     )
     subscription_customer = subscription.get("customer") if isinstance(subscription, dict) else None
-    if isinstance(subscription_customer, dict):
-        subscription_customer_id = subscription_customer.get("id")
-    else:
-        subscription_customer_id = subscription_customer
-    customer_id = object_id(customer) or object_id(subscription_customer_id) or object_id(order.get("customer"))
+    raw_customer = obj.get("customer")
+    customer = creem_event_customer_payload(raw_customer, subscription_customer, order.get("customer"), transaction.get("customer"))
+    customer_id = (
+        object_id(raw_customer)
+        or object_id(subscription_customer)
+        or object_id(order.get("customer"))
+        or object_id(transaction.get("customer"))
+    )
+    subscription_id = creem_event_subscription_id(event_type, obj, subscription, transaction, checkout)
+    if event_type in {"refund.created", "dispute.created"} and not subscription_id:
+        return None
     if not user_id and not customer_id and not request_id:
         return None
 
@@ -766,16 +824,21 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         product = item_product
 
     product_plan = creem_plan_from_product(product)
-    metadata_plan = text_payload(metadata.get("plan") or subscription_metadata.get("plan"), "").strip().lower()
+    metadata_plan = text_payload(metadata_value("plan", metadata, checkout_metadata, order_metadata, subscription_metadata), "").strip().lower()
     plan = product_plan or (metadata_plan if metadata_plan in PLAN_IDS else None)
-    status = normalize_creem_subscription_status(event_type, subscription.get("status") if isinstance(subscription, dict) else "active")
+    status = normalize_creem_subscription_status(
+        event_type,
+        subscription.get("status") if isinstance(subscription, dict) else None,
+        transaction.get("status"),
+    )
+    if event_type == "refund.created" and status != "canceled":
+        return None
     if status in PAID_PLAN_ENTITLEMENT_STATUSES and object_id(product) and not product_plan:
         return None
     if plan in PAID_PLAN_IDS and status in PAID_PLAN_ENTITLEMENT_STATUSES and not creem_product_configured_for_plan(product, plan):
         return None
     interval = normalize_interval(
-        metadata.get("interval")
-        or subscription_metadata.get("interval")
+        metadata_value("interval", metadata, checkout_metadata, order_metadata, subscription_metadata)
         or interval_from_creem_product(product)
         or "month"
     )
@@ -785,7 +848,8 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
         "provider": "creem",
         "customerId": customer_id,
         "customerEmail": customer.get("email"),
-        "subscriptionId": subscription.get("id") if isinstance(subscription, dict) else None,
+        "subscriptionId": subscription_id,
+        "subscriptionItemId": object_id(subscription_item),
         "status": status,
         "plan": plan,
         "interval": interval,
@@ -829,13 +893,20 @@ def normalize_subscription_status(status: object) -> str:
     return normalized or "active"
 
 
-def normalize_creem_subscription_status(event_type: str | None, status: object) -> str:
+def normalize_creem_subscription_status(event_type: str | None, status: object, transaction_status: object | None = None) -> str:
+    normalized_transaction_status = text_payload(transaction_status, "").strip().lower()
+    if event_type == "refund.created" and normalized_transaction_status in {"refunded", "chargeback"}:
+        return "canceled"
+    if event_type == "dispute.created":
+        return "past_due"
     if event_type == "subscription.canceled":
         return "canceled"
     if event_type == "subscription.scheduled_cancel":
         return "canceling"
     if event_type == "subscription.past_due":
         return "past_due"
+    if event_type == "subscription.unpaid":
+        return "unpaid"
     if event_type == "subscription.expired":
         return "past_due"
     if event_type == "subscription.paused":

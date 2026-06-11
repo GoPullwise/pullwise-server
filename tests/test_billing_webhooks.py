@@ -262,6 +262,147 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["currentPeriodStart"], "2024-03-01T00:00:00.000Z")
         self.assertEqual(update["currentPeriodEnd"], "2024-04-01T00:00:00.000Z")
 
+    def test_creem_refund_created_maps_nested_checkout_metadata_and_revokes_access(self) -> None:
+        event = {
+            "id": "evt_creem_refund_1",
+            "created_at": 1728734351631,
+            "eventType": "refund.created",
+            "object": {
+                "id": "ref_1",
+                "status": "succeeded",
+                "transaction": {
+                    "id": "tran_1",
+                    "status": "refunded",
+                    "subscription": "sub_1",
+                },
+                "subscription": {
+                    "id": "sub_1",
+                    "product": "prod_monthly",
+                    "customer": "cust_1",
+                    "status": "active",
+                    "current_period_start_date": "2024-10-12T11:58:38.000Z",
+                    "current_period_end_date": "2024-11-12T11:58:38.000Z",
+                },
+                "checkout": {
+                    "id": "ch_1",
+                    "request_id": "pw_usr_1_req_1",
+                    "metadata": {"userId": "usr_1", "plan": "pro", "interval": "month"},
+                },
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+            },
+        }
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
+
+        self.assertEqual(update["userId"], "usr_1")
+        self.assertEqual(update["requestId"], "pw_usr_1_req_1")
+        self.assertEqual(update["customerId"], "cust_1")
+        self.assertEqual(update["customerEmail"], "dev@example.com")
+        self.assertEqual(update["subscriptionId"], "sub_1")
+        self.assertEqual(update["status"], "canceled")
+        self.assertEqual(update["plan"], "pro")
+        self.assertEqual(update["interval"], "month")
+        self.assertEqual(update["eventCreated"], 1728734351)
+
+    def test_creem_refund_created_without_subscription_context_is_ignored(self) -> None:
+        event = {
+            "id": "evt_creem_onetime_refund_1",
+            "created_at": 1728734351631,
+            "eventType": "refund.created",
+            "object": {
+                "id": "ref_1",
+                "status": "succeeded",
+                "transaction": {
+                    "id": "tran_1",
+                    "status": "refunded",
+                    "order": "ord_1",
+                    "customer": "cust_1",
+                },
+                "order": {
+                    "id": "ord_1",
+                    "customer": "cust_1",
+                    "product": "prod_onetime",
+                    "status": "paid",
+                    "type": "onetime",
+                },
+                "checkout": {
+                    "id": "ch_1",
+                    "request_id": "pw_usr_1_onetime",
+                    "metadata": {"userId": "usr_1"},
+                },
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+            },
+        }
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
+
+        self.assertIsNone(update)
+
+    def test_creem_dispute_created_revokes_access_even_when_subscription_is_active(self) -> None:
+        event = {
+            "id": "evt_creem_dispute_1",
+            "created_at": 1750941264812,
+            "eventType": "dispute.created",
+            "object": {
+                "id": "disp_1",
+                "transaction": {
+                    "id": "tran_1",
+                    "status": "chargeback",
+                    "subscription": "sub_1",
+                    "customer": "cust_1",
+                },
+                "subscription": {
+                    "id": "sub_1",
+                    "product": "prod_monthly",
+                    "customer": "cust_1",
+                    "status": "active",
+                    "metadata": {"userId": "usr_1"},
+                },
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+            },
+        }
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
+
+        self.assertEqual(update["userId"], "usr_1")
+        self.assertEqual(update["customerId"], "cust_1")
+        self.assertEqual(update["subscriptionId"], "sub_1")
+        self.assertEqual(update["status"], "past_due")
+        self.assertEqual(update["plan"], "pro")
+        self.assertEqual(update["interval"], "month")
+
+    def test_creem_dispute_created_without_subscription_context_is_ignored(self) -> None:
+        event = {
+            "id": "evt_creem_onetime_dispute_1",
+            "created_at": 1750941264812,
+            "eventType": "dispute.created",
+            "object": {
+                "id": "disp_1",
+                "transaction": {
+                    "id": "tran_1",
+                    "status": "chargeback",
+                    "customer": "cust_1",
+                    "order": "ord_1",
+                },
+                "order": {
+                    "id": "ord_1",
+                    "customer": "cust_1",
+                    "product": "prod_onetime",
+                    "status": "paid",
+                    "type": "onetime",
+                },
+                "customer": {"id": "cust_1", "email": "dev@example.com"},
+            },
+        }
+
+        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+            update = billing.billing_update_from_creem_event(event)
+
+        self.assertIsNone(update)
+
 
 if __name__ == "__main__":
     unittest.main()
