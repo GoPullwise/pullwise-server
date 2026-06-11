@@ -372,7 +372,10 @@ def config() -> dict:
         if isinstance(cached, dict) and current - loaded_at < CACHE_TTL_SECONDS:
             return copy.deepcopy(cached)
 
-    raw = db.load_state_item(STATE_KEY)
+    try:
+        raw = db.load_state_item(STATE_KEY)
+    except Exception:
+        return default_config()
     normalized = normalize_config(raw if isinstance(raw, dict) else {})
     with _CACHE_LOCK:
         _CACHE["config"] = copy.deepcopy(normalized)
