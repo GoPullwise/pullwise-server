@@ -79,21 +79,32 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
 
-    def test_env_example_declares_max_subscription_configuration(self) -> None:
+    def test_env_example_does_not_declare_database_backed_subscription_configuration(self) -> None:
         values = env_example_values()
 
-        self.assertEqual(values.get("PULLWISE_PRO_USER_REVIEW_LIMIT"), "60")
-        self.assertEqual(values.get("PULLWISE_PRO_REPO_REVIEW_LIMIT"), "60")
-        self.assertEqual(values.get("PULLWISE_MAX_USER_REVIEW_LIMIT"), "90")
-        self.assertEqual(values.get("PULLWISE_MAX_REPO_REVIEW_LIMIT"), "90")
+        self.assertNotIn("PULLWISE_BILLING_PROVIDER", values)
+        self.assertNotIn("PULLWISE_FREE_USER_REVIEW_LIMIT", values)
+        self.assertNotIn("PULLWISE_FREE_REPO_REVIEW_LIMIT", values)
+        self.assertNotIn("PULLWISE_PRO_USER_REVIEW_LIMIT", values)
+        self.assertNotIn("PULLWISE_PRO_REPO_REVIEW_LIMIT", values)
+        self.assertNotIn("PULLWISE_MAX_USER_REVIEW_LIMIT", values)
+        self.assertNotIn("PULLWISE_MAX_REPO_REVIEW_LIMIT", values)
         self.assertNotIn("PULLWISE_PRO_CODEX_REASONING_EFFORT", values)
         self.assertNotIn("PULLWISE_MAX_CODEX_REASONING_EFFORT", values)
         self.assertNotIn("PULLWISE_PRO_OPENCODE_VARIANT", values)
         self.assertNotIn("PULLWISE_MAX_OPENCODE_VARIANT", values)
-        self.assertIn("PULLWISE_CREEM_PRO_PRODUCT_IDS", values)
-        self.assertIn("PULLWISE_CREEM_MAX_PRODUCT_IDS", values)
-        self.assertEqual(values.get("PULLWISE_CREEM_UPGRADE_BEHAVIOR"), "proration-charge-immediately")
+        self.assertNotIn("PULLWISE_CREEM_PRO_PRODUCT_IDS", values)
+        self.assertNotIn("PULLWISE_CREEM_MAX_PRODUCT_IDS", values)
+        self.assertNotIn("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID", values)
+        self.assertNotIn("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID", values)
+        self.assertNotIn("PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID", values)
+        self.assertNotIn("PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID", values)
+        self.assertNotIn("PULLWISE_CREEM_TEST_MODE", values)
+        self.assertNotIn("PULLWISE_CREEM_UPGRADE_BEHAVIOR", values)
+        self.assertNotIn("PULLWISE_CREEM_API_BASE_URL", values)
         self.assertNotIn("PULLWISE_CREEM_DOWNGRADE_BEHAVIOR", values)
+        self.assertIn("PULLWISE_CREEM_API_KEY", values)
+        self.assertIn("PULLWISE_CREEM_WEBHOOK_SECRET", values)
 
     def test_main_uses_default_port_for_invalid_port_env(self) -> None:
         class ServerStub:
@@ -141,7 +152,7 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertIn("limits", handler.payload)
         self.assertEqual(
             handler.payload["limits"]["repository"],
-            {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024},
+            {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024, "source": "database"},
         )
         self.assertEqual(handler.payload["database"], {"type": "sqlite", "configured": True})
         self.assertNotIn("path", handler.payload["database"])

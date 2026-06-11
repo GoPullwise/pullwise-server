@@ -787,7 +787,7 @@ def creem_api_base_url() -> str:
     configured = system_config.creem_api_base_url().strip().rstrip("/")
     parsed = urlparse(configured)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise BillingConfigurationError("PULLWISE_CREEM_API_BASE_URL must be an absolute HTTP(S) URL.")
+        raise BillingConfigurationError("Creem API base URL must be an absolute HTTP(S) URL.")
     return configured[:-3] if configured.endswith("/v1") else configured
 
 
