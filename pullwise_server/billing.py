@@ -977,8 +977,8 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     if plan in PAID_PLAN_IDS and status in PAID_PLAN_ENTITLEMENT_STATUSES and not creem_product_configured_for_plan(product, plan):
         return None
     interval = normalize_interval(
-        metadata_value("interval", metadata, checkout_metadata, order_metadata, subscription_metadata)
-        or interval_from_creem_product(product)
+        interval_from_creem_product(product)
+        or metadata_value("interval", metadata, checkout_metadata, order_metadata, subscription_metadata)
         or "month"
     )
     return {

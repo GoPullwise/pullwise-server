@@ -224,6 +224,27 @@ class BillingWebhookTest(unittest.TestCase):
 
         self.assertEqual(update["interval"], "year")
 
+    def test_creem_product_interval_overrides_stale_subscription_metadata(self) -> None:
+        event = {
+            "id": "evt_creem_product_interval_overrides_metadata_1",
+            "eventType": "subscription.update",
+            "object": {
+                "id": "sub_1",
+                "status": "active",
+                "product": {"id": "prod_yearly"},
+                "customer": {"id": "cust_1"},
+                "metadata": {"userId": "usr_1", "plan": "pro", "interval": "month"},
+            },
+        }
+
+        with patch(
+            "pullwise_server.system_config.config",
+            return_value=creem_database_config(pro_product_ids=("prod_monthly", "prod_yearly")),
+        ):
+            update = billing.billing_update_from_creem_event(event)
+
+        self.assertEqual(update["interval"], "year")
+
     def test_creem_checkout_completed_rejects_unknown_product_id(self) -> None:
         event = {
             "id": "evt_creem_unknown_checkout_product_1",
