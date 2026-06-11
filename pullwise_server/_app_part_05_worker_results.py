@@ -228,7 +228,7 @@ def worker_result_checksum(body: dict) -> str:
         "duration_ms": body.get("duration_ms"),
         "error": body.get("error"),
         "error_code": worker_result_error_code(body),
-        "aiUsage": public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")),
+        "aiUsage": public_scan_ai_usage(body.get("aiUsage")),
         "preflight": public_scan_preflight(body.get("preflight")),
         "completionAudit": public_scan_completion_audit(
             body.get("completionAudit") or body.get("completion_audit")
@@ -302,7 +302,7 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     )
     convergence_state = convergence_state_from_worker_result(job, body)
     audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
-    ai_usage = public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage"))
+    ai_usage = public_scan_ai_usage(body.get("aiUsage"))
     completion_audit = public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
     job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
