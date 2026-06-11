@@ -563,19 +563,28 @@ class ApiKeyRoutesTest(unittest.TestCase):
     def test_subscription_plan_docs_route_returns_server_agent_config(self) -> None:
         handler = RouteHarness("/docs/subscription-plans")
 
-        with patch.dict(
-            os.environ,
+        app.billing.update_review_agent_config(
+            "pro",
             {
-                "PULLWISE_PRO_CODEX_CLI": "codex-docs-cli",
-                "PULLWISE_PRO_CODEX_MODEL": "gpt-docs-pro",
-                "PULLWISE_PRO_CODEX_REASONING_EFFORT": "high",
-                "PULLWISE_MAX_AGENT_CLI": "opencode",
-                "PULLWISE_MAX_OPENCODE_MODEL": "opencode/docs-max",
-                "PULLWISE_MAX_OPENCODE_VARIANT": "high",
+                "providerChain": ["codex"],
+                "codex": {
+                    "cli": "codex-docs-cli",
+                    "model": "gpt-docs-pro",
+                    "reasoningEffort": "high",
+                },
             },
-            clear=False,
-        ):
-            app.PullwiseHandler.route(handler, "GET")
+        )
+        app.billing.update_review_agent_config(
+            "max",
+            {
+                "providerChain": ["opencode"],
+                "opencode": {
+                    "model": "opencode/docs-max",
+                    "variant": "high",
+                },
+            },
+        )
+        app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual([plan["id"] for plan in handler.payload["plans"]], ["free", "pro", "max"])
@@ -589,6 +598,28 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["model"], "opencode/docs-max")
         self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["variant"], "high")
         self.assertEqual(handler.payload["plans"][1]["agentConfig"], handler.payload["agentConfigs"]["pro"])
+
+    def test_subscription_plan_agent_env_overrides_are_ignored(self) -> None:
+        handler = RouteHarness("/docs/subscription-plans")
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_PRO_AGENT_PROVIDER_CHAIN": "opencode",
+                "PULLWISE_PRO_CODEX_MODEL": "gpt-env-ignored",
+                "PULLWISE_PRO_CODEX_REASONING_EFFORT": "high",
+                "PULLWISE_PRO_OPENCODE_MODEL": "opencode/env-ignored",
+            },
+            clear=False,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        pro_config = handler.payload["agentConfigs"]["pro"]
+        self.assertEqual(pro_config["agent"]["cli"], "codex")
+        self.assertEqual(pro_config["agent"]["model"], "gpt-5.5")
+        self.assertEqual(pro_config["agent"]["reasoningEffort"], "medium")
+        self.assertEqual(pro_config["codex"]["model"], "gpt-5.5")
 
     def test_billing_page_points_subscription_action_to_pricing(self) -> None:
         cookie = seed_session()

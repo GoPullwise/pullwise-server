@@ -156,6 +156,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(pricing_payload(user))
         if path in {"/docs/subscription-plans", "/subscription-plans/agent-configs"}:
             return self.json(subscription_plan_agent_configs_payload())
+        if path == "/docs/server-config":
+            return self.json(system_config.public_docs_payload())
         if path in {"/api-docs", "/api/docs"}:
             return self.json(api_docs_payload())
         api_segments = external_api_segments(segments)
@@ -1715,6 +1717,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(scan_system_status_payload(admin=True))
         if segments == ["admin", "users"]:
             return self.json(admin_users_payload(current_user_id=session["userId"]))
+        if segments == ["admin", "system-config"]:
+            return self.json(system_config.admin_payload())
+        if segments == ["admin", "subscription-plans", "agent-configs"]:
+            return self.json(billing.review_agent_configs_admin_payload())
         if segments == ["admin", "review-calibration"]:
             scope_key = review_calibration_scope_key_from_params(params)
             if not scope_key:
@@ -1806,6 +1812,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "region": public_issue_text(body.get("region")),
                 "version": public_issue_text(body.get("version")),
                 "max_concurrent_jobs": max_concurrent_jobs,
+                "max_concurrency_cap": system_config.worker_max_concurrency_cap(),
             }
         )
         self.audit_worker_action(
@@ -1876,12 +1883,58 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
                     return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-            worker = db.update_worker(worker_id, changed)
+            worker = db.update_worker(
+                worker_id,
+                changed,
+                max_concurrency_cap=system_config.worker_max_concurrency_cap(),
+            )
             if not worker:
                 self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
             self.audit_worker_action(session, "update_worker", worker_id=worker_id, changed_fields=changed)
             return self.json({"worker": worker_public_payload(worker, admin=True)})
+        if len(segments) == 4 and segments[:3] == ["admin", "subscription-plans", "agent-configs"]:
+            plan = clean_github_access_text(segments[3]) or ""
+            try:
+                agent_config = billing.update_review_agent_config(plan, body)
+            except ValueError as exc:
+                self.audit_worker_action(session, "update_plan_agent_config", success=False, error=str(exc))
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            self.audit_worker_action(
+                session,
+                "update_plan_agent_config",
+                changed_fields={
+                    "plan": agent_config["plan"],
+                    "providerChain": agent_config["providerChain"],
+                    "model": agent_config["agent"]["model"],
+                    "reasoningEffort": agent_config["agent"]["reasoningEffort"],
+                },
+            )
+            return self.json(
+                {
+                    "plan": {
+                        "id": agent_config["plan"],
+                        "name": {"free": "Free", "pro": "Pro", "max": "Max"}[agent_config["plan"]],
+                        "reviewLimit": billing.review_limit(agent_config["plan"]),
+                        "agentConfig": agent_config,
+                        "source": "database",
+                    },
+                    "agentConfig": agent_config,
+                    "source": "database",
+                }
+            )
+        if segments == ["admin", "system-config"]:
+            try:
+                payload = system_config.update(body)
+            except ValueError as exc:
+                self.audit_worker_action(session, "update_system_config", success=False, error=str(exc))
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            self.audit_worker_action(
+                session,
+                "update_system_config",
+                changed_fields={"fields": sorted(system_config.flatten_paths(body.get("settings") if isinstance(body.get("settings"), dict) else body))},
+            )
+            return self.json(payload)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_admin_delete(self, segments: list[str]) -> None:
@@ -1966,6 +2019,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
                     "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
                     "timestamp": now(),
+                    "max_concurrency_cap": system_config.worker_max_concurrency_cap(),
                 }
             )
         except ValueError as exc:
@@ -2031,20 +2085,24 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         max_jobs = min(
             max_jobs,
             worker_available_claim_slots(worker_record),
-            max(1, env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS", 32)),
+            system_config.worker_max_claim_jobs(),
         )
         if max_jobs <= 0:
             return self.json({"job": None, "jobs": []})
         try:
-            recovered_jobs = db.recover_expired_scan_jobs(now())
+            recovered_jobs = db.recover_expired_scan_jobs(
+                now(),
+                worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
+            )
             if recovered_jobs:
                 with STATE_LOCK:
                     apply_recovered_scan_jobs_locked(recovered_jobs)
             jobs = db.claim_next_scan_jobs(
                 worker_id,
                 max_jobs=max_jobs,
-                lease_seconds=max(60, env_int("PULLWISE_SCAN_JOB_LEASE_SECONDS", 3600)),
+                lease_seconds=system_config.scan_job_lease_seconds(),
                 per_user_running_limit=max_scan_concurrency_per_user(),
+                worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))

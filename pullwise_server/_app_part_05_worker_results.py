@@ -18,10 +18,79 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "installation_id": scan.get("installationId"),
             "clone_url": scan.get("cloneUrl"),
             "review_output_language": clean_review_output_language(scan.get("reviewOutputLanguage")),
-            "max_attempts": env_int("PULLWISE_SCAN_JOB_MAX_ATTEMPTS", 3),
+            "max_attempts": system_config.scan_job_max_attempts(),
         }
     )
     scan["jobId"] = job.get("job_id")
+    return job
+
+
+def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None = None) -> None:
+    scan_id = public_issue_text(scan.get("id"))
+    if scan_id:
+        ISSUES[:] = [issue for issue in ISSUES if public_issue_text(issue.get("scanId")) != scan_id]
+    queued_timestamp = pull_request_timestamp(queued_at) or now()
+    scan.update(
+        {
+            "status": "queued",
+            "queuedAt": queued_timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "jobId": public_issue_text(job.get("job_id")) or public_issue_text(scan.get("jobId")),
+        }
+    )
+    commit = clean_github_access_text(job.get("commit"))
+    if commit:
+        scan["commit"] = commit
+    for key in (
+        "aiUsage",
+        "auditSwarm",
+        "claimedAt",
+        "claimedByWorkerId",
+        "completedAt",
+        "completionAudit",
+        "convergenceState",
+        "durationMs",
+        "effectiveAgentConfig",
+        "error",
+        "errorCode",
+        "impactGraph",
+        "jobTrace",
+        "preflight",
+        "quotaRefunded",
+        "recoveredAt",
+        "recoveryReason",
+        "repositoryGraph",
+        "resultChecksum",
+        "semanticGraph",
+        "startedAt",
+        "updatedAt",
+        "verificationAudit",
+    ):
+        scan.pop(key, None)
+
+
+def retry_scan_job_for_scan_locked(scan: dict, *, queued_at: int | None = None) -> dict:
+    scan_id = public_issue_text(scan.get("id"))
+    if not scan_id:
+        raise ValueError("Scan id is required.")
+    job = db.get_scan_job_for_scan(scan_id)
+    if job:
+        job_status = public_issue_text(job.get("status")).lower()
+        if job_status not in {"failed", "lost", "cancelled"}:
+            raise RuntimeError("Only failed, lost, or cancelled scan jobs can be retried.")
+        retried_job = db.retry_scan_job(scan_id, timestamp=queued_at)
+        if not retried_job:
+            raise RuntimeError("Scan job could not be retried.")
+        job = retried_job
+    else:
+        if public_scan_status(scan.get("status")) not in {"failed", "cancelled"}:
+            raise RuntimeError("Only failed, lost, or cancelled scan jobs can be retried.")
+        job = create_scan_job_for_scan(scan)
+        if not job:
+            raise RuntimeError("Scan job could not be created.")
+    reset_scan_for_retry_locked(scan, job=job, queued_at=queued_at)
     return job
 
 
@@ -72,8 +141,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "clone_url": trusted_github_web_url(job.get("clone_url")),
     }
     agent_config = worker_agent_config_for_job(job, scan)
-    payload["agent_config"] = agent_config
     payload["agentConfig"] = agent_config
+    repository_limits = repository_scan_limits_payload()
+    payload["repositoryLimits"] = repository_limits
     language = review_output_language_payload(job.get("review_output_language"))
     payload["review_output_language"] = language["code"]
     payload["review_output_language_label"] = language["label"]
@@ -158,7 +228,7 @@ def worker_result_checksum(body: dict) -> str:
         "duration_ms": body.get("duration_ms"),
         "error": body.get("error"),
         "error_code": worker_result_error_code(body),
-        "ai_usage": public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage")),
+        "aiUsage": public_scan_ai_usage(body.get("aiUsage")),
         "preflight": public_scan_preflight(body.get("preflight")),
         "verification_audit": public_scan_verification_audit_input(
             body.get("verification_audit") or body.get("verificationAudit")
@@ -228,7 +298,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     )
     convergence_state = convergence_state_from_worker_result(job, body)
     audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
-    ai_usage = public_scan_ai_usage(body.get("ai_usage") or body.get("aiUsage"))
+    ai_usage = public_scan_ai_usage(body.get("aiUsage"))
+    effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
     raw_repository_graph = body.get("repository_graph") or body.get("repositoryGraph")
     repository_graph = public_repository_graph(raw_repository_graph)
     semantic_graph = public_repository_semantic_graph(body.get("semantic_graph") or body.get("semanticGraph"))
@@ -292,6 +363,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan["auditSwarm"] = audit_swarm
         if ai_usage:
             scan["aiUsage"] = ai_usage
+        if effective_agent_config:
+            scan["effectiveAgentConfig"] = effective_agent_config
         if repository_graph:
             scan["repositoryGraph"] = repository_graph
         if semantic_graph:

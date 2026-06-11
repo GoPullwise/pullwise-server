@@ -7,10 +7,7 @@ DEFAULT_SCAN_REPOSITORY_MAX_BYTES = 50 * 1024 * 1024
 
 
 def repository_scan_limits_payload() -> dict:
-    return {
-        "maxFiles": max(1, env_int("PULLWISE_MAX_REPO_FILES", DEFAULT_SCAN_REPOSITORY_MAX_FILES)),
-        "maxBytes": max(1, env_int("PULLWISE_MAX_REPO_BYTES", DEFAULT_SCAN_REPOSITORY_MAX_BYTES)),
-    }
+    return system_config.repository_scan_limits()
 
 
 def readiness_payload() -> dict:

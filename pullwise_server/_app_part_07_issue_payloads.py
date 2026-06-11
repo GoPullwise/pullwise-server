@@ -939,15 +939,15 @@ def scan_queue_sort_key(scan: dict) -> tuple[int, str]:
 
 
 def max_scan_concurrency_per_user() -> int:
-    return max(1, env_int("PULLWISE_MAX_RUNNING_SCANS_PER_USER", env_int("PULLWISE_MAX_CONCURRENT_SCANS_PER_USER", 1)))
+    return system_config.max_running_scans_per_user()
 
 
 def max_queued_scans_global() -> int:
-    return max(1, env_int("PULLWISE_MAX_QUEUED_SCANS_GLOBAL", 1000))
+    return system_config.max_queued_scans_global()
 
 
 def max_queued_scans_per_user() -> int:
-    return max(1, env_int("PULLWISE_MAX_QUEUED_SCANS_PER_USER", 20))
+    return system_config.max_queued_scans_per_user()
 
 
 def plural(count: int, word: str) -> str:

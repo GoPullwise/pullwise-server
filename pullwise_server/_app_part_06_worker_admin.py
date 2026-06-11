@@ -12,7 +12,7 @@ def summarize_findings(findings: list[dict]) -> dict:
 
 
 def worker_heartbeat_timeout_seconds() -> int:
-    return max(60, env_int("PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", 120))
+    return system_config.worker_heartbeat_timeout_seconds()
 
 
 def parse_worker_version(value: object) -> tuple[int, ...] | None:
@@ -35,7 +35,7 @@ def compare_worker_versions(version: tuple[int, ...], minimum: tuple[int, ...]) 
 
 
 def worker_version_compatible(worker: dict) -> bool:
-    minimum = env("PULLWISE_MIN_WORKER_VERSION", "").strip()
+    minimum = system_config.worker_min_version().strip()
     if not minimum:
         return True
     parsed_minimum = parse_worker_version(minimum)
@@ -49,7 +49,7 @@ def worker_version_compatible(worker: dict) -> bool:
 
 def worker_supported_provider(worker: dict) -> bool:
     provider = public_issue_text(worker.get("provider")) or "codex"
-    allowed = {item.strip() for item in env("PULLWISE_WORKER_PROVIDERS", "codex").split(",") if item.strip()}
+    allowed = system_config.worker_allowed_providers()
     return provider in allowed
 
 
@@ -157,11 +157,11 @@ def normalize_worker_release_version(value: object) -> str:
 
 
 def configured_worker_release_version() -> str:
-    return normalize_worker_release_version(env("PULLWISE_DEFAULT_WORKER_VERSION", "")) or DEFAULT_WORKER_PACKAGE_VERSION
+    return normalize_worker_release_version(system_config.worker_default_version()) or DEFAULT_WORKER_PACKAGE_VERSION
 
 
 def fetch_latest_worker_release_version() -> str:
-    api_url = env("PULLWISE_WORKER_RELEASES_API_URL", DEFAULT_WORKER_RELEASES_API_URL).strip()
+    api_url = system_config.worker_release_api_url().strip() or DEFAULT_WORKER_RELEASES_API_URL
     if not api_url:
         return ""
     request = urllib.request.Request(
@@ -171,7 +171,7 @@ def fetch_latest_worker_release_version() -> str:
             "User-Agent": "Pullwise",
         },
     )
-    timeout = max(1, env_int("PULLWISE_WORKER_RELEASE_FETCH_TIMEOUT_SECONDS", 3))
+    timeout = system_config.worker_release_fetch_timeout_seconds()
     with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode("utf-8"))
     if not isinstance(payload, dict):
@@ -180,11 +180,11 @@ def fetch_latest_worker_release_version() -> str:
 
 
 def latest_worker_release_version() -> str:
-    configured = normalize_worker_release_version(env("PULLWISE_DEFAULT_WORKER_VERSION", ""))
+    configured = normalize_worker_release_version(system_config.worker_default_version())
     if configured:
         return configured
 
-    ttl = max(0, env_int("PULLWISE_WORKER_RELEASE_CACHE_SECONDS", 300))
+    ttl = system_config.worker_release_cache_seconds()
     current_time = now()
     cached_version = public_issue_text(LATEST_WORKER_RELEASE_CACHE.get("version"))
     checked_at = float(LATEST_WORKER_RELEASE_CACHE.get("checked_at") or 0)
@@ -215,10 +215,10 @@ def worker_defaults_payload() -> dict:
 
 
 def default_worker_package(version: object = None) -> str:
-    explicit_package = env("PULLWISE_DEFAULT_WORKER_PACKAGE", "").strip()
+    explicit_package = system_config.worker_default_package().strip()
     if explicit_package:
         return explicit_package
-    selected_version = public_issue_text(version) or env("PULLWISE_DEFAULT_WORKER_VERSION", "").strip() or DEFAULT_WORKER_PACKAGE_VERSION
+    selected_version = public_issue_text(version) or system_config.worker_default_version().strip() or DEFAULT_WORKER_PACKAGE_VERSION
     if not WORKER_PACKAGE_RELEASE_RE.fullmatch(selected_version):
         selected_version = DEFAULT_WORKER_PACKAGE_VERSION
     return worker_release_package(selected_version)
@@ -295,8 +295,6 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS": "3600",
             "PULLWISE_RETAIN_FAILED_CHECKOUT_SECONDS": "0",
             "PULLWISE_MAX_CHECKOUT_BYTES": "21474836480",
-            "PULLWISE_MAX_REPO_FILES": "2000",
-            "PULLWISE_MAX_REPO_BYTES": "52428800",
             "PULLWISE_LOG_RETENTION_SECONDS": "1209600",
             "PULLWISE_MAX_LOG_BYTES": "1073741824",
             "PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES": "10485760",
@@ -478,8 +476,6 @@ write_env_value PULLWISE_WORKER_MAX_BACKOFF_SECONDS "60"
 write_env_value PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS "3600"
 write_env_value PULLWISE_RETAIN_FAILED_CHECKOUT_SECONDS "0"
 write_env_value PULLWISE_MAX_CHECKOUT_BYTES "21474836480"
-write_env_value PULLWISE_MAX_REPO_FILES "2000"
-write_env_value PULLWISE_MAX_REPO_BYTES "52428800"
 write_env_value PULLWISE_LOG_RETENTION_SECONDS "1209600"
 write_env_value PULLWISE_MAX_LOG_BYTES "1073741824"
 write_env_value PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES "10485760"
@@ -550,7 +546,10 @@ run_as_service_user "$BIN_PATH" doctor || true
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "If Codex is not logged in, run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH codex login --device-auth"
 """
-    return script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package()).replace("\r\n", "\n")
+    return (
+        script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
+        .replace("\r\n", "\n")
+    )
 
 
 def worker_test_payload(worker: dict) -> dict:

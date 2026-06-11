@@ -800,6 +800,81 @@ def public_repository_semantic_stats(
     return stats
 
 
+def public_scan_agent_text(value: object, *, max_length: int = 128) -> str:
+    text = clean_github_access_text(value) or ""
+    if len(text) > max_length:
+        return ""
+    return text
+
+
+def public_scan_agent_reasoning_effort(value: object) -> str:
+    effort = public_scan_agent_text(value).lower()
+    return effort if effort in {"low", "medium", "high", "xhigh"} else ""
+
+
+def public_scan_agent_provider(value: object) -> str:
+    provider = public_scan_agent_text(value).lower()
+    return provider if provider in {"codex", "opencode"} else ""
+
+
+def public_scan_agent_config(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    raw_agent = source.get("agent") if isinstance(source.get("agent"), dict) else {}
+    provider = public_scan_agent_provider(source.get("provider") or raw_agent.get("cli"))
+    provider_chain = []
+    raw_provider_chain = source.get("providerChain") if isinstance(source.get("providerChain"), list) else []
+    if not isinstance(raw_provider_chain, list):
+        raw_provider_chain = []
+    for item in raw_provider_chain:
+        clean_provider = public_scan_agent_provider(item)
+        if clean_provider and clean_provider not in provider_chain:
+            provider_chain.append(clean_provider)
+    if not provider and provider_chain:
+        provider = provider_chain[0]
+    if not provider:
+        return {}
+    cli = public_scan_agent_text(source.get("cli") or raw_agent.get("command") or raw_agent.get("cli"))
+    model = public_scan_agent_text(source.get("model") or raw_agent.get("model"))
+    reasoning_effort = public_scan_agent_reasoning_effort(
+        source.get("reasoningEffort")
+        or raw_agent.get("reasoningEffort")
+    )
+    payload = {
+        "provider": provider,
+        "providerChain": provider_chain or [provider],
+        "agent": {
+            "cli": provider,
+            "command": cli,
+            "model": model,
+            "reasoningEffort": reasoning_effort,
+        },
+        "cli": cli,
+        "model": model,
+        "reasoningEffort": reasoning_effort,
+    }
+    for provider_key in ("codex", "opencode"):
+        raw_provider = source.get(provider_key) if isinstance(source.get(provider_key), dict) else {}
+        provider_payload = {}
+        command = public_scan_agent_text(raw_provider.get("command") or raw_provider.get("cli"))
+        provider_model = public_scan_agent_text(raw_provider.get("model"))
+        provider_effort = public_scan_agent_reasoning_effort(
+            raw_provider.get("reasoningEffort")
+            or raw_provider.get("variant")
+        )
+        if command:
+            provider_payload["cli"] = command
+            provider_payload["command"] = command
+        if provider_model:
+            provider_payload["model"] = provider_model
+        if provider_effort:
+            provider_payload["reasoningEffort"] = provider_effort
+            if provider_key == "opencode":
+                provider_payload["variant"] = provider_effort
+        if provider_payload:
+            payload[provider_key] = provider_payload
+    return payload
+
+
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -817,9 +892,25 @@ def scan_payload(scan: dict) -> dict:
     ai_usage = public_scan_ai_usage(scan.get("aiUsage") or scan.get("ai_usage"))
     if ai_usage:
         payload["aiUsage"] = ai_usage
+    effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
+    if effective_agent_config:
+        payload["effectiveAgentConfig"] = effective_agent_config
+        payload["reviewAgent"] = {
+            "agentCli": effective_agent_config["agent"]["command"] or effective_agent_config["provider"],
+            "provider": effective_agent_config["provider"],
+            "command": effective_agent_config["agent"]["command"],
+            "model": effective_agent_config["agent"]["model"],
+            "reasoningEffort": effective_agent_config["agent"]["reasoningEffort"],
+        }
     verification_audit = public_scan_verification_audit(scan)
     if public_scan_verification_audit_has_data(verification_audit):
         payload["verificationAudit"] = verification_audit
+    completion_audit = public_scan_completion_audit(scan.get("completionAudit") or scan.get("completion_audit"))
+    if completion_audit:
+        payload["completionAudit"] = completion_audit
+    job_trace = public_scan_job_trace(scan.get("jobTrace") or scan.get("job_trace"))
+    if job_trace:
+        payload["jobTrace"] = job_trace
     preflight = public_scan_preflight(scan.get("preflight"))
     if preflight:
         payload["preflight"] = preflight
@@ -971,7 +1062,7 @@ def public_scan_count(value: object) -> int:
 
 
 def worker_max_concurrency_cap() -> int:
-    return max(1, env_int("PULLWISE_WORKER_MAX_CONCURRENCY_CAP", 32))
+    return system_config.worker_max_concurrency_cap()
 
 
 def worker_admin_capacity(value: object) -> int:
@@ -999,8 +1090,175 @@ def public_scan_issue_counts(value: object) -> dict:
 
 def public_scan_ai_usage(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
-    model = clean_github_access_text(source.get("model") or source.get("modelName") or source.get("model_name"))
+    model = clean_github_access_text(source.get("model"))
     return {"model": model} if model else {}
+
+
+def public_scan_compact_text(value: object, *, max_length: int = 240) -> str:
+    text = " ".join(review._safe_text_lenient(value).split())
+    return text[:max_length]
+
+
+def public_scan_compact_status(value: object, *, max_length: int = 48) -> str:
+    return public_scan_compact_text(value, max_length=max_length).lower()
+
+
+def public_scan_compact_text_list(value: object, *, limit: int = 8, max_length: int = 240) -> list[str]:
+    if isinstance(value, list):
+        raw_items = value
+    elif value in (None, "", [], {}):
+        raw_items = []
+    else:
+        raw_items = [value]
+    items = []
+    seen = set()
+    for item in raw_items:
+        text = public_scan_compact_text(item, max_length=max_length)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+        if len(items) >= limit:
+            break
+    return items
+
+
+def public_scan_completion_audit_checks(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    checks = []
+    seen = set()
+    for item in raw_items:
+        if isinstance(item, dict):
+            check = {
+                "label": public_scan_compact_text(
+                    item.get("label") or item.get("title") or item.get("name") or item.get("key"),
+                    max_length=120,
+                ),
+                "status": public_scan_compact_status(item.get("status") or item.get("verdict"), max_length=40),
+                "summary": public_scan_compact_text(
+                    item.get("summary") or item.get("detail") or item.get("message"),
+                    max_length=280,
+                ),
+            }
+            check = {key: field for key, field in check.items() if field}
+        else:
+            label = public_scan_compact_text(item, max_length=120)
+            check = {"label": label} if label else {}
+        if not check:
+            continue
+        dedupe_key = json.dumps(check, ensure_ascii=False, sort_keys=True)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        checks.append(check)
+        if len(checks) >= 12:
+            break
+    return checks
+
+
+def public_scan_completion_audit(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    retry_recommended = source.get("retryRecommended")
+    if retry_recommended is None:
+        retry_recommended = source.get("retry_recommended")
+    payload = {
+        "protocol": public_scan_compact_text(source.get("protocol"), max_length=80),
+        "status": public_scan_compact_status(source.get("status"), max_length=40),
+        "blockers": public_scan_compact_text_list(source.get("blockers"), limit=8, max_length=240),
+        "warnings": public_scan_compact_text_list(source.get("warnings"), limit=10, max_length=240),
+        "checks": public_scan_completion_audit_checks(source.get("checks")),
+        "retryRecommended": bool(retry_recommended),
+        "retryReason": public_scan_compact_text(
+            source.get("retryReason") or source.get("retry_reason"),
+            max_length=280,
+        ),
+        "summary": public_scan_compact_text(source.get("summary"), max_length=800),
+    }
+    return {key: field for key, field in payload.items() if field not in ("", [], {}, False)}
+
+
+def public_scan_job_trace_rejected_reasons(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    reasons = []
+    seen = set()
+    for item in raw_items:
+        if isinstance(item, dict):
+            reason = public_scan_compact_text(
+                item.get("reason") or item.get("code") or item.get("label"),
+                max_length=120,
+            )
+            payload = {"reason": reason} if reason else {}
+            count = public_scan_count(item.get("count"))
+            if count:
+                payload["count"] = count
+        else:
+            reason = public_scan_compact_text(item, max_length=120)
+            payload = {"reason": reason} if reason else {}
+        if not payload:
+            continue
+        dedupe_key = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        reasons.append(payload)
+        if len(reasons) >= 10:
+            break
+    return reasons
+
+
+def public_scan_job_trace_checkpoints(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    checkpoints = []
+    seen = set()
+    for item in raw_items:
+        if isinstance(item, dict):
+            checkpoint = {
+                "key": public_scan_compact_text(
+                    item.get("key") or item.get("id") or item.get("label") or item.get("name") or item.get("stage"),
+                    max_length=80,
+                ),
+                "status": public_scan_compact_status(item.get("status"), max_length=40),
+                "summary": public_scan_compact_text(
+                    item.get("summary") or item.get("message") or item.get("detail"),
+                    max_length=280,
+                ),
+                "attempt": public_scan_count(item.get("attempt")),
+                "durationMs": public_scan_count(item.get("durationMs") or item.get("duration_ms")),
+            }
+            checkpoint = {key: field for key, field in checkpoint.items() if field not in ("", 0)}
+        else:
+            key = public_scan_compact_text(item, max_length=80)
+            checkpoint = {"key": key} if key else {}
+        if not checkpoint:
+            continue
+        dedupe_key = json.dumps(checkpoint, ensure_ascii=False, sort_keys=True)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        checkpoints.append(checkpoint)
+        if len(checkpoints) >= 20:
+            break
+    return checkpoints
+
+
+def public_scan_job_trace(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    payload = {
+        "protocol": public_scan_compact_text(source.get("protocol"), max_length=80),
+        "checkpoints": public_scan_job_trace_checkpoints(source.get("checkpoints")),
+        "summaries": public_scan_compact_text_list(source.get("summaries"), limit=12, max_length=280),
+        "candidateFindingsBeforeFilter": public_scan_count(
+            source.get("candidateFindingsBeforeFilter") or source.get("candidate_findings_before_filter")
+        ),
+        "rejectedReasons": public_scan_job_trace_rejected_reasons(
+            source.get("rejectedReasons") or source.get("rejected_reasons")
+        ),
+        "nextRetryHint": public_scan_compact_text(
+            source.get("nextRetryHint") or source.get("next_retry_hint"),
+            max_length=280,
+        ),
+    }
+    return {key: field for key, field in payload.items() if field not in ("", [], {}, 0)}
 
 
 def public_confidence(value: object) -> float:
@@ -2717,7 +2975,7 @@ def public_scan_audit_swarm(value: object) -> dict:
         "protocol": public_issue_text(value.get("protocol")),
         "stage": public_issue_text(value.get("stage")).lower(),
         "adapter": public_issue_text(value.get("adapter")),
-        "providerChain": review._safe_text_list(value.get("providerChain") or value.get("provider_chain"))[:5],
+        "providerChain": review._safe_text_list(value.get("providerChain"))[:5],
         "summary": " ".join(review._safe_text_lenient(value.get("summary")).split())[:800],
         "logsSummary": " ".join(review._safe_text_lenient(value.get("logsSummary") or value.get("logs_summary")).split())[
             :1000

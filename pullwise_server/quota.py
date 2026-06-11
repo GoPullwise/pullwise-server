@@ -3,13 +3,12 @@ from __future__ import annotations
 import calendar
 import datetime
 import math
-import os
 import sqlite3
 import time
 from contextlib import closing
 from typing import Any
 
-from . import db
+from . import db, system_config
 
 
 PAID_PLAN_IDS = {"pro", "max"}
@@ -22,19 +21,6 @@ class QuotaExceeded(Exception):
         self.code = code
         self.message = message
         self.repo_id = repo_id
-
-
-def env_int(names: str | list[str], default: int) -> int:
-    candidates = [names] if isinstance(names, str) else names
-    for name in candidates:
-        raw = os.environ.get(name)
-        if raw is None or raw == "":
-            continue
-        try:
-            return int(raw)
-        except ValueError:
-            return default
-    return default
 
 
 def current_period(timestamp: int | None = None) -> str:
@@ -152,81 +138,11 @@ def effective_user_plan(user: dict[str, Any] | None, *, timestamp: int | None = 
 
 
 def user_limit_for_plan(plan: str) -> int:
-    normalized_plan = normalize_plan(plan)
-    if normalized_plan == "max":
-        return max(
-            0,
-            env_int(
-                [
-                    "PULLWISE_MAX_USER_REVIEW_LIMIT",
-                    "PULLWISE_MAX_REVIEW_LIMIT",
-                ],
-                90,
-            ),
-        )
-    if normalized_plan == "pro":
-        return max(
-            0,
-            env_int(
-                [
-                    "PULLWISE_PRO_USER_REVIEW_LIMIT",
-                    "PULLWISE_PRO_REVIEW_LIMIT",
-                ],
-                60,
-            ),
-        )
-    return max(
-        0,
-        env_int(
-            [
-                "PULLWISE_FREE_USER_REVIEW_LIMIT",
-                "PULLWISE_FREE_REVIEW_LIMIT",
-            ],
-            5,
-        ),
-    )
+    return system_config.plan_user_review_limit(normalize_plan(plan))
 
 
 def repository_limit_for_plan(plan: str) -> int:
-    normalized_plan = normalize_plan(plan)
-    if normalized_plan == "max":
-        return max(
-            0,
-            env_int(
-                [
-                    "PULLWISE_MAX_REPO_REVIEW_LIMIT",
-                    "PULLWISE_MAX_REPOSITORY_REVIEW_LIMIT",
-                    "PULLWISE_MAX_USER_REVIEW_LIMIT",
-                    "PULLWISE_MAX_REVIEW_LIMIT",
-                ],
-                90,
-            ),
-        )
-    if normalized_plan == "pro":
-        return max(
-            0,
-            env_int(
-                [
-                    "PULLWISE_PRO_REPO_REVIEW_LIMIT",
-                    "PULLWISE_PRO_REPOSITORY_REVIEW_LIMIT",
-                    "PULLWISE_PRO_USER_REVIEW_LIMIT",
-                    "PULLWISE_PRO_REVIEW_LIMIT",
-                ],
-                60,
-            ),
-        )
-    return max(
-        0,
-        env_int(
-            [
-                "PULLWISE_FREE_REPO_REVIEW_LIMIT",
-                "PULLWISE_FREE_REPOSITORY_REVIEW_LIMIT",
-                "PULLWISE_FREE_USER_REVIEW_LIMIT",
-                "PULLWISE_FREE_REVIEW_LIMIT",
-            ],
-            5,
-        ),
-    )
+    return system_config.plan_repository_review_limit(normalize_plan(plan))
 
 
 def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: int | None = None) -> tuple[str, int]:

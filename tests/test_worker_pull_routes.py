@@ -3684,26 +3684,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             app.SCANS.append(scan)
             app.create_scan_job_for_scan(scan)
 
-        blank_agent_env = {
-            f"PULLWISE_{plan}_{key}": ""
-            for plan in ("FREE", "PRO", "MAX")
-            for key in (
-                "CODEX_CLI",
-                "CODEX_COMMAND",
-                "CODEX_MODEL",
-                "CODEX_REASONING_EFFORT",
-                "OPENCODE_CLI",
-                "OPENCODE_COMMAND",
-                "OPENCODE_MODEL",
-                "OPENCODE_VARIANT",
-                "AGENT_CLI",
-                "AGENT_PROVIDER_CHAIN",
-                "PROVIDER_CHAIN",
-            )
-        }
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 3}, headers=self.auth)
-        with patch.dict(os.environ, blank_agent_env, clear=False):
-            app.PullwiseHandler.route(claim, "POST")
+        app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.OK)
         configs = {job["agentConfig"]["plan"]: job["agentConfig"] for job in claim.payload["jobs"]}
@@ -3728,7 +3710,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 self.assertEqual(opencode["model"], "opencode/big-pickle")
                 self.assertEqual(opencode["variant"], effort)
 
-    def test_worker_claim_agent_config_uses_plan_env_overrides(self) -> None:
+    def test_worker_claim_agent_config_uses_database_plan_config(self) -> None:
         app.USERS["usr_pro_agent"] = {
             "id": "usr_pro_agent",
             "name": "Pro User",
@@ -3750,23 +3732,26 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS.append(scan)
         app.create_scan_job_for_scan(scan)
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 1}, headers=self.auth)
-        with patch.dict(
-            os.environ,
+        app.billing.update_review_agent_config(
+            "pro",
             {
-                "PULLWISE_PRO_AGENT_PROVIDER_CHAIN": "opencode,codex",
-                "PULLWISE_PRO_CODEX_CLI": "codex-pro-cli",
-                "PULLWISE_PRO_CODEX_COMMAND": "codex-pro-command",
-                "PULLWISE_PRO_CODEX_MODEL": "gpt-pro",
-                "PULLWISE_PRO_CODEX_REASONING_EFFORT": "high",
-                "PULLWISE_PRO_OPENCODE_CLI": "opencode-pro-cli",
-                "PULLWISE_PRO_OPENCODE_COMMAND": "opencode-pro-command",
-                "PULLWISE_PRO_OPENCODE_MODEL": "opencode/pro-model",
-                "PULLWISE_PRO_OPENCODE_VARIANT": "high",
+                "providerChain": ["opencode", "codex"],
+                "codex": {
+                    "cli": "codex-pro-cli",
+                    "command": "codex-pro-command",
+                    "model": "gpt-pro",
+                    "reasoningEffort": "high",
+                },
+                "opencode": {
+                    "cli": "opencode-pro-cli",
+                    "command": "opencode-pro-command",
+                    "model": "opencode/pro-model",
+                    "variant": "high",
+                },
             },
-            clear=False,
-        ):
-            app.PullwiseHandler.route(claim, "POST")
+        )
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 1}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.OK)
         agent_config = claim.payload["job"]["agentConfig"]

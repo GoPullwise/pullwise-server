@@ -25,7 +25,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
-from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging
+from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, system_config
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -251,18 +251,15 @@ def decode_json_body(raw_bytes: bytes) -> dict:
 
 
 def rate_limit_enabled() -> bool:
-    configured = os.environ.get("PULLWISE_RATE_LIMIT_ENABLED")
-    if configured is not None:
-        return env_flag("PULLWISE_RATE_LIMIT_ENABLED")
-    return env("PULLWISE_MODE", "local").strip().lower() == "production"
+    return system_config.rate_limit_enabled()
 
 
 def rate_limit_requests() -> int:
-    return max(0, env_int("PULLWISE_RATE_LIMIT_REQUESTS", 600))
+    return system_config.rate_limit_requests()
 
 
 def rate_limit_window_seconds() -> int:
-    return max(1, env_int("PULLWISE_RATE_LIMIT_WINDOW_SECONDS", 60))
+    return system_config.rate_limit_window_seconds()
 
 
 def rate_limit_exempt_path(method: str, path: str) -> bool:
@@ -595,7 +592,10 @@ def rollback_orphan_scan_quota_locked() -> int:
 
 def recover_interrupted_scans() -> int:
     recovered = 0
-    recovered_jobs = db.recover_expired_scan_jobs(now())
+    recovered_jobs = db.recover_expired_scan_jobs(
+        now(),
+        worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
+    )
     with STATE_LOCK:
         recovered += reconstruct_orphan_scan_jobs_locked()
         recovered += rollback_orphan_scan_quota_locked()

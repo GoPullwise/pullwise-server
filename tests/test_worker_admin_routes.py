@@ -505,6 +505,63 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
 
+    def test_admin_can_manage_subscription_plan_agent_configs(self) -> None:
+        listing = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(listing, "GET")
+
+        self.assertEqual(listing.status, HTTPStatus.OK)
+        self.assertEqual([plan["id"] for plan in listing.payload["plans"]], ["free", "pro", "max"])
+        self.assertEqual(listing.payload["agentConfigs"]["max"]["codex"]["reasoningEffort"], "xhigh")
+        self.assertEqual(listing.payload["source"], "database")
+        stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
+        self.assertIn("pro", stored["plans"])
+
+        update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/pro",
+            {
+                "providerChain": ["opencode", "codex"],
+                "codex": {
+                    "cli": "codex-admin",
+                    "command": "codex-admin",
+                    "model": "gpt-admin",
+                    "reasoningEffort": "high",
+                },
+                "opencode": {
+                    "cli": "opencode-admin",
+                    "command": "opencode-admin",
+                    "model": "opencode/admin",
+                    "variant": "high",
+                },
+            },
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(update, "PATCH")
+
+        self.assertEqual(update.status, HTTPStatus.OK)
+        agent_config = update.payload["agentConfig"]
+        self.assertEqual(agent_config["plan"], "pro")
+        self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
+        self.assertEqual(agent_config["agent"]["cli"], "opencode")
+        self.assertEqual(agent_config["agent"]["model"], "opencode/admin")
+        self.assertEqual(agent_config["codex"]["model"], "gpt-admin")
+
+        docs = RouteHarness("/docs/subscription-plans")
+        app.PullwiseHandler.route(docs, "GET")
+
+        self.assertEqual(docs.status, HTTPStatus.OK)
+        self.assertEqual(docs.payload["agentConfigs"]["pro"], agent_config)
+
+    def test_admin_plan_agent_config_rejects_invalid_values(self) -> None:
+        update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/pro",
+            {"providerChain": ["bad"], "codex": {"reasoningEffort": "extreme"}},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(update, "PATCH")
+
+        self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("providerChain", update.payload["message"])
+
     def test_admin_review_calibration_summary_is_admin_only_and_sanitized(self) -> None:
         event = {
             "protocol": "pullwise-review-decision/0.1",

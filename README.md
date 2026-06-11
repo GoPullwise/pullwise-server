@@ -132,12 +132,6 @@ PULLWISE_WORKER_SERVER_URL=https://api.your-domain.com
 PULLWISE_DB_PATH=/data/pullwise.sqlite3
 PULLWISE_LOG_DIR=/data/logs
 PULLWISE_LOG_ROTATION_TIME=00:00
-PULLWISE_RATE_LIMIT_ENABLED=true
-PULLWISE_RATE_LIMIT_REQUESTS=600
-PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
-PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
-PULLWISE_MAX_QUEUED_SCANS_GLOBAL=1000
-PULLWISE_MAX_QUEUED_SCANS_PER_USER=20
 PULLWISE_SERVER_CLEANUP_INTERVAL_SECONDS=3600
 PULLWISE_SCAN_JOB_RETENTION_SECONDS=2592000
 PULLWISE_WORKER_COMMAND_RETENTION_SECONDS=2592000
@@ -149,15 +143,13 @@ PULLWISE_COOKIE_SAME_SITE=Lax
 PULLWISE_ADMIN_USER_IDS=
 PULLWISE_ADMIN_EMAILS=admin@example.com
 PULLWISE_WORKER_JOB_TIMEOUT_SECONDS=1800
-PULLWISE_WORKER_MAX_RETRIES=3
-PULLWISE_FREE_USER_REVIEW_LIMIT=5
-PULLWISE_FREE_REPO_REVIEW_LIMIT=5
-PULLWISE_PRO_USER_REVIEW_LIMIT=60
-PULLWISE_PRO_REPO_REVIEW_LIMIT=60
-PULLWISE_MAX_USER_REVIEW_LIMIT=90
-PULLWISE_MAX_REPO_REVIEW_LIMIT=90
-PULLWISE_BILLING_TIMEOUT_SECONDS=15
 ```
+
+Plan quotas, scan queue/retry/lease limits, repository scan limits, rate
+limits, worker control-plane defaults, review calibration settings, and the
+non-secret Creem catalog live in the server database. Edit them through the
+admin app Settings page or `PATCH /admin/system-config`; the server seeds
+hardcoded defaults when the DB has no value.
 
 Server cleanup only prunes operational records: expired sessions/GitHub OAuth state, terminal worker commands/audit rows, and terminal scan job/result duplicates that have already been applied to the user-visible scan state. User scan results in `SCANS`/`ISSUES` are retained.
 
@@ -281,9 +273,9 @@ the worker package as a systemd service. The script accepts `--server`,
 from `PULLWISE_WORKER_TOKEN`. The target host must have Python 3.9 or newer.
 By default, the installer downloads the
 `pullwise-worker` wheel from the `GoPullwise/pullwise-worker` GitHub Release
-matching the worker `version` provided at admin creation time, falling back to
-`PULLWISE_DEFAULT_WORKER_VERSION` or `v0.4.2`. Override the full package URL
-with `PULLWISE_DEFAULT_WORKER_PACKAGE`, `PULLWISE_WORKER_PACKAGE`, or
+matching the worker `version` provided at admin creation time. The default
+worker version, default package, and release lookup URL are database-backed
+system config. Override the full package URL with `PULLWISE_WORKER_PACKAGE` or
 `--package` during controlled upgrades. Re-running the installer force-reinstalls
 the selected worker wheel so same-version rebuilds are not skipped by pip. The Codex CLI bootstrap package is
 pinned by default as `@openai/codex@0.135.0`; override it with
@@ -297,7 +289,7 @@ Worker endpoints (authenticated via bearer token):
 - `POST /worker/jobs/{id}/result` — upload completed scan results
 
 Jobs that timeout (no heartbeat or progress) are automatically re-queued up
-to `PULLWISE_WORKER_MAX_RETRIES` times, then marked failed.
+to the database-backed scan job max-attempts setting, then marked failed.
 
 ### Billing Provider Configuration
 
@@ -305,19 +297,14 @@ Creem:
 
 ```env
 PULLWISE_CREEM_API_KEY=...
-PULLWISE_CREEM_PRO_PRODUCT_IDS=prod_monthly,prod_yearly
-PULLWISE_CREEM_MAX_PRODUCT_IDS=prod_max_monthly,prod_max_yearly
 PULLWISE_CREEM_WEBHOOK_SECRET=...
-PULLWISE_CREEM_TEST_MODE=false
-PULLWISE_CREEM_UPGRADE_BEHAVIOR=proration-charge-immediately
-# Optional explicit override. Accepts either the origin or /v1 URL.
-PULLWISE_CREEM_API_BASE_URL=
 ```
 
-Creem is the only supported billing provider. Set
-`PULLWISE_BILLING_PROVIDER=creem` explicitly, or omit it and billing will be
-enabled when the Creem API key and product IDs are present. If Creem is not
-configured, billing is disabled automatically.
+Creem is the only supported billing provider. Billing is enabled when the
+Creem API key, webhook secret, and database-backed Creem product catalog are
+configured. Creem product IDs, test mode, API base URL, upgrade behavior, and
+billing timeout are edited through admin system config, not environment
+variables. If Creem is not configured, billing is disabled automatically.
 
 ### GitHub App Configuration
 
@@ -400,11 +387,11 @@ repository returns `409 Conflict`.
 The machine-readable API description is available at `GET /api-docs` and
 `GET /api/docs`.
 
-When `PULLWISE_RATE_LIMIT_ENABLED=true`, each request is counted in SQLite in
-the `api_rate_limits` table. The limiter keys by signed-in user id when a valid
-session is present, otherwise by client IP address. Defaults are `600` requests
-per `60` seconds. In production mode the limiter is enabled by default unless
-explicitly disabled; local mode leaves it off unless configured.
+When the database-backed rate limit setting is enabled, each request is counted
+in SQLite in the `api_rate_limits` table. The limiter keys by signed-in user id
+when a valid session is present, otherwise by client IP address. Defaults are
+`600` requests per `60` seconds, with blocking disabled until enabled in admin
+system config.
 
 ### Ubuntu 22.04 launcher
 
@@ -596,22 +583,17 @@ The server does not execute review jobs locally. It creates queued scan jobs and
 external `pullwise-worker` hosts claim, run, and upload results through the
 worker API.
 
-Standalone pullwise-worker hosts use their own provider chain. The default is
-Codex only. Set `PULLWISE_PROVIDER_CHAIN=codex,opencode` on the worker host for
-Codex-first fallback, then configure `PULLWISE_CODEX_MODEL`,
-`PULLWISE_CODEX_REASONING_EFFORT`, `PULLWISE_OPENCODE_MODEL`, and
-`PULLWISE_OPENCODE_VARIANT` in that worker's env file.
+Standalone pullwise-worker hosts still have process-level provider defaults for
+legacy jobs that do not include `agentConfig`. Subscription plan policy is not
+read from worker or server environment variables; it is stored in the server
+database and attached to each claimed job.
 
 In distributed worker mode, total running scan capacity comes from connected
 workers and their advertised free slots. Each worker controls its local
 parallelism with `PULLWISE_MAX_CONCURRENT_JOBS`. The server keeps only the
-per-user running fairness limit plus queue limits:
-
-```env
-PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
-PULLWISE_MAX_QUEUED_SCANS_GLOBAL=1000
-PULLWISE_MAX_QUEUED_SCANS_PER_USER=20
-```
+per-user running fairness limit plus queue limits. Edit those limits through
+admin system config; they are not read from worker hosts and they are not read
+from server environment variables after startup.
 
 If all online workers have no free slots, new scans remain `queued` until a
 worker reports capacity and claims more work. The per-user running limit prevents
@@ -657,50 +639,26 @@ Monthly review allowance resets on the user's subscription-cycle
 anniversary, or on the free-cycle anniversary when the account is not entitled
 to a paid plan.
 
-Quota controls:
+Quota controls are database-backed system config. Edit Free, Pro, and Max user
+and repository monthly scan limits through the admin Settings page.
 
-```env
-PULLWISE_FREE_USER_REVIEW_LIMIT=5
-PULLWISE_FREE_REPO_REVIEW_LIMIT=5
-PULLWISE_PRO_USER_REVIEW_LIMIT=60
-PULLWISE_PRO_REPO_REVIEW_LIMIT=60
-PULLWISE_MAX_USER_REVIEW_LIMIT=90
-PULLWISE_MAX_REPO_REVIEW_LIMIT=90
-PULLWISE_PRO_CODEX_REASONING_EFFORT=medium
-PULLWISE_MAX_CODEX_REASONING_EFFORT=xhigh
-PULLWISE_PRO_OPENCODE_VARIANT=medium
-PULLWISE_MAX_OPENCODE_VARIANT=xhigh
-```
+Subscription plan agent CLI/model/reasoning policy is stored in the server
+database. The server seeds Free, Pro, and Max defaults into `app_state` on first
+read, admins edit them through `/admin/subscription-plans/agent-configs`, and
+each claimed scan job carries the resolved `agentConfig` to the worker.
 
 Creem:
 
 ```env
-PULLWISE_BILLING_PROVIDER=creem
 PULLWISE_CREEM_API_KEY=creem_key
-PULLWISE_CREEM_PRO_PRODUCT_IDS=prod_monthly,prod_yearly
-PULLWISE_CREEM_MAX_PRODUCT_IDS=prod_max_monthly,prod_max_yearly
 PULLWISE_CREEM_WEBHOOK_SECRET=whsec_...
-PULLWISE_CREEM_TEST_MODE=false
-PULLWISE_CREEM_API_BASE_URL=
-PULLWISE_CREEM_UPGRADE_BEHAVIOR=proration-charge-immediately
 ```
 
-Set `PULLWISE_CREEM_TEST_MODE=true` with a Creem test-mode API key and test
-product IDs to use `https://test-api.creem.io/v1`. Leave it `false` for
-production, which uses `https://api.creem.io/v1`. Pullwise retrieves each
-configured product from Creem and infers monthly/yearly pricing from
-`billing_period`, so amount and currency are not configured locally.
-`PULLWISE_CREEM_API_BASE_URL` is an optional override for nonstandard
-environments and may be set to either `https://test-api.creem.io` or
-`https://test-api.creem.io/v1`.
-
-For compatibility, `PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID` and
-`PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID` are still accepted, but
-`PULLWISE_CREEM_PRO_PRODUCT_IDS` is the preferred configuration.
-Max uses the same shape through `PULLWISE_CREEM_MAX_PRODUCT_IDS`; optional
-`PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID` and
-`PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID` are accepted for explicit interval
-configuration.
+Creem product IDs are database-backed system config. Configure each monthly and
+yearly Creem product ID under the matching Pullwise plan; Creem checkout and
+subscription upgrade calls use `product_id`. Test mode, API base URL, upgrade
+behavior, and billing timeout are also admin system config. API keys and
+webhook signing secrets remain deployment secrets.
 
 Implemented billing routes:
 
@@ -715,7 +673,7 @@ Checkout URLs are created server-side with `userId`
 metadata. Webhooks verify Creem `creem-signature` before updating billing
 state. Plan and interval upgrades use the Creem subscription upgrade endpoint.
 Pullwise supports higher-tier changes and monthly-to-yearly changes, with
-`PULLWISE_CREEM_UPGRADE_BEHAVIOR` defaulting to immediate proration. Lower-tier
+the database-backed Creem upgrade behavior defaulting to immediate proration. Lower-tier
 changes and yearly-to-monthly changes are not offered by Pullwise. Cancellation
 is scheduled for the end of the paid period; Pullwise does not issue automatic
 refunds for the remaining period.
