@@ -284,7 +284,7 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
             "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
             "PULLWISE_WORKER_PACKAGE": worker_package,
-            "PULLWISE_CODEX_PACKAGE": "@openai/codex@0.135.0",
+            "PULLWISE_CODEX_COMMAND": "codex",
             "PULLWISE_CODEX_MODEL": "gpt-5.5",
             "PULLWISE_CODEX_REASONING_EFFORT": "medium",
             "PULLWISE_OPENCODE_COMMAND": "opencode",
@@ -335,14 +335,7 @@ def worker_install_script() -> str:
     script = """#!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_USER="pullwise-worker"
 SERVICE_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-CONFIG_DIR="/etc/pullwise-worker"
-ENV_FILE="$CONFIG_DIR/worker.env"
-BIN_PATH="/usr/local/bin/pullwise-worker"
-DATA_DIR="/var/lib/pullwise-worker"
-CHECKOUT_ROOT="$DATA_DIR/checkouts"
-LOG_DIR="/var/log/pullwise-worker"
 SERVER_URL=""
 WORKER_ID=""
 WORKER_TOKEN=""
@@ -351,7 +344,8 @@ MAX_CONCURRENT_JOBS="1"
 PROVIDER="codex"
 PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
-CODEX_PACKAGE="${PULLWISE_CODEX_PACKAGE:-@openai/codex@0.135.0}"
+CODEX_COMMAND="${PULLWISE_CODEX_COMMAND:-}"
+OPENCODE_COMMAND="${PULLWISE_OPENCODE_COMMAND:-}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -363,7 +357,6 @@ while [ "$#" -gt 0 ]; do
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
     --provider-chain) PROVIDER_CHAIN="${2:-codex}"; shift 2 ;;
     --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
-    --codex-package) CODEX_PACKAGE="${2:-@openai/codex@0.135.0}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -376,6 +369,23 @@ if [ -z "$SERVER_URL" ] || [ -z "$WORKER_ID" ] || [ -z "$WORKER_TOKEN" ]; then
   echo "missing --server, --worker-id, or worker token env/file" >&2
   exit 2
 fi
+safe_worker_id() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-48
+}
+SAFE_WORKER_ID="$(safe_worker_id "$WORKER_ID")"
+if [ -z "$SAFE_WORKER_ID" ]; then
+  echo "worker id does not contain any safe service-name characters" >&2
+  exit 2
+fi
+SERVICE_USER="pullwise-worker-$SAFE_WORKER_ID"
+CONFIG_DIR="/etc/pullwise-worker/$SAFE_WORKER_ID"
+ENV_FILE="$CONFIG_DIR/worker.env"
+BIN_PATH="/usr/local/bin/pullwise-worker-$SAFE_WORKER_ID"
+DATA_DIR="/var/lib/pullwise-worker/$SAFE_WORKER_ID"
+CHECKOUT_ROOT="$DATA_DIR/checkouts"
+LOG_DIR="/var/log/pullwise-worker/$SAFE_WORKER_ID"
+SERVICE_FILE="/etc/systemd/system/pullwise-worker-$SAFE_WORKER_ID.service"
+LOGROTATE_FILE="/etc/logrotate.d/pullwise-worker-$SAFE_WORKER_ID"
 if [ -z "$WORKER_PACKAGE" ]; then
   WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-}"
 fi
@@ -397,48 +407,56 @@ fi
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
 run_as_service_user() {
   if command -v runuser >/dev/null 2>&1; then
-    runuser -u "$SERVICE_USER" -- env PATH="$SERVICE_PATH" "$@"
+    runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin" "$@"
   elif command -v sudo >/dev/null 2>&1; then
-    sudo -u "$SERVICE_USER" env PATH="$SERVICE_PATH" "$@"
+    sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin" "$@"
   else
     echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
     return 127
   fi
 }
+scoped_command_path() {
+  local fallback_one="${1:-}"
+  local fallback_two="${2:-}"
+  if [ -n "$fallback_one" ] && [ -x "$fallback_one" ]; then
+    printf '%s\n' "$fallback_one"
+  elif [ -n "$fallback_two" ] && [ -x "$fallback_two" ]; then
+    printf '%s\n' "$fallback_two"
+  else
+    return 1
+  fi
+}
 need_cmd python3
 need_cmd git
+need_cmd curl
 python3 - <<'PY'
 import sys
 if sys.version_info < (3, 9):
     raise SystemExit("Pullwise worker requires Python 3.9 or newer.")
 PY
 PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
-if ! command -v node >/dev/null 2>&1; then
-  echo "node is required for Codex CLI; install Node.js 20+ then rerun." >&2
-  exit 1
-fi
-NODE_MAJOR="$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))')"
-if [ "${NODE_MAJOR:-0}" -lt 20 ]; then
-  echo "Node.js 20+ is required for Codex CLI. Found $(node --version)." >&2
-  exit 1
-fi
-if ! command -v codex >/dev/null 2>&1; then
-  if command -v npm >/dev/null 2>&1; then
-    npm install -g "$CODEX_PACKAGE"
-  else
-    echo "npm is required to install Codex CLI. Install codex manually and rerun." >&2
-    exit 1
-  fi
-fi
 
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
 
-SERVICE_NODE_MAJOR="$(run_as_service_user node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))' 2>/dev/null || true)"
-SERVICE_NODE_VERSION="$(run_as_service_user node --version 2>/dev/null || true)"
-if [ "${SERVICE_NODE_MAJOR:-0}" -lt 20 ]; then
-  echo "Node.js 20+ must be available to $SERVICE_USER. Found ${SERVICE_NODE_VERSION:-not found}." >&2
-  exit 1
+if [ -z "$CODEX_COMMAND" ]; then
+  if ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")"; then
+    run_as_service_user sh -lc 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
+    CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" || {
+      echo "Codex installer completed, but codex is not executable for $SERVICE_USER." >&2
+      exit 1
+    }
+  fi
+fi
+
+if [ -z "$OPENCODE_COMMAND" ]; then
+  if ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")"; then
+    run_as_service_user sh -lc 'curl -fsSL https://opencode.ai/install | bash'
+    OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" || {
+      echo "OpenCode installer completed, but opencode is not executable for $SERVICE_USER." >&2
+      exit 1
+    }
+  fi
 fi
 
 python3 -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
@@ -463,10 +481,10 @@ write_env_value PULLWISE_MAX_CONCURRENT_JOBS "$MAX_CONCURRENT_JOBS"
 write_env_value PULLWISE_CHECKOUT_ROOT "$CHECKOUT_ROOT"
 write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
-write_env_value PULLWISE_CODEX_PACKAGE "$CODEX_PACKAGE"
+write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
 write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
 write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
-write_env_value PULLWISE_OPENCODE_COMMAND "${PULLWISE_OPENCODE_COMMAND:-opencode}"
+write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"
 write_env_value PULLWISE_OPENCODE_MODEL "${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"
 write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
@@ -482,29 +500,29 @@ write_env_value PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES "10485760"
 chown root:"$SERVICE_USER" "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
 
-cat > "$BIN_PATH" <<'EOF'
+cat > "$BIN_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 load_worker_env() {
-  local env_file="$1"
+  local env_file="\$1"
   local key value
-  [ -f "$env_file" ] || return 0
-  while IFS="=" read -r key value || [ -n "$key" ]; do
-    [[ -z "$key" || "$key" == \\#* ]] && continue
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    export "$key=$value"
-  done < "$env_file"
+  [ -f "\$env_file" ] || return 0
+  while IFS="=" read -r key value || [ -n "\$key" ]; do
+    [[ -z "\$key" || "\$key" == \\#* ]] && continue
+    [[ "\$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    export "\$key=\$value"
+  done < "\$env_file"
 }
-load_worker_env /etc/pullwise-worker/worker.env
-export PATH="${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-PYTHON_BIN="${PULLWISE_PYTHON_BIN:-python3}"
-exec "$PYTHON_BIN" -m pullwise_worker.main "$@"
+load_worker_env "\${PULLWISE_WORKER_ENV_FILE:-$ENV_FILE}"
+export PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"
+exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
 chmod 0755 "$BIN_PATH"
 
-cat > /etc/systemd/system/pullwise-worker.service <<EOF
+cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Pullwise Worker
+Description=Pullwise Worker $WORKER_NAME
 After=network-online.target
 Wants=network-online.target
 
@@ -527,7 +545,7 @@ ReadWritePaths=$DATA_DIR $LOG_DIR
 WantedBy=multi-user.target
 EOF
 
-cat > /etc/logrotate.d/pullwise-worker <<EOF
+cat > "$LOGROTATE_FILE" <<EOF
 $LOG_DIR/*.log {
   daily
   rotate 14
@@ -539,12 +557,16 @@ $LOG_DIR/*.log {
 EOF
 
 systemctl daemon-reload
-systemctl enable pullwise-worker >/dev/null
-systemctl restart pullwise-worker
+systemctl enable "pullwise-worker-$SAFE_WORKER_ID" >/dev/null
+systemctl restart "pullwise-worker-$SAFE_WORKER_ID"
 run_as_service_user "$BIN_PATH" doctor || true
 
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
-echo "If Codex is not logged in, run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH codex login --device-auth"
+echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
+echo "Worker home: $DATA_DIR"
+echo "Manual authorization remains required:"
+echo "  Codex device login: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin $CODEX_COMMAND login --device-auth"
+echo "  OpenCode API/provider credentials: configure them for $SERVICE_USER under HOME=$DATA_DIR before enabling an OpenCode provider chain."
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
