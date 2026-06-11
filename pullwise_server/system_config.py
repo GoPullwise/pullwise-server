@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import threading
 import time
 from urllib.parse import urlparse
@@ -800,7 +801,7 @@ def worker_heartbeat_timeout_seconds() -> int:
 
 
 def worker_min_version() -> str:
-    return text_setting("worker.minVersion")
+    return text_setting("worker.minVersion") or os.environ.get("PULLWISE_MIN_WORKER_VERSION", "")
 
 
 def worker_allowed_providers() -> set[str]:

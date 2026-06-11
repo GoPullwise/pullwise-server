@@ -434,6 +434,9 @@ scoped_command_path() {
     return 1
   fi
 }
+path_command() {
+  PATH="$SERVICE_PATH" command -v "$1" 2>/dev/null || return 1
+}
 need_cmd python3
 need_cmd git
 need_cmd curl
@@ -448,7 +451,7 @@ id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shel
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
 
 if [ -z "$CODEX_COMMAND" ]; then
-  if ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")"; then
+  if ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" && ! CODEX_COMMAND="$(path_command codex)"; then
     run_as_service_user sh -lc 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
     CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" || {
       echo "Codex installer completed, but codex is not executable for $SERVICE_USER." >&2
@@ -458,7 +461,7 @@ if [ -z "$CODEX_COMMAND" ]; then
 fi
 
 if [ -z "$OPENCODE_COMMAND" ]; then
-  if ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")"; then
+  if ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" && ! OPENCODE_COMMAND="$(path_command opencode)"; then
     run_as_service_user sh -lc 'curl -fsSL https://opencode.ai/install | bash'
     OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" || {
       echo "OpenCode installer completed, but opencode is not executable for $SERVICE_USER." >&2
