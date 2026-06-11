@@ -889,7 +889,7 @@ def scan_payload(scan: dict) -> dict:
         "verification": public_scan_verification_counts(scan),
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
-    ai_usage = public_scan_ai_usage(scan.get("aiUsage") or scan.get("ai_usage"))
+    ai_usage = public_scan_ai_usage(scan.get("aiUsage"))
     if ai_usage:
         payload["aiUsage"] = ai_usage
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
