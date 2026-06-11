@@ -44,28 +44,8 @@ def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
-def env_flag(name: str, default: str = "false") -> bool:
-    return env(name, default).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def env_int(name: str, default: int) -> int:
-    try:
-        return int(env(name, str(default)))
-    except ValueError:
-        return default
-
-
-def env_csv(value: str) -> list[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
-
-
 def billing_timeout_seconds() -> int:
-    configured = system_config.billing_timeout_seconds()
-    default = int(system_config.DEFAULT_CONFIG["billing"]["billingTimeoutSeconds"])
-    if configured != default:
-        return configured
-    value = env_int("PULLWISE_BILLING_TIMEOUT_SECONDS", configured)
-    return value if value > 0 else configured
+    return system_config.billing_timeout_seconds()
 
 
 def review_limit(plan: str) -> int:
@@ -301,17 +281,7 @@ def creem_configured() -> bool:
 
 
 def selected_provider() -> str:
-    configured = env("PULLWISE_BILLING_PROVIDER").strip().lower()
-    if configured:
-        if configured != "creem":
-            raise BillingConfigurationError("PULLWISE_BILLING_PROVIDER must be creem.")
-        if not creem_configured():
-            raise BillingConfigurationError("Creem billing is selected but Creem environment variables are incomplete.")
-        return "creem"
-
-    if creem_configured():
-        return "creem"
-    return "disabled"
+    return "creem" if creem_configured() else "disabled"
 
 
 def creem_configured_product_ids_for_plan(plan: str) -> list[str]:
@@ -325,34 +295,14 @@ def creem_configured_paid_product_ids(plan: str) -> list[str]:
     normalized_plan = normalize_plan(plan)
     if normalized_plan not in PAID_PLAN_IDS:
         return []
-    configured_ids = system_config.creem_product_ids_for_plan(normalized_plan)
-    raw_ids = configured_ids if configured_ids else creem_legacy_product_ids_for_plan(normalized_plan)
     product_ids: list[str] = []
     seen: set[str] = set()
-    for raw in raw_ids:
+    for raw in system_config.creem_product_ids_for_plan(normalized_plan):
         product_id = str(raw or "").strip()
         if product_id and product_id not in seen:
             product_ids.append(product_id)
             seen.add(product_id)
     return product_ids
-
-
-def creem_legacy_product_ids_for_plan(plan: str) -> list[str]:
-    normalized_plan = normalize_plan(plan)
-    combined = env(f"PULLWISE_CREEM_{normalized_plan.upper()}_PRODUCT_IDS")
-    if combined:
-        return env_csv(combined)
-    if normalized_plan == "pro":
-        return [
-            env("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID", env("PULLWISE_CREEM_PRODUCT_ID")),
-            env("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID", env("PULLWISE_CREEM_YEARLY_PRODUCT_ID")),
-        ]
-    if normalized_plan == "max":
-        return [
-            env("PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID"),
-            env("PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID"),
-        ]
-    return []
 
 
 def creem_configured_product_ids() -> list[str]:
@@ -707,11 +657,7 @@ def create_creem_subscription_change(billing: dict, *, plan: str, interval: str,
 def creem_subscription_update_behavior(current_plan: str, current_interval: str, target_plan: str, target_interval: str) -> str:
     if not subscription_change_is_upgrade(current_plan, current_interval, target_plan, target_interval):
         raise BillingConfigurationError("Only subscription upgrades are supported.")
-    configured = system_config.creem_upgrade_behavior()
-    default = str(system_config.DEFAULT_CONFIG["billing"]["creemUpgradeBehavior"])
-    if configured != default:
-        return configured
-    return normalize_creem_update_behavior(env("PULLWISE_CREEM_UPGRADE_BEHAVIOR"), default)
+    return system_config.creem_upgrade_behavior()
 
 
 def subscription_change_is_upgrade(current_plan: str, current_interval: str, target_plan: str, target_interval: str) -> bool:
@@ -839,15 +785,6 @@ def create_creem_subscription_resume(billing: dict) -> dict:
 
 def creem_api_base_url() -> str:
     configured = system_config.creem_api_base_url().strip().rstrip("/")
-    configured_test_mode = system_config.creem_test_mode()
-    default_config_url = (
-        system_config.DEFAULT_CREEM_TEST_API_BASE_URL
-        if configured_test_mode
-        else system_config.DEFAULT_CREEM_API_BASE_URL
-    )
-    if not (configured and (configured != default_config_url or configured_test_mode)):
-        default_url = "https://test-api.creem.io" if env_flag("PULLWISE_CREEM_TEST_MODE") else "https://api.creem.io"
-        configured = env("PULLWISE_CREEM_API_BASE_URL", default_url).strip().rstrip("/") or default_url
     parsed = urlparse(configured)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise BillingConfigurationError("PULLWISE_CREEM_API_BASE_URL must be an absolute HTTP(S) URL.")
@@ -1147,10 +1084,7 @@ def normalize_interval(interval: object) -> str:
     return normalized if normalized in {"month", "year"} else "month"
 
 
-def interval_from_legacy_creem_product_id(product_id: object) -> str | None:
-    inferred = interval_from_explicit_creem_product_id(product_id)
-    if inferred:
-        return inferred
+def interval_from_configured_creem_product_id(product_id: object) -> str | None:
     if not isinstance(product_id, str) or not product_id.strip():
         return None
     normalized_product_id = product_id.strip()
@@ -1163,39 +1097,15 @@ def interval_from_legacy_creem_product_id(product_id: object) -> str | None:
     return None
 
 
-def interval_from_explicit_creem_product_id(product_id: object) -> str | None:
-    if not isinstance(product_id, str) or not product_id.strip():
-        return None
-    normalized_product_id = product_id.strip()
-    yearly_ids = {
-        env("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID").strip(),
-        env("PULLWISE_CREEM_YEARLY_PRODUCT_ID").strip(),
-        env("PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID").strip(),
-    }
-    monthly_ids = {
-        env("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID").strip(),
-        env("PULLWISE_CREEM_PRODUCT_ID").strip(),
-        env("PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID").strip(),
-    }
-    if normalized_product_id in yearly_ids - {""}:
-        return "year"
-    if normalized_product_id in monthly_ids - {""}:
-        return "month"
-    return None
-
-
 def interval_from_creem_product(product: dict | None) -> str | None:
     if not isinstance(product, dict):
         return None
-    inferred = interval_from_explicit_creem_product_id(product.get("id"))
-    if inferred:
-        return inferred
     period = str(product.get("billing_period") or "").strip().lower()
     if period in {"every-year", "year", "yearly", "annual", "annually"}:
         return "year"
     if period in {"every-month", "month", "monthly"}:
         return "month"
-    inferred = interval_from_legacy_creem_product_id(product.get("id"))
+    inferred = interval_from_configured_creem_product_id(product.get("id"))
     if inferred:
         return inferred
     return None

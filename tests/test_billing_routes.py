@@ -11,7 +11,7 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import Mock, patch
 
-from pullwise_server import app
+from pullwise_server import app, system_config
 
 
 def creem_product(product_id: str, *, price: int, period: str) -> dict:
@@ -38,6 +38,36 @@ def creem_product_get(*products: dict):
         return response
 
     return side_effect
+
+
+def database_config(**overrides: object) -> dict:
+    config = system_config.default_config()
+    for path, value in overrides.items():
+        current = config
+        parts = path.split("__")
+        for part in parts[:-1]:
+            current = current[part]
+        current[parts[-1]] = value
+    return config
+
+
+def creem_database_config(
+    *,
+    pro_product_ids: tuple[str, ...] = (),
+    max_product_ids: tuple[str, ...] = (),
+    api_base_url: str = "https://test-api.creem.io",
+    free_review_limit: int = 5,
+    pro_review_limit: int = 60,
+    max_review_limit: int = 90,
+) -> dict:
+    return database_config(
+        plans__free__userReviewLimit=free_review_limit,
+        plans__pro__userReviewLimit=pro_review_limit,
+        plans__max__userReviewLimit=max_review_limit,
+        billing__creemProProductIds=list(pro_product_ids),
+        billing__creemMaxProductIds=list(max_product_ids),
+        billing__creemApiBaseUrl=api_base_url,
+    )
 
 
 class HandlerHarness(app.PullwiseHandler):
@@ -141,9 +171,11 @@ class BillingRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_CREEM_API_KEY": "creem_123",
-                "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_monthly,prod_yearly",
             },
             clear=True,
+        ), patch(
+            "pullwise_server.system_config.config",
+            return_value=creem_database_config(pro_product_ids=("prod_monthly", "prod_yearly")),
         ), patch(
             "pullwise_server.billing.requests.get",
             side_effect=creem_product_get(
@@ -559,7 +591,8 @@ class BillingRoutesTest(unittest.TestCase):
         second = HandlerHarness({"repo": "owner/other", "requestId": "scan_req_2"}, cookie=cookie)
 
         with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_USER_REVIEW_LIMIT": "1"}, clear=True),
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
+            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=1)),
         ):
             app.PullwiseHandler.handle_post(first, "/scans", {}, ["scans"])
             app.PullwiseHandler.handle_post(second, "/scans", {}, ["scans"])
@@ -575,10 +608,13 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(billing_payload["usage"]["resetAt"], first.payload["billingUsage"]["resetAt"])
         self.assertGreater(billing_payload["usage"]["resetAt"], app.now())
 
-    def test_legacy_consume_review_quota_uses_db_backed_user_quota(self) -> None:
+    def test_consume_review_quota_uses_db_backed_user_quota(self) -> None:
         seed_session()
 
-        with patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path, "PULLWISE_FREE_USER_REVIEW_LIMIT": "1"}, clear=True):
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
+            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=1)),
+        ):
             first_ok, first_payload = app.consume_review_quota(app.USERS["usr_1"])
             second_ok, second_payload = app.consume_review_quota(app.USERS["usr_1"])
             account_payload = app.billing_account_payload(app.USERS["usr_1"])
@@ -697,9 +733,11 @@ class BillingRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test",
-                "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
             },
             clear=True,
+        ), patch(
+            "pullwise_server.system_config.config",
+            return_value=creem_database_config(pro_product_ids=("prod_monthly",)),
         ):
             app.PullwiseHandler.handle_post(handler, "/webhooks/creem", {}, ["webhooks", "creem"])
 
