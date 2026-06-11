@@ -125,6 +125,9 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
     cli = clean_review_agent_config_text(source.get("cli"))
     if cli:
         result["cli"] = cli
+        command = clean_review_agent_config_text(source.get("command"))
+        if "command" not in source or command == cli:
+            result["command"] = cli
     model = clean_review_agent_config_text(source.get("model"))
     if model:
         result["model"] = model

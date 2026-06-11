@@ -504,6 +504,8 @@ write_env_value PULLWISE_OPENCODE_MODEL "${PULLWISE_OPENCODE_MODEL:-opencode/big
 write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
+write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"
+write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"
 write_env_value PULLWISE_WORKER_POLL_JITTER_SECONDS "2"
 write_env_value PULLWISE_WORKER_MAX_BACKOFF_SECONDS "60"
 write_env_value PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS "3600"
@@ -581,7 +583,8 @@ echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
 echo "Worker home: $DATA_DIR"
 echo "Manual authorization remains required:"
 echo "  Codex device login: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin $CODEX_COMMAND login --device-auth"
-echo "  OpenCode API/provider credentials: configure them for $SERVICE_USER under HOME=$DATA_DIR before enabling an OpenCode provider chain."
+echo "  OpenCode API/provider credentials: launch opencode then run /connect:"
+echo "    sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.opencode/bin $OPENCODE_COMMAND"
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())

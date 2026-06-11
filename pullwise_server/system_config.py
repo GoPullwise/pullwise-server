@@ -34,7 +34,7 @@ DEFAULT_CONFIG = {
         "maxRepoBytes": 50 * 1024 * 1024,
     },
     "worker": {
-        "maxClaimJobs": 2,
+        "maxClaimJobs": 32,
         "maxConcurrencyCap": 32,
         "heartbeatTimeoutSeconds": 120,
         "minVersion": "",
@@ -738,6 +738,28 @@ def bool_setting(path: str) -> bool:
     return bool(value)
 
 
+def env_int(name: str) -> int | None:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def env_bool(name: str) -> bool | None:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return None
+    text = value.strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
 def text_setting(path: str) -> str:
     found, value = nested_get(config(), path)
     if not found:
@@ -769,14 +791,23 @@ def repository_scan_limits() -> dict:
 
 
 def max_running_scans_per_user() -> int:
+    configured = env_int("PULLWISE_MAX_RUNNING_SCANS_PER_USER")
+    if configured is not None:
+        return max(1, configured)
     return max(1, int_setting("scan.maxRunningScansPerUser"))
 
 
 def max_queued_scans_global() -> int:
+    configured = env_int("PULLWISE_MAX_QUEUED_SCANS_GLOBAL")
+    if configured is not None:
+        return max(1, configured)
     return max(1, int_setting("scan.maxQueuedScansGlobal"))
 
 
 def max_queued_scans_per_user() -> int:
+    configured = env_int("PULLWISE_MAX_QUEUED_SCANS_PER_USER")
+    if configured is not None:
+        return max(1, configured)
     return max(1, int_setting("scan.maxQueuedScansPerUser"))
 
 
@@ -789,6 +820,9 @@ def scan_job_lease_seconds() -> int:
 
 
 def worker_max_claim_jobs() -> int:
+    configured = env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS")
+    if configured is not None:
+        return max(1, configured)
     return max(1, int_setting("worker.maxClaimJobs"))
 
 
@@ -830,14 +864,27 @@ def worker_release_cache_seconds() -> int:
 
 
 def rate_limit_enabled() -> bool:
+    configured = env_bool("PULLWISE_RATE_LIMIT_ENABLED")
+    if configured is not None:
+        return configured
     return bool_setting("rateLimit.enabled")
 
 
 def rate_limit_requests() -> int:
+    configured = env_int("PULLWISE_RATE_LIMIT_REQUESTS")
+    if configured is not None:
+        return max(0, configured)
+    if "PULLWISE_RATE_LIMIT_ENABLED" in os.environ:
+        return max(0, int(DEFAULT_CONFIG["rateLimit"]["requests"]))
     return max(0, int_setting("rateLimit.requests"))
 
 
 def rate_limit_window_seconds() -> int:
+    configured = env_int("PULLWISE_RATE_LIMIT_WINDOW_SECONDS")
+    if configured is not None:
+        return max(1, configured)
+    if "PULLWISE_RATE_LIMIT_ENABLED" in os.environ:
+        return max(1, int(DEFAULT_CONFIG["rateLimit"]["windowSeconds"]))
     return max(1, int_setting("rateLimit.windowSeconds"))
 
 
