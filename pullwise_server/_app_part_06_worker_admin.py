@@ -386,12 +386,15 @@ if [ -z "$SAFE_WORKER_ID" ]; then
   exit 2
 fi
 SERVICE_USER="$(service_user_name "$SAFE_WORKER_ID")"
-CONFIG_DIR="/etc/pullwise-worker/$SAFE_WORKER_ID"
+BASE_CONFIG_DIR="/etc/pullwise-worker"
+BASE_DATA_DIR="/var/lib/pullwise-worker"
+BASE_LOG_DIR="/var/log/pullwise-worker"
+CONFIG_DIR="$BASE_CONFIG_DIR/$SAFE_WORKER_ID"
 ENV_FILE="$CONFIG_DIR/worker.env"
 BIN_PATH="/usr/local/bin/pullwise-worker-$SAFE_WORKER_ID"
-DATA_DIR="/var/lib/pullwise-worker/$SAFE_WORKER_ID"
+DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
 CHECKOUT_ROOT="$DATA_DIR/checkouts"
-LOG_DIR="/var/log/pullwise-worker/$SAFE_WORKER_ID"
+LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
 SERVICE_FILE="/etc/systemd/system/pullwise-worker-$SAFE_WORKER_ID.service"
 LOGROTATE_FILE="/etc/logrotate.d/pullwise-worker-$SAFE_WORKER_ID"
 if [ -z "$WORKER_PACKAGE" ]; then
@@ -448,6 +451,7 @@ PY
 PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
 
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
 
 if [ -z "$CODEX_COMMAND" ]; then
