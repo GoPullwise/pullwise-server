@@ -378,6 +378,27 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertIsNone(enabled["disabled_at"])
         self.assertEqual(enabled["enabled"], 1)
 
+    def test_initialize_does_not_restore_deleted_environment_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            env = {
+                "PULLWISE_DB_PATH": db_path,
+                "PULLWISE_WORKER_TOKEN": "legacy-env-token",
+                "PULLWISE_WORKER_ID": "legacy_env_worker",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                db.initialize()
+                self.assertEqual([worker["worker_id"] for worker in db.list_workers()], ["legacy_env_worker"])
+
+                deleted = db.soft_delete_worker("legacy_env_worker")
+                self.assertIsNotNone(deleted)
+                self.assertEqual(db.list_workers(), [])
+
+                db.initialize()
+
+                self.assertEqual(db.list_workers(), [])
+                self.assertIsNotNone(db.get_worker("legacy_env_worker", include_deleted=True)["deleted_at"])
+
     def test_cleanup_operational_records_prunes_only_old_terminal_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

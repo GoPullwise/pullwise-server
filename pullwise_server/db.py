@@ -472,8 +472,8 @@ def initialize() -> None:
                     ON CONFLICT(worker_id) DO UPDATE SET
                         token_hash = excluded.token_hash,
                         enabled = 1,
-                        deleted_at = NULL,
                         updated_at = excluded.updated_at
+                    WHERE workers.deleted_at IS NULL
                     """,
                     (env_worker_id, token_hash),
                 )

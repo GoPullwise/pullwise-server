@@ -372,12 +372,20 @@ fi
 safe_worker_id() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-48
 }
+service_user_name() {
+  local suffix
+  suffix="$(printf '%s' "$1" | tr 'A-Z_' 'a-z-' | tr -cd 'a-z0-9-' | cut -c1-16)"
+  if [ -z "$suffix" ]; then
+    suffix="worker"
+  fi
+  printf 'pw-worker-%s\n' "$suffix"
+}
 SAFE_WORKER_ID="$(safe_worker_id "$WORKER_ID")"
 if [ -z "$SAFE_WORKER_ID" ]; then
   echo "worker id does not contain any safe service-name characters" >&2
   exit 2
 fi
-SERVICE_USER="pullwise-worker-$SAFE_WORKER_ID"
+SERVICE_USER="$(service_user_name "$SAFE_WORKER_ID")"
 CONFIG_DIR="/etc/pullwise-worker/$SAFE_WORKER_ID"
 ENV_FILE="$CONFIG_DIR/worker.env"
 BIN_PATH="/usr/local/bin/pullwise-worker-$SAFE_WORKER_ID"
