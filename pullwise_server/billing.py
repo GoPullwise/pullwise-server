@@ -123,15 +123,8 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
     cli = clean_review_agent_config_text(source.get("cli"))
-    command = clean_review_agent_config_text(source.get("command"))
     if cli:
         result["cli"] = cli
-        if not command:
-            result["command"] = cli
-    if command:
-        result["command"] = command
-        if not cli:
-            result["cli"] = command
     model = clean_review_agent_config_text(source.get("model"))
     if model:
         result["model"] = model
@@ -282,6 +275,16 @@ def creem_configured() -> bool:
 
 def selected_provider() -> str:
     return "creem" if creem_configured() else "disabled"
+
+
+def normalize_billing_provider(provider: object) -> str:
+    normalized = text_payload(provider, "").strip().lower()
+    return normalized if normalized in {"creem"} else normalized
+
+
+def subscription_provider_matches_configured_provider(billing: dict, provider: str) -> bool:
+    billing_provider = normalize_billing_provider(billing.get("provider"))
+    return not billing_provider or billing_provider == provider
 
 
 def creem_configured_product_ids_for_plan(plan: str) -> list[str]:
@@ -604,8 +607,7 @@ def change_subscription_interval(user: dict, *, interval: str, plan: str | None 
         raise BillingConfigurationError("Only active subscriptions can be changed.")
 
     provider = selected_provider()
-    billing_provider = (billing.get("provider") or provider).lower()
-    if billing_provider and billing_provider != provider:
+    if not subscription_provider_matches_configured_provider(billing, provider):
         raise BillingConfigurationError("Configured billing provider does not match this subscription.")
     if provider == "creem":
         return create_creem_subscription_change(billing, plan=target_plan, interval=target_interval, resume_first=status == "canceling")
@@ -697,8 +699,7 @@ def cancel_subscription(user: dict, *, mode: str = "scheduled", return_url: str 
     if normalized_mode != "scheduled":
         raise BillingConfigurationError("Only scheduled cancellation is supported.")
     provider = selected_provider()
-    billing_provider = (billing.get("provider") or provider).lower()
-    if billing_provider and billing_provider != provider:
+    if not subscription_provider_matches_configured_provider(billing, provider):
         raise BillingConfigurationError("Configured billing provider does not match this subscription.")
     if provider == "creem":
         return create_creem_subscription_cancel(billing, mode=normalized_mode)
@@ -749,8 +750,7 @@ def resume_subscription(user: dict, *, return_url: str | None = None) -> dict:
     if status != "canceling":
         raise BillingConfigurationError("Only scheduled cancellations can be resumed.")
     provider = selected_provider()
-    billing_provider = (billing.get("provider") or provider).lower()
-    if billing_provider and billing_provider != provider:
+    if not subscription_provider_matches_configured_provider(billing, provider):
         raise BillingConfigurationError("Configured billing provider does not match this subscription.")
     if provider == "creem":
         return create_creem_subscription_resume(billing)

@@ -3738,13 +3738,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "providerChain": ["opencode", "codex"],
                 "codex": {
                     "cli": "codex-pro-cli",
-                    "command": "codex-pro-command",
+                    "command": "codex-pro-command-ignored",
                     "model": "gpt-pro",
                     "reasoningEffort": "high",
                 },
                 "opencode": {
                     "cli": "opencode-pro-cli",
-                    "command": "opencode-pro-command",
+                    "command": "opencode-pro-command-ignored",
                     "model": "opencode/pro-model",
                     "variant": "high",
                 },
@@ -3763,12 +3763,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
         self.assertEqual(agent_config["provider_chain"], ["opencode", "codex"])
         self.assertEqual(agent_config["codex"]["cli"], "codex-pro-cli")
-        self.assertEqual(agent_config["codex"]["command"], "codex-pro-command")
+        self.assertEqual(agent_config["codex"]["command"], "codex")
         self.assertEqual(agent_config["codex"]["model"], "gpt-pro")
         self.assertEqual(agent_config["codex"]["reasoningEffort"], "high")
         self.assertEqual(agent_config["codex"]["reasoning_effort"], "high")
         self.assertEqual(agent_config["opencode"]["cli"], "opencode-pro-cli")
-        self.assertEqual(agent_config["opencode"]["command"], "opencode-pro-command")
+        self.assertEqual(agent_config["opencode"]["command"], "opencode")
         self.assertEqual(agent_config["opencode"]["model"], "opencode/pro-model")
         self.assertEqual(agent_config["opencode"]["variant"], "high")
 

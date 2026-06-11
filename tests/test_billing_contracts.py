@@ -633,7 +633,7 @@ class BillingContractsTest(unittest.TestCase):
                 {
                     "id": "usr_1",
                     "billing": {
-                        "provider": "creem",
+                        "provider": " Creem ",
                         "customerId": "cust_123",
                         "subscriptionId": "sub_123",
                         "plan": "pro",
@@ -650,6 +650,43 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(result["cancelAtPeriodEnd"], False)
         self.assertEqual(post.call_args_list[0].args[0], "https://test-api.creem.io/v1/subscriptions/sub_123/resume")
         self.assertEqual(post.call_args_list[1].args[0], "https://test-api.creem.io/v1/subscriptions/sub_123/upgrade")
+
+    def test_creem_cancel_accepts_normalizable_subscription_provider(self) -> None:
+        response = Mock()
+        response.json.return_value = {"id": "sub_123", "status": "scheduled_cancel"}
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                },
+                clear=True,
+            ),
+            patch(
+                "pullwise_server.system_config.config",
+                return_value=creem_database_config(pro_product_ids=("prod_monthly",)),
+            ),
+            patch("pullwise_server.billing.requests.post", return_value=response) as post,
+        ):
+            result = billing.cancel_subscription(
+                {
+                    "id": "usr_1",
+                    "billing": {
+                        "provider": " Creem ",
+                        "customerId": "cust_123",
+                        "subscriptionId": "sub_123",
+                        "plan": "pro",
+                        "interval": "month",
+                        "status": "active",
+                    },
+                }
+            )
+
+        self.assertEqual(result["provider"], "creem")
+        self.assertEqual(result["status"], "canceling")
+        self.assertEqual(post.call_args.args[0], "https://test-api.creem.io/v1/subscriptions/sub_123/cancel")
 
     def test_creem_resume_subscription_uses_resume_endpoint(self) -> None:
         response = Mock()

@@ -522,13 +522,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "providerChain": ["opencode", "codex"],
                 "codex": {
                     "cli": "codex-admin",
-                    "command": "codex-admin",
+                    "command": "codex-bin-ignored",
                     "model": "gpt-admin",
                     "reasoningEffort": "high",
                 },
                 "opencode": {
                     "cli": "opencode-admin",
-                    "command": "opencode-admin",
+                    "command": "opencode-bin-ignored",
                     "model": "opencode/admin",
                     "variant": "high",
                 },
@@ -543,7 +543,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
         self.assertEqual(agent_config["agent"]["cli"], "opencode")
         self.assertEqual(agent_config["agent"]["model"], "opencode/admin")
+        self.assertEqual(agent_config["codex"]["cli"], "codex-admin")
+        self.assertEqual(agent_config["codex"]["command"], "codex")
         self.assertEqual(agent_config["codex"]["model"], "gpt-admin")
+        self.assertEqual(agent_config["opencode"]["cli"], "opencode-admin")
+        self.assertEqual(agent_config["opencode"]["command"], "opencode")
 
         docs = RouteHarness("/docs/subscription-plans")
         app.PullwiseHandler.route(docs, "GET")
