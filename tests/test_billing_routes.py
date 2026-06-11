@@ -1319,14 +1319,17 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
             {
                 "PULLWISE_DB_PATH": self.db_path,
                 "PULLWISE_CREEM_WEBHOOK_SECRET": "whsec_test",
-                "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
-                "PULLWISE_PRO_USER_REVIEW_LIMIT": "60",
-                "PULLWISE_FREE_USER_REVIEW_LIMIT": "5",
             },
             clear=False,
         )
         self.db_patcher.start()
         self.addCleanup(self.db_patcher.stop)
+        self.config_patcher = patch(
+            "pullwise_server.system_config.config",
+            return_value=creem_database_config(pro_product_ids=("prod_monthly",)),
+        )
+        self.config_patcher.start()
+        self.addCleanup(self.config_patcher.stop)
 
     def test_creem_webhook_persists_billing_and_refreshes_quota_bucket(self) -> None:
         seed_session()

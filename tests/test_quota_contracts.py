@@ -9,7 +9,7 @@ import unittest
 from contextlib import closing
 from unittest.mock import patch
 
-from pullwise_server import db, quota
+from pullwise_server import db, quota, system_config
 
 
 def make_user(user_id: str) -> dict:
@@ -18,6 +18,28 @@ def make_user(user_id: str) -> dict:
         "email": f"{user_id}@example.com",
         "billing": {"plan": "free", "status": "active"},
     }
+
+
+def database_config(**overrides: object) -> dict:
+    config = system_config.default_config()
+    for path, value in overrides.items():
+        current = config
+        parts = path.split("__")
+        for part in parts[:-1]:
+            current = current[part]
+        current[parts[-1]] = value
+    return config
+
+
+def quota_config(*, free_limit: int = 5, pro_limit: int = 60, max_limit: int = 90) -> dict:
+    return database_config(
+        plans__free__userReviewLimit=free_limit,
+        plans__free__repositoryReviewLimit=free_limit,
+        plans__pro__userReviewLimit=pro_limit,
+        plans__pro__repositoryReviewLimit=pro_limit,
+        plans__max__userReviewLimit=max_limit,
+        plans__max__repositoryReviewLimit=max_limit,
+    )
 
 
 class QuotaContractsTest(unittest.TestCase):
@@ -38,18 +60,15 @@ class QuotaContractsTest(unittest.TestCase):
         self.assertEqual(user_usage["limit"], 5)
         self.assertEqual(repo_usage["limit"], 5)
 
-    def test_user_limit_environment_variables_are_respected(self) -> None:
+    def test_user_limits_use_system_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "7",
-                    "PULLWISE_PRO_USER_REVIEW_LIMIT": "70",
-                    "PULLWISE_MAX_USER_REVIEW_LIMIT": "90",
-                },
-                clear=True,
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch(
+                    "pullwise_server.system_config.config",
+                    return_value=quota_config(free_limit=7, pro_limit=70, max_limit=90),
+                ),
             ):
                 free_user = make_user("usr_free")
                 pro_user = {
@@ -97,13 +116,9 @@ class QuotaContractsTest(unittest.TestCase):
     def test_atomic_consume_succeeds_then_rejects_when_repo_limit_is_used(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
-                },
-                clear=True,
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1)),
             ):
                 user = make_user("usr_1")
                 repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
@@ -130,13 +145,9 @@ class QuotaContractsTest(unittest.TestCase):
     def test_concurrent_consume_does_not_exceed_remaining_user_quota(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
-                },
-                clear=True,
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1)),
             ):
                 user = make_user("usr_1")
                 repositories = [
@@ -199,13 +210,9 @@ class QuotaContractsTest(unittest.TestCase):
     def test_forks_share_repository_quota_with_source_repo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
-                },
-                clear=True,
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1)),
             ):
                 user = make_user("usr_1")
                 first_fork = db.upsert_repository(
@@ -246,15 +253,12 @@ class QuotaContractsTest(unittest.TestCase):
     def test_repository_limit_matches_user_limit_for_each_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "8",
-                    "PULLWISE_PRO_USER_REVIEW_LIMIT": "80",
-                    "PULLWISE_MAX_USER_REVIEW_LIMIT": "90",
-                },
-                clear=True,
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch(
+                    "pullwise_server.system_config.config",
+                    return_value=quota_config(free_limit=8, pro_limit=80, max_limit=90),
+                ),
             ):
                 self.assertEqual(quota.repository_limit_for_plan("free"), 8)
                 self.assertEqual(quota.repository_limit_for_plan("pro"), 80)
@@ -321,13 +325,9 @@ class QuotaContractsTest(unittest.TestCase):
     def test_subscription_cycle_reset_creates_fresh_quota_bucket(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_PRO_USER_REVIEW_LIMIT": "1",
-                },
-                clear=True,
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch("pullwise_server.system_config.config", return_value=quota_config(pro_limit=1)),
             ):
                 subscription_start = calendar.timegm((2026, 1, 15, 12, 0, 0))
                 subscription_end = calendar.timegm((2026, 3, 15, 12, 0, 0))

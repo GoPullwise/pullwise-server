@@ -6,7 +6,25 @@ import os
 import unittest
 from unittest.mock import patch
 
-from pullwise_server import billing
+from pullwise_server import billing, system_config
+
+
+def database_config(**overrides: object) -> dict:
+    config = system_config.default_config()
+    for path, value in overrides.items():
+        current = config
+        parts = path.split("__")
+        for part in parts[:-1]:
+            current = current[part]
+        current[parts[-1]] = value
+    return config
+
+
+def creem_database_config(*, pro_product_ids: tuple[str, ...] = (), max_product_ids: tuple[str, ...] = ()) -> dict:
+    return database_config(
+        billing__creemProProductIds=list(pro_product_ids),
+        billing__creemMaxProductIds=list(max_product_ids),
+    )
 
 
 class BillingWebhookTest(unittest.TestCase):
@@ -31,7 +49,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["userId"], "usr_1")
@@ -71,7 +89,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["requestId"], "pw_usr_1_req_1")
@@ -102,7 +120,10 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly"}, clear=True):
+        with patch(
+            "pullwise_server.system_config.config",
+            return_value=creem_database_config(pro_product_ids=("prod_monthly", "prod_yearly")),
+        ):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["userId"], "usr_1")
@@ -122,7 +143,7 @@ class BillingWebhookTest(unittest.TestCase):
             "subscription.paused": "paused",
             "subscription.trialing": "trialing",
         }
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             for event_type, expected_status in scenarios.items():
                 with self.subTest(event_type=event_type):
                     update = billing.billing_update_from_creem_event(
@@ -164,7 +185,7 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertIsNone(update)
 
     def test_creem_event_defaults_malformed_status_plan_and_interval(self) -> None:
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(
                 {
                     "id": "evt_creem_malformed_values_1",
@@ -189,13 +210,16 @@ class BillingWebhookTest(unittest.TestCase):
             "object": {
                 "id": "sub_1",
                 "status": "active",
-                "product": {"id": "prod_yearly", "billing_period": "every-month"},
+                "product": {"id": "prod_yearly"},
                 "customer": {"id": "cust_1"},
                 "metadata": {"userId": "usr_1"},
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly"}, clear=True):
+        with patch(
+            "pullwise_server.system_config.config",
+            return_value=creem_database_config(pro_product_ids=("prod_monthly", "prod_yearly")),
+        ):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["interval"], "year")
@@ -212,7 +236,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertIsNone(update)
@@ -230,7 +254,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertIsNone(update)
@@ -254,7 +278,10 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly"}, clear=True):
+        with patch(
+            "pullwise_server.system_config.config",
+            return_value=creem_database_config(pro_product_ids=("prod_monthly", "prod_yearly")),
+        ):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["status"], "past_due")
@@ -292,7 +319,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["userId"], "usr_1")
@@ -335,7 +362,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertIsNone(update)
@@ -364,7 +391,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertEqual(update["userId"], "usr_1")
@@ -398,7 +425,7 @@ class BillingWebhookTest(unittest.TestCase):
             },
         }
 
-        with patch.dict(os.environ, {"PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly"}, clear=True):
+        with patch("pullwise_server.system_config.config", return_value=creem_database_config(pro_product_ids=("prod_monthly",))):
             update = billing.billing_update_from_creem_event(event)
 
         self.assertIsNone(update)

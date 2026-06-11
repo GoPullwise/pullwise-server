@@ -9,7 +9,7 @@ from contextlib import closing
 from http import HTTPStatus
 from unittest.mock import patch
 
-from pullwise_server import app, db
+from pullwise_server import app, db, system_config
 
 
 class RouteHarness(app.PullwiseHandler):
@@ -94,6 +94,24 @@ def seed_user(user_id: str, session_id: str, *, installation_id: str = "111", re
     return f"pw_session={session_id}"
 
 
+def database_config(**overrides: object) -> dict:
+    config = system_config.default_config()
+    for path, value in overrides.items():
+        current = config
+        parts = path.split("__")
+        for part in parts[:-1]:
+            current = current[part]
+        current[parts[-1]] = value
+    return config
+
+
+def quota_config(*, free_limit: int = 5) -> dict:
+    return database_config(
+        plans__free__userReviewLimit=free_limit,
+        plans__free__repositoryReviewLimit=free_limit,
+    )
+
+
 class ScanQuotaRoutesTest(unittest.TestCase):
     def setUp(self) -> None:
         reset_state()
@@ -106,12 +124,14 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
-                "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
             },
             clear=True,
         )
         self.env.start()
         self.addCleanup(self.env.stop)
+        self.config_patcher = patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1))
+        self.config_patcher.start()
+        self.addCleanup(self.config_patcher.stop)
 
     def test_same_github_repo_id_shares_repository_quota_across_users(self) -> None:
         first_cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
@@ -132,13 +152,9 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(first.payload["billingUsage"]["resetAt"], first.payload["repoUsage"]["resetAt"])
 
     def test_same_installation_shares_user_quota_across_repos(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "user-quota.sqlite3"),
-                "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
-            },
-            clear=True,
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "user-quota.sqlite3")}, clear=True),
+            patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1)),
         ):
             first_cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
             second_cookie = seed_user("usr_b", "ses_b", installation_id="111", repo_id="456")
@@ -157,12 +173,9 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(second.status, HTTPStatus.CREATED)
 
     def test_default_user_quota_allows_five_distinct_repos_per_month(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "default-user-quota.sqlite3"),
-            },
-            clear=True,
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "default-user-quota.sqlite3")}, clear=True),
+            patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=5)),
         ):
             cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="100")
             github_access = app.USERS["usr_a"]["githubRepositoryAccess"]
@@ -205,13 +218,9 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(len(app.SCANS), 5)
 
     def test_scan_preflight_reports_user_quota_without_creating_scans(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "preflight-user-quota.sqlite3"),
-                "PULLWISE_FREE_USER_REVIEW_LIMIT": "3",
-            },
-            clear=True,
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "preflight-user-quota.sqlite3")}, clear=True),
+            patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=3)),
         ):
             cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="100")
             github_access = app.USERS["usr_a"]["githubRepositoryAccess"]
