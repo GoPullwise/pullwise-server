@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import threading
 import time
 from urllib.parse import urlparse
@@ -343,6 +344,23 @@ _CACHE: dict[str, object] = {"loaded_at": 0.0, "config": None}
 
 def default_config() -> dict:
     return copy.deepcopy(DEFAULT_CONFIG)
+
+
+def env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default)
+
+
+def env_int(names: str | list[str], default: int) -> int:
+    candidates = [names] if isinstance(names, str) else names
+    for name in candidates:
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            continue
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+    return default
 
 
 def metadata() -> list[dict]:
@@ -752,11 +770,35 @@ def list_setting(path: str) -> list[str]:
 
 
 def plan_user_review_limit(plan: object) -> int:
-    return max(0, int_setting(f"plans.{plan_id(plan)}.userReviewLimit"))
+    normalized = plan_id(plan)
+    configured = max(0, int_setting(f"plans.{normalized}.userReviewLimit"))
+    default = int(DEFAULT_CONFIG["plans"][normalized]["userReviewLimit"])
+    if configured != default:
+        return configured
+    env_value = env_int(
+        [
+            f"PULLWISE_{normalized.upper()}_USER_REVIEW_LIMIT",
+            f"PULLWISE_{normalized.upper()}_REVIEW_LIMIT",
+        ],
+        configured,
+    )
+    return max(0, env_value)
 
 
 def plan_repository_review_limit(plan: object) -> int:
-    return max(0, int_setting(f"plans.{plan_id(plan)}.repositoryReviewLimit"))
+    normalized = plan_id(plan)
+    configured = max(0, int_setting(f"plans.{normalized}.repositoryReviewLimit"))
+    default = int(DEFAULT_CONFIG["plans"][normalized]["repositoryReviewLimit"])
+    if configured != default:
+        return configured
+    env_value = env_int(
+        [
+            f"PULLWISE_{normalized.upper()}_REPO_REVIEW_LIMIT",
+            f"PULLWISE_{normalized.upper()}_REPOSITORY_REVIEW_LIMIT",
+        ],
+        configured,
+    )
+    return max(0, env_value)
 
 
 def repository_scan_limits() -> dict:

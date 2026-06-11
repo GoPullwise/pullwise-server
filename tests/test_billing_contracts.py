@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
-from pullwise_server import billing
+from pullwise_server import billing, system_config
 
 
 def creem_product(product_id: str, *, price: int, period: str, currency: str = "USD", name: str = "Pullwise Pro") -> dict:
@@ -33,7 +33,95 @@ def creem_product_get(*products: dict):
     return side_effect
 
 
+def database_config(**overrides: object) -> dict:
+    config = system_config.default_config()
+    for path, value in overrides.items():
+        current = config
+        parts = path.split("__")
+        for part in parts[:-1]:
+            current = current[part]
+        current[parts[-1]] = value
+    return config
+
+
 class BillingContractsTest(unittest.TestCase):
+    def test_legacy_creem_product_environment_does_not_enable_billing(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_PRODUCT_ID": "prod_legacy",
+                    "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_legacy_monthly,prod_legacy_yearly",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.system_config.config", return_value=database_config()),
+        ):
+            self.assertEqual(billing.selected_provider(), "disabled")
+
+    def test_public_plan_uses_database_catalog_and_ignores_legacy_billing_env(self) -> None:
+        config = database_config(
+            plans__free__userReviewLimit=6,
+            plans__pro__userReviewLimit=66,
+            billing__creemProProductIds=["prod_db_monthly", "prod_db_yearly"],
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_BILLING_PROVIDER": "creem",
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_PRODUCT_ID": "prod_legacy",
+                    "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_legacy_monthly,prod_legacy_yearly",
+                    "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
+                    "PULLWISE_PRO_USER_REVIEW_LIMIT": "2",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.system_config.config", return_value=config),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_db_monthly", price=2900, period="every-month", currency="USD"),
+                    creem_product("prod_db_yearly", price=29000, period="every-year", currency="USD"),
+                ),
+            ),
+        ):
+            plan = billing.public_plan()
+
+        self.assertEqual(plan["plans"][0]["reviewLimit"], 6)
+        self.assertEqual(plan["plans"][1]["reviewLimit"], 66)
+        self.assertEqual(plan["plans"][1]["prices"]["month"]["productId"], "prod_db_monthly")
+        self.assertEqual(plan["plans"][1]["prices"]["year"]["productId"], "prod_db_yearly")
+
+    def test_creem_request_settings_use_database_and_ignore_legacy_env(self) -> None:
+        config = database_config(
+            billing__billingTimeoutSeconds=22,
+            billing__creemApiBaseUrl="https://db-creem.test/v1",
+            billing__creemTestMode=False,
+            billing__creemUpgradeBehavior="proration-none",
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_BILLING_TIMEOUT_SECONDS": "1",
+                    "PULLWISE_CREEM_API_BASE_URL": "https://legacy-creem.test",
+                    "PULLWISE_CREEM_TEST_MODE": "true",
+                    "PULLWISE_CREEM_UPGRADE_BEHAVIOR": "proration-charge-immediately",
+                },
+                clear=True,
+            ),
+            patch("pullwise_server.system_config.config", return_value=config),
+        ):
+            self.assertEqual(billing.billing_timeout_seconds(), 22)
+            self.assertEqual(billing.creem_api_base_url(), "https://db-creem.test")
+            self.assertEqual(
+                billing.creem_subscription_update_behavior("pro", "month", "max", "month"),
+                "proration-none",
+            )
+
     def test_public_plan_exposes_free_and_pro_monthly_yearly_catalog(self) -> None:
         with patch.dict(
             os.environ,
@@ -473,6 +561,114 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(post.call_args.args[0], "https://test-api.creem.io/v1/subscriptions/sub_123/upgrade")
         self.assertEqual(post.call_args.kwargs["json"]["product_id"], "prod_yearly")
         self.assertEqual(post.call_args.kwargs["json"]["update_behavior"], "proration-charge-immediately")
+
+    def test_creem_change_from_canceling_subscription_resumes_before_upgrade(self) -> None:
+        resume_response = Mock()
+        resume_response.json.return_value = {"id": "sub_123", "status": "active", "cancel_at_period_end": False}
+        resume_response.raise_for_status.return_value = None
+        upgrade_response = Mock()
+        upgrade_response.json.return_value = {"id": "sub_123", "status": "active"}
+        upgrade_response.raise_for_status.return_value = None
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
+                    "PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID": "prod_yearly",
+                    "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+                },
+                clear=True,
+            ),
+            patch(
+                "pullwise_server.system_config.config",
+                return_value=database_config(
+                    billing__creemApiBaseUrl="https://test-api.creem.io",
+                    billing__creemProProductIds=["prod_monthly", "prod_yearly"],
+                ),
+            ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(
+                    creem_product("prod_monthly", price=2900, period="every-month"),
+                    creem_product("prod_yearly", price=29000, period="every-year"),
+                ),
+            ),
+            patch("pullwise_server.billing.requests.post", side_effect=[resume_response, upgrade_response]) as post,
+        ):
+            result = billing.change_subscription_interval(
+                {
+                    "id": "usr_1",
+                    "billing": {
+                        "provider": "creem",
+                        "customerId": "cust_123",
+                        "subscriptionId": "sub_123",
+                        "plan": "pro",
+                        "interval": "month",
+                        "status": "canceling",
+                        "cancelAtPeriodEnd": True,
+                    },
+                },
+                interval="year",
+                return_url="https://app.pullwise.dev/?screen=billing",
+            )
+
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["cancelAtPeriodEnd"], False)
+        self.assertEqual(post.call_args_list[0].args[0], "https://test-api.creem.io/v1/subscriptions/sub_123/resume")
+        self.assertEqual(post.call_args_list[1].args[0], "https://test-api.creem.io/v1/subscriptions/sub_123/upgrade")
+
+    def test_creem_resume_subscription_uses_resume_endpoint(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "id": "sub_123",
+            "status": "active",
+            "cancel_at_period_end": False,
+            "current_period_start_date": "2026-06-01T00:00:00.000Z",
+            "current_period_end_date": "2026-07-01T00:00:00.000Z",
+        }
+        response.raise_for_status.return_value = None
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                    "PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID": "prod_monthly",
+                    "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+                },
+                clear=True,
+            ),
+            patch(
+                "pullwise_server.system_config.config",
+                return_value=database_config(
+                    billing__creemApiBaseUrl="https://test-api.creem.io",
+                    billing__creemProProductIds=["prod_monthly"],
+                ),
+            ),
+            patch("pullwise_server.billing.requests.post", return_value=response) as post,
+        ):
+            result = billing.resume_subscription(
+                {
+                    "id": "usr_1",
+                    "billing": {
+                        "provider": "creem",
+                        "customerId": "cust_123",
+                        "subscriptionId": "sub_123",
+                        "plan": "pro",
+                        "interval": "month",
+                        "status": "canceling",
+                    },
+                },
+                return_url="https://app.pullwise.dev/?screen=billing",
+            )
+
+        self.assertEqual(result["provider"], "creem")
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["cancelAtPeriodEnd"], False)
+        self.assertIsNone(result["canceledAt"])
+        self.assertEqual(post.call_args.args[0], "https://test-api.creem.io/v1/subscriptions/sub_123/resume")
 
     def test_creem_update_behavior_allows_only_plan_and_interval_upgrades(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

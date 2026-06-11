@@ -677,13 +677,21 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.json(result)
             if result.get("provider") == "creem":
                 current_billing = user.get("billing") or {}
+                next_status = result.get("status") or current_billing.get("status") or "active"
+                restored_subscription = billing.normalize_subscription_status(next_status) in {"active", "trialing"}
                 user["billing"] = {
                     **current_billing,
                     "provider": "creem",
                     "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
-                    "status": result.get("status") or current_billing.get("status") or "active",
+                    "status": next_status,
                     "plan": billing.normalize_plan(result.get("plan") or current_billing.get("plan") or "pro"),
                     "interval": billing.normalize_interval(result.get("interval") or current_billing.get("interval")),
+                    "cancelAtPeriodEnd": result.get("cancelAtPeriodEnd")
+                    if isinstance(result.get("cancelAtPeriodEnd"), bool)
+                    else (False if restored_subscription else current_billing.get("cancelAtPeriodEnd")),
+                    "canceledAt": result.get("canceledAt")
+                    if "canceledAt" in result
+                    else (None if restored_subscription else current_billing.get("canceledAt")),
                     "currentPeriodStart": result.get("currentPeriodStart") or current_billing.get("currentPeriodStart"),
                     "currentPeriodEnd": result.get("currentPeriodEnd") or current_billing.get("currentPeriodEnd"),
                 }
@@ -715,6 +723,40 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     if isinstance(result.get("cancelAtPeriodEnd"), bool)
                     else current_billing.get("cancelAtPeriodEnd"),
                     "canceledAt": result.get("canceledAt") or current_billing.get("canceledAt"),
+                    "currentPeriodStart": result.get("currentPeriodStart") or current_billing.get("currentPeriodStart"),
+                    "currentPeriodEnd": result.get("currentPeriodEnd") or current_billing.get("currentPeriodEnd"),
+                }
+                mark_state_dirty()
+            return self.json(result)
+        if path == "/billing/resume-subscription":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before resuming your subscription.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            user = USERS[session["userId"]]
+            result = billing.resume_subscription(
+                user,
+                return_url=safe_redirect_to(body.get("returnUrl"), "billing"),
+            )
+            result = safe_billing_redirect_response(result, "subscription resume")
+            if result.get("provider") == "creem":
+                current_billing = user.get("billing") or {}
+                next_status = result.get("status") or current_billing.get("status") or "active"
+                restored_subscription = billing.normalize_subscription_status(next_status) in {"active", "trialing"}
+                user["billing"] = {
+                    **current_billing,
+                    "provider": "creem",
+                    "subscriptionId": result.get("subscriptionId") or current_billing.get("subscriptionId"),
+                    "status": next_status,
+                    "plan": billing.normalize_plan(result.get("plan") or current_billing.get("plan") or "pro"),
+                    "interval": billing.normalize_interval(result.get("interval") or current_billing.get("interval")),
+                    "cancelAtPeriodEnd": result.get("cancelAtPeriodEnd")
+                    if isinstance(result.get("cancelAtPeriodEnd"), bool)
+                    else (False if restored_subscription else current_billing.get("cancelAtPeriodEnd")),
+                    "canceledAt": result.get("canceledAt")
+                    if "canceledAt" in result
+                    else (None if restored_subscription else current_billing.get("canceledAt")),
                     "currentPeriodStart": result.get("currentPeriodStart") or current_billing.get("currentPeriodStart"),
                     "currentPeriodEnd": result.get("currentPeriodEnd") or current_billing.get("currentPeriodEnd"),
                 }
