@@ -379,6 +379,39 @@ class LauncherContractsTest(unittest.TestCase):
 
         self.assertEqual(0, result.returncode, result.stderr + result.stdout)
         self.assertIn("doctor checks passed", result.stdout)
+
+    def test_doctor_accepts_admin_managed_billing_catalog_without_product_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            env_file = Path(env["PULLWISE_SYSTEM_ENV_FILE"])
+            with env_file.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write("PULLWISE_CREEM_API_KEY=creem_123\n")
+                handle.write("PULLWISE_CREEM_WEBHOOK_SECRET=whsec_123\n")
+            self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
+
+            result = self.run_launcher(["doctor"], env)
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertNotIn("PULLWISE_CREEM_PRO_PRODUCT_IDS", result.stderr + result.stdout)
+
+    def test_doctor_accepts_admin_managed_scan_limits_without_scan_limit_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            env_file = Path(env["PULLWISE_SYSTEM_ENV_FILE"])
+            contents = "\n".join(
+                line
+                for line in env_file.read_text(encoding="utf-8").splitlines()
+                if not line.startswith("PULLWISE_MAX_RUNNING_SCANS_PER_USER=")
+            )
+            env_file.write_text(contents + "\n", encoding="utf-8", newline="\n")
+            self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
+
+            result = self.run_launcher(["doctor"], env)
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertNotIn("PULLWISE_MAX_RUNNING_SCANS_PER_USER", result.stderr + result.stdout)
         self.assertIn("Ubuntu 22.04", result.stdout)
 
     def test_doctor_rejects_missing_systemd_service_in_production(self) -> None:

@@ -1177,23 +1177,12 @@ check_github_config() {
 }
 
 check_scan_limits() {
-  user_limit=$(env_value PULLWISE_MAX_RUNNING_SCANS_PER_USER "$(env_value PULLWISE_MAX_CONCURRENT_SCANS_PER_USER "1")")
-  if is_positive_int "$user_limit"; then
-    ok "PULLWISE_MAX_RUNNING_SCANS_PER_USER=$user_limit"
-  else
-    fail "PULLWISE_MAX_RUNNING_SCANS_PER_USER must be a positive integer."
-  fi
+  ok "scan limits are managed by server system configuration"
 }
 
 check_billing_config() {
   creem=false
-  creem_pro_products=$(env_value PULLWISE_CREEM_PRO_PRODUCT_IDS "")
-  creem_max_products=$(env_value PULLWISE_CREEM_MAX_PRODUCT_IDS "")
-  creem_monthly=$(env_value PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID "$(env_value PULLWISE_CREEM_PRODUCT_ID "")")
-  creem_yearly=$(env_value PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID "$(env_value PULLWISE_CREEM_YEARLY_PRODUCT_ID "")")
-  creem_max_monthly=$(env_value PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID "")
-  creem_max_yearly=$(env_value PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID "")
-  if [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || [ -n "$creem_pro_products" ] || [ -n "$creem_max_products" ] || [ -n "$creem_monthly" ] || [ -n "$creem_yearly" ] || [ -n "$creem_max_monthly" ] || [ -n "$creem_max_yearly" ]; then
+  if [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || [ -n "$(env_value PULLWISE_CREEM_WEBHOOK_SECRET "")" ]; then
     creem=true
   fi
   provider=$(env_value PULLWISE_BILLING_PROVIDER "")
@@ -1222,20 +1211,8 @@ check_billing_config() {
 
   if [ "$validate_creem" = true ]; then
     [ -n "$(env_value PULLWISE_CREEM_API_KEY "")" ] || fail "PULLWISE_CREEM_API_KEY is required for Creem billing."
-    if [ -n "$creem_pro_products" ]; then
-      ok "PULLWISE_CREEM_PRO_PRODUCT_IDS is configured"
-    else
-      [ -n "$creem_monthly" ] || fail "Set PULLWISE_CREEM_PRO_PRODUCT_IDS or PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID."
-      [ -n "$creem_yearly" ] || fail "Set PULLWISE_CREEM_PRO_PRODUCT_IDS or PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID."
-    fi
-    if [ -n "$creem_max_products" ]; then
-      ok "PULLWISE_CREEM_MAX_PRODUCT_IDS is configured"
-    elif [ -n "$creem_max_monthly" ] || [ -n "$creem_max_yearly" ]; then
-      [ -n "$creem_max_monthly" ] || fail "Set PULLWISE_CREEM_MAX_PRODUCT_IDS or PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID."
-      [ -n "$creem_max_yearly" ] || fail "Set PULLWISE_CREEM_MAX_PRODUCT_IDS or PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID."
-    else
-      warn "PULLWISE_CREEM_MAX_PRODUCT_IDS is not configured; Max checkout will be unavailable"
-    fi
+    [ -n "$(env_value PULLWISE_CREEM_WEBHOOK_SECRET "")" ] || warn "PULLWISE_CREEM_WEBHOOK_SECRET is not configured; Creem webhooks will be rejected"
+    ok "Creem secrets are configured; product catalog is managed by server system configuration"
   fi
 }
 
