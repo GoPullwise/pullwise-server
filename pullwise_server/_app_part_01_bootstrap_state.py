@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import secrets
+import subprocess
 import threading
 import time
 import urllib.error
@@ -41,6 +42,38 @@ def web_root() -> str:
         return os.path.abspath(custom)
     # Default: ../pullwise-web/dist relative to this file
     return os.path.join(os.path.dirname(project_root()), "pullwise-web", "dist")
+
+
+def start_server_restart_process() -> dict:
+    workdir = project_root()
+    launcher = os.path.join(workdir, "launcher.sh")
+    if not os.path.isfile(launcher):
+        raise FileNotFoundError("launcher.sh not found.")
+
+    popen_kwargs = {
+        "cwd": workdir,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(["bash", "launcher.sh", "restart"], **popen_kwargs)
+    return {
+        "ok": True,
+        "message": "Pullwise server restart started.",
+        "command": "bash launcher.sh restart",
+        "cwd": workdir,
+        "pid": process.pid,
+        "startedAt": now(),
+    }
 
 
 def load_env_file(path: str | None = None) -> None:

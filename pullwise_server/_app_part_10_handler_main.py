@@ -1921,6 +1921,21 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if not isinstance(body, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if segments == ["admin", "server", "restart"]:
+            try:
+                payload = start_server_restart_process()
+            except FileNotFoundError:
+                logger.exception("Admin server restart requested, but launcher.sh was not found.")
+                return self.error(HTTPStatus.NOT_IMPLEMENTED, "Server restart launcher is not available.")
+            except OSError:
+                logger.exception("Failed to start Pullwise server restart process.")
+                return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to start server restart.")
+            logger.warning(
+                "Admin requested Pullwise server restart user_id=%s pid=%s",
+                session.get("userId"),
+                payload.get("pid"),
+            )
+            return self.json(payload, HTTPStatus.ACCEPTED)
         if segments == ["admin", "review-calibration", "labels"]:
             try:
                 payload = record_admin_manual_review_outcome(body, reviewer_id=session["userId"])
