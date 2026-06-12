@@ -407,6 +407,12 @@ fi
 if [ -z "$PROVIDER_CHAIN" ]; then
   PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-$PROVIDER}"
 fi
+OPENCODE_MODEL="${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"
+OPENCODE_AUTH_PROVIDER="${OPENCODE_MODEL%%/*}"
+if [ -z "$OPENCODE_AUTH_PROVIDER" ]; then
+  OPENCODE_AUTH_PROVIDER="opencode"
+fi
+SERVICE_TOOL_PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin"
 
 case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
 case "$(uname -m)" in x86_64|aarch64|arm64) ;; *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;; esac
@@ -419,9 +425,9 @@ fi
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
 run_as_service_user() {
   if command -v runuser >/dev/null 2>&1; then
-    runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin" "$@"
+    runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" PATH="$SERVICE_TOOL_PATH" "$@"
   elif command -v sudo >/dev/null 2>&1; then
-    sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin" "$@"
+    sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" PATH="$SERVICE_TOOL_PATH" "$@"
   else
     echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
     return 127
@@ -501,7 +507,7 @@ write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
 write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
 write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
 write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"
-write_env_value PULLWISE_OPENCODE_MODEL "${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"
+write_env_value PULLWISE_OPENCODE_MODEL "$OPENCODE_MODEL"
 write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
@@ -583,9 +589,14 @@ echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
 echo "Worker home: $DATA_DIR"
 echo "Manual authorization remains required:"
-echo "  Codex device login: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin $CODEX_COMMAND login --device-auth"
-echo "  OpenCode API/provider credentials: launch opencode then run /connect:"
-echo "    sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.opencode/bin $OPENCODE_COMMAND"
+echo "  Codex device login: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $CODEX_COMMAND login --device-auth"
+echo "  OpenCode API/provider credentials:"
+echo "  OpenCode current model provider: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider $OPENCODE_AUTH_PROVIDER"
+echo "  OpenCode DeepSeek example (PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider deepseek"
+echo "  OpenCode MiniMax example (PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider minimax"
+echo "  OpenCode generic template: set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider <provider>"
+echo "  OpenCode interactive provider selection: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login"
+echo "  OpenCode auth status: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth list"
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())

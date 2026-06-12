@@ -1869,7 +1869,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(scan_system_status_payload(admin=True))
         if segments == ["admin", "server-metrics"]:
             storage_path = env("PULLWISE_SERVER_METRICS_STORAGE_PATH", "") or os.path.dirname(db.database_path()) or project_root()
-            return self.json(system_metrics.server_metrics_payload(storage_path=storage_path, timestamp=now()))
+            metrics = system_metrics.server_metrics_payload(storage_path=storage_path, timestamp=now())
+            history = system_metrics.server_metrics_history(
+                db.load_state_item(system_metrics.SERVER_METRICS_HISTORY_STATE_KEY),
+                metrics,
+            )
+            db.save_state_item(system_metrics.SERVER_METRICS_HISTORY_STATE_KEY, history)
+            metrics["history"] = history
+            metrics["historyMeta"] = {
+                "limit": system_metrics.SERVER_METRICS_HISTORY_LIMIT,
+                "minIntervalSeconds": system_metrics.SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS,
+            }
+            return self.json(metrics)
         if segments == ["admin", "users"]:
             return self.json(admin_users_payload(current_user_id=session["userId"]))
         if segments == ["admin", "system-config"]:

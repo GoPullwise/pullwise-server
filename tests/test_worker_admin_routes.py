@@ -139,7 +139,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         expected = {
             "ok": True,
             "collectedAt": 1781200000,
-            "cpu": {"usagePercent": 42.5, "logicalCount": 8, "loadAverage": None},
+            "cpu": {"logicalCount": 8, "loadAverage": None},
             "memory": {"totalBytes": 8589934592, "availableBytes": 4294967296, "usedBytes": 4294967296, "usedPercent": 50.0},
             "storage": {"totalBytes": 107374182400, "freeBytes": 64424509440, "usedBytes": 42949672960, "usedPercent": 40.0},
             "server": {"hostname": "api-1"},
@@ -152,7 +152,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload, expected)
+        self.assertEqual(handler.payload["collectedAt"], expected["collectedAt"])
+        self.assertEqual(handler.payload["cpu"], expected["cpu"])
+        self.assertEqual(handler.payload["memory"], expected["memory"])
+        self.assertEqual(handler.payload["storage"], expected["storage"])
+        self.assertEqual(handler.payload["server"], expected["server"])
+        self.assertEqual(handler.payload["history"][0]["collectedAt"], expected["collectedAt"])
+        self.assertEqual(handler.payload["history"][0]["memory"]["usedPercent"], 50.0)
+        self.assertEqual(handler.payload["history"][0]["storage"]["usedPercent"], 40.0)
+        self.assertNotIn("usagePercent", json.dumps(handler.payload))
         self.assertEqual(collect.call_args.kwargs["timestamp"], 1781200000)
         self.assertEqual(collect.call_args.kwargs["storage_path"], os.path.dirname(db.database_path()))
 
@@ -375,7 +383,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("Codex device login:", install.text_payload)
         self.assertIn("login --device-auth", install.text_payload)
         self.assertIn("OpenCode API/provider credentials", install.text_payload)
-        self.assertIn("opencode then run /connect", install.text_payload)
+        self.assertIn("OPENCODE_AUTH_PROVIDER", install.text_payload)
+        self.assertIn("auth login --provider $OPENCODE_AUTH_PROVIDER", install.text_payload)
+        self.assertIn("PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro", install.text_payload)
+        self.assertIn("auth login --provider deepseek", install.text_payload)
+        self.assertIn("PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3", install.text_payload)
+        self.assertIn("auth login --provider minimax", install.text_payload)
+        self.assertIn("OpenCode generic template", install.text_payload)
+        self.assertIn("OpenCode interactive provider selection", install.text_payload)
+        self.assertIn("auth list", install.text_payload)
         self.assertNotIn("pullwise-worker==0.1.0", install.text_payload)
         self.assertIn("PULLWISE_PROVIDER_CHAIN", install.text_payload)
         self.assertIn("PULLWISE_CODEX_MODEL", install.text_payload)
@@ -386,7 +402,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             install.text_payload,
         )
         self.assertIn(
-            'write_env_value PULLWISE_OPENCODE_MODEL "${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"',
+            'write_env_value PULLWISE_OPENCODE_MODEL "$OPENCODE_MODEL"',
             install.text_payload,
         )
         self.assertIn('write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"', install.text_payload)

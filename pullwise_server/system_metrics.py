@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import platform
 import shutil
@@ -9,8 +10,9 @@ from typing import Any
 
 
 _PROC_MEMINFO_PATH = "/proc/meminfo"
-_PROC_STAT_PATH = "/proc/stat"
-_CPU_SAMPLE_INTERVAL_SECONDS = 0.05
+SERVER_METRICS_HISTORY_STATE_KEY = "server_metrics_history"
+SERVER_METRICS_HISTORY_LIMIT = 180
+SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS = 10
 
 
 def _percent(numerator: int | float | None, denominator: int | float | None) -> float | None:
@@ -91,43 +93,6 @@ def memory_payload() -> dict[str, Any]:
     }
 
 
-def _read_proc_cpu_times() -> tuple[int, int] | None:
-    try:
-        with open(_PROC_STAT_PATH, "r", encoding="utf-8") as stat_file:
-            first = stat_file.readline()
-    except OSError:
-        return None
-
-    parts = first.split()
-    if not parts or parts[0] != "cpu":
-        return None
-    try:
-        values = [int(part) for part in parts[1:]]
-    except ValueError:
-        return None
-    if len(values) < 4:
-        return None
-    idle = values[3] + (values[4] if len(values) > 4 else 0)
-    total = sum(values)
-    return idle, total
-
-
-def cpu_usage_percent(sample_interval_seconds: float = _CPU_SAMPLE_INTERVAL_SECONDS) -> float | None:
-    first = _read_proc_cpu_times()
-    if not first:
-        return None
-    time.sleep(max(0.0, sample_interval_seconds))
-    second = _read_proc_cpu_times()
-    if not second:
-        return None
-
-    idle_delta = second[0] - first[0]
-    total_delta = second[1] - first[1]
-    if total_delta <= 0:
-        return None
-    return round(max(0.0, min(100.0, 100.0 * (1.0 - (idle_delta / total_delta)))), 1)
-
-
 def load_average_payload() -> dict[str, float] | None:
     try:
         one, five, fifteen = os.getloadavg()
@@ -142,10 +107,8 @@ def load_average_payload() -> dict[str, float] | None:
 
 def cpu_payload() -> dict[str, Any]:
     return {
-        "usagePercent": cpu_usage_percent(),
         "logicalCount": os.cpu_count(),
         "loadAverage": load_average_payload(),
-        "sampleIntervalSeconds": _CPU_SAMPLE_INTERVAL_SECONDS,
     }
 
 
@@ -202,3 +165,70 @@ def server_metrics_payload(*, storage_path: str, timestamp: int | None = None) -
         "memory": memory_payload(),
         "storage": storage_payload(storage_path),
     }
+
+
+def _number_or_none(value: object) -> int | float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return None
+
+
+def _compact_resource_payload(resource: object, keys: tuple[str, ...]) -> dict[str, int | float | None]:
+    if not isinstance(resource, dict):
+        return {key: None for key in keys}
+    return {key: _number_or_none(resource.get(key)) for key in keys}
+
+
+def server_metrics_history_sample(payload: dict[str, Any]) -> dict[str, Any]:
+    cpu = payload.get("cpu") if isinstance(payload.get("cpu"), dict) else {}
+    load_average = cpu.get("loadAverage") if isinstance(cpu.get("loadAverage"), dict) else None
+    return {
+        "collectedAt": int(_number_or_none(payload.get("collectedAt")) or time.time()),
+        "cpu": {
+            "logicalCount": _number_or_none(cpu.get("logicalCount")),
+            "loadAverage": _compact_resource_payload(
+                load_average,
+                ("oneMinute", "fiveMinute", "fifteenMinute"),
+            )
+            if load_average is not None
+            else None,
+        },
+        "memory": _compact_resource_payload(
+            payload.get("memory"),
+            ("totalBytes", "availableBytes", "usedBytes", "usedPercent"),
+        ),
+        "storage": _compact_resource_payload(
+            payload.get("storage"),
+            ("totalBytes", "freeBytes", "usedBytes", "usedPercent"),
+        ),
+    }
+
+
+def server_metrics_history(
+    existing_history: object,
+    current_payload: dict[str, Any],
+    *,
+    limit: int = SERVER_METRICS_HISTORY_LIMIT,
+    min_interval_seconds: int = SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS,
+) -> list[dict[str, Any]]:
+    history = [item for item in existing_history if isinstance(item, dict)] if isinstance(existing_history, list) else []
+    sample = server_metrics_history_sample(current_payload)
+    sample_timestamp = int(sample["collectedAt"])
+    clean_history = [
+        item
+        for item in history
+        if isinstance(_number_or_none(item.get("collectedAt")), int | float)
+        and int(item.get("collectedAt")) <= sample_timestamp
+    ]
+
+    if clean_history and sample_timestamp - int(clean_history[-1].get("collectedAt", 0)) < max(0, min_interval_seconds):
+        clean_history[-1] = sample
+    else:
+        clean_history.append(sample)
+
+    clean_limit = max(1, min(1000, int(limit or SERVER_METRICS_HISTORY_LIMIT)))
+    return clean_history[-clean_limit:]
