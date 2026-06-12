@@ -188,6 +188,10 @@ class WorkerReleaseDispatchError(RuntimeError):
     pass
 
 
+class WorkerReleaseFetchError(RuntimeError):
+    pass
+
+
 def normalize_worker_release_version(value: object) -> str:
     version = public_issue_text(value)
     if version.startswith("v"):
@@ -199,7 +203,7 @@ def configured_worker_release_version() -> str:
     return normalize_worker_release_version(system_config.worker_default_version()) or DEFAULT_WORKER_PACKAGE_VERSION
 
 
-def fetch_latest_worker_release_version() -> str:
+def fetch_latest_worker_release_version(*, strict_list: bool = False) -> str:
     api_url = system_config.worker_release_api_url().strip() or DEFAULT_WORKER_RELEASES_API_URL
     if not api_url:
         return ""
@@ -209,7 +213,9 @@ def fetch_latest_worker_release_version() -> str:
     if list_url:
         try:
             list_version = worker_release_version_from_payload(fetch_worker_release_api_payload(list_url))
-        except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+        except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError, WorkerReleaseFetchError):
+            if strict_list:
+                raise
             list_version = ""
         if list_version and (
             not latest_version
@@ -221,10 +227,23 @@ def fetch_latest_worker_release_version() -> str:
 
 def fetch_worker_release_api_payload(api_url: str) -> object:
     token = worker_release_github_token()
-    headers = github_auth.github_api_headers(token) if token else {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "Pullwise",
-    }
+    headers = github_auth.github_api_headers(token) if token else github_auth.github_api_headers()
+    try:
+        return fetch_worker_release_api_payload_with_headers(api_url, headers)
+    except urllib.error.HTTPError as exc:
+        if not token or exc.code not in {401, 403, 404}:
+            raise WorkerReleaseFetchError(worker_release_http_error_message(exc)) from exc
+        try:
+            return fetch_worker_release_api_payload_with_headers(api_url, github_auth.github_api_headers())
+        except urllib.error.HTTPError as fallback_exc:
+            message = (
+                f"{worker_release_http_error_message(exc)} "
+                f"Unauthenticated fallback also failed: {worker_release_http_error_message(fallback_exc)}"
+            )
+            raise WorkerReleaseFetchError(message) from fallback_exc
+
+
+def fetch_worker_release_api_payload_with_headers(api_url: str, headers: dict[str, str]) -> object:
     request = urllib.request.Request(
         api_url,
         headers=headers,
@@ -272,8 +291,10 @@ def github_latest_worker_release_version(*, force: bool = False) -> str:
         return cached_version
 
     try:
-        latest = fetch_latest_worker_release_version()
-    except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+        latest = fetch_latest_worker_release_version(strict_list=force)
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError, WorkerReleaseFetchError):
+        if force:
+            raise
         latest = ""
     if latest:
         LATEST_WORKER_RELEASE_CACHE.update({"version": latest, "checked_at": current_time})
@@ -290,7 +311,12 @@ def latest_worker_release_version(*, force: bool = False) -> str:
 
 def worker_defaults_payload(*, force_refresh: bool = False) -> dict:
     configured_version = normalize_worker_release_version(system_config.worker_default_version())
-    latest_version = github_latest_worker_release_version(force=force_refresh)
+    release_error = ""
+    try:
+        latest_version = github_latest_worker_release_version(force=force_refresh)
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError, WorkerReleaseFetchError) as exc:
+        latest_version = ""
+        release_error = str(exc)
     version = configured_version or latest_version or configured_worker_release_version()
     package = worker_release_package(version)
     latest_package = worker_release_package(latest_version) if latest_version else ""
@@ -309,6 +335,7 @@ def worker_defaults_payload(*, force_refresh: bool = False) -> dict:
             "latestVersion": latest_version,
             "latestPackage": latest_package,
             "cacheSeconds": system_config.worker_release_cache_seconds(),
+            "error": release_error,
         },
     }
 
