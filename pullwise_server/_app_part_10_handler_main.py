@@ -1893,7 +1893,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, "scope_key or user/repo/branch parameters are required.")
             return self.json(review_calibration_admin_payload(scope_key))
         if segments == ["admin", "workers", "defaults"]:
-            return self.json(worker_defaults_payload())
+            force_refresh = public_issue_text(params.get("refresh") or params.get("force")).lower() in {"1", "true", "yes", "on"}
+            return self.json(worker_defaults_payload(force_refresh=force_refresh))
         if segments == ["admin", "workers"]:
             workers = [worker_public_payload(worker, admin=True) for worker in db.list_workers()]
             return self.json({"items": workers, "workers": workers})

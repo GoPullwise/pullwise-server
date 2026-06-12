@@ -19,6 +19,21 @@ class CheckoutContractsTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "host"):
                 checkout.clone_url_for("owner/repo", "https://evil.example/owner/repo.git")
 
+    def test_clone_url_rejects_plaintext_github_transport(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "HTTPS"):
+                checkout.clone_url_for("owner/repo", "http://github.com/owner/repo.git")
+
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "http://github.com"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "HTTPS"):
+                checkout.clone_url_for("owner/repo")
+
+        with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "http://localhost:3000"}, clear=False):
+            self.assertEqual(
+                checkout.clone_url_for("owner/repo", "http://localhost:3000/owner/repo.git"),
+                "http://localhost:3000/owner/repo.git",
+            )
+
     def test_clone_url_must_match_authorized_repository_path(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             with self.assertRaisesRegex(RuntimeError, "repository"):

@@ -323,7 +323,11 @@ def trusted_github_web_url(value: object) -> str | None:
         return None
     parsed = urlparse(raw)
     allowed = urlparse(github_auth.github_web_url())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if not github_auth.github_web_url_transport_allowed(allowed):
+        return None
+    if not github_auth.github_web_url_transport_allowed(parsed):
+        return None
+    if parsed.scheme != allowed.scheme:
         return None
     if allowed.netloc and parsed.netloc.lower() != allowed.netloc.lower():
         return None

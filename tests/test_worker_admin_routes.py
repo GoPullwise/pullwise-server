@@ -510,6 +510,59 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["workerVersion"], "0.2.3")
         self.assertEqual(handler.payload["workerPackage"], expected_package)
+        self.assertEqual(handler.payload["latestWorkerVersion"], "0.2.3")
+        self.assertEqual(handler.payload["release"]["latestVersion"], "0.2.3")
+
+    def test_admin_worker_defaults_refresh_bypasses_cached_latest_release(self) -> None:
+        class ReleaseResponse:
+            def __enter__(self) -> "ReleaseResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps({"tag_name": "v0.5.5"}).encode("utf-8")
+
+        app.LATEST_WORKER_RELEASE_CACHE.update({"version": "0.5.4", "checked_at": app.now()})
+        cached = RouteHarness("/admin/workers/defaults", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(cached, "GET")
+
+        with patch("urllib.request.urlopen", return_value=ReleaseResponse()) as urlopen:
+            refreshed = RouteHarness("/admin/workers/defaults?refresh=1", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(refreshed, "GET")
+
+        self.assertEqual(cached.status, HTTPStatus.OK)
+        self.assertEqual(cached.payload["latestWorkerVersion"], "0.5.4")
+        self.assertEqual(refreshed.status, HTTPStatus.OK)
+        self.assertEqual(refreshed.payload["latestWorkerVersion"], "0.5.5")
+        self.assertEqual(refreshed.payload["workerVersion"], "0.5.5")
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_admin_worker_defaults_exposes_latest_release_when_default_version_is_pinned(self) -> None:
+        class ReleaseResponse:
+            def __enter__(self) -> "ReleaseResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps({"tag_name": "v0.5.5"}).encode("utf-8")
+
+        with (
+            patch.object(app.system_config, "worker_default_version", return_value="0.5.4"),
+            patch("urllib.request.urlopen", return_value=ReleaseResponse()),
+        ):
+            handler = RouteHarness("/admin/workers/defaults?refresh=1", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["workerVersion"], "0.5.4")
+        self.assertEqual(handler.payload["configuredWorkerVersion"], "0.5.4")
+        self.assertEqual(handler.payload["defaults"]["source"], "configured")
+        self.assertEqual(handler.payload["latestWorkerVersion"], "0.5.5")
+        self.assertEqual(handler.payload["release"]["latestVersion"], "0.5.5")
 
     def test_admin_can_dispatch_worker_release_workflow(self) -> None:
         captured: dict[str, object] = {}

@@ -524,7 +524,13 @@ def create_checkout_session(
     plan, interval = validate_checkout_selection(plan, interval)
     provider = selected_provider()
     if provider == "creem":
-        return create_creem_checkout_session(user, success_url=success_url or default_success_url(), plan=plan, interval=interval)
+        return create_creem_checkout_session(
+            user,
+            success_url=success_url or default_success_url(),
+            cancel_url=cancel_url or default_cancel_url(),
+            plan=plan,
+            interval=interval,
+        )
     raise BillingConfigurationError("Billing is not configured.")
 
 
@@ -538,8 +544,9 @@ def validate_checkout_selection(plan: str, interval: str) -> tuple[str, str]:
     return normalized_plan, normalized_interval
 
 
-def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, interval: str) -> dict:
+def create_creem_checkout_session(user: dict, *, success_url: str, cancel_url: str, plan: str, interval: str) -> dict:
     success_url = request_redirect_url(success_url, default_success_url(), "success")
+    cancel_url = request_redirect_url(cancel_url, default_cancel_url(), "cancel")
     product_id = creem_product_id(interval, plan=plan)
     if not product_id:
         raise BillingConfigurationError(f"Creem {plan.title()} {interval} product is not configured.")
@@ -555,6 +562,7 @@ def create_creem_checkout_session(user: dict, *, success_url: str, plan: str, in
         "request_id": request_id,
         "units": 1,
         "success_url": success_url,
+        "cancel_url": cancel_url,
         "metadata": {
             "userId": user["id"],
             "plan": plan,

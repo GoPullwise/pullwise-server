@@ -559,6 +559,14 @@ class GitHubAuthContractsTest(unittest.TestCase):
                     "clone_url": "https://evil.example/octocat/UnsafeHost.git",
                     "permissions": {"pull": True},
                 },
+                {
+                    "id": 1296271,
+                    "name": "PlaintextTransport",
+                    "full_name": "octocat/PlaintextTransport",
+                    "html_url": "http://github.com/octocat/PlaintextTransport",
+                    "clone_url": "http://github.com/octocat/PlaintextTransport.git",
+                    "permissions": {"pull": True},
+                },
             ]
         }
         response.links = {}
@@ -570,8 +578,8 @@ class GitHubAuthContractsTest(unittest.TestCase):
         ):
             repositories = github_auth.list_installation_repositories("123")
 
-        self.assertEqual([repo["htmlUrl"] for repo in repositories], [None, None])
-        self.assertEqual([repo["cloneUrl"] for repo in repositories], [None, None])
+        self.assertEqual([repo["htmlUrl"] for repo in repositories], [None, None, None])
+        self.assertEqual([repo["cloneUrl"] for repo in repositories], [None, None, None])
 
     def test_list_installation_repositories_sanitizes_malformed_repository_text_fields(self) -> None:
         response = Mock()

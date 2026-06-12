@@ -325,6 +325,8 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["headers"]["x-api-key"], "creem_123")
         json_payload = post.call_args.kwargs["json"]
         self.assertEqual(json_payload["product_id"], "prod_123")
+        self.assertEqual(json_payload["success_url"], "https://app.pullwise.dev/?billing=success")
+        self.assertEqual(json_payload["cancel_url"], "https://app.pullwise.dev/?billing=cancel")
         self.assertEqual(json_payload["customer"]["email"], "dev@example.com")
         self.assertNotIn("id", json_payload["customer"])
         self.assertEqual(json_payload["metadata"]["userId"], "usr_1")
@@ -552,6 +554,28 @@ class BillingContractsTest(unittest.TestCase):
             self.assertRaisesRegex(billing.BillingConfigurationError, "absolute HTTP"),
         ):
             billing.create_checkout_session(user, success_url="javascript:alert(1)")
+        post.assert_not_called()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_CREEM_API_KEY": "creem_123",
+                },
+                clear=True,
+            ),
+            patch(
+                "pullwise_server.system_config.config",
+                return_value=creem_database_config(pro_product_ids=("prod_123",)),
+            ),
+            patch("pullwise_server.billing.requests.post", return_value=response) as post,
+            self.assertRaisesRegex(billing.BillingConfigurationError, "absolute HTTP"),
+        ):
+            billing.create_checkout_session(
+                user,
+                success_url="https://app.pullwise.dev/?billing=success",
+                cancel_url="javascript:alert(1)",
+            )
         post.assert_not_called()
 
     def test_creem_monthly_to_yearly_change_uses_upgrade_endpoint(self) -> None:

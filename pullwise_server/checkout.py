@@ -507,8 +507,12 @@ def clone_url_for(repo: str, configured_url: object | None = None) -> str:
             raise RuntimeError("Repository clone URL must be an HTTP(S) URL.")
     parsed = urlparse(clone_url)
     allowed = urlparse(github_auth.github_web_url())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise RuntimeError("Repository clone URL must be an HTTP(S) URL.")
+    if not github_clone_url_transport_allowed(allowed):
+        raise RuntimeError("Configured GitHub web URL must use HTTPS unless it is loopback HTTP.")
+    if not github_clone_url_transport_allowed(parsed) or not parsed.netloc:
+        raise RuntimeError("Repository clone URL must use HTTPS unless it is loopback HTTP.")
+    if parsed.scheme != allowed.scheme:
+        raise RuntimeError("Repository clone URL scheme does not match configured GitHub host.")
     if allowed.netloc and parsed.netloc.lower() != allowed.netloc.lower():
         raise RuntimeError("Repository clone URL host does not match configured GitHub host.")
     clone_path = parsed.path.rstrip("/")
@@ -517,6 +521,19 @@ def clone_url_for(repo: str, configured_url: object | None = None) -> str:
     if clone_path.lower() != f"/{repo.lower()}":
         raise RuntimeError("Repository clone URL path does not match requested repository.")
     return clone_url
+
+
+def github_clone_url_transport_allowed(parsed) -> bool:
+    if parsed.scheme == "https" and parsed.netloc:
+        return True
+    if parsed.scheme == "http" and parsed.netloc and is_loopback_host(parsed.hostname or ""):
+        return True
+    return False
+
+
+def is_loopback_host(hostname: str) -> bool:
+    normalized = hostname.lower().strip("[]")
+    return normalized in {"localhost", "127.0.0.1", "::1"}
 
 
 def validate_repo_full_name(repo: str) -> str:

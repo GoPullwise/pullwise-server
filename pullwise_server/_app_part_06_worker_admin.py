@@ -218,16 +218,12 @@ def fetch_latest_worker_release_version() -> str:
     return normalize_worker_release_version(payload.get("tag_name") or payload.get("name"))
 
 
-def latest_worker_release_version() -> str:
-    configured = normalize_worker_release_version(system_config.worker_default_version())
-    if configured:
-        return configured
-
+def github_latest_worker_release_version(*, force: bool = False) -> str:
     ttl = system_config.worker_release_cache_seconds()
     current_time = now()
     cached_version = public_issue_text(LATEST_WORKER_RELEASE_CACHE.get("version"))
     checked_at = float(LATEST_WORKER_RELEASE_CACHE.get("checked_at") or 0)
-    if cached_version and ttl and checked_at > current_time - ttl:
+    if not force and cached_version and ttl and checked_at > current_time - ttl:
         return cached_version
 
     try:
@@ -237,18 +233,37 @@ def latest_worker_release_version() -> str:
     if latest:
         LATEST_WORKER_RELEASE_CACHE.update({"version": latest, "checked_at": current_time})
         return latest
-    return configured_worker_release_version()
+    return cached_version or ""
 
 
-def worker_defaults_payload() -> dict:
-    version = latest_worker_release_version()
+def latest_worker_release_version(*, force: bool = False) -> str:
+    configured = normalize_worker_release_version(system_config.worker_default_version())
+    if configured:
+        return configured
+    return github_latest_worker_release_version(force=force) or configured_worker_release_version()
+
+
+def worker_defaults_payload(*, force_refresh: bool = False) -> dict:
+    configured_version = normalize_worker_release_version(system_config.worker_default_version())
+    latest_version = github_latest_worker_release_version(force=force_refresh)
+    version = configured_version or latest_version or configured_worker_release_version()
     package = worker_release_package(version)
+    latest_package = worker_release_package(latest_version) if latest_version else ""
     return {
         "workerVersion": version,
         "workerPackage": package,
+        "latestWorkerVersion": latest_version,
+        "latestWorkerPackage": latest_package,
+        "configuredWorkerVersion": configured_version,
         "defaults": {
             "version": version,
             "package": package,
+            "source": "configured" if configured_version else "latest" if latest_version else "fallback",
+        },
+        "release": {
+            "latestVersion": latest_version,
+            "latestPackage": latest_package,
+            "cacheSeconds": system_config.worker_release_cache_seconds(),
         },
     }
 
