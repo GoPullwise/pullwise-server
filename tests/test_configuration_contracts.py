@@ -165,6 +165,51 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("privateKey", serialized)
         self.assertNotIn("token", serialized.lower())
 
+    def test_repository_checkout_limits_are_configured_per_subscription_plan(self) -> None:
+        config = app.system_config.default_config()
+
+        self.assertEqual(config["plans"]["free"]["maxRepoFiles"], 200)
+        self.assertEqual(config["plans"]["free"]["maxRepoBytes"], 5 * 1024 * 1024)
+        self.assertEqual(config["plans"]["pro"]["maxRepoFiles"], 1000)
+        self.assertEqual(config["plans"]["pro"]["maxRepoBytes"], 20 * 1024 * 1024)
+        self.assertEqual(config["plans"]["max"]["maxRepoFiles"], 2000)
+        self.assertEqual(config["plans"]["max"]["maxRepoBytes"], 50 * 1024 * 1024)
+
+        groups = app.system_config.public_docs_groups(config, pro_products=[], max_products=[])
+        plan_fields = {
+            field["path"]: field["value"]
+            for group in groups
+            if group["id"] == "plans"
+            for field in group["fields"]
+        }
+        scan_fields = {
+            field["path"]
+            for group in groups
+            if group["id"] == "scan"
+            for field in group["fields"]
+        }
+
+        self.assertEqual(plan_fields["plans.free.maxRepoFiles"], 200)
+        self.assertEqual(plan_fields["plans.pro.maxRepoBytes"], 20 * 1024 * 1024)
+        self.assertEqual(plan_fields["plans.max.maxRepoBytes"], 50 * 1024 * 1024)
+        self.assertNotIn("scan.maxRepoFiles", scan_fields)
+        self.assertNotIn("scan.maxRepoBytes", scan_fields)
+
+    def test_legacy_global_repository_checkout_limits_migrate_to_plan_limits(self) -> None:
+        legacy = app.system_config.default_config()
+        for plan in app.system_config.PLAN_IDS:
+            legacy["plans"][plan].pop("maxRepoFiles", None)
+            legacy["plans"][plan].pop("maxRepoBytes", None)
+        legacy["scan"]["maxRepoFiles"] = 345
+        legacy["scan"]["maxRepoBytes"] = 6 * 1024 * 1024
+
+        normalized = app.system_config.normalize_config(legacy)
+
+        for plan in app.system_config.PLAN_IDS:
+            with self.subTest(plan=plan):
+                self.assertEqual(normalized["plans"][plan]["maxRepoFiles"], 345)
+                self.assertEqual(normalized["plans"][plan]["maxRepoBytes"], 6 * 1024 * 1024)
+
     def test_settings_default_review_output_language_is_english(self) -> None:
         previous_users = app.USERS
         previous_settings = app.SETTINGS

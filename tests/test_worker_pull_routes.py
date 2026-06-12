@@ -3988,7 +3988,16 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(claim.status, HTTPStatus.OK)
         configs = {job["agentConfig"]["plan"]: job["agentConfig"] for job in claim.payload["jobs"]}
+        repository_limits = {job["agentConfig"]["plan"]: job["repositoryLimits"] for job in claim.payload["jobs"]}
         self.assertEqual(set(configs), {"free", "pro", "max"})
+        self.assertEqual(
+            repository_limits,
+            {
+                "free": {"maxFiles": 200, "maxBytes": 5 * 1024 * 1024, "source": "database"},
+                "pro": {"maxFiles": 1000, "maxBytes": 20 * 1024 * 1024, "source": "database"},
+                "max": {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024, "source": "database"},
+            },
+        )
         for plan, effort in (("free", "medium"), ("pro", "medium"), ("max", "xhigh")):
             with self.subTest(plan=plan):
                 codex = configs[plan]["codex"]
