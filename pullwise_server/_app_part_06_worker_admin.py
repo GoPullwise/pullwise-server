@@ -310,7 +310,7 @@ def worker_create_payload(worker: dict) -> dict:
             "PULLWISE_WORKER_ID": public["worker_id"],
             "PULLWISE_WORKER_TOKEN": token,
             "PULLWISE_PROVIDER": public["provider"],
-            "PULLWISE_PROVIDER_CHAIN": public["provider"],
+            "PULLWISE_PROVIDER_CHAIN": "codex,opencode",
             "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
             "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
             "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
@@ -386,7 +386,7 @@ while [ "$#" -gt 0 ]; do
     --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
     --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-1}"; shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
-    --provider-chain) PROVIDER_CHAIN="${2:-codex}"; shift 2 ;;
+    --provider-chain) PROVIDER_CHAIN="${2:-codex,opencode}"; shift 2 ;;
     --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -435,7 +435,7 @@ if [ -z "$WORKER_PACKAGE" ]; then
   WORKER_PACKAGE="__DEFAULT_WORKER_PACKAGE__"
 fi
 if [ -z "$PROVIDER_CHAIN" ]; then
-  PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-$PROVIDER}"
+  PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-codex,opencode}"
 fi
 OPENCODE_MODEL="${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"
 OPENCODE_AUTH_PROVIDER="${OPENCODE_MODEL%%/*}"
