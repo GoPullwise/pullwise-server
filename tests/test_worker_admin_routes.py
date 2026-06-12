@@ -183,6 +183,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn(token, payload["install_command"])
         self.assertIn("'US worker'", payload["install_command"])
         self.assertIn("--max-concurrent-jobs 4", payload["install_command"])
+        self.assertIn("--provider-chain 'codex,opencode'", payload["install_command"])
         self.assertIn(f"--package '{app.default_worker_package()}'", payload["install_command"])
         self.assertIn("pullwise_worker-0.4.2-py3-none-any.whl", payload["install_command"])
         self.assertEqual(payload["local_server_url"], "http://127.0.0.1:18080")
@@ -190,6 +191,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("http://127.0.0.1:18080/install-worker.sh", payload["local_install_command"])
         self.assertIn("--server 'http://127.0.0.1:18080'", payload["local_install_command"])
         self.assertIn("--max-concurrent-jobs 4", payload["local_install_command"])
+        self.assertIn("--provider-chain 'codex,opencode'", payload["local_install_command"])
         self.assertIn(f"--package '{app.default_worker_package()}'", payload["local_install_command"])
         self.assertNotIn(token, payload["local_install_command"])
         self.assertEqual(payload["install_commands"]["standard"], payload["install_command"])
@@ -211,6 +213,42 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(detail, "GET")
         self.assertEqual(detail.status, HTTPStatus.OK)
         self.assertNotIn("worker_token", json.dumps(detail.payload))
+
+    def test_admin_can_create_worker_with_selected_provider_chain(self) -> None:
+        handler = RouteHarness(
+            "/admin/workers",
+            {
+                "name": "OpenCode worker",
+                "providerChain": ["opencode"],
+                "region": "ap-south",
+                "max_concurrent_jobs": 2,
+            },
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        payload = handler.payload
+        stored = db.get_worker(payload["worker_id"])
+        self.assertEqual(stored["provider"], "opencode")
+        self.assertEqual(payload["provider"], "opencode")
+        self.assertEqual(payload["providerChain"], ["opencode"])
+        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER"], "opencode")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER_CHAIN"], "opencode")
+        self.assertNotIn("PULLWISE_CODEX_COMMAND", payload["suggested_env"])
+        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], "opencode")
+        self.assertIn("--provider-chain 'opencode'", payload["install_command"])
+
+    def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
+        handler = RouteHarness(
+            "/admin/workers",
+            {"name": "No provider", "providerChain": ["bad"]},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("providerChain", handler.payload["message"])
 
     def test_worker_heartbeat_persists_machine_metrics_for_admin_detail(self) -> None:
         payload, token = self.create_worker()
@@ -497,7 +535,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("pullwise-worker==0.1.0", install.text_payload)
         self.assertIn("PULLWISE_PROVIDER_CHAIN", install.text_payload)
         self.assertIn('--provider-chain) PROVIDER_CHAIN="${2:-codex,opencode}"', install.text_payload)
+        self.assertIn("provider_chain_has() {", install.text_payload)
+        self.assertIn("if provider_chain_has codex && [ -z \"$CODEX_COMMAND\" ]; then", install.text_payload)
+        self.assertIn("if provider_chain_has opencode && [ -z \"$OPENCODE_COMMAND\" ]; then", install.text_payload)
         self.assertIn('PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-codex,opencode}"', install.text_payload)
+        self.assertIn('PROVIDER="${PROVIDER_CHAIN%%,*}"', install.text_payload)
         self.assertIn("PULLWISE_CODEX_MODEL", install.text_payload)
         self.assertIn("PULLWISE_CODEX_REASONING_EFFORT", install.text_payload)
         self.assertIn('write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"', install.text_payload)
