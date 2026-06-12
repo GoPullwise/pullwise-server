@@ -470,6 +470,7 @@ BASE_DATA_DIR="/var/lib/pullwise-worker"
 BASE_LOG_DIR="/var/log/pullwise-worker"
 CONFIG_DIR="$BASE_CONFIG_DIR/$SAFE_WORKER_ID"
 ENV_FILE="$CONFIG_DIR/worker.env"
+AUTH_COMMANDS_FILE="$CONFIG_DIR/auth-commands.txt"
 BIN_PATH="/usr/local/bin/pullwise-worker-$SAFE_WORKER_ID"
 DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
 CHECKOUT_ROOT="$DATA_DIR/checkouts"
@@ -590,6 +591,41 @@ write_env_value() {
   fi
   printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
 }
+write_auth_commands() {
+  {
+    echo "Pullwise worker manual authorization commands"
+    echo "Worker: $WORKER_NAME ($WORKER_ID)"
+    echo "Home: $DATA_DIR"
+    echo "Provider chain: $PROVIDER_CHAIN"
+    if provider_chain_has codex; then
+      echo "Codex device login:"
+      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${CODEX_COMMAND:-codex} login --device-auth"
+    fi
+    if provider_chain_has opencode; then
+      echo "OpenCode current model provider:"
+      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider $OPENCODE_AUTH_PROVIDER"
+      echo "OpenCode DeepSeek example:"
+      echo "PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider deepseek"
+      echo "OpenCode MiniMax example:"
+      echo "PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3 sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider minimax"
+      echo "OpenCode generic template:"
+      echo "Set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider <provider>"
+      echo "OpenCode interactive provider selection:"
+      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login"
+      echo "OpenCode auth status:"
+      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth list"
+    fi
+  } > "$AUTH_COMMANDS_FILE"
+  chown root:"$SERVICE_USER" "$AUTH_COMMANDS_FILE"
+  chmod 0640 "$AUTH_COMMANDS_FILE"
+}
+print_auth_commands() {
+  echo
+  cat "$AUTH_COMMANDS_FILE"
+  echo
+  echo "Authorization commands saved to $AUTH_COMMANDS_FILE"
+  echo
+}
 
 : > "$ENV_FILE"
 write_env_value PULLWISE_SERVER_URL "$SERVER_URL"
@@ -625,6 +661,7 @@ write_env_value PULLWISE_MAX_LOG_BYTES "1073741824"
 write_env_value PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES "10485760"
 chown root:"$SERVICE_USER" "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
+write_auth_commands
 
 cat > "$BIN_PATH" <<EOF
 #!/usr/bin/env bash
@@ -685,24 +722,13 @@ EOF
 systemctl daemon-reload
 systemctl enable "pullwise-worker-$SAFE_WORKER_ID" >/dev/null
 systemctl restart "pullwise-worker-$SAFE_WORKER_ID"
-run_as_service_user "$BIN_PATH" doctor || true
-
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
 echo "Worker home: $DATA_DIR"
-echo "Manual authorization remains required:"
-if provider_chain_has codex; then
-  echo "  Codex device login: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${CODEX_COMMAND:-codex} login --device-auth"
-fi
-if provider_chain_has opencode; then
-  echo "  OpenCode API/provider credentials:"
-  echo "  OpenCode current model provider: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider $OPENCODE_AUTH_PROVIDER"
-  echo "  OpenCode DeepSeek example (PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider deepseek"
-  echo "  OpenCode MiniMax example (PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider minimax"
-  echo "  OpenCode generic template: set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider <provider>"
-  echo "  OpenCode interactive provider selection: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login"
-  echo "  OpenCode auth status: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth list"
-fi
+print_auth_commands
+run_as_service_user "$BIN_PATH" doctor || true
+
+print_auth_commands
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
