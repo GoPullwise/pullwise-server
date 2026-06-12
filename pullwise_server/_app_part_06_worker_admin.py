@@ -255,6 +255,35 @@ def default_worker_package(version: object = None) -> str:
     return worker_release_package(selected_version)
 
 
+WORKER_INSTALL_PROVIDERS = ("codex", "opencode")
+DEFAULT_WORKER_PROVIDER_CHAIN = ("codex", "opencode")
+
+
+def worker_provider_chain(value: object = None, *, strict: bool = False) -> list[str]:
+    if isinstance(value, list):
+        raw_items = value
+    elif isinstance(value, str):
+        raw_items = value.split(",")
+    elif value is None:
+        raw_items = DEFAULT_WORKER_PROVIDER_CHAIN
+    else:
+        raw_items = []
+    providers: list[str] = []
+    for item in raw_items:
+        provider = public_issue_text(item).lower()
+        if provider in WORKER_INSTALL_PROVIDERS and provider not in providers:
+            providers.append(provider)
+    if providers:
+        return providers
+    if strict:
+        raise ValueError("providerChain must include codex or opencode.")
+    return list(DEFAULT_WORKER_PROVIDER_CHAIN)
+
+
+def worker_provider_chain_text(value: object = None, *, strict: bool = False) -> str:
+    return ",".join(worker_provider_chain(value, strict=strict))
+
+
 def worker_create_payload(worker: dict) -> dict:
     public = worker_public_payload(worker, admin=True)
     token = public_issue_text(worker.get("worker_token"))
@@ -273,6 +302,8 @@ def worker_create_payload(worker: dict) -> dict:
     local_install_url = f"{local_server_url}/install-worker.sh"
     max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
     worker_package = default_worker_package(public.get("version"))
+    provider_chain = worker_provider_chain(worker.get("provider_chain") or worker.get("providerChain"))
+    provider_chain_text = ",".join(provider_chain)
     install_command = worker_install_command(
         install_url=install_url,
         server_url=server_url,
@@ -280,6 +311,7 @@ def worker_create_payload(worker: dict) -> dict:
         worker_name=public.get("name") or public["worker_id"],
         max_concurrent_jobs=max_concurrent_jobs,
         worker_package=worker_package,
+        provider_chain=provider_chain_text,
     )
     local_install_command = worker_install_command(
         install_url=local_install_url,
@@ -288,7 +320,44 @@ def worker_create_payload(worker: dict) -> dict:
         worker_name=public.get("name") or public["worker_id"],
         max_concurrent_jobs=max_concurrent_jobs,
         worker_package=worker_package,
+        provider_chain=provider_chain_text,
     )
+    suggested_env = {
+        "PULLWISE_SERVER_URL": server_url,
+        "PULLWISE_LOCAL_SERVER_URL": local_server_url,
+        "PULLWISE_WORKER_ID": public["worker_id"],
+        "PULLWISE_WORKER_TOKEN": token,
+        "PULLWISE_PROVIDER": provider_chain[0],
+        "PULLWISE_PROVIDER_CHAIN": provider_chain_text,
+        "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
+        "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
+        "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
+        "PULLWISE_WORKER_PACKAGE": worker_package,
+        "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
+        "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
+        "PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS": "3600",
+        "PULLWISE_RETAIN_FAILED_CHECKOUT_SECONDS": "0",
+        "PULLWISE_MAX_CHECKOUT_BYTES": "21474836480",
+        "PULLWISE_LOG_RETENTION_SECONDS": "1209600",
+        "PULLWISE_MAX_LOG_BYTES": "1073741824",
+        "PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES": "10485760",
+    }
+    if "codex" in provider_chain:
+        suggested_env.update(
+            {
+                "PULLWISE_CODEX_COMMAND": "codex",
+                "PULLWISE_CODEX_MODEL": "gpt-5.5",
+                "PULLWISE_CODEX_REASONING_EFFORT": "medium",
+            }
+        )
+    if "opencode" in provider_chain:
+        suggested_env.update(
+            {
+                "PULLWISE_OPENCODE_COMMAND": "opencode",
+                "PULLWISE_OPENCODE_MODEL": "opencode/big-pickle",
+                "PULLWISE_OPENCODE_VARIANT": "medium",
+            }
+        )
     payload = {
         "worker": public,
         "worker_id": public["worker_id"],
@@ -303,33 +372,10 @@ def worker_create_payload(worker: dict) -> dict:
             "standard": install_command,
             "local": local_install_command,
         },
-        "provider": public["provider"],
-        "suggested_env": {
-            "PULLWISE_SERVER_URL": server_url,
-            "PULLWISE_LOCAL_SERVER_URL": local_server_url,
-            "PULLWISE_WORKER_ID": public["worker_id"],
-            "PULLWISE_WORKER_TOKEN": token,
-            "PULLWISE_PROVIDER": public["provider"],
-            "PULLWISE_PROVIDER_CHAIN": "codex,opencode",
-            "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
-            "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
-            "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
-            "PULLWISE_WORKER_PACKAGE": worker_package,
-            "PULLWISE_CODEX_COMMAND": "codex",
-            "PULLWISE_CODEX_MODEL": "gpt-5.5",
-            "PULLWISE_CODEX_REASONING_EFFORT": "medium",
-            "PULLWISE_OPENCODE_COMMAND": "opencode",
-            "PULLWISE_OPENCODE_MODEL": "opencode/big-pickle",
-            "PULLWISE_OPENCODE_VARIANT": "medium",
-            "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
-            "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
-            "PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS": "3600",
-            "PULLWISE_RETAIN_FAILED_CHECKOUT_SECONDS": "0",
-            "PULLWISE_MAX_CHECKOUT_BYTES": "21474836480",
-            "PULLWISE_LOG_RETENTION_SECONDS": "1209600",
-            "PULLWISE_MAX_LOG_BYTES": "1073741824",
-            "PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES": "10485760",
-        },
+        "provider": provider_chain[0],
+        "providerChain": list(provider_chain),
+        "provider_chain": list(provider_chain),
+        "suggested_env": suggested_env,
     }
     return payload
 
@@ -342,6 +388,7 @@ def worker_install_command(
     worker_name: str,
     max_concurrent_jobs: int,
     worker_package: str,
+    provider_chain: str,
 ) -> str:
     return (
         "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
@@ -351,6 +398,7 @@ def worker_install_command(
         f"--worker-id {shell_quote(worker_id)} "
         f"--worker-name {shell_quote(worker_name)} "
         f"--package {shell_quote(worker_package)} "
+        f"--provider-chain {shell_quote(provider_chain)} "
         f"--max-concurrent-jobs {max_concurrent_jobs}"
     )
 
@@ -434,9 +482,29 @@ fi
 if [ -z "$WORKER_PACKAGE" ]; then
   WORKER_PACKAGE="__DEFAULT_WORKER_PACKAGE__"
 fi
+normalize_provider_chain() {
+  local raw="${1:-}"
+  local next=""
+  local item
+  raw="${raw//[[:space:]]/}"
+  IFS=',' read -ra items <<< "$raw"
+  for item in "${items[@]}"; do
+    case "$item" in
+      codex|opencode)
+        case ",$next," in *",$item,"*) ;; *) next="${next:+$next,}$item" ;; esac
+        ;;
+    esac
+  done
+  printf '%s\n' "${next:-codex,opencode}"
+}
+provider_chain_has() {
+  case ",$PROVIDER_CHAIN," in *",$1,"*) return 0 ;; *) return 1 ;; esac
+}
 if [ -z "$PROVIDER_CHAIN" ]; then
   PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-codex,opencode}"
 fi
+PROVIDER_CHAIN="$(normalize_provider_chain "$PROVIDER_CHAIN")"
+PROVIDER="${PROVIDER_CHAIN%%,*}"
 OPENCODE_MODEL="${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"
 OPENCODE_AUTH_PROVIDER="${OPENCODE_MODEL%%/*}"
 if [ -z "$OPENCODE_AUTH_PROVIDER" ]; then
@@ -491,7 +559,7 @@ id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shel
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
 
-if [ -z "$CODEX_COMMAND" ]; then
+if provider_chain_has codex && [ -z "$CODEX_COMMAND" ]; then
   if ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" && ! CODEX_COMMAND="$(path_command codex)"; then
     run_as_service_user sh -lc 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
     CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" || {
@@ -501,7 +569,7 @@ if [ -z "$CODEX_COMMAND" ]; then
   fi
 fi
 
-if [ -z "$OPENCODE_COMMAND" ]; then
+if provider_chain_has opencode && [ -z "$OPENCODE_COMMAND" ]; then
   if ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" && ! OPENCODE_COMMAND="$(path_command opencode)"; then
     run_as_service_user sh -lc 'curl -fsSL https://opencode.ai/install | bash'
     OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" || {
@@ -533,12 +601,16 @@ write_env_value PULLWISE_MAX_CONCURRENT_JOBS "$MAX_CONCURRENT_JOBS"
 write_env_value PULLWISE_CHECKOUT_ROOT "$CHECKOUT_ROOT"
 write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
-write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
-write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
-write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
-write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"
-write_env_value PULLWISE_OPENCODE_MODEL "$OPENCODE_MODEL"
-write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
+if provider_chain_has codex; then
+  write_env_value PULLWISE_CODEX_COMMAND "${CODEX_COMMAND:-codex}"
+  write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
+  write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
+fi
+if provider_chain_has opencode; then
+  write_env_value PULLWISE_OPENCODE_COMMAND "${OPENCODE_COMMAND:-opencode}"
+  write_env_value PULLWISE_OPENCODE_MODEL "$OPENCODE_MODEL"
+  write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
+fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
 write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"
@@ -619,14 +691,18 @@ echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
 echo "Worker home: $DATA_DIR"
 echo "Manual authorization remains required:"
-echo "  Codex device login: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $CODEX_COMMAND login --device-auth"
-echo "  OpenCode API/provider credentials:"
-echo "  OpenCode current model provider: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider $OPENCODE_AUTH_PROVIDER"
-echo "  OpenCode DeepSeek example (PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider deepseek"
-echo "  OpenCode MiniMax example (PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider minimax"
-echo "  OpenCode generic template: set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login --provider <provider>"
-echo "  OpenCode interactive provider selection: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth login"
-echo "  OpenCode auth status: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH $OPENCODE_COMMAND auth list"
+if provider_chain_has codex; then
+  echo "  Codex device login: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${CODEX_COMMAND:-codex} login --device-auth"
+fi
+if provider_chain_has opencode; then
+  echo "  OpenCode API/provider credentials:"
+  echo "  OpenCode current model provider: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider $OPENCODE_AUTH_PROVIDER"
+  echo "  OpenCode DeepSeek example (PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider deepseek"
+  echo "  OpenCode MiniMax example (PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3): sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider minimax"
+  echo "  OpenCode generic template: set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider <provider>"
+  echo "  OpenCode interactive provider selection: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login"
+  echo "  OpenCode auth status: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth list"
+fi
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())

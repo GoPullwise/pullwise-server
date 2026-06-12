@@ -1968,24 +1968,34 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_admin_worker_create(self, session: dict, body: dict) -> None:
         try:
             max_concurrent_jobs = worker_admin_capacity(body.get("max_concurrent_jobs"))
+            provider_chain = worker_provider_chain(
+                body.get("providerChain", body.get("provider_chain")),
+                strict=("providerChain" in body or "provider_chain" in body),
+            )
         except ValueError as exc:
             self.audit_worker_action(session, "create_worker", success=False, error=str(exc))
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         worker = db.create_worker(
             {
                 "name": public_issue_text(body.get("name")) or "Worker",
-                "provider": public_issue_text(body.get("provider")) or "codex",
+                "provider": provider_chain[0],
                 "region": public_issue_text(body.get("region")),
                 "version": public_issue_text(body.get("version")),
                 "max_concurrent_jobs": max_concurrent_jobs,
                 "max_concurrency_cap": system_config.worker_max_concurrency_cap(),
             }
         )
+        worker["provider_chain"] = provider_chain
         self.audit_worker_action(
             session,
             "create_worker",
             worker_id=worker.get("worker_id"),
-            changed_fields={"name": worker.get("name"), "provider": worker.get("provider"), "region": worker.get("region")},
+            changed_fields={
+                "name": worker.get("name"),
+                "provider": worker.get("provider"),
+                "providerChain": provider_chain,
+                "region": worker.get("region"),
+            },
         )
         return self.json(worker_create_payload(worker), HTTPStatus.CREATED)
 
