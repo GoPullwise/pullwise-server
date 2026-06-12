@@ -511,6 +511,100 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["workerVersion"], "0.2.3")
         self.assertEqual(handler.payload["workerPackage"], expected_package)
 
+    def test_admin_can_dispatch_worker_release_workflow(self) -> None:
+        captured: dict[str, object] = {}
+
+        class DispatchResponse:
+            status = 204
+
+            def __enter__(self) -> "DispatchResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def getcode(self) -> int:
+                return 204
+
+        def fake_urlopen(request, timeout: int):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return DispatchResponse()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_WORKER_RELEASE_TOKEN": "ghp_release",
+                    "PULLWISE_WORKER_RELEASE_REPOSITORY": "GoPullwise/pullwise-worker",
+                    "PULLWISE_WORKER_RELEASE_WORKFLOW": "release.yml",
+                    "PULLWISE_WORKER_RELEASE_REF": "main",
+                    "PULLWISE_GITHUB_API_URL": "https://api.github.test",
+                    "PULLWISE_GITHUB_TIMEOUT_SECONDS": "7",
+                },
+                clear=False,
+            ),
+            patch("urllib.request.urlopen", side_effect=fake_urlopen) as urlopen,
+        ):
+            handler = RouteHarness(
+                "/admin/workers/releases",
+                {"version": "v0.4.3"},
+                cookie=self.admin_cookie,
+                headers={"X-Request-Id": "req_release"},
+            )
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(handler.payload["version"], "0.4.3")
+        self.assertEqual(handler.payload["tag"], "v0.4.3")
+        self.assertEqual(handler.payload["repository"], "GoPullwise/pullwise-worker")
+        self.assertEqual(handler.payload["workflow"], "release.yml")
+        self.assertEqual(handler.payload["workflowDispatch"]["inputs"], {"version": "0.4.3"})
+        self.assertNotIn("ghp_release", json.dumps(handler.payload))
+        self.assertEqual(captured["timeout"], 7)
+        request = captured["request"]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(
+            request.full_url,
+            "https://api.github.test/repos/GoPullwise/pullwise-worker/actions/workflows/release.yml/dispatches",
+        )
+        self.assertEqual(request.get_header("Authorization"), "Bearer ghp_release")
+        self.assertEqual(json.loads(request.data.decode("utf-8")), {"ref": "main", "inputs": {"version": "0.4.3"}})
+        self.assertEqual(urlopen.call_count, 1)
+        audit = db.list_worker_audit_events(limit=1)[0]
+        self.assertEqual(audit["action"], "release_worker")
+        self.assertEqual(audit["actor_user_id"], "usr_admin")
+        self.assertEqual(audit["request_id"], "req_release")
+        self.assertEqual(json.loads(audit["changed_fields"])["tag"], "v0.4.3")
+
+    def test_admin_worker_release_rejects_invalid_version(self) -> None:
+        with patch("urllib.request.urlopen") as urlopen:
+            handler = RouteHarness(
+                "/admin/workers/releases",
+                {"version": "0.4.3-beta"},
+                cookie=self.admin_cookie,
+            )
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("x.y.z", handler.payload["message"])
+        urlopen.assert_not_called()
+        audit = db.list_worker_audit_events(limit=1)[0]
+        self.assertEqual(audit["action"], "release_worker")
+        self.assertEqual(audit["success"], 0)
+
+    def test_non_admin_cannot_dispatch_worker_release_workflow(self) -> None:
+        with patch("urllib.request.urlopen") as urlopen:
+            handler = RouteHarness(
+                "/admin/workers/releases",
+                {"version": "0.4.3"},
+                cookie=self.user_cookie,
+            )
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+        urlopen.assert_not_called()
+
     def test_public_install_script_contains_deploy_assets_but_no_worker_secrets(self) -> None:
         install = RouteHarness("/install-worker.sh")
 

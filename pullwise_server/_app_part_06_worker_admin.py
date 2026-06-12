@@ -180,6 +180,14 @@ def worker_release_package(version: str) -> str:
     )
 
 
+class WorkerReleaseConfigurationError(RuntimeError):
+    pass
+
+
+class WorkerReleaseDispatchError(RuntimeError):
+    pass
+
+
 def normalize_worker_release_version(value: object) -> str:
     version = public_issue_text(value)
     if version.startswith("v"):
@@ -241,6 +249,124 @@ def worker_defaults_payload() -> dict:
         "defaults": {
             "version": version,
             "package": package,
+        },
+    }
+
+
+WORKER_RELEASE_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+WORKER_RELEASE_WORKFLOW_RE = re.compile(r"^[A-Za-z0-9_.-]+\.ya?ml$")
+WORKER_RELEASE_REF_RE = re.compile(r"^[A-Za-z0-9._/\-]{1,200}$")
+
+
+def worker_release_repository() -> str:
+    repository = public_issue_text(
+        github_auth.env_any(
+            ["PULLWISE_WORKER_RELEASE_REPOSITORY", "PULLWISE_WORKER_RELEASE_REPO"],
+            "GoPullwise/pullwise-worker",
+        )
+    )
+    if not WORKER_RELEASE_REPOSITORY_RE.fullmatch(repository):
+        raise WorkerReleaseConfigurationError("PULLWISE_WORKER_RELEASE_REPOSITORY must be owner/repo.")
+    return repository
+
+
+def worker_release_workflow() -> str:
+    workflow = public_issue_text(
+        github_auth.env_any(
+            ["PULLWISE_WORKER_RELEASE_WORKFLOW", "PULLWISE_WORKER_RELEASE_WORKFLOW_ID"],
+            "release.yml",
+        )
+    )
+    if not WORKER_RELEASE_WORKFLOW_RE.fullmatch(workflow):
+        raise WorkerReleaseConfigurationError("PULLWISE_WORKER_RELEASE_WORKFLOW must be a workflow YAML filename.")
+    return workflow
+
+
+def worker_release_ref() -> str:
+    ref = public_issue_text(github_auth.env_any(["PULLWISE_WORKER_RELEASE_REF"], "main"))
+    if not WORKER_RELEASE_REF_RE.fullmatch(ref) or ref.startswith("/") or ref.endswith("/") or ".." in ref:
+        raise WorkerReleaseConfigurationError("PULLWISE_WORKER_RELEASE_REF must be a safe branch or tag ref.")
+    return ref
+
+
+def worker_release_github_token() -> str:
+    return public_issue_text(
+        github_auth.env_any(
+            [
+                "PULLWISE_WORKER_RELEASE_TOKEN",
+                "PULLWISE_WORKER_RELEASE_GITHUB_TOKEN",
+                "PULLWISE_GITHUB_WORKFLOW_TOKEN",
+            ]
+        )
+    )
+
+
+def worker_release_dispatch_url(repository: str, workflow: str) -> str:
+    owner, repo = repository.split("/", 1)
+    return (
+        f"{github_auth.github_api_url()}/repos/{quote(owner, safe='')}/{quote(repo, safe='')}"
+        f"/actions/workflows/{quote(workflow, safe='')}/dispatches"
+    )
+
+
+def worker_release_http_error_message(exc: urllib.error.HTTPError) -> str:
+    detail = ""
+    try:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        detail = ""
+    message = f"GitHub workflow dispatch failed with status {exc.code}."
+    if detail:
+        message = f"{message} {detail[:500]}"
+    return message
+
+
+def dispatch_worker_release_workflow(version_value: object) -> dict:
+    version = normalize_worker_release_version(version_value)
+    if not version:
+        raise ValueError("Worker release version must use x.y.z format.")
+
+    token = worker_release_github_token()
+    if not token:
+        raise WorkerReleaseConfigurationError("PULLWISE_WORKER_RELEASE_TOKEN is required to dispatch worker releases.")
+
+    repository = worker_release_repository()
+    workflow = worker_release_workflow()
+    ref = worker_release_ref()
+    body = {"ref": ref, "inputs": {"version": version}}
+    data = json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(
+        worker_release_dispatch_url(repository, workflow),
+        data=data,
+        headers={
+            **github_auth.github_api_headers(token),
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=github_auth.request_timeout()) as response:
+            status = int(getattr(response, "status", 0) or response.getcode())
+    except urllib.error.HTTPError as exc:
+        raise WorkerReleaseDispatchError(worker_release_http_error_message(exc)) from exc
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        raise WorkerReleaseDispatchError(f"GitHub workflow dispatch failed: {exc}") from exc
+
+    if status < 200 or status >= 300:
+        raise WorkerReleaseDispatchError(f"GitHub workflow dispatch failed with status {status}.")
+
+    return {
+        "ok": True,
+        "version": version,
+        "tag": f"v{version}",
+        "repository": repository,
+        "workflow": workflow,
+        "ref": ref,
+        "workflowDispatch": {
+            "repository": repository,
+            "workflow": workflow,
+            "ref": ref,
+            "inputs": {"version": version},
         },
     }
 

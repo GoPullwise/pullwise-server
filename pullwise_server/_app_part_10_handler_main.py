@@ -1942,6 +1942,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             return self.json(payload, HTTPStatus.CREATED)
+        if segments == ["admin", "workers", "releases"]:
+            return self.handle_admin_worker_release(session, body)
         if segments == ["admin", "workers"]:
             return self.handle_admin_worker_create(session, body)
         if len(segments) == 4 and segments[:2] == ["admin", "workers"]:
@@ -2013,6 +2015,32 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             },
         )
         return self.json(worker_create_payload(worker), HTTPStatus.CREATED)
+
+    def handle_admin_worker_release(self, session: dict, body: dict) -> None:
+        raw_version = body.get("version")
+        try:
+            payload = dispatch_worker_release_workflow(raw_version)
+        except WorkerReleaseConfigurationError as exc:
+            self.audit_worker_action(session, "release_worker", success=False, error=str(exc))
+            return self.error(HTTPStatus.NOT_IMPLEMENTED, str(exc))
+        except ValueError as exc:
+            self.audit_worker_action(session, "release_worker", success=False, error=str(exc))
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        except WorkerReleaseDispatchError as exc:
+            self.audit_worker_action(session, "release_worker", success=False, error=str(exc))
+            return self.error(HTTPStatus.BAD_GATEWAY, str(exc))
+        self.audit_worker_action(
+            session,
+            "release_worker",
+            changed_fields={
+                "version": payload["version"],
+                "tag": payload["tag"],
+                "repository": payload["repository"],
+                "workflow": payload["workflow"],
+                "ref": payload["ref"],
+            },
+        )
+        return self.json(payload, HTTPStatus.ACCEPTED)
 
     def handle_admin_worker_command(self, session: dict, worker_id: str, body: dict) -> None:
         command = public_issue_text(body.get("command")).lower()
