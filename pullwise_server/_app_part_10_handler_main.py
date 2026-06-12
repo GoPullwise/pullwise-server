@@ -1908,7 +1908,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             ]
             return self.json(
                 {
-                    "worker": worker_public_payload(worker, admin=True),
+                    "worker": worker_public_payload(worker, admin=True, include_machine_metrics=True),
                     "auditEvents": audit,
                     "taskActivity": task_activity,
                 }
@@ -2169,6 +2169,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             clamp_error = f"max_concurrent_jobs clamped to {heartbeat_capacity}"
             last_error = f"{last_error}; {clamp_error}" if last_error else clamp_error
         heartbeat_region = public_issue_text(body.get("region")) if "region" in body else ""
+        heartbeat_timestamp = now()
+        machine_metrics = system_metrics.sanitize_machine_metrics_payload(
+            body.get("machine_metrics"),
+            identity_key="worker",
+            fallback_timestamp=heartbeat_timestamp,
+        )
+        machine_metrics_history = None
+        if machine_metrics:
+            machine_metrics_history = system_metrics.machine_metrics_history(
+                decoded_worker_json_payload(worker_record.get("machine_metrics_history"), list),
+                machine_metrics,
+            )
         try:
             record = db.upsert_worker_heartbeat(
                 {
@@ -2185,7 +2197,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,
                     "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
                     "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
-                    "timestamp": now(),
+                    "machine_metrics": machine_metrics,
+                    "machine_metrics_history": machine_metrics_history,
+                    "timestamp": heartbeat_timestamp,
                     "max_concurrency_cap": system_config.worker_max_concurrency_cap(),
                 }
             )

@@ -212,6 +212,73 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(detail.status, HTTPStatus.OK)
         self.assertNotIn("worker_token", json.dumps(detail.payload))
 
+    def test_worker_heartbeat_persists_machine_metrics_for_admin_detail(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        worker_auth = {"Authorization": f"Bearer {token}"}
+        machine_metrics = {
+            "ok": True,
+            "collectedAt": 1781200000,
+            "worker": {
+                "hostname": "worker-host",
+                "platform": "Linux-6.8",
+                "system": "Linux",
+                "release": "6.8",
+                "machine": "x86_64",
+                "pythonVersion": "3.10.12",
+                "processId": 321,
+            },
+            "cpu": {
+                "logicalCount": 8,
+                "loadAverage": {"oneMinute": 1.25, "fiveMinute": 0.75, "fifteenMinute": 0.5},
+            },
+            "memory": {
+                "totalBytes": 8589934592,
+                "availableBytes": 3221225472,
+                "usedBytes": 5368709120,
+                "usedPercent": 62.5,
+            },
+            "storage": {
+                "path": "/var/lib/pullwise-worker/checkouts",
+                "measuredPath": "/var/lib/pullwise-worker",
+                "totalBytes": 107374182400,
+                "freeBytes": 64424509440,
+                "usedBytes": 42949672960,
+                "usedPercent": 40.0,
+            },
+        }
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.4.18",
+                "max_concurrent_jobs": 4,
+                "running_jobs": 1,
+                "free_slots": 3,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "machine_metrics": machine_metrics,
+            },
+            headers=worker_auth,
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(detail, "GET")
+
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        metrics = detail.payload["worker"]["machineMetrics"]
+        self.assertEqual(metrics["worker"]["hostname"], "worker-host")
+        self.assertEqual(metrics["memory"]["usedPercent"], 62.5)
+        self.assertEqual(metrics["storage"]["usedPercent"], 40.0)
+        self.assertEqual(metrics["history"][0]["collectedAt"], 1781200000)
+        self.assertEqual(metrics["history"][0]["memory"]["usedPercent"], 62.5)
+        self.assertEqual(metrics["history"][0]["storage"]["usedPercent"], 40.0)
+        self.assertNotIn("usagePercent", json.dumps(metrics))
+
     def test_admin_worker_detail_includes_recent_task_activity(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]

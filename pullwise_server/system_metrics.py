@@ -13,6 +13,15 @@ _PROC_MEMINFO_PATH = "/proc/meminfo"
 SERVER_METRICS_HISTORY_STATE_KEY = "server_metrics_history"
 SERVER_METRICS_HISTORY_LIMIT = 180
 SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS = 10
+MACHINE_IDENTITY_KEYS = (
+    "hostname",
+    "platform",
+    "system",
+    "release",
+    "machine",
+    "pythonVersion",
+    "processId",
+)
 
 
 def _percent(numerator: int | float | None, denominator: int | float | None) -> float | None:
@@ -148,23 +157,32 @@ def storage_payload(path: str) -> dict[str, Any]:
     }
 
 
-def server_metrics_payload(*, storage_path: str, timestamp: int | None = None) -> dict[str, Any]:
+def machine_identity_payload() -> dict[str, Any]:
+    return {
+        "hostname": platform.node(),
+        "platform": platform.platform(),
+        "system": platform.system(),
+        "release": platform.release(),
+        "machine": platform.machine(),
+        "pythonVersion": platform.python_version(),
+        "processId": os.getpid(),
+    }
+
+
+def machine_metrics_payload(*, identity_key: str, storage_path: str, timestamp: int | None = None) -> dict[str, Any]:
+    identity = identity_key if identity_key in {"server", "worker"} else "machine"
     return {
         "ok": True,
         "collectedAt": int(timestamp if timestamp is not None else time.time()),
-        "server": {
-            "hostname": platform.node(),
-            "platform": platform.platform(),
-            "system": platform.system(),
-            "release": platform.release(),
-            "machine": platform.machine(),
-            "pythonVersion": platform.python_version(),
-            "processId": os.getpid(),
-        },
+        identity: machine_identity_payload(),
         "cpu": cpu_payload(),
         "memory": memory_payload(),
         "storage": storage_payload(storage_path),
     }
+
+
+def server_metrics_payload(*, storage_path: str, timestamp: int | None = None) -> dict[str, Any]:
+    return machine_metrics_payload(identity_key="server", storage_path=storage_path, timestamp=timestamp)
 
 
 def _number_or_none(value: object) -> int | float | None:
@@ -177,13 +195,87 @@ def _number_or_none(value: object) -> int | float | None:
     return None
 
 
+def _text_or_none(value: object, *, limit: int = 500) -> str | None:
+    if value is None:
+        return None
+    text = str(value).replace("\x00", "").splitlines()[0].strip()
+    return text[:limit] if text else None
+
+
 def _compact_resource_payload(resource: object, keys: tuple[str, ...]) -> dict[str, int | float | None]:
     if not isinstance(resource, dict):
         return {key: None for key in keys}
     return {key: _number_or_none(resource.get(key)) for key in keys}
 
 
-def server_metrics_history_sample(payload: dict[str, Any]) -> dict[str, Any]:
+def _clean_identity_payload(identity: object) -> dict[str, Any]:
+    if not isinstance(identity, dict):
+        return {}
+    clean: dict[str, Any] = {}
+    for key in MACHINE_IDENTITY_KEYS:
+        value = identity.get(key)
+        if key == "processId":
+            clean[key] = _number_or_none(value)
+        else:
+            clean[key] = _text_or_none(value, limit=180)
+    return clean
+
+
+def _clean_storage_payload(storage: object) -> dict[str, Any]:
+    clean = _compact_resource_payload(
+        storage,
+        ("totalBytes", "freeBytes", "usedBytes", "usedPercent"),
+    )
+    if isinstance(storage, dict):
+        clean["path"] = _text_or_none(storage.get("path"), limit=500)
+        clean["measuredPath"] = _text_or_none(storage.get("measuredPath"), limit=500)
+    else:
+        clean["path"] = None
+        clean["measuredPath"] = None
+    return clean
+
+
+def sanitize_machine_metrics_payload(
+    payload: object,
+    *,
+    identity_key: str,
+    fallback_timestamp: int | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    clean_identity_key = identity_key if identity_key in {"server", "worker"} else "machine"
+    cpu = payload.get("cpu") if isinstance(payload.get("cpu"), dict) else {}
+    load_average = cpu.get("loadAverage") if isinstance(cpu.get("loadAverage"), dict) else None
+    timestamp = int(_number_or_none(payload.get("collectedAt")) or fallback_timestamp or time.time())
+    identity_payload = (
+        payload.get(clean_identity_key)
+        if isinstance(payload.get(clean_identity_key), dict)
+        else payload.get("worker")
+        if isinstance(payload.get("worker"), dict)
+        else payload.get("server")
+    )
+    return {
+        "ok": payload.get("ok") is not False,
+        "collectedAt": timestamp,
+        clean_identity_key: _clean_identity_payload(identity_payload),
+        "cpu": {
+            "logicalCount": _number_or_none(cpu.get("logicalCount")),
+            "loadAverage": _compact_resource_payload(
+                load_average,
+                ("oneMinute", "fiveMinute", "fifteenMinute"),
+            )
+            if load_average is not None
+            else None,
+        },
+        "memory": _compact_resource_payload(
+            payload.get("memory"),
+            ("totalBytes", "availableBytes", "usedBytes", "usedPercent"),
+        ),
+        "storage": _clean_storage_payload(payload.get("storage")),
+    }
+
+
+def machine_metrics_history_sample(payload: dict[str, Any]) -> dict[str, Any]:
     cpu = payload.get("cpu") if isinstance(payload.get("cpu"), dict) else {}
     load_average = cpu.get("loadAverage") if isinstance(cpu.get("loadAverage"), dict) else None
     return {
@@ -208,7 +300,11 @@ def server_metrics_history_sample(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def server_metrics_history(
+def server_metrics_history_sample(payload: dict[str, Any]) -> dict[str, Any]:
+    return machine_metrics_history_sample(payload)
+
+
+def machine_metrics_history(
     existing_history: object,
     current_payload: dict[str, Any],
     *,
@@ -216,7 +312,7 @@ def server_metrics_history(
     min_interval_seconds: int = SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS,
 ) -> list[dict[str, Any]]:
     history = [item for item in existing_history if isinstance(item, dict)] if isinstance(existing_history, list) else []
-    sample = server_metrics_history_sample(current_payload)
+    sample = machine_metrics_history_sample(current_payload)
     sample_timestamp = int(sample["collectedAt"])
     clean_history = [
         item
@@ -232,3 +328,18 @@ def server_metrics_history(
 
     clean_limit = max(1, min(1000, int(limit or SERVER_METRICS_HISTORY_LIMIT)))
     return clean_history[-clean_limit:]
+
+
+def server_metrics_history(
+    existing_history: object,
+    current_payload: dict[str, Any],
+    *,
+    limit: int = SERVER_METRICS_HISTORY_LIMIT,
+    min_interval_seconds: int = SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS,
+) -> list[dict[str, Any]]:
+    return machine_metrics_history(
+        existing_history,
+        current_payload,
+        limit=limit,
+        min_interval_seconds=min_interval_seconds,
+    )

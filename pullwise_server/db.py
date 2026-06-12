@@ -217,6 +217,8 @@ def initialize() -> None:
                     codex_ready INTEGER,
                     systemd_active INTEGER,
                     doctor_checked_at INTEGER,
+                    machine_metrics TEXT,
+                    machine_metrics_history TEXT,
                     status TEXT NOT NULL DEFAULT 'online',
                     first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     last_heartbeat_at INTEGER,
@@ -242,6 +244,8 @@ def initialize() -> None:
                 ("workers", "codex_ready", "INTEGER"),
                 ("workers", "systemd_active", "INTEGER"),
                 ("workers", "doctor_checked_at", "INTEGER"),
+                ("workers", "machine_metrics", "TEXT"),
+                ("workers", "machine_metrics_history", "TEXT"),
             ):
                 ensure_column(connection, table, column, definition)
             connection.execute(
@@ -1214,6 +1218,18 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     )
     running_jobs = max(0, min(max_concurrent_jobs, int(record.get("running_jobs") or 0)))
     free_slots = max(0, min(max_concurrent_jobs, int(record.get("free_slots") or 0)))
+    machine_metrics = record.get("machine_metrics")
+    machine_metrics_history = record.get("machine_metrics_history")
+    machine_metrics_text = (
+        json.dumps(to_jsonable(machine_metrics), ensure_ascii=False, sort_keys=True)
+        if isinstance(machine_metrics, dict)
+        else None
+    )
+    machine_metrics_history_text = (
+        json.dumps(to_jsonable(machine_metrics_history), ensure_ascii=False, sort_keys=True)
+        if isinstance(machine_metrics_history, list)
+        else None
+    )
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -1222,9 +1238,10 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                 INSERT INTO workers (
                     worker_id, name, version, provider, enabled, max_concurrent_jobs, running_jobs,
                     free_slots, hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
-                    created_at, updated_at, doctor_status, codex_ready, systemd_active, doctor_checked_at
+                    created_at, updated_at, doctor_status, codex_ready, systemd_active, doctor_checked_at,
+                    machine_metrics, machine_metrics_history
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
@@ -1238,6 +1255,8 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
                     systemd_active = COALESCE(excluded.systemd_active, workers.systemd_active),
                     doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
+                    machine_metrics = COALESCE(excluded.machine_metrics, workers.machine_metrics),
+                    machine_metrics_history = COALESCE(excluded.machine_metrics_history, workers.machine_metrics_history),
                     status = CASE WHEN workers.enabled = 0 THEN 'disabled' ELSE 'online' END,
                     last_heartbeat_at = excluded.last_heartbeat_at,
                     updated_at = excluded.updated_at
@@ -1261,6 +1280,8 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("codex_ready"),
                     record.get("systemd_active"),
                     record.get("doctor_checked_at"),
+                    machine_metrics_text,
+                    machine_metrics_history_text,
                 ),
             )
             row = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}

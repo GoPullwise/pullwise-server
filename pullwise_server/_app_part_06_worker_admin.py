@@ -110,7 +110,33 @@ def worker_command_payload(command: dict | None, *, admin: bool = False) -> dict
     return payload
 
 
-def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
+def decoded_worker_json_payload(value: object, expected_type: type) -> object | None:
+    if isinstance(value, expected_type):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, expected_type) else None
+
+
+def worker_machine_metrics_payload(worker: dict) -> dict | None:
+    metrics = decoded_worker_json_payload(worker.get("machine_metrics"), dict)
+    if not isinstance(metrics, dict):
+        return None
+    payload = dict(metrics)
+    history = decoded_worker_json_payload(worker.get("machine_metrics_history"), list)
+    payload["history"] = history if isinstance(history, list) else []
+    payload["historyMeta"] = {
+        "limit": system_metrics.SERVER_METRICS_HISTORY_LIMIT,
+        "minIntervalSeconds": system_metrics.SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS,
+    }
+    return payload
+
+
+def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_metrics: bool = False) -> dict:
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
         "name": public_issue_text(worker.get("name")) or public_issue_text(worker.get("worker_id")),
@@ -140,6 +166,10 @@ def worker_public_payload(worker: dict, *, admin: bool = False) -> dict:
             db.get_latest_worker_command(public_issue_text(worker.get("worker_id"))),
             admin=True,
         )
+        if include_machine_metrics:
+            machine_metrics = worker_machine_metrics_payload(worker)
+            if machine_metrics:
+                payload["machineMetrics"] = machine_metrics
     return payload
 
 

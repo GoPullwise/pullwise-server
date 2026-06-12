@@ -41,6 +41,42 @@ class SystemMetricsTest(unittest.TestCase):
         self.assertEqual(history[0]["cpu"]["loadAverage"]["oneMinute"], 1.25)
         self.assertNotIn("usagePercent", str(history))
 
+    def test_sanitize_worker_machine_metrics_payload_limits_worker_report_shape(self) -> None:
+        payload = {
+            "ok": True,
+            "collectedAt": 1781200000,
+            "worker": {
+                "hostname": "worker-1",
+                "platform": "Linux-6.8\nignored",
+                "machine": "x86_64",
+                "pythonVersion": "3.10.12",
+                "processId": 1234,
+            },
+            "cpu": {
+                "logicalCount": 8,
+                "loadAverage": {"oneMinute": 1.25, "fiveMinute": 0.75, "fifteenMinute": 0.5},
+            },
+            "memory": {"totalBytes": 1000, "availableBytes": 250, "usedBytes": 750, "usedPercent": 75.0},
+            "storage": {
+                "path": "/var/lib/pullwise-worker/checkouts",
+                "measuredPath": "/var/lib/pullwise-worker",
+                "totalBytes": 2000,
+                "freeBytes": 1000,
+                "usedBytes": 1000,
+                "usedPercent": 50.0,
+            },
+        }
+
+        clean = system_metrics.sanitize_machine_metrics_payload(payload, identity_key="worker")
+
+        self.assertEqual(clean["collectedAt"], 1781200000)
+        self.assertEqual(clean["worker"]["hostname"], "worker-1")
+        self.assertEqual(clean["worker"]["platform"], "Linux-6.8")
+        self.assertEqual(clean["cpu"]["logicalCount"], 8)
+        self.assertEqual(clean["memory"]["usedPercent"], 75.0)
+        self.assertEqual(clean["storage"]["path"], "/var/lib/pullwise-worker/checkouts")
+        self.assertNotIn("usagePercent", str(clean))
+
     def test_server_metrics_history_replaces_recent_sample_and_prunes_limit(self) -> None:
         first = {
             "collectedAt": 1781200000,
