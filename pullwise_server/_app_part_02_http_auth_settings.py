@@ -2,10 +2,6 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
-DEFAULT_SCAN_REPOSITORY_MAX_FILES = 2000
-DEFAULT_SCAN_REPOSITORY_MAX_BYTES = 50 * 1024 * 1024
-
-
 def repository_scan_limits_payload(plan: object = "max") -> dict:
     return system_config.repository_scan_limits(plan)
 

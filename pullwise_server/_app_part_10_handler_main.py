@@ -2082,6 +2082,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "id": agent_config["plan"],
                         "name": {"free": "Free", "pro": "Pro", "max": "Max"}[agent_config["plan"]],
                         "reviewLimit": billing.review_limit(agent_config["plan"]),
+                        "repositoryReviewLimit": billing.repository_review_limit(agent_config["plan"]),
+                        "repositoryLimits": billing.repository_limits(agent_config["plan"]),
                         "agentConfig": agent_config,
                         "source": "database",
                     },

@@ -672,6 +672,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(listing.status, HTTPStatus.OK)
         self.assertEqual([plan["id"] for plan in listing.payload["plans"]], ["free", "pro", "max"])
+        self.assertEqual(
+            listing.payload["plans"][0]["repositoryLimits"],
+            {"maxFiles": 200, "maxBytes": 5 * 1024 * 1024, "source": "database"},
+        )
         self.assertEqual(listing.payload["agentConfigs"]["max"]["codex"]["reasoningEffort"], "xhigh")
         self.assertEqual(listing.payload["source"], "database")
         stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)

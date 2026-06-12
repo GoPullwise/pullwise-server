@@ -239,6 +239,8 @@ def review_agent_configs_admin_payload() -> dict:
                 "id": plan,
                 "name": plan_names[plan],
                 "reviewLimit": review_limit(plan),
+                "repositoryReviewLimit": repository_review_limit(plan),
+                "repositoryLimits": repository_limits(plan),
                 "agentConfig": agent_configs[plan],
                 "source": "database",
             }
