@@ -6,8 +6,8 @@ DEFAULT_SCAN_REPOSITORY_MAX_FILES = 2000
 DEFAULT_SCAN_REPOSITORY_MAX_BYTES = 50 * 1024 * 1024
 
 
-def repository_scan_limits_payload() -> dict:
-    return system_config.repository_scan_limits()
+def repository_scan_limits_payload(plan: object = "max") -> dict:
+    return system_config.repository_scan_limits(plan)
 
 
 def readiness_payload() -> dict:

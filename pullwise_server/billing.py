@@ -52,6 +52,14 @@ def review_limit(plan: str) -> int:
     return system_config.plan_user_review_limit(normalize_plan(plan, default="free"))
 
 
+def repository_review_limit(plan: str) -> int:
+    return system_config.plan_repository_review_limit(normalize_plan(plan, default="free"))
+
+
+def repository_limits(plan: str) -> dict:
+    return system_config.repository_scan_limits(normalize_plan(plan, default="free"))
+
+
 def clean_review_agent_config_text(value: object) -> str:
     if not isinstance(value, str):
         return ""
@@ -424,6 +432,8 @@ def public_plan() -> dict:
                 "description": "Try Pullwise with monthly account and repository scan allowance.",
                 "currency": currency,
                 "reviewLimit": review_limit("free"),
+                "repositoryReviewLimit": repository_review_limit("free"),
+                "repositoryLimits": repository_limits("free"),
                 "prices": {
                     "month": {
                         "amount": "0",
@@ -457,6 +467,8 @@ def public_paid_plan_payload(plan: str, products: dict, currency: str) -> dict:
         "description": f"{description} Quota is shared across your account and repositories.",
         "currency": currency,
         "reviewLimit": review_limit(normalized_plan),
+        "repositoryReviewLimit": repository_review_limit(normalized_plan),
+        "repositoryLimits": repository_limits(normalized_plan),
         "prices": {
             "month": creem_price_payload(monthly_product, "month"),
             "year": creem_price_payload(yearly_product, "year"),

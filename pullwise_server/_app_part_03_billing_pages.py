@@ -302,6 +302,8 @@ def subscription_plan_agent_configs_payload() -> dict:
                 "id": plan_id,
                 "name": plan_names[plan_id],
                 "reviewLimit": billing.review_limit(plan_id),
+                "repositoryReviewLimit": billing.repository_review_limit(plan_id),
+                "repositoryLimits": billing.repository_limits(plan_id),
                 "agentConfig": agent_configs[plan_id],
             }
             for plan_id in billing.PLAN_IDS

@@ -20,9 +20,24 @@ DEFAULT_CREEM_TEST_API_BASE_URL = "https://test-api.creem.io"
 DEFAULT_CONFIG = {
     "version": 1,
     "plans": {
-        "free": {"userReviewLimit": 5, "repositoryReviewLimit": 5},
-        "pro": {"userReviewLimit": 60, "repositoryReviewLimit": 60},
-        "max": {"userReviewLimit": 90, "repositoryReviewLimit": 90},
+        "free": {
+            "userReviewLimit": 5,
+            "repositoryReviewLimit": 5,
+            "maxRepoFiles": 200,
+            "maxRepoBytes": 5 * 1024 * 1024,
+        },
+        "pro": {
+            "userReviewLimit": 60,
+            "repositoryReviewLimit": 60,
+            "maxRepoFiles": 1000,
+            "maxRepoBytes": 20 * 1024 * 1024,
+        },
+        "max": {
+            "userReviewLimit": 90,
+            "repositoryReviewLimit": 90,
+            "maxRepoFiles": 2000,
+            "maxRepoBytes": 50 * 1024 * 1024,
+        },
     },
     "scan": {
         "maxRunningScansPerUser": 1,
@@ -30,8 +45,6 @@ DEFAULT_CONFIG = {
         "maxQueuedScansPerUser": 20,
         "jobMaxAttempts": 3,
         "jobLeaseSeconds": 3600,
-        "maxRepoFiles": 2000,
-        "maxRepoBytes": 50 * 1024 * 1024,
     },
     "worker": {
         "maxClaimJobs": 2,
@@ -73,30 +86,44 @@ FIELD_METADATA = [
         "title": "Plan quotas",
         "description": "Monthly scan quotas by subscription plan. These values are read when pricing, quota status, and scan quota checks are computed.",
         "fields": [
-            {
-                "path": f"plans.{plan}.userReviewLimit",
-                "label": f"{plan.title()} user review limit",
-                "type": "integer",
-                "min": 0,
-                "description": f"Maximum monthly scans one {plan.title()} user can start across all repositories.",
-            }
+            field
             for plan in PLAN_IDS
-        ]
-        + [
-            {
-                "path": f"plans.{plan}.repositoryReviewLimit",
-                "label": f"{plan.title()} repository review limit",
-                "type": "integer",
-                "min": 0,
-                "description": f"Maximum monthly scans allowed for a single repository under the {plan.title()} plan.",
-            }
-            for plan in PLAN_IDS
+            for field in (
+                {
+                    "path": f"plans.{plan}.userReviewLimit",
+                    "label": f"{plan.title()} user review limit",
+                    "type": "integer",
+                    "min": 0,
+                    "description": f"Maximum monthly scans one {plan.title()} user can start across all repositories.",
+                },
+                {
+                    "path": f"plans.{plan}.repositoryReviewLimit",
+                    "label": f"{plan.title()} repository review limit",
+                    "type": "integer",
+                    "min": 0,
+                    "description": f"Maximum monthly scans allowed for a single repository under the {plan.title()} plan.",
+                },
+                {
+                    "path": f"plans.{plan}.maxRepoFiles",
+                    "label": f"{plan.title()} repository file limit",
+                    "type": "integer",
+                    "min": 1,
+                    "description": f"Repository file-count ceiling for {plan.title()} worker checkouts before verifier or AI review.",
+                },
+                {
+                    "path": f"plans.{plan}.maxRepoBytes",
+                    "label": f"{plan.title()} repository byte limit",
+                    "type": "integer",
+                    "min": 1,
+                    "description": f"Repository checkout byte ceiling for {plan.title()} worker checkouts before verifier or AI review.",
+                },
+            )
         ],
     },
     {
         "id": "scan",
         "title": "Scan scheduling",
-        "description": "Queue, retry, lease, and repository-size policy used by the server and worker job payloads.",
+        "description": "Queue, retry, and lease policy used by the server and worker job payloads.",
         "fields": [
             {
                 "path": "scan.maxRunningScansPerUser",
@@ -132,20 +159,6 @@ FIELD_METADATA = [
                 "type": "integer",
                 "min": 60,
                 "description": "How long a claimed job lease may run before the server can recover it as expired.",
-            },
-            {
-                "path": "scan.maxRepoFiles",
-                "label": "Max repository files",
-                "type": "integer",
-                "min": 1,
-                "description": "Repository file-count ceiling sent to workers; oversized repositories stop before verifier or AI review.",
-            },
-            {
-                "path": "scan.maxRepoBytes",
-                "label": "Max repository bytes",
-                "type": "integer",
-                "min": 1,
-                "description": "Repository checkout byte ceiling sent to workers; oversized repositories stop before verifier or AI review.",
             },
         ],
     },
@@ -405,8 +418,6 @@ def public_docs_payload() -> dict:
                 "maxRunningScansPerUser": current["scan"]["maxRunningScansPerUser"],
                 "maxQueuedScansGlobal": current["scan"]["maxQueuedScansGlobal"],
                 "maxQueuedScansPerUser": current["scan"]["maxQueuedScansPerUser"],
-                "maxRepoFiles": current["scan"]["maxRepoFiles"],
-                "maxRepoBytes": current["scan"]["maxRepoBytes"],
             },
             "rateLimit": current["rateLimit"],
             "billing": {
@@ -434,28 +445,40 @@ def public_docs_groups(current: dict, *, pro_products: list[str], max_products: 
             "title": "Plan quotas",
             "description": "Monthly scan quotas enforced by the server for each subscription plan.",
             "fields": [
-                public_field(
-                    f"plans.{plan}.userReviewLimit",
-                    f"{plan.title()} user monthly scans",
-                    current["plans"][plan]["userReviewLimit"],
-                    f"Maximum scans one {plan.title()} user can start in a billing cycle.",
-                )
+                field
                 for plan in PLAN_IDS
-            ]
-            + [
-                public_field(
-                    f"plans.{plan}.repositoryReviewLimit",
-                    f"{plan.title()} repository monthly scans",
-                    current["plans"][plan]["repositoryReviewLimit"],
-                    f"Maximum scans one repository can receive in a billing cycle for {plan.title()} users.",
+                for field in (
+                    public_field(
+                        f"plans.{plan}.userReviewLimit",
+                        f"{plan.title()} user monthly scans",
+                        current["plans"][plan]["userReviewLimit"],
+                        f"Maximum scans one {plan.title()} user can start in a billing cycle.",
+                    ),
+                    public_field(
+                        f"plans.{plan}.repositoryReviewLimit",
+                        f"{plan.title()} repository monthly scans",
+                        current["plans"][plan]["repositoryReviewLimit"],
+                        f"Maximum scans one repository can receive in a billing cycle for {plan.title()} users.",
+                    ),
+                    public_field(
+                        f"plans.{plan}.maxRepoFiles",
+                        f"{plan.title()} repository file limit",
+                        current["plans"][plan]["maxRepoFiles"],
+                        f"Repository checkouts above this file count stop before verifier or AI review for {plan.title()} users.",
+                    ),
+                    public_field(
+                        f"plans.{plan}.maxRepoBytes",
+                        f"{plan.title()} repository byte limit",
+                        current["plans"][plan]["maxRepoBytes"],
+                        f"Repository checkouts above this size stop before verifier or AI review for {plan.title()} users.",
+                    ),
                 )
-                for plan in PLAN_IDS
             ],
         },
         {
             "id": "scan",
             "title": "Scan limits",
-            "description": "Queue and repository-size limits visible to users when scans are accepted or rejected.",
+            "description": "Queue limits visible to users when scans are accepted or rejected.",
             "fields": [
                 public_field(
                     "scan.maxRunningScansPerUser",
@@ -474,18 +497,6 @@ def public_docs_groups(current: dict, *, pro_products: list[str], max_products: 
                     "Global queued scans",
                     current["scan"]["maxQueuedScansGlobal"],
                     "Maximum queued scans across the service.",
-                ),
-                public_field(
-                    "scan.maxRepoFiles",
-                    "Repository file limit",
-                    current["scan"]["maxRepoFiles"],
-                    "Repository checkouts above this file count stop before verifier or AI review.",
-                ),
-                public_field(
-                    "scan.maxRepoBytes",
-                    "Repository byte limit",
-                    current["scan"]["maxRepoBytes"],
-                    "Repository checkouts above this size stop before verifier or AI review.",
                 ),
             ],
         },
@@ -581,7 +592,27 @@ def normalize_config(raw: dict) -> dict:
             nested_set(normalized, path, clean_value(value, spec))
         except ValueError:
             continue
+    apply_legacy_repository_scan_limit_migration(normalized, raw)
     return normalized
+
+
+def apply_legacy_repository_scan_limit_migration(normalized: dict, raw: dict) -> None:
+    legacy_fields = (
+        ("scan.maxRepoFiles", "maxRepoFiles"),
+        ("scan.maxRepoBytes", "maxRepoBytes"),
+    )
+    for legacy_path, plan_key in legacy_fields:
+        legacy_found, legacy_value = nested_get(raw, legacy_path)
+        if not legacy_found:
+            continue
+        try:
+            migrated_value = clean_int(legacy_value, minimum=1)
+        except ValueError:
+            continue
+        for plan in PLAN_IDS:
+            plan_found, _value = nested_get(raw, f"plans.{plan}.{plan_key}")
+            if not plan_found:
+                normalized["plans"][plan][plan_key] = migrated_value
 
 
 def flatten_paths(value: object, prefix: str = "") -> list[str]:
@@ -785,10 +816,19 @@ def plan_repository_review_limit(plan: object) -> int:
     return max(0, int_setting(f"plans.{plan_id(plan)}.repositoryReviewLimit"))
 
 
-def repository_scan_limits() -> dict:
+def plan_repository_file_limit(plan: object) -> int:
+    return max(1, int_setting(f"plans.{plan_id(plan, default='max')}.maxRepoFiles"))
+
+
+def plan_repository_byte_limit(plan: object) -> int:
+    return max(1, int_setting(f"plans.{plan_id(plan, default='max')}.maxRepoBytes"))
+
+
+def repository_scan_limits(plan: object = "max") -> dict:
+    normalized_plan = plan_id(plan, default="max")
     return {
-        "maxFiles": max(1, int_setting("scan.maxRepoFiles")),
-        "maxBytes": max(1, int_setting("scan.maxRepoBytes")),
+        "maxFiles": plan_repository_file_limit(normalized_plan),
+        "maxBytes": plan_repository_byte_limit(normalized_plan),
         "source": "database",
     }
 

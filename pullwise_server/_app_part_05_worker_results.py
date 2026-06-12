@@ -94,11 +94,14 @@ def retry_scan_job_for_scan_locked(scan: dict, *, queued_at: int | None = None) 
     return job
 
 
-def worker_agent_config_for_job(job: dict, scan: dict | None = None) -> dict:
+def worker_plan_for_job(job: dict, scan: dict | None = None) -> str:
     user_id = str(job.get("user_id") or (scan or {}).get("userId") or "").strip()
     user = USERS.get(user_id) if user_id else None
-    plan = quota.effective_user_plan(user)
-    return billing.review_agent_config(plan)
+    return quota.effective_user_plan(user)
+
+
+def worker_agent_config_for_job(job: dict, scan: dict | None = None) -> dict:
+    return billing.review_agent_config(worker_plan_for_job(job, scan))
 
 
 def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
@@ -140,9 +143,10 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
         "clone_url": trusted_github_web_url(job.get("clone_url")),
     }
-    agent_config = worker_agent_config_for_job(job, scan)
+    plan = worker_plan_for_job(job, scan)
+    agent_config = billing.review_agent_config(plan)
     payload["agentConfig"] = agent_config
-    repository_limits = repository_scan_limits_payload()
+    repository_limits = repository_scan_limits_payload(plan)
     payload["repositoryLimits"] = repository_limits
     language = review_output_language_payload(job.get("review_output_language"))
     payload["review_output_language"] = language["code"]
