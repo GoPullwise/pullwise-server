@@ -164,6 +164,35 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(collect.call_args.kwargs["timestamp"], 1781200000)
         self.assertEqual(collect.call_args.kwargs["storage_path"], os.path.dirname(db.database_path()))
 
+    def test_admin_can_start_pullwise_server_restart(self) -> None:
+        fake_process = type("FakeProcess", (), {"pid": 4321})()
+        with (
+            patch.object(app, "now", return_value=1781200000),
+            patch.object(app.subprocess, "Popen", return_value=fake_process) as popen,
+        ):
+            handler = RouteHarness("/admin/server/restart", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(handler.payload["command"], "bash launcher.sh restart")
+        self.assertEqual(handler.payload["pid"], 4321)
+        self.assertEqual(handler.payload["startedAt"], 1781200000)
+        popen.assert_called_once()
+        args, kwargs = popen.call_args
+        self.assertEqual(args[0], ["bash", "launcher.sh", "restart"])
+        self.assertEqual(kwargs["cwd"], app.project_root())
+        self.assertIs(kwargs["stdin"], app.subprocess.DEVNULL)
+        self.assertIs(kwargs["stdout"], app.subprocess.DEVNULL)
+        self.assertIs(kwargs["stderr"], app.subprocess.DEVNULL)
+
+    def test_non_admin_cannot_start_pullwise_server_restart(self) -> None:
+        with patch.object(app.subprocess, "Popen") as popen:
+            handler = RouteHarness("/admin/server/restart", cookie=self.user_cookie)
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+        popen.assert_not_called()
+
     def test_admin_can_create_worker_and_token_is_only_returned_once_as_hash(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
