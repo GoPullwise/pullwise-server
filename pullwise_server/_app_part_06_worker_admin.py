@@ -737,14 +737,26 @@ fi
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
 run_as_service_user() {
-  if command -v runuser >/dev/null 2>&1; then
-    runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" PATH="$SERVICE_TOOL_PATH" "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" PATH="$SERVICE_TOOL_PATH" "$@"
-  else
-    echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
-    return 127
-  fi
+  (
+    cd "$DATA_DIR"
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" PATH="$SERVICE_TOOL_PATH" "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" PATH="$SERVICE_TOOL_PATH" "$@"
+    else
+      echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
+      return 127
+    fi
+  )
+}
+service_user_auth_command() {
+  local command_line=""
+  local part
+  for part in "$@"; do
+    command_line="${command_line:+$command_line }$(printf '%q' "$part")"
+  done
+  printf 'sudo -u %q env HOME=%q PATH=%q sh -lc %q\n' \
+    "$SERVICE_USER" "$DATA_DIR" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
 }
 scoped_command_path() {
   local fallback_one="${1:-}"
@@ -813,21 +825,24 @@ write_auth_commands() {
     echo "Provider chain: $PROVIDER_CHAIN"
     if provider_chain_has codex; then
       echo "Codex device login:"
-      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${CODEX_COMMAND:-codex} login --device-auth"
+      service_user_auth_command "${CODEX_COMMAND:-codex}" login --device-auth
     fi
     if provider_chain_has opencode; then
       echo "OpenCode current model provider:"
-      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider $OPENCODE_AUTH_PROVIDER"
+      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider "$OPENCODE_AUTH_PROVIDER"
       echo "OpenCode DeepSeek example:"
-      echo "PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider deepseek"
+      printf 'PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro '
+      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider deepseek
       echo "OpenCode MiniMax example:"
-      echo "PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3 sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider minimax"
+      printf 'PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3 '
+      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider minimax
       echo "OpenCode generic template:"
-      echo "Set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login --provider <provider>"
+      printf 'Set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: '
+      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider '<provider>'
       echo "OpenCode interactive provider selection:"
-      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth login"
+      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login
       echo "OpenCode auth status:"
-      echo "sudo -u $SERVICE_USER env HOME=$DATA_DIR PATH=$SERVICE_TOOL_PATH ${OPENCODE_COMMAND:-opencode} auth list"
+      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth list
     fi
   } > "$AUTH_COMMANDS_FILE"
   chown root:"$SERVICE_USER" "$AUTH_COMMANDS_FILE"
