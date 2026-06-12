@@ -1170,20 +1170,26 @@ def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
             return None
 
 
-def get_worker_by_token(token: str, *, allow_disabled: bool = False) -> dict[str, Any] | None:
+def get_worker_by_token(
+    token: str,
+    *,
+    allow_disabled: bool = False,
+    include_deleted: bool = False,
+) -> dict[str, Any] | None:
     initialize()
     token = str(token or "").strip()
     if not token:
         return None
     token_hash = worker_token_hash(token)
     enabled_clause = "" if allow_disabled else "AND enabled = 1"
+    deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
             row = connection.execute(
                 f"""
                 SELECT * FROM workers
-                WHERE token_hash = ? {enabled_clause} AND deleted_at IS NULL
+                WHERE token_hash = ? {enabled_clause} {deleted_clause}
                 """,
                 (token_hash,),
             ).fetchone()
@@ -1366,16 +1372,29 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                     timestamp,
                 ),
             )
-            connection.execute(
-                """
-                UPDATE workers
-                SET enabled = 0,
-                    disabled_at = COALESCE(disabled_at, ?),
-                    updated_at = ?
-                WHERE worker_id = ?
-                """,
-                (timestamp, timestamp, worker_id),
-            )
+            if command == "uninstall":
+                connection.execute(
+                    """
+                    UPDATE workers
+                    SET enabled = 0,
+                        deleted_at = COALESCE(deleted_at, ?),
+                        disabled_at = COALESCE(disabled_at, ?),
+                        updated_at = ?
+                    WHERE worker_id = ?
+                    """,
+                    (timestamp, timestamp, timestamp, worker_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE workers
+                    SET enabled = 0,
+                        disabled_at = COALESCE(disabled_at, ?),
+                        updated_at = ?
+                    WHERE worker_id = ?
+                    """,
+                    (timestamp, timestamp, worker_id),
+                )
             return row_to_dict(connection.execute("SELECT * FROM worker_commands WHERE id = ?", (command_id,)).fetchone())
 
 
@@ -1609,6 +1628,53 @@ def get_scan_job(job_id: str) -> dict[str, Any] | None:
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+
+
+def get_scan_job_for_scan(scan_id: str) -> dict[str, Any] | None:
+    initialize()
+    scan_id = str(scan_id or "").strip()
+    if not scan_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
+
+
+def retry_scan_job(scan_id: str, *, timestamp: int | None = None) -> dict[str, Any] | None:
+    initialize()
+    scan_id = str(scan_id or "").strip()
+    if not scan_id:
+        return None
+    current_time = int(timestamp if timestamp is not None else time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            cursor = connection.execute(
+                """
+                UPDATE scan_jobs
+                SET status = 'queued',
+                    claimed_by_worker_id = NULL,
+                    claimed_at = NULL,
+                    started_at = NULL,
+                    completed_at = NULL,
+                    timeout_at = NULL,
+                    error = NULL,
+                    result_checksum = NULL,
+                    progress_phase = NULL,
+                    progress = 0,
+                    progress_message = NULL,
+                    logs_summary = NULL,
+                    last_attempt_id = NULL,
+                    created_at = ?,
+                    updated_at = ?
+                WHERE scan_id = ?
+                  AND status IN ('failed', 'cancelled', 'lost')
+                """,
+                (current_time, current_time, scan_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+            return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
 
 
 def list_scan_jobs_missing_from_state(scan_ids: list[str] | set[str]) -> list[dict[str, Any]]:

@@ -690,6 +690,22 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "repository_graph": repository_graph_fixture(),
                 "semantic_graph": semantic_graph_fixture(),
                 "impact_graph": impact_graph_fixture(),
+                "completion_audit": {
+                    "protocol": "pullwise-completion-audit/0.1",
+                    "status": "warning",
+                    "warnings": ["Agent output is still being checked."],
+                    "checks": [{"label": "checkpoint", "status": "warning", "summary": "Intermediate trace only."}],
+                    "retry_recommended": True,
+                    "retry_reason": "wait for final verifier result",
+                    "summary": "Progress audit checkpoint.",
+                },
+                "job_trace": {
+                    "protocol": "pullwise-job-trace/0.1",
+                    "status": "running",
+                    "checkpoints": [{"stage": "clone", "status": "ok", "summary": "Repository cloned."}],
+                    "candidate_findings_before_filter": 0,
+                    "next_retry_hint": "wait for final verifier result",
+                },
                 "audit_swarm": {
                     "protocol": "audit-swarm/0.1",
                     "stage": "discovery",
@@ -728,6 +744,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(running_scan_payload["auditSwarm"]["counts"]["evidenceBlocks"], 1)
         self.assertEqual(running_scan_payload["auditSwarm"]["roles"], ["security-reviewer"])
         self.assertEqual(running_scan_payload["auditSwarm"]["evidenceBlocks"][0]["kind"], "summary")
+        self.assertEqual(running_scan_payload["completionAudit"]["status"], "warning")
+        self.assertEqual(running_scan_payload["completionAudit"]["retryReason"], "wait for final verifier result")
+        self.assertEqual(running_scan_payload["completionAudit"]["checks"][0]["label"], "checkpoint")
+        self.assertEqual(running_scan_payload["jobTrace"]["checkpoints"][0]["key"], "clone")
+        self.assertEqual(running_scan_payload["jobTrace"]["nextRetryHint"], "wait for final verifier result")
 
         final_repository_graph = repository_graph_fixture()
         final_repository_graph["summary"] = "Final graph"
@@ -3039,6 +3060,283 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(payload["preflight"]["repositoryLimitExceeded"])
         self.assertEqual(payload["preflight"]["repositoryLimitReasons"], ["file_count", "total_bytes"])
 
+    def test_fake_repository_too_large_without_preflight_limit_evidence_does_not_refund(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {"usr_1": user}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "11001",
+                "full_name": "acme/fake-large",
+                "owner_login": "acme",
+                "default_branch": "main",
+            }
+        )
+        quota_result = app.quota.consume_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_fake_large",
+            request_id="req_fake_large",
+        )
+        scan = {
+            "id": "sc_fake_large",
+            "repo": repository["full_name"],
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_fake_large",
+            "quotaBucketIds": quota_result["bucketIds"],
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed_job = claim.payload["job"]
+
+        result = RouteHarness(
+            f"/worker/jobs/{claimed_job['job_id']}/result",
+            {
+                "status": "failed",
+                "attempt_id": f"wk_1-{claimed_job['attempt']}",
+                "result_checksum": "checksum-fake-repository-too-large",
+                "error": "Repository is too large for Pullwise scanning.",
+                "error_code": "REPOSITORY_TOO_LARGE",
+                **audit_result_fields([]),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertNotIn("quotaRollback", result.payload)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 1)
+        self.assertNotIn("quotaRefunded", app.scan_payload(app.SCANS[0]))
+
+    def test_worker_progress_stores_completion_audit_and_job_trace(self) -> None:
+        scan = {
+            "id": "sc_progress_audit",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+
+        progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {
+                "phase": "ai",
+                "progress": 55,
+                "completion_audit": {
+                    "protocol": "completion-audit/0.1",
+                    "status": "warning",
+                    "retry_recommended": True,
+                    "retry_reason": "Worker detected partial output.",
+                    "checks": [{"label": "artifact", "status": "warning", "summary": "Missing optional bundle."}],
+                    "raw": "drop me",
+                },
+                "job_trace": {
+                    "protocol": "job-trace/0.1",
+                    "candidate_findings_before_filter": 7,
+                    "checkpoints": [{"key": "review", "status": "running", "duration_ms": 123}],
+                    "rejected_reasons": [{"reason": "duplicate", "count": 2}],
+                    "next_retry_hint": "retry with a clean workspace",
+                    "raw": "drop me",
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(progress, "POST")
+
+        self.assertEqual(progress.status, HTTPStatus.OK)
+        payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(payload["completionAudit"]["protocol"], "completion-audit/0.1")
+        self.assertTrue(payload["completionAudit"]["retryRecommended"])
+        self.assertEqual(payload["completionAudit"]["checks"][0]["label"], "artifact")
+        self.assertEqual(payload["jobTrace"]["protocol"], "job-trace/0.1")
+        self.assertEqual(payload["jobTrace"]["candidateFindingsBeforeFilter"], 7)
+        self.assertEqual(payload["jobTrace"]["checkpoints"][0]["durationMs"], 123)
+        self.assertNotIn("raw", json.dumps(payload["completionAudit"]))
+        self.assertNotIn("raw", json.dumps(payload["jobTrace"]))
+
+    def test_retry_consumes_quota_and_requeues_failed_scan(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {"usr_1": user}
+        app.SESSIONS = {"ses_owner": {"id": "ses_owner", "userId": "usr_1", "createdAt": app.now(), "expiresAt": app.now() + 3600}}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "12001",
+                "full_name": "acme/retry",
+                "owner_login": "acme",
+                "default_branch": "main",
+            }
+        )
+        initial_quota = app.quota.consume_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_retry_route",
+            request_id="req_initial",
+        )
+        scan = {
+            "id": "sc_retry_route",
+            "repo": repository["full_name"],
+            "branch": "main",
+            "commit": "pending",
+            "status": "failed",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "completedAt": app.now(),
+            "progress": 80,
+            "phase": "report",
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_initial",
+            "quotaBucketIds": initial_quota["bucketIds"],
+            "billingUsage": initial_quota["user"],
+            "repoUsage": initial_quota["repository"],
+            "error": "worker failed",
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        connection = db.connect()
+        try:
+            connection.execute("UPDATE scan_jobs SET status = 'failed' WHERE scan_id = ?", (scan["id"],))
+            connection.commit()
+        finally:
+            connection.close()
+
+        retry = RouteHarness(
+            "/scans/sc_retry_route/retry",
+            {"requestId": "req_retry_route"},
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+        )
+        app.PullwiseHandler.route(retry, "POST")
+
+        self.assertEqual(retry.status, HTTPStatus.CREATED)
+        self.assertEqual(retry.payload["status"], "queued")
+        self.assertEqual(app.SCANS[0]["requestId"], "req_retry_route")
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 2)
+        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 2)
+        self.assertEqual(db.get_scan_job_for_scan("sc_retry_route")["status"], "queued")
+        self.assertEqual(app.SCANS[0]["progress"], 0)
+
+    def test_retry_repository_too_large_refunds_only_current_retry_request(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {"usr_1": user}
+        app.SESSIONS = {"ses_owner": {"id": "ses_owner", "userId": "usr_1", "createdAt": app.now(), "expiresAt": app.now() + 3600}}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "12002",
+                "full_name": "acme/retry-large",
+                "owner_login": "acme",
+                "default_branch": "main",
+            }
+        )
+        initial_quota = app.quota.consume_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_retry_large",
+            request_id="req_initial_large",
+        )
+        scan = {
+            "id": "sc_retry_large",
+            "repo": repository["full_name"],
+            "branch": "main",
+            "commit": "pending",
+            "status": "failed",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "completedAt": app.now(),
+            "progress": 90,
+            "phase": "report",
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_initial_large",
+            "quotaBucketIds": initial_quota["bucketIds"],
+            "billingUsage": initial_quota["user"],
+            "repoUsage": initial_quota["repository"],
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        connection = db.connect()
+        try:
+            connection.execute("UPDATE scan_jobs SET status = 'failed' WHERE scan_id = ?", (scan["id"],))
+            connection.commit()
+        finally:
+            connection.close()
+
+        retry = RouteHarness(
+            "/scans/sc_retry_large/retry",
+            {"requestId": "req_retry_large"},
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
+        )
+        app.PullwiseHandler.route(retry, "POST")
+        self.assertEqual(retry.status, HTTPStatus.CREATED)
+        self.assertEqual(retry.payload["status"], "queued")
+        self.assertEqual(app.SCANS[0]["requestId"], "req_retry_large")
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 2)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed_job = claim.payload["job"]
+        result = RouteHarness(
+            f"/worker/jobs/{claimed_job['job_id']}/result",
+            {
+                "status": "failed",
+                "attempt_id": f"wk_1-{claimed_job['attempt']}",
+                "result_checksum": "checksum-retry-repository-too-large",
+                "error": "Repository is too large for Pullwise scanning.",
+                "error_code": "REPOSITORY_TOO_LARGE",
+                **audit_result_fields([]),
+                "preflight": {
+                    "mode": "static",
+                    "execution": "repository_limit_check",
+                    "repositoryStats": {"fileCount": 2001, "totalBytes": 50 * 1024 * 1024 + 1},
+                    "repositoryLimits": {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024},
+                    "repositoryLimitExceeded": True,
+                    "repositoryLimitReasons": ["file_count"],
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(result.payload["quotaRollback"]["ledgerRows"], 2)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 1)
+        self.assertEqual(app.SCANS[0]["requestId"], "req_retry_large")
+
     def test_worker_result_backfills_pending_commit_with_resolved_sha(self) -> None:
         resolved_commit = "1234567890abcdef1234567890abcdef12345678"
         scan = {
@@ -3638,7 +3936,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 3}, headers=self.auth)
         with patch.dict(
             os.environ,
-            {"PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
+            {"PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1", "PULLWISE_WORKER_MAX_CLAIM_JOBS": "3"},
             clear=False,
         ):
             app.PullwiseHandler.route(claim, "POST")
@@ -3685,7 +3983,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             app.create_scan_job_for_scan(scan)
 
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 3}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        with patch.dict(os.environ, {"PULLWISE_WORKER_MAX_CLAIM_JOBS": "3"}, clear=False):
+            app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.OK)
         configs = {job["agentConfig"]["plan"]: job["agentConfig"] for job in claim.payload["jobs"]}
@@ -3808,7 +4107,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 3}, headers=self.auth)
         with patch.dict(
             os.environ,
-            {"PULLWISE_MAX_RUNNING_SCANS_GLOBAL": "1", "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
+            {
+                "PULLWISE_MAX_RUNNING_SCANS_GLOBAL": "1",
+                "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1",
+                "PULLWISE_WORKER_MAX_CLAIM_JOBS": "3",
+            },
             clear=False,
         ):
             app.PullwiseHandler.route(claim, "POST")
@@ -3920,6 +4223,83 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
         self.assertEqual(scan["status"], "queued")
+
+    def test_worker_claim_allows_provider_fallback_when_codex_not_ready(self) -> None:
+        scan = {
+            "id": "sc_opencode_fallback",
+            "repo": "acme/opencode-fallback",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS.append(scan)
+        job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 1,
+                "running_jobs": 0,
+                "free_slots": 1,
+                "doctor_status": "ok",
+                "codex_ready": 0,
+                "timestamp": app.now(),
+            }
+        )
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual(claim.payload["job"]["job_id"], job["job_id"])
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
+        self.assertEqual(scan["status"], "running")
+
+    def test_worker_claim_allows_opencode_first_worker_when_allowlist_is_opencode(self) -> None:
+        scan = {
+            "id": "sc_opencode_first",
+            "repo": "acme/opencode-first",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS.append(scan)
+        job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "opencode",
+                "max_concurrent_jobs": 1,
+                "running_jobs": 0,
+                "free_slots": 1,
+                "doctor_status": "ok",
+                "codex_ready": 0,
+                "timestamp": app.now(),
+            }
+        )
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        with patch("pullwise_server.app.system_config.worker_allowed_providers", return_value={"opencode"}):
+            app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual(claim.payload["job"]["job_id"], job["job_id"])
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
+        self.assertEqual(scan["status"], "running")
 
     def test_worker_claim_requires_supported_provider(self) -> None:
         scan = {

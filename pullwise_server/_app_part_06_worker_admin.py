@@ -48,8 +48,8 @@ def worker_version_compatible(worker: dict) -> bool:
 
 
 def worker_supported_provider(worker: dict) -> bool:
-    provider = public_issue_text(worker.get("provider")) or "codex"
-    allowed = system_config.worker_allowed_providers()
+    provider = public_issue_text(worker.get("provider")).lower() or "codex"
+    allowed = {item.lower() for item in system_config.worker_allowed_providers()}
     return provider in allowed
 
 
@@ -62,12 +62,13 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
         return "offline"
     doctor_status = public_issue_text(worker.get("doctor_status")).lower()
     codex_ready = worker.get("codex_ready")
+    codex_unready = codex_ready == 0 and doctor_status != "ok"
     if (
         clean_scan_error(worker.get("last_error"))
         or not worker_version_compatible(worker)
         or not worker_supported_provider(worker)
         or doctor_status in {"degraded", "failed", "not_ready"}
-        or codex_ready == 0
+        or codex_unready
     ):
         return "degraded"
     if public_scan_count(worker.get("running_jobs")) >= max(1, public_scan_count(worker.get("max_concurrent_jobs"))):

@@ -55,6 +55,7 @@ admin-only and are limited to registry state, desired state, and credentials:
 - `POST /admin/workers/{id}/rotate-token`: rotate the worker credential and return the new token once
 - `POST /admin/workers/{id}/test`: evaluate server-side registry and heartbeat diagnostics
 - `DELETE /admin/workers/{id}`: soft-delete a worker
+- `DELETE /worker/registry`: worker-token authenticated self-unregister used by local uninstall
 
 All admin writes must:
 
@@ -78,6 +79,12 @@ pull-based command queue:
 6. The worker reports progress, final status, output summary, and error details back to the server.
 7. The server records the result and exposes it only to admins.
 
+`stop` commands disable job claiming but keep the worker in the registry.
+`uninstall` commands soft-delete the worker registry row as soon as the command
+is accepted, so admin lists remove it immediately. A locally run
+`pullwise-worker uninstall` calls `DELETE /worker/registry` before removing the
+local service when a worker token is configured.
+
 This model keeps root, SSH, and host-specific privileges off the server. It also
 makes operations retryable, auditable, and compatible with workers behind NAT or
 private networks.
@@ -89,7 +96,7 @@ The worker management control plane must not:
 - expose public hostnames or local paths
 - expose worker tokens or token hashes
 - expose internal errors to ordinary users
-- let non-admin users mutate worker registry state
+- let ordinary users mutate worker registry state
 - let the server directly SSH into worker hosts
 - provide arbitrary command execution from the server to a worker
 

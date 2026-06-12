@@ -34,7 +34,7 @@ DEFAULT_CONFIG = {
         "maxRepoBytes": 50 * 1024 * 1024,
     },
     "worker": {
-        "maxClaimJobs": 32,
+        "maxClaimJobs": 2,
         "maxConcurrencyCap": 32,
         "heartbeatTimeoutSeconds": 120,
         "minVersion": "",

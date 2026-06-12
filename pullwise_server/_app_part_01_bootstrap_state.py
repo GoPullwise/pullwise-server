@@ -25,7 +25,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
-from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, system_config
+from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, system_config, system_metrics
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -309,12 +309,17 @@ def api_key_prefix(token: str) -> str:
     return token[:16]
 
 
-def worker_token_record(handler: BaseHTTPRequestHandler, *, allow_disabled: bool = False) -> dict | None:
+def worker_token_record(
+    handler: BaseHTTPRequestHandler,
+    *,
+    allow_disabled: bool = False,
+    include_deleted: bool = False,
+) -> dict | None:
     token = bearer_token(handler)
     if not token:
         return None
     if allow_disabled:
-        return db.get_worker_by_token(token, allow_disabled=True)
+        return db.get_worker_by_token(token, allow_disabled=True, include_deleted=include_deleted)
     return db.get_enabled_worker_token(token)
 
 

@@ -459,17 +459,21 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
     user_id = public_issue_text(job.get("user_id"))
     if not scan_id or not user_id:
         return {}
+    with STATE_LOCK:
+        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        request_id = public_issue_text((scan or {}).get("requestId")) or None
+        repo_id = public_issue_text((scan or {}).get("repoId") or job.get("repo_id"))
+        has_repository_limit_evidence = worker_result_has_repository_limit_evidence(body, scan)
+    if not has_repository_limit_evidence:
+        return {}
     rollback_result = quota.rollback_scan_quota(
         scan_id=scan_id,
         requested_by_user_id=user_id,
-        match_request_id=False,
+        request_id=request_id,
     )
     if not rollback_result.get("ledgerRows"):
         return rollback_result
 
-    with STATE_LOCK:
-        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
-        repo_id = public_issue_text((scan or {}).get("repoId") or job.get("repo_id"))
     user = USERS.get(user_id)
     repository = db.get_repository(repo_id) if repo_id else None
     user_usage = quota.quota_payload_for_user(user) if user else None
@@ -488,6 +492,17 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
             }
             mark_state_dirty()
     return rollback_result
+
+
+def worker_result_has_repository_limit_evidence(body: dict, scan: dict | None) -> bool:
+    preflight = public_scan_preflight(body.get("preflight") if isinstance(body, dict) else None)
+    if not preflight and isinstance(scan, dict):
+        preflight = public_scan_preflight(scan.get("preflight"))
+    if preflight.get("repositoryLimitExceeded") is not True:
+        return False
+    limits = preflight.get("repositoryLimits") if isinstance(preflight.get("repositoryLimits"), dict) else {}
+    reasons = preflight.get("repositoryLimitReasons") if isinstance(preflight.get("repositoryLimitReasons"), list) else []
+    return bool(reasons or public_scan_count(limits.get("maxFiles")) or public_scan_count(limits.get("maxBytes")))
 
 
 def worker_issue_reserved_ids(job: dict) -> set[str]:

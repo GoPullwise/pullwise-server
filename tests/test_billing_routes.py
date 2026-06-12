@@ -1456,6 +1456,51 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
             connection.close()
         self.assertEqual(rows, [("user", "usr_1", "pro", 60, 0)])
 
+    def test_creem_subscription_paid_webhook_refreshes_paid_quota_bucket(self) -> None:
+        seed_session()
+        raw = json.dumps(
+            {
+                "id": "evt_creem_subscription_paid_1",
+                "eventType": "subscription.paid",
+                "created_at": 1728734327355,
+                "object": {
+                    "id": "sub_1",
+                    "status": "active",
+                    "customer": {"id": "cust_1", "email": "dev@example.com"},
+                    "product": {"id": "prod_monthly", "billing_period": "every-month"},
+                    "current_period_start_date": "2026-06-09T00:00:00.000Z",
+                    "current_period_end_date": "2026-07-09T00:00:00.000Z",
+                    "metadata": {"userId": "usr_1", "plan": "pro"},
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(b"whsec_test", raw, hashlib.sha256).hexdigest()
+        handler = HandlerHarness(
+            path="/webhooks/creem",
+            raw_body=raw,
+            headers={"Content-Length": str(len(raw)), "creem-signature": signature},
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        billing_payload = app.billing_account_payload(app.USERS["usr_1"])
+        self.assertEqual(billing_payload["plan"], "pro")
+        self.assertEqual(billing_payload["status"], "active")
+        self.assertEqual(billing_payload["usage"]["plan"], "pro")
+        self.assertEqual(billing_payload["usage"]["limit"], 60)
+        self.assertEqual(billing_payload["usage"]["remaining"], 60)
+
+        connection = app.db.connect()
+        try:
+            rows = connection.execute(
+                "SELECT scope_type, scope_id, period, plan, quota_limit, used FROM quota_buckets WHERE scope_type = 'user'"
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(rows, [("user", "usr_1", "cycle:1780963200", "pro", 60, 0)])
+
     def test_creem_terminal_webhook_without_product_preserves_existing_plan(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {

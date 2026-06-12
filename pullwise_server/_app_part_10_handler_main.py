@@ -581,6 +581,97 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     status=scan.get("status"),
                 )
             return self.json(scan_payload(scan), HTTPStatus.CREATED if scan_created else HTTPStatus.OK)
+        if len(segments) == 3 and segments[0] == "scans" and segments[2] == "retry":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before retrying a scan.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            retry_request_id = scan_request_id_from_body(body)
+            quota_result = None
+            scan = None
+            repository = None
+            try:
+                with STATE_LOCK:
+                    user = USERS.get(session["userId"])
+                    if not user:
+                        return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before retrying a scan.")
+                    scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+                    job = db.get_scan_job_for_scan(public_issue_text(scan.get("id")))
+                    job_status = public_issue_text((job or {}).get("status")).lower()
+                    scan_status = public_issue_text(scan.get("status")).lower()
+                    if scan_status not in {"failed", "lost", "cancelled"} or (
+                        job and job_status not in {"failed", "lost", "cancelled"}
+                    ):
+                        return self.error(HTTPStatus.CONFLICT, "Only failed, lost, or cancelled scans can be retried.")
+                    if not retry_request_id or retry_request_id == public_issue_text(scan.get("requestId")):
+                        retry_request_id = make_id("retry")
+                    repo_id = public_issue_text(scan.get("repoId"))
+                    repository = db.get_repository(repo_id) if repo_id else None
+                    if not repository:
+                        return self.error(HTTPStatus.BAD_REQUEST, "Unable to resolve repository context for retry.")
+                    scan_id = public_issue_text(scan.get("id"))
+                quota_result = quota.consume_scan_quota(
+                    user=user,
+                    repository=repository,
+                    requested_by_user_id=session["userId"],
+                    scan_id=scan_id,
+                    request_id=retry_request_id,
+                )
+                if quota_result.get("deduplicated"):
+                    return self.json(
+                        {"message": "Retry requestId has already been used.", "code": "IDEMPOTENCY_KEY_REUSED"},
+                        HTTPStatus.CONFLICT,
+                    )
+                with STATE_LOCK:
+                    scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+                    job = db.get_scan_job_for_scan(public_issue_text(scan.get("id")))
+                    job_status = public_issue_text((job or {}).get("status")).lower()
+                    scan_status = public_issue_text(scan.get("status")).lower()
+                    if scan_status not in {"failed", "lost", "cancelled"} or (
+                        job and job_status not in {"failed", "lost", "cancelled"}
+                    ):
+                        raise RuntimeError("Only failed, lost, or cancelled scans can be retried.")
+                    retried_job = retry_scan_job_for_scan_locked(scan, queued_at=now())
+                    scan["requestId"] = retry_request_id
+                    scan["quotaBucketIds"] = quota_result["bucketIds"]
+                    scan["billingUsage"] = quota_result["user"]
+                    scan["repoUsage"] = quota_result["repository"]
+                    mark_state_dirty()
+                scan_logging.log_event(
+                    "scan_retry_queued",
+                    scanId=scan.get("id"),
+                    userId=scan.get("userId"),
+                    repo=scan.get("repo"),
+                    branch=scan.get("branch"),
+                    commit=scan.get("commit"),
+                    provider="worker",
+                    requestId=retry_request_id,
+                    jobId=retried_job.get("job_id"),
+                    quotaBucketIds=scan.get("quotaBucketIds"),
+                )
+                return self.json(scan_payload(scan), HTTPStatus.CREATED)
+            except quota.QuotaExceeded as exc:
+                payload = {"message": exc.message, "code": exc.code}
+                if exc.repo_id:
+                    payload["repoId"] = exc.repo_id
+                return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
+            except RuntimeError as exc:
+                if quota_result and not quota_result.get("deduplicated"):
+                    quota.rollback_scan_quota(
+                        scan_id=public_issue_text((scan or {}).get("id")) or segments[1],
+                        requested_by_user_id=session["userId"],
+                        request_id=retry_request_id,
+                    )
+                return self.error(HTTPStatus.CONFLICT, str(exc))
+            except Exception:
+                if quota_result and not quota_result.get("deduplicated"):
+                    quota.rollback_scan_quota(
+                        scan_id=public_issue_text((scan or {}).get("id")) or segments[1],
+                        requested_by_user_id=session["userId"],
+                        request_id=retry_request_id,
+                    )
+                raise
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
             session = self.current_session()
             if not session:
@@ -795,6 +886,25 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_delete(self, segments: list[str]) -> None:
+        if segments == ["worker", "registry"]:
+            worker_record = self.require_worker(allow_disabled=True, include_deleted=True)
+            if not worker_record:
+                return
+            worker_id = public_issue_text(worker_record.get("worker_id"))
+            worker = db.soft_delete_worker(worker_id) or db.get_worker(worker_id, include_deleted=True)
+            if not worker:
+                return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+            db.record_worker_audit_event(
+                {
+                    "actor_user_id": "",
+                    "action": "worker_self_unregister",
+                    "worker_id": worker_id,
+                    "changed_fields": {"deleted": True},
+                    "request_id": request_id_from_handler(self),
+                    "created_at": now(),
+                }
+            )
+            return self.json({"ok": True, "worker": worker_public_payload(worker, admin=True), "deleted": True})
         if segments and segments[0] == "admin":
             return self.handle_admin_delete(segments)
         if len(segments) == 2 and segments[0] == "api-keys":
@@ -1757,6 +1867,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if segments == ["admin", "status"]:
             return self.json(scan_system_status_payload(admin=True))
+        if segments == ["admin", "server-metrics"]:
+            storage_path = env("PULLWISE_SERVER_METRICS_STORAGE_PATH", "") or os.path.dirname(db.database_path()) or project_root()
+            return self.json(system_metrics.server_metrics_payload(storage_path=storage_path, timestamp=now()))
         if segments == ["admin", "users"]:
             return self.json(admin_users_payload(current_user_id=session["userId"]))
         if segments == ["admin", "system-config"]:
@@ -2001,8 +2114,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
-    def require_worker(self, *, allow_disabled: bool = False) -> dict | None:
-        record = worker_token_record(self, allow_disabled=allow_disabled)
+    def require_worker(self, *, allow_disabled: bool = False, include_deleted: bool = False) -> dict | None:
+        record = worker_token_record(self, allow_disabled=allow_disabled, include_deleted=include_deleted)
         if not record:
             self.error(HTTPStatus.UNAUTHORIZED, "A valid worker token is required.")
             return None
@@ -2012,7 +2125,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         allow_disabled = segments == ["worker", "heartbeat"] or (
             len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status"
         )
-        worker_record = self.require_worker(allow_disabled=allow_disabled)
+        allow_deleted = allow_disabled
+        worker_record = self.require_worker(allow_disabled=allow_disabled, include_deleted=allow_deleted)
         if not worker_record:
             return
         if not isinstance(body, dict):
@@ -2213,6 +2327,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not job:
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
         audit_swarm = public_scan_audit_swarm(body.get("audit_swarm") or body.get("auditSwarm"))
+        completion_audit = public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
+        job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
         raw_repository_graph = body.get("repository_graph") or body.get("repositoryGraph")
         repository_graph = public_repository_graph(raw_repository_graph)
         semantic_graph = public_repository_semantic_graph(body.get("semantic_graph") or body.get("semanticGraph"))
@@ -2237,6 +2353,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 }
                 if audit_swarm:
                     update["auditSwarm"] = audit_swarm
+                if completion_audit:
+                    update["completionAudit"] = completion_audit
+                if job_trace:
+                    update["jobTrace"] = job_trace
                 if repository_graph:
                     update["repositoryGraph"] = repository_graph
                 if semantic_graph:

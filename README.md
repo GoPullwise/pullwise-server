@@ -667,6 +667,7 @@ Implemented billing routes:
 - `POST /billing/checkout-sessions`
 - `POST /billing/change-interval`
 - `POST /billing/cancel-subscription`
+- `POST /billing/resume-subscription`
 - `POST /webhooks/creem`
 
 Checkout URLs are created server-side with `userId`
@@ -675,8 +676,8 @@ state. Plan and interval upgrades use the Creem subscription upgrade endpoint.
 Pullwise supports higher-tier changes and monthly-to-yearly changes, with
 the database-backed Creem upgrade behavior defaulting to immediate proration. Lower-tier
 changes and yearly-to-monthly changes are not offered by Pullwise. Cancellation
-is scheduled for the end of the paid period; Pullwise does not issue automatic
-refunds for the remaining period.
+is scheduled for the end of the paid period and can be resumed before that
+period ends; Pullwise does not issue automatic refunds for the remaining period.
 
 ## User and Billing State
 
@@ -792,6 +793,7 @@ Implemented endpoints:
 - `POST /billing/checkout-sessions`
 - `POST /billing/change-interval`
 - `POST /billing/cancel-subscription`
+- `POST /billing/resume-subscription`
 - `POST /webhooks/creem`
 - `GET /api/v1/repositories`
 - `POST /api/v1/repositories/{repoId}/scans`
