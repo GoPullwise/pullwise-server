@@ -2181,6 +2181,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 decoded_worker_json_payload(worker_record.get("machine_metrics_history"), list),
                 machine_metrics,
             )
+        raw_active_job_ids = body.get("active_job_ids") or body.get("activeJobIds")
+        active_job_ids = []
+        if isinstance(raw_active_job_ids, list):
+            for value in raw_active_job_ids[:100]:
+                job_id = clean_github_access_text(value)
+                if job_id and job_id not in active_job_ids:
+                    active_job_ids.append(job_id)
         try:
             record = db.upsert_worker_heartbeat(
                 {
@@ -2205,6 +2212,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if active_job_ids:
+            db.renew_worker_scan_job_leases(
+                worker_id,
+                active_job_ids,
+                lease_seconds=system_config.scan_job_lease_seconds(),
+                timestamp=heartbeat_timestamp,
+            )
         command = db.get_next_worker_command(worker_id)
         return self.json(
             {
@@ -2346,6 +2360,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "progress": public_scan_progress(body.get("progress")),
                 "message": public_issue_text(body.get("message")),
                 "started_at": pull_request_timestamp(body.get("started_at")) or now(),
+                "timeout_at": now() + system_config.scan_job_lease_seconds(),
                 "logs_summary": public_issue_text(body.get("logs_summary")),
             },
         )

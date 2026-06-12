@@ -1769,6 +1769,46 @@ def update_scan_job_commit(job_id: str, commit: str) -> dict[str, Any] | None:
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
 
 
+def renew_worker_scan_job_leases(
+    worker_id: str,
+    job_ids: list[str],
+    *,
+    lease_seconds: int = 3600,
+    timestamp: int | None = None,
+) -> int:
+    initialize()
+    worker_id = str(worker_id or "").strip()
+    unique_job_ids = []
+    seen = set()
+    for value in job_ids or []:
+        job_id = str(value or "").strip()
+        if job_id and job_id not in seen:
+            unique_job_ids.append(job_id)
+            seen.add(job_id)
+    if not worker_id or not unique_job_ids:
+        return 0
+    current_time = int(timestamp if timestamp is not None else time.time())
+    timeout_at = current_time + max(60, int(lease_seconds or 3600))
+    placeholders = ",".join("?" for _ in unique_job_ids)
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE scan_jobs
+                SET timeout_at = CASE
+                        WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
+                        ELSE timeout_at
+                    END,
+                    updated_at = ?
+                WHERE claimed_by_worker_id = ?
+                  AND status IN ('claimed', 'running', 'uploading_result')
+                  AND job_id IN ({placeholders})
+                """,
+                (timeout_at, timeout_at, current_time, worker_id, *unique_job_ids),
+            )
+            return max(0, cursor.rowcount)
+
+
 def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
     initialize()
     worker_id = str(worker_id or "").strip()
@@ -1786,7 +1826,13 @@ def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[s
                 OR started_at IS NOT NULL
                 OR completed_at IS NOT NULL
               )
-            ORDER BY COALESCE(completed_at, started_at, claimed_at, updated_at, created_at) DESC,
+            ORDER BY MAX(
+                       COALESCE(completed_at, 0),
+                       COALESCE(started_at, 0),
+                       COALESCE(claimed_at, 0),
+                       COALESCE(updated_at, 0),
+                       COALESCE(created_at, 0)
+                     ) DESC,
                      job_id ASC
             LIMIT ?
             """,
@@ -2127,6 +2173,11 @@ def _requeue_stale_worker_jobs_locked(
 def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str, Any] | None:
     initialize()
     current_time = int(time.time())
+    raw_timeout_at = progress.get("timeout_at")
+    try:
+        timeout_at = int(raw_timeout_at) if raw_timeout_at is not None else None
+    except (TypeError, ValueError):
+        timeout_at = None
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -2138,6 +2189,11 @@ def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str,
                     progress_message = ?,
                     status = 'running',
                     started_at = COALESCE(started_at, ?),
+                    timeout_at = CASE
+                        WHEN ? IS NULL THEN timeout_at
+                        WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
+                        ELSE timeout_at
+                    END,
                     logs_summary = ?,
                     updated_at = ?
                 WHERE job_id = ? AND status IN ('claimed', 'running')
@@ -2147,6 +2203,9 @@ def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str,
                     max(0, min(100, int(progress.get("progress") or 0))),
                     progress.get("message"),
                     int(progress.get("started_at") or current_time),
+                    timeout_at,
+                    timeout_at,
+                    timeout_at,
                     progress.get("logs_summary"),
                     current_time,
                     job_id,

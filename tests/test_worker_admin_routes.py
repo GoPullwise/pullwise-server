@@ -366,6 +366,41 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("clone_token", json.dumps(activity))
         self.assertNotIn("result_payload", json.dumps(activity))
 
+    def test_admin_worker_activity_uses_latest_activity_timestamp(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+        timestamp = app.now()
+        scan = {
+            "id": "sc_worker_active_today",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_jobs(worker_id, max_jobs=1, lease_seconds=3600, timestamp=timestamp)[0]
+        db.update_scan_job_progress(
+            claimed["job_id"],
+            {"phase": "ai", "progress": 50, "message": "reviewing", "started_at": timestamp + 10},
+        )
+        db.renew_worker_scan_job_leases(worker_id, [job["job_id"]], timestamp=timestamp + 3700)
+
+        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(detail, "GET")
+
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        activity = detail.payload["taskActivity"][0]
+        self.assertEqual(activity["status"], "running")
+        self.assertEqual(activity["started_at"], timestamp + 10)
+        self.assertEqual(activity["last_activity_at"], timestamp + 3700)
+
     def test_admin_worker_version_controls_release_package_in_install_command(self) -> None:
         handler = RouteHarness(
             "/admin/workers",

@@ -4574,6 +4574,58 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "done")
         self.assertEqual(len(app.ISSUES), 1)
 
+    def test_worker_heartbeat_renews_active_job_lease(self) -> None:
+        timestamp = app.now()
+        scan = {
+            "id": "sc_active_lease",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        with patch("pullwise_server.app.now", return_value=timestamp):
+            app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        original_timeout_at = db.get_scan_job(job["job_id"])["timeout_at"]
+        self.assertLess(original_timeout_at, timestamp + 3700)
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 1,
+                "free_slots": 1,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "active_job_ids": [job["job_id"]],
+            },
+            headers=self.auth,
+        )
+        with patch("pullwise_server.app.now", return_value=timestamp + 3700):
+            app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        stored = db.get_scan_job(job["job_id"])
+        self.assertEqual(stored["status"], "claimed")
+        self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
+        self.assertGreater(stored["timeout_at"], original_timeout_at)
+        self.assertEqual(stored["timeout_at"], timestamp + 7300)
+        self.assertEqual(db.recover_expired_scan_jobs(timestamp + 3701), [])
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
+
     def test_retry_rejects_late_result_from_previous_attempt(self) -> None:
         timestamp = app.now()
         scan = {

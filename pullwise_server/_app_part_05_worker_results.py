@@ -173,6 +173,10 @@ def worker_task_activity_payload(job: dict) -> dict:
     completed_at = pull_request_timestamp(job.get("completed_at"))
     updated_at = pull_request_timestamp(job.get("updated_at"))
     created_at = pull_request_timestamp(job.get("created_at"))
+    last_activity_at = max(
+        [value for value in (completed_at, updated_at, started_at, claimed_at, created_at) if value],
+        default=None,
+    )
     return {
         "worker_id": public_issue_text(job.get("claimed_by_worker_id")),
         "job_id": public_issue_text(job.get("job_id")),
@@ -187,7 +191,7 @@ def worker_task_activity_payload(job: dict) -> dict:
         "claimed_at": claimed_at,
         "started_at": started_at,
         "completed_at": completed_at,
-        "last_activity_at": completed_at or started_at or claimed_at or updated_at or created_at,
+        "last_activity_at": last_activity_at,
     }
 
 
