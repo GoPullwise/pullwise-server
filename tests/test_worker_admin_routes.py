@@ -537,7 +537,49 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(refreshed.status, HTTPStatus.OK)
         self.assertEqual(refreshed.payload["latestWorkerVersion"], "0.5.5")
         self.assertEqual(refreshed.payload["workerVersion"], "0.5.5")
-        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(urlopen.call_count, 2)
+
+    def test_admin_worker_defaults_prefers_highest_release_list_version(self) -> None:
+        class ReleaseResponse:
+            def __init__(self, payload: object) -> None:
+                self.payload = payload
+
+            def __enter__(self) -> "ReleaseResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return json.dumps(self.payload).encode("utf-8")
+
+        responses = [
+            ReleaseResponse({"tag_name": "v0.5.4"}),
+            ReleaseResponse(
+                [
+                    {"tag_name": "v0.5.4", "draft": False, "prerelease": False},
+                    {"tag_name": "v0.5.5", "draft": False, "prerelease": False},
+                    {"tag_name": "v0.6.0-beta", "draft": False, "prerelease": True},
+                ]
+            ),
+        ]
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_WORKER_RELEASE_TOKEN": "ghp_release"}, clear=False),
+            patch("urllib.request.urlopen", side_effect=responses) as urlopen,
+        ):
+            handler = RouteHarness("/admin/workers/defaults?refresh=1", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["latestWorkerVersion"], "0.5.5")
+        self.assertEqual(handler.payload["workerVersion"], "0.5.5")
+        self.assertEqual(urlopen.call_count, 2)
+        requests = [call.args[0] for call in urlopen.call_args_list]
+        self.assertIn("/releases/latest", requests[0].full_url)
+        self.assertIn("/releases?per_page=50", requests[1].full_url)
+        self.assertEqual(requests[0].get_header("Authorization"), "Bearer ghp_release")
+        self.assertEqual(requests[1].get_header("Authorization"), "Bearer ghp_release")
 
     def test_admin_worker_defaults_exposes_latest_release_when_default_version_is_pinned(self) -> None:
         class ReleaseResponse:

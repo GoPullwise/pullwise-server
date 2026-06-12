@@ -203,19 +203,64 @@ def fetch_latest_worker_release_version() -> str:
     api_url = system_config.worker_release_api_url().strip() or DEFAULT_WORKER_RELEASES_API_URL
     if not api_url:
         return ""
+    latest_payload = fetch_worker_release_api_payload(api_url)
+    latest_version = worker_release_version_from_payload(latest_payload)
+    list_url = worker_release_list_api_url(api_url)
+    if list_url:
+        try:
+            list_version = worker_release_version_from_payload(fetch_worker_release_api_payload(list_url))
+        except (OSError, TimeoutError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+            list_version = ""
+        if list_version and (
+            not latest_version
+            or compare_worker_versions(parse_worker_version(list_version) or (), parse_worker_version(latest_version) or ()) > 0
+        ):
+            return list_version
+    return latest_version
+
+
+def fetch_worker_release_api_payload(api_url: str) -> object:
+    token = worker_release_github_token()
+    headers = github_auth.github_api_headers(token) if token else {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Pullwise",
+    }
     request = urllib.request.Request(
         api_url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "Pullwise",
-        },
+        headers=headers,
     )
     timeout = system_config.worker_release_fetch_timeout_seconds()
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+        return json.loads(response.read().decode("utf-8"))
+
+
+def worker_release_list_api_url(api_url: str) -> str:
+    parsed = urlparse(api_url)
+    if not parsed.path.endswith("/releases/latest"):
+        return ""
+    query = urlencode({"per_page": "50"})
+    return urlunparse(parsed._replace(path=parsed.path[: -len("/latest")], query=query))
+
+
+def worker_release_version_from_payload(payload: object) -> str:
     if not isinstance(payload, dict):
+        if isinstance(payload, list):
+            return newest_worker_release_version(payload)
         return ""
     return normalize_worker_release_version(payload.get("tag_name") or payload.get("name"))
+
+
+def newest_worker_release_version(releases: list) -> str:
+    versions: list[str] = []
+    for release in releases:
+        if not isinstance(release, dict) or release.get("draft") is True or release.get("prerelease") is True:
+            continue
+        version = normalize_worker_release_version(release.get("tag_name") or release.get("name"))
+        if version:
+            versions.append(version)
+    if not versions:
+        return ""
+    return max(versions, key=lambda value: parse_worker_version(value) or ())
 
 
 def github_latest_worker_release_version(*, force: bool = False) -> str:
@@ -370,6 +415,7 @@ def dispatch_worker_release_workflow(version_value: object) -> dict:
     if status < 200 or status >= 300:
         raise WorkerReleaseDispatchError(f"GitHub workflow dispatch failed with status {status}.")
 
+    LATEST_WORKER_RELEASE_CACHE.update({"version": "", "checked_at": 0.0})
     return {
         "ok": True,
         "version": version,
