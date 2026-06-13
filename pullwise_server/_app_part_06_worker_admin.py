@@ -721,10 +721,6 @@ fi
 PROVIDER_CHAIN="$(normalize_provider_chain "$PROVIDER_CHAIN")"
 PROVIDER="${PROVIDER_CHAIN%%,*}"
 OPENCODE_MODEL="${PULLWISE_OPENCODE_MODEL:-opencode/big-pickle}"
-OPENCODE_AUTH_PROVIDER="${OPENCODE_MODEL%%/*}"
-if [ -z "$OPENCODE_AUTH_PROVIDER" ]; then
-  OPENCODE_AUTH_PROVIDER="opencode"
-fi
 SERVICE_TOOL_PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin"
 
 case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
@@ -828,17 +824,6 @@ write_auth_commands() {
       service_user_auth_command "${CODEX_COMMAND:-codex}" login --device-auth
     fi
     if provider_chain_has opencode; then
-      echo "OpenCode current model provider:"
-      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider "$OPENCODE_AUTH_PROVIDER"
-      echo "OpenCode DeepSeek example:"
-      printf 'PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro '
-      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider deepseek
-      echo "OpenCode MiniMax example:"
-      printf 'PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3 '
-      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider minimax
-      echo "OpenCode generic template:"
-      printf 'Set PULLWISE_OPENCODE_MODEL=<provider>/<model>, then run: '
-      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login --provider '<provider>'
       echo "OpenCode interactive provider selection:"
       service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login
       echo "OpenCode auth status:"
