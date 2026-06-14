@@ -92,12 +92,10 @@ def public_repository_graph(value: object) -> dict:
     summary = public_repository_graph_text(value.get("summary"), limit=500)
     if summary:
         payload["summary"] = summary
-    architecture_summary = public_repository_graph_architecture_summary(
-        value.get("architectureSummary") or value.get("architecture_summary")
-    )
+    architecture_summary = public_repository_graph_architecture_summary(value.get("architectureSummary"))
     if architecture_summary:
         payload["architectureSummary"] = architecture_summary
-    impact_graph = public_impact_graph(value.get("impactGraph") or value.get("impact_graph"), repository_graph=payload)
+    impact_graph = public_impact_graph(value.get("impactGraph"), repository_graph=payload)
     if impact_graph:
         payload["impactGraph"] = impact_graph
     return payload
@@ -917,20 +915,18 @@ def scan_payload(scan: dict) -> dict:
     audit_swarm = public_scan_audit_swarm(scan.get("auditSwarm") or scan.get("audit_swarm"))
     if audit_swarm:
         payload["auditSwarm"] = audit_swarm
-    raw_repository_graph = scan.get("repositoryGraph") or scan.get("repository_graph")
+    raw_repository_graph = scan.get("repositoryGraph")
     repository_graph = public_repository_graph(raw_repository_graph)
     if repository_graph:
         payload["repositoryGraph"] = repository_graph
-    semantic_graph = public_repository_semantic_graph(scan.get("semanticGraph") or scan.get("semantic_graph"))
+    semantic_graph = public_repository_semantic_graph(scan.get("semanticGraph"))
     if not semantic_graph and isinstance(raw_repository_graph, dict):
-        semantic_graph = public_repository_semantic_graph(
-            raw_repository_graph.get("semanticGraph") or raw_repository_graph.get("semantic_graph")
-        )
+        semantic_graph = public_repository_semantic_graph(raw_repository_graph.get("semanticGraph"))
     if semantic_graph:
         payload["semanticGraph"] = semantic_graph
-    raw_impact_graph = scan.get("impactGraph") or scan.get("impact_graph")
+    raw_impact_graph = scan.get("impactGraph")
     if not raw_impact_graph and isinstance(raw_repository_graph, dict):
-        raw_impact_graph = raw_repository_graph.get("impactGraph") or raw_repository_graph.get("impact_graph")
+        raw_impact_graph = raw_repository_graph.get("impactGraph")
     impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
     if impact_graph:
         payload["impactGraph"] = impact_graph
@@ -3949,7 +3945,7 @@ def audit_bundle_dockerfile(bundle: dict) -> str:
         [
             "# Pullwise audit reproduction container.",
             "# Build from the unzipped audit bundle with: docker build -t pullwise-audit .",
-            "# This scaffold is retained for compatibility and does not run captured commands.",
+            "# This scaffold documents the audit environment and does not run captured commands.",
             "FROM ubuntu:22.04",
             "",
             "ENV DEBIAN_FRONTEND=noninteractive",

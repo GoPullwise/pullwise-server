@@ -314,16 +314,14 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     completion_audit = public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
     job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
-    raw_repository_graph = body.get("repository_graph") or body.get("repositoryGraph")
+    raw_repository_graph = body.get("repositoryGraph")
     repository_graph = public_repository_graph(raw_repository_graph)
-    semantic_graph = public_repository_semantic_graph(body.get("semantic_graph") or body.get("semanticGraph"))
+    semantic_graph = public_repository_semantic_graph(body.get("semanticGraph"))
     if not semantic_graph and isinstance(raw_repository_graph, dict):
-        semantic_graph = public_repository_semantic_graph(
-            raw_repository_graph.get("semanticGraph") or raw_repository_graph.get("semantic_graph")
-        )
-    raw_impact_graph = body.get("impact_graph") or body.get("impactGraph")
+        semantic_graph = public_repository_semantic_graph(raw_repository_graph.get("semanticGraph"))
+    raw_impact_graph = body.get("impactGraph")
     if not raw_impact_graph and isinstance(raw_repository_graph, dict):
-        raw_impact_graph = raw_repository_graph.get("impactGraph") or raw_repository_graph.get("impact_graph")
+        raw_impact_graph = raw_repository_graph.get("impactGraph")
     impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
     if repository_graph and impact_graph:
         repository_graph["impactGraph"] = impact_graph
