@@ -745,6 +745,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("sh -lc", install.text_payload)
         self.assertIn('cd \\"\\$HOME\\" && exec $command_line', install.text_payload)
         self.assertIn("print_auth_commands() {", install.text_payload)
+        self.assertNotIn('cat "$AUTH_COMMANDS_FILE"', install.text_payload)
+        self.assertIn('echo "Authorization commands saved to $AUTH_COMMANDS_FILE"', install.text_payload)
         self.assertIn("Pullwise worker manual authorization commands", install.text_payload)
         self.assertIn("Codex device login:", install.text_payload)
         self.assertIn("login --device-auth", install.text_payload)
@@ -787,6 +789,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("write_auth_commands", install.text_payload)
         self.assertIn("print_auth_commands", install.text_payload)
         self.assertIn("PULLWISE_PYTHON_BIN", install.text_payload)
+        self.assertEqual(install.text_payload.count("\nprint_auth_commands\n"), 1)
         self.assertIn("print_auth_commands\nrun_as_service_user \"$BIN_PATH\" doctor || true", install.text_payload)
         self.assertIn("run_as_service_user \"$BIN_PATH\" doctor || true", install.text_payload)
         self.assertNotIn("@openai/codex@0.135.0", install.text_payload)
@@ -1441,6 +1444,31 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin.payload["workers"][0]["doctor_status"], "ok")
         self.assertTrue(admin.payload["workers"][0]["codex_ready"])
         self.assertTrue(admin.payload["workers"][0]["systemd_active"])
+
+    def test_opencode_worker_is_supported_by_default(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "opencode",
+                "version": "0.1.0",
+                "max_concurrent_jobs": 1,
+                "running_jobs": 0,
+                "free_slots": 1,
+                "last_error": "",
+                "doctor_status": "ok",
+                "codex_ready": False,
+                "systemd_active": True,
+                "doctor_checked_at": app.now(),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "idle")
 
     def test_status_capacity_increases_with_multiple_online_workers(self) -> None:
         payload_one, token_one = self.create_worker()

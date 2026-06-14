@@ -835,8 +835,6 @@ write_auth_commands() {
 }
 print_auth_commands() {
   echo
-  cat "$AUTH_COMMANDS_FILE"
-  echo
   echo "Authorization commands saved to $AUTH_COMMANDS_FILE"
   echo
 }
@@ -941,8 +939,6 @@ echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
 echo "Worker home: $DATA_DIR"
 print_auth_commands
 run_as_service_user "$BIN_PATH" doctor || true
-
-print_auth_commands
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
