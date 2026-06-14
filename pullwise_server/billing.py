@@ -86,8 +86,6 @@ def clean_review_agent_effort(value: object, default: str) -> str:
 def clean_review_agent_provider_chain(value: object) -> list[str]:
     if isinstance(value, list):
         raw_items = value
-    elif isinstance(value, str):
-        raw_items = value.split(",")
     else:
         raise ValueError("providerChain must be a non-empty list of codex/opencode providers.")
     providers: list[str] = []
@@ -140,10 +138,7 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
     if model:
         result["model"] = model
     effort_key = "reasoningEffort" if provider == "codex" else "variant"
-    effort = clean_review_agent_effort(
-        source.get(effort_key) or source.get("reasoning_effort"),
-        result[effort_key],
-    )
+    effort = clean_review_agent_effort(source.get(effort_key), result[effort_key])
     result[effort_key] = effort
     return result
 
@@ -152,10 +147,8 @@ def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     defaults = default_review_agent_plan_config(plan)
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
-    if "providerChain" in source or "provider_chain" in source:
-        result["providerChain"] = clean_review_agent_provider_chain(
-            source.get("providerChain", source.get("provider_chain"))
-        )
+    if "providerChain" in source:
+        result["providerChain"] = clean_review_agent_provider_chain(source.get("providerChain"))
     result["codex"] = normalize_review_agent_provider_config("codex", source.get("codex"), defaults["codex"])
     result["opencode"] = normalize_review_agent_provider_config("opencode", source.get("opencode"), defaults["opencode"])
     return result
@@ -199,26 +192,14 @@ def review_agent_config(plan: str) -> dict:
     codex_config = configured["codex"]
     opencode_config = configured["opencode"]
     provider_chain = configured["providerChain"]
-    primary_provider = provider_chain[0]
-    primary_model = opencode_config["model"] if primary_provider == "opencode" else codex_config["model"]
-    primary_effort = opencode_config["variant"] if primary_provider == "opencode" else codex_config["reasoningEffort"]
     return {
         "plan": normalized_plan,
-        "agent": {
-            "cli": primary_provider,
-            "model": primary_model,
-            "reasoningEffort": primary_effort,
-            "reasoning_effort": primary_effort,
-        },
-        "provider": primary_provider,
         "providerChain": list(provider_chain),
-        "provider_chain": list(provider_chain),
         "codex": {
             "cli": codex_config["cli"],
             "command": codex_config["command"],
             "model": codex_config["model"],
             "reasoningEffort": codex_config["reasoningEffort"],
-            "reasoning_effort": codex_config["reasoningEffort"],
         },
         "opencode": {
             "cli": opencode_config["cli"],
@@ -256,12 +237,16 @@ def update_review_agent_config(plan: str, payload: dict) -> dict:
         raise ValueError("Unknown subscription plan.")
     if not isinstance(payload, dict):
         raise ValueError("Plan agent config update must be a JSON object.")
+    if "provider_chain" in payload:
+        raise ValueError("providerChain is required; provider_chain is not supported.")
+    for provider in REVIEW_AGENT_PROVIDERS:
+        provider_payload = payload.get(provider)
+        if isinstance(provider_payload, dict) and "reasoning_effort" in provider_payload:
+            raise ValueError(f"{provider}.reasoningEffort is required; reasoning_effort is not supported.")
     state = review_agent_config_state()
     current = copy.deepcopy(state["plans"][normalized_plan])
-    if "providerChain" in payload or "provider_chain" in payload:
-        current["providerChain"] = clean_review_agent_provider_chain(
-            payload.get("providerChain", payload.get("provider_chain"))
-        )
+    if "providerChain" in payload:
+        current["providerChain"] = clean_review_agent_provider_chain(payload.get("providerChain"))
     for provider in REVIEW_AGENT_PROVIDERS:
         if provider in payload:
             current[provider] = normalize_review_agent_provider_config(

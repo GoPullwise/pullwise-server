@@ -587,7 +587,6 @@ def worker_create_payload(worker: dict) -> dict:
         },
         "provider": provider_chain[0],
         "providerChain": list(provider_chain),
-        "provider_chain": list(provider_chain),
         "suggested_env": suggested_env,
     }
     return payload

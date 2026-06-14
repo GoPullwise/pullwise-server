@@ -154,7 +154,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             user = USERS.get(session["userId"]) if session else None
             return self.json(pricing_payload(user))
-        if path in {"/docs/subscription-plans", "/subscription-plans/agent-configs"}:
+        if path == "/docs/subscription-plans":
             return self.json(subscription_plan_agent_configs_payload())
         if path == "/docs/server-config":
             return self.json(system_config.public_docs_payload())
@@ -1987,8 +1987,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         try:
             max_concurrent_jobs = worker_admin_capacity(body.get("max_concurrent_jobs"))
             provider_chain = worker_provider_chain(
-                body.get("providerChain", body.get("provider_chain")),
-                strict=("providerChain" in body or "provider_chain" in body),
+                body.get("providerChain"),
+                strict=("providerChain" in body),
             )
         except ValueError as exc:
             self.audit_worker_action(session, "create_worker", success=False, error=str(exc))
@@ -2126,8 +2126,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 changed_fields={
                     "plan": agent_config["plan"],
                     "providerChain": agent_config["providerChain"],
-                    "model": agent_config["agent"]["model"],
-                    "reasoningEffort": agent_config["agent"]["reasoningEffort"],
+                    "model": agent_config[agent_config["providerChain"][0]]["model"],
+                    "reasoningEffort": (
+                        agent_config["opencode"]["variant"]
+                        if agent_config["providerChain"][0] == "opencode"
+                        else agent_config["codex"]["reasoningEffort"]
+                    ),
                 },
             )
             return self.json(

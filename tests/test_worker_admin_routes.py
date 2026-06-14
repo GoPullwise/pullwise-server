@@ -985,11 +985,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         agent_config = update.payload["agentConfig"]
         self.assertEqual(agent_config["plan"], "pro")
         self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
-        self.assertEqual(agent_config["agent"]["cli"], "opencode")
-        self.assertEqual(agent_config["agent"]["model"], "opencode/admin")
+        self.assertNotIn("agent", agent_config)
+        self.assertNotIn("provider", agent_config)
+        self.assertNotIn("provider_chain", agent_config)
         self.assertEqual(agent_config["codex"]["cli"], "codex-admin")
         self.assertEqual(agent_config["codex"]["command"], "codex")
         self.assertEqual(agent_config["codex"]["model"], "gpt-admin")
+        self.assertNotIn("reasoning_effort", agent_config["codex"])
         self.assertEqual(agent_config["opencode"]["cli"], "opencode-admin")
         self.assertEqual(agent_config["opencode"]["command"], "opencode")
 
@@ -998,6 +1000,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(docs.status, HTTPStatus.OK)
         self.assertEqual(docs.payload["agentConfigs"]["pro"], agent_config)
+
+        legacy_update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/pro",
+            {"provider_chain": ["codex"], "codex": {"reasoning_effort": "high"}},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(legacy_update, "PATCH")
+
+        self.assertEqual(legacy_update.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("providerChain", legacy_update.payload["message"])
 
     def test_worker_can_fetch_subscription_plan_agent_configs(self) -> None:
         payload, token = self.create_worker()
