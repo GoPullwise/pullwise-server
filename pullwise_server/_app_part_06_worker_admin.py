@@ -825,6 +825,9 @@ write_auth_commands() {
     fi
     if provider_chain_has opencode; then
       echo "OpenCode interactive provider selection:"
+      echo "OpenCode configured model: $OPENCODE_MODEL"
+      echo "OpenCode current model provider: ${OPENCODE_MODEL%%/*}"
+      echo "Select the provider matching the configured model provider."
       service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login
       echo "OpenCode auth status:"
       service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth list
