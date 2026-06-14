@@ -680,6 +680,24 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(second_claim, "POST")
         self.assertEqual(second_claim.status, HTTPStatus.FORBIDDEN)
 
+        removed_progress_fields = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {
+                "phase": "index",
+                "progress": 20,
+                "repository_graph": repository_graph_fixture(),
+                "semantic_graph": semantic_graph_fixture(),
+                "impact_graph": impact_graph_fixture(),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(removed_progress_fields, "POST")
+        self.assertEqual(removed_progress_fields.status, HTTPStatus.OK)
+        snake_scan_payload = app.scan_payload(app.SCANS[0])
+        self.assertNotIn("repositoryGraph", snake_scan_payload)
+        self.assertNotIn("semanticGraph", snake_scan_payload)
+        self.assertNotIn("impactGraph", snake_scan_payload)
+
         progress = RouteHarness(
             f"/worker/jobs/{job['job_id']}/progress",
             {
@@ -687,9 +705,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "progress": 70,
                 "message": "reviewing",
                 "logs_summary": "ok",
-                "repository_graph": repository_graph_fixture(),
-                "semantic_graph": semantic_graph_fixture(),
-                "impact_graph": impact_graph_fixture(),
+                "repositoryGraph": repository_graph_fixture(),
+                "semanticGraph": semantic_graph_fixture(),
+                "impactGraph": impact_graph_fixture(),
                 "completion_audit": {
                     "protocol": "pullwise-completion-audit/0.1",
                     "status": "warning",
@@ -784,8 +802,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "reasoningEffort": "high",
                 },
             },
-            "repository_graph": final_repository_graph,
-            "semantic_graph": semantic_graph_fixture(),
+            "repositoryGraph": final_repository_graph,
+            "semanticGraph": semantic_graph_fixture(),
             "impactGraph": impact_graph_fixture(),
             "result_checksum": "checksum-1",
         }

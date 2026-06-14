@@ -188,6 +188,9 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["provider"], "creem")
         self.assertTrue(handler.payload["enabled"])
+        self.assertIn("workspace", handler.payload)
+        self.assertNotIn("account", handler.payload)
+        self.assertEqual(handler.payload["workspace"]["plan"], "free")
 
     def test_checkout_requires_sign_in(self) -> None:
         app.USERS = {}
