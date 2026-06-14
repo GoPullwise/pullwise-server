@@ -889,19 +889,19 @@ def scan_payload(scan: dict) -> dict:
         "verification": public_scan_verification_counts(scan),
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
-    ai_usage = public_scan_ai_usage(scan.get("aiUsage") or scan.get("ai_usage"))
-    if ai_usage:
-        payload["aiUsage"] = ai_usage
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
-        payload["reviewAgent"] = {
-            "agentCli": effective_agent_config["agent"]["command"] or effective_agent_config["provider"],
-            "provider": effective_agent_config["provider"],
-            "command": effective_agent_config["agent"]["command"],
-            "model": effective_agent_config["agent"]["model"],
-            "reasoningEffort": effective_agent_config["agent"]["reasoningEffort"],
-        }
+    ai_usage_source = dict(scan.get("aiUsage") if isinstance(scan.get("aiUsage"), dict) else {})
+    if effective_agent_config:
+        effective_agent = effective_agent_config["agent"]
+        ai_usage_source.setdefault("agentCli", effective_agent["command"] or effective_agent_config["provider"])
+        ai_usage_source.setdefault("provider", effective_agent_config["provider"])
+        ai_usage_source.setdefault("model", effective_agent["model"])
+        ai_usage_source.setdefault("reasoningEffort", effective_agent["reasoningEffort"])
+    ai_usage = public_scan_ai_usage(ai_usage_source)
+    if ai_usage:
+        payload["aiUsage"] = ai_usage
     verification_audit = public_scan_verification_audit(scan)
     if public_scan_verification_audit_has_data(verification_audit):
         payload["verificationAudit"] = verification_audit
@@ -1090,8 +1090,20 @@ def public_scan_issue_counts(value: object) -> dict:
 
 def public_scan_ai_usage(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
+    agent_cli = public_scan_agent_text(source.get("agentCli"))
+    provider = public_scan_agent_provider(source.get("provider"))
     model = clean_github_access_text(source.get("model"))
-    return {"model": model} if model else {}
+    reasoning_effort = public_scan_agent_reasoning_effort(source.get("reasoningEffort"))
+    payload = {}
+    if agent_cli:
+        payload["agentCli"] = agent_cli
+    if provider:
+        payload["provider"] = provider
+    if model:
+        payload["model"] = model
+    if reasoning_effort:
+        payload["reasoningEffort"] = reasoning_effort
+    return payload
 
 
 def public_scan_compact_text(value: object, *, max_length: int = 240) -> str:

@@ -769,11 +769,21 @@ class WorkerPullRoutesTest(unittest.TestCase):
             ),
             "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
             "duration_ms": 1234,
-            "ai_usage": {
+            "aiUsage": {
                 "model": "gpt-5.5",
                 "input_tokens": 123,
                 "output_tokens": 45,
                 "total_tokens": 168,
+            },
+            "effectiveAgentConfig": {
+                "provider": "codex",
+                "providerChain": ["codex"],
+                "agent": {
+                    "cli": "codex",
+                    "command": "codex",
+                    "model": "gpt-5.5",
+                    "reasoningEffort": "high",
+                },
             },
             "repository_graph": final_repository_graph,
             "semantic_graph": semantic_graph_fixture(),
@@ -789,8 +799,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         final_scan_payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(
             final_scan_payload["aiUsage"],
-            {"model": "gpt-5.5"},
+            {"agentCli": "codex", "provider": "codex", "model": "gpt-5.5", "reasoningEffort": "high"},
         )
+        self.assertNotIn("reviewAgent", final_scan_payload)
         self.assertEqual(final_scan_payload["repositoryGraph"]["summary"], "Final graph")
         self.assertEqual(final_scan_payload["repositoryGraph"]["architectureSummary"]["entrypoints"], ["src/final.py"])
         self.assertEqual(final_scan_payload["impactGraph"]["coverage"]["sourceFilesWithoutDocs"], ["src/app.py"])
