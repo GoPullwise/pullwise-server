@@ -173,6 +173,12 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
     return payload
 
 
+def worker_safe_service_id(worker_id: object) -> str:
+    allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+    safe = "".join(char if char in allowed else "-" for char in public_issue_text(worker_id))
+    return safe[:48]
+
+
 def worker_release_package(version: str) -> str:
     return (
         "https://github.com/GoPullwise/pullwise-worker/releases/download/"
@@ -526,6 +532,9 @@ def worker_create_payload(worker: dict) -> dict:
     worker_package = default_worker_package(public.get("version"))
     provider_chain = worker_provider_chain(worker.get("provider_chain") or worker.get("providerChain"))
     provider_chain_text = ",".join(provider_chain)
+    safe_worker_id = worker_safe_service_id(public["worker_id"])
+    service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"
+    service_log_dir = f"/var/log/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/log/pullwise-worker"
     install_command = worker_install_command(
         install_url=install_url,
         server_url=server_url,
@@ -552,9 +561,10 @@ def worker_create_payload(worker: dict) -> dict:
         "PULLWISE_PROVIDER": provider_chain[0],
         "PULLWISE_PROVIDER_CHAIN": provider_chain_text,
         "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
-        "PULLWISE_CHECKOUT_ROOT": "/var/lib/pullwise-worker/checkouts",
-        "PULLWISE_LOG_DIR": "/var/log/pullwise-worker",
+        "PULLWISE_CHECKOUT_ROOT": f"{service_home}/checkouts",
+        "PULLWISE_LOG_DIR": service_log_dir,
         "PULLWISE_WORKER_PACKAGE": worker_package,
+        "PULLWISE_SERVICE_HOME": service_home,
         "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
         "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
         "PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS": "3600",
@@ -567,7 +577,7 @@ def worker_create_payload(worker: dict) -> dict:
     if "codex" in provider_chain:
         suggested_env.update(
             {
-                "PULLWISE_CODEX_COMMAND": "codex",
+                "PULLWISE_CODEX_COMMAND": f"{service_home}/.codex/bin/codex",
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
             }
@@ -575,7 +585,7 @@ def worker_create_payload(worker: dict) -> dict:
     if "opencode" in provider_chain:
         suggested_env.update(
             {
-                "PULLWISE_OPENCODE_COMMAND": "opencode",
+                "PULLWISE_OPENCODE_COMMAND": f"{service_home}/.opencode/bin/opencode",
                 "PULLWISE_OPENCODE_VARIANT": "medium",
             }
         )
@@ -850,14 +860,14 @@ write_auth_commands() {
     echo "Provider chain: $PROVIDER_CHAIN"
     if provider_chain_has codex; then
       echo "Codex device login:"
-      service_user_auth_command "${CODEX_COMMAND:-codex}" login --device-auth
+      service_user_auth_command "$CODEX_COMMAND" login --device-auth
     fi
     if provider_chain_has opencode; then
       echo "OpenCode interactive provider selection:"
       echo "Select the providers used by the Pullwise subscription plan agent configs."
-      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth login
+      service_user_auth_command "$OPENCODE_COMMAND" auth login
       echo "OpenCode auth status:"
-      service_user_auth_command "${OPENCODE_COMMAND:-opencode}" auth list
+      service_user_auth_command "$OPENCODE_COMMAND" auth list
     fi
   } > "$AUTH_COMMANDS_FILE"
   chown root:"$SERVICE_USER" "$AUTH_COMMANDS_FILE"
