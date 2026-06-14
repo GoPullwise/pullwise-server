@@ -743,6 +743,7 @@ SERVICE_TOOL_PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA
 CODEX_HOME="$DATA_DIR/.codex"
 XDG_CONFIG_HOME="$DATA_DIR/.config"
 XDG_CACHE_HOME="$DATA_DIR/.cache"
+XDG_DATA_HOME="$DATA_DIR/.local/share"
 
 case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
 case "$(uname -m)" in x86_64|aarch64|arm64) ;; *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;; esac
@@ -757,9 +758,9 @@ run_as_service_user() {
   (
     cd "$DATA_DIR"
     if command -v runuser >/dev/null 2>&1; then
-      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
+      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     elif command -v sudo >/dev/null 2>&1; then
-      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
+      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     else
       echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
       return 127
@@ -772,8 +773,8 @@ service_user_auth_command() {
   for part in "$@"; do
     command_line="${command_line:+$command_line }$(printf '%q' "$part")"
   done
-  printf 'sudo -u %q env HOME=%q USERPROFILE=%q CODEX_HOME=%q XDG_CONFIG_HOME=%q XDG_CACHE_HOME=%q PATH=%q sh -lc %q\n' \
-    "$SERVICE_USER" "$DATA_DIR" "$DATA_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
+  printf 'sudo -u %q env HOME=%q USERPROFILE=%q CODEX_HOME=%q XDG_CONFIG_HOME=%q XDG_CACHE_HOME=%q XDG_DATA_HOME=%q PATH=%q sh -lc %q\n' \
+    "$SERVICE_USER" "$DATA_DIR" "$DATA_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
 }
 scoped_command_path() {
   local fallback_one="${1:-}"
@@ -816,7 +817,7 @@ id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shel
 usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
 install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 
 if provider_chain_has codex; then
   if [ -n "$CODEX_COMMAND" ]; then
@@ -931,6 +932,13 @@ load_worker_env() {
   done < "\$env_file"
 }
 load_worker_env "\${PULLWISE_WORKER_ENV_FILE:-$ENV_FILE}"
+SERVICE_HOME="\${PULLWISE_SERVICE_HOME:-/var/lib/pullwise-worker}"
+export HOME="\$SERVICE_HOME"
+export USERPROFILE="\$SERVICE_HOME"
+export CODEX_HOME="\$SERVICE_HOME/.codex"
+export XDG_CONFIG_HOME="\$SERVICE_HOME/.config"
+export XDG_CACHE_HOME="\$SERVICE_HOME/.cache"
+export XDG_DATA_HOME="\$SERVICE_HOME/.local/share"
 export PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
@@ -956,6 +964,7 @@ Environment=USERPROFILE=$DATA_DIR
 Environment=CODEX_HOME=$DATA_DIR/.codex
 Environment=XDG_CONFIG_HOME=$DATA_DIR/.config
 Environment=XDG_CACHE_HOME=$DATA_DIR/.cache
+Environment=XDG_DATA_HOME=$DATA_DIR/.local/share
 ExecStart=$BIN_PATH run
 Restart=on-failure
 RestartSec=5
