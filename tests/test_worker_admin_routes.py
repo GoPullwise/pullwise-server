@@ -242,25 +242,27 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("worker_token", payload["worker"])
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_TOKEN"], token)
         self.assertEqual(payload["install_url"], "http://localhost:8080/install-worker.sh")
-        self.assertIn("read -rsp", payload["install_command"])
-        self.assertIn("PULLWISE_WORKER_TOKEN", payload["install_command"])
-        self.assertNotIn("--worker-token", payload["install_command"])
-        self.assertNotIn(token, payload["install_command"])
-        self.assertIn("'US worker'", payload["install_command"])
-        self.assertIn("--max-concurrent-jobs 4", payload["install_command"])
-        self.assertIn("--provider-chain 'opencode,codex'", payload["install_command"])
-        self.assertIn(f"--package '{app.default_worker_package()}'", payload["install_command"])
-        self.assertIn("pullwise_worker-0.4.2-py3-none-any.whl", payload["install_command"])
+        standard_install_command = payload["install_commands"]["standard"]
+        local_install_command = payload["install_commands"]["local"]
+        self.assertIn("read -rsp", standard_install_command)
+        self.assertIn("PULLWISE_WORKER_TOKEN", standard_install_command)
+        self.assertNotIn("--worker-token", standard_install_command)
+        self.assertNotIn(token, standard_install_command)
+        self.assertIn("'US worker'", standard_install_command)
+        self.assertIn("--max-concurrent-jobs 4", standard_install_command)
+        self.assertIn("--provider-chain 'opencode,codex'", standard_install_command)
+        self.assertIn(f"--package '{app.default_worker_package()}'", standard_install_command)
+        self.assertIn("pullwise_worker-0.4.2-py3-none-any.whl", standard_install_command)
         self.assertEqual(payload["local_server_url"], "http://127.0.0.1:18080")
         self.assertEqual(payload["local_install_url"], "http://127.0.0.1:18080/install-worker.sh")
-        self.assertIn("http://127.0.0.1:18080/install-worker.sh", payload["local_install_command"])
-        self.assertIn("--server 'http://127.0.0.1:18080'", payload["local_install_command"])
-        self.assertIn("--max-concurrent-jobs 4", payload["local_install_command"])
-        self.assertIn("--provider-chain 'opencode,codex'", payload["local_install_command"])
-        self.assertIn(f"--package '{app.default_worker_package()}'", payload["local_install_command"])
-        self.assertNotIn(token, payload["local_install_command"])
-        self.assertEqual(payload["install_commands"]["standard"], payload["install_command"])
-        self.assertEqual(payload["install_commands"]["local"], payload["local_install_command"])
+        self.assertIn("http://127.0.0.1:18080/install-worker.sh", local_install_command)
+        self.assertIn("--server 'http://127.0.0.1:18080'", local_install_command)
+        self.assertIn("--max-concurrent-jobs 4", local_install_command)
+        self.assertIn("--provider-chain 'opencode,codex'", local_install_command)
+        self.assertIn(f"--package '{app.default_worker_package()}'", local_install_command)
+        self.assertNotIn(token, local_install_command)
+        self.assertNotIn("install_command", payload)
+        self.assertNotIn("local_install_command", payload)
         self.assertEqual(payload["suggested_env"]["PULLWISE_MAX_CONCURRENT_JOBS"], "4")
         self.assertEqual(payload["suggested_env"]["PULLWISE_LOCAL_SERVER_URL"], "http://127.0.0.1:18080")
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], app.default_worker_package())
@@ -302,7 +304,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER_CHAIN"], "opencode")
         self.assertNotIn("PULLWISE_CODEX_COMMAND", payload["suggested_env"])
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], "opencode")
-        self.assertIn("--provider-chain 'opencode'", payload["install_command"])
+        self.assertIn("--provider-chain 'opencode'", payload["install_commands"]["standard"])
 
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
         handler = RouteHarness(
@@ -516,7 +518,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         expected = app.worker_release_package("0.1.1")
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], expected)
-        self.assertIn(f"--package '{expected}'", handler.payload["install_command"])
+        self.assertIn(f"--package '{expected}'", handler.payload["install_commands"]["standard"])
 
     def test_worker_minimum_version_uses_numeric_components(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_MIN_WORKER_VERSION": "0.9.0"}, clear=False):
@@ -1039,15 +1041,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(docs.status, HTTPStatus.OK)
         self.assertEqual(docs.payload["agentConfigs"]["pro"], agent_config)
 
-        legacy_update = RouteHarness(
+        unsupported_update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",
             {"provider_chain": ["codex"], "codex": {"reasoning_effort": "high"}},
             cookie=self.admin_cookie,
         )
-        app.PullwiseHandler.route(legacy_update, "PATCH")
+        app.PullwiseHandler.route(unsupported_update, "PATCH")
 
-        self.assertEqual(legacy_update.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("providerChain", legacy_update.payload["message"])
+        self.assertEqual(unsupported_update.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("providerChain", unsupported_update.payload["message"])
 
     def test_worker_can_fetch_subscription_plan_agent_configs(self) -> None:
         payload, token = self.create_worker()
@@ -1297,9 +1299,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         new_token = rotate.payload["worker_token"]
         self.assertNotEqual(new_token, token)
         self.assertEqual(db.get_worker(worker_id)["token_hash"], db.worker_token_hash(new_token))
-        self.assertIn("PULLWISE_WORKER_TOKEN", rotate.payload["install_command"])
-        self.assertNotIn("--worker-token", rotate.payload["install_command"])
-        self.assertNotIn(new_token, rotate.payload["install_command"])
+        self.assertIn("PULLWISE_WORKER_TOKEN", rotate.payload["install_commands"]["standard"])
+        self.assertNotIn("--worker-token", rotate.payload["install_commands"]["standard"])
+        self.assertNotIn(new_token, rotate.payload["install_commands"]["standard"])
 
         old_token_claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
         app.PullwiseHandler.route(old_token_claim, "POST")

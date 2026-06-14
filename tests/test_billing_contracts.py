@@ -70,14 +70,14 @@ def creem_database_config(
 
 
 class BillingContractsTest(unittest.TestCase):
-    def test_legacy_creem_product_environment_does_not_enable_billing(self) -> None:
+    def test_ignored_creem_product_environment_does_not_enable_billing(self) -> None:
         with (
             patch.dict(
                 os.environ,
                 {
                     "PULLWISE_CREEM_API_KEY": "creem_123",
-                    "PULLWISE_CREEM_PRODUCT_ID": "prod_legacy",
-                    "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_legacy_monthly,prod_legacy_yearly",
+                    "PULLWISE_CREEM_PRODUCT_ID": "prod_ignored",
+                    "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_ignored_monthly,prod_ignored_yearly",
                 },
                 clear=True,
             ),
@@ -85,7 +85,7 @@ class BillingContractsTest(unittest.TestCase):
         ):
             self.assertEqual(billing.selected_provider(), "disabled")
 
-    def test_public_plan_uses_database_catalog_and_ignores_legacy_billing_env(self) -> None:
+    def test_public_plan_uses_database_catalog_and_ignores_removed_billing_env(self) -> None:
         config = database_config(
             plans__free__userReviewLimit=6,
             plans__pro__userReviewLimit=66,
@@ -97,8 +97,8 @@ class BillingContractsTest(unittest.TestCase):
                 {
                     "PULLWISE_BILLING_PROVIDER": "creem",
                     "PULLWISE_CREEM_API_KEY": "creem_123",
-                    "PULLWISE_CREEM_PRODUCT_ID": "prod_legacy",
-                    "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_legacy_monthly,prod_legacy_yearly",
+                    "PULLWISE_CREEM_PRODUCT_ID": "prod_ignored",
+                    "PULLWISE_CREEM_PRO_PRODUCT_IDS": "prod_ignored_monthly,prod_ignored_yearly",
                     "PULLWISE_FREE_USER_REVIEW_LIMIT": "1",
                     "PULLWISE_PRO_USER_REVIEW_LIMIT": "2",
                 },
@@ -120,7 +120,7 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(plan["plans"][1]["prices"]["month"]["productId"], "prod_db_monthly")
         self.assertEqual(plan["plans"][1]["prices"]["year"]["productId"], "prod_db_yearly")
 
-    def test_creem_request_settings_use_database_and_ignore_legacy_env(self) -> None:
+    def test_creem_request_settings_use_database_and_ignore_removed_env(self) -> None:
         config = database_config(
             billing__billingTimeoutSeconds=22,
             billing__creemApiBaseUrl="https://db-creem.test/v1",
@@ -132,7 +132,7 @@ class BillingContractsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_BILLING_TIMEOUT_SECONDS": "1",
-                    "PULLWISE_CREEM_API_BASE_URL": "https://legacy-creem.test",
+                    "PULLWISE_CREEM_API_BASE_URL": "https://ignored-creem.test",
                     "PULLWISE_CREEM_TEST_MODE": "true",
                     "PULLWISE_CREEM_UPGRADE_BEHAVIOR": "proration-charge-immediately",
                 },
@@ -242,7 +242,7 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(plan["plans"][1]["prices"]["year"]["productId"], "prod_yearly")
         self.assertEqual(get.call_count, 2)
 
-    def test_public_plan_ignores_legacy_review_limit_aliases(self) -> None:
+    def test_public_plan_ignores_removed_review_limit_aliases(self) -> None:
         with patch.dict(
             os.environ,
             {
@@ -260,14 +260,14 @@ class BillingContractsTest(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "PULLWISE_LEGACY_BILLING_SECRET": "legacy_123",
-                "PULLWISE_LEGACY_PRODUCT_ID": "legacy_product",
+                "PULLWISE_REMOVED_BILLING_SECRET": "ignored_123",
+                "PULLWISE_REMOVED_PRODUCT_ID": "ignored_product",
             },
             clear=True,
         ):
             self.assertEqual(billing.selected_provider(), "disabled")
 
-    def test_legacy_provider_environment_does_not_enable_billing(self) -> None:
+    def test_removed_provider_environment_does_not_enable_billing(self) -> None:
         with patch.dict(
             os.environ,
             {
@@ -700,7 +700,7 @@ class BillingContractsTest(unittest.TestCase):
                 {
                     "id": "usr_1",
                     "billing": {
-                        "provider": "legacy-provider",
+                        "provider": "removed-provider",
                         "customerId": "cust_123",
                         "subscriptionId": "sub_123",
                         "plan": "pro",
@@ -737,7 +737,7 @@ class BillingContractsTest(unittest.TestCase):
                 {
                     "id": "usr_1",
                     "billing": {
-                        "provider": "legacy-provider",
+                        "provider": "removed-provider",
                         "customerId": "cust_123",
                         "subscriptionId": "sub_123",
                         "plan": "pro",

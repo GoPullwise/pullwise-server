@@ -585,10 +585,8 @@ def worker_create_payload(worker: dict) -> dict:
         "worker_token": token,
         "server_url": server_url,
         "install_url": install_url,
-        "install_command": install_command,
         "local_server_url": local_server_url,
         "local_install_url": local_install_url,
-        "local_install_command": local_install_command,
         "install_commands": {
             "standard": install_command,
             "local": local_install_command,

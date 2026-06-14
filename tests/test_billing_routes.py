@@ -682,7 +682,7 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertIsNone(payload["updatedAt"])
         self.assertNotIn("raw", payload)
 
-    def test_billing_account_payload_does_not_expose_legacy_subscription_records(self) -> None:
+    def test_billing_account_payload_does_not_expose_subscription_snapshots(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billing"] = {
             "provider": "creem",
