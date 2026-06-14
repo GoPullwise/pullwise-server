@@ -18,6 +18,7 @@ or another worker instance's auth state.
   - `CODEX_HOME=$DATA_DIR/.codex`
   - `XDG_CONFIG_HOME=$DATA_DIR/.config`
   - `XDG_CACHE_HOME=$DATA_DIR/.cache`
+  - `XDG_DATA_HOME=$DATA_DIR/.local/share`
   - `PATH` including only the service path and this worker's local tool dirs
 - The installer should create the per-worker config/cache/auth directories under
   `$DATA_DIR`.
