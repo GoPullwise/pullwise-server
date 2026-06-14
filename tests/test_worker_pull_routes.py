@@ -3998,21 +3998,20 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "max": {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024, "source": "database"},
             },
         )
+        expected_provider_chains = {"free": ["opencode"], "pro": ["codex"], "max": ["codex"]}
         for plan, effort in (("free", "medium"), ("pro", "medium"), ("max", "xhigh")):
             with self.subTest(plan=plan):
                 codex = configs[plan]["codex"]
                 opencode = configs[plan]["opencode"]
-                self.assertEqual(configs[plan]["agent"]["cli"], "codex")
-                self.assertEqual(configs[plan]["agent"]["model"], "gpt-5.5")
-                self.assertEqual(configs[plan]["agent"]["reasoningEffort"], effort)
-                self.assertEqual(configs[plan]["provider"], "codex")
-                self.assertEqual(configs[plan]["providerChain"], ["codex", "opencode"])
-                self.assertEqual(configs[plan]["provider_chain"], ["codex", "opencode"])
+                self.assertEqual(configs[plan]["providerChain"], expected_provider_chains[plan])
+                self.assertNotIn("agent", configs[plan])
+                self.assertNotIn("provider", configs[plan])
+                self.assertNotIn("provider_chain", configs[plan])
                 self.assertEqual(codex["cli"], "codex")
                 self.assertEqual(codex["command"], "codex")
                 self.assertEqual(codex["model"], "gpt-5.5")
                 self.assertEqual(codex["reasoningEffort"], effort)
-                self.assertEqual(codex["reasoning_effort"], effort)
+                self.assertNotIn("reasoning_effort", codex)
                 self.assertEqual(opencode["cli"], "opencode")
                 self.assertEqual(opencode["command"], "opencode")
                 self.assertEqual(opencode["model"], "opencode/big-pickle")
@@ -4064,17 +4063,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.status, HTTPStatus.OK)
         agent_config = claim.payload["job"]["agentConfig"]
         self.assertEqual(agent_config["plan"], "pro")
-        self.assertEqual(agent_config["agent"]["cli"], "opencode")
-        self.assertEqual(agent_config["agent"]["model"], "opencode/pro-model")
-        self.assertEqual(agent_config["agent"]["reasoningEffort"], "high")
-        self.assertEqual(agent_config["provider"], "opencode")
         self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
-        self.assertEqual(agent_config["provider_chain"], ["opencode", "codex"])
+        self.assertNotIn("agent", agent_config)
+        self.assertNotIn("provider", agent_config)
+        self.assertNotIn("provider_chain", agent_config)
         self.assertEqual(agent_config["codex"]["cli"], "codex-pro-cli")
         self.assertEqual(agent_config["codex"]["command"], "codex")
         self.assertEqual(agent_config["codex"]["model"], "gpt-pro")
         self.assertEqual(agent_config["codex"]["reasoningEffort"], "high")
-        self.assertEqual(agent_config["codex"]["reasoning_effort"], "high")
+        self.assertNotIn("reasoning_effort", agent_config["codex"])
         self.assertEqual(agent_config["opencode"]["cli"], "opencode-pro-cli")
         self.assertEqual(agent_config["opencode"]["command"], "opencode")
         self.assertEqual(agent_config["opencode"]["model"], "opencode/pro-model")

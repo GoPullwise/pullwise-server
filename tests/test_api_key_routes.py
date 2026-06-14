@@ -592,8 +592,9 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["command"], "codex-docs-cli")
         self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["model"], "gpt-docs-pro")
         self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["reasoningEffort"], "high")
-        self.assertEqual(handler.payload["agentConfigs"]["max"]["agent"]["cli"], "opencode")
-        self.assertEqual(handler.payload["agentConfigs"]["max"]["agent"]["model"], "opencode/docs-max")
+        self.assertNotIn("agent", handler.payload["agentConfigs"]["max"])
+        self.assertNotIn("provider", handler.payload["agentConfigs"]["max"])
+        self.assertNotIn("provider_chain", handler.payload["agentConfigs"]["max"])
         self.assertEqual(handler.payload["agentConfigs"]["max"]["providerChain"], ["opencode"])
         self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["model"], "opencode/docs-max")
         self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["variant"], "high")
@@ -616,9 +617,10 @@ class ApiKeyRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         pro_config = handler.payload["agentConfigs"]["pro"]
-        self.assertEqual(pro_config["agent"]["cli"], "codex")
-        self.assertEqual(pro_config["agent"]["model"], "gpt-5.5")
-        self.assertEqual(pro_config["agent"]["reasoningEffort"], "medium")
+        self.assertEqual(pro_config["providerChain"], ["codex"])
+        self.assertNotIn("agent", pro_config)
+        self.assertNotIn("provider", pro_config)
+        self.assertNotIn("provider_chain", pro_config)
         self.assertEqual(pro_config["codex"]["model"], "gpt-5.5")
 
     def test_billing_page_points_subscription_action_to_pricing(self) -> None:
