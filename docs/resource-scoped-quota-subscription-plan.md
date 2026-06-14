@@ -112,7 +112,7 @@
 约束：
 
 - `github_app_installation_id` 唯一。
-- 如果 GitHub 安装不可用，允许 legacy/personal workspace，但不作为长期主路径。
+- 如果 GitHub 安装不可用，允许 personal workspace，但不作为长期主路径。
 
 ### WorkspaceMember
 
@@ -123,7 +123,7 @@
 - `workspace_id`
 - `user_id`
 - `role`: `owner` / `admin` / `member`
-- `source`: `github_installation` / `legacy_migration`
+- `source`: `github_installation` / `personal_workspace`
 
 作用：
 
@@ -575,7 +575,7 @@ Pro workspace:
 - Repo 页面能看出额度与 repo/workspace 绑定。
 - quota exceeded 错误稳定跳转 Billing。
 
-### 阶段 5：Legacy 数据迁移与兼容
+### 阶段 5：初始数据整理
 
 目标：
 
@@ -583,10 +583,10 @@ Pro workspace:
 
 迁移策略：
 
-1. 为每个已有 user 创建 legacy personal workspace。
+1. 为每个已有 user 创建 personal workspace。
 2. 如果用户只有一个 GitHub App installation，把 user 的 billing 状态迁移到该 installation workspace。
 3. 如果用户有多个 installations：
-   - 保守策略：先迁移到 legacy personal workspace。
+   - 保守策略：先迁移到 personal workspace。
    - UI 提示用户选择要绑定订阅的 workspace。
    - 选择后迁移 billing customer/subscription 到目标 workspace。
 4. `user.billingUsage` 迁移为 workspace quota bucket。

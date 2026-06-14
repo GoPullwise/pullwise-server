@@ -583,10 +583,9 @@ The server does not execute review jobs locally. It creates queued scan jobs and
 external `pullwise-worker` hosts claim, run, and upload results through the
 worker API.
 
-Standalone pullwise-worker hosts still have process-level provider defaults for
-legacy jobs that do not include `agentConfig`. Subscription plan policy is not
-read from worker or server environment variables; it is stored in the server
-database and attached to each claimed job.
+Standalone pullwise-worker hosts keep only process-level executable settings.
+Subscription plan policy is not read from worker or server environment
+variables; it is stored in the server database and attached to each claimed job.
 
 In distributed worker mode, total running scan capacity comes from connected
 workers and their advertised free slots. Each worker controls its local
