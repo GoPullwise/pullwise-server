@@ -773,8 +773,20 @@ scoped_command_path() {
     return 1
   fi
 }
-path_command() {
-  PATH="$SERVICE_PATH" command -v "$1" 2>/dev/null || return 1
+ensure_scoped_command_path() {
+  local command_path="${1:-}"
+  local label="${2:-provider}"
+  local resolved_home resolved_command
+  [ -n "$command_path" ] || return 0
+  resolved_home="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
+  resolved_command="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
+  case "$resolved_command/" in
+    "$resolved_home"/*) ;;
+    *)
+      echo "$label command must be inside worker home $DATA_DIR: $command_path" >&2
+      exit 1
+      ;;
+  esac
 }
 need_cmd python3
 need_cmd git
@@ -793,24 +805,30 @@ install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
 install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
 
-if provider_chain_has codex && [ -z "$CODEX_COMMAND" ]; then
-  if ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" && ! CODEX_COMMAND="$(path_command codex)"; then
+if provider_chain_has codex; then
+  if [ -n "$CODEX_COMMAND" ]; then
+    ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
+  elif ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")"; then
     run_as_service_user sh -lc 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
     CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" || {
       echo "Codex installer completed, but codex is not executable for $SERVICE_USER." >&2
       exit 1
     }
   fi
+  ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi
 
-if provider_chain_has opencode && [ -z "$OPENCODE_COMMAND" ]; then
-  if ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" && ! OPENCODE_COMMAND="$(path_command opencode)"; then
+if provider_chain_has opencode; then
+  if [ -n "$OPENCODE_COMMAND" ]; then
+    ensure_scoped_command_path "$OPENCODE_COMMAND" "OpenCode"
+  elif ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")"; then
     run_as_service_user sh -lc 'curl -fsSL https://opencode.ai/install | bash'
     OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" || {
       echo "OpenCode installer completed, but opencode is not executable for $SERVICE_USER." >&2
       exit 1
     }
   fi
+  ensure_scoped_command_path "$OPENCODE_COMMAND" "OpenCode"
 fi
 
 python3 -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
@@ -862,12 +880,12 @@ write_env_value PULLWISE_CHECKOUT_ROOT "$CHECKOUT_ROOT"
 write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
 if provider_chain_has codex; then
-  write_env_value PULLWISE_CODEX_COMMAND "${CODEX_COMMAND:-codex}"
+  write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
 fi
 if provider_chain_has opencode; then
-  write_env_value PULLWISE_OPENCODE_COMMAND "${OPENCODE_COMMAND:-opencode}"
+  write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"
   write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
 fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
