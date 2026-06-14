@@ -592,27 +592,7 @@ def normalize_config(raw: dict) -> dict:
             nested_set(normalized, path, clean_value(value, spec))
         except ValueError:
             continue
-    apply_legacy_repository_scan_limit_migration(normalized, raw)
     return normalized
-
-
-def apply_legacy_repository_scan_limit_migration(normalized: dict, raw: dict) -> None:
-    legacy_fields = (
-        ("scan.maxRepoFiles", "maxRepoFiles"),
-        ("scan.maxRepoBytes", "maxRepoBytes"),
-    )
-    for legacy_path, plan_key in legacy_fields:
-        legacy_found, legacy_value = nested_get(raw, legacy_path)
-        if not legacy_found:
-            continue
-        try:
-            migrated_value = clean_int(legacy_value, minimum=1)
-        except ValueError:
-            continue
-        for plan in PLAN_IDS:
-            plan_found, _value = nested_get(raw, f"plans.{plan}.{plan_key}")
-            if not plan_found:
-                normalized["plans"][plan][plan_key] = migrated_value
 
 
 def flatten_paths(value: object, prefix: str = "") -> list[str]:
