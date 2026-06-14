@@ -225,6 +225,11 @@ class ConfigurationContractsTest(unittest.TestCase):
             app.USERS = previous_users
             app.SETTINGS = previous_settings
 
+    def test_review_output_language_rejects_non_canonical_aliases(self) -> None:
+        self.assertEqual(app.clean_review_output_language("zh"), "en")
+        self.assertEqual(app.clean_review_output_language("chinese"), "en")
+        self.assertEqual(app.clean_review_output_language("zh-CN"), "zh-CN")
+
     def test_settings_update_accepts_supported_review_output_language(self) -> None:
         previous_users = app.USERS
         previous_settings = app.SETTINGS

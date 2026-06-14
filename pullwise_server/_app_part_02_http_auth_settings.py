@@ -811,43 +811,13 @@ REVIEW_OUTPUT_LANGUAGES: dict[str, str] = {
     "pt-BR": "Portuguese",
     "it": "Italian",
 }
-REVIEW_OUTPUT_LANGUAGE_ALIASES = {
-    "english": "en",
-    "en-us": "en",
-    "en-gb": "en",
-    "zh": "zh-CN",
-    "zh-cn": "zh-CN",
-    "zh_hans": "zh-CN",
-    "chinese": "zh-CN",
-    "cn": "zh-CN",
-    "ja-jp": "ja",
-    "japanese": "ja",
-    "jp": "ja",
-    "ko-kr": "ko",
-    "korean": "ko",
-    "kr": "ko",
-    "es-es": "es",
-    "es-mx": "es",
-    "spanish": "es",
-    "fr-fr": "fr",
-    "french": "fr",
-    "de-de": "de",
-    "german": "de",
-    "pt": "pt-BR",
-    "pt-br": "pt-BR",
-    "portuguese": "pt-BR",
-    "it-it": "it",
-    "italian": "it",
-}
-
-
 def clean_review_output_language(value: object, *, default: str | None = DEFAULT_REVIEW_OUTPUT_LANGUAGE) -> str | None:
     text = public_issue_text(value)
     if not text:
         return default
     if text in REVIEW_OUTPUT_LANGUAGES:
         return text
-    return REVIEW_OUTPUT_LANGUAGE_ALIASES.get(text.lower(), default)
+    return default
 
 
 def review_output_language_payload(value: object) -> dict:
