@@ -81,7 +81,12 @@ pull-based command queue:
 
 `stop` commands disable job claiming but keep the worker in the registry.
 `uninstall` commands soft-delete the worker registry row as soon as the command
-is accepted, so admin lists remove it immediately. A locally run
+is accepted, so admin lists remove it immediately. The running worker executes
+admin-queued uninstall only after active jobs finish, deletes its worker-owned
+instance home and log directories, reports the command result, and exits
+cleanly so the systemd unit remains stopped. It does not remove root-owned
+systemd unit, binary, or `/etc` configuration files; use local root
+`pullwise-worker uninstall` for full host service cleanup. A locally run
 `pullwise-worker uninstall` calls `DELETE /worker/registry` before removing the
 local service when a worker token is configured.
 
