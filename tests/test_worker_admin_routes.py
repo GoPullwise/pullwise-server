@@ -232,8 +232,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_MODEL"], "gpt-5.5")
         self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_REASONING_EFFORT"], "medium")
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], "opencode")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_MODEL"], "opencode/big-pickle")
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VARIANT"], "medium")
+        self.assertNotIn("PULLWISE_OPENCODE_MODEL", payload["suggested_env"])
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_MAX_BACKOFF_SECONDS"], "60")
         self.assertEqual(audit[0]["action"], "create_worker")
         self.assertEqual(audit[0]["actor_user_id"], "usr_admin")
@@ -751,9 +751,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("Codex device login:", install.text_payload)
         self.assertIn("login --device-auth", install.text_payload)
         self.assertIn("OpenCode interactive provider selection", install.text_payload)
-        self.assertIn("OpenCode configured model: $OPENCODE_MODEL", install.text_payload)
-        self.assertIn("OpenCode current model provider: ${OPENCODE_MODEL%%/*}", install.text_payload)
-        self.assertIn("Select the provider matching the configured model provider.", install.text_payload)
+        self.assertIn("Select the providers used by the Pullwise subscription plan agent configs.", install.text_payload)
         self.assertIn("OpenCode auth status:", install.text_payload)
         self.assertIn("auth list", install.text_payload)
         self.assertNotIn("OPENCODE_AUTH_PROVIDER", install.text_payload)
@@ -778,13 +776,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             'write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"',
             install.text_payload,
         )
-        self.assertIn(
-            'write_env_value PULLWISE_OPENCODE_MODEL "$OPENCODE_MODEL"',
-            install.text_payload,
-        )
         self.assertIn('write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"', install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_COMMAND", install.text_payload)
-        self.assertIn("PULLWISE_OPENCODE_MODEL", install.text_payload)
+        self.assertNotIn("PULLWISE_OPENCODE_MODEL", install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_VARIANT", install.text_payload)
         self.assertIn('write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"', install.text_payload)
         self.assertIn('write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"', install.text_payload)
@@ -998,6 +992,42 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(docs.status, HTTPStatus.OK)
         self.assertEqual(docs.payload["agentConfigs"]["pro"], agent_config)
+
+    def test_worker_can_fetch_subscription_plan_agent_configs(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        app.billing.update_review_agent_config(
+            "free",
+            {
+                "providerChain": ["opencode"],
+                "opencode": {"model": "minimax/MiniMax-M3", "variant": "medium"},
+            },
+        )
+        app.billing.update_review_agent_config("pro", {"providerChain": ["codex"]})
+        app.billing.update_review_agent_config("max", {"providerChain": ["codex"]})
+
+        handler = RouteHarness(
+            "/worker/agent-configs",
+            {"worker_id": worker_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["agentConfigs"]["free"]["providerChain"], ["opencode"])
+        self.assertEqual(handler.payload["agentConfigs"]["free"]["opencode"]["model"], "minimax/MiniMax-M3")
+        self.assertEqual(handler.payload["agentConfigs"]["pro"]["providerChain"], ["codex"])
+        self.assertEqual(handler.payload["agentConfigs"]["max"]["providerChain"], ["codex"])
+        self.assertEqual([plan["id"] for plan in handler.payload["plans"]], ["free", "pro", "max"])
+
+        denied = RouteHarness(
+            "/worker/agent-configs",
+            {"worker_id": "wk_other"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(denied, "POST")
+
+        self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
 
     def test_admin_plan_agent_config_rejects_invalid_values(self) -> None:
         update = RouteHarness(

@@ -2200,6 +2200,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         if segments == ["worker", "heartbeat"]:
             return self.handle_worker_heartbeat(body, worker_record)
+        if segments == ["worker", "agent-configs"]:
+            return self.handle_worker_agent_configs(body, worker_record)
         if segments == ["worker", "jobs", "claim"]:
             return self.handle_worker_job_claim(body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "progress":
@@ -2213,6 +2215,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def authenticated_worker_id_matches(self, worker_record: dict, worker_id: str) -> bool:
         authenticated_worker_id = public_issue_text(worker_record.get("worker_id"))
         return bool(authenticated_worker_id and worker_id and authenticated_worker_id == worker_id)
+
+    def handle_worker_agent_configs(self, body: dict, worker_record: dict) -> None:
+        worker_id = clean_github_access_text(body.get("worker_id")) or ""
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        return self.json(billing.review_agent_configs_admin_payload())
 
     def handle_worker_heartbeat(self, body: dict, worker_record: dict) -> None:
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
