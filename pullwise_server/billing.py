@@ -101,8 +101,9 @@ def clean_review_agent_provider_chain(value: object) -> list[str]:
 def default_review_agent_plan_config(plan: str) -> dict:
     normalized_plan = normalize_plan(plan, default="free")
     effort = REVIEW_AGENT_EFFORT_DEFAULTS[normalized_plan]
+    provider_chain = ["opencode"] if normalized_plan == "free" else ["codex"]
     return {
-        "providerChain": ["codex", "opencode"],
+        "providerChain": provider_chain,
         "codex": {
             "cli": REVIEW_CODEX_COMMAND_DEFAULT,
             "command": REVIEW_CODEX_COMMAND_DEFAULT,

@@ -470,7 +470,15 @@ def default_worker_package(version: object = None) -> str:
 
 
 WORKER_INSTALL_PROVIDERS = ("codex", "opencode")
-DEFAULT_WORKER_PROVIDER_CHAIN = ("codex", "opencode")
+
+
+def default_worker_provider_chain() -> list[str]:
+    providers: list[str] = []
+    for plan in billing.PLAN_IDS:
+        for provider in billing.review_agent_provider_chain(plan):
+            if provider in WORKER_INSTALL_PROVIDERS and provider not in providers:
+                providers.append(provider)
+    return providers
 
 
 def worker_provider_chain(value: object = None, *, strict: bool = False) -> list[str]:
@@ -479,7 +487,7 @@ def worker_provider_chain(value: object = None, *, strict: bool = False) -> list
     elif isinstance(value, str):
         raw_items = value.split(",")
     elif value is None:
-        raw_items = DEFAULT_WORKER_PROVIDER_CHAIN
+        raw_items = default_worker_provider_chain()
     else:
         raw_items = []
     providers: list[str] = []
@@ -491,7 +499,7 @@ def worker_provider_chain(value: object = None, *, strict: bool = False) -> list
         return providers
     if strict:
         raise ValueError("providerChain must include codex or opencode.")
-    return list(DEFAULT_WORKER_PROVIDER_CHAIN)
+    return default_worker_provider_chain()
 
 
 def worker_provider_chain_text(value: object = None, *, strict: bool = False) -> str:
@@ -646,7 +654,7 @@ while [ "$#" -gt 0 ]; do
     --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
     --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-1}"; shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
-    --provider-chain) PROVIDER_CHAIN="${2:-codex,opencode}"; shift 2 ;;
+    --provider-chain) PROVIDER_CHAIN="${2:-}"; shift 2 ;;
     --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -709,15 +717,19 @@ normalize_provider_chain() {
         ;;
     esac
   done
-  printf '%s\n' "${next:-codex,opencode}"
+  printf '%s\n' "$next"
 }
 provider_chain_has() {
   case ",$PROVIDER_CHAIN," in *",$1,"*) return 0 ;; *) return 1 ;; esac
 }
 if [ -z "$PROVIDER_CHAIN" ]; then
-  PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-codex,opencode}"
+  PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-}"
 fi
 PROVIDER_CHAIN="$(normalize_provider_chain "$PROVIDER_CHAIN")"
+if [ -z "$PROVIDER_CHAIN" ]; then
+  echo "provider chain is required; install from the admin-generated command." >&2
+  exit 2
+fi
 PROVIDER="${PROVIDER_CHAIN%%,*}"
 SERVICE_TOOL_PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin"
 
