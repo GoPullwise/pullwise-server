@@ -250,7 +250,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn(token, standard_install_command)
         self.assertIn("'US worker'", standard_install_command)
         self.assertIn("--max-concurrent-jobs 4", standard_install_command)
-        self.assertIn("--provider-chain 'opencode,codex'", standard_install_command)
+        self.assertIn("--provider-chain 'codex'", standard_install_command)
         self.assertIn(f"--package '{app.default_worker_package()}'", standard_install_command)
         self.assertIn("pullwise_worker-0.4.2-py3-none-any.whl", standard_install_command)
         self.assertEqual(payload["local_server_url"], "http://127.0.0.1:18080")
@@ -258,7 +258,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("http://127.0.0.1:18080/install-worker.sh", local_install_command)
         self.assertIn("--server 'http://127.0.0.1:18080'", local_install_command)
         self.assertIn("--max-concurrent-jobs 4", local_install_command)
-        self.assertIn("--provider-chain 'opencode,codex'", local_install_command)
+        self.assertIn("--provider-chain 'codex'", local_install_command)
         self.assertIn(f"--package '{app.default_worker_package()}'", local_install_command)
         self.assertNotIn(token, local_install_command)
         self.assertNotIn("install_command", payload)
@@ -266,11 +266,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(payload["suggested_env"]["PULLWISE_MAX_CONCURRENT_JOBS"], "4")
         self.assertEqual(payload["suggested_env"]["PULLWISE_LOCAL_SERVER_URL"], "http://127.0.0.1:18080")
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], app.default_worker_package())
-        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER_CHAIN"], "opencode,codex")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER_CHAIN"], "codex")
         self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_MODEL"], "gpt-5.5")
         self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_REASONING_EFFORT"], "medium")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], "opencode")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VARIANT"], "medium")
+        self.assertNotIn("PULLWISE_OPENCODE_COMMAND", payload["suggested_env"])
+        self.assertNotIn("PULLWISE_OPENCODE_VARIANT", payload["suggested_env"])
         self.assertNotIn("PULLWISE_OPENCODE_MODEL", payload["suggested_env"])
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_MAX_BACKOFF_SECONDS"], "60")
         self.assertEqual(audit[0]["action"], "create_worker")
@@ -316,6 +316,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("providerChain", handler.payload["message"])
+
+    def test_admin_worker_create_rejects_multiple_provider_chain_entries(self) -> None:
+        handler = RouteHarness(
+            "/admin/workers",
+            {"name": "No provider fallback", "providerChain": ["codex", "opencode"]},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("exactly one provider", handler.payload["message"])
 
     def test_worker_heartbeat_persists_machine_metrics_for_admin_detail(self) -> None:
         payload, token = self.create_worker()
@@ -1003,7 +1014,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",
             {
-                "providerChain": ["opencode", "codex"],
+                "providerChain": ["opencode"],
                 "codex": {
                     "cli": "codex-admin",
                     "command": "codex-bin-ignored",
@@ -1024,7 +1035,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(update.status, HTTPStatus.OK)
         agent_config = update.payload["agentConfig"]
         self.assertEqual(agent_config["plan"], "pro")
-        self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
+        self.assertEqual(agent_config["providerChain"], ["opencode"])
         self.assertNotIn("agent", agent_config)
         self.assertNotIn("provider", agent_config)
         self.assertNotIn("provider_chain", agent_config)
@@ -1050,6 +1061,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(unsupported_update.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("providerChain", unsupported_update.payload["message"])
+
+        multi_provider_update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/pro",
+            {"providerChain": ["opencode", "codex"]},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(multi_provider_update, "PATCH")
+
+        self.assertEqual(multi_provider_update.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("exactly one provider", multi_provider_update.payload["message"])
 
     def test_worker_can_fetch_subscription_plan_agent_configs(self) -> None:
         payload, token = self.create_worker()

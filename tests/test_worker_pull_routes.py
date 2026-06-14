@@ -770,15 +770,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
             "duration_ms": 1234,
             "aiUsage": {
+                "agentCli": "codex",
+                "provider": "codex",
                 "model": "gpt-5.5",
-                "input_tokens": 123,
-                "output_tokens": 45,
-                "total_tokens": 168,
+                "reasoningEffort": "high",
             },
             "effectiveAgentConfig": {
-                "provider": "codex",
                 "providerChain": ["codex"],
-                "agent": {
+                "codex": {
                     "cli": "codex",
                     "command": "codex",
                     "model": "gpt-5.5",
@@ -800,6 +799,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(
             final_scan_payload["aiUsage"],
             {"agentCli": "codex", "provider": "codex", "model": "gpt-5.5", "reasoningEffort": "high"},
+        )
+        self.assertEqual(
+            final_scan_payload["effectiveAgentConfig"],
+            {
+                "providerChain": ["codex"],
+                "codex": {
+                    "cli": "codex",
+                    "command": "codex",
+                    "model": "gpt-5.5",
+                    "reasoningEffort": "high",
+                },
+            },
         )
         self.assertNotIn("reviewAgent", final_scan_payload)
         self.assertEqual(final_scan_payload["repositoryGraph"]["summary"], "Final graph")
@@ -4053,7 +4064,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.billing.update_review_agent_config(
             "pro",
             {
-                "providerChain": ["opencode", "codex"],
+                "providerChain": ["opencode"],
                 "codex": {
                     "cli": "codex-pro-cli",
                     "command": "codex-pro-command-ignored",
@@ -4074,7 +4085,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.status, HTTPStatus.OK)
         agent_config = claim.payload["job"]["agentConfig"]
         self.assertEqual(agent_config["plan"], "pro")
-        self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
+        self.assertEqual(agent_config["providerChain"], ["opencode"])
         self.assertNotIn("agent", agent_config)
         self.assertNotIn("provider", agent_config)
         self.assertNotIn("provider_chain", agent_config)
@@ -4241,10 +4252,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
         self.assertEqual(scan["status"], "queued")
 
-    def test_worker_claim_allows_provider_fallback_when_codex_not_ready(self) -> None:
+    def test_worker_claim_rejects_codex_worker_when_codex_not_ready(self) -> None:
         scan = {
-            "id": "sc_opencode_fallback",
-            "repo": "acme/opencode-fallback",
+            "id": "sc_codex_not_ready",
+            "repo": "acme/codex-not-ready",
             "branch": "main",
             "commit": "pending",
             "status": "queued",
@@ -4274,10 +4285,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         app.PullwiseHandler.route(claim, "POST")
 
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        self.assertEqual(claim.payload["job"]["job_id"], job["job_id"])
-        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
-        self.assertEqual(scan["status"], "running")
+        self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
+        self.assertEqual(scan["status"], "queued")
 
     def test_worker_claim_allows_opencode_first_worker_when_allowlist_is_opencode(self) -> None:
         scan = {
