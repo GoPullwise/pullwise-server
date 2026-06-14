@@ -678,6 +678,7 @@ if [ -z "$SAFE_WORKER_ID" ]; then
   exit 2
 fi
 SERVICE_USER="$(service_user_name "$SAFE_WORKER_ID")"
+SERVICE_GROUP="pullwise-worker"
 BASE_CONFIG_DIR="/etc/pullwise-worker"
 BASE_DATA_DIR="/var/lib/pullwise-worker"
 BASE_LOG_DIR="/var/log/pullwise-worker"
@@ -776,8 +777,11 @@ if sys.version_info < (3, 9):
 PY
 PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
 
+getent group "$SERVICE_GROUP" >/dev/null 2>&1 || groupadd --system "$SERVICE_GROUP"
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
-install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
+usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"
+install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
+install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"
 
 if provider_chain_has codex && [ -z "$CODEX_COMMAND" ]; then
@@ -903,6 +907,7 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
+SupplementaryGroups=$SERVICE_GROUP
 WorkingDirectory=$DATA_DIR
 EnvironmentFile=$ENV_FILE
 Environment=PATH=$SERVICE_PATH
@@ -912,7 +917,7 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=$DATA_DIR $LOG_DIR
+ReadWritePaths=$BASE_DATA_DIR $BASE_LOG_DIR $DATA_DIR $LOG_DIR
 
 [Install]
 WantedBy=multi-user.target
