@@ -317,17 +317,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("providerChain", handler.payload["message"])
 
-    def test_admin_worker_create_rejects_multiple_provider_chain_entries(self) -> None:
-        handler = RouteHarness(
-            "/admin/workers",
-            {"name": "No provider fallback", "providerChain": ["codex", "opencode"]},
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("exactly one provider", handler.payload["message"])
-
     def test_worker_heartbeat_persists_machine_metrics_for_admin_detail(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -1042,7 +1031,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(update.status, HTTPStatus.OK)
         agent_config = update.payload["agentConfig"]
         self.assertEqual(agent_config["plan"], "pro")
-        self.assertEqual(agent_config["providerChain"], ["opencode"])
+        self.assertEqual(agent_config["providerChain"], ["opencode", "codex"])
         self.assertNotIn("agent", agent_config)
         self.assertNotIn("provider", agent_config)
         self.assertNotIn("provider_chain", agent_config)
@@ -1068,16 +1057,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(unsupported_update.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("providerChain", unsupported_update.payload["message"])
-
-        multi_provider_update = RouteHarness(
-            "/admin/subscription-plans/agent-configs/pro",
-            {"providerChain": ["opencode", "codex"]},
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(multi_provider_update, "PATCH")
-
-        self.assertEqual(multi_provider_update.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("exactly one provider", multi_provider_update.payload["message"])
 
     def test_worker_can_fetch_subscription_plan_agent_configs(self) -> None:
         payload, token = self.create_worker()
