@@ -800,16 +800,16 @@ class WorkerPullRoutesTest(unittest.TestCase):
             final_scan_payload["aiUsage"],
             {"agentCli": "codex", "provider": "codex", "model": "gpt-5.5", "reasoningEffort": "high"},
         )
+        effective_config = final_scan_payload["effectiveAgentConfig"]
+        self.assertEqual(effective_config["provider"], "codex")
+        self.assertEqual(effective_config["providerChain"], ["codex"])
         self.assertEqual(
-            final_scan_payload["effectiveAgentConfig"],
+            effective_config["codex"],
             {
-                "providerChain": ["codex"],
-                "codex": {
-                    "cli": "codex",
-                    "command": "codex",
-                    "model": "gpt-5.5",
-                    "reasoningEffort": "high",
-                },
+                "cli": "codex",
+                "command": "codex",
+                "model": "gpt-5.5",
+                "reasoningEffort": "high",
             },
         )
         self.assertNotIn("reviewAgent", final_scan_payload)
