@@ -276,6 +276,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_MODEL"], "gpt-5.5")
         self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_REASONING_EFFORT"], "medium")
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], f"{service_home}/.opencode/bin/opencode")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VERSION"], app.DEFAULT_OPENCODE_VERSION)
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VARIANT"], "medium")
         self.assertNotIn("PULLWISE_OPENCODE_MODEL", payload["suggested_env"])
         self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_MAX_BACKOFF_SECONDS"], "60")
@@ -312,6 +313,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         service_home = f"/var/lib/pullwise-worker/{payload['worker_id'][:48]}"
         self.assertEqual(payload["suggested_env"]["PULLWISE_SERVICE_HOME"], service_home)
         self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], f"{service_home}/.opencode/bin/opencode")
+        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VERSION"], app.DEFAULT_OPENCODE_VERSION)
         self.assertIn("--provider-chain 'opencode'", payload["install_commands"]["standard"])
 
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
@@ -792,6 +794,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn("Python 3.9 or newer", install.text_payload)
         self.assertIn("https://chatgpt.com/codex/install.sh", install.text_payload)
         self.assertIn("https://opencode.ai/install", install.text_payload)
+        self.assertIn('OPENCODE_VERSION="${PULLWISE_OPENCODE_VERSION:-1.15.10}"', install.text_payload)
+        self.assertIn('--version "$OPENCODE_VERSION" --no-modify-path', install.text_payload)
         self.assertIn("scoped_command_path", install.text_payload)
         self.assertIn("ensure_scoped_command_path() {", install.text_payload)
         self.assertIn('ensure_scoped_command_path "$CODEX_COMMAND" "Codex"', install.text_payload)
@@ -858,9 +862,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             install.text_payload,
         )
         self.assertIn('write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"', install.text_payload)
+        self.assertIn('write_env_value PULLWISE_OPENCODE_VERSION "$OPENCODE_VERSION"', install.text_payload)
         self.assertIn('write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"', install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_COMMAND", install.text_payload)
         self.assertNotIn("PULLWISE_OPENCODE_MODEL", install.text_payload)
+        self.assertIn("PULLWISE_OPENCODE_VERSION", install.text_payload)
         self.assertIn("PULLWISE_OPENCODE_VARIANT", install.text_payload)
         self.assertIn('write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"', install.text_payload)
         self.assertIn('write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"', install.text_payload)

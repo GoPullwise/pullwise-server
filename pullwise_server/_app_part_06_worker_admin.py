@@ -476,6 +476,7 @@ def default_worker_package(version: object = None) -> str:
 
 
 WORKER_INSTALL_PROVIDERS = ("codex", "opencode")
+DEFAULT_OPENCODE_VERSION = "1.15.10"
 
 
 def default_worker_provider_chain() -> list[str]:
@@ -586,6 +587,7 @@ def worker_create_payload(worker: dict) -> dict:
         suggested_env.update(
             {
                 "PULLWISE_OPENCODE_COMMAND": f"{service_home}/.opencode/bin/opencode",
+                "PULLWISE_OPENCODE_VERSION": DEFAULT_OPENCODE_VERSION,
                 "PULLWISE_OPENCODE_VARIANT": "medium",
             }
         )
@@ -653,6 +655,7 @@ PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
 CODEX_COMMAND="${PULLWISE_CODEX_COMMAND:-}"
 OPENCODE_COMMAND="${PULLWISE_OPENCODE_COMMAND:-}"
+OPENCODE_VERSION="${PULLWISE_OPENCODE_VERSION:-__DEFAULT_OPENCODE_VERSION__}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -902,7 +905,7 @@ if provider_chain_has opencode; then
   if [ -n "$OPENCODE_COMMAND" ]; then
     ensure_scoped_command_path "$OPENCODE_COMMAND" "OpenCode"
   elif ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")"; then
-    run_as_service_user sh -lc 'curl -fsSL https://opencode.ai/install | bash'
+    run_as_service_user env OPENCODE_VERSION="$OPENCODE_VERSION" sh -lc 'curl -fsSL https://opencode.ai/install | bash -s -- --version "$OPENCODE_VERSION" --no-modify-path'
     OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" || {
       echo "OpenCode installer completed, but opencode is not executable for $SERVICE_USER." >&2
       exit 1
@@ -966,6 +969,7 @@ if provider_chain_has codex; then
 fi
 if provider_chain_has opencode; then
   write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"
+  write_env_value PULLWISE_OPENCODE_VERSION "$OPENCODE_VERSION"
   write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
 fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
@@ -1066,6 +1070,7 @@ run_as_service_user "$BIN_PATH" doctor || true
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
+        .replace("__DEFAULT_OPENCODE_VERSION__", DEFAULT_OPENCODE_VERSION)
         .replace("\r\n", "\n")
     )
 
