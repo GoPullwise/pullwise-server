@@ -1393,29 +1393,16 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                     timestamp,
                 ),
             )
-            if command == "uninstall":
-                connection.execute(
-                    """
-                    UPDATE workers
-                    SET enabled = 0,
-                        deleted_at = COALESCE(deleted_at, ?),
-                        disabled_at = COALESCE(disabled_at, ?),
-                        updated_at = ?
-                    WHERE worker_id = ?
-                    """,
-                    (timestamp, timestamp, timestamp, worker_id),
-                )
-            else:
-                connection.execute(
-                    """
-                    UPDATE workers
-                    SET enabled = 0,
-                        disabled_at = COALESCE(disabled_at, ?),
-                        updated_at = ?
-                    WHERE worker_id = ?
-                    """,
-                    (timestamp, timestamp, worker_id),
-                )
+            connection.execute(
+                """
+                UPDATE workers
+                SET enabled = 0,
+                    disabled_at = COALESCE(disabled_at, ?),
+                    updated_at = ?
+                WHERE worker_id = ?
+                """,
+                (timestamp, timestamp, worker_id),
+            )
             return row_to_dict(connection.execute("SELECT * FROM worker_commands WHERE id = ?", (command_id,)).fetchone())
 
 

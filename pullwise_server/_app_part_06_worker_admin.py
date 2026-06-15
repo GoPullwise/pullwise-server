@@ -706,6 +706,70 @@ CHECKOUT_ROOT="$DATA_DIR/checkouts"
 LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
 SERVICE_FILE="/etc/systemd/system/pullwise-worker-$SAFE_WORKER_ID.service"
 LOGROTATE_FILE="/etc/logrotate.d/pullwise-worker-$SAFE_WORKER_ID"
+INSTALL_COMPLETED=0
+ROLLBACK_ENABLED=0
+HAD_SERVICE_USER=0
+HAD_CONFIG_DIR=0
+HAD_DATA_DIR=0
+HAD_LOG_DIR=0
+HAD_BIN_PATH=0
+HAD_SERVICE_FILE=0
+HAD_LOGROTATE_FILE=0
+id "$SERVICE_USER" >/dev/null 2>&1 && HAD_SERVICE_USER=1
+[ -e "$CONFIG_DIR" ] && HAD_CONFIG_DIR=1
+[ -e "$DATA_DIR" ] && HAD_DATA_DIR=1
+[ -e "$LOG_DIR" ] && HAD_LOG_DIR=1
+[ -e "$BIN_PATH" ] && HAD_BIN_PATH=1
+[ -e "$SERVICE_FILE" ] && HAD_SERVICE_FILE=1
+[ -e "$LOGROTATE_FILE" ] && HAD_LOGROTATE_FILE=1
+rollback_dir() {
+  local path="$1"
+  local base="$2"
+  local existed="$3"
+  [ "$existed" = "0" ] || return 0
+  [ -n "$path" ] || return 0
+  case "$path" in
+    "$base"/*) rm -rf -- "$path" >/dev/null 2>&1 || true ;;
+    *) echo "Refusing to roll back unexpected directory: $path" >&2 ;;
+  esac
+}
+rollback_file() {
+  local path="$1"
+  local base="$2"
+  local existed="$3"
+  [ "$existed" = "0" ] || return 0
+  [ -n "$path" ] || return 0
+  case "$path" in
+    "$base"/*) rm -f -- "$path" >/dev/null 2>&1 || true ;;
+    *) echo "Refusing to roll back unexpected file: $path" >&2 ;;
+  esac
+}
+rollback_failed_install() {
+  local status=$?
+  trap - EXIT
+  if [ "$status" -eq 0 ] || [ "$INSTALL_COMPLETED" = "1" ] || [ "$ROLLBACK_ENABLED" != "1" ]; then
+    exit "$status"
+  fi
+  if [ "${PULLWISE_KEEP_FAILED_INSTALL:-}" = "1" ]; then
+    echo "Pullwise worker install failed; preserving partial instance because PULLWISE_KEEP_FAILED_INSTALL=1." >&2
+    exit "$status"
+  fi
+  echo "Pullwise worker install failed; rolling back partial instance $SAFE_WORKER_ID." >&2
+  systemctl stop "pullwise-worker-$SAFE_WORKER_ID" >/dev/null 2>&1 || true
+  systemctl disable "pullwise-worker-$SAFE_WORKER_ID" >/dev/null 2>&1 || true
+  rollback_file "$SERVICE_FILE" "/etc/systemd/system" "$HAD_SERVICE_FILE"
+  rollback_file "$LOGROTATE_FILE" "/etc/logrotate.d" "$HAD_LOGROTATE_FILE"
+  rollback_file "$BIN_PATH" "/usr/local/bin" "$HAD_BIN_PATH"
+  rollback_dir "$CONFIG_DIR" "$BASE_CONFIG_DIR" "$HAD_CONFIG_DIR"
+  rollback_dir "$DATA_DIR" "$BASE_DATA_DIR" "$HAD_DATA_DIR"
+  rollback_dir "$LOG_DIR" "$BASE_LOG_DIR" "$HAD_LOG_DIR"
+  if [ "$HAD_SERVICE_USER" = "0" ]; then
+    userdel "$SERVICE_USER" >/dev/null 2>&1 || true
+  fi
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  exit "$status"
+}
+trap rollback_failed_install EXIT
 if [ -z "$WORKER_PACKAGE" ]; then
   WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-}"
 fi
@@ -812,6 +876,7 @@ if sys.version_info < (3, 9):
 PY
 PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
 
+ROLLBACK_ENABLED=1
 getent group "$SERVICE_GROUP" >/dev/null 2>&1 || groupadd --system "$SERVICE_GROUP"
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"
@@ -992,6 +1057,7 @@ EOF
 systemctl daemon-reload
 systemctl enable "pullwise-worker-$SAFE_WORKER_ID" >/dev/null
 systemctl restart "pullwise-worker-$SAFE_WORKER_ID"
+INSTALL_COMPLETED=1
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
 echo "Worker home: $DATA_DIR"

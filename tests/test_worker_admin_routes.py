@@ -765,6 +765,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn('CONFIG_DIR="$BASE_CONFIG_DIR/$SAFE_WORKER_ID"', install.text_payload)
         self.assertIn('DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"', install.text_payload)
         self.assertIn('LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"', install.text_payload)
+        self.assertIn("rollback_failed_install() {", install.text_payload)
+        self.assertIn("trap rollback_failed_install EXIT", install.text_payload)
+        self.assertIn("ROLLBACK_ENABLED=1", install.text_payload)
+        self.assertIn('rollback_dir "$DATA_DIR" "$BASE_DATA_DIR" "$HAD_DATA_DIR"', install.text_payload)
+        self.assertIn('rollback_dir "$LOG_DIR" "$BASE_LOG_DIR" "$HAD_LOG_DIR"', install.text_payload)
+        self.assertIn('rollback_file "$SERVICE_FILE" "/etc/systemd/system" "$HAD_SERVICE_FILE"', install.text_payload)
+        self.assertIn("INSTALL_COMPLETED=1", install.text_payload)
         self.assertIn('SERVICE_GROUP="pullwise-worker"', install.text_payload)
         self.assertIn('getent group "$SERVICE_GROUP" >/dev/null 2>&1 || groupadd --system "$SERVICE_GROUP"', install.text_payload)
         self.assertIn('usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"', install.text_payload)
@@ -1433,13 +1440,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(uninstall.status, HTTPStatus.ACCEPTED)
         uninstall_command = uninstall.payload["command"]
         self.assertEqual(uninstall_command["command"], "uninstall")
-        self.assertIsNone(db.get_worker(worker_id))
-        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+        worker_after_uninstall_request = db.get_worker(worker_id)
+        self.assertIsNotNone(worker_after_uninstall_request)
+        self.assertFalse(worker_after_uninstall_request["enabled"])
+        self.assertIsNone(worker_after_uninstall_request["deleted_at"])
 
         admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin_workers, "GET")
         self.assertEqual(admin_workers.status, HTTPStatus.OK)
-        self.assertEqual(admin_workers.payload["workers"], [])
+        self.assertEqual(admin_workers.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["id"], uninstall_command["id"])
+        self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["status"], "pending")
 
         deleted_heartbeat = RouteHarness(
             "/worker/heartbeat",
