@@ -1085,8 +1085,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 patch.object(app, "WORKER_INSTANCE_LOGROTATE_DIR", logrotate_dir),
                 patch.object(app, "WORKER_INSTANCE_BIN_DIR", bin_dir),
                 patch.object(app.subprocess, "run", side_effect=fake_run),
+                patch.object(app.os, "geteuid", return_value=0, create=True),
             )
-            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7]:
                 paths = app.worker_instance_paths(worker_id)
                 for key in ("configDir", "dataDir", "logDir"):
                     os.makedirs(paths[key], exist_ok=True)
@@ -1113,6 +1114,67 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIn(["systemctl", "disable", app.worker_instance_service_name(worker_id)], commands)
         self.assertIn(["systemctl", "daemon-reload"], commands)
         self.assertIn(["userdel", app.worker_instance_service_user(worker_id)], commands)
+
+    def test_admin_delete_worker_uses_sudo_when_systemd_unit_requires_privilege(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+        commands = []
+
+        class Completed:
+            returncode = 0
+
+        with tempfile.TemporaryDirectory() as root:
+            config_base = os.path.join(root, "etc", "pullwise-worker")
+            data_base = os.path.join(root, "var", "lib", "pullwise-worker")
+            log_base = os.path.join(root, "var", "log", "pullwise-worker")
+            systemd_dir = os.path.join(root, "etc", "systemd", "system")
+            logrotate_dir = os.path.join(root, "etc", "logrotate.d")
+            bin_dir = os.path.join(root, "usr", "local", "bin")
+            patches = (
+                patch.object(app, "WORKER_INSTANCE_CONFIG_BASE_DIR", config_base),
+                patch.object(app, "WORKER_INSTANCE_DATA_BASE_DIR", data_base),
+                patch.object(app, "WORKER_INSTANCE_LOG_BASE_DIR", log_base),
+                patch.object(app, "WORKER_INSTANCE_SYSTEMD_DIR", systemd_dir),
+                patch.object(app, "WORKER_INSTANCE_LOGROTATE_DIR", logrotate_dir),
+                patch.object(app, "WORKER_INSTANCE_BIN_DIR", bin_dir),
+            )
+            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+                paths = app.worker_instance_paths(worker_id)
+                for key in ("configDir", "dataDir", "logDir"):
+                    os.makedirs(paths[key], exist_ok=True)
+                for key in ("serviceFile", "logrotateFile", "binPath"):
+                    os.makedirs(os.path.dirname(paths[key]), exist_ok=True)
+                    with open(paths[key], "w", encoding="utf-8") as handle:
+                        handle.write(key)
+
+                original_unlink = os.unlink
+
+                def fake_unlink(path, *_args, **_kwargs):
+                    if path == paths["serviceFile"]:
+                        raise PermissionError(13, "Permission denied", path)
+                    return original_unlink(path)
+
+                def fake_run(command, **_kwargs):
+                    commands.append(command)
+                    if command[:5] == ["sudo", "-n", "rm", "-f", "--"] and command[5] == paths["serviceFile"]:
+                        original_unlink(paths["serviceFile"])
+                    return Completed()
+
+                with (
+                    patch.object(app.os, "geteuid", return_value=1000, create=True),
+                    patch.object(app.os, "unlink", side_effect=fake_unlink),
+                    patch.object(app.subprocess, "run", side_effect=fake_run),
+                ):
+                    delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+                    app.PullwiseHandler.route(delete, "DELETE")
+
+                self.assertEqual(delete.status, HTTPStatus.OK)
+                self.assertTrue(delete.payload["deleted"])
+                self.assertFalse(os.path.exists(paths["serviceFile"]), paths["serviceFile"])
+
+        self.assertIsNone(db.get_worker(worker_id))
+        self.assertIn(["sudo", "-n", "systemctl", "stop", app.worker_instance_service_name(worker_id)], commands)
+        self.assertIn(["sudo", "-n", "rm", "-f", "--", paths["serviceFile"]], commands)
 
     def test_admin_can_queue_worker_stop_and_uninstall_commands(self) -> None:
         payload, token = self.create_worker()

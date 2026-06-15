@@ -268,7 +268,10 @@ def remove_worker_instance_dir(path: str, root: str, removed: list[str]) -> None
         return
     if not os.path.isdir(path):
         raise ValueError(f"refusing to remove non-directory worker path: {path}")
-    shutil.rmtree(path)
+    try:
+        shutil.rmtree(path)
+    except PermissionError:
+        run_worker_instance_cleanup_command(["rm", "-rf", "--", path], check=True, privileged=True)
     removed.append(path)
 
 
@@ -279,14 +282,31 @@ def remove_worker_instance_file(path: str, root: str, removed: list[str]) -> Non
         raise ValueError(f"refusing to remove directory as worker file: {path}")
     if not os.path.exists(path) and not os.path.islink(path):
         return
-    os.unlink(path)
+    try:
+        os.unlink(path)
+    except PermissionError:
+        run_worker_instance_cleanup_command(["rm", "-f", "--", path], check=True, privileged=True)
     removed.append(path)
 
 
-def run_worker_instance_cleanup_command(command: list[str], *, check: bool = False) -> int | None:
+def worker_instance_cleanup_requires_sudo() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    return callable(geteuid) and geteuid() != 0
+
+
+def worker_instance_cleanup_command(command: list[str], *, privileged: bool = False) -> list[str]:
+    if privileged and worker_instance_cleanup_requires_sudo():
+        return ["sudo", "-n", *command]
+    return command
+
+
+def run_worker_instance_cleanup_command(command: list[str], *, check: bool = False, privileged: bool = False) -> int | None:
+    command = worker_instance_cleanup_command(command, privileged=privileged)
     try:
         completed = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
+        if check:
+            raise RuntimeError(f"worker instance cleanup command not available: {' '.join(command)}") from exc
         return None
     if check and completed.returncode != 0:
         raise RuntimeError(f"worker instance cleanup command failed: {' '.join(command)}")
@@ -309,8 +329,8 @@ def cleanup_admin_worker_instance(worker_id: object) -> dict:
     paths = worker_instance_paths(worker_id)
     removed: list[str] = []
 
-    run_worker_instance_cleanup_command(["systemctl", "stop", service_name])
-    run_worker_instance_cleanup_command(["systemctl", "disable", service_name])
+    run_worker_instance_cleanup_command(["systemctl", "stop", service_name], privileged=True)
+    run_worker_instance_cleanup_command(["systemctl", "disable", service_name], privileged=True)
 
     remove_worker_instance_file(paths["serviceFile"], WORKER_INSTANCE_SYSTEMD_DIR, removed)
     remove_worker_instance_file(paths["logrotateFile"], WORKER_INSTANCE_LOGROTATE_DIR, removed)
@@ -319,12 +339,12 @@ def cleanup_admin_worker_instance(worker_id: object) -> dict:
     remove_worker_instance_dir(paths["dataDir"], WORKER_INSTANCE_DATA_BASE_DIR, removed)
     remove_worker_instance_dir(paths["logDir"], WORKER_INSTANCE_LOG_BASE_DIR, removed)
 
-    run_worker_instance_cleanup_command(["systemctl", "daemon-reload"])
+    run_worker_instance_cleanup_command(["systemctl", "daemon-reload"], privileged=True)
     service_user_removed = False
     if not worker_service_user_is_shared(worker_id):
         user_exists = run_worker_instance_cleanup_command(["id", service_user])
         if user_exists == 0:
-            run_worker_instance_cleanup_command(["userdel", service_user], check=True)
+            run_worker_instance_cleanup_command(["userdel", service_user], check=True, privileged=True)
             service_user_removed = True
 
     return {
