@@ -653,12 +653,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "providerChain": ["codex", "opencode"],
                 "max_concurrent_jobs": 1,
                 "running_jobs": 0,
                 "free_slots": 1,
                 "hostname": "builder-1",
                 "doctor_status": "ok",
                 "codex_ready": True,
+                "opencode_ready": True,
+                "readyProviders": ["codex", "opencode"],
             },
             headers=self.auth,
         )
@@ -3952,11 +3955,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "provider_chain": ["codex", "opencode"],
                 "max_concurrent_jobs": 3,
                 "running_jobs": 0,
                 "free_slots": 3,
                 "doctor_status": "ok",
                 "codex_ready": 1,
+                "opencode_ready": 1,
+                "ready_providers": ["codex", "opencode"],
                 "timestamp": app.now(),
             }
         )
@@ -3997,11 +4003,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "provider_chain": ["codex", "opencode"],
                 "max_concurrent_jobs": 3,
                 "running_jobs": 0,
                 "free_slots": 3,
                 "doctor_status": "ok",
                 "codex_ready": 1,
+                "opencode_ready": 1,
+                "ready_providers": ["codex", "opencode"],
                 "timestamp": app.now(),
             }
         )
@@ -4083,7 +4092,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         }
         app.SCANS.append(scan)
-        app.create_scan_job_for_scan(scan)
 
         app.billing.update_review_agent_config(
             "pro",
@@ -4103,6 +4111,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 },
             },
         )
+        app.create_scan_job_for_scan(scan)
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 1}, headers=self.auth)
         app.PullwiseHandler.route(claim, "POST")
 
@@ -4129,11 +4138,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "provider_chain": ["codex", "opencode"],
                 "max_concurrent_jobs": 3,
                 "running_jobs": 0,
                 "free_slots": 3,
                 "doctor_status": "ok",
                 "codex_ready": 1,
+                "opencode_ready": 1,
+                "ready_providers": ["codex", "opencode"],
                 "timestamp": app.now(),
             }
         )
@@ -4222,11 +4234,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "provider_chain": ["codex", "opencode"],
                 "max_concurrent_jobs": 2,
                 "running_jobs": 2,
                 "free_slots": 0,
                 "doctor_status": "ok",
                 "codex_ready": 1,
+                "opencode_ready": 1,
+                "ready_providers": ["codex", "opencode"],
                 "timestamp": app.now(),
             }
         )
@@ -4260,11 +4275,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "provider_chain": ["codex", "opencode"],
                 "max_concurrent_jobs": 1,
                 "running_jobs": 0,
                 "free_slots": 1,
                 "doctor_status": "degraded",
                 "codex_ready": 0,
+                "opencode_ready": 0,
+                "ready_providers": [],
                 "timestamp": app.now(),
             }
         )
@@ -4297,11 +4315,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "provider_chain": ["codex", "opencode"],
                 "max_concurrent_jobs": 1,
                 "running_jobs": 0,
                 "free_slots": 1,
                 "doctor_status": "ok",
                 "codex_ready": 0,
+                "opencode_ready": 1,
+                "ready_providers": ["opencode"],
                 "timestamp": app.now(),
             }
         )
@@ -4335,11 +4356,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "opencode",
+                "provider_chain": ["opencode"],
                 "max_concurrent_jobs": 1,
                 "running_jobs": 0,
                 "free_slots": 1,
                 "doctor_status": "ok",
                 "codex_ready": 0,
+                "opencode_ready": 1,
+                "ready_providers": ["opencode"],
                 "timestamp": app.now(),
             }
         )
@@ -4372,18 +4396,21 @@ class WorkerPullRoutesTest(unittest.TestCase):
             {
                 "worker_id": "wk_1",
                 "version": "0.1.0",
-                "provider": "unknown",
+                "provider": "codex",
+                "provider_chain": ["codex"],
                 "max_concurrent_jobs": 1,
                 "running_jobs": 0,
                 "free_slots": 1,
                 "doctor_status": "ok",
                 "codex_ready": 1,
+                "ready_providers": ["codex"],
                 "timestamp": app.now(),
             }
         )
 
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        with patch("pullwise_server.app.system_config.worker_allowed_providers", return_value={"opencode"}):
+            app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "queued")
@@ -4711,11 +4738,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
+                "provider_chain": ["codex", "opencode"],
                 "max_concurrent_jobs": 2,
                 "running_jobs": 0,
                 "free_slots": 2,
                 "doctor_status": "ok",
                 "codex_ready": 1,
+                "opencode_ready": 1,
+                "ready_providers": ["codex", "opencode"],
                 "timestamp": timestamp + 3701,
             }
         )
