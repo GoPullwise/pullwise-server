@@ -26,7 +26,8 @@ or another worker instance's auth state.
   - `XDG_CONFIG_HOME=$DATA_DIR/.config`
   - `XDG_CACHE_HOME=$DATA_DIR/.cache`
   - `XDG_DATA_HOME=$DATA_DIR/.local/share`
-  - `PATH` including only the service path and this worker's local tool dirs
+  - `PATH` with this worker's `$DATA_DIR/.local/bin`, `$DATA_DIR/.codex/bin`,
+    and `$DATA_DIR/.opencode/bin` before the base service path
 - The installer should create the per-worker config/cache/auth directories under
   `$DATA_DIR`.
 - The installer-time readiness output and a later `doctor` run with no
