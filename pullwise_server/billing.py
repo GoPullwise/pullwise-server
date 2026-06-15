@@ -31,10 +31,8 @@ CREEM_PRO_ENTITLEMENT_STATUSES = PAID_PLAN_ENTITLEMENT_STATUSES
 CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
 REVIEW_CODEX_COMMAND_DEFAULT = "codex"
 REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
-REVIEW_OPENCODE_COMMAND_DEFAULT = "opencode"
-REVIEW_OPENCODE_MODEL_DEFAULT = "opencode/big-pickle"
 REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
-REVIEW_AGENT_PROVIDERS = ("codex", "opencode")
+REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
 REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
 REVIEW_AGENT_CONFIG_STATE_KEY = "review_agent_config"
@@ -87,34 +85,27 @@ def clean_review_agent_provider_chain(value: object) -> list[str]:
     if isinstance(value, list):
         raw_items = value
     else:
-        raise ValueError("providerChain must be a non-empty list of codex/opencode providers.")
+        raise ValueError("providerChain must be a non-empty list of codex providers.")
     providers: list[str] = []
     for item in raw_items:
         provider = clean_review_agent_provider(item)
         if provider and provider not in providers:
             providers.append(provider)
     if not providers:
-        raise ValueError("providerChain must include codex or opencode.")
+        raise ValueError("providerChain must include codex.")
     return providers
 
 
 def default_review_agent_plan_config(plan: str) -> dict:
     normalized_plan = normalize_plan(plan, default="free")
     effort = REVIEW_AGENT_EFFORT_DEFAULTS[normalized_plan]
-    provider_chain = ["opencode"] if normalized_plan == "free" else ["codex"]
     return {
-        "providerChain": provider_chain,
+        "providerChain": ["codex"],
         "codex": {
             "cli": REVIEW_CODEX_COMMAND_DEFAULT,
             "command": REVIEW_CODEX_COMMAND_DEFAULT,
             "model": REVIEW_CODEX_MODEL_DEFAULT,
             "reasoningEffort": effort,
-        },
-        "opencode": {
-            "cli": REVIEW_OPENCODE_COMMAND_DEFAULT,
-            "command": REVIEW_OPENCODE_COMMAND_DEFAULT,
-            "model": REVIEW_OPENCODE_MODEL_DEFAULT,
-            "variant": effort,
         },
     }
 
@@ -138,9 +129,8 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
     model = clean_review_agent_config_text(source.get("model"))
     if model:
         result["model"] = model
-    effort_key = "reasoningEffort" if provider == "codex" else "variant"
-    effort = clean_review_agent_effort(source.get(effort_key), result[effort_key])
-    result[effort_key] = effort
+    effort = clean_review_agent_effort(source.get("reasoningEffort"), result["reasoningEffort"])
+    result["reasoningEffort"] = effort
     return result
 
 
@@ -151,7 +141,6 @@ def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     if "providerChain" in source:
         result["providerChain"] = clean_review_agent_provider_chain(source.get("providerChain"))
     result["codex"] = normalize_review_agent_provider_config("codex", source.get("codex"), defaults["codex"])
-    result["opencode"] = normalize_review_agent_provider_config("opencode", source.get("opencode"), defaults["opencode"])
     return result
 
 
@@ -183,15 +172,10 @@ def review_reasoning_effort(plan: str) -> str:
     return review_agent_config_state()["plans"][normalize_plan(plan, default="free")]["codex"]["reasoningEffort"]
 
 
-def review_opencode_variant(plan: str) -> str:
-    return review_agent_config_state()["plans"][normalize_plan(plan, default="free")]["opencode"]["variant"]
-
-
 def review_agent_config(plan: str) -> dict:
     normalized_plan = normalize_plan(plan, default="free")
     configured = review_agent_config_state()["plans"][normalized_plan]
     codex_config = configured["codex"]
-    opencode_config = configured["opencode"]
     provider_chain = configured["providerChain"]
     return {
         "plan": normalized_plan,
@@ -201,12 +185,6 @@ def review_agent_config(plan: str) -> dict:
             "command": codex_config["command"],
             "model": codex_config["model"],
             "reasoningEffort": codex_config["reasoningEffort"],
-        },
-        "opencode": {
-            "cli": opencode_config["cli"],
-            "command": opencode_config["command"],
-            "model": opencode_config["model"],
-            "variant": opencode_config["variant"],
         },
     }
 

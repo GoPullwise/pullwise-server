@@ -61,8 +61,6 @@ def worker_record_ready_providers(worker: dict) -> list[str]:
     fallback = []
     if worker.get("codex_ready"):
         fallback.append("codex")
-    if worker.get("opencode_ready"):
-        fallback.append("opencode")
     if fallback:
         return fallback
     return worker_record_provider_chain(worker) if public_issue_text(worker.get("doctor_status")).lower() == "ok" else []
@@ -185,7 +183,6 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         payload["last_error"] = clean_scan_error(worker.get("last_error"))
         payload["doctor_status"] = public_issue_text(worker.get("doctor_status"))
         payload["codex_ready"] = bool(worker.get("codex_ready")) if worker.get("codex_ready") is not None else None
-        payload["opencode_ready"] = bool(worker.get("opencode_ready")) if worker.get("opencode_ready") is not None else None
         payload["systemd_active"] = bool(worker.get("systemd_active")) if worker.get("systemd_active") is not None else None
         payload["doctor_checked_at"] = pull_request_timestamp(worker.get("doctor_checked_at"))
         payload["test"] = worker_test_payload(worker)
@@ -505,8 +502,7 @@ def default_worker_package(version: object = None) -> str:
     return worker_release_package(selected_version)
 
 
-WORKER_INSTALL_PROVIDERS = ("codex", "opencode")
-DEFAULT_OPENCODE_VERSION = "1.17.7"
+WORKER_INSTALL_PROVIDERS = ("codex",)
 
 
 def default_worker_provider_chain() -> list[str]:
@@ -535,7 +531,7 @@ def worker_provider_chain(value: object = None, *, strict: bool = False) -> list
     if providers:
         return providers
     if strict:
-        raise ValueError("providerChain must include codex or opencode.")
+        raise ValueError("providerChain must include codex.")
     return default_worker_provider_chain()
 
 
@@ -613,14 +609,6 @@ def worker_create_payload(worker: dict) -> dict:
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
             }
         )
-    if "opencode" in provider_chain:
-        suggested_env.update(
-            {
-                "PULLWISE_OPENCODE_COMMAND": f"{service_home}/.opencode/bin/opencode",
-                "PULLWISE_OPENCODE_VERSION": DEFAULT_OPENCODE_VERSION,
-                "PULLWISE_OPENCODE_VARIANT": "medium",
-            }
-        )
     payload = {
         "worker": public,
         "worker_id": public["worker_id"],
@@ -684,8 +672,6 @@ PROVIDER="codex"
 PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
 CODEX_COMMAND="${PULLWISE_CODEX_COMMAND:-}"
-OPENCODE_COMMAND="${PULLWISE_OPENCODE_COMMAND:-}"
-OPENCODE_VERSION="${PULLWISE_OPENCODE_VERSION:-__DEFAULT_OPENCODE_VERSION__}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -818,7 +804,7 @@ normalize_provider_chain() {
   IFS=',' read -ra items <<< "$raw"
   for item in "${items[@]}"; do
     case "$item" in
-      codex|opencode)
+      codex)
         case ",$next," in *",$item,"*) ;; *) next="${next:+$next,}$item" ;; esac
         ;;
     esac
@@ -837,7 +823,7 @@ if [ -z "$PROVIDER_CHAIN" ]; then
   exit 2
 fi
 PROVIDER="${PROVIDER_CHAIN%%,*}"
-SERVICE_TOOL_PATH="$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin:$SERVICE_PATH"
+SERVICE_TOOL_PATH="$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$SERVICE_PATH"
 CODEX_HOME="$DATA_DIR/.codex"
 XDG_CONFIG_HOME="$DATA_DIR/.config"
 XDG_CACHE_HOME="$DATA_DIR/.cache"
@@ -917,7 +903,7 @@ usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
 install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin" "$DATA_DIR/.codex/bin" "$DATA_DIR/.opencode" "$DATA_DIR/.opencode/bin"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin" "$DATA_DIR/.codex/bin"
 
 if provider_chain_has codex; then
   if [ -n "$CODEX_COMMAND" ]; then
@@ -930,19 +916,6 @@ if provider_chain_has codex; then
     }
   fi
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
-fi
-
-if provider_chain_has opencode; then
-  if [ -n "$OPENCODE_COMMAND" ]; then
-    ensure_scoped_command_path "$OPENCODE_COMMAND" "OpenCode"
-  elif ! OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")"; then
-    run_as_service_user env OPENCODE_VERSION="$OPENCODE_VERSION" sh -lc 'curl -fsSL https://opencode.ai/install | bash -s -- --version "$OPENCODE_VERSION" --no-modify-path'
-    OPENCODE_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/opencode" "$DATA_DIR/.opencode/bin/opencode")" || {
-      echo "OpenCode installer completed, but opencode is not executable for $SERVICE_USER." >&2
-      exit 1
-    }
-  fi
-  ensure_scoped_command_path "$OPENCODE_COMMAND" "OpenCode"
 fi
 
 python3 -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
@@ -965,13 +938,6 @@ write_auth_commands() {
     if provider_chain_has codex; then
       echo "Codex device login:"
       service_user_auth_command "$CODEX_COMMAND" login --device-auth
-    fi
-    if provider_chain_has opencode; then
-      echo "OpenCode interactive provider selection:"
-      echo "Select the providers used by the Pullwise subscription plan agent configs."
-      service_user_auth_command "$OPENCODE_COMMAND" auth login
-      echo "OpenCode auth status:"
-      service_user_auth_command "$OPENCODE_COMMAND" auth list
     fi
   } > "$AUTH_COMMANDS_FILE"
   chown root:"$SERVICE_USER" "$AUTH_COMMANDS_FILE"
@@ -997,11 +963,6 @@ if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
-fi
-if provider_chain_has opencode; then
-  write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"
-  write_env_value PULLWISE_OPENCODE_VERSION "$OPENCODE_VERSION"
-  write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"
 fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
@@ -1047,7 +1008,7 @@ export XDG_CONFIG_HOME="\$SERVICE_HOME/.config"
 export XDG_CACHE_HOME="\$SERVICE_HOME/.cache"
 export XDG_DATA_HOME="\$SERVICE_HOME/.local/share"
 SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-export PATH="\$SERVICE_HOME/.local/bin:\$SERVICE_HOME/.codex/bin:\$SERVICE_HOME/.opencode/bin:\$SERVICE_PATH"
+export PATH="\$SERVICE_HOME/.local/bin:\$SERVICE_HOME/.codex/bin:\$SERVICE_PATH"
 PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
@@ -1108,7 +1069,6 @@ run_as_service_user "$BIN_PATH" doctor || true
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
-        .replace("__DEFAULT_OPENCODE_VERSION__", DEFAULT_OPENCODE_VERSION)
         .replace("\r\n", "\n")
     )
 

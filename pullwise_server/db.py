@@ -216,7 +216,6 @@ def initialize() -> None:
                     last_error TEXT,
                     doctor_status TEXT,
                     codex_ready INTEGER,
-                    opencode_ready INTEGER,
                     ready_providers TEXT,
                     systemd_active INTEGER,
                     doctor_checked_at INTEGER,
@@ -246,7 +245,6 @@ def initialize() -> None:
                 ("workers", "deleted_at", "INTEGER"),
                 ("workers", "doctor_status", "TEXT"),
                 ("workers", "codex_ready", "INTEGER"),
-                ("workers", "opencode_ready", "INTEGER"),
                 ("workers", "ready_providers", "TEXT"),
                 ("workers", "systemd_active", "INTEGER"),
                 ("workers", "doctor_checked_at", "INTEGER"),
@@ -995,7 +993,7 @@ def normalize_worker_capacity(value: Any, *, clamp: bool = True, cap: int | None
     return capacity
 
 
-WORKER_PROVIDER_VALUES = {"codex", "opencode"}
+WORKER_PROVIDER_VALUES = {"codex"}
 
 
 def normalize_provider_list(value: Any) -> list[str]:
@@ -1042,13 +1040,11 @@ def heartbeat_ready_providers_json(record: dict[str, Any]) -> str | None:
     raw_ready = record.get("ready_providers")
     if raw_ready is not None:
         return json.dumps(normalize_provider_list(raw_ready), sort_keys=True)
-    if "codex_ready" not in record and "opencode_ready" not in record:
+    if "codex_ready" not in record:
         return None
     providers: list[str] = []
     if provider_ready_flag(record.get("codex_ready")):
         providers.append("codex")
-    if provider_ready_flag(record.get("opencode_ready")):
-        providers.append("opencode")
     return json.dumps(providers, sort_keys=True)
 
 
@@ -1093,7 +1089,7 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     worker_id = str(record.get("worker_id") or stable_id("wk", token_hash)).strip()
     timestamp = int(record.get("timestamp") or time.time())
     max_concurrency_cap = record.get("max_concurrency_cap")
-    provider = str(record.get("provider") or "codex")[:60]
+    provider = (normalize_provider_list(record.get("provider")) or ["codex"])[0]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
@@ -1357,10 +1353,10 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                 INSERT INTO workers (
                     worker_id, name, version, provider, provider_chain, enabled, max_concurrent_jobs, running_jobs,
                     free_slots, hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
-                    created_at, updated_at, doctor_status, codex_ready, opencode_ready, ready_providers,
+                    created_at, updated_at, doctor_status, codex_ready, ready_providers,
                     systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
                 )
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
@@ -1373,7 +1369,6 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     last_error = excluded.last_error,
                     doctor_status = COALESCE(excluded.doctor_status, workers.doctor_status),
                     codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
-                    opencode_ready = COALESCE(excluded.opencode_ready, workers.opencode_ready),
                     ready_providers = COALESCE(excluded.ready_providers, workers.ready_providers),
                     systemd_active = COALESCE(excluded.systemd_active, workers.systemd_active),
                     doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
@@ -1401,7 +1396,6 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     timestamp,
                     record.get("doctor_status"),
                     record.get("codex_ready"),
-                    record.get("opencode_ready"),
                     ready_providers,
                     record.get("systemd_active"),
                     record.get("doctor_checked_at"),

@@ -812,7 +812,7 @@ def public_scan_agent_reasoning_effort(value: object) -> str:
 
 def public_scan_agent_provider(value: object) -> str:
     provider = public_scan_agent_text(value).lower()
-    return provider if provider in {"codex", "opencode"} else ""
+    return provider if provider == "codex" else ""
 
 
 def public_scan_agent_config(value: object) -> dict:
@@ -850,26 +850,20 @@ def public_scan_agent_config(value: object) -> dict:
         "model": model,
         "reasoningEffort": reasoning_effort,
     }
-    for provider_key in ("codex", "opencode"):
-        raw_provider = source.get(provider_key) if isinstance(source.get(provider_key), dict) else {}
-        provider_payload = {}
-        command = public_scan_agent_text(raw_provider.get("command") or raw_provider.get("cli"))
-        provider_model = public_scan_agent_text(raw_provider.get("model"))
-        provider_effort = public_scan_agent_reasoning_effort(
-            raw_provider.get("reasoningEffort")
-            or raw_provider.get("variant")
-        )
-        if command:
-            provider_payload["cli"] = command
-            provider_payload["command"] = command
-        if provider_model:
-            provider_payload["model"] = provider_model
-        if provider_effort:
-            provider_payload["reasoningEffort"] = provider_effort
-            if provider_key == "opencode":
-                provider_payload["variant"] = provider_effort
-        if provider_payload:
-            payload[provider_key] = provider_payload
+    raw_provider = source.get("codex") if isinstance(source.get("codex"), dict) else {}
+    provider_payload = {}
+    command = public_scan_agent_text(raw_provider.get("command") or raw_provider.get("cli"))
+    provider_model = public_scan_agent_text(raw_provider.get("model"))
+    provider_effort = public_scan_agent_reasoning_effort(raw_provider.get("reasoningEffort"))
+    if command:
+        provider_payload["cli"] = command
+        provider_payload["command"] = command
+    if provider_model:
+        provider_payload["model"] = provider_model
+    if provider_effort:
+        provider_payload["reasoningEffort"] = provider_effort
+    if provider_payload:
+        payload["codex"] = provider_payload
     return payload
 
 

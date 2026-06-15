@@ -51,7 +51,7 @@ DEFAULT_CONFIG = {
         "maxConcurrencyCap": 32,
         "heartbeatTimeoutSeconds": 120,
         "minVersion": "",
-        "allowedProviders": ["codex", "opencode"],
+        "allowedProviders": ["codex"],
         "defaultVersion": "",
         "defaultPackage": "",
         "releaseApiUrl": "https://api.github.com/repos/GoPullwise/pullwise-worker/releases/latest",
@@ -200,7 +200,7 @@ FIELD_METADATA = [
                 "label": "Allowed worker providers",
                 "type": "stringList",
                 "maxLength": 128,
-                "description": "Comma-separated worker provider names allowed to claim jobs, usually codex or opencode.",
+                "description": "Comma-separated worker provider names allowed to claim jobs. Currently only codex is supported.",
             },
             {
                 "path": "worker.defaultVersion",
@@ -863,7 +863,7 @@ def worker_min_version() -> str:
 
 def worker_allowed_providers() -> set[str]:
     providers = {item.strip() for item in list_setting("worker.allowedProviders") if item.strip()}
-    return providers or {"codex", "opencode"}
+    return providers or {"codex"}
 
 
 def worker_default_version() -> str:

@@ -2141,12 +2141,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 changed_fields={
                     "plan": agent_config["plan"],
                     "providerChain": agent_config["providerChain"],
-                    "model": agent_config[agent_config["providerChain"][0]]["model"],
-                    "reasoningEffort": (
-                        agent_config["opencode"]["variant"]
-                        if agent_config["providerChain"][0] == "opencode"
-                        else agent_config["codex"]["reasoningEffort"]
-                    ),
+                    "model": agent_config["codex"]["model"],
+                    "reasoningEffort": agent_config["codex"]["reasoningEffort"],
                 },
             )
             return self.json(
@@ -2286,7 +2282,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "last_error": last_error,
                     "doctor_status": public_issue_text(body.get("doctor_status")),
                     "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,
-                    "opencode_ready": 1 if body.get("opencode_ready") is True else 0 if body.get("opencode_ready") is False else None,
                     "ready_providers": body.get("readyProviders") if "readyProviders" in body else body.get("ready_providers"),
                     "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
                     "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
