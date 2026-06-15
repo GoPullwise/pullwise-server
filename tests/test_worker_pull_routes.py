@@ -372,14 +372,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "version": "0.1.0",
                 "provider": "codex",
-                "provider_chain": ["codex", "opencode"],
+                "provider_chain": ["codex"],
                 "max_concurrent_jobs": 2,
                 "running_jobs": 0,
                 "free_slots": 2,
                 "doctor_status": "ok",
                 "codex_ready": 1,
-                "opencode_ready": 1,
-                "ready_providers": ["codex", "opencode"],
+                "ready_providers": ["codex"],
                 "timestamp": app.now(),
             }
         )
@@ -392,14 +391,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": worker_id,
                 "version": "0.1.0",
                 "provider": "codex",
-                "provider_chain": ["codex", "opencode"],
+                "provider_chain": ["codex"],
                 "max_concurrent_jobs": 2,
                 "running_jobs": 0,
                 "free_slots": 2,
                 "doctor_status": "ok",
                 "codex_ready": 1,
-                "opencode_ready": 1,
-                "ready_providers": ["codex", "opencode"],
+                "ready_providers": ["codex"],
                 "timestamp": app.now(),
             }
         )
