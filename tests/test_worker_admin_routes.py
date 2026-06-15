@@ -423,13 +423,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             "/worker/heartbeat",
             {
                 "worker_id": worker_id,
-                "provider": "codex",
+                "provider": "opencode",
+                "providerChain": ["opencode"],
                 "version": "0.1.0",
                 "max_concurrent_jobs": 4,
                 "running_jobs": 0,
                 "free_slots": 4,
                 "doctor_status": "ok",
-                "codex_ready": True,
+                "opencode_ready": True,
+                "readyProviders": ["opencode"],
             },
             headers=worker_auth,
         )
@@ -1717,12 +1719,14 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             {
                 "worker_id": worker_id,
                 "version": "0.1.0",
-                "provider": "codex",
+                "provider": "opencode",
+                "provider_chain": ["opencode"],
                 "max_concurrent_jobs": 1,
                 "running_jobs": 0,
                 "free_slots": 1,
                 "doctor_status": "ok",
-                "codex_ready": 1,
+                "opencode_ready": 1,
+                "ready_providers": ["opencode"],
                 "timestamp": app.now(),
             }
         )
