@@ -476,7 +476,7 @@ def default_worker_package(version: object = None) -> str:
 
 
 WORKER_INSTALL_PROVIDERS = ("codex", "opencode")
-DEFAULT_OPENCODE_VERSION = "1.15.10"
+DEFAULT_OPENCODE_VERSION = "1.17.7"
 
 
 def default_worker_provider_chain() -> list[str]:
