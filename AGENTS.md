@@ -9,15 +9,14 @@ systemd unit management. Do not add macOS or Windows worker installer behavior.
 
 ## Worker Installer Provider Isolation
 
-The server-generated worker installer must preserve per-worker Codex/OpenCode
-isolation. A worker must never depend on global Codex/OpenCode config, root auth,
+The server-generated worker installer must preserve per-worker Codex
+isolation. A worker must never depend on global Codex config, root auth,
 or another worker instance's auth state.
 
 - Generated install commands and suggested env must point provider commands at
   the target worker home, for example:
   - `$DATA_DIR/.local/bin/codex`
   - `$DATA_DIR/.codex/bin/codex`
-  - `$DATA_DIR/.opencode/bin/opencode`
 - The installer, saved auth commands, and systemd unit must use the same
   instance-scoped environment:
   - `HOME=$DATA_DIR`
@@ -27,7 +26,7 @@ or another worker instance's auth state.
   - `XDG_CACHE_HOME=$DATA_DIR/.cache`
   - `XDG_DATA_HOME=$DATA_DIR/.local/share`
   - `PATH` with this worker's `$DATA_DIR/.local/bin`, `$DATA_DIR/.codex/bin`,
-    and `$DATA_DIR/.opencode/bin` before the base service path
+    before the base service path
 - The installer should create the per-worker config/cache/auth directories under
   `$DATA_DIR`.
 - The installer-time readiness output and a later `doctor` run with no
@@ -35,8 +34,8 @@ or another worker instance's auth state.
   it sees root/global auth or another worker's provider config.
 
 When changing worker installer generation, keep multi-worker deployments in
-mind: every worker on the same server must use only its own configured Codex and
-OpenCode directories.
+mind: every worker on the same server must use only its own configured Codex
+directories.
 
 ## Worker Install Secrets And Identity
 

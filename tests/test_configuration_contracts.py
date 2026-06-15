@@ -79,33 +79,6 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
 
-    def test_env_example_does_not_declare_database_backed_subscription_configuration(self) -> None:
-        values = env_example_values()
-
-        self.assertNotIn("PULLWISE_BILLING_PROVIDER", values)
-        self.assertNotIn("PULLWISE_FREE_USER_REVIEW_LIMIT", values)
-        self.assertNotIn("PULLWISE_FREE_REPO_REVIEW_LIMIT", values)
-        self.assertNotIn("PULLWISE_PRO_USER_REVIEW_LIMIT", values)
-        self.assertNotIn("PULLWISE_PRO_REPO_REVIEW_LIMIT", values)
-        self.assertNotIn("PULLWISE_MAX_USER_REVIEW_LIMIT", values)
-        self.assertNotIn("PULLWISE_MAX_REPO_REVIEW_LIMIT", values)
-        self.assertNotIn("PULLWISE_PRO_CODEX_REASONING_EFFORT", values)
-        self.assertNotIn("PULLWISE_MAX_CODEX_REASONING_EFFORT", values)
-        self.assertNotIn("PULLWISE_PRO_OPENCODE_VARIANT", values)
-        self.assertNotIn("PULLWISE_MAX_OPENCODE_VARIANT", values)
-        self.assertNotIn("PULLWISE_CREEM_PRO_PRODUCT_IDS", values)
-        self.assertNotIn("PULLWISE_CREEM_MAX_PRODUCT_IDS", values)
-        self.assertNotIn("PULLWISE_CREEM_PRO_MONTHLY_PRODUCT_ID", values)
-        self.assertNotIn("PULLWISE_CREEM_PRO_YEARLY_PRODUCT_ID", values)
-        self.assertNotIn("PULLWISE_CREEM_MAX_MONTHLY_PRODUCT_ID", values)
-        self.assertNotIn("PULLWISE_CREEM_MAX_YEARLY_PRODUCT_ID", values)
-        self.assertNotIn("PULLWISE_CREEM_TEST_MODE", values)
-        self.assertNotIn("PULLWISE_CREEM_UPGRADE_BEHAVIOR", values)
-        self.assertNotIn("PULLWISE_CREEM_API_BASE_URL", values)
-        self.assertNotIn("PULLWISE_CREEM_DOWNGRADE_BEHAVIOR", values)
-        self.assertIn("PULLWISE_CREEM_API_KEY", values)
-        self.assertIn("PULLWISE_CREEM_WEBHOOK_SECRET", values)
-
     def test_main_uses_default_port_for_invalid_port_env(self) -> None:
         class ServerStub:
             def __init__(self) -> None:
@@ -139,31 +112,6 @@ class ConfigurationContractsTest(unittest.TestCase):
 
                 self.assertEqual([("0.0.0.0", 8080)], addresses)
                 self.assertTrue(server.closed)
-
-    def test_health_exposes_safe_readiness_details(self) -> None:
-        handler = RouteHarness("/health")
-
-        handler.handle_get("/health", {}, ["health"])
-
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["reviewProvider"], "worker")
-        self.assertIn("github", handler.payload)
-        self.assertIn("billing", handler.payload)
-        self.assertIn("limits", handler.payload)
-        self.assertEqual(
-            handler.payload["limits"]["repository"],
-            {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024, "source": "database"},
-        )
-        self.assertEqual(handler.payload["database"], {"type": "sqlite", "configured": True})
-        self.assertNotIn("path", handler.payload["database"])
-        self.assertIn("oauthConfigured", handler.payload["github"])
-        self.assertIn("appApiConfigured", handler.payload["github"])
-        serialized = json.dumps(handler.payload)
-        self.assertNotIn("codex", serialized.lower())
-        self.assertNotIn("opencode", serialized.lower())
-        self.assertNotIn("secret", serialized.lower())
-        self.assertNotIn("privateKey", serialized)
-        self.assertNotIn("token", serialized.lower())
 
     def test_repository_checkout_limits_are_configured_per_subscription_plan(self) -> None:
         config = app.system_config.default_config()

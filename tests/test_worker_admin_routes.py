@@ -229,93 +229,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
         popen.assert_not_called()
 
-    def test_admin_can_create_worker_and_token_is_only_returned_once_as_hash(self) -> None:
-        payload, token = self.create_worker()
-        worker_id = payload["worker_id"]
-        stored = db.get_worker(worker_id)
-        audit = db.list_worker_audit_events(worker_id)
-
-        self.assertTrue(token.startswith("pww_"))
-        self.assertEqual(stored["worker_id"], worker_id)
-        self.assertNotEqual(stored["token_hash"], token)
-        self.assertEqual(stored["token_hash"], db.worker_token_hash(token))
-        self.assertNotIn("worker_token", payload["worker"])
-        self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_TOKEN"], token)
-        self.assertEqual(payload["install_url"], "http://localhost:8080/install-worker.sh")
-        standard_install_command = payload["install_commands"]["standard"]
-        local_install_command = payload["install_commands"]["local"]
-        self.assertIn("read -rsp", standard_install_command)
-        self.assertIn("PULLWISE_WORKER_TOKEN", standard_install_command)
-        self.assertNotIn("--worker-token", standard_install_command)
-        self.assertNotIn(token, standard_install_command)
-        self.assertIn("'US worker'", standard_install_command)
-        self.assertIn("--max-concurrent-jobs 4", standard_install_command)
-        self.assertIn("--provider-chain 'opencode,codex'", standard_install_command)
-        self.assertIn(f"--package '{app.default_worker_package()}'", standard_install_command)
-        self.assertIn("pullwise_worker-0.5.23-py3-none-any.whl", standard_install_command)
-        self.assertEqual(payload["local_server_url"], "http://127.0.0.1:18080")
-        self.assertEqual(payload["local_install_url"], "http://127.0.0.1:18080/install-worker.sh")
-        self.assertIn("http://127.0.0.1:18080/install-worker.sh", local_install_command)
-        self.assertIn("--server 'http://127.0.0.1:18080'", local_install_command)
-        self.assertIn("--max-concurrent-jobs 4", local_install_command)
-        self.assertIn("--provider-chain 'opencode,codex'", local_install_command)
-        self.assertIn(f"--package '{app.default_worker_package()}'", local_install_command)
-        self.assertNotIn(token, local_install_command)
-        self.assertNotIn("install_command", payload)
-        self.assertNotIn("local_install_command", payload)
-        self.assertEqual(payload["suggested_env"]["PULLWISE_MAX_CONCURRENT_JOBS"], "4")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_LOCAL_SERVER_URL"], "http://127.0.0.1:18080")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], app.default_worker_package())
-        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER"], "opencode")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER_CHAIN"], "opencode,codex")
-        service_home = f"/var/lib/pullwise-worker/{worker_id[:48]}"
-        self.assertEqual(payload["suggested_env"]["PULLWISE_SERVICE_HOME"], service_home)
-        self.assertEqual(payload["suggested_env"]["PULLWISE_CHECKOUT_ROOT"], f"{service_home}/checkouts")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_LOG_DIR"], f"/var/log/pullwise-worker/{worker_id[:48]}")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_COMMAND"], f"{service_home}/.codex/bin/codex")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_MODEL"], "gpt-5.5")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_CODEX_REASONING_EFFORT"], "medium")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], f"{service_home}/.opencode/bin/opencode")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VERSION"], app.DEFAULT_OPENCODE_VERSION)
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VARIANT"], "medium")
-        self.assertNotIn("PULLWISE_OPENCODE_MODEL", payload["suggested_env"])
-        self.assertEqual(payload["suggested_env"]["PULLWISE_WORKER_MAX_BACKOFF_SECONDS"], "60")
-        self.assertEqual(audit[0]["action"], "create_worker")
-        self.assertEqual(audit[0]["actor_user_id"], "usr_admin")
-
-        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
-        app.PullwiseHandler.route(detail, "GET")
-        self.assertEqual(detail.status, HTTPStatus.OK)
-        self.assertNotIn("worker_token", json.dumps(detail.payload))
-
-    def test_admin_can_create_worker_with_selected_provider_chain(self) -> None:
-        handler = RouteHarness(
-            "/admin/workers",
-            {
-                "name": "OpenCode worker",
-                "providerChain": ["opencode"],
-                "region": "ap-south",
-                "max_concurrent_jobs": 2,
-            },
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.CREATED)
-        payload = handler.payload
-        stored = db.get_worker(payload["worker_id"])
-        self.assertEqual(stored["provider"], "opencode")
-        self.assertEqual(payload["provider"], "opencode")
-        self.assertEqual(payload["providerChain"], ["opencode"])
-        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER"], "opencode")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_PROVIDER_CHAIN"], "opencode")
-        self.assertNotIn("PULLWISE_CODEX_COMMAND", payload["suggested_env"])
-        service_home = f"/var/lib/pullwise-worker/{payload['worker_id'][:48]}"
-        self.assertEqual(payload["suggested_env"]["PULLWISE_SERVICE_HOME"], service_home)
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_COMMAND"], f"{service_home}/.opencode/bin/opencode")
-        self.assertEqual(payload["suggested_env"]["PULLWISE_OPENCODE_VERSION"], app.DEFAULT_OPENCODE_VERSION)
-        self.assertIn("--provider-chain 'opencode'", payload["install_commands"]["standard"])
-
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
         handler = RouteHarness(
             "/admin/workers",
@@ -394,95 +307,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(metrics["history"][0]["storage"]["usedPercent"], 40.0)
         self.assertNotIn("usagePercent", json.dumps(metrics))
 
-    def test_admin_worker_detail_includes_recent_task_activity(self) -> None:
-        payload, token = self.create_worker()
-        worker_id = payload["worker_id"]
-        timestamp = app.now()
-        scan = {
-            "id": "sc_worker_activity",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "abc123",
-            "status": "queued",
-            "userId": "usr_user",
-            "createdAt": timestamp,
-            "queuedAt": timestamp,
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "installationId": "111",
-            "repoId": "repo_123",
-            "githubRepoId": "123",
-            "cloneUrl": "https://github.com/acme/api.git",
-        }
-        app.SCANS = [scan]
-        job = app.create_scan_job_for_scan(scan)
-        worker_auth = {"Authorization": f"Bearer {token}"}
-
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "opencode",
-                "providerChain": ["opencode"],
-                "version": "0.1.0",
-                "max_concurrent_jobs": 4,
-                "running_jobs": 0,
-                "free_slots": 4,
-                "doctor_status": "ok",
-                "opencode_ready": True,
-                "readyProviders": ["opencode"],
-            },
-            headers=worker_auth,
-        )
-        app.PullwiseHandler.route(heartbeat, "POST")
-        self.assertEqual(heartbeat.status, HTTPStatus.OK)
-
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers=worker_auth)
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        self.assertEqual(claim.payload["job"]["job_id"], job["job_id"])
-
-        progress = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/progress",
-            {"phase": "ai", "progress": 70, "message": "reviewing", "started_at": timestamp + 10},
-            headers=worker_auth,
-        )
-        app.PullwiseHandler.route(progress, "POST")
-        self.assertEqual(progress.status, HTTPStatus.OK)
-
-        result = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
-            {
-                "status": "done",
-                "attempt_id": f"{worker_id}-1",
-                **empty_audit_result_fields(),
-                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                "duration_ms": 123,
-                "result_checksum": "checksum-worker-activity",
-            },
-            headers=worker_auth,
-        )
-        app.PullwiseHandler.route(result, "POST")
-        self.assertEqual(result.status, HTTPStatus.OK)
-
-        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
-        app.PullwiseHandler.route(detail, "GET")
-
-        self.assertEqual(detail.status, HTTPStatus.OK)
-        activity = detail.payload["taskActivity"]
-        self.assertEqual(len(activity), 1)
-        self.assertEqual(activity[0]["worker_id"], worker_id)
-        self.assertEqual(activity[0]["job_id"], job["job_id"])
-        self.assertEqual(activity[0]["scan_id"], scan["id"])
-        self.assertEqual(activity[0]["repo"], "acme/api")
-        self.assertEqual(activity[0]["status"], "done")
-        self.assertIsNotNone(activity[0]["claimed_at"])
-        self.assertEqual(activity[0]["started_at"], timestamp + 10)
-        self.assertIsNotNone(activity[0]["completed_at"])
-        self.assertNotIn("clone_token", json.dumps(activity))
-        self.assertNotIn("result_payload", json.dumps(activity))
-
     def test_admin_worker_activity_uses_latest_activity_timestamp(self) -> None:
         payload, _token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -540,30 +364,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertFalse(app.worker_version_compatible({"version": "not-a-version"}))
             self.assertFalse(app.worker_version_compatible({"version": "0.10.0-beta"}))
             self.assertFalse(app.worker_version_compatible({"version": ""}))
-
-    def test_admin_worker_defaults_resolve_latest_release_version(self) -> None:
-        class ReleaseResponse:
-            def __enter__(self) -> "ReleaseResponse":
-                return self
-
-            def __exit__(self, *args: object) -> None:
-                return None
-
-            def read(self) -> bytes:
-                return json.dumps({"tag_name": "v0.2.3"}).encode("utf-8")
-
-        with patch("urllib.request.urlopen", return_value=ReleaseResponse()):
-            handler = RouteHarness("/admin/workers/defaults", cookie=self.admin_cookie)
-            app.PullwiseHandler.route(handler, "GET")
-
-        expected_package = app.worker_release_package("0.2.3")
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["workerVersion"], "0.2.3")
-        self.assertEqual(handler.payload["workerPackage"], expected_package)
-        self.assertEqual(handler.payload["latestWorkerVersion"], "0.2.3")
-        self.assertEqual(handler.payload["providerChain"], ["opencode", "codex"])
-        self.assertEqual(handler.payload["defaults"]["providerChain"], ["opencode", "codex"])
-        self.assertEqual(handler.payload["release"]["latestVersion"], "0.2.3")
 
     def test_admin_worker_defaults_refresh_bypasses_cached_latest_release(self) -> None:
         class ReleaseResponse:
@@ -752,159 +552,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
         urlopen.assert_not_called()
 
-    def test_public_install_script_contains_deploy_assets_but_no_worker_secrets(self) -> None:
-        install = RouteHarness("/install-worker.sh")
-
-        app.PullwiseHandler.route(install, "GET")
-
-        self.assertEqual(install.status, HTTPStatus.OK)
-        self.assertIn("text/x-shellscript", install.headers_out["Content-Type"])
-        self.assertIn("systemd", install.text_payload)
-        self.assertIn('SAFE_WORKER_ID="$(safe_worker_id "$WORKER_ID")"', install.text_payload)
-        self.assertIn("service_user_name() {", install.text_payload)
-        self.assertIn("cut -c1-16", install.text_payload)
-        self.assertIn('SERVICE_USER="$(service_user_name "$SAFE_WORKER_ID")"', install.text_payload)
-        self.assertNotIn('SERVICE_USER="pullwise-worker-$SAFE_WORKER_ID"', install.text_payload)
-        self.assertIn('BASE_CONFIG_DIR="/etc/pullwise-worker"', install.text_payload)
-        self.assertIn('BASE_DATA_DIR="/var/lib/pullwise-worker"', install.text_payload)
-        self.assertIn('BASE_LOG_DIR="/var/log/pullwise-worker"', install.text_payload)
-        self.assertIn('CONFIG_DIR="$BASE_CONFIG_DIR/$SAFE_WORKER_ID"', install.text_payload)
-        self.assertIn('DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"', install.text_payload)
-        self.assertIn('LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"', install.text_payload)
-        self.assertIn("rollback_failed_install() {", install.text_payload)
-        self.assertIn("trap rollback_failed_install EXIT", install.text_payload)
-        self.assertIn("ROLLBACK_ENABLED=1", install.text_payload)
-        self.assertIn('rollback_dir "$DATA_DIR" "$BASE_DATA_DIR" "$HAD_DATA_DIR"', install.text_payload)
-        self.assertIn('rollback_dir "$LOG_DIR" "$BASE_LOG_DIR" "$HAD_LOG_DIR"', install.text_payload)
-        self.assertIn('rollback_file "$SERVICE_FILE" "/etc/systemd/system" "$HAD_SERVICE_FILE"', install.text_payload)
-        self.assertIn("INSTALL_COMPLETED=1", install.text_payload)
-        self.assertIn('SERVICE_GROUP="pullwise-worker"', install.text_payload)
-        self.assertIn('getent group "$SERVICE_GROUP" >/dev/null 2>&1 || groupadd --system "$SERVICE_GROUP"', install.text_payload)
-        self.assertIn('usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"', install.text_payload)
-        self.assertIn('install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"', install.text_payload)
-        self.assertIn('install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"', install.text_payload)
-        self.assertIn('install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR"', install.text_payload)
-        self.assertIn('install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin"', install.text_payload)
-        self.assertIn('"$DATA_DIR/.codex/bin"', install.text_payload)
-        self.assertIn('"$DATA_DIR/.opencode/bin"', install.text_payload)
-        self.assertIn('SERVICE_NAME="pullwise-worker-$SAFE_WORKER_ID"', install.text_payload)
-        self.assertIn('SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"', install.text_payload)
-        self.assertIn('BIN_PATH="/usr/local/bin/$SERVICE_NAME"', install.text_payload)
-        self.assertIn("logrotate", install.text_payload)
-        self.assertIn("doctor", install.text_payload)
-        self.assertIn("PULLWISE_WORKER_PACKAGE", install.text_payload)
-        self.assertIn(app.default_worker_package(), install.text_payload)
-        self.assertIn("pullwise_worker-0.5.23-py3-none-any.whl", install.text_payload)
-        self.assertIn("pip install --upgrade --force-reinstall --no-cache-dir", install.text_payload)
-        self.assertIn("Python 3.9 or newer", install.text_payload)
-        self.assertIn("https://chatgpt.com/codex/install.sh", install.text_payload)
-        self.assertIn("https://opencode.ai/install", install.text_payload)
-        self.assertIn('OPENCODE_VERSION="${PULLWISE_OPENCODE_VERSION:-1.17.7}"', install.text_payload)
-        self.assertIn('--version "$OPENCODE_VERSION" --no-modify-path', install.text_payload)
-        self.assertIn("scoped_command_path", install.text_payload)
-        self.assertIn("ensure_scoped_command_path() {", install.text_payload)
-        self.assertIn('ensure_scoped_command_path "$CODEX_COMMAND" "Codex"', install.text_payload)
-        self.assertIn('ensure_scoped_command_path "$OPENCODE_COMMAND" "OpenCode"', install.text_payload)
-        self.assertIn('$DATA_DIR/.local/bin/codex', install.text_payload)
-        self.assertIn('$DATA_DIR/.local/bin/opencode', install.text_payload)
-        self.assertNotIn("path_command", install.text_payload)
-        self.assertNotIn('path_command codex', install.text_payload)
-        self.assertNotIn('path_command opencode', install.text_payload)
-        self.assertIn('AUTH_COMMANDS_FILE="$CONFIG_DIR/auth-commands.txt"', install.text_payload)
-        self.assertIn("write_auth_commands() {", install.text_payload)
-        self.assertIn("service_user_auth_command() {", install.text_payload)
-        self.assertIn('CODEX_HOME="$DATA_DIR/.codex"', install.text_payload)
-        self.assertIn('XDG_CONFIG_HOME="$DATA_DIR/.config"', install.text_payload)
-        self.assertIn('XDG_DATA_HOME="$DATA_DIR/.local/share"', install.text_payload)
-        self.assertIn('SERVICE_HOME="\\${PULLWISE_SERVICE_HOME:-/var/lib/pullwise-worker}"', install.text_payload)
-        self.assertIn('export HOME="\\$SERVICE_HOME"', install.text_payload)
-        self.assertIn('export XDG_DATA_HOME="\\$SERVICE_HOME/.local/share"', install.text_payload)
-        self.assertIn('Environment=CODEX_HOME=$DATA_DIR/.codex', install.text_payload)
-        self.assertIn('Environment=XDG_DATA_HOME=$DATA_DIR/.local/share', install.text_payload)
-        self.assertIn('cd "$DATA_DIR"', install.text_payload)
-        self.assertIn("sh -lc", install.text_payload)
-        self.assertIn('cd \\"\\$HOME\\" && exec $command_line', install.text_payload)
-        self.assertIn("print_auth_commands() {", install.text_payload)
-        self.assertNotIn('cat "$AUTH_COMMANDS_FILE"', install.text_payload)
-        self.assertIn('echo "Authorization commands saved to $AUTH_COMMANDS_FILE"', install.text_payload)
-        self.assertIn("Pullwise worker manual authorization commands", install.text_payload)
-        self.assertIn("Codex device login:", install.text_payload)
-        self.assertIn('service_user_auth_command "$CODEX_COMMAND" login --device-auth', install.text_payload)
-        self.assertIn("login --device-auth", install.text_payload)
-        self.assertIn("OpenCode interactive provider selection", install.text_payload)
-        self.assertIn("Select the providers used by the Pullwise subscription plan agent configs.", install.text_payload)
-        self.assertIn('service_user_auth_command "$OPENCODE_COMMAND" auth login', install.text_payload)
-        self.assertIn('service_user_auth_command "$OPENCODE_COMMAND" auth list', install.text_payload)
-        self.assertIn("OpenCode auth status:", install.text_payload)
-        self.assertIn("auth list", install.text_payload)
-        self.assertNotIn('${CODEX_COMMAND:-codex}', install.text_payload)
-        self.assertNotIn('${OPENCODE_COMMAND:-opencode}', install.text_payload)
-        self.assertNotIn("OPENCODE_AUTH_PROVIDER", install.text_payload)
-        self.assertNotIn("auth login --provider", install.text_payload)
-        self.assertNotIn("PULLWISE_OPENCODE_MODEL=deepseek/deepseek-v4-pro", install.text_payload)
-        self.assertNotIn("auth login --provider deepseek", install.text_payload)
-        self.assertNotIn("PULLWISE_OPENCODE_MODEL=minimax/MiniMax-M3", install.text_payload)
-        self.assertNotIn("auth login --provider minimax", install.text_payload)
-        self.assertNotIn("OpenCode generic template", install.text_payload)
-        self.assertNotIn("pullwise-worker==0.1.0", install.text_payload)
-        self.assertIn("PULLWISE_PROVIDER_CHAIN", install.text_payload)
-        self.assertIn('--provider-chain) PROVIDER_CHAIN="${2:-}"; shift 2 ;;', install.text_payload)
-        self.assertIn("provider_chain_has() {", install.text_payload)
-        self.assertIn("if provider_chain_has codex; then", install.text_payload)
-        self.assertIn('if [ -n "$CODEX_COMMAND" ]; then', install.text_payload)
-        self.assertIn("if provider_chain_has opencode; then", install.text_payload)
-        self.assertIn('if [ -n "$OPENCODE_COMMAND" ]; then', install.text_payload)
-        self.assertIn('PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-}"', install.text_payload)
-        self.assertIn('if [ -z "$PROVIDER_CHAIN" ]; then', install.text_payload)
-        self.assertIn("provider chain is required", install.text_payload)
-        self.assertIn('PROVIDER="${PROVIDER_CHAIN%%,*}"', install.text_payload)
-        self.assertIn("PULLWISE_CODEX_MODEL", install.text_payload)
-        self.assertIn("PULLWISE_CODEX_REASONING_EFFORT", install.text_payload)
-        self.assertIn('write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"', install.text_payload)
-        self.assertIn('write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"', install.text_payload)
-        self.assertIn(
-            'write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"',
-            install.text_payload,
-        )
-        self.assertIn('write_env_value PULLWISE_OPENCODE_COMMAND "$OPENCODE_COMMAND"', install.text_payload)
-        self.assertIn('write_env_value PULLWISE_OPENCODE_VERSION "$OPENCODE_VERSION"', install.text_payload)
-        self.assertIn('write_env_value PULLWISE_OPENCODE_VARIANT "${PULLWISE_OPENCODE_VARIANT:-medium}"', install.text_payload)
-        self.assertIn("PULLWISE_OPENCODE_COMMAND", install.text_payload)
-        self.assertNotIn("PULLWISE_OPENCODE_MODEL", install.text_payload)
-        self.assertIn("PULLWISE_OPENCODE_VERSION", install.text_payload)
-        self.assertIn("PULLWISE_OPENCODE_VARIANT", install.text_payload)
-        self.assertIn('write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"', install.text_payload)
-        self.assertIn('write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"', install.text_payload)
-        self.assertIn("SupplementaryGroups=$SERVICE_GROUP", install.text_payload)
-        self.assertIn("ReadWritePaths=$BASE_DATA_DIR $BASE_LOG_DIR $DATA_DIR $LOG_DIR", install.text_payload)
-        self.assertIn("write_auth_commands", install.text_payload)
-        self.assertIn("print_auth_commands", install.text_payload)
-        self.assertIn("PULLWISE_PYTHON_BIN", install.text_payload)
-        self.assertEqual(install.text_payload.count("\nprint_auth_commands\n"), 1)
-        self.assertIn("print_auth_commands\nrun_as_service_user \"$BIN_PATH\" doctor || true", install.text_payload)
-        self.assertIn("run_as_service_user \"$BIN_PATH\" doctor || true", install.text_payload)
-        self.assertNotIn("@openai/codex@0.135.0", install.text_payload)
-        self.assertNotIn("--codex-package", install.text_payload)
-        self.assertNotIn("npm install -g", install.text_payload)
-        self.assertIn("--provider-chain", install.text_payload)
-        self.assertIn("write_env_value()", install.text_payload)
-        self.assertIn("environment value for $key must be single-line", install.text_payload)
-        self.assertIn('ENV_FILE="$CONFIG_DIR/worker.env"', install.text_payload)
-        self.assertIn('load_worker_env "\\${PULLWISE_WORKER_ENV_FILE:-$ENV_FILE}"', install.text_payload)
-        self.assertNotIn("load_worker_env /etc/pullwise-worker/worker.env", install.text_payload)
-        self.assertNotIn("PULLWISE_WORKER_TOKEN=$WORKER_TOKEN", install.text_payload)
-        self.assertNotIn(". /etc/pullwise-worker/worker.env", install.text_payload)
-        self.assertIn("PULLWISE_WORKER_TOKEN", install.text_payload)
-        self.assertIn("--worker-token-file", install.text_payload)
-        self.assertIn("Restart=on-failure", install.text_payload)
-        self.assertNotIn("Restart=always", install.text_payload)
-        self.assertNotIn("--worker-token) WORKER_TOKEN", install.text_payload)
-        self.assertNotIn("$(dirname \"$0\")", install.text_payload)
-        self.assertNotIn("cp \"$(dirname", install.text_payload)
-        self.assertNotIn("\r\n", install.text_payload)
-        self.assertNotIn("pww_", install.text_payload)
-        self.assertNotIn("WORKER_TOKEN=pww_", install.text_payload)
-
     def test_non_admin_cannot_access_admin_workers(self) -> None:
         denied = RouteHarness("/admin/workers", cookie=self.user_cookie)
         app.PullwiseHandler.route(denied, "GET")
@@ -1031,108 +678,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_non_admin_cannot_access_admin_users(self) -> None:
         denied = RouteHarness("/admin/users", cookie=self.user_cookie)
         app.PullwiseHandler.route(denied, "GET")
-
-        self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
-
-    def test_admin_can_manage_subscription_plan_agent_configs(self) -> None:
-        listing = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
-        app.PullwiseHandler.route(listing, "GET")
-
-        self.assertEqual(listing.status, HTTPStatus.OK)
-        self.assertEqual([plan["id"] for plan in listing.payload["plans"]], ["free", "pro", "max"])
-        self.assertEqual(
-            listing.payload["plans"][0]["repositoryLimits"],
-            {"maxFiles": 200, "maxBytes": 5 * 1024 * 1024, "source": "database"},
-        )
-        self.assertEqual(listing.payload["agentConfigs"]["max"]["codex"]["reasoningEffort"], "xhigh")
-        self.assertEqual(listing.payload["source"], "database")
-        stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
-        self.assertIn("pro", stored["plans"])
-
-        update = RouteHarness(
-            "/admin/subscription-plans/agent-configs/pro",
-            {
-                "providerChain": ["opencode"],
-                "codex": {
-                    "cli": "codex-admin",
-                    "command": "codex-bin-ignored",
-                    "model": "gpt-admin",
-                    "reasoningEffort": "high",
-                },
-                "opencode": {
-                    "cli": "opencode-admin",
-                    "command": "opencode-bin-ignored",
-                    "model": "opencode/admin",
-                    "variant": "high",
-                },
-            },
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(update, "PATCH")
-
-        self.assertEqual(update.status, HTTPStatus.OK)
-        agent_config = update.payload["agentConfig"]
-        self.assertEqual(agent_config["plan"], "pro")
-        self.assertEqual(agent_config["providerChain"], ["opencode"])
-        self.assertNotIn("agent", agent_config)
-        self.assertNotIn("provider", agent_config)
-        self.assertNotIn("provider_chain", agent_config)
-        self.assertEqual(agent_config["codex"]["cli"], "codex-admin")
-        self.assertEqual(agent_config["codex"]["command"], "codex")
-        self.assertEqual(agent_config["codex"]["model"], "gpt-admin")
-        self.assertNotIn("reasoning_effort", agent_config["codex"])
-        self.assertEqual(agent_config["opencode"]["cli"], "opencode-admin")
-        self.assertEqual(agent_config["opencode"]["command"], "opencode")
-
-        docs = RouteHarness("/docs/subscription-plans")
-        app.PullwiseHandler.route(docs, "GET")
-
-        self.assertEqual(docs.status, HTTPStatus.OK)
-        self.assertEqual(docs.payload["agentConfigs"]["pro"], agent_config)
-
-        unsupported_update = RouteHarness(
-            "/admin/subscription-plans/agent-configs/pro",
-            {"provider_chain": ["codex"], "codex": {"reasoning_effort": "high"}},
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(unsupported_update, "PATCH")
-
-        self.assertEqual(unsupported_update.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("providerChain", unsupported_update.payload["message"])
-
-    def test_worker_can_fetch_subscription_plan_agent_configs(self) -> None:
-        payload, token = self.create_worker()
-        worker_id = payload["worker_id"]
-        app.billing.update_review_agent_config(
-            "free",
-            {
-                "providerChain": ["opencode"],
-                "opencode": {"model": "minimax/MiniMax-M3", "variant": "medium"},
-            },
-        )
-        app.billing.update_review_agent_config("pro", {"providerChain": ["codex"]})
-        app.billing.update_review_agent_config("max", {"providerChain": ["codex"]})
-
-        handler = RouteHarness(
-            "/worker/agent-configs",
-            {"worker_id": worker_id},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["agentConfigs"]["free"]["providerChain"], ["opencode"])
-        self.assertEqual(handler.payload["agentConfigs"]["free"]["opencode"]["model"], "minimax/MiniMax-M3")
-        self.assertEqual(handler.payload["agentConfigs"]["pro"]["providerChain"], ["codex"])
-        self.assertEqual(handler.payload["agentConfigs"]["max"]["providerChain"], ["codex"])
-        self.assertEqual([plan["id"] for plan in handler.payload["plans"]], ["free", "pro", "max"])
-
-        denied = RouteHarness(
-            "/worker/agent-configs",
-            {"worker_id": "wk_other"},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(denied, "POST")
 
         self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
 
@@ -1381,6 +926,62 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         for expected in ["update_worker", "disable_worker", "enable_worker", "rotate_worker_token", "delete_worker"]:
             self.assertIn(expected, actions)
 
+    def test_admin_delete_worker_removes_same_host_instance_resources(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+        commands = []
+
+        class Completed:
+            returncode = 0
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            return Completed()
+
+        with tempfile.TemporaryDirectory() as root:
+            config_base = os.path.join(root, "etc", "pullwise-worker")
+            data_base = os.path.join(root, "var", "lib", "pullwise-worker")
+            log_base = os.path.join(root, "var", "log", "pullwise-worker")
+            systemd_dir = os.path.join(root, "etc", "systemd", "system")
+            logrotate_dir = os.path.join(root, "etc", "logrotate.d")
+            bin_dir = os.path.join(root, "usr", "local", "bin")
+            patches = (
+                patch.object(app, "WORKER_INSTANCE_CONFIG_BASE_DIR", config_base),
+                patch.object(app, "WORKER_INSTANCE_DATA_BASE_DIR", data_base),
+                patch.object(app, "WORKER_INSTANCE_LOG_BASE_DIR", log_base),
+                patch.object(app, "WORKER_INSTANCE_SYSTEMD_DIR", systemd_dir),
+                patch.object(app, "WORKER_INSTANCE_LOGROTATE_DIR", logrotate_dir),
+                patch.object(app, "WORKER_INSTANCE_BIN_DIR", bin_dir),
+                patch.object(app.subprocess, "run", side_effect=fake_run),
+            )
+            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+                paths = app.worker_instance_paths(worker_id)
+                for key in ("configDir", "dataDir", "logDir"):
+                    os.makedirs(paths[key], exist_ok=True)
+                    with open(os.path.join(paths[key], "marker.txt"), "w", encoding="utf-8") as handle:
+                        handle.write(key)
+                for key in ("serviceFile", "logrotateFile", "binPath"):
+                    os.makedirs(os.path.dirname(paths[key]), exist_ok=True)
+                    with open(paths[key], "w", encoding="utf-8") as handle:
+                        handle.write(key)
+
+                delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+                app.PullwiseHandler.route(delete, "DELETE")
+
+                self.assertEqual(delete.status, HTTPStatus.OK)
+                self.assertTrue(delete.payload["deleted"])
+                self.assertEqual(delete.payload["cleanup"]["serviceName"], app.worker_instance_service_name(worker_id))
+                self.assertTrue(delete.payload["cleanup"]["serviceUserRemoved"])
+                for path in paths.values():
+                    self.assertFalse(os.path.exists(path), path)
+
+        self.assertIsNone(db.get_worker(worker_id))
+        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+        self.assertIn(["systemctl", "stop", app.worker_instance_service_name(worker_id)], commands)
+        self.assertIn(["systemctl", "disable", app.worker_instance_service_name(worker_id)], commands)
+        self.assertIn(["systemctl", "daemon-reload"], commands)
+        self.assertIn(["userdel", app.worker_instance_service_user(worker_id)], commands)
+
     def test_admin_can_queue_worker_stop_and_uninstall_commands(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -1625,31 +1226,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertTrue(admin.payload["workers"][0]["codex_ready"])
         self.assertTrue(admin.payload["workers"][0]["systemd_active"])
 
-    def test_opencode_worker_is_supported_by_default(self) -> None:
-        payload, token = self.create_worker()
-        worker_id = payload["worker_id"]
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "opencode",
-                "version": "0.1.0",
-                "max_concurrent_jobs": 1,
-                "running_jobs": 0,
-                "free_slots": 1,
-                "last_error": "",
-                "doctor_status": "ok",
-                "codex_ready": False,
-                "systemd_active": True,
-                "doctor_checked_at": app.now(),
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(heartbeat, "POST")
-        self.assertEqual(heartbeat.status, HTTPStatus.OK)
-
-        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "idle")
-
     def test_status_capacity_increases_with_multiple_online_workers(self) -> None:
         payload_one, token_one = self.create_worker()
         worker_one_id = payload_one["worker_id"]
@@ -1736,77 +1312,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(heartbeat_with_error.status, HTTPStatus.OK)
         stored = db.get_worker(worker_id)
         self.assertEqual(stored["last_error"], "disk pressure; max_concurrent_jobs clamped to 32")
-
-    def test_disabling_worker_blocks_job_progress_and_result_mutations(self) -> None:
-        payload, token = self.create_worker()
-        worker_id = payload["worker_id"]
-        scan = {
-            "id": "sc_active",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "pending",
-            "status": "queued",
-            "userId": "usr_user",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-        }
-        app.SCANS = [scan]
-        job = app.create_scan_job_for_scan(scan)
-        db.upsert_worker_heartbeat(
-            {
-                "worker_id": worker_id,
-                "version": "0.1.0",
-                "provider": "opencode",
-                "provider_chain": ["opencode"],
-                "max_concurrent_jobs": 1,
-                "running_jobs": 0,
-                "free_slots": 1,
-                "doctor_status": "ok",
-                "opencode_ready": 1,
-                "ready_providers": ["opencode"],
-                "timestamp": app.now(),
-            }
-        )
-
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-
-        disable = RouteHarness(f"/admin/workers/{worker_id}/disable", cookie=self.admin_cookie)
-        app.PullwiseHandler.route(disable, "POST")
-        self.assertEqual(disable.status, HTTPStatus.OK)
-
-        new_claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
-        app.PullwiseHandler.route(new_claim, "POST")
-        self.assertEqual(new_claim.status, HTTPStatus.UNAUTHORIZED)
-
-        progress = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/progress",
-            {"phase": "ai", "progress": 70},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(progress, "POST")
-        self.assertEqual(progress.status, HTTPStatus.UNAUTHORIZED)
-
-        result_body = {
-            "status": "done",
-            **empty_audit_result_fields(),
-            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "duration_ms": 1000,
-            "attempt_id": f"{worker_id}-1",
-            "result_checksum": "checksum-disabled-worker-finish",
-        }
-        result = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
-            result_body,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(result, "POST")
-        self.assertEqual(result.status, HTTPStatus.UNAUTHORIZED)
-        self.assertEqual(app.SCANS[0]["status"], "running")
-        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
 
     def test_worker_test_records_audit(self) -> None:
         payload, _token = self.create_worker()

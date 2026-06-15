@@ -583,69 +583,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
             "Creem checkout failed (status 400): Product not found. Trace ID: trace_123.",
         )
 
-    def test_subscription_plan_docs_route_returns_server_agent_config(self) -> None:
-        handler = RouteHarness("/docs/subscription-plans")
-
-        app.billing.update_review_agent_config(
-            "pro",
-            {
-                "providerChain": ["codex"],
-                "codex": {
-                    "cli": "codex-docs-cli",
-                    "model": "gpt-docs-pro",
-                    "reasoningEffort": "high",
-                },
-            },
-        )
-        app.billing.update_review_agent_config(
-            "max",
-            {
-                "providerChain": ["opencode"],
-                "opencode": {
-                    "model": "opencode/docs-max",
-                    "variant": "high",
-                },
-            },
-        )
-        app.PullwiseHandler.route(handler, "GET")
-
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual([plan["id"] for plan in handler.payload["plans"]], ["free", "pro", "max"])
-        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["cli"], "codex-docs-cli")
-        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["command"], "codex-docs-cli")
-        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["model"], "gpt-docs-pro")
-        self.assertEqual(handler.payload["agentConfigs"]["pro"]["codex"]["reasoningEffort"], "high")
-        self.assertNotIn("agent", handler.payload["agentConfigs"]["max"])
-        self.assertNotIn("provider", handler.payload["agentConfigs"]["max"])
-        self.assertNotIn("provider_chain", handler.payload["agentConfigs"]["max"])
-        self.assertEqual(handler.payload["agentConfigs"]["max"]["providerChain"], ["opencode"])
-        self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["model"], "opencode/docs-max")
-        self.assertEqual(handler.payload["agentConfigs"]["max"]["opencode"]["variant"], "high")
-        self.assertEqual(handler.payload["plans"][1]["agentConfig"], handler.payload["agentConfigs"]["pro"])
-
-    def test_subscription_plan_agent_env_overrides_are_ignored(self) -> None:
-        handler = RouteHarness("/docs/subscription-plans")
-
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_PRO_AGENT_PROVIDER_CHAIN": "opencode",
-                "PULLWISE_PRO_CODEX_MODEL": "gpt-env-ignored",
-                "PULLWISE_PRO_CODEX_REASONING_EFFORT": "high",
-                "PULLWISE_PRO_OPENCODE_MODEL": "opencode/env-ignored",
-            },
-            clear=False,
-        ):
-            app.PullwiseHandler.route(handler, "GET")
-
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        pro_config = handler.payload["agentConfigs"]["pro"]
-        self.assertEqual(pro_config["providerChain"], ["codex"])
-        self.assertNotIn("agent", pro_config)
-        self.assertNotIn("provider", pro_config)
-        self.assertNotIn("provider_chain", pro_config)
-        self.assertEqual(pro_config["codex"]["model"], "gpt-5.5")
-
     def test_billing_page_points_subscription_action_to_pricing(self) -> None:
         cookie = seed_session()
         billing = RouteHarness("/billing", cookie=cookie)
