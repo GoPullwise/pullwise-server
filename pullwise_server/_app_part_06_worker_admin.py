@@ -818,6 +818,7 @@ usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
 install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin" "$DATA_DIR/.codex/bin" "$DATA_DIR/.opencode" "$DATA_DIR/.opencode/bin"
 
 if provider_chain_has codex; then
   if [ -n "$CODEX_COMMAND" ]; then
