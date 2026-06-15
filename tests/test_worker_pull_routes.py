@@ -3578,6 +3578,89 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIsNone(claim.payload["job"])
         self.assertEqual(scan["status"], "queued")
 
+    def test_worker_claim_refills_single_free_slot_after_partial_completion(self) -> None:
+        for index in range(1, 4):
+            scan = {
+                "id": f"sc_refill_{index}",
+                "repo": f"acme/refill-{index}",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": "usr_refill",
+                "createdAt": app.now() + index,
+                "queuedAt": app.now() + index,
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "repoId": f"repo_refill_{index}",
+                "githubRepoId": f"refill_{index}",
+            }
+            app.SCANS.append(scan)
+            app.create_scan_job_for_scan(scan)
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "2",
+                "PULLWISE_WORKER_MAX_CLAIM_JOBS": "4",
+            },
+            clear=False,
+        ):
+            first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 4}, headers=self.auth)
+            app.PullwiseHandler.route(first_claim, "POST")
+
+        self.assertEqual(first_claim.status, HTTPStatus.OK)
+        self.assertEqual([job["scan_id"] for job in first_claim.payload["jobs"]], ["sc_refill_1", "sc_refill_2"])
+        first_job, remaining_job = first_claim.payload["jobs"]
+
+        result = RouteHarness(
+            f"/worker/jobs/{first_job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": f"wk_1-{first_job['attempt']}",
+                "result_checksum": f"checksum-{first_job['job_id']}",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+        self.assertEqual(result.status, HTTPStatus.OK)
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "providerChain": ["codex"],
+                "max_concurrent_jobs": 2,
+                "running_jobs": 1,
+                "free_slots": 1,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "readyProviders": ["codex"],
+                "active_job_ids": [remaining_job["job_id"]],
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "2",
+                "PULLWISE_WORKER_MAX_CLAIM_JOBS": "4",
+            },
+            clear=False,
+        ):
+            refill_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 4}, headers=self.auth)
+            app.PullwiseHandler.route(refill_claim, "POST")
+
+        self.assertEqual(refill_claim.status, HTTPStatus.OK)
+        self.assertEqual([job["scan_id"] for job in refill_claim.payload["jobs"]], ["sc_refill_3"])
+
     def test_multi_worker_queue_claims_progress_and_results_complete_without_duplicate_claims(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
