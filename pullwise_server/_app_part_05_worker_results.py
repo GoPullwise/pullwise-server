@@ -3,6 +3,9 @@ from __future__ import annotations
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 def create_scan_job_for_scan(scan: dict) -> dict:
+    user_id = str(scan.get("userId") or "").strip()
+    user = USERS.get(user_id) if user_id else None
+    plan = quota.effective_user_plan(user)
     job = db.create_scan_job(
         {
             "job_id": make_id("job"),
@@ -18,6 +21,7 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "installation_id": scan.get("installationId"),
             "clone_url": scan.get("cloneUrl"),
             "review_output_language": clean_review_output_language(scan.get("reviewOutputLanguage")),
+            "provider_chain": billing.review_agent_provider_chain(plan),
             "max_attempts": system_config.scan_job_max_attempts(),
         }
     )
@@ -145,6 +149,10 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     }
     plan = worker_plan_for_job(job, scan)
     agent_config = billing.review_agent_config(plan)
+    job_provider_chain = db.normalize_provider_list(job.get("provider_chain"))
+    if job_provider_chain:
+        agent_config = dict(agent_config)
+        agent_config["providerChain"] = job_provider_chain
     payload["agentConfig"] = agent_config
     repository_limits = repository_scan_limits_payload(plan)
     payload["repositoryLimits"] = repository_limits

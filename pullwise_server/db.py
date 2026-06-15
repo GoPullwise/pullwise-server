@@ -206,6 +206,7 @@ def initialize() -> None:
                     token_hash TEXT UNIQUE,
                     version TEXT,
                     provider TEXT,
+                    provider_chain TEXT,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     max_concurrent_jobs INTEGER NOT NULL DEFAULT 1,
                     running_jobs INTEGER NOT NULL DEFAULT 0,
@@ -215,6 +216,8 @@ def initialize() -> None:
                     last_error TEXT,
                     doctor_status TEXT,
                     codex_ready INTEGER,
+                    opencode_ready INTEGER,
+                    ready_providers TEXT,
                     systemd_active INTEGER,
                     doctor_checked_at INTEGER,
                     machine_metrics TEXT,
@@ -234,6 +237,7 @@ def initialize() -> None:
                 ("workers", "name", "TEXT"),
                 ("workers", "token_hash", "TEXT"),
                 ("workers", "enabled", "INTEGER NOT NULL DEFAULT 1"),
+                ("workers", "provider_chain", "TEXT"),
                 ("workers", "region", "TEXT"),
                 ("workers", "created_at", "INTEGER"),
                 ("workers", "updated_at", "INTEGER"),
@@ -242,6 +246,8 @@ def initialize() -> None:
                 ("workers", "deleted_at", "INTEGER"),
                 ("workers", "doctor_status", "TEXT"),
                 ("workers", "codex_ready", "INTEGER"),
+                ("workers", "opencode_ready", "INTEGER"),
+                ("workers", "ready_providers", "TEXT"),
                 ("workers", "systemd_active", "INTEGER"),
                 ("workers", "doctor_checked_at", "INTEGER"),
                 ("workers", "machine_metrics", "TEXT"),
@@ -316,11 +322,13 @@ def initialize() -> None:
                     logs_summary TEXT,
                     max_attempts INTEGER NOT NULL DEFAULT 3,
                     review_output_language TEXT,
+                    provider_chain TEXT,
                     last_attempt_id TEXT
                 )
                 """
             )
             ensure_column(connection, "scan_jobs", "review_output_language", "TEXT")
+            ensure_column(connection, "scan_jobs", "provider_chain", "TEXT")
             ensure_column(connection, "scan_jobs", "last_attempt_id", "TEXT")
             connection.execute(
                 """
@@ -946,6 +954,39 @@ def normalize_worker_capacity(value: Any, *, clamp: bool = True, cap: int | None
     return capacity
 
 
+WORKER_PROVIDER_VALUES = {"codex", "opencode"}
+
+
+def normalize_provider_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        raw_items = value
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed = []
+            raw_items = parsed if isinstance(parsed, list) else []
+        else:
+            raw_items = stripped.split(",")
+    elif value is None:
+        raw_items = []
+    else:
+        raw_items = []
+    providers: list[str] = []
+    for item in raw_items:
+        provider = str(item or "").strip().lower()
+        if provider in WORKER_PROVIDER_VALUES and provider not in providers:
+            providers.append(provider)
+    return providers
+
+
+def provider_list_json(value: Any, *, fallback: Any = None) -> str | None:
+    providers = normalize_provider_list(value) or normalize_provider_list(fallback)
+    return json.dumps(providers, sort_keys=True) if providers else None
+
+
 WORKER_LIFECYCLE_COMMANDS = {"stop", "uninstall"}
 WORKER_COMMAND_ACTIVE_STATUSES = {"pending", "running"}
 WORKER_COMMAND_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
@@ -987,23 +1028,26 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     worker_id = str(record.get("worker_id") or stable_id("wk", token_hash)).strip()
     timestamp = int(record.get("timestamp") or time.time())
     max_concurrency_cap = record.get("max_concurrency_cap")
+    provider = str(record.get("provider") or "codex")[:60]
+    provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
             connection.execute(
                 """
                 INSERT INTO workers (
-                    worker_id, name, token_hash, provider, enabled, status,
+                    worker_id, name, token_hash, provider, provider_chain, enabled, status,
                     max_concurrent_jobs, running_jobs, free_slots, version,
                     hostname, region, last_error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 1, 'offline', ?, 0, ?, ?, NULL, ?, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 1, 'offline', ?, 0, ?, ?, NULL, ?, NULL, ?, ?)
                 """,
                 (
                     worker_id,
                     str(record.get("name") or "Worker")[:120],
                     token_hash,
-                    str(record.get("provider") or "codex")[:60],
+                    provider,
+                    provider_chain,
                     normalize_worker_capacity(record.get("max_concurrent_jobs"), cap=max_concurrency_cap),
                     normalize_worker_capacity(record.get("max_concurrent_jobs"), cap=max_concurrency_cap),
                     record.get("version"),
@@ -1054,6 +1098,7 @@ def update_worker(
     allowed = {
         "name": "name",
         "provider": "provider",
+        "provider_chain": "provider_chain",
         "region": "region",
         "version": "version",
         "max_concurrent_jobs": "max_concurrent_jobs",
@@ -1066,6 +1111,12 @@ def update_worker(
         value = patch[source_key]
         if column == "max_concurrent_jobs":
             value = normalize_worker_capacity(value, cap=max_concurrency_cap)
+        elif column == "provider_chain":
+            value = provider_list_json(value)
+            if value:
+                first_provider = normalize_provider_list(value)[0]
+                assignments.append("provider = ?")
+                values.append(first_provider)
         elif value is not None:
             value = str(value)[:120]
         assignments.append(f"{column} = ?")
@@ -1218,6 +1269,9 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     )
     running_jobs = max(0, min(max_concurrent_jobs, int(record.get("running_jobs") or 0)))
     free_slots = max(0, min(max_concurrent_jobs, int(record.get("free_slots") or 0)))
+    provider = str(record.get("provider") or "codex")[:60]
+    provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
+    ready_providers = provider_list_json(record.get("ready_providers"))
     machine_metrics = record.get("machine_metrics")
     machine_metrics_history = record.get("machine_metrics_history")
     machine_metrics_text = (
@@ -1236,15 +1290,16 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
             connection.execute(
                 """
                 INSERT INTO workers (
-                    worker_id, name, version, provider, enabled, max_concurrent_jobs, running_jobs,
+                    worker_id, name, version, provider, provider_chain, enabled, max_concurrent_jobs, running_jobs,
                     free_slots, hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
-                    created_at, updated_at, doctor_status, codex_ready, systemd_active, doctor_checked_at,
-                    machine_metrics, machine_metrics_history
+                    created_at, updated_at, doctor_status, codex_ready, opencode_ready, ready_providers,
+                    systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
+                    provider_chain = COALESCE(excluded.provider_chain, workers.provider_chain),
                     max_concurrent_jobs = excluded.max_concurrent_jobs,
                     running_jobs = excluded.running_jobs,
                     free_slots = excluded.free_slots,
@@ -1253,6 +1308,8 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     last_error = excluded.last_error,
                     doctor_status = COALESCE(excluded.doctor_status, workers.doctor_status),
                     codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
+                    opencode_ready = COALESCE(excluded.opencode_ready, workers.opencode_ready),
+                    ready_providers = COALESCE(excluded.ready_providers, workers.ready_providers),
                     systemd_active = COALESCE(excluded.systemd_active, workers.systemd_active),
                     doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
                     machine_metrics = COALESCE(excluded.machine_metrics, workers.machine_metrics),
@@ -1265,7 +1322,8 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     worker_id,
                     record.get("name") or worker_id,
                     record.get("version"),
-                    record.get("provider") or "codex",
+                    provider,
+                    provider_chain,
                     max_concurrent_jobs,
                     running_jobs,
                     free_slots,
@@ -1278,6 +1336,8 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     timestamp,
                     record.get("doctor_status"),
                     record.get("codex_ready"),
+                    record.get("opencode_ready"),
+                    ready_providers,
                     record.get("systemd_active"),
                     record.get("doctor_checked_at"),
                     machine_metrics_text,
@@ -1593,6 +1653,7 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
     if not job_id or not scan_id or not repo:
         raise ValueError("job_id, scan_id, and repo are required")
     timestamp = int(record.get("created_at") or time.time())
+    provider_chain = provider_list_json(record.get("provider_chain"))
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -1604,10 +1665,10 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     timeout_at, error, result_checksum, created_at, updated_at,
                     user_id, repo_id, github_repo_id, installation_id, clone_url,
                     progress_phase, progress, progress_message, logs_summary, max_attempts,
-                    review_output_language
+                    review_output_language, provider_chain
                 )
                 VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?,
-                    ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?)
+                    ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?, ?)
                 ON CONFLICT(scan_id) DO NOTHING
                 """,
                 (
@@ -1626,6 +1687,7 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("clone_url"),
                     max(1, int(record.get("max_attempts") or 3)),
                     record.get("review_output_language"),
+                    provider_chain,
                 ),
             )
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()) or {}
@@ -1866,6 +1928,7 @@ def claim_next_scan_jobs(
     lease_seconds: int = 3600,
     per_user_running_limit: int = 1,
     worker_heartbeat_timeout_seconds: int = 120,
+    ready_providers: list[str] | None = None,
     timestamp: int | None = None,
 ) -> list[dict[str, Any]]:
     initialize()
@@ -1876,6 +1939,7 @@ def claim_next_scan_jobs(
     timeout_at = current_time + max(60, int(lease_seconds))
     requested = max(1, int(max_jobs or 1))
     per_user_limit = max(1, int(per_user_running_limit or 1))
+    ready_provider_set = set(normalize_provider_list(ready_providers)) if ready_providers is not None else None
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -1921,6 +1985,10 @@ def claim_next_scan_jobs(
             for row in rows:
                 if len(claimed) >= requested:
                     break
+                if ready_provider_set is not None:
+                    job_provider_chain = normalize_provider_list(row["provider_chain"])
+                    if not ready_provider_set or (job_provider_chain and ready_provider_set.isdisjoint(job_provider_chain)):
+                        continue
                 user_id = str(row["user_id"] or "")
                 if running_by_user.get(user_id, 0) >= per_user_limit:
                     continue

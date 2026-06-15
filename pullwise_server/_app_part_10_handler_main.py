@@ -1997,6 +1997,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             {
                 "name": public_issue_text(body.get("name")) or "Worker",
                 "provider": provider_chain[0],
+                "provider_chain": provider_chain,
                 "region": public_issue_text(body.get("region")),
                 "version": public_issue_text(body.get("version")),
                 "max_concurrent_jobs": max_concurrent_jobs,
@@ -2097,6 +2098,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 for key in ("name", "provider", "region", "version", "max_concurrent_jobs")
                 if key in body
             }
+            if "providerChain" in body:
+                try:
+                    changed["provider_chain"] = worker_provider_chain(body.get("providerChain"), strict=True)
+                    changed["provider"] = changed["provider_chain"][0]
+                except ValueError as exc:
+                    self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
+                    return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             if "max_concurrent_jobs" in changed:
                 try:
                     changed["max_concurrent_jobs"] = worker_admin_capacity(changed["max_concurrent_jobs"])
@@ -2262,6 +2270,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "worker_id": worker_id,
                     "version": public_issue_text(body.get("version")),
                     "provider": public_issue_text(body.get("provider")) or "codex",
+                    "provider_chain": body.get("providerChain") or body.get("provider_chain"),
                     "max_concurrent_jobs": heartbeat_capacity,
                     "running_jobs": public_scan_count(body.get("running_jobs")),
                     "free_slots": public_scan_count(body.get("free_slots")),
@@ -2270,6 +2279,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "last_error": last_error,
                     "doctor_status": public_issue_text(body.get("doctor_status")),
                     "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,
+                    "opencode_ready": 1 if body.get("opencode_ready") is True else 0 if body.get("opencode_ready") is False else None,
+                    "ready_providers": body.get("readyProviders") or body.get("ready_providers"),
                     "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
                     "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
                     "machine_metrics": machine_metrics,
@@ -2352,6 +2363,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         if max_jobs <= 0:
             return self.json({"job": None, "jobs": []})
+        ready_providers = worker_record_ready_providers(worker_record)
+        if not ready_providers:
+            return self.json({"job": None, "jobs": []})
         try:
             recovered_jobs = db.recover_expired_scan_jobs(
                 now(),
@@ -2366,6 +2380,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 lease_seconds=system_config.scan_job_lease_seconds(),
                 per_user_running_limit=max_scan_concurrency_per_user(),
                 worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
+                ready_providers=ready_providers,
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))

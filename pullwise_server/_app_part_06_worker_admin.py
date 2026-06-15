@@ -47,10 +47,30 @@ def worker_version_compatible(worker: dict) -> bool:
     return compare_worker_versions(parsed_version, parsed_minimum) >= 0
 
 
+def worker_record_provider_chain(worker: dict) -> list[str]:
+    decoded = decoded_worker_json_payload(worker.get("provider_chain"), list)
+    return worker_provider_chain(decoded or worker.get("provider_chain") or worker.get("provider") or worker.get("providerChain"))
+
+
+def worker_record_ready_providers(worker: dict) -> list[str]:
+    decoded = decoded_worker_json_payload(worker.get("ready_providers"), list)
+    ready = worker_provider_chain(decoded or worker.get("readyProviders"), strict=False) if decoded or worker.get("readyProviders") else []
+    if ready:
+        return ready
+    fallback = []
+    if worker.get("codex_ready"):
+        fallback.append("codex")
+    if worker.get("opencode_ready"):
+        fallback.append("opencode")
+    if fallback:
+        return fallback
+    return worker_record_provider_chain(worker) if public_issue_text(worker.get("doctor_status")).lower() == "ok" else []
+
+
 def worker_supported_provider(worker: dict) -> bool:
-    provider = public_issue_text(worker.get("provider")).lower() or "codex"
+    provider_chain = worker_record_provider_chain(worker)
     allowed = {item.lower() for item in system_config.worker_allowed_providers()}
-    return provider in allowed
+    return any(provider in allowed for provider in provider_chain)
 
 
 def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str:
@@ -62,7 +82,8 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
         return "offline"
     doctor_status = public_issue_text(worker.get("doctor_status")).lower()
     codex_ready = worker.get("codex_ready")
-    codex_unready = codex_ready == 0 and doctor_status != "ok"
+    ready_providers = worker_record_ready_providers(worker)
+    codex_unready = codex_ready == 0 and doctor_status != "ok" and not ready_providers
     if (
         clean_scan_error(worker.get("last_error"))
         or not worker_version_compatible(worker)
@@ -137,10 +158,14 @@ def worker_machine_metrics_payload(worker: dict) -> dict | None:
 
 
 def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_metrics: bool = False) -> dict:
+    provider_chain = worker_record_provider_chain(worker)
+    ready_providers = worker_record_ready_providers(worker)
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
         "name": public_issue_text(worker.get("name")) or public_issue_text(worker.get("worker_id")),
-        "provider": public_issue_text(worker.get("provider")) or "codex",
+        "provider": public_issue_text(worker.get("provider")) or (provider_chain[0] if provider_chain else "codex"),
+        "providerChain": provider_chain,
+        "readyProviders": ready_providers,
         "enabled": bool(worker.get("enabled")),
         "status": computed_worker_status(worker),
         "last_heartbeat_at": pull_request_timestamp(worker.get("last_heartbeat_at")),
@@ -159,6 +184,7 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         payload["last_error"] = clean_scan_error(worker.get("last_error"))
         payload["doctor_status"] = public_issue_text(worker.get("doctor_status"))
         payload["codex_ready"] = bool(worker.get("codex_ready")) if worker.get("codex_ready") is not None else None
+        payload["opencode_ready"] = bool(worker.get("opencode_ready")) if worker.get("opencode_ready") is not None else None
         payload["systemd_active"] = bool(worker.get("systemd_active")) if worker.get("systemd_active") is not None else None
         payload["doctor_checked_at"] = pull_request_timestamp(worker.get("doctor_checked_at"))
         payload["test"] = worker_test_payload(worker)
@@ -700,15 +726,16 @@ SERVICE_GROUP="pullwise-worker"
 BASE_CONFIG_DIR="/etc/pullwise-worker"
 BASE_DATA_DIR="/var/lib/pullwise-worker"
 BASE_LOG_DIR="/var/log/pullwise-worker"
+SERVICE_NAME="pullwise-worker-$SAFE_WORKER_ID"
 CONFIG_DIR="$BASE_CONFIG_DIR/$SAFE_WORKER_ID"
 ENV_FILE="$CONFIG_DIR/worker.env"
 AUTH_COMMANDS_FILE="$CONFIG_DIR/auth-commands.txt"
-BIN_PATH="/usr/local/bin/pullwise-worker-$SAFE_WORKER_ID"
+BIN_PATH="/usr/local/bin/$SERVICE_NAME"
 DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
 CHECKOUT_ROOT="$DATA_DIR/checkouts"
 LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
-SERVICE_FILE="/etc/systemd/system/pullwise-worker-$SAFE_WORKER_ID.service"
-LOGROTATE_FILE="/etc/logrotate.d/pullwise-worker-$SAFE_WORKER_ID"
+SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+LOGROTATE_FILE="/etc/logrotate.d/$SERVICE_NAME"
 INSTALL_COMPLETED=0
 ROLLBACK_ENABLED=0
 HAD_SERVICE_USER=0
@@ -758,8 +785,8 @@ rollback_failed_install() {
     exit "$status"
   fi
   echo "Pullwise worker install failed; rolling back partial instance $SAFE_WORKER_ID." >&2
-  systemctl stop "pullwise-worker-$SAFE_WORKER_ID" >/dev/null 2>&1 || true
-  systemctl disable "pullwise-worker-$SAFE_WORKER_ID" >/dev/null 2>&1 || true
+  systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
   rollback_file "$SERVICE_FILE" "/etc/systemd/system" "$HAD_SERVICE_FILE"
   rollback_file "$LOGROTATE_FILE" "/etc/logrotate.d" "$HAD_LOGROTATE_FILE"
   rollback_file "$BIN_PATH" "/usr/local/bin" "$HAD_BIN_PATH"
@@ -806,7 +833,7 @@ if [ -z "$PROVIDER_CHAIN" ]; then
   exit 2
 fi
 PROVIDER="${PROVIDER_CHAIN%%,*}"
-SERVICE_TOOL_PATH="$SERVICE_PATH:$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin"
+SERVICE_TOOL_PATH="$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$DATA_DIR/.opencode/bin:$SERVICE_PATH"
 CODEX_HOME="$DATA_DIR/.codex"
 XDG_CONFIG_HOME="$DATA_DIR/.config"
 XDG_CACHE_HOME="$DATA_DIR/.cache"
@@ -976,6 +1003,12 @@ write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
 write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"
 write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"
+write_env_value PULLWISE_SERVICE_NAME "$SERVICE_NAME"
+write_env_value PULLWISE_SERVICE_FILE "$SERVICE_FILE"
+write_env_value PULLWISE_WORKER_ENV_FILE "$ENV_FILE"
+write_env_value PULLWISE_WORKER_ENV_BACKUP_FILE "$ENV_FILE.bak"
+write_env_value PULLWISE_WORKER_BIN_PATH "$BIN_PATH"
+write_env_value PULLWISE_LOGROTATE_FILE "$LOGROTATE_FILE"
 write_env_value PULLWISE_WORKER_POLL_JITTER_SECONDS "2"
 write_env_value PULLWISE_WORKER_MAX_BACKOFF_SECONDS "60"
 write_env_value PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS "3600"
@@ -1009,7 +1042,8 @@ export CODEX_HOME="\$SERVICE_HOME/.codex"
 export XDG_CONFIG_HOME="\$SERVICE_HOME/.config"
 export XDG_CACHE_HOME="\$SERVICE_HOME/.cache"
 export XDG_DATA_HOME="\$SERVICE_HOME/.local/share"
-export PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+export PATH="\$SERVICE_HOME/.local/bin:\$SERVICE_HOME/.codex/bin:\$SERVICE_HOME/.opencode/bin:\$SERVICE_PATH"
 PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
@@ -1028,7 +1062,7 @@ Group=$SERVICE_USER
 SupplementaryGroups=$SERVICE_GROUP
 WorkingDirectory=$DATA_DIR
 EnvironmentFile=$ENV_FILE
-Environment=PATH=$SERVICE_PATH
+Environment=PATH=$SERVICE_TOOL_PATH
 Environment=HOME=$DATA_DIR
 Environment=USERPROFILE=$DATA_DIR
 Environment=CODEX_HOME=$DATA_DIR/.codex
@@ -1059,11 +1093,11 @@ $LOG_DIR/*.log {
 EOF
 
 systemctl daemon-reload
-systemctl enable "pullwise-worker-$SAFE_WORKER_ID" >/dev/null
-systemctl restart "pullwise-worker-$SAFE_WORKER_ID"
+systemctl enable "$SERVICE_NAME" >/dev/null
+systemctl restart "$SERVICE_NAME"
 INSTALL_COMPLETED=1
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
-echo "Systemd service: pullwise-worker-$SAFE_WORKER_ID"
+echo "Systemd service: $SERVICE_NAME"
 echo "Worker home: $DATA_DIR"
 print_auth_commands
 run_as_service_user "$BIN_PATH" doctor || true
