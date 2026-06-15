@@ -2184,12 +2184,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not existing_worker:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
-            try:
-                cleanup = cleanup_admin_worker_instance(worker_id)
-            except (OSError, RuntimeError, ValueError) as exc:
-                message = str(exc) or "Worker instance cleanup failed."
-                self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error=message)
-                return self.error(HTTPStatus.INTERNAL_SERVER_ERROR, message)
             worker = db.soft_delete_worker(worker_id)
             if not worker:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
@@ -2198,14 +2192,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 session,
                 "delete_worker",
                 worker_id=worker_id,
-                changed_fields={
-                    "deleted": True,
-                    "serviceName": cleanup["serviceName"],
-                    "removedPaths": cleanup["removedPaths"],
-                    "serviceUserRemoved": cleanup["serviceUserRemoved"],
-                },
+                changed_fields={"deleted": True},
             )
-            return self.json({"worker": worker_public_payload(worker, admin=True), "deleted": True, "cleanup": cleanup})
+            return self.json({"worker": worker_public_payload(worker, admin=True), "deleted": True})
         if len(segments) == 3 and segments[:2] == ["admin", "users"]:
             user_id = clean_github_access_text(segments[2]) or ""
             try:
