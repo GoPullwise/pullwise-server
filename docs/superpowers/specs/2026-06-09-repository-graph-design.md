@@ -46,8 +46,8 @@ scan rather than created as an unrelated endpoint.
 - Include enough structure to help a developer understand the repository at a
   glance: modules, entrypoints, tests, config, CI, manifests, package managers,
   language mix, and high-level dependency edges.
-- Produce a compact `architectureSummary` that can be injected into Codex and
-  OpenCode review prompts.
+- Produce a compact `architectureSummary` that can be injected into Codex
+  review prompts.
 - Persist and expose the graph as part of scan state.
 - Include the graph in JSON audit bundles and zip audit bundles.
 - Render the graph interactively in the web scan experience with pan, zoom,
