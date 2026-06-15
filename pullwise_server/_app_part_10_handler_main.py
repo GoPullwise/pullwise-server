@@ -2076,7 +2076,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session,
             action_name,
             worker_id=worker_id,
-            changed_fields={"command": command, "commandId": worker_command.get("id")},
+            changed_fields={
+                "command": command,
+                "commandId": worker_command.get("id"),
+                **({"deleted": True} if command == "uninstall" else {}),
+            },
         )
         worker = db.get_worker(worker_id, include_deleted=True) or {}
         return self.json(

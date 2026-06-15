@@ -1451,17 +1451,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(uninstall.status, HTTPStatus.ACCEPTED)
         uninstall_command = uninstall.payload["command"]
         self.assertEqual(uninstall_command["command"], "uninstall")
-        worker_after_uninstall_request = db.get_worker(worker_id)
+        self.assertIsNone(db.get_worker(worker_id))
+        worker_after_uninstall_request = db.get_worker(worker_id, include_deleted=True)
         self.assertIsNotNone(worker_after_uninstall_request)
         self.assertFalse(worker_after_uninstall_request["enabled"])
-        self.assertIsNone(worker_after_uninstall_request["deleted_at"])
+        self.assertIsNotNone(worker_after_uninstall_request["deleted_at"])
+        self.assertIsNotNone(uninstall.payload["worker"]["deleted_at"])
 
         admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin_workers, "GET")
         self.assertEqual(admin_workers.status, HTTPStatus.OK)
-        self.assertEqual(admin_workers.payload["workers"][0]["worker_id"], worker_id)
-        self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["id"], uninstall_command["id"])
-        self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["status"], "pending")
+        self.assertEqual(admin_workers.payload["workers"], [])
 
         deleted_heartbeat = RouteHarness(
             "/worker/heartbeat",
@@ -1481,6 +1481,43 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(uninstall_done.status, HTTPStatus.OK)
         self.assertIsNone(db.get_worker(worker_id))
         self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+
+    def test_uninstall_command_immediately_soft_deletes_degraded_worker(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "max_concurrent_jobs": 4,
+                "running_jobs": 0,
+                "free_slots": 4,
+                "doctor_status": "degraded",
+                "codex_ready": False,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
+
+        uninstall = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "uninstall"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(uninstall, "POST")
+
+        self.assertEqual(uninstall.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(uninstall.payload["command"]["command"], "uninstall")
+        self.assertIsNone(db.get_worker(worker_id))
+        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+
+        admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(admin_workers, "GET")
+        self.assertEqual(admin_workers.status, HTTPStatus.OK)
+        self.assertEqual(admin_workers.payload["workers"], [])
 
     def test_worker_can_unregister_itself_from_registry(self) -> None:
         payload, token = self.create_worker()

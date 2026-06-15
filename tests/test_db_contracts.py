@@ -399,6 +399,33 @@ class DatabaseContractsTest(unittest.TestCase):
                 self.assertEqual(db.list_workers(), [])
                 self.assertIsNotNone(db.get_worker("env_worker", include_deleted=True)["deleted_at"])
 
+    def test_initialize_soft_deletes_legacy_pending_uninstall_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                db.initialize()
+                db.create_worker({"worker_id": "wk_legacy_uninstall", "name": "Legacy uninstall worker"})
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            INSERT INTO worker_commands (
+                                id, worker_id, command, status, created_at, updated_at
+                            )
+                            VALUES ('cmd_legacy_uninstall', 'wk_legacy_uninstall', 'uninstall', 'pending', 123, 123)
+                            """
+                        )
+
+                db.initialize()
+
+                self.assertIsNone(db.get_worker("wk_legacy_uninstall"))
+                deleted = db.get_worker("wk_legacy_uninstall", include_deleted=True)
+
+        self.assertIsNotNone(deleted)
+        self.assertEqual(deleted["enabled"], 0)
+        self.assertEqual(deleted["deleted_at"], 123)
+        self.assertEqual(deleted["disabled_at"], 123)
+
     def test_cleanup_operational_records_prunes_only_old_terminal_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

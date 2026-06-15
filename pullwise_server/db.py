@@ -292,6 +292,7 @@ def initialize() -> None:
                 ON worker_commands(worker_id, status, created_at)
                 """
             )
+            reconcile_worker_uninstall_deletes(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS scan_jobs (
@@ -496,6 +497,46 @@ def ensure_column(connection: sqlite3.Connection, table: str, column: str, defin
     if any(row[1] == column for row in rows):
         return
     connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def reconcile_worker_uninstall_deletes(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        UPDATE workers
+        SET enabled = 0,
+            deleted_at = COALESCE(
+                deleted_at,
+                (
+                    SELECT MIN(worker_commands.created_at)
+                    FROM worker_commands
+                    WHERE worker_commands.worker_id = workers.worker_id
+                      AND worker_commands.command = 'uninstall'
+                      AND worker_commands.status IN ('pending', 'running')
+                ),
+                strftime('%s', 'now')
+            ),
+            disabled_at = COALESCE(
+                disabled_at,
+                (
+                    SELECT MIN(worker_commands.created_at)
+                    FROM worker_commands
+                    WHERE worker_commands.worker_id = workers.worker_id
+                      AND worker_commands.command = 'uninstall'
+                      AND worker_commands.status IN ('pending', 'running')
+                ),
+                strftime('%s', 'now')
+            ),
+            updated_at = strftime('%s', 'now')
+        WHERE deleted_at IS NULL
+          AND EXISTS (
+              SELECT 1
+              FROM worker_commands
+              WHERE worker_commands.worker_id = workers.worker_id
+                AND worker_commands.command = 'uninstall'
+                AND worker_commands.status IN ('pending', 'running')
+          )
+        """
+    )
 
 
 def normalize_quota_ledger_schema(connection: sqlite3.Connection) -> None:
@@ -1477,16 +1518,29 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                     timestamp,
                 ),
             )
-            connection.execute(
-                """
-                UPDATE workers
-                SET enabled = 0,
-                    disabled_at = COALESCE(disabled_at, ?),
-                    updated_at = ?
-                WHERE worker_id = ?
-                """,
-                (timestamp, timestamp, worker_id),
-            )
+            if command == "uninstall":
+                connection.execute(
+                    """
+                    UPDATE workers
+                    SET enabled = 0,
+                        deleted_at = COALESCE(deleted_at, ?),
+                        disabled_at = COALESCE(disabled_at, ?),
+                        updated_at = ?
+                    WHERE worker_id = ?
+                    """,
+                    (timestamp, timestamp, timestamp, worker_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE workers
+                    SET enabled = 0,
+                        disabled_at = COALESCE(disabled_at, ?),
+                        updated_at = ?
+                    WHERE worker_id = ?
+                    """,
+                    (timestamp, timestamp, worker_id),
+                )
             return row_to_dict(connection.execute("SELECT * FROM worker_commands WHERE id = ?", (command_id,)).fetchone())
 
 
