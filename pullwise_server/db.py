@@ -1295,7 +1295,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     created_at, updated_at, doctor_status, codex_ready, opencode_ready, ready_providers,
                     systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
                 )
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
