@@ -159,6 +159,12 @@ def worker_machine_metrics_payload(worker: dict) -> dict | None:
 
 
 def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_metrics: bool = False) -> dict:
+    if admin:
+        worker = dict(worker)
+        capacity = public_scan_count(worker.get("max_concurrent_jobs")) or 1
+        running_jobs = db.count_worker_running_scan_jobs(public_issue_text(worker.get("worker_id")))
+        worker["running_jobs"] = running_jobs
+        worker["free_slots"] = max(0, capacity - running_jobs)
     provider_chain = worker_record_provider_chain(worker)
     ready_providers = worker_record_ready_providers(worker)
     payload = {

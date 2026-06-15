@@ -3,7 +3,8 @@ from __future__ import annotations
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 def scan_system_status_payload(*, admin: bool = False) -> dict:
-    workers = [worker_public_payload(worker, admin=True) for worker in db.list_workers()]
+    worker_records = db.list_workers()
+    workers = [worker_public_payload(worker, admin=False) for worker in worker_records]
     queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
     running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
     online = [worker for worker in workers if worker["status"] in {"idle", "busy"}]
@@ -29,7 +30,7 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         "offlineWorkerCount": len(offline),
     }
     if admin:
-        payload["workers"] = workers
+        payload["workers"] = [worker_public_payload(worker, admin=True) for worker in worker_records]
     return payload
 
 

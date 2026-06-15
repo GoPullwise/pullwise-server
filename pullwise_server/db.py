@@ -1962,6 +1962,24 @@ def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[s
         return [dict(row) for row in rows]
 
 
+def count_worker_running_scan_jobs(worker_id: str) -> int:
+    initialize()
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return 0
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM scan_jobs
+            WHERE claimed_by_worker_id = ?
+              AND status IN ('running', 'uploading_result')
+            """,
+            (worker_id,),
+        ).fetchone()
+        return max(0, int(row[0] if row else 0))
+
+
 def list_completed_scan_job_results() -> list[dict[str, Any]]:
     initialize()
     with _LOCK, closing(connect()) as connection:

@@ -342,6 +342,83 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(activity["started_at"], timestamp + 10)
         self.assertEqual(activity["last_activity_at"], timestamp + 3700)
 
+    def test_admin_worker_running_jobs_counts_only_running_scan_jobs(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        timestamp = app.now()
+        scans = [
+            {
+                "id": "sc_worker_running",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": "usr_user",
+                "createdAt": timestamp,
+                "queuedAt": timestamp,
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            {
+                "id": "sc_worker_claimed",
+                "repo": "acme/web",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": "usr_other",
+                "createdAt": timestamp + 1,
+                "queuedAt": timestamp + 1,
+                "progress": 0,
+                "phase": None,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+        ]
+        app.USERS["usr_other"] = {"id": "usr_other", "email": "other@example.com", "name": "Other"}
+        app.SCANS = scans
+        for scan in scans:
+            app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_jobs(worker_id, max_jobs=2, lease_seconds=3600, timestamp=timestamp)
+        self.assertEqual(len(claimed), 2)
+        db.update_scan_job_progress(
+            claimed[0]["job_id"],
+            {"phase": "ai", "progress": 50, "message": "reviewing", "started_at": timestamp + 10},
+        )
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.4.18",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 2,
+                "free_slots": 0,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "active_job_ids": [job["job_id"] for job in claimed],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(admin_workers, "GET")
+        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(detail, "GET")
+
+        self.assertEqual(admin_workers.status, HTTPStatus.OK)
+        self.assertEqual(admin_workers.payload["workers"][0]["running_jobs"], 1)
+        self.assertEqual(admin_workers.payload["workers"][0]["status"], "idle")
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        self.assertEqual(detail.payload["worker"]["running_jobs"], 1)
+        self.assertEqual(detail.payload["worker"]["status"], "idle")
+        self.assertEqual(
+            [activity["status"] for activity in detail.payload["taskActivity"]],
+            ["running", "claimed"],
+        )
+
     def test_admin_worker_version_controls_release_package_in_install_command(self) -> None:
         handler = RouteHarness(
             "/admin/workers",
