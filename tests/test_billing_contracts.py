@@ -4,6 +4,8 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
+import requests
+
 from pullwise_server import billing, system_config
 
 
@@ -326,12 +328,12 @@ class BillingContractsTest(unittest.TestCase):
         json_payload = post.call_args.kwargs["json"]
         self.assertEqual(json_payload["product_id"], "prod_123")
         self.assertEqual(json_payload["success_url"], "https://app.pullwise.dev/?billing=success")
-        self.assertEqual(json_payload["cancel_url"], "https://app.pullwise.dev/?billing=cancel")
+        self.assertNotIn("cancel_url", json_payload)
         self.assertEqual(json_payload["customer"]["email"], "dev@example.com")
         self.assertNotIn("id", json_payload["customer"])
         self.assertEqual(json_payload["metadata"]["userId"], "usr_1")
 
-    def test_creem_checkout_reuses_existing_customer_id(self) -> None:
+    def test_creem_checkout_keeps_existing_customer_id_without_sending_it_to_checkout(self) -> None:
         response = Mock()
         response.json.return_value = {"id": "chk_123", "checkout_url": "https://creem.io/checkout/chk_123"}
         response.raise_for_status.return_value = None
@@ -360,7 +362,40 @@ class BillingContractsTest(unittest.TestCase):
             )
 
         self.assertEqual(session["customerId"], "cust_existing")
-        self.assertEqual(post.call_args.kwargs["json"]["customer"]["id"], "cust_existing")
+        self.assertEqual(post.call_args.kwargs["json"]["customer"], {"email": "dev@example.com"})
+
+    def test_creem_provider_error_uses_documented_message_and_trace_id(self) -> None:
+        response = Mock()
+        response.status_code = 400
+        response.json.return_value = {
+            "trace_id": "trace_123",
+            "status": 400,
+            "error": "Bad Request",
+            "message": ["Product not found"],
+            "timestamp": 1706889600000,
+        }
+        response.raise_for_status.side_effect = requests.HTTPError("400 Client Error", response=response)
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_CREEM_API_KEY": "creem_123"}, clear=True),
+            patch(
+                "pullwise_server.system_config.config",
+                return_value=creem_database_config(pro_product_ids=("prod_123",)),
+            ),
+            patch(
+                "pullwise_server.billing.requests.get",
+                side_effect=creem_product_get(creem_product("prod_123", price=2900, period="every-month")),
+            ),
+            patch("pullwise_server.billing.requests.post", return_value=response),
+            self.assertRaisesRegex(
+                billing.BillingProviderResponseError,
+                r"Creem checkout failed \(status 400\): Product not found\. Trace ID: trace_123\.",
+            ),
+        ):
+            billing.create_checkout_session(
+                {"id": "usr_1", "email": "dev@example.com"},
+                success_url="https://app.pullwise.dev/?billing=success",
+            )
 
     def test_billing_provider_requests_use_default_timeout_for_invalid_timeout_env(self) -> None:
         for timeout_value in ["abc", "0", "-5"]:

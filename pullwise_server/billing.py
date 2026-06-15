@@ -312,18 +312,95 @@ def creem_api_headers() -> dict[str, str]:
     return {"x-api-key": env("PULLWISE_CREEM_API_KEY"), "Content-Type": "application/json"}
 
 
-def fetch_creem_product(product_id: str) -> dict:
-    response = requests.get(
-        urljoin(creem_api_base_url() + "/", "v1/products"),
-        headers=creem_api_headers(),
-        params={"product_id": product_id},
-        timeout=billing_timeout_seconds(),
-    )
-    response.raise_for_status()
-    payload = response.json()
+def creem_get_json(path: str, *, action: str, params: dict | None = None) -> dict:
+    try:
+        response = requests.get(
+            urljoin(creem_api_base_url() + "/", path),
+            headers=creem_api_headers(),
+            params=params,
+            timeout=billing_timeout_seconds(),
+        )
+    except requests.RequestException as exc:
+        raise BillingProviderResponseError(f"Creem {action} request failed.") from exc
+    return creem_response_json(response, action)
+
+
+def creem_post_json(path: str, *, action: str, payload: dict | None = None) -> dict:
+    request_kwargs = {
+        "headers": creem_api_headers(),
+        "timeout": billing_timeout_seconds(),
+    }
+    if payload is not None:
+        request_kwargs["json"] = payload
+    try:
+        response = requests.post(
+            urljoin(creem_api_base_url() + "/", path),
+            **request_kwargs,
+        )
+    except requests.RequestException as exc:
+        raise BillingProviderResponseError(f"Creem {action} request failed.") from exc
+    return creem_response_json(response, action)
+
+
+def creem_response_json(response: requests.Response, action: str) -> dict:
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise BillingProviderResponseError(creem_error_message(response, action)) from exc
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise BillingProviderResponseError(f"Creem {action} did not return valid JSON.") from exc
     if not isinstance(payload, dict):
-        raise BillingProviderResponseError("Creem did not return a valid product payload.")
+        raise BillingProviderResponseError(f"Creem {action} did not return a valid JSON object.")
     return payload
+
+
+def creem_error_message(response: requests.Response, action: str) -> str:
+    payload = None
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    provider_status = ""
+    error = ""
+    trace_id = ""
+    messages: list[str] = []
+    if isinstance(payload, dict):
+        provider_status = clean_creem_error_text(payload.get("status"))
+        error = clean_creem_error_text(payload.get("error"))
+        trace_id = clean_creem_error_text(payload.get("trace_id"))
+        raw_messages = payload.get("message")
+        if isinstance(raw_messages, list):
+            messages = [message for message in (clean_creem_error_text(item) for item in raw_messages) if message]
+        else:
+            message = clean_creem_error_text(raw_messages)
+            if message:
+                messages = [message]
+    status = provider_status or clean_creem_error_text(getattr(response, "status_code", ""))
+    detail = "; ".join(messages) or error
+    message = f"Creem {action} failed"
+    if status:
+        message += f" (status {status})"
+    if detail:
+        message += f": {detail}"
+    if trace_id:
+        message += f". Trace ID: {trace_id}"
+    return message + "."
+
+
+def clean_creem_error_text(value: object) -> str:
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def fetch_creem_product(product_id: str) -> dict:
+    return creem_get_json("v1/products", action="product lookup", params={"product_id": product_id})
 
 
 def creem_product_catalog(plan: str | None = None) -> dict:
@@ -532,15 +609,16 @@ def validate_checkout_selection(plan: str, interval: str) -> tuple[str, str]:
 
 def create_creem_checkout_session(user: dict, *, success_url: str, cancel_url: str, plan: str, interval: str) -> dict:
     success_url = request_redirect_url(success_url, default_success_url(), "success")
-    cancel_url = request_redirect_url(cancel_url, default_cancel_url(), "cancel")
+    request_redirect_url(cancel_url, default_cancel_url(), "cancel")
     product_id = creem_product_id(interval, plan=plan)
     if not product_id:
         raise BillingConfigurationError(f"Creem {plan.title()} {interval} product is not configured.")
     request_id = f"pw_{user['id']}_{secrets.token_urlsafe(8)}"
+    existing_customer_id = None
+    raw_existing_customer_id = (user.get("billing") or {}).get("customerId")
+    if isinstance(raw_existing_customer_id, str) and raw_existing_customer_id.strip():
+        existing_customer_id = raw_existing_customer_id.strip()
     customer = {}
-    existing_customer_id = (user.get("billing") or {}).get("customerId")
-    if isinstance(existing_customer_id, str) and existing_customer_id.strip():
-        customer["id"] = existing_customer_id.strip()
     if user.get("email"):
         customer["email"] = user["email"]
     payload = {
@@ -548,7 +626,6 @@ def create_creem_checkout_session(user: dict, *, success_url: str, cancel_url: s
         "request_id": request_id,
         "units": 1,
         "success_url": success_url,
-        "cancel_url": cancel_url,
         "metadata": {
             "userId": user["id"],
             "plan": plan,
@@ -557,16 +634,9 @@ def create_creem_checkout_session(user: dict, *, success_url: str, cancel_url: s
     }
     if customer:
         payload["customer"] = customer
-    response = requests.post(
-        urljoin(creem_api_base_url() + "/", "v1/checkouts"),
-        headers=creem_api_headers(),
-        json=payload,
-        timeout=billing_timeout_seconds(),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    checkout_url = provider_redirect_url(payload.get("checkout_url") or payload.get("url"), "Creem", "Checkout")
-    returned_customer = payload.get("customer")
+    response_payload = creem_post_json("v1/checkouts", action="checkout", payload=payload)
+    checkout_url = provider_redirect_url(response_payload.get("checkout_url"), "Creem", "Checkout")
+    returned_customer = response_payload.get("customer")
     if isinstance(returned_customer, dict):
         returned_customer_id = returned_customer.get("id")
     else:
@@ -577,8 +647,8 @@ def create_creem_checkout_session(user: dict, *, success_url: str, cancel_url: s
         "provider": "creem",
         "plan": plan,
         "interval": interval,
-        "id": payload.get("id"),
-        "customerId": returned_customer_id or customer.get("id"),
+        "id": response_payload.get("id"),
+        "customerId": returned_customer_id or existing_customer_id,
         "requestId": request_id,
         "url": checkout_url,
     }
@@ -628,17 +698,14 @@ def create_creem_subscription_change(billing: dict, *, plan: str, interval: str,
         plan,
         interval,
     )
-    response = requests.post(
-        urljoin(creem_api_base_url() + "/", f"v1/subscriptions/{subscription_id}/upgrade"),
-        headers=creem_api_headers(),
-        json={
+    payload = creem_post_json(
+        f"v1/subscriptions/{subscription_id}/upgrade",
+        action="subscription upgrade",
+        payload={
             "product_id": product_id,
             "update_behavior": update_behavior,
         },
-        timeout=billing_timeout_seconds(),
     )
-    response.raise_for_status()
-    payload = response.json()
     normalized_status = normalize_subscription_status(payload.get("status"))
     cancel_at_period_end = payload.get("cancel_at_period_end")
     return {
@@ -707,14 +774,11 @@ def create_creem_subscription_cancel(billing: dict, *, mode: str = "scheduled") 
     subscription_id = billing.get("subscriptionId")
     if not subscription_id:
         raise BillingConfigurationError("No active Creem subscription is linked to this account.")
-    response = requests.post(
-        urljoin(creem_api_base_url() + "/", f"v1/subscriptions/{subscription_id}/cancel"),
-        headers=creem_api_headers(),
-        json={"mode": mode},
-        timeout=billing_timeout_seconds(),
+    payload = creem_post_json(
+        f"v1/subscriptions/{subscription_id}/cancel",
+        action="subscription cancellation",
+        payload={"mode": mode},
     )
-    response.raise_for_status()
-    payload = response.json()
     return {
         "provider": "creem",
         "plan": normalize_plan(billing.get("plan") or "pro"),
@@ -756,13 +820,10 @@ def create_creem_subscription_resume(billing: dict) -> dict:
     subscription_id = billing.get("subscriptionId")
     if not subscription_id:
         raise BillingConfigurationError("No active Creem subscription is linked to this account.")
-    response = requests.post(
-        urljoin(creem_api_base_url() + "/", f"v1/subscriptions/{subscription_id}/resume"),
-        headers=creem_api_headers(),
-        timeout=billing_timeout_seconds(),
+    payload = creem_post_json(
+        f"v1/subscriptions/{subscription_id}/resume",
+        action="subscription resume",
     )
-    response.raise_for_status()
-    payload = response.json()
     normalized_status = normalize_subscription_status(payload.get("status"))
     cancel_at_period_end = payload.get("cancel_at_period_end")
     return {

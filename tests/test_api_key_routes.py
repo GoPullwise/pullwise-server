@@ -560,6 +560,29 @@ class ApiKeyRoutesTest(unittest.TestCase):
             f"/repositories/{db.repository_id_for_github_repo('123')}",
         )
 
+    def test_checkout_session_provider_error_returns_bad_gateway(self) -> None:
+        cookie = seed_session()
+        handler = RouteHarness(
+            "/billing/checkout-sessions",
+            {"plan": "pro", "interval": "month"},
+            cookie=cookie,
+        )
+
+        with patch.object(
+            app.billing,
+            "create_checkout_session",
+            side_effect=app.billing.BillingProviderResponseError(
+                "Creem checkout failed (status 400): Product not found. Trace ID: trace_123."
+            ),
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.BAD_GATEWAY)
+        self.assertEqual(
+            handler.payload["message"],
+            "Creem checkout failed (status 400): Product not found. Trace ID: trace_123.",
+        )
+
     def test_subscription_plan_docs_route_returns_server_agent_config(self) -> None:
         handler = RouteHarness("/docs/subscription-plans")
 
