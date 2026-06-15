@@ -54,7 +54,7 @@ def worker_record_provider_chain(worker: dict) -> list[str]:
 
 def worker_record_ready_providers(worker: dict) -> list[str]:
     decoded = decoded_worker_json_payload(worker.get("ready_providers"), list)
-    ready = worker_provider_chain(decoded or worker.get("readyProviders"), strict=False) if decoded or worker.get("readyProviders") else []
+    ready = db.normalize_provider_list(decoded if decoded is not None else worker.get("readyProviders"))
     if ready:
         return ready
     fallback = []
@@ -557,7 +557,7 @@ def worker_create_payload(worker: dict) -> dict:
     local_install_url = f"{local_server_url}/install-worker.sh"
     max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
     worker_package = default_worker_package(public.get("version"))
-    provider_chain = worker_provider_chain(worker.get("provider_chain") or worker.get("providerChain"))
+    provider_chain = worker_record_provider_chain(worker)
     provider_chain_text = ",".join(provider_chain)
     safe_worker_id = worker_safe_service_id(public["worker_id"])
     service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"

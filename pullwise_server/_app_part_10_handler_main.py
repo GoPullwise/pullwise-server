@@ -519,9 +519,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 scan["changedFiles"] = changed_files
                             if base_commit:
                                 scan["baseCommit"] = base_commit
+                            SCANS.insert(0, scan)
+                            scan_created = True
+                            mark_state_dirty()
                             try:
                                 create_scan_job_for_scan(scan)
                             except Exception:
+                                SCANS[:] = [item for item in SCANS if item.get("id") != scan_id]
+                                scan_created = False
+                                mark_state_dirty()
                                 if not quota_result.get("deduplicated"):
                                     quota.rollback_scan_quota(
                                         scan_id=scan_id,
@@ -529,9 +535,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                         request_id=request_id or None,
                                     )
                                 raise
-                            SCANS.insert(0, scan)
-                            scan_created = True
-                            mark_state_dirty()
 
             if scan_error:
                 scan_logging.log_event(
@@ -2679,17 +2682,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             }
             if request_id:
                 scan["requestId"] = request_id
+            SCANS.insert(0, scan)
+            mark_state_dirty()
             try:
                 create_scan_job_for_scan(scan)
             except Exception:
+                SCANS[:] = [item for item in SCANS if item.get("id") != scan_id]
+                mark_state_dirty()
                 quota.rollback_scan_quota(
                     scan_id=scan_id,
                     requested_by_user_id=context["user"]["id"],
                     request_id=request_id or None,
                 )
                 raise
-            SCANS.insert(0, scan)
-            mark_state_dirty()
         scan_logging.log_event(
             "scan_queued",
             scanId=scan["id"],

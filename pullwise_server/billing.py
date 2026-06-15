@@ -569,11 +569,11 @@ def request_redirect_url(value: object, fallback: str, label: str) -> str:
 
 
 def default_success_url() -> str:
-    return f"{env('PULLWISE_APP_URL', 'http://localhost:5173').rstrip('/')}/?screen=settings&billing=success"
+    return f"{env('PULLWISE_APP_URL', 'http://localhost:5173').rstrip('/')}/settings?billing=success"
 
 
 def default_cancel_url() -> str:
-    return f"{env('PULLWISE_APP_URL', 'http://localhost:5173').rstrip('/')}/?screen=settings&billing=cancel"
+    return f"{env('PULLWISE_APP_URL', 'http://localhost:5173').rstrip('/')}/settings?billing=cancel"
 
 
 def create_checkout_session(
