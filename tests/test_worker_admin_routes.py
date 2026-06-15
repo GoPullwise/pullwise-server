@@ -365,6 +365,28 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertFalse(app.worker_version_compatible({"version": "0.10.0-beta"}))
             self.assertFalse(app.worker_version_compatible({"version": ""}))
 
+    def test_admin_worker_defaults_recovers_from_invalid_plan_agent_state(self) -> None:
+        db.save_state_item(
+            app.billing.REVIEW_AGENT_CONFIG_STATE_KEY,
+            {
+                "version": 1,
+                "plans": {
+                    "free": {"providerChain": ["bad"]},
+                    "pro": {"providerChain": []},
+                    "max": {"providerChain": "bad"},
+                },
+            },
+        )
+
+        with patch("urllib.request.urlopen", side_effect=OSError("network unavailable")):
+            handler = RouteHarness("/admin/workers/defaults", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["providerChain"], ["codex"])
+        self.assertEqual(handler.payload["defaults"]["providerChain"], ["codex"])
+        self.assertEqual(handler.payload["workerVersion"], app.DEFAULT_WORKER_PACKAGE_VERSION)
+
     def test_admin_worker_defaults_refresh_bypasses_cached_latest_release(self) -> None:
         class ReleaseResponse:
             def __enter__(self) -> "ReleaseResponse":
@@ -691,6 +713,39 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("providerChain", update.payload["message"])
+
+    def test_plan_agent_config_reads_repair_invalid_persisted_provider_chain(self) -> None:
+        db.save_state_item(
+            app.billing.REVIEW_AGENT_CONFIG_STATE_KEY,
+            {
+                "version": 1,
+                "plans": {
+                    "free": {
+                        "providerChain": ["bad"],
+                        "codex": {"cli": "codex", "model": "gpt-free", "reasoningEffort": "high"},
+                    },
+                    "pro": {"providerChain": []},
+                    "max": {"providerChain": "bad"},
+                },
+            },
+        )
+
+        admin = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(admin, "GET")
+        docs = RouteHarness("/docs/subscription-plans")
+        app.PullwiseHandler.route(docs, "GET")
+
+        for handler in (admin, docs):
+            self.assertEqual(handler.status, HTTPStatus.OK)
+            self.assertEqual(handler.payload["agentConfigs"]["free"]["providerChain"], ["codex"])
+            self.assertEqual(handler.payload["agentConfigs"]["pro"]["providerChain"], ["codex"])
+            self.assertEqual(handler.payload["agentConfigs"]["max"]["providerChain"], ["codex"])
+            self.assertEqual(handler.payload["agentConfigs"]["free"]["codex"]["model"], "gpt-free")
+
+        stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
+        self.assertEqual(stored["plans"]["free"]["providerChain"], ["codex"])
+        self.assertEqual(stored["plans"]["pro"]["providerChain"], ["codex"])
+        self.assertEqual(stored["plans"]["max"]["providerChain"], ["codex"])
 
     def test_admin_review_calibration_summary_is_admin_only_and_sanitized(self) -> None:
         event = {

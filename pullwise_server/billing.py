@@ -81,18 +81,22 @@ def clean_review_agent_effort(value: object, default: str) -> str:
     return effort if effort in REVIEW_AGENT_EFFORTS else default
 
 
-def clean_review_agent_provider_chain(value: object) -> list[str]:
+def clean_review_agent_provider_chain(value: object, *, strict: bool = True) -> list[str]:
     if isinstance(value, list):
         raw_items = value
     else:
-        raise ValueError("providerChain must be a non-empty list of codex providers.")
+        if strict:
+            raise ValueError("providerChain must be a non-empty list of codex providers.")
+        raw_items = []
     providers: list[str] = []
     for item in raw_items:
         provider = clean_review_agent_provider(item)
         if provider and provider not in providers:
             providers.append(provider)
     if not providers:
-        raise ValueError("providerChain must include codex.")
+        if strict:
+            raise ValueError("providerChain must include codex.")
+        return ["codex"]
     return providers
 
 
@@ -139,7 +143,7 @@ def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
     if "providerChain" in source:
-        result["providerChain"] = clean_review_agent_provider_chain(source.get("providerChain"))
+        result["providerChain"] = clean_review_agent_provider_chain(source.get("providerChain"), strict=False)
     result["codex"] = normalize_review_agent_provider_config("codex", source.get("codex"), defaults["codex"])
     return result
 
