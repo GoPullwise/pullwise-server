@@ -561,6 +561,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["workerVersion"], "0.2.3")
         self.assertEqual(handler.payload["workerPackage"], expected_package)
         self.assertEqual(handler.payload["latestWorkerVersion"], "0.2.3")
+        self.assertEqual(handler.payload["providerChain"], ["opencode", "codex"])
+        self.assertEqual(handler.payload["defaults"]["providerChain"], ["opencode", "codex"])
         self.assertEqual(handler.payload["release"]["latestVersion"], "0.2.3")
 
     def test_admin_worker_defaults_refresh_bypasses_cached_latest_release(self) -> None:

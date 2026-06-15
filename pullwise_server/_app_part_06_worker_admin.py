@@ -353,15 +353,18 @@ def worker_defaults_payload(*, force_refresh: bool = False) -> dict:
     version = configured_version or latest_version or configured_worker_release_version()
     package = worker_release_package(version)
     latest_package = worker_release_package(latest_version) if latest_version else ""
+    provider_chain = default_worker_provider_chain()
     return {
         "workerVersion": version,
         "workerPackage": package,
         "latestWorkerVersion": latest_version,
         "latestWorkerPackage": latest_package,
         "configuredWorkerVersion": configured_version,
+        "providerChain": list(provider_chain),
         "defaults": {
             "version": version,
             "package": package,
+            "providerChain": list(provider_chain),
             "source": "configured" if configured_version else "latest" if latest_version else "fallback",
         },
         "release": {
