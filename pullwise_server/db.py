@@ -987,6 +987,30 @@ def provider_list_json(value: Any, *, fallback: Any = None) -> str | None:
     return json.dumps(providers, sort_keys=True) if providers else None
 
 
+def provider_ready_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "ready"}
+    return False
+
+
+def heartbeat_ready_providers_json(record: dict[str, Any]) -> str | None:
+    raw_ready = record.get("ready_providers")
+    if raw_ready is not None:
+        return json.dumps(normalize_provider_list(raw_ready), sort_keys=True)
+    if "codex_ready" not in record and "opencode_ready" not in record:
+        return None
+    providers: list[str] = []
+    if provider_ready_flag(record.get("codex_ready")):
+        providers.append("codex")
+    if provider_ready_flag(record.get("opencode_ready")):
+        providers.append("opencode")
+    return json.dumps(providers, sort_keys=True)
+
+
 WORKER_LIFECYCLE_COMMANDS = {"stop", "uninstall"}
 WORKER_COMMAND_ACTIVE_STATUSES = {"pending", "running"}
 WORKER_COMMAND_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
@@ -1271,7 +1295,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     free_slots = max(0, min(max_concurrent_jobs, int(record.get("free_slots") or 0)))
     provider = str(record.get("provider") or "codex")[:60]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
-    ready_providers = provider_list_json(record.get("ready_providers"))
+    ready_providers = heartbeat_ready_providers_json(record)
     machine_metrics = record.get("machine_metrics")
     machine_metrics_history = record.get("machine_metrics_history")
     machine_metrics_text = (

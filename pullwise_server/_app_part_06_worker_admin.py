@@ -54,9 +54,10 @@ def worker_record_provider_chain(worker: dict) -> list[str]:
 
 def worker_record_ready_providers(worker: dict) -> list[str]:
     decoded = decoded_worker_json_payload(worker.get("ready_providers"), list)
-    ready = db.normalize_provider_list(decoded if decoded is not None else worker.get("readyProviders"))
-    if ready:
-        return ready
+    if decoded is not None:
+        return db.normalize_provider_list(decoded)
+    if worker.get("readyProviders") is not None:
+        return db.normalize_provider_list(worker.get("readyProviders"))
     fallback = []
     if worker.get("codex_ready"):
         fallback.append("codex")

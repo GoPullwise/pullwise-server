@@ -2283,7 +2283,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "doctor_status": public_issue_text(body.get("doctor_status")),
                     "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,
                     "opencode_ready": 1 if body.get("opencode_ready") is True else 0 if body.get("opencode_ready") is False else None,
-                    "ready_providers": body.get("readyProviders") or body.get("ready_providers"),
+                    "ready_providers": body.get("readyProviders") if "readyProviders" in body else body.get("ready_providers"),
                     "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
                     "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
                     "machine_metrics": machine_metrics,
