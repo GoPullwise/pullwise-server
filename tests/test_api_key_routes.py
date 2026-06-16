@@ -237,6 +237,51 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(stop.status, HTTPStatus.OK)
         self.assertEqual(stop.payload["status"], "cancelled")
 
+    def test_api_current_and_stop_reconcile_completed_scan_when_state_is_stale(self) -> None:
+        _cookie, key = self.create_api_key()
+        auth = {"Authorization": f"Bearer {key}"}
+        repositories = RouteHarness("/api/v1/repositories", headers=auth)
+        app.PullwiseHandler.route(repositories, "GET")
+        repo = repositories.payload["items"][0]
+
+        with patch.object(app, "scan_branch_is_available", return_value=True):
+            start = RouteHarness(
+                f"/api/v1/repositories/{repo['repoId']}/scans",
+                {"requestId": "req_api_stale_done", "branch": "main"},
+                headers=auth,
+            )
+            app.PullwiseHandler.route(start, "POST")
+        self.assertEqual(start.status, HTTPStatus.CREATED)
+        job = db.get_scan_job_for_scan(start.payload["id"])
+        claimed = db.claim_next_scan_jobs("wk_api", max_jobs=1, timestamp=app.now())[0]
+        db.record_scan_job_result(
+            job["job_id"],
+            attempt_id=f"wk_api-{claimed['attempt']}",
+            status="done",
+            result_checksum="checksum-api-stale-done",
+            payload={
+                "status": "done",
+                "attempt_id": f"wk_api-{claimed['attempt']}",
+                "result_checksum": "checksum-api-stale-done",
+                "audit_protocol": "audit-swarm/0.1",
+                "issue_cards": [],
+                "verification_results": [],
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+        )
+        app.SCANS[0].update({"status": "running", "phase": "ai", "progress": 80})
+
+        stop = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/stop", headers=auth)
+        app.PullwiseHandler.route(stop, "POST")
+        self.assertEqual(stop.status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(app.SCANS[0]["status"], "done")
+
+        current = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/current", headers=auth)
+        app.PullwiseHandler.route(current, "GET")
+        self.assertEqual(current.status, HTTPStatus.OK)
+        self.assertEqual(current.payload["status"], "done")
+        self.assertEqual(current.payload["scan"]["id"], start.payload["id"])
+
     def test_api_key_repository_routes_reject_misbound_github_access(self) -> None:
         _cookie, key = self.create_api_key()
         auth = {"Authorization": f"Bearer {key}"}
