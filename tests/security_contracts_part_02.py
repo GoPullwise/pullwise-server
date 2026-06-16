@@ -684,6 +684,61 @@ class SecurityContractsPart02Test(SecurityContractsBase):
         self.assertFalse(handler.payload["needsAuthorization"])
         self.assertFalse(handler.payload["repositoriesNeedSync"])
         self.assertEqual([item["fullName"] for item in handler.payload["items"]], ["octocat/private-repo"])
+
+    def test_repositories_route_pages_before_full_response_enrichment(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "github-app",
+            "scope": "selected",
+            "repositorySelection": "selected",
+            "authorizedUserId": "usr_1",
+            "authorizedGithubId": "1",
+            "authorizedGithubLogin": "octocat",
+            "installationId": "111",
+            "installationIds": ["111"],
+            "installationAccount": "octocat",
+            "installationAccounts": ["octocat"],
+            "repositories": [
+                "octocat/alpha",
+                "octocat/beta",
+                "octocat/gamma",
+            ],
+            "repositoryItems": [
+                {
+                    "id": str(100 + index),
+                    "name": name,
+                    "fullName": f"octocat/{name}",
+                    "installationId": "111",
+                    "installationAccount": "octocat",
+                    "defaultBranch": "main",
+                    "cloneUrl": f"https://github.com/octocat/{name}.git",
+                }
+                for index, name in enumerate(("alpha", "beta", "gamma"))
+            ],
+            "repositoriesNeedSync": False,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+
+        with patch.object(app, "repository_items_for_response", wraps=app.repository_items_for_response) as full_response:
+            handler = RouteHarness("/repositories?limit=1", cookie="pw_session=ses_1")
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["total"], 3)
+        self.assertEqual(handler.payload["limit"], 1)
+        self.assertEqual(handler.payload["offset"], 0)
+        self.assertTrue(handler.payload["hasMore"])
+        self.assertEqual([item["fullName"] for item in handler.payload["items"]], ["octocat/alpha"])
+        self.assertEqual(handler.payload["repositories"], handler.payload["items"])
+        self.assertEqual(full_response.call_count, 0)
+
     def test_repositories_payload_sanitizes_malformed_repository_items(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {

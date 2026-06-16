@@ -189,15 +189,26 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/dev/magic-links" or path == "/auth/email/callback":
             return self.error(HTTPStatus.NOT_FOUND, "Route not found")
         if path == "/repositories":
-            return self.json(self.repositories_payload())
+            return self.json(self.repositories_payload(params=params))
         if len(segments) == 3 and segments[0] == "repositories" and segments[2] == "branches":
             return self.handle_repository_branches(segments[1])
         if path == "/scans":
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scans = filter_user_scan_payloads([scan_payload(scan) for scan in user_scans_for_read(session)], params)
-            return self.json(paginated_response(scans, keys=("scans",), params=params))
+            scans = filter_user_scan_records(user_scans_for_read(session), params)
+            limit, offset = pagination_params(params)
+            page = scans[offset : offset + limit]
+            scan_payloads = [scan_list_payload(scan) for scan in page]
+            return self.json(
+                paginated_page_response(
+                    scan_payloads,
+                    total=len(scans),
+                    limit=limit,
+                    offset=offset,
+                    keys=("scans",),
+                )
+            )
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "audit-bundle.zip":
             session = self.current_session()
             if not session:
@@ -251,8 +262,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing issues.")
-            issue_payloads = filter_user_issue_payloads([issue_payload(issue) for issue in user_issues(session)], params)
-            return self.json(paginated_response(issue_payloads, keys=("issues",), params=params))
+            issues = filter_user_issue_records(user_issues(session), params)
+            limit, offset = pagination_params(params)
+            page = issues[offset : offset + limit]
+            issue_payloads = [issue_payload(issue) for issue in page]
+            return self.json(
+                paginated_page_response(
+                    issue_payloads,
+                    total=len(issues),
+                    limit=limit,
+                    offset=offset,
+                    keys=("issues",),
+                )
+            )
         if len(segments) == 2 and segments[0] == "issues":
             session = self.current_session()
             if not session:
@@ -1608,7 +1630,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             }
         )
 
-    def repositories_payload(self, refresh: bool = False) -> dict:
+    def repositories_payload(self, refresh: bool = False, params: dict | None = None) -> dict:
         session = self.current_session()
         if not session:
             return {"items": [], "repositories": [], "needsAuthorization": True}
@@ -1652,12 +1674,28 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 github_access = refreshed_access
                 bound_existing_access = True
 
-        repository_items = repository_items_for_response(user, github_access)
         if not github_repository_access_connected(github_access):
             payload = unavailable_repositories_payload(github_access)
             payload["userQuota"] = user_quota
             return payload
+        if repository_list_params_active(params):
+            payload = paginated_repository_items_for_response(user, github_access, params or {})
+            payload.update(
+                {
+                    "userQuota": user_quota,
+                    "needsAuthorization": False,
+                    "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
+                    "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
+                    "repositorySelection": clean_github_access_text(github_access.get("repositorySelection")),
+                    "installationAccount": clean_github_access_text(github_access.get("installationAccount")),
+                    "installationAccounts": clean_github_access_text_list(github_access.get("installationAccounts")),
+                    "installations": public_installation_summaries(user, github_access),
+                    "repositoriesNeedSync": github_repositories_need_sync(github_access),
+                }
+            )
+            return payload
 
+        repository_items = repository_items_for_response(user, github_access)
         return {
             "items": repository_items,
             "repositories": repository_items,

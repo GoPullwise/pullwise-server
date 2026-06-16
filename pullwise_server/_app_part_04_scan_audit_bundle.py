@@ -1031,6 +1031,161 @@ def scan_payload(scan: dict) -> dict:
     return payload
 
 
+def scan_list_payload(scan: dict) -> dict:
+    payload = {
+        "id": public_issue_text(scan.get("id")),
+        "userId": public_issue_text(scan.get("userId")),
+        "repo": clean_repository_full_name(scan.get("repo")),
+        "branch": clean_github_access_text(scan.get("branch")) or "main",
+        "commit": clean_github_access_text(scan.get("commit")) or "pending",
+        "status": public_scan_status(scan.get("status")),
+        "phase": public_scan_phase(scan.get("phase")),
+        "progress": public_scan_progress(scan.get("progress")),
+        "issues": public_scan_issue_counts(scan.get("issues")),
+        "verification": public_scan_verification_counts(scan),
+        "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
+    }
+    effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
+    if effective_agent_config:
+        payload["effectiveAgentConfig"] = effective_agent_config
+    ai_usage_source = dict(scan.get("aiUsage") if isinstance(scan.get("aiUsage"), dict) else {})
+    if effective_agent_config:
+        effective_agent = effective_agent_config["agent"]
+        ai_usage_source.setdefault("agentCli", effective_agent["command"] or effective_agent_config["provider"])
+        ai_usage_source.setdefault("provider", effective_agent_config["provider"])
+        ai_usage_source.setdefault("model", effective_agent["model"])
+        ai_usage_source.setdefault("reasoningEffort", effective_agent["reasoningEffort"])
+    ai_usage = public_scan_ai_usage(ai_usage_source)
+    if ai_usage:
+        payload["aiUsage"] = ai_usage
+    verification_audit = public_scan_verification_audit(scan)
+    if public_scan_verification_audit_has_data(verification_audit):
+        payload["verificationAudit"] = {
+            key: value
+            for key, value in verification_audit.items()
+            if key
+            in {
+                "candidateCount",
+                "reportedCount",
+                "auditOnlyCount",
+                "rejectedCount",
+                "downgradedCount",
+                "verifiedSuppressionCount",
+                "verifiedCount",
+                "staticProofCount",
+                "potentialRiskCount",
+                "unverifiedCount",
+                "summary",
+            }
+        }
+    completion_audit = public_scan_completion_audit(scan.get("completionAudit") or scan.get("completion_audit"))
+    if completion_audit:
+        payload["completionAudit"] = completion_audit
+    job_trace = public_scan_job_trace(scan.get("jobTrace") or scan.get("job_trace"))
+    if job_trace:
+        payload["jobTrace"] = job_trace
+    base_commit = clean_github_access_text(scan.get("baseCommit") or scan.get("base_commit"))
+    if base_commit:
+        payload["baseCommit"] = base_commit
+    for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
+        if key in scan:
+            payload[key] = pull_request_timestamp(scan.get(key)) or 0
+    if "error" in scan:
+        payload["error"] = clean_scan_error(scan.get("error"))
+    error_code = public_scan_error_code(scan.get("errorCode") or scan.get("error_code"))
+    if error_code:
+        payload["errorCode"] = error_code
+    if "time" in scan:
+        payload["time"] = public_issue_text(scan.get("time"))
+    if "by" in scan:
+        payload["by"] = public_issue_text(scan.get("by"))
+    if "reviewOutputLanguage" in scan:
+        language = review_output_language_payload(scan.get("reviewOutputLanguage"))
+        payload["reviewOutputLanguage"] = language["code"]
+    if "installationId" in scan:
+        payload["installationId"] = clean_github_access_text(scan.get("installationId"), allow_int=True)
+    for key in ("repoId", "githubRepoId"):
+        if key in scan:
+            payload[key] = clean_github_access_text(scan.get(key), allow_int=True)
+    if isinstance(scan.get("quotaBucketIds"), dict):
+        payload["quotaBucketIds"] = {
+            key: clean_github_access_text(value, allow_int=True)
+            for key, value in scan["quotaBucketIds"].items()
+            if clean_github_access_text(value, allow_int=True)
+        }
+    if isinstance(scan.get("billingUsage"), dict):
+        payload["billingUsage"] = safe_quota_usage_payload(scan.get("billingUsage"), default_scope="user")
+    if isinstance(scan.get("repoUsage"), dict):
+        payload["repoUsage"] = safe_quota_usage_payload(scan.get("repoUsage"), default_scope="repository")
+    quota_state = public_issue_text(scan.get("quotaState"))
+    if quota_state in {"reserved", "consumed", "released", "refunded"}:
+        payload["quotaState"] = quota_state
+    for key in ("quotaReservedAt", "quotaConsumedAt", "quotaReleasedAt"):
+        if pull_request_timestamp(scan.get(key)):
+            payload[key] = pull_request_timestamp(scan.get(key)) or 0
+    quota_trigger = public_issue_text(scan.get("quotaConsumeTrigger"))
+    if quota_trigger:
+        payload["quotaConsumeTrigger"] = quota_trigger
+    quota_release_reason = public_issue_text(scan.get("quotaReleaseReason"))
+    if quota_release_reason:
+        payload["quotaReleaseReason"] = quota_release_reason
+    if isinstance(scan.get("quotaRefunded"), dict):
+        refunded = scan["quotaRefunded"]
+        reason = public_scan_error_code(refunded.get("reason"))
+        if reason:
+            payload["quotaRefunded"] = {
+                "reason": reason,
+                "ledgerRows": public_scan_count(refunded.get("ledgerRows")),
+                "bucketRows": public_scan_count(refunded.get("bucketRows")),
+            }
+    if isinstance(scan.get("riskDecision"), dict):
+        decision = public_issue_text(scan["riskDecision"].get("decision"))
+        reason = public_issue_text(scan["riskDecision"].get("reason"))
+        risk_payload = {}
+        if decision:
+            risk_payload["decision"] = decision
+        if reason:
+            risk_payload["reason"] = reason
+        matched_repository_id = clean_github_access_text(scan["riskDecision"].get("matchedRepositoryId"), allow_int=True)
+        if matched_repository_id:
+            risk_payload["matchedRepositoryId"] = matched_repository_id
+        if risk_payload:
+            payload["riskDecision"] = risk_payload
+    if isinstance(scan.get("repoFingerprint"), dict):
+        fingerprint_payload = {}
+        for source_key, target_key in (
+            ("headSha", "headSha"),
+            ("treeSha", "treeSha"),
+            ("lockfileHash", "lockfileHash"),
+            ("manifestHash", "manifestHash"),
+            ("sourceFingerprint", "sourceFingerprint"),
+        ):
+            value = clean_github_access_text(scan["repoFingerprint"].get(source_key))
+            if value:
+                fingerprint_payload[target_key] = value
+        if fingerprint_payload:
+            payload["repoFingerprint"] = fingerprint_payload
+    if "installationAccount" in scan:
+        payload["installationAccount"] = clean_github_access_text(scan.get("installationAccount"))
+    if "installationTargetType" in scan:
+        payload["installationTargetType"] = clean_github_access_text(scan.get("installationTargetType"))
+    if "repositorySelection" in scan:
+        payload["repositorySelection"] = clean_github_access_text(scan.get("repositorySelection"))
+    if "cloneUrl" in scan:
+        payload["cloneUrl"] = trusted_github_web_url(scan.get("cloneUrl"))
+    if "jobId" in scan:
+        payload["jobId"] = public_issue_text(scan.get("jobId"))
+    claimed_by_worker_id = public_issue_text(scan.get("claimedByWorkerId"))
+    if claimed_by_worker_id:
+        payload["worker"] = {"id": claimed_by_worker_id}
+    if pull_request_timestamp(scan.get("claimedAt")):
+        payload["claimedAt"] = pull_request_timestamp(scan.get("claimedAt")) or 0
+    queue = scan_queue_payload(scan)
+    if queue:
+        payload["queue"] = queue
+    return payload
+
+
 def public_scan_status(value: object) -> str:
     status = public_issue_text(value).lower()
     return status if status in SCAN_STATUSES else "queued"

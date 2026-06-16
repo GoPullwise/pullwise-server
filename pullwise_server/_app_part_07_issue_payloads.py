@@ -1081,6 +1081,17 @@ def paginated_response(items: list[dict], *, keys: tuple[str, ...], params: dict
     limit, offset = pagination_params(params)
     total = len(items)
     page = items[offset : offset + limit]
+    return paginated_page_response(page, total=total, limit=limit, offset=offset, keys=keys)
+
+
+def paginated_page_response(
+    page: list[dict],
+    *,
+    total: int,
+    limit: int,
+    offset: int,
+    keys: tuple[str, ...],
+) -> dict:
     next_offset = offset + len(page)
     payload = {
         "items": page,
@@ -1095,6 +1106,17 @@ def paginated_response(items: list[dict], *, keys: tuple[str, ...], params: dict
     return payload
 
 
+def filter_user_scan_records(scans: list[dict], params: dict) -> list[dict]:
+    raw_status = public_issue_text(params.get("status")).lower()
+    status = public_scan_status(raw_status) if raw_status and raw_status != "all" else ""
+    repo = clean_repository_full_name(params.get("repo"))
+    if status:
+        scans = [scan for scan in scans if public_scan_status(scan.get("status")) == status]
+    if repo:
+        scans = [scan for scan in scans if clean_repository_full_name(scan.get("repo")) == repo]
+    return sorted(scans, key=lambda scan: (pull_request_timestamp(scan.get("createdAt")) or 0, public_issue_text(scan.get("id"))), reverse=True)
+
+
 def filter_user_scan_payloads(scans: list[dict], params: dict) -> list[dict]:
     raw_status = public_issue_text(params.get("status")).lower()
     status = public_scan_status(raw_status) if raw_status and raw_status != "all" else ""
@@ -1104,6 +1126,31 @@ def filter_user_scan_payloads(scans: list[dict], params: dict) -> list[dict]:
     if repo:
         scans = [scan for scan in scans if scan.get("repo") == repo]
     return sorted(scans, key=lambda scan: (pull_request_timestamp(scan.get("createdAt")) or 0, public_issue_text(scan.get("id"))), reverse=True)
+
+
+def filter_user_issue_records(issues: list[dict], params: dict) -> list[dict]:
+    raw_status = public_issue_text(params.get("status")).lower()
+    raw_severity = public_issue_text(params.get("severity")).lower()
+    status = public_issue_status(raw_status) if raw_status and raw_status != "all" else ""
+    severity = review._safe_severity(raw_severity) if raw_severity and raw_severity != "all" else ""
+    scan_id = public_issue_text(params.get("scanId"))
+    query = public_issue_text(params.get("q")).lower()
+    if status:
+        issues = [issue for issue in issues if public_issue_status(issue.get("status")) == status]
+    if severity:
+        issues = [issue for issue in issues if review._safe_severity(issue.get("severity")) == severity]
+    if scan_id:
+        issues = [issue for issue in issues if public_issue_text(issue.get("scanId")) == scan_id]
+    if query:
+        issues = [
+            issue
+            for issue in issues
+            if any(
+                query in public_issue_text(value).lower()
+                for value in (issue.get("title"), issue.get("file"), issue.get("repo"), issue.get("category"), issue.get("id"))
+            )
+        ]
+    return issues
 
 
 def filter_user_issue_payloads(issues: list[dict], params: dict) -> list[dict]:

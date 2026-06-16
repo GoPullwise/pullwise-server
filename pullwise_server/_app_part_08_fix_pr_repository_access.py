@@ -620,6 +620,69 @@ def repository_items_for_response(user: dict | None, github_access: dict | None)
     return [repository_item_with_quota(item, user) for item in repository_items_for_payload(github_access)]
 
 
+def sync_repository_response_items_for_user(user: dict | None, items: list[dict]) -> None:
+    if not user or not items:
+        return
+    try:
+        from . import repository_access
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            repository_record = repository_access.repository_record_from_item(item)
+            if not repository_record:
+                continue
+            repository = db.upsert_repository(repository_record)
+            item["repoId"] = repository["id"]
+            item["githubRepoId"] = repository["github_repo_id"]
+    except Exception:
+        logger.exception("Unable to sync repository response page for user %s", user.get("id"))
+
+
+def repository_list_params_active(params: dict | None) -> bool:
+    if not isinstance(params, dict):
+        return False
+    return any(public_issue_text(params.get(key)) for key in ("limit", "offset", "q", "owner"))
+
+
+def filter_repository_items_for_list(items: list[dict], params: dict) -> list[dict]:
+    query = public_issue_text(params.get("q")).lower()
+    owner = public_issue_text(params.get("owner")).lower().lstrip("@")
+    if owner:
+        items = [
+            item
+            for item in items
+            if public_issue_text(item.get("fullName")).split("/", 1)[0].lower() == owner
+        ]
+    if query:
+        items = [
+            item
+            for item in items
+            if any(
+                query in public_issue_text(value).lower()
+                for value in (
+                    item.get("name"),
+                    item.get("fullName"),
+                    item.get("desc"),
+                    item.get("description"),
+                    item.get("lang"),
+                    item.get("repoId"),
+                    item.get("githubRepoId"),
+                    item.get("id"),
+                )
+            )
+        ]
+    return items
+
+
+def paginated_repository_items_for_response(user: dict | None, github_access: dict | None, params: dict) -> dict:
+    repository_items = filter_repository_items_for_list(repository_items_for_payload(github_access), params)
+    limit, offset = pagination_params(params, default_limit=100, max_limit=200)
+    page_records = repository_items[offset : offset + limit]
+    sync_repository_response_items_for_user(user, page_records)
+    page = [repository_item_with_quota(item, user) for item in page_records]
+    return paginated_page_response(page, total=len(repository_items), limit=limit, offset=offset, keys=("repositories",))
+
+
 def scan_resource_context(user: dict, github_access: dict, repo_meta: dict) -> tuple[dict, dict]:
     sync_repository_access_for_user(user, github_access)
     from . import repository_access
@@ -1434,4 +1497,3 @@ def session_payload(session: dict | None) -> dict:
         "navigation": navigation_payload(),
         "nextStep": "choose_repositories" if repositories_connected else "connect_github_repositories",
     }
-
