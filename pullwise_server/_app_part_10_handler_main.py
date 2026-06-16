@@ -12,7 +12,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not rate_limit_enabled() or rate_limit_exempt_path(method, path):
             self._rate_limit_headers = {}
             return False
-        if path.startswith("/worker/") and worker_token_record(self, allow_disabled=True):
+        if path.startswith("/worker/") and worker_token_record(self, allow_disabled=True, include_deleted=True):
             self._rate_limit_headers = {}
             return False
         limit = rate_limit_requests()

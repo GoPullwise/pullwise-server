@@ -8,7 +8,7 @@ from contextlib import closing
 from http import HTTPStatus
 from unittest.mock import patch
 
-from pullwise_server import app
+from pullwise_server import app, db
 
 
 class HandlerHarness(app.PullwiseHandler):
@@ -145,6 +145,38 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
 
         self.assertFalse(limited)
         record_rate_limit_hit.assert_not_called()
+
+    def test_deleted_worker_command_poll_keeps_worker_rate_limit_exemption(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_DB_PATH": db_path,
+                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+                },
+                clear=True,
+            ):
+                db.initialize()
+                worker = db.create_worker({"name": "Worker", "provider": "codex"})
+                worker_id = worker["worker_id"]
+                command = db.create_worker_command({"worker_id": worker_id, "command": "uninstall"})
+                first = HandlerHarness("/auth/session")
+                poll = HandlerHarness(
+                    "/worker/commands/poll",
+                    {"worker_id": worker_id},
+                    headers={"Authorization": f"Bearer {worker['worker_token']}"},
+                )
+
+                app.PullwiseHandler.route(first, "GET")
+                app.PullwiseHandler.route(poll, "POST")
+
+            self.assertEqual(first.status, HTTPStatus.OK)
+            self.assertEqual(poll.status, HTTPStatus.OK)
+            self.assertEqual(poll.payload["command"]["id"], command["id"])
 
     def test_rate_limit_storage_failures_do_not_block_api_requests(self) -> None:
         handler = HandlerHarness("/auth/session")
