@@ -701,16 +701,23 @@ if [ -z "$SERVER_URL" ] || [ -z "$WORKER_ID" ] || [ -z "$WORKER_TOKEN" ]; then
   echo "missing --server, --worker-id, or worker token env/file" >&2
   exit 2
 fi
+if ! command -v sha256sum >/dev/null 2>&1; then
+  echo "missing required command: sha256sum" >&2
+  exit 1
+fi
 safe_worker_id() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-48
 }
 service_user_name() {
-  local suffix
-  suffix="$(printf '%s' "$1" | tr 'A-Z_' 'a-z-' | tr -cd 'a-z0-9-' | cut -c1-16)"
-  if [ -z "$suffix" ]; then
-    suffix="worker"
+  local prefix digest
+  prefix="$(printf '%s' "$1" | tr 'A-Z_' 'a-z-' | tr -cd 'a-z0-9-' | cut -c1-10)"
+  if [ -z "$prefix" ]; then
+    prefix="worker"
   fi
-  printf 'pw-worker-%s\n' "$suffix"
+  digest="$(printf '%s' "$1" | sha256sum)"
+  digest="${digest%% *}"
+  digest="$(printf '%s' "$digest" | cut -c1-10)"
+  printf 'pw-worker-%s-%s\n' "$prefix" "$digest"
 }
 SAFE_WORKER_ID="$(safe_worker_id "$WORKER_ID")"
 if [ -z "$SAFE_WORKER_ID" ]; then
@@ -718,7 +725,6 @@ if [ -z "$SAFE_WORKER_ID" ]; then
   exit 2
 fi
 SERVICE_USER="$(service_user_name "$SAFE_WORKER_ID")"
-SERVICE_GROUP="pullwise-worker"
 BASE_CONFIG_DIR="/etc/pullwise-worker"
 BASE_DATA_DIR="/var/lib/pullwise-worker"
 BASE_LOG_DIR="/var/log/pullwise-worker"
@@ -904,11 +910,17 @@ PY
 PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
 
 ROLLBACK_ENABLED=1
-getent group "$SERVICE_GROUP" >/dev/null 2>&1 || groupadd --system "$SERVICE_GROUP"
-id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
-usermod -a -G "$SERVICE_GROUP" "$SERVICE_USER"
+if id "$SERVICE_USER" >/dev/null 2>&1; then
+  existing_home="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
+  if [ "$existing_home" != "$DATA_DIR" ]; then
+    echo "service user $SERVICE_USER already exists with home $existing_home; expected $DATA_DIR" >&2
+    exit 1
+  fi
+else
+  useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+fi
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
-install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"
+install -d -m 0755 -o root -g root "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin" "$DATA_DIR/.codex/bin"
 
@@ -1033,7 +1045,6 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
-SupplementaryGroups=$SERVICE_GROUP
 WorkingDirectory=$DATA_DIR
 EnvironmentFile=$ENV_FILE
 Environment=PATH=$SERVICE_TOOL_PATH
@@ -1049,7 +1060,7 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=$BASE_DATA_DIR $BASE_LOG_DIR $DATA_DIR $LOG_DIR
+ReadWritePaths=$DATA_DIR $LOG_DIR
 RuntimeDirectory=$SERVICE_NAME
 RuntimeDirectoryMode=0750
 ExecStopPost=+$BIN_PATH finalize-uninstall
