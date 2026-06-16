@@ -82,13 +82,13 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     doctor_status = public_issue_text(worker.get("doctor_status")).lower()
     codex_ready = worker.get("codex_ready")
     ready_providers = worker_record_ready_providers(worker)
-    codex_unready = codex_ready == 0 and doctor_status != "ok" and not ready_providers
+    provider_readiness_blocked = not ready_providers and (
+        codex_ready == 0 or doctor_status in {"degraded", "failed", "not_ready"}
+    )
     if (
-        clean_scan_error(worker.get("last_error"))
-        or not worker_version_compatible(worker)
+        not worker_version_compatible(worker)
         or not worker_supported_provider(worker)
-        or doctor_status in {"degraded", "failed", "not_ready"}
-        or codex_unready
+        or provider_readiness_blocked
     ):
         return "degraded"
     if public_scan_count(worker.get("running_jobs")) >= max(1, public_scan_count(worker.get("max_concurrent_jobs"))):

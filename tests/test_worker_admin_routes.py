@@ -1326,10 +1326,21 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "running_jobs": 4, "free_slots": 0, "timestamp": app.now()})
         self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "busy")
-        db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "running_jobs": 0, "free_slots": 4, "doctor_status": "degraded", "codex_ready": 0, "timestamp": app.now()})
+        db.upsert_worker_heartbeat(
+            {
+                **worker,
+                "worker_id": worker_id,
+                "running_jobs": 0,
+                "free_slots": 4,
+                "doctor_status": "degraded",
+                "codex_ready": 0,
+                "ready_providers": [],
+                "timestamp": app.now(),
+            }
+        )
         self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
         db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "last_error": "internal stack", "timestamp": app.now()})
-        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "idle")
         with patch("pullwise_server.app.now", return_value=app.now() + 1000):
             self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "offline")
 
