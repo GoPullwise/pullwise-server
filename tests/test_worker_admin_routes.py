@@ -419,6 +419,32 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             ["running", "claimed"],
         )
 
+    def test_ready_worker_running_jobs_are_not_degraded_by_doctor_warning(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.4.18",
+                "max_concurrent_jobs": 1,
+                "running_jobs": 1,
+                "free_slots": 0,
+                "last_error": "previous transient claim error",
+                "doctor_status": "degraded",
+                "codex_ready": True,
+                "readyProviders": ["codex"],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        worker = db.get_worker(worker_id)
+        self.assertEqual(worker["doctor_status"], "degraded")
+        self.assertEqual(app.computed_worker_status(worker), "busy")
+
     def test_admin_worker_version_controls_release_package_in_install_command(self) -> None:
         handler = RouteHarness(
             "/admin/workers",
