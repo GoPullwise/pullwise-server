@@ -1790,6 +1790,41 @@ def get_scan_job_for_scan(scan_id: str) -> dict[str, Any] | None:
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
 
 
+def list_scan_jobs_for_scans(
+    scan_ids: list[str] | set[str] | tuple[str, ...],
+    job_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    initialize()
+    unique_scan_ids = list(dict.fromkeys(str(value or "").strip() for value in scan_ids or [] if str(value or "").strip()))
+    unique_job_ids = list(dict.fromkeys(str(value or "").strip() for value in job_ids or [] if str(value or "").strip()))
+    if not unique_scan_ids and not unique_job_ids:
+        return []
+
+    rows: list[sqlite3.Row] = []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        for values, column in ((unique_scan_ids, "scan_id"), (unique_job_ids, "job_id")):
+            for start in range(0, len(values), 400):
+                chunk = values[start : start + 400]
+                if not chunk:
+                    continue
+                placeholders = ",".join("?" for _ in chunk)
+                rows.extend(
+                    connection.execute(
+                        f"SELECT * FROM scan_jobs WHERE {column} IN ({placeholders})",
+                        tuple(chunk),
+                    ).fetchall()
+                )
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        item = row_to_dict(row) or {}
+        key = str(item.get("job_id") or item.get("scan_id") or "")
+        if key:
+            deduped[key] = item
+    return list(deduped.values())
+
+
 def retry_scan_job(scan_id: str, *, timestamp: int | None = None) -> dict[str, Any] | None:
     initialize()
     scan_id = str(scan_id or "").strip()
@@ -2052,6 +2087,47 @@ def get_completed_scan_job_result(job_id: str) -> dict[str, Any] | None:
     except (TypeError, json.JSONDecodeError):
         item["result_payload"] = {}
     return item
+
+
+def list_completed_scan_job_results_for_job_ids(job_ids: list[str] | set[str] | tuple[str, ...]) -> list[dict[str, Any]]:
+    initialize()
+    unique_job_ids = list(dict.fromkeys(str(value or "").strip() for value in job_ids or [] if str(value or "").strip()))
+    if not unique_job_ids:
+        return []
+    rows: list[sqlite3.Row] = []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        for start in range(0, len(unique_job_ids), 400):
+            chunk = unique_job_ids[start : start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows.extend(
+                connection.execute(
+                    f"""
+                    SELECT
+                        sj.*,
+                        jr.attempt_id AS result_attempt_id,
+                        jr.result_checksum AS result_result_checksum,
+                        jr.status AS result_status,
+                        jr.payload AS result_payload,
+                        jr.created_at AS result_created_at
+                    FROM scan_jobs sj
+                    JOIN job_results jr ON jr.job_id = sj.job_id
+                    WHERE sj.job_id IN ({placeholders})
+                      AND sj.status IN ('done', 'failed')
+                      AND jr.attempt_id = sj.last_attempt_id
+                    """,
+                    tuple(chunk),
+                ).fetchall()
+            )
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        item = row_to_dict(row) or {}
+        try:
+            item["result_payload"] = json.loads(str(item.get("result_payload") or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            item["result_payload"] = {}
+        results.append(item)
+    return results
 
 
 def claim_next_scan_jobs(

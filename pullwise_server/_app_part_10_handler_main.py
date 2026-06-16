@@ -199,7 +199,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scans = filter_user_scan_records(user_scans_for_read(session), params)
             limit, offset = pagination_params(params)
             page = scans[offset : offset + limit]
-            scan_payloads = [scan_list_payload(scan) for scan in page]
+            scan_payloads = scan_list_payloads(page)
             return self.json(
                 paginated_page_response(
                     scan_payloads,
