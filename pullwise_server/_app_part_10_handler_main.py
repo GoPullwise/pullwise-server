@@ -2338,7 +2338,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 decoded_worker_json_payload(worker_record.get("machine_metrics_history"), list),
                 machine_metrics,
             )
-        raw_active_job_ids = body.get("active_job_ids") or body.get("activeJobIds")
+        raw_active_job_ids = body.get("active_job_ids") if "active_job_ids" in body else body.get("activeJobIds")
         active_job_ids = []
         active_job_ids_provided = isinstance(raw_active_job_ids, list)
         if active_job_ids_provided:

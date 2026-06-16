@@ -53,6 +53,29 @@ directories.
 - Suggested env should include provider command variables only for providers in
   the worker's configured provider chain.
 
+## Worker Delete Lifecycle
+
+Admin Delete instance is not complete when the worker disappears from the server
+registry or admin list. Deleting a worker instance must also remove the
+worker-host resources associated with that instance: service unit, wrapper,
+logrotate entry, `/etc` config, service user when safe, instance `DATA_DIR` under
+`/var/lib/pullwise-worker`, instance `LOG_DIR` under
+`/var/log/pullwise-worker`, and any other instance-scoped runtime files.
+
+The server and worker may run on different hosts. Do not implement admin delete
+by deleting paths on the Pullwise Server host or by assuming server-local
+`/var/lib/pullwise-worker` and `/var/log/pullwise-worker` are the target worker
+host. Server-side delete should express desired lifecycle state and track
+pending/running/succeeded/failed cleanup status; worker-host cleanup must be
+performed by a host-local worker manager, watcher, supervisor, or finalizer that
+has authority over the installed worker instance.
+
+Future lifecycle work should prefer a host-local watcher/supervisor managing the
+worker process over relying on the managed worker process alone to delete
+itself. A running worker may acknowledge admin delete, but the durable cleanup
+responsibility belongs to the worker host manager so stopped, degraded, or
+self-removing workers can still be cleaned up and reported accurately.
+
 ## Agent Config Source Of Truth
 
 The server owns subscription plan agent policy.

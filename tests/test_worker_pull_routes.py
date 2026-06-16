@@ -4197,6 +4197,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with patch("pullwise_server.app.now", return_value=timestamp):
             app.PullwiseHandler.route(claim, "POST")
         self.assertEqual(claim.status, HTTPStatus.OK)
+        connection = db.connect()
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE scan_jobs SET claimed_at = ?, timeout_at = ? WHERE job_id = ?",
+                    (timestamp, timestamp + 3600, job["job_id"]),
+                )
+        finally:
+            connection.close()
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
 
         heartbeat = RouteHarness(
@@ -4250,6 +4259,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with patch("pullwise_server.app.now", return_value=timestamp):
             app.PullwiseHandler.route(claim, "POST")
         self.assertEqual(claim.status, HTTPStatus.OK)
+        connection = db.connect()
+        try:
+            with connection:
+                connection.execute(
+                    "UPDATE scan_jobs SET claimed_at = ?, timeout_at = ? WHERE job_id = ?",
+                    (timestamp, timestamp + 3600, job["job_id"]),
+                )
+        finally:
+            connection.close()
 
         heartbeat = RouteHarness(
             "/worker/heartbeat",
