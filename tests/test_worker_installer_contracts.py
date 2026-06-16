@@ -61,6 +61,21 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('install -d -m 0755 -o root -g root "$BASE_DATA_DIR" "$BASE_LOG_DIR"', script)
         self.assertNotIn('install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"', script)
 
+    def test_installer_creates_one_watcher_service_per_worker_instance(self) -> None:
+        script = app.worker_install_script()
+
+        self.assertIn('WATCHER_SERVICE_NAME="$SERVICE_NAME-watcher"', script)
+        self.assertIn('WATCHER_SERVICE_FILE="/etc/systemd/system/$WATCHER_SERVICE_NAME.service"', script)
+        self.assertIn('write_env_value PULLWISE_LIFECYCLE_WATCHER_ENABLED "1"', script)
+        self.assertIn('write_env_value PULLWISE_WATCHER_SERVICE_NAME "$WATCHER_SERVICE_NAME"', script)
+        self.assertIn('write_env_value PULLWISE_WATCHER_SERVICE_FILE "$WATCHER_SERVICE_FILE"', script)
+        self.assertIn('cat > "$WATCHER_SERVICE_FILE" <<EOF', script)
+        self.assertIn("ExecStart=$BIN_PATH watch", script)
+        self.assertIn('systemctl enable "$WATCHER_SERVICE_NAME"', script)
+        self.assertIn('systemctl restart "$WATCHER_SERVICE_NAME"', script)
+        self.assertIn('rollback_file "$WATCHER_SERVICE_FILE" "/etc/systemd/system" "$HAD_WATCHER_SERVICE_FILE"', script)
+        self.assertNotIn("ExecStopPost=+$BIN_PATH finalize-uninstall", script)
+
     def test_service_user_name_uses_digest_to_avoid_prefix_collisions(self) -> None:
         shell = shutil.which("sh") or shutil.which("bash")
         if not shell:

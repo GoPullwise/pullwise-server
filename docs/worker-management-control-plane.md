@@ -83,13 +83,14 @@ pull-based command queue:
 `DELETE /admin/workers/{id}` creates an `uninstall` command instead of only
 soft-deleting registry state. `uninstall` commands soft-delete the worker
 registry row as soon as the command is accepted, so admin lists remove it
-immediately. The running worker executes admin-queued uninstall only after
-active jobs finish. Current systemd units write an uninstall marker, report the
-command result, exit cleanly, and then run a root `ExecStopPost` finalizer that
-removes the worker service unit, wrapper binary, logrotate file, `/etc`
-configuration directory, instance home, and instance log directory. Older units
-without the finalizer still delete the worker-owned instance home and log
-directories before exiting. A locally run `pullwise-worker uninstall` calls
+immediately. Current installs create one host-local watcher service per worker
+instance. The watcher polls lifecycle commands without mutating heartbeat state,
+stops the paired worker service, writes an uninstall marker, reports command
+status, and removes the worker service unit, watcher unit, wrapper binary,
+logrotate file, `/etc` configuration directory, instance home, and instance log
+directory. Older units without the watcher may rely on the running worker or the
+legacy finalizer path, which is less reliable when the worker is already stopped
+or degraded. A locally run `pullwise-worker uninstall` calls
 `DELETE /worker/registry` before removing the local service when a worker token
 is configured.
 

@@ -1240,7 +1240,10 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
                 self.assertEqual(handler.status, HTTPStatus.OK)
                 issue = handler.payload["items"][0] if path == "/issues" else handler.payload
-                self.assertEqual(issue["pullRequest"], expected)
+                if path == "/issues":
+                    self.assertNotIn("pullRequest", issue)
+                else:
+                    self.assertEqual(issue["pullRequest"], expected)
 
         self.assertNotEqual(app.ISSUES[0]["pullRequest"], expected)
 
@@ -1268,7 +1271,10 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
                 self.assertEqual(handler.status, HTTPStatus.OK)
                 issue = handler.payload["items"][0] if path == "/issues" else handler.payload
-                self.assertEqual(issue["pullRequestPending"], expected)
+                if path == "/issues":
+                    self.assertNotIn("pullRequestPending", issue)
+                else:
+                    self.assertEqual(issue["pullRequestPending"], expected)
 
         self.assertNotEqual(app.ISSUES[0]["pullRequestPending"], expected)
 

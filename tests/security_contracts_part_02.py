@@ -160,6 +160,31 @@ class SecurityContractsPart02Test(SecurityContractsBase):
             "createdAt": 0,
         }
 
+        list_expected = {
+            key: expected[key]
+            for key in (
+                "id",
+                "userId",
+                "scanId",
+                "jobId",
+                "repo",
+                "branch",
+                "commit",
+                "status",
+                "severity",
+                "category",
+                "title",
+                "verificationStatus",
+                "confidenceLevel",
+                "file",
+                "line",
+                "confidence",
+                "confidenceRationale",
+                "effort",
+                "createdAt",
+            )
+        }
+
         for path in ("/issues", "/issues/iss_1"):
             with self.subTest(path=path):
                 handler = RouteHarness(path, cookie=self.signed_in())
@@ -168,7 +193,14 @@ class SecurityContractsPart02Test(SecurityContractsBase):
 
                 self.assertEqual(handler.status, HTTPStatus.OK)
                 issue = handler.payload["items"][0] if path == "/issues" else handler.payload
-                self.assertEqual(issue, expected)
+                if path == "/issues":
+                    self.assertEqual(issue, list_expected)
+                    self.assertNotIn("evidence", issue)
+                    self.assertNotIn("reproduction", issue)
+                    self.assertNotIn("badCode", issue)
+                    self.assertNotIn("goodCode", issue)
+                else:
+                    self.assertEqual(issue, expected)
     def test_issue_payload_hides_auto_fix_for_empty_replacement(self) -> None:
         app.ISSUES[0].update({
             "scanId": "sc_1",

@@ -1076,6 +1076,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIsNone(db.get_worker(worker_id))
         self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
 
+        poll = RouteHarness(
+            "/worker/commands/poll",
+            {"worker_id": worker_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(poll, "POST")
+        self.assertEqual(poll.status, HTTPStatus.OK)
+        self.assertEqual(poll.payload["command"]["id"], command["id"])
+        self.assertEqual(poll.payload["command"]["command"], "uninstall")
+
         heartbeat = RouteHarness(
             "/worker/heartbeat",
             {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
