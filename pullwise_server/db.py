@@ -117,6 +117,7 @@ def initialize() -> None:
                     plan TEXT NOT NULL,
                     quota_limit INTEGER NOT NULL,
                     used INTEGER NOT NULL DEFAULT 0,
+                    reserved INTEGER NOT NULL DEFAULT 0,
                     reset_at INTEGER NOT NULL,
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -124,6 +125,7 @@ def initialize() -> None:
                 )
                 """
             )
+            ensure_column(connection, "quota_buckets", "reserved", "INTEGER NOT NULL DEFAULT 0")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS quota_ledger (

@@ -233,8 +233,8 @@ def _ensure_quota_bucket(
     reset_at = non_negative_int(reset_at) or reset_at_for_period(period)
     connection.execute(
         """
-        INSERT INTO quota_buckets (id, scope_type, scope_id, period, plan, quota_limit, used, reset_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, strftime('%s', 'now'), strftime('%s', 'now'))
+        INSERT INTO quota_buckets (id, scope_type, scope_id, period, plan, quota_limit, used, reserved, reset_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, strftime('%s', 'now'), strftime('%s', 'now'))
         ON CONFLICT(scope_type, scope_id, period, plan) DO UPDATE SET
             quota_limit = excluded.quota_limit,
             reset_at = excluded.reset_at,
@@ -245,22 +245,29 @@ def _ensure_quota_bucket(
     row = connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (bucket_id,)).fetchone()
     bucket = dict(row)
     used = non_negative_int(bucket.get("used"))
-    if used != bucket.get("used"):
-        connection.execute("UPDATE quota_buckets SET used = ?, updated_at = strftime('%s', 'now') WHERE id = ?", (used, bucket_id))
+    reserved = non_negative_int(bucket.get("reserved"))
+    if used != bucket.get("used") or reserved != bucket.get("reserved"):
+        connection.execute(
+            "UPDATE quota_buckets SET used = ?, reserved = ?, updated_at = strftime('%s', 'now') WHERE id = ?",
+            (used, reserved, bucket_id),
+        )
         bucket["used"] = used
+        bucket["reserved"] = reserved
     return bucket
 
 
 def quota_payload(bucket: dict[str, Any], *, scope: str) -> dict[str, Any]:
     used = non_negative_int(bucket.get("used"))
+    reserved = non_negative_int(bucket.get("reserved"))
     limit = non_negative_int(bucket.get("quota_limit"))
     return {
         "scope": scope,
         "period": str(bucket.get("period") or current_period()),
         "plan": str(bucket.get("plan") or "free"),
         "used": used,
+        "reserved": reserved,
         "limit": limit,
-        "remaining": max(0, limit - used),
+        "remaining": max(0, limit - used - reserved),
         "resetAt": non_negative_int(bucket.get("reset_at")),
         "bucketId": str(bucket.get("id") or ""),
     }
