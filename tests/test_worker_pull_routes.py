@@ -2833,6 +2833,72 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertNotIn("raw", json.dumps(payload["completionAudit"]))
         self.assertNotIn("raw", json.dumps(payload["jobTrace"]))
 
+    def test_worker_ai_progress_consumes_reserved_scan_quota(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {"usr_1": user}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "11901",
+                "full_name": "acme/reserved",
+                "owner_login": "acme",
+                "default_branch": "main",
+            }
+        )
+        quota_result = app.quota.reserve_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_reserved_ai",
+            request_id="req_reserved_ai",
+        )
+        scan = {
+            "id": "sc_reserved_ai",
+            "repo": repository["full_name"],
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_reserved_ai",
+            "quotaBucketIds": quota_result["bucketIds"],
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+            "quotaState": "reserved",
+            "quotaReservedAt": app.now(),
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
+
+        progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {"phase": "ai", "progress": 50},
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(progress, "POST")
+
+        self.assertEqual(progress.status, HTTPStatus.OK)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
+        payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(payload["quotaState"], "consumed")
+        self.assertEqual(payload["billingUsage"]["used"], 1)
+        self.assertEqual(payload["billingUsage"]["reserved"], 0)
+
     def test_retry_consumes_quota_and_requeues_failed_scan(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
         app.USERS = {"usr_1": user}
@@ -2892,8 +2958,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(retry.status, HTTPStatus.CREATED)
         self.assertEqual(retry.payload["status"], "queued")
         self.assertEqual(app.SCANS[0]["requestId"], "req_retry_route")
-        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 2)
-        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 2)
+        user_quota = app.quota.quota_payload_for_user(user)
+        repo_quota = app.quota.quota_payload_for_repository(repository, user)
+        self.assertEqual(user_quota["used"], 1)
+        self.assertEqual(user_quota["reserved"], 1)
+        self.assertEqual(repo_quota["used"], 1)
+        self.assertEqual(repo_quota["reserved"], 1)
         self.assertEqual(db.get_scan_job_for_scan("sc_retry_route")["status"], "queued")
         self.assertEqual(app.SCANS[0]["progress"], 0)
 
@@ -2954,7 +3024,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(retry.status, HTTPStatus.CREATED)
         self.assertEqual(retry.payload["status"], "queued")
         self.assertEqual(app.SCANS[0]["requestId"], "req_retry_large")
-        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 2)
+        user_quota = app.quota.quota_payload_for_user(user)
+        self.assertEqual(user_quota["used"], 1)
+        self.assertEqual(user_quota["reserved"], 1)
 
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         app.PullwiseHandler.route(claim, "POST")
@@ -2983,9 +3055,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(result, "POST")
 
         self.assertEqual(result.status, HTTPStatus.OK)
-        self.assertEqual(result.payload["quotaRollback"]["ledgerRows"], 2)
+        self.assertEqual(result.payload["quotaRelease"]["ledgerRows"], 2)
         self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
         self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 1)
+        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["reserved"], 0)
         self.assertEqual(app.SCANS[0]["requestId"], "req_retry_large")
 
     def test_worker_result_backfills_pending_commit_with_resolved_sha(self) -> None:

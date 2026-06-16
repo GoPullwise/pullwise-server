@@ -147,7 +147,9 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
         self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_REPOSITORY")
         self.assertEqual(first.payload["githubRepoId"], "123")
-        self.assertEqual(first.payload["repoUsage"]["used"], 1)
+        self.assertEqual(first.payload["repoUsage"]["used"], 0)
+        self.assertEqual(first.payload["repoUsage"]["reserved"], 1)
+        self.assertEqual(first.payload["repoUsage"]["remaining"], 0)
         self.assertEqual(first.payload["billingUsage"]["period"], first.payload["repoUsage"]["period"])
         self.assertEqual(first.payload["billingUsage"]["resetAt"], first.payload["repoUsage"]["resetAt"])
 
@@ -209,11 +211,13 @@ class ScanQuotaRoutesTest(unittest.TestCase):
 
         self.assertEqual([handler.status for handler in handlers], [HTTPStatus.CREATED] * 5 + [HTTPStatus.PAYMENT_REQUIRED])
         self.assertEqual(handlers[-1].payload["code"], "QUOTA_EXCEEDED_USER")
-        self.assertEqual(handlers[-2].payload["billingUsage"]["used"], 5)
+        self.assertEqual(handlers[-2].payload["billingUsage"]["used"], 0)
+        self.assertEqual(handlers[-2].payload["billingUsage"]["reserved"], 5)
         self.assertEqual(handlers[-2].payload["billingUsage"]["limit"], 5)
         self.assertEqual(handlers[-2].payload["billingUsage"]["remaining"], 0)
         self.assertEqual(repositories.status, HTTPStatus.OK)
-        self.assertEqual(repositories.payload["userQuota"]["used"], 5)
+        self.assertEqual(repositories.payload["userQuota"]["used"], 0)
+        self.assertEqual(repositories.payload["userQuota"]["reserved"], 5)
         self.assertEqual(repositories.payload["userQuota"]["remaining"], 0)
         self.assertEqual(len(app.SCANS), 5)
 
@@ -261,7 +265,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(preflight.status, HTTPStatus.OK)
         self.assertEqual(preflight.payload["requestedCount"], 4)
         self.assertEqual(preflight.payload["allowedCount"], 2)
-        self.assertEqual(preflight.payload["userQuota"]["used"], 1)
+        self.assertEqual(preflight.payload["userQuota"]["used"], 0)
+        self.assertEqual(preflight.payload["userQuota"]["reserved"], 1)
         self.assertEqual(preflight.payload["userQuota"]["remaining"], 2)
         self.assertEqual(len(preflight.payload["repositories"]), 4)
         self.assertEqual(len(app.SCANS), 1)
@@ -317,12 +322,46 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.OK)
         self.assertEqual(first.payload["id"], second.payload["id"])
-        self.assertEqual(first.payload["billingUsage"]["used"], 1)
+        self.assertEqual(first.payload["billingUsage"]["used"], 0)
+        self.assertEqual(first.payload["billingUsage"]["reserved"], 1)
+        self.assertEqual(first.payload["quotaState"], "reserved")
         self.assertIn("jobId", first.payload)
         job = db.get_scan_job(first.payload["jobId"])
         self.assertIsNotNone(job)
         self.assertEqual(job["scan_id"], first.payload["id"])
         self.assertEqual(job["status"], "queued")
+
+    def test_cancel_releases_reserved_quota_and_records_billing_activity(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        first = RouteHarness({"repoId": "123", "requestId": "req_cancel"}, cookie=cookie)
+        app.PullwiseHandler.route(first, "POST")
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(first.payload["billingUsage"]["used"], 0)
+        self.assertEqual(first.payload["billingUsage"]["reserved"], 1)
+
+        cancel = RouteHarness({}, cookie=cookie, path=f"/scans/{first.payload['id']}/cancel")
+        app.PullwiseHandler.route(cancel, "POST")
+
+        self.assertEqual(cancel.status, HTTPStatus.OK)
+        self.assertEqual(cancel.payload["status"], "cancelled")
+        self.assertEqual(cancel.payload["quotaState"], "released")
+        self.assertEqual(cancel.payload["billingUsage"]["used"], 0)
+        self.assertEqual(cancel.payload["billingUsage"]["reserved"], 0)
+        self.assertEqual(cancel.payload["billingUsage"]["remaining"], 1)
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            used, reserved = connection.execute(
+                "SELECT COALESCE(SUM(used), 0), COALESCE(SUM(reserved), 0) FROM quota_buckets"
+            ).fetchone()
+        self.assertEqual(used, 0)
+        self.assertEqual(reserved, 0)
+
+        billing_plan = RouteHarness(cookie=cookie, path="/billing/plan")
+        app.PullwiseHandler.route(billing_plan, "GET")
+        self.assertEqual(billing_plan.status, HTTPStatus.OK)
+        activity = billing_plan.payload["account"]["quotaActivity"]
+        activity_keys = {(item["scanId"], item["action"]) for item in activity}
+        self.assertIn((first.payload["id"], "reserved"), activity_keys)
+        self.assertIn((first.payload["id"], "released"), activity_keys)
 
     def test_scan_start_rolls_back_quota_when_job_creation_fails(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
@@ -344,7 +383,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
 
         self.assertEqual(retry.status, HTTPStatus.CREATED)
         self.assertEqual(len(app.SCANS), 1)
-        self.assertEqual(retry.payload["billingUsage"]["used"], 1)
+        self.assertEqual(retry.payload["billingUsage"]["used"], 0)
+        self.assertEqual(retry.payload["billingUsage"]["reserved"], 1)
 
     def test_repo_without_stable_id_requires_repository_sync(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")

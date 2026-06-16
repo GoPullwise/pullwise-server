@@ -91,7 +91,7 @@ def consume_review_quota(user: dict) -> tuple[bool, dict]:
                 """
                 UPDATE quota_buckets
                 SET used = used + 1, updated_at = strftime('%s', 'now')
-                WHERE id = ? AND used < quota_limit
+                WHERE id = ? AND used + reserved < quota_limit
                 """,
                 (bucket["id"],),
             )

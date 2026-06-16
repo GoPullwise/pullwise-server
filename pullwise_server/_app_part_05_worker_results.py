@@ -124,7 +124,14 @@ def scan_quota_has_been_consumed(scan: dict | None) -> bool:
         return False
     if public_issue_text(scan.get("quotaState")) in {"consumed", "refunded"}:
         return True
-    return bool(pull_request_timestamp(scan.get("quotaConsumedAt")))
+    if public_issue_text(scan.get("quotaState")) in {"reserved", "released"}:
+        return False
+    if pull_request_timestamp(scan.get("quotaConsumedAt")):
+        return True
+    bucket_ids = scan.get("quotaBucketIds") if isinstance(scan.get("quotaBucketIds"), dict) else {}
+    if bucket_ids.get("user"):
+        return True
+    return isinstance(scan.get("billingUsage"), dict) or isinstance(scan.get("repoUsage"), dict)
 
 
 def refresh_scan_quota_usage_locked(scan: dict, user: dict | None, repository: dict | None) -> None:
