@@ -929,8 +929,27 @@ def user_scans_for_read(session: dict | None) -> list[dict]:
     if not scans:
         return []
     with STATE_LOCK:
+        scan_ids = [public_issue_text(scan.get("id")) for scan in scans]
+        job_ids = [public_issue_text(scan.get("jobId")) for scan in scans if public_issue_text(scan.get("jobId"))]
+        jobs = db.list_scan_jobs_for_scans(scan_ids, job_ids)
+        job_lookup: dict[tuple[str, str], dict] = {}
+        terminal_job_ids = []
+        for job in jobs:
+            job_id = public_issue_text(job.get("job_id"))
+            scan_id = public_issue_text(job.get("scan_id"))
+            if job_id:
+                job_lookup[("job", job_id)] = job
+            if scan_id:
+                job_lookup[("scan", scan_id)] = job
+            if job_id and scan_status_from_job_status(job.get("status")) in {"done", "failed"}:
+                terminal_job_ids.append(job_id)
+        result_lookup = {
+            public_issue_text(result.get("job_id")): result
+            for result in db.list_completed_scan_job_results_for_job_ids(terminal_job_ids)
+            if public_issue_text(result.get("job_id"))
+        }
         for scan in scans:
-            reconcile_scan_job_state_locked(scan)
+            reconcile_scan_job_state_locked(scan, job_lookup=job_lookup, result_lookup=result_lookup)
     return scans
 
 

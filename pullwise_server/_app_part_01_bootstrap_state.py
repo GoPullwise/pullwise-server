@@ -753,13 +753,22 @@ def scan_status_from_job_status(status: object) -> str:
     return normalized if normalized in {"queued", "done", "failed", "cancelled"} else ""
 
 
-def reconcile_scan_job_state_locked(scan: dict) -> bool:
+def reconcile_scan_job_state_locked(
+    scan: dict,
+    *,
+    job_lookup: dict[tuple[str, str], dict] | None = None,
+    result_lookup: dict[str, dict] | None = None,
+) -> bool:
     scan_id = public_issue_text(scan.get("id"))
     if not scan_id:
         return False
     job_id = public_issue_text(scan.get("jobId"))
-    job = db.get_scan_job(job_id) if job_id else None
+    job = job_lookup.get(("job", job_id)) if job_lookup is not None and job_id else None
+    if not job and job_lookup is None:
+        job = db.get_scan_job(job_id) if job_id else None
     if not job:
+        job = job_lookup.get(("scan", scan_id)) if job_lookup is not None else None
+    if not job and job_lookup is None:
         job = db.get_scan_job_for_scan(scan_id)
     if not job:
         return False
@@ -768,7 +777,10 @@ def reconcile_scan_job_state_locked(scan: dict) -> bool:
     if not status:
         return False
     if status in {"done", "failed"}:
-        result = db.get_completed_scan_job_result(public_issue_text(job.get("job_id")))
+        job_id = public_issue_text(job.get("job_id"))
+        result = result_lookup.get(job_id) if result_lookup is not None else None
+        if result is None:
+            result = db.get_completed_scan_job_result(job_id)
         if result:
             payload = result.get("result_payload") if isinstance(result.get("result_payload"), dict) else {}
             result_status = public_issue_text(result.get("result_status") or result.get("status")).lower()

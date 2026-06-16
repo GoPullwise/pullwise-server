@@ -164,6 +164,33 @@ class SecurityContractsPart01Test(SecurityContractsBase):
             self.assertEqual(scan["verificationAudit"]["reportedCount"], 3)
             self.assertEqual(scan["verificationAudit"]["downgradedCount"], 3)
 
+    def test_scans_route_prefetches_scan_jobs_for_history_read(self) -> None:
+        app.SCANS = [
+            {
+                "id": f"sc_{index}",
+                "jobId": f"job_{index}",
+                "userId": "usr_1",
+                "status": "done",
+                "repo": "owner/repo",
+                "createdAt": 300 - index,
+            }
+            for index in range(5)
+        ]
+
+        with (
+            patch.object(app.db, "list_scan_jobs_for_scans", return_value=[]) as list_jobs,
+            patch.object(app.db, "list_completed_scan_job_results_for_job_ids", return_value=[]) as list_results,
+            patch.object(app.db, "get_scan_job", side_effect=AssertionError("single job lookup should not run")),
+            patch.object(app.db, "get_scan_job_for_scan", side_effect=AssertionError("single scan lookup should not run")),
+        ):
+            handler = RouteHarness("/scans?limit=1", cookie=self.signed_in())
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual([scan["id"] for scan in handler.payload["items"]], ["sc_0"])
+        list_jobs.assert_called_once()
+        list_results.assert_called_once_with([])
+
     def test_issues_route_filters_and_paginates_signed_in_user_results(self) -> None:
         app.ISSUES = [
             {

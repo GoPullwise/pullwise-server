@@ -819,16 +819,6 @@ def public_scan_agent_config(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     raw_agent = source.get("agent") if isinstance(source.get("agent"), dict) else {}
     provider = public_scan_agent_provider(source.get("provider") or raw_agent.get("cli"))
-    provider_chain = []
-    raw_provider_chain = source.get("providerChain") if isinstance(source.get("providerChain"), list) else []
-    if not isinstance(raw_provider_chain, list):
-        raw_provider_chain = []
-    for item in raw_provider_chain:
-        clean_provider = public_scan_agent_provider(item)
-        if clean_provider and clean_provider not in provider_chain:
-            provider_chain.append(clean_provider)
-    if not provider and provider_chain:
-        provider = provider_chain[0]
     if not provider:
         return {}
     cli = public_scan_agent_text(source.get("cli") or raw_agent.get("command") or raw_agent.get("cli"))
@@ -839,7 +829,6 @@ def public_scan_agent_config(value: object) -> dict:
     )
     payload = {
         "provider": provider,
-        "providerChain": provider_chain or [provider],
         "agent": {
             "cli": provider,
             "command": cli,
@@ -2362,7 +2351,7 @@ def public_review_score_factors(value: object) -> dict:
         "truthProbability",
         "decisionScore",
         "driftState",
-        "providerChain",
+        "provider",
         "workerVersion",
         "auditProtocol",
         "promptVersion",
@@ -3214,7 +3203,7 @@ def public_scan_audit_swarm(value: object) -> dict:
         "protocol": public_issue_text(value.get("protocol")),
         "stage": public_issue_text(value.get("stage")).lower(),
         "adapter": public_issue_text(value.get("adapter")),
-        "providerChain": review._safe_text_list(value.get("providerChain"))[:5],
+        "provider": public_scan_agent_provider(value.get("provider") or value.get("adapter")),
         "summary": " ".join(review._safe_text_lenient(value.get("summary")).split())[:800],
         "logsSummary": " ".join(review._safe_text_lenient(value.get("logsSummary") or value.get("logs_summary")).split())[
             :1000
@@ -4535,9 +4524,9 @@ def public_scan_preflight(value: object) -> dict:
         )
         if text:
             payload[key] = text
-    provider_chain = review._safe_text_list(value.get("providerChain"))[:5]
-    if provider_chain:
-        payload["providerChain"] = provider_chain
+    provider = public_scan_agent_provider(value.get("provider"))
+    if provider:
+        payload["provider"] = provider
     environment = public_scan_preflight_environment(value.get("environment"))
     if environment:
         payload["environment"] = environment

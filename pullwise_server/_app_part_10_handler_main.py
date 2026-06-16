@@ -2186,7 +2186,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "update_plan_agent_config",
                 changed_fields={
                     "plan": agent_config["plan"],
-                    "providerChain": agent_config["providerChain"],
+                    "provider": agent_config["provider"],
                     "model": agent_config["codex"]["model"],
                     "reasoningEffort": agent_config["codex"]["reasoningEffort"],
                 },

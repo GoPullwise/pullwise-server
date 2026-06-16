@@ -21,7 +21,7 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "installation_id": scan.get("installationId"),
             "clone_url": scan.get("cloneUrl"),
             "review_output_language": clean_review_output_language(scan.get("reviewOutputLanguage")),
-            "provider_chain": billing.review_agent_provider_chain(plan),
+            "provider_chain": [billing.review_agent_provider(plan)],
             "max_attempts": system_config.scan_job_max_attempts(),
         }
     )
@@ -248,7 +248,7 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     job_provider_chain = db.normalize_provider_list(job.get("provider_chain"))
     if job_provider_chain:
         agent_config = dict(agent_config)
-        agent_config["providerChain"] = job_provider_chain
+        agent_config["provider"] = job_provider_chain[0]
     payload["agentConfig"] = agent_config
     repository_limits = repository_scan_limits_payload(plan)
     payload["repositoryLimits"] = repository_limits

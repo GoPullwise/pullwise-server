@@ -514,9 +514,9 @@ WORKER_INSTALL_PROVIDERS = ("codex",)
 def default_worker_provider_chain() -> list[str]:
     providers: list[str] = []
     for plan in billing.PLAN_IDS:
-        for provider in billing.review_agent_provider_chain(plan):
-            if provider in WORKER_INSTALL_PROVIDERS and provider not in providers:
-                providers.append(provider)
+        provider = billing.review_agent_provider(plan)
+        if provider in WORKER_INSTALL_PROVIDERS and provider not in providers:
+            providers.append(provider)
     return providers
 
 
