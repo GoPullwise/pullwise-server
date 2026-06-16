@@ -1859,16 +1859,17 @@ def list_orphan_scan_quota_consumptions(scan_ids: list[str] | set[str]) -> list[
                 q.scan_id,
                 q.requested_by_user_id,
                 q.request_id,
+                q.reason,
                 COUNT(*) AS ledger_rows
             FROM quota_ledger q
             LEFT JOIN scan_jobs sj ON sj.scan_id = q.scan_id
-            WHERE q.reason = 'scan_created'
+            WHERE q.reason IN ('scan_created', 'scan_consumed', 'scan_reserved')
               AND q.delta > 0
               AND q.scan_id IS NOT NULL
               AND q.scan_id != ''
               AND sj.scan_id IS NULL
               {existing_clause}
-            GROUP BY q.scan_id, q.requested_by_user_id, q.request_id
+            GROUP BY q.scan_id, q.requested_by_user_id, q.request_id, q.reason
             ORDER BY MIN(q.created_at) ASC, q.scan_id ASC
             """,
             params,

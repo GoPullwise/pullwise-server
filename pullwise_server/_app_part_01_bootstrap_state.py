@@ -649,12 +649,20 @@ def rollback_orphan_scan_quota_locked() -> int:
         requested_by_user_id = public_issue_text(row.get("requested_by_user_id"))
         if not scan_id or not requested_by_user_id:
             continue
-        result = quota.rollback_scan_quota(
-            scan_id=scan_id,
-            requested_by_user_id=requested_by_user_id,
-            request_id=public_issue_text(row.get("request_id")) or None,
-        )
-        if result.get("ledgerRows"):
+        if public_issue_text(row.get("reason")) == "scan_reserved":
+            result = quota.release_scan_quota_reservation(
+                scan_id=scan_id,
+                requested_by_user_id=requested_by_user_id,
+                request_id=public_issue_text(row.get("request_id")) or None,
+                record_ledger=False,
+            )
+        else:
+            result = quota.rollback_scan_quota(
+                scan_id=scan_id,
+                requested_by_user_id=requested_by_user_id,
+                request_id=public_issue_text(row.get("request_id")) or None,
+            )
+        if result.get("ledgerRows") or result.get("bucketRows"):
             rolled_back += 1
     return rolled_back
 
