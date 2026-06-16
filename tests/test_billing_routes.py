@@ -602,8 +602,10 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
         self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_USER")
-        self.assertEqual(first.payload["billingUsage"]["used"], 1)
-        self.assertEqual(billing_payload["usage"]["used"], 1)
+        self.assertEqual(first.payload["billingUsage"]["used"], 0)
+        self.assertEqual(first.payload["billingUsage"]["reserved"], 1)
+        self.assertEqual(billing_payload["usage"]["used"], 0)
+        self.assertEqual(billing_payload["usage"]["reserved"], 1)
         self.assertEqual(billing_payload["usage"]["limit"], 1)
         self.assertEqual(billing_payload["usage"]["remaining"], 0)
         self.assertEqual(billing_payload["usage"]["resetAt"], first.payload["billingUsage"]["resetAt"])
@@ -620,11 +622,15 @@ class BillingRoutesTest(unittest.TestCase):
             patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=5)),
         ):
             app.PullwiseHandler.handle_post(consumed, "/scans", {}, ["scans"])
+            consumed_job = app.db.get_scan_job_for_scan(consumed.payload["id"])
+            app.finalize_scan_quota_for_job(consumed_job, trigger="test")
             app.SCANS[0]["status"] = "done"
             app.SCANS[0]["completedAt"] = app.now() + 60
 
             app.PullwiseHandler.handle_post(refunded, "/scans", {}, ["scans"])
             refunded_scan = app.SCANS[0]
+            refunded_job = app.db.get_scan_job_for_scan(refunded.payload["id"])
+            app.finalize_scan_quota_for_job(refunded_job, trigger="test")
             refunded_scan["status"] = "failed"
             refunded_scan["completedAt"] = app.now() + 120
             rollback = app.quota.rollback_scan_quota(
