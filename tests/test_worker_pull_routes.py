@@ -4175,6 +4175,105 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(db.recover_expired_scan_jobs(timestamp + 3701), [])
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
 
+    def test_worker_heartbeat_requeues_unstarted_claim_missing_from_active_jobs(self) -> None:
+        timestamp = app.now()
+        scan = {
+            "id": "sc_startup_lost",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        with patch("pullwise_server.app.now", return_value=timestamp):
+            app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 0,
+                "free_slots": 2,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "active_job_ids": [],
+            },
+            headers=self.auth,
+        )
+        with patch("pullwise_server.app.now", return_value=timestamp + 121):
+            app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        stored = db.get_scan_job(job["job_id"])
+        self.assertEqual(stored["status"], "queued")
+        self.assertEqual(stored["claimed_by_worker_id"], None)
+        self.assertEqual(stored["claimed_at"], None)
+        self.assertEqual(stored["started_at"], None)
+        self.assertEqual(stored["timeout_at"], None)
+        self.assertEqual(stored["error"], "worker_job_startup_lost")
+        self.assertEqual(app.SCANS[0]["status"], "queued")
+        self.assertEqual(app.SCANS[0]["recoveryReason"], "worker_job_startup_lost")
+
+    def test_worker_heartbeat_keeps_unstarted_claim_during_startup_grace(self) -> None:
+        timestamp = app.now()
+        scan = {
+            "id": "sc_startup_grace",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        with patch("pullwise_server.app.now", return_value=timestamp):
+            app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "max_concurrent_jobs": 2,
+                "running_jobs": 0,
+                "free_slots": 2,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "active_job_ids": [],
+            },
+            headers=self.auth,
+        )
+        with patch("pullwise_server.app.now", return_value=timestamp + 119):
+            app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        stored = db.get_scan_job(job["job_id"])
+        self.assertEqual(stored["status"], "claimed")
+        self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
+
     def test_queue_limits_reject_new_scan_before_job_creation(self) -> None:
         app.SCANS = [
             {

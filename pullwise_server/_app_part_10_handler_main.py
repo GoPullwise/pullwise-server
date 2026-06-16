@@ -2340,7 +2340,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
         raw_active_job_ids = body.get("active_job_ids") or body.get("activeJobIds")
         active_job_ids = []
-        if isinstance(raw_active_job_ids, list):
+        active_job_ids_provided = isinstance(raw_active_job_ids, list)
+        if active_job_ids_provided:
             for value in raw_active_job_ids[:100]:
                 job_id = clean_github_access_text(value)
                 if job_id and job_id not in active_job_ids:
@@ -2371,6 +2372,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if active_job_ids_provided:
+            recovered_jobs = db.requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
+                worker_id,
+                active_job_ids,
+                grace_seconds=system_config.scan_job_startup_grace_seconds(),
+                timestamp=heartbeat_timestamp,
+            )
+            if recovered_jobs:
+                with STATE_LOCK:
+                    apply_recovered_scan_jobs_locked(recovered_jobs)
         if active_job_ids:
             db.renew_worker_scan_job_leases(
                 worker_id,

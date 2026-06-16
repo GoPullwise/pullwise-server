@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
         "maxQueuedScansPerUser": 20,
         "jobMaxAttempts": 3,
         "jobLeaseSeconds": 3600,
+        "jobStartupGraceSeconds": 120,
     },
     "worker": {
         "maxClaimJobs": 2,
@@ -159,6 +160,13 @@ FIELD_METADATA = [
                 "type": "integer",
                 "min": 60,
                 "description": "How long a claimed job lease may run before the server can recover it as expired.",
+            },
+            {
+                "path": "scan.jobStartupGraceSeconds",
+                "label": "Scan job startup grace seconds",
+                "type": "integer",
+                "min": 30,
+                "description": "Grace period before an unstarted claimed job missing from worker heartbeats is recovered.",
             },
         ],
     },
@@ -840,6 +848,13 @@ def scan_job_max_attempts() -> int:
 
 def scan_job_lease_seconds() -> int:
     return max(60, int_setting("scan.jobLeaseSeconds"))
+
+
+def scan_job_startup_grace_seconds() -> int:
+    configured = env_int("PULLWISE_SCAN_JOB_STARTUP_GRACE_SECONDS")
+    if configured is not None:
+        return max(30, configured)
+    return max(30, int_setting("scan.jobStartupGraceSeconds"))
 
 
 def worker_max_claim_jobs() -> int:

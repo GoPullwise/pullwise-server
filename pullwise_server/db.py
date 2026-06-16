@@ -1974,6 +1974,106 @@ def renew_worker_scan_job_leases(
             return max(0, cursor.rowcount)
 
 
+def requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
+    worker_id: str,
+    active_job_ids: list[str],
+    *,
+    grace_seconds: int = 120,
+    timestamp: int | None = None,
+) -> list[dict[str, Any]]:
+    initialize()
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return []
+    unique_active_job_ids = []
+    seen = set()
+    for value in active_job_ids or []:
+        job_id = str(value or "").strip()
+        if job_id and job_id not in seen:
+            unique_active_job_ids.append(job_id)
+            seen.add(job_id)
+    current_time = int(timestamp if timestamp is not None else time.time())
+    cutoff = current_time - max(30, int(grace_seconds or 120))
+    active_clause = ""
+    active_values: list[Any] = []
+    if unique_active_job_ids:
+        placeholders = ",".join("?" for _ in unique_active_job_ids)
+        active_clause = f"AND job_id NOT IN ({placeholders})"
+        active_values.extend(unique_active_job_ids)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            rows = connection.execute(
+                f"""
+                SELECT job_id, scan_id, attempt, max_attempts
+                FROM scan_jobs
+                WHERE claimed_by_worker_id = ?
+                  AND status = 'claimed'
+                  AND started_at IS NULL
+                  AND claimed_at IS NOT NULL
+                  AND claimed_at <= ?
+                  {active_clause}
+                """,
+                (worker_id, cutoff, *active_values),
+            ).fetchall()
+            recovered: list[dict[str, Any]] = []
+            for row in rows:
+                if int(row["attempt"]) < int(row["max_attempts"]):
+                    connection.execute(
+                        """
+                        UPDATE scan_jobs
+                        SET status = 'queued',
+                            claimed_by_worker_id = NULL,
+                            claimed_at = NULL,
+                            started_at = NULL,
+                            timeout_at = NULL,
+                            error = 'worker_job_startup_lost',
+                            updated_at = ?
+                        WHERE job_id = ? AND status = 'claimed' AND started_at IS NULL
+                        """,
+                        (current_time, row["job_id"]),
+                    )
+                    recovered.append(
+                        {
+                            "job_id": row["job_id"],
+                            "scan_id": row["scan_id"],
+                            "status": "queued",
+                            "reason": "worker_job_startup_lost",
+                            "attempt": int(row["attempt"]),
+                            "max_attempts": int(row["max_attempts"]),
+                        }
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE scan_jobs
+                        SET status = 'failed',
+                            completed_at = ?,
+                            timeout_at = NULL,
+                            error = 'worker_job_startup_lost',
+                            updated_at = ?
+                        WHERE job_id = ? AND status = 'claimed' AND started_at IS NULL
+                        """,
+                        (current_time, current_time, row["job_id"]),
+                    )
+                    recovered.append(
+                        {
+                            "job_id": row["job_id"],
+                            "scan_id": row["scan_id"],
+                            "status": "failed",
+                            "reason": "worker_job_startup_lost",
+                            "attempt": int(row["attempt"]),
+                            "max_attempts": int(row["max_attempts"]),
+                        }
+                    )
+            connection.commit()
+            return recovered
+        except Exception:
+            connection.rollback()
+            raise
+
+
 def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
     initialize()
     worker_id = str(worker_id or "").strip()
