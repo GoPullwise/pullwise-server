@@ -76,6 +76,19 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('rollback_file "$WATCHER_SERVICE_FILE" "/etc/systemd/system" "$HAD_WATCHER_SERVICE_FILE"', script)
         self.assertNotIn("ExecStopPost=+$BIN_PATH finalize-uninstall", script)
 
+    def test_installer_runs_codex_device_auth_by_default_after_printing_command(self) -> None:
+        script = app.worker_install_script()
+
+        self.assertIn("codex_device_auth_command() {", script)
+        self.assertIn('service_user_auth_command "$CODEX_COMMAND" login --device-auth', script)
+        self.assertIn("run_default_auth_commands() {", script)
+        self.assertIn('auth_command="$(codex_device_auth_command)"', script)
+        self.assertIn('if ! eval "$auth_command"; then', script)
+        self.assertIn(
+            'print_auth_commands\nrun_default_auth_commands\nrun_as_service_user "$BIN_PATH" doctor || true',
+            script,
+        )
+
     def test_service_user_name_uses_digest_to_avoid_prefix_collisions(self) -> None:
         shell = shutil.which("sh") or shutil.which("bash")
         if not shell:

@@ -970,6 +970,9 @@ write_env_value() {
   fi
   printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
 }
+codex_device_auth_command() {
+  service_user_auth_command "$CODEX_COMMAND" login --device-auth
+}
 write_auth_commands() {
   {
     echo "Pullwise worker manual authorization commands"
@@ -978,7 +981,7 @@ write_auth_commands() {
     echo "Provider chain: $PROVIDER_CHAIN"
     if provider_chain_has codex; then
       echo "Codex device login:"
-      service_user_auth_command "$CODEX_COMMAND" login --device-auth
+      codex_device_auth_command
     fi
   } > "$AUTH_COMMANDS_FILE"
   chown root:"$SERVICE_USER" "$AUTH_COMMANDS_FILE"
@@ -988,6 +991,15 @@ print_auth_commands() {
   echo
   echo "Authorization commands saved to $AUTH_COMMANDS_FILE"
   echo
+}
+run_default_auth_commands() {
+  provider_chain_has codex || return 0
+  local auth_command
+  auth_command="$(codex_device_auth_command)"
+  echo "Starting Codex device login. The same command is saved in $AUTH_COMMANDS_FILE."
+  if ! eval "$auth_command"; then
+    echo "Codex device login did not complete. Re-run the saved command to authorize later." >&2
+  fi
 }
 
 : > "$ENV_FILE"
@@ -1137,6 +1149,7 @@ echo "Systemd service: $SERVICE_NAME"
 echo "Watcher service: $WATCHER_SERVICE_NAME"
 echo "Worker home: $DATA_DIR"
 print_auth_commands
+run_default_auth_commands
 run_as_service_user "$BIN_PATH" doctor || true
 """
     return (
