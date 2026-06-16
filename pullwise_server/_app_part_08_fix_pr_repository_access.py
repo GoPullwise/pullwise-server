@@ -45,7 +45,7 @@ def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
 
         try:
             repo_path = checkout.prepare_checkout(scan_id, scan, lambda: False)
-        except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
+        except (RuntimeError, OSError, checkout.CheckoutCancelled, checkout.CheckoutTimedOut) as exc:
             try:
                 checkout.cleanup_scan_workspace(user_id, scan_id)
             except (RuntimeError, OSError) as cleanup_exc:
@@ -275,7 +275,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
             }
             store_issue_pull_request(issue, pull_request)
             return pull_request
-        except (RuntimeError, OSError, checkout.CheckoutCancelled) as exc:
+        except (RuntimeError, OSError, checkout.CheckoutCancelled, checkout.CheckoutTimedOut) as exc:
             if irreversible_started:
                 record_pull_request_pending_failure(issue, str(exc))
                 raise github_auth.GitHubError(str(exc)) from exc
@@ -1434,5 +1434,4 @@ def session_payload(session: dict | None) -> dict:
         "navigation": navigation_payload(),
         "nextStep": "choose_repositories" if repositories_connected else "connect_github_repositories",
     }
-
 

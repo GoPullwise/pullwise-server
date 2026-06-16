@@ -10,6 +10,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
 from urllib.parse import urlparse
 
@@ -18,6 +19,10 @@ from . import github_auth
 
 class CheckoutCancelled(Exception):
     """Raised when a checkout subprocess is cancelled by the scan worker."""
+
+
+class CheckoutTimedOut(Exception):
+    """Raised when a checkout subprocess exceeds the configured timeout."""
 
 
 _REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -228,6 +233,8 @@ def _run_git_process(
         encoding="utf-8",
         errors="replace",
     )
+    timeout_seconds = git_timeout_seconds()
+    deadline = time.monotonic() + timeout_seconds
     while True:
         try:
             stdout, stderr = process.communicate(timeout=0.25)
@@ -236,6 +243,9 @@ def _run_git_process(
             if is_cancelled():
                 terminate_process(process)
                 raise CheckoutCancelled()
+            if time.monotonic() >= deadline:
+                terminate_process(process)
+                raise CheckoutTimedOut(f"Git {action} timed out after {timeout_seconds}s")
 
     if process.returncode != 0:
         detail = (stderr or stdout or "").strip()
@@ -470,6 +480,14 @@ def clone_depth() -> str:
         return str(max(1, int(raw)))
     except ValueError:
         return "1"
+
+
+def git_timeout_seconds() -> int:
+    raw = os.environ.get("PULLWISE_GIT_TIMEOUT_SECONDS", "600").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 600
 
 
 def clean_scan_text(value: object, *, allow_int: bool = False) -> str | None:

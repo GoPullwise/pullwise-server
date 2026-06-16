@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -226,6 +227,45 @@ class CheckoutContractsTest(unittest.TestCase):
 
         self.assertEqual(popen.call_args.kwargs["encoding"], "utf-8")
         self.assertEqual(popen.call_args.kwargs["errors"], "replace")
+
+    def test_run_git_terminates_process_after_configured_timeout(self) -> None:
+        class FakeProcess:
+            returncode = None
+            terminated = False
+
+            def communicate(self, timeout: float) -> tuple[str, str]:
+                raise subprocess.TimeoutExpired(["git", "status"], timeout)
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                raise AssertionError("terminate should be enough for this fake process")
+
+            def wait(self, timeout: float) -> None:
+                self.returncode = -15
+
+        fake_process = FakeProcess()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                patch.dict(
+                    os.environ,
+                    {"PULLWISE_CHECKOUT_ROOT": tmpdir, "PULLWISE_GIT_TIMEOUT_SECONDS": "1"},
+                    clear=False,
+                ),
+                patch("pullwise_server.checkout.subprocess.Popen", return_value=fake_process),
+                patch("pullwise_server.checkout.time.monotonic", side_effect=[0, 2]),
+            ):
+                with self.assertRaisesRegex(checkout.CheckoutTimedOut, "timed out after 1s"):
+                    checkout.run_git(
+                        ["git", "status"],
+                        cwd=tmpdir,
+                        extra_env={},
+                        is_cancelled=lambda: False,
+                        action="status",
+                    )
+
+        self.assertTrue(fake_process.terminated)
 
     def test_repository_authorization_requires_explicit_repo_match(self) -> None:
         self.assertFalse(app.repository_is_authorized(None, "owner/repo"))
