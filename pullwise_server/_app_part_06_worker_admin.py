@@ -904,8 +904,8 @@ need_cmd git
 need_cmd curl
 python3 - <<'PY'
 import sys
-if sys.version_info < (3, 10):
-    raise SystemExit("Pullwise worker requires Python 3.10 or newer.")
+if sys.version_info < (3, 9):
+    raise SystemExit("Pullwise worker requires Python 3.9 or newer.")
 PY
 PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
 
