@@ -732,6 +732,7 @@ CHECKOUT_ROOT="$DATA_DIR/checkouts"
 LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 LOGROTATE_FILE="/etc/logrotate.d/$SERVICE_NAME"
+UNINSTALL_MARKER_FILE="/run/$SERVICE_NAME/uninstall-requested"
 INSTALL_COMPLETED=0
 ROLLBACK_ENABLED=0
 HAD_SERVICE_USER=0
@@ -980,6 +981,8 @@ write_env_value PULLWISE_WORKER_ENV_FILE "$ENV_FILE"
 write_env_value PULLWISE_WORKER_ENV_BACKUP_FILE "$ENV_FILE.bak"
 write_env_value PULLWISE_WORKER_BIN_PATH "$BIN_PATH"
 write_env_value PULLWISE_LOGROTATE_FILE "$LOGROTATE_FILE"
+write_env_value PULLWISE_REMOTE_UNINSTALL_FINALIZER "1"
+write_env_value PULLWISE_UNINSTALL_MARKER_FILE "$UNINSTALL_MARKER_FILE"
 write_env_value PULLWISE_WORKER_POLL_JITTER_SECONDS "2"
 write_env_value PULLWISE_WORKER_MAX_BACKOFF_SECONDS "60"
 write_env_value PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS "3600"
@@ -1047,6 +1050,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=$BASE_DATA_DIR $BASE_LOG_DIR $DATA_DIR $LOG_DIR
+RuntimeDirectory=$SERVICE_NAME
+RuntimeDirectoryMode=0750
+ExecStopPost=+$BIN_PATH finalize-uninstall
 
 [Install]
 WantedBy=multi-user.target

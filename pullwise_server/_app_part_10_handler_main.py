@@ -2180,11 +2180,23 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
             worker_id = clean_github_access_text(segments[2]) or ""
-            existing_worker = db.get_worker(worker_id)
-            if not existing_worker:
+            try:
+                worker_command = db.create_worker_command(
+                    {
+                        "worker_id": worker_id,
+                        "command": "uninstall",
+                        "requested_by_user_id": session.get("userId"),
+                        "request_id": request_id_from_handler(self),
+                        "created_at": now(),
+                    }
+                )
+            except ValueError as exc:
+                self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error=str(exc))
+                return self.error(HTTPStatus.CONFLICT, str(exc))
+            if not worker_command:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
-            worker = db.soft_delete_worker(worker_id)
+            worker = db.get_worker(worker_id, include_deleted=True)
             if not worker:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
@@ -2192,9 +2204,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 session,
                 "delete_worker",
                 worker_id=worker_id,
-                changed_fields={"deleted": True},
+                changed_fields={
+                    "deleted": True,
+                    "command": "uninstall",
+                    "commandId": worker_command.get("id"),
+                },
             )
-            return self.json({"worker": worker_public_payload(worker, admin=True), "deleted": True})
+            return self.json(
+                {
+                    "worker": worker_public_payload(worker, admin=True),
+                    "command": worker_command_payload(worker_command, admin=True),
+                    "deleted": True,
+                },
+                HTTPStatus.ACCEPTED,
+            )
         if len(segments) == 3 and segments[:2] == ["admin", "users"]:
             user_id = clean_github_access_text(segments[2]) or ""
             try:

@@ -1050,27 +1050,39 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
         app.PullwiseHandler.route(delete, "DELETE")
-        self.assertEqual(delete.status, HTTPStatus.OK)
+        self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
         self.assertTrue(delete.payload["deleted"])
+        self.assertEqual(delete.payload["command"]["command"], "uninstall")
         self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
 
         actions = [event["action"] for event in db.list_worker_audit_events(worker_id, limit=20)]
         for expected in ["update_worker", "disable_worker", "enable_worker", "rotate_worker_token", "delete_worker"]:
             self.assertIn(expected, actions)
 
-    def test_admin_delete_worker_soft_deletes_without_host_cleanup(self) -> None:
-        payload, _token = self.create_worker()
+    def test_admin_delete_worker_queues_uninstall_without_server_host_cleanup(self) -> None:
+        payload, token = self.create_worker()
         worker_id = payload["worker_id"]
 
         with patch.object(app.subprocess, "run", side_effect=AssertionError("admin delete must not run host cleanup")):
             delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
             app.PullwiseHandler.route(delete, "DELETE")
 
-        self.assertEqual(delete.status, HTTPStatus.OK)
+        self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
         self.assertTrue(delete.payload["deleted"])
-        self.assertNotIn("cleanup", delete.payload)
+        command = delete.payload["command"]
+        self.assertEqual(command["command"], "uninstall")
+        self.assertEqual(command["status"], "pending")
         self.assertIsNone(db.get_worker(worker_id))
         self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(heartbeat.payload["command"]["id"], command["id"])
 
     def test_admin_can_queue_worker_stop_and_uninstall_commands(self) -> None:
         payload, token = self.create_worker()
