@@ -704,7 +704,8 @@ def public_issue_feedback(issue: dict) -> dict:
 
 def issue_payload(issue: dict) -> dict:
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
-    auto_fix = issue_auto_fix_contract_ok(issue)
+    fixability = issue_fixability_state(issue)
+    auto_fix = fixability["autoFixable"]
     auto_fixable = auto_fix
     affected_locations = public_issue_affected_locations(issue)
     evidence = public_issue_evidence(issue, affected_locations=affected_locations)
@@ -767,6 +768,8 @@ def issue_payload(issue: dict) -> dict:
         "confidenceRationale": review._safe_text_lenient(issue.get("confidenceRationale")),
         "autoFix": auto_fix,
         "autoFixable": auto_fixable,
+        "fixabilityState": fixability["state"],
+        "fixabilityReason": fixability["reason"],
         "effort": review._safe_text(issue.get("effort"), "-"),
         "fixBenefits": review._safe_text_lenient(issue.get("fixBenefits")),
         "fixRisks": review._safe_text_lenient(issue.get("fixRisks")),
@@ -829,30 +832,86 @@ def safe_quota_usage_payload(value: object, *, default_scope: str) -> dict:
 
 
 def issue_auto_fix_contract_ok(issue: dict) -> bool:
+    return issue_fixability_state(issue)["autoFixable"]
+
+
+def issue_fixability_state(issue: dict) -> dict:
     if issue.get("autoFix") is not True and issue.get("autoFixable") is not True:
-        return False
+        return issue_fixability_payload(
+            False,
+            "missing_patch",
+            "No safe deterministic patch was generated for this issue.",
+        )
     if not fix_workflow.safe_issue_file(issue.get("file")):
-        return False
+        return issue_fixability_payload(
+            False,
+            "unsafe_file",
+            "Issue file is missing or is not a safe repository-relative path.",
+        )
     if not fix_workflow.code_lines(issue.get("badCode")) or not fix_workflow.code_lines(issue.get("goodCode")):
-        return False
+        return issue_fixability_payload(
+            False,
+            "missing_patch",
+            "Auto-fix requires non-empty current and suggested code blocks.",
+        )
 
     scan_id = public_issue_text(issue.get("scanId"))
     if not scan_id:
-        return True
+        return issue_fixability_payload(
+            True,
+            "ready",
+            "A safe deterministic patch is ready to preview.",
+        )
     scan = next((item for item in SCANS if item.get("id") == scan_id), None)
     if not scan:
-        return True
+        return issue_fixability_payload(
+            True,
+            "ready",
+            "A safe deterministic patch is ready to preview.",
+        )
     repo_path = scan.get("repoPath")
     user_id = public_issue_text(issue.get("userId"))
     if not isinstance(repo_path, str) or not repo_path or not user_id:
-        return True
+        return issue_fixability_payload(
+            True,
+            "ready",
+            "A safe deterministic patch is ready to preview.",
+        )
     if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id) or not os.path.exists(repo_path):
-        return True
+        return issue_fixability_payload(
+            True,
+            "ready",
+            "A safe deterministic patch is ready to preview.",
+        )
 
     try:
-        return fix_workflow.preview_issue_fix(repo_path, issue).get("valid") is True
+        preview = fix_workflow.preview_issue_fix(repo_path, issue)
     except (OSError, UnicodeError, ValueError):
-        return False
+        return issue_fixability_payload(
+            False,
+            "preview_unavailable",
+            "The stored patch could not be validated against the scanned checkout.",
+        )
+    if preview.get("valid") is True:
+        return issue_fixability_payload(
+            True,
+            "ready",
+            "A safe deterministic patch is ready to preview.",
+        )
+    reason = review._safe_text_lenient(preview.get("message"))[:500]
+    return issue_fixability_payload(
+        False,
+        "patch_not_applicable",
+        reason or "The stored patch no longer applies to the scanned checkout.",
+    )
+
+
+def issue_fixability_payload(auto_fixable: bool, state: str, reason: str) -> dict:
+    return {
+        "autoFixable": bool(auto_fixable),
+        "state": state,
+        "reason": reason,
+    }
 
 
 def public_issue_text(value: object) -> str:

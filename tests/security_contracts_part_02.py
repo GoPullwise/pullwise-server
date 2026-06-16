@@ -144,6 +144,8 @@ class SecurityContractsPart02Test(SecurityContractsBase):
             "confidenceRationale": "",
             "autoFix": False,
             "autoFixable": False,
+            "fixabilityState": "missing_patch",
+            "fixabilityReason": "No safe deterministic patch was generated for this issue.",
             "effort": "-",
             "fixBenefits": "",
             "fixRisks": "",
@@ -181,6 +183,11 @@ class SecurityContractsPart02Test(SecurityContractsBase):
 
         self.assertIs(payload["autoFix"], False)
         self.assertIs(payload["autoFixable"], False)
+        self.assertEqual(payload["fixabilityState"], "missing_patch")
+        self.assertEqual(
+            payload["fixabilityReason"],
+            "Auto-fix requires non-empty current and suggested code blocks.",
+        )
     def test_issue_payload_hides_auto_fix_for_non_contiguous_bad_code(self) -> None:
         app.ISSUES[0].update({
             "scanId": "sc_1",
@@ -206,6 +213,8 @@ class SecurityContractsPart02Test(SecurityContractsBase):
 
         self.assertIs(payload["autoFix"], False)
         self.assertIs(payload["autoFixable"], False)
+        self.assertEqual(payload["fixabilityState"], "patch_not_applicable")
+        self.assertEqual(payload["fixabilityReason"], "Old block was not found.")
     def test_github_installation_html_url_must_match_configured_github_host(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_GITHUB_WEB_URL": "https://github.com"}, clear=False):
             self.assertEqual(
