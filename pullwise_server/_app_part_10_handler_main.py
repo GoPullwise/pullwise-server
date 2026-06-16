@@ -265,7 +265,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             issues = filter_user_issue_records(user_issues(session), params)
             limit, offset = pagination_params(params)
             page = issues[offset : offset + limit]
-            issue_payloads = [issue_payload(issue) for issue in page]
+            issue_payloads = [issue_list_payload(issue) for issue in page]
             return self.json(
                 paginated_page_response(
                     issue_payloads,
@@ -2282,7 +2282,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return record
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
-        allow_disabled = segments == ["worker", "heartbeat"] or (
+        allow_disabled = segments in (["worker", "heartbeat"], ["worker", "commands", "poll"]) or (
             len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status"
         )
         allow_deleted = allow_disabled
@@ -2293,6 +2293,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         if segments == ["worker", "heartbeat"]:
             return self.handle_worker_heartbeat(body, worker_record)
+        if segments == ["worker", "commands", "poll"]:
+            return self.handle_worker_command_poll(body, worker_record)
         if segments == ["worker", "agent-configs"]:
             return self.handle_worker_agent_configs(body, worker_record)
         if segments == ["worker", "jobs", "claim"]:
@@ -2314,6 +2316,26 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
         return self.json(billing.review_agent_configs_admin_payload())
+
+    def handle_worker_command_poll(self, body: dict, worker_record: dict) -> None:
+        worker_id = clean_github_access_text(body.get("worker_id")) or ""
+        if not worker_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        running_jobs = db.count_worker_running_scan_jobs(worker_id)
+        command = db.get_next_worker_command(worker_id)
+        return self.json(
+            {
+                "ok": True,
+                "worker": {
+                    "worker_id": public_issue_text(worker_record.get("worker_id")),
+                    "status": computed_worker_status(worker_record),
+                    "running_jobs": running_jobs,
+                },
+                "command": worker_command_payload(command),
+            }
+        )
 
     def handle_worker_heartbeat(self, body: dict, worker_record: dict) -> None:
         worker_id = clean_github_access_text(body.get("worker_id")) or ""

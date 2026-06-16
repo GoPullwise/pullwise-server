@@ -245,7 +245,7 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual([issue["id"] for issue in handler.payload["items"]], ["iss_auth"])
         self.assertEqual(handler.payload["issues"], handler.payload["items"])
 
-    def test_issues_route_paginates_before_building_issue_payloads(self) -> None:
+    def test_issues_route_paginates_before_building_issue_list_payloads(self) -> None:
         app.ISSUES = [
             {
                 "id": f"iss_{index}",
@@ -259,7 +259,10 @@ class SecurityContractsPart01Test(SecurityContractsBase):
             for index in range(3)
         ]
 
-        with patch.object(app, "issue_payload", wraps=app.issue_payload) as full_payload:
+        with (
+            patch.object(app, "issue_list_payload", wraps=app.issue_list_payload) as list_payload,
+            patch.object(app, "issue_payload", side_effect=AssertionError("full issue payload should not run")),
+        ):
             handler = RouteHarness("/issues?status=open&limit=1", cookie=self.signed_in())
             app.PullwiseHandler.route(handler, "GET")
 
@@ -267,7 +270,7 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(handler.payload["total"], 3)
         self.assertTrue(handler.payload["hasMore"])
         self.assertEqual([issue["id"] for issue in handler.payload["items"]], ["iss_0"])
-        self.assertEqual(full_payload.call_count, 1)
+        self.assertEqual(list_payload.call_count, 1)
 
     def test_route_ignores_client_disconnect_without_500_response(self) -> None:
         handler = DisconnectingRouteHarness("/auth/session")

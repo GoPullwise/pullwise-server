@@ -744,6 +744,7 @@ BASE_CONFIG_DIR="/etc/pullwise-worker"
 BASE_DATA_DIR="/var/lib/pullwise-worker"
 BASE_LOG_DIR="/var/log/pullwise-worker"
 SERVICE_NAME="pullwise-worker-$SAFE_WORKER_ID"
+WATCHER_SERVICE_NAME="$SERVICE_NAME-watcher"
 CONFIG_DIR="$BASE_CONFIG_DIR/$SAFE_WORKER_ID"
 ENV_FILE="$CONFIG_DIR/worker.env"
 AUTH_COMMANDS_FILE="$CONFIG_DIR/auth-commands.txt"
@@ -752,6 +753,7 @@ DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
 CHECKOUT_ROOT="$DATA_DIR/checkouts"
 LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+WATCHER_SERVICE_FILE="/etc/systemd/system/$WATCHER_SERVICE_NAME.service"
 LOGROTATE_FILE="/etc/logrotate.d/$SERVICE_NAME"
 UNINSTALL_MARKER_FILE="/run/$SERVICE_NAME/uninstall-requested"
 INSTALL_COMPLETED=0
@@ -762,6 +764,7 @@ HAD_DATA_DIR=0
 HAD_LOG_DIR=0
 HAD_BIN_PATH=0
 HAD_SERVICE_FILE=0
+HAD_WATCHER_SERVICE_FILE=0
 HAD_LOGROTATE_FILE=0
 id "$SERVICE_USER" >/dev/null 2>&1 && HAD_SERVICE_USER=1
 [ -e "$CONFIG_DIR" ] && HAD_CONFIG_DIR=1
@@ -769,6 +772,7 @@ id "$SERVICE_USER" >/dev/null 2>&1 && HAD_SERVICE_USER=1
 [ -e "$LOG_DIR" ] && HAD_LOG_DIR=1
 [ -e "$BIN_PATH" ] && HAD_BIN_PATH=1
 [ -e "$SERVICE_FILE" ] && HAD_SERVICE_FILE=1
+[ -e "$WATCHER_SERVICE_FILE" ] && HAD_WATCHER_SERVICE_FILE=1
 [ -e "$LOGROTATE_FILE" ] && HAD_LOGROTATE_FILE=1
 rollback_dir() {
   local path="$1"
@@ -804,8 +808,11 @@ rollback_failed_install() {
   fi
   echo "Pullwise worker install failed; rolling back partial instance $SAFE_WORKER_ID." >&2
   systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl stop "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
   systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl disable "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
   rollback_file "$SERVICE_FILE" "/etc/systemd/system" "$HAD_SERVICE_FILE"
+  rollback_file "$WATCHER_SERVICE_FILE" "/etc/systemd/system" "$HAD_WATCHER_SERVICE_FILE"
   rollback_file "$LOGROTATE_FILE" "/etc/logrotate.d" "$HAD_LOGROTATE_FILE"
   rollback_file "$BIN_PATH" "/usr/local/bin" "$HAD_BIN_PATH"
   rollback_dir "$CONFIG_DIR" "$BASE_CONFIG_DIR" "$HAD_CONFIG_DIR"
@@ -1004,6 +1011,10 @@ write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"
 write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"
 write_env_value PULLWISE_SERVICE_NAME "$SERVICE_NAME"
 write_env_value PULLWISE_SERVICE_FILE "$SERVICE_FILE"
+write_env_value PULLWISE_LIFECYCLE_WATCHER_ENABLED "1"
+write_env_value PULLWISE_WATCHER_SERVICE_NAME "$WATCHER_SERVICE_NAME"
+write_env_value PULLWISE_WATCHER_SERVICE_FILE "$WATCHER_SERVICE_FILE"
+write_env_value PULLWISE_WATCHER_POLL_SECONDS "5"
 write_env_value PULLWISE_WORKER_ENV_FILE "$ENV_FILE"
 write_env_value PULLWISE_WORKER_ENV_BACKUP_FILE "$ENV_FILE.bak"
 write_env_value PULLWISE_WORKER_BIN_PATH "$BIN_PATH"
@@ -1078,7 +1089,27 @@ ProtectSystem=strict
 ReadWritePaths=$DATA_DIR $LOG_DIR
 RuntimeDirectory=$SERVICE_NAME
 RuntimeDirectoryMode=0750
-ExecStopPost=+$BIN_PATH finalize-uninstall
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > "$WATCHER_SERVICE_FILE" <<EOF
+[Unit]
+Description=Pullwise Worker Watcher $WORKER_NAME
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/
+EnvironmentFile=$ENV_FILE
+ExecStart=$BIN_PATH watch
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=false
+RuntimeDirectory=$WATCHER_SERVICE_NAME
+RuntimeDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target
@@ -1097,10 +1128,13 @@ EOF
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null
+systemctl enable "$WATCHER_SERVICE_NAME" >/dev/null
 systemctl restart "$SERVICE_NAME"
+systemctl restart "$WATCHER_SERVICE_NAME"
 INSTALL_COMPLETED=1
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "Systemd service: $SERVICE_NAME"
+echo "Watcher service: $WATCHER_SERVICE_NAME"
 echo "Worker home: $DATA_DIR"
 print_auth_commands
 run_as_service_user "$BIN_PATH" doctor || true

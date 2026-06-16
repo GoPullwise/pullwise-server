@@ -815,6 +815,66 @@ def issue_payload(issue: dict) -> dict:
     return payload
 
 
+def public_issue_list_verification_status(issue: dict) -> str:
+    status = public_issue_text(issue.get("verificationStatus")).lower()
+    if status in ISSUE_VERIFICATION_STATUSES:
+        return status
+    reported_status = public_issue_text(issue.get("reportedVerificationStatus")).lower()
+    if reported_status in ISSUE_VERIFICATION_STATUSES:
+        return reported_status
+    if public_issue_file(issue.get("file"), issue=issue) and review._safe_non_negative_int(issue.get("line")):
+        return "static_proof"
+    return "potential_risk"
+
+
+def public_issue_list_confidence_level(issue: dict, verification_status: str) -> str:
+    level = public_issue_text(issue.get("confidenceLevel") or issue.get("confidence_level")).lower()
+    if level in {"high", "medium", "low"}:
+        return level
+    if verification_status == "verified":
+        return "high"
+    if verification_status == "static_proof":
+        return "medium"
+    return "low"
+
+
+def issue_list_payload(issue: dict) -> dict:
+    issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
+    audit_metadata = public_issue_audit_metadata(issue)
+    verification_status = public_issue_list_verification_status(issue)
+    payload = {
+        "id": issue_id,
+        "userId": public_issue_text(issue.get("userId")),
+        "scanId": public_issue_text(issue.get("scanId")),
+        "jobId": public_issue_text(issue.get("jobId")),
+        "repo": clean_repository_full_name(issue.get("repo")),
+        "branch": audit_metadata.get("branch", "main"),
+        "commit": audit_metadata.get("commit", "pending"),
+        "status": public_issue_status(issue.get("status")),
+        "severity": review._safe_severity(issue.get("severity")),
+        "category": review._safe_category(issue.get("category")),
+        "title": review._safe_text(issue.get("title"), "Untitled finding"),
+        "verificationStatus": verification_status,
+        "confidenceLevel": public_issue_list_confidence_level(issue, verification_status),
+        "file": public_issue_file(issue.get("file"), issue=issue),
+        "line": review._safe_non_negative_int(issue.get("line")),
+        "confidence": review._safe_confidence(issue.get("confidence")),
+        "confidenceRationale": review._safe_text_lenient(issue.get("confidenceRationale")),
+        "effort": review._safe_text(issue.get("effort"), "-"),
+        "createdAt": pull_request_timestamp(issue.get("createdAt")) or 0,
+    }
+    updated_at = pull_request_timestamp(issue.get("updatedAt"))
+    if updated_at is not None:
+        payload["updatedAt"] = updated_at
+    age = public_issue_text(issue.get("age"))
+    if age:
+        payload["age"] = age
+    feedback = public_issue_feedback(issue)
+    if feedback:
+        payload["feedbackReason"] = feedback["reason"]
+    return payload
+
+
 def safe_quota_usage_payload(value: object, *, default_scope: str) -> dict:
     usage = value if isinstance(value, dict) else {}
     used = non_negative_int(usage.get("used"))

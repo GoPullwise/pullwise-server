@@ -76,6 +76,12 @@ itself. A running worker may acknowledge admin delete, but the durable cleanup
 responsibility belongs to the worker host manager so stopped, degraded, or
 self-removing workers can still be cleaned up and reported accurately.
 
+A single worker host may run multiple Pullwise worker instances. Do not reuse a
+worker process, watcher process, systemd unit, service user, env file, config
+directory, data directory, log directory, runtime directory, or lifecycle marker
+across worker instances. Each worker instance must have its own paired watcher or
+supervisor with instance-scoped names derived from the safe worker id.
+
 ## Agent Config Source Of Truth
 
 The server owns subscription plan agent policy.
