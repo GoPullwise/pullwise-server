@@ -767,7 +767,24 @@ def reconcile_scan_job_state_locked(scan: dict) -> bool:
     status = scan_status_from_job_status(job.get("status"))
     if not status:
         return False
-    if status in {"done", "failed", "cancelled"}:
+    if status in {"done", "failed"}:
+        result = db.get_completed_scan_job_result(public_issue_text(job.get("job_id")))
+        if result:
+            payload = result.get("result_payload") if isinstance(result.get("result_payload"), dict) else {}
+            result_status = public_issue_text(result.get("result_status") or result.get("status")).lower()
+            checksum = clean_github_access_text(result.get("result_result_checksum") or result.get("result_checksum"))
+            if result_status in {"done", "failed"}:
+                changed = apply_worker_job_result_to_state_locked(
+                    result,
+                    payload,
+                    status=result_status,
+                    checksum=checksum,
+                )
+                rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
+                if changed:
+                    return True
+        return reconcile_terminal_scan_job_locked(scan, job)
+    if status == "cancelled":
         return reconcile_terminal_scan_job_locked(scan, job)
 
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)

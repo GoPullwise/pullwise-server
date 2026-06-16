@@ -2020,6 +2020,40 @@ def list_completed_scan_job_results() -> list[dict[str, Any]]:
     return results
 
 
+def get_completed_scan_job_result(job_id: str) -> dict[str, Any] | None:
+    initialize()
+    job_id = str(job_id or "").strip()
+    if not job_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT
+                sj.*,
+                jr.attempt_id AS result_attempt_id,
+                jr.result_checksum AS result_result_checksum,
+                jr.status AS result_status,
+                jr.payload AS result_payload,
+                jr.created_at AS result_created_at
+            FROM scan_jobs sj
+            JOIN job_results jr ON jr.job_id = sj.job_id
+            WHERE sj.job_id = ?
+              AND sj.status IN ('done', 'failed')
+              AND jr.attempt_id = sj.last_attempt_id
+            """,
+            (job_id,),
+        ).fetchone()
+    item = row_to_dict(row) if row else None
+    if not item:
+        return None
+    try:
+        item["result_payload"] = json.loads(str(item.get("result_payload") or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        item["result_payload"] = {}
+    return item
+
+
 def claim_next_scan_jobs(
     worker_id: str,
     *,

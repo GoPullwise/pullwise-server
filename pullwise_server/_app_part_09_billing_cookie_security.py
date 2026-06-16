@@ -448,20 +448,22 @@ def api_repository_payload(row: dict, user: dict | None = None) -> dict:
 
 
 def latest_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
-    for scan in SCANS:
-        if scan.get("userId") == user_id and scan.get("repoId") == repo_id:
-            return scan
+    with STATE_LOCK:
+        for scan in SCANS:
+            if scan.get("userId") == user_id and scan.get("repoId") == repo_id:
+                reconcile_scan_job_state_locked(scan)
+                return scan
     return None
 
 
 def active_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
-    for scan in SCANS:
-        if (
-            scan.get("userId") == user_id
-            and scan.get("repoId") == repo_id
-            and scan.get("status") in {"queued", "running"}
-        ):
-            return scan
+    with STATE_LOCK:
+        for scan in SCANS:
+            if scan.get("userId") != user_id or scan.get("repoId") != repo_id:
+                continue
+            reconcile_scan_job_state_locked(scan)
+            if scan.get("status") in {"queued", "running"}:
+                return scan
     return None
 
 

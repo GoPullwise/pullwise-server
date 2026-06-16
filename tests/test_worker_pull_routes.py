@@ -3999,6 +3999,73 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(row["progress"], 70)
         self.assertEqual(app.SCANS[0]["status"], "running")
 
+    def test_scan_list_reconciles_completed_job_result_when_state_is_stale(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_stale_done",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, timestamp=app.now())[0]
+        db.update_scan_job_progress(
+            job["job_id"],
+            {"phase": "ai", "progress": 80, "message": "reviewing"},
+        )
+        result = RouteHarness(
+            f"/worker/jobs/{claimed['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-stale-done",
+                **audit_result_fields(
+                    [audit_issue_card("Completed finding", issue_id="issue-stale-done", severity="P1")]
+                ),
+                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+        self.assertEqual(result.status, HTTPStatus.OK)
+        app.SCANS[0].update(
+            {
+                "status": "running",
+                "phase": "ai",
+                "progress": 80,
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            }
+        )
+        app.ISSUES = []
+
+        listing = RouteHarness("/scans", headers={"Cookie": "pw_session=ses_1"})
+        app.PullwiseHandler.route(listing, "GET")
+
+        self.assertEqual(listing.status, HTTPStatus.OK)
+        row = listing.payload["items"][0]
+        self.assertEqual(row["status"], "done")
+        self.assertEqual(row["phase"], "report")
+        self.assertEqual(row["progress"], 100)
+        self.assertEqual(row["issues"]["high"], 1)
+        self.assertEqual(app.SCANS[0]["status"], "done")
+        self.assertEqual(len(app.ISSUES), 1)
+
     def test_worker_result_must_match_current_claim_attempt(self) -> None:
         scan = {
             "id": "sc_attempt",
