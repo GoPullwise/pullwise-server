@@ -57,14 +57,14 @@ directories.
 
 The server owns subscription plan agent policy.
 
-- Free/pro/max review agent configs are the source of truth for plan provider
-  chains, model names, reasoning effort/variant, and repository limits.
+- Free/pro/max review agent configs are the source of truth for the plan
+  provider, model names, reasoning effort/variant, and repository limits.
 - Worker claim payloads must include per-job `agentConfig` and
   `repositoryLimits`; workers should not infer those from local defaults.
 - The worker agent-config endpoint used by `doctor` must expose the same plan
   configs that job claims use.
-- Keep provider chain payloads in camelCase for worker-facing API responses
-  (`providerChain`), not mixed with internal snake_case fields.
+- Keep the plan review-agent provider as a single `provider` field in
+  worker-facing API responses.
 
 ## Quota And Account Terminology
 

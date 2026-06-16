@@ -448,9 +448,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             {
                 "version": 1,
                 "plans": {
-                    "free": {"providerChain": ["bad"]},
-                    "pro": {"providerChain": []},
-                    "max": {"providerChain": "bad"},
+                    "free": {"provider": "bad"},
+                    "pro": {"provider": ""},
+                    "max": {"provider": None},
                 },
             },
         )
@@ -783,26 +783,26 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_admin_plan_agent_config_rejects_invalid_values(self) -> None:
         update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",
-            {"providerChain": ["bad"], "codex": {"reasoningEffort": "extreme"}},
+            {"provider": "bad", "codex": {"reasoningEffort": "extreme"}},
             cookie=self.admin_cookie,
         )
         app.PullwiseHandler.route(update, "PATCH")
 
         self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("providerChain", update.payload["message"])
+        self.assertIn("provider", update.payload["message"])
 
-    def test_plan_agent_config_reads_repair_invalid_persisted_provider_chain(self) -> None:
+    def test_plan_agent_config_reads_repair_invalid_persisted_provider(self) -> None:
         db.save_state_item(
             app.billing.REVIEW_AGENT_CONFIG_STATE_KEY,
             {
                 "version": 1,
                 "plans": {
                     "free": {
-                        "providerChain": ["bad"],
+                        "provider": "bad",
                         "codex": {"cli": "codex", "model": "gpt-free", "reasoningEffort": "high"},
                     },
-                    "pro": {"providerChain": []},
-                    "max": {"providerChain": "bad"},
+                    "pro": {"provider": ""},
+                    "max": {"provider": None},
                 },
             },
         )
@@ -814,15 +814,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         for handler in (admin, docs):
             self.assertEqual(handler.status, HTTPStatus.OK)
-            self.assertEqual(handler.payload["agentConfigs"]["free"]["providerChain"], ["codex"])
-            self.assertEqual(handler.payload["agentConfigs"]["pro"]["providerChain"], ["codex"])
-            self.assertEqual(handler.payload["agentConfigs"]["max"]["providerChain"], ["codex"])
+            self.assertEqual(handler.payload["agentConfigs"]["free"]["provider"], "codex")
+            self.assertEqual(handler.payload["agentConfigs"]["pro"]["provider"], "codex")
+            self.assertEqual(handler.payload["agentConfigs"]["max"]["provider"], "codex")
+            self.assertNotIn("providerChain", handler.payload["agentConfigs"]["free"])
             self.assertEqual(handler.payload["agentConfigs"]["free"]["codex"]["model"], "gpt-free")
 
         stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
-        self.assertEqual(stored["plans"]["free"]["providerChain"], ["codex"])
-        self.assertEqual(stored["plans"]["pro"]["providerChain"], ["codex"])
-        self.assertEqual(stored["plans"]["max"]["providerChain"], ["codex"])
+        self.assertEqual(stored["plans"]["free"]["provider"], "codex")
+        self.assertEqual(stored["plans"]["pro"]["provider"], "codex")
+        self.assertEqual(stored["plans"]["max"]["provider"], "codex")
 
     def test_admin_review_calibration_summary_is_admin_only_and_sanitized(self) -> None:
         event = {

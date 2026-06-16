@@ -2450,7 +2450,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "branch": "main",
                     "commit": "abc1234",
                     "workerVersion": "0.2.0",
-                    "providerChain": ["codex"],
+                    "provider": "codex",
                     "environment": {
                         "os": "Linux",
                         "osRelease": "6.8.0",

@@ -14,6 +14,43 @@ def service_user_helper(script: str) -> str:
     return script[start:end] + '\nservice_user_name "$(safe_worker_id "$1")"\n'
 
 
+def instance_metadata_helper(script: str) -> str:
+    start = script.index("safe_worker_id() {")
+    end = script.index('SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"')
+    return (
+        'WORKER_ID="$1"\n'
+        + script[start:end]
+        + '\nprintf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$SAFE_WORKER_ID" "$SERVICE_USER" "$SERVICE_NAME" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"\n'
+    )
+
+
+def instance_metadata(script: str, worker_id: str) -> dict[str, str]:
+    shell = shutil.which("sh") or shutil.which("bash")
+    if not shell:
+        raise unittest.SkipTest("No POSIX shell is available for installer contract tests.")
+    if not shutil.which("sha256sum"):
+        raise unittest.SkipTest("sha256sum is required for installer contract tests.")
+
+    result = subprocess.run(
+        [shell, "-c", instance_metadata_helper(script), "_", worker_id],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr + result.stdout)
+    safe_id, service_user, service_name, config_dir, data_dir, log_dir = result.stdout.strip().split("\t")
+    return {
+        "safe_id": safe_id,
+        "service_user": service_user,
+        "service_name": service_name,
+        "config_dir": config_dir,
+        "data_dir": data_dir,
+        "log_dir": log_dir,
+    }
+
+
 class WorkerInstallerContractsTest(unittest.TestCase):
     def test_systemd_write_paths_are_instance_scoped(self) -> None:
         script = app.worker_install_script()
@@ -51,6 +88,22 @@ class WorkerInstallerContractsTest(unittest.TestCase):
             digest = hashlib.sha256(safe_id.encode("utf-8")).hexdigest()[:10]
             self.assertEqual(f"pw-worker-wk-abcdefg-{digest}", name)
             self.assertLessEqual(len(name), 32)
+
+    def test_long_worker_ids_do_not_reuse_instance_names_after_truncation(self) -> None:
+        script = app.worker_install_script()
+        prefix = "wk_" + ("a" * 45)
+        worker_ids = [f"{prefix}_X", f"{prefix}_Y"]
+        instances = [instance_metadata(script, worker_id) for worker_id in worker_ids]
+
+        for worker_id, metadata in zip(worker_ids, instances, strict=True):
+            digest = hashlib.sha256(worker_id.encode("utf-8")).hexdigest()[:10]
+            self.assertEqual(app.worker_safe_service_id(worker_id), metadata["safe_id"])
+            self.assertEqual(48, len(metadata["safe_id"]))
+            self.assertTrue(metadata["safe_id"].endswith(f"-{digest}"))
+            self.assertLessEqual(len(metadata["service_user"]), 32)
+
+        for field in ("safe_id", "service_user", "service_name", "config_dir", "data_dir", "log_dir"):
+            self.assertNotEqual(instances[0][field], instances[1][field])
 
     def test_existing_service_user_must_belong_to_current_worker_home(self) -> None:
         script = app.worker_install_script()
