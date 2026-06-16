@@ -962,6 +962,18 @@ def scan_payload(scan: dict) -> dict:
         payload["billingUsage"] = safe_quota_usage_payload(scan.get("billingUsage"), default_scope="user")
     if isinstance(scan.get("repoUsage"), dict):
         payload["repoUsage"] = safe_quota_usage_payload(scan.get("repoUsage"), default_scope="repository")
+    quota_state = public_issue_text(scan.get("quotaState"))
+    if quota_state in {"reserved", "consumed", "released", "refunded"}:
+        payload["quotaState"] = quota_state
+    for key in ("quotaReservedAt", "quotaConsumedAt", "quotaReleasedAt"):
+        if pull_request_timestamp(scan.get(key)):
+            payload[key] = pull_request_timestamp(scan.get(key)) or 0
+    quota_trigger = public_issue_text(scan.get("quotaConsumeTrigger"))
+    if quota_trigger:
+        payload["quotaConsumeTrigger"] = quota_trigger
+    quota_release_reason = public_issue_text(scan.get("quotaReleaseReason"))
+    if quota_release_reason:
+        payload["quotaReleaseReason"] = quota_release_reason
     if isinstance(scan.get("quotaRefunded"), dict):
         refunded = scan["quotaRefunded"]
         reason = public_scan_error_code(refunded.get("reason"))

@@ -62,7 +62,13 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
         "impactGraph",
         "jobTrace",
         "preflight",
+        "quotaConsumedAt",
+        "quotaConsumeTrigger",
         "quotaRefunded",
+        "quotaReleasedAt",
+        "quotaReleaseReason",
+        "quotaReservedAt",
+        "quotaState",
         "recoveredAt",
         "recoveryReason",
         "repositoryGraph",
@@ -106,6 +112,89 @@ def worker_plan_for_job(job: dict, scan: dict | None = None) -> str:
 
 def worker_agent_config_for_job(job: dict, scan: dict | None = None) -> dict:
     return billing.review_agent_config(worker_plan_for_job(job, scan))
+
+
+def quota_request_id_for_scan(scan: dict | None) -> str | None:
+    request_id = public_issue_text((scan or {}).get("requestId"))
+    return request_id or None
+
+
+def scan_quota_has_been_consumed(scan: dict | None) -> bool:
+    if not isinstance(scan, dict):
+        return False
+    if public_issue_text(scan.get("quotaState")) in {"consumed", "refunded"}:
+        return True
+    return bool(pull_request_timestamp(scan.get("quotaConsumedAt")))
+
+
+def refresh_scan_quota_usage_locked(scan: dict, user: dict | None, repository: dict | None) -> None:
+    if user:
+        scan["billingUsage"] = quota.quota_payload_for_user(user)
+    if repository:
+        scan["repoUsage"] = quota.quota_payload_for_repository(repository, user)
+
+
+def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") -> dict:
+    scan_id = public_issue_text(job.get("scan_id"))
+    user_id = public_issue_text(job.get("user_id"))
+    repo_id = public_issue_text(job.get("repo_id"))
+    if not scan_id or not user_id or not repo_id:
+        return {}
+    with STATE_LOCK:
+        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        request_id = quota_request_id_for_scan(scan)
+        already_consumed = scan_quota_has_been_consumed(scan)
+    if already_consumed:
+        return {"deduplicated": True, "consumed": True}
+    user = USERS.get(user_id)
+    repository = db.get_repository(repo_id)
+    if not user or not repository:
+        return {}
+    quota_result = quota.consume_reserved_scan_quota(
+        user=user,
+        repository=repository,
+        requested_by_user_id=user_id,
+        scan_id=scan_id,
+        request_id=request_id,
+    )
+    if not quota_result.get("consumed"):
+        return quota_result
+    consumed_at = now()
+    with STATE_LOCK:
+        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        if scan:
+            scan["quotaState"] = "consumed"
+            scan["quotaConsumedAt"] = consumed_at
+            scan["quotaConsumeTrigger"] = public_issue_text(trigger) or "codex_started"
+            scan["quotaBucketIds"] = quota_result.get("bucketIds") or scan.get("quotaBucketIds") or {}
+            refresh_scan_quota_usage_locked(scan, user, repository)
+            mark_state_dirty()
+    return quota_result
+
+
+def release_scan_quota_reservation_for_scan(scan: dict, *, reason: str = "scan_cancelled") -> dict:
+    scan_id = public_issue_text((scan or {}).get("id"))
+    user_id = public_issue_text((scan or {}).get("userId"))
+    if not scan_id or not user_id or scan_quota_has_been_consumed(scan):
+        return {}
+    request_id = quota_request_id_for_scan(scan)
+    release_result = quota.release_scan_quota_reservation(
+        scan_id=scan_id,
+        requested_by_user_id=user_id,
+        request_id=request_id,
+        record_ledger=True,
+    )
+    if not release_result.get("ledgerRows") and not release_result.get("bucketRows"):
+        return release_result
+    user = USERS.get(user_id)
+    repo_id = public_issue_text(scan.get("repoId"))
+    repository = db.get_repository(repo_id) if repo_id else None
+    scan["quotaState"] = "released"
+    scan["quotaReleasedAt"] = now()
+    scan["quotaReleaseReason"] = public_scan_error_code(reason) or public_issue_text(reason) or "scan_cancelled"
+    refresh_scan_quota_usage_locked(scan, user, repository)
+    mark_state_dirty()
+    return release_result
 
 
 def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
@@ -439,7 +528,9 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
         quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
         result = {"accepted": True, "duplicate": True, "conflict": False, "issueCount": len(issue_cards)}
-        if quota_rollback.get("ledgerRows"):
+        if quota_rollback.get("reservationReleased"):
+            result["quotaRelease"] = quota_rollback
+        elif quota_rollback.get("ledgerRows"):
             result["quotaRollback"] = quota_rollback
         return result
     resolved_commit = worker_result_resolved_commit(job=job, body=body)
@@ -450,6 +541,9 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         else:
             job = {**job, "commit": resolved_commit}
     event_result = record_worker_review_decision_events(job, body, attempt_id=attempt_id, status=status)
+    quota_finalized = {}
+    if worker_result_should_finalize_quota(job, body, status=status):
+        quota_finalized = finalize_scan_quota_for_job(job, trigger="worker_result")
     with STATE_LOCK:
         apply_worker_job_result_to_state_locked(job, body, status=status, checksum=checksum)
     quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
@@ -461,9 +555,24 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         "issueCount": len(issue_cards),
         "reviewDecisionEvents": event_result,
     }
-    if quota_rollback.get("ledgerRows"):
+    if quota_finalized.get("consumed"):
+        result["quotaConsumed"] = True
+    if quota_rollback.get("reservationReleased"):
+        result["quotaRelease"] = quota_rollback
+    elif quota_rollback.get("ledgerRows"):
         result["quotaRollback"] = quota_rollback
     return result
+
+
+def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -> bool:
+    if status == "done":
+        return True
+    if public_scan_phase(job.get("progress_phase")) in {"ai", "report"}:
+        return True
+    if public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")):
+        return True
+    issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
+    return bool(issue_cards)
 
 
 def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, status: str) -> dict:
@@ -478,8 +587,30 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
         request_id = public_issue_text((scan or {}).get("requestId")) or None
         repo_id = public_issue_text((scan or {}).get("repoId") or job.get("repo_id"))
         has_repository_limit_evidence = worker_result_has_repository_limit_evidence(body, scan)
+        quota_consumed = scan_quota_has_been_consumed(scan)
     if not has_repository_limit_evidence:
         return {}
+    if not quota_consumed:
+        release_result = quota.release_scan_quota_reservation(
+            scan_id=scan_id,
+            requested_by_user_id=user_id,
+            request_id=request_id,
+            record_ledger=True,
+        )
+        if not release_result.get("ledgerRows"):
+            return release_result
+        user = USERS.get(user_id)
+        repository = db.get_repository(repo_id) if repo_id else None
+        with STATE_LOCK:
+            scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+            if scan:
+                scan["quotaState"] = "released"
+                scan["quotaReleasedAt"] = now()
+                scan["quotaReleaseReason"] = "REPOSITORY_TOO_LARGE"
+                refresh_scan_quota_usage_locked(scan, user, repository)
+                mark_state_dirty()
+        release_result["reservationReleased"] = True
+        return release_result
     rollback_result = quota.rollback_scan_quota(
         scan_id=scan_id,
         requested_by_user_id=user_id,
@@ -504,6 +635,7 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
                 "ledgerRows": public_scan_count(rollback_result.get("ledgerRows")),
                 "bucketRows": public_scan_count(rollback_result.get("bucketRows")),
             }
+            scan["quotaState"] = "refunded"
             mark_state_dirty()
     return rollback_result
 

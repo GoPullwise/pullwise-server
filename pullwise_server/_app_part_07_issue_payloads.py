@@ -818,14 +818,19 @@ def issue_payload(issue: dict) -> dict:
 def safe_quota_usage_payload(value: object, *, default_scope: str) -> dict:
     usage = value if isinstance(value, dict) else {}
     used = non_negative_int(usage.get("used"))
+    reserved = non_negative_int(usage.get("reserved"))
     limit = non_negative_int(usage.get("limit"))
     return {
         "scope": clean_github_access_text(usage.get("scope")) or default_scope,
         "period": clean_github_access_text(usage.get("period")) or current_review_usage_period(),
         "plan": clean_github_access_text(usage.get("plan")) or "free",
         "used": used,
+        "reserved": reserved,
         "limit": limit,
-        "remaining": max(0, non_negative_int(usage.get("remaining")) if "remaining" in usage else limit - used),
+        "remaining": max(
+            0,
+            non_negative_int(usage.get("remaining")) if "remaining" in usage else limit - used - reserved,
+        ),
         "resetAt": non_negative_int(usage.get("resetAt")),
         "bucketId": clean_github_access_text(usage.get("bucketId"), allow_int=True),
     }

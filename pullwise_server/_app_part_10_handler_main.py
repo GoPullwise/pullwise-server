@@ -450,7 +450,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                     scan_error = (HTTPStatus.BAD_REQUEST, "Unable to resolve repository context.")
                             else:
                                 try:
-                                    quota_result = quota.consume_scan_quota(
+                                    quota_result = quota.reserve_scan_quota(
                                         user=scan_user,
                                         repository=repository_record,
                                         requested_by_user_id=session["userId"],
@@ -511,6 +511,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 "repoPath": None,
                                 "billingUsage": quota_result["user"],
                                 "repoUsage": quota_result["repository"],
+                                "quotaState": "reserved",
+                                "quotaReservedAt": now(),
                                 "by": "you",
                             }
                             if request_id:
@@ -529,10 +531,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 scan_created = False
                                 mark_state_dirty()
                                 if not quota_result.get("deduplicated"):
-                                    quota.rollback_scan_quota(
+                                    quota.release_scan_quota_reservation(
                                         scan_id=scan_id,
                                         requested_by_user_id=session["userId"],
                                         request_id=request_id or None,
+                                        record_ledger=False,
                                     )
                                 raise
 
@@ -614,7 +617,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     if not repository:
                         return self.error(HTTPStatus.BAD_REQUEST, "Unable to resolve repository context for retry.")
                     scan_id = public_issue_text(scan.get("id"))
-                quota_result = quota.consume_scan_quota(
+                quota_result = quota.reserve_scan_quota(
                     user=user,
                     repository=repository,
                     requested_by_user_id=session["userId"],
@@ -640,6 +643,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     scan["quotaBucketIds"] = quota_result["bucketIds"]
                     scan["billingUsage"] = quota_result["user"]
                     scan["repoUsage"] = quota_result["repository"]
+                    scan["quotaState"] = "reserved"
+                    scan["quotaReservedAt"] = now()
                     mark_state_dirty()
                 scan_logging.log_event(
                     "scan_retry_queued",
@@ -661,18 +666,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
             except RuntimeError as exc:
                 if quota_result and not quota_result.get("deduplicated"):
-                    quota.rollback_scan_quota(
+                    quota.release_scan_quota_reservation(
                         scan_id=public_issue_text((scan or {}).get("id")) or segments[1],
                         requested_by_user_id=session["userId"],
                         request_id=retry_request_id,
+                        record_ledger=False,
                     )
                 return self.error(HTTPStatus.CONFLICT, str(exc))
             except Exception:
                 if quota_result and not quota_result.get("deduplicated"):
-                    quota.rollback_scan_quota(
+                    quota.release_scan_quota_reservation(
                         scan_id=public_issue_text((scan or {}).get("id")) or segments[1],
                         requested_by_user_id=session["userId"],
                         request_id=retry_request_id,
+                        record_ledger=False,
                     )
                 raise
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
@@ -683,6 +690,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 scan = self.find_or_404(user_scans(session), segments[1], "Scan")
                 if scan.get("status") not in {"queued", "running"}:
                     return self.error(HTTPStatus.CONFLICT, "Only queued or running scans can be cancelled.")
+                release_scan_quota_reservation_for_scan(scan, reason="scan_cancelled")
                 scan["status"] = "cancelled"
                 scan["completedAt"] = now()
                 mark_state_dirty()
@@ -2470,10 +2478,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
         if public_issue_text(current_job.get("status")) not in {"claimed", "running"}:
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
+        phase = public_scan_phase(body.get("phase"))
         job = db.update_scan_job_progress(
             job_id,
             {
-                "phase": public_scan_phase(body.get("phase")),
+                "phase": phase,
                 "progress": public_scan_progress(body.get("progress")),
                 "message": public_issue_text(body.get("message")),
                 "started_at": pull_request_timestamp(body.get("started_at")) or now(),
@@ -2483,6 +2492,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         if not job:
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
+        if phase in {"ai", "report"}:
+            finalize_scan_quota_for_job(job, trigger=f"phase_{phase}")
         audit_swarm = public_scan_audit_swarm(body.get("audit_swarm") or body.get("auditSwarm"))
         completion_audit = public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
         job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
@@ -2501,7 +2512,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
             if scan and scan.get("status") == "running":
                 update = {
-                    "phase": public_scan_phase(body.get("phase")),
+                    "phase": phase,
                     "progress": public_scan_progress(body.get("progress")),
                     "startedAt": job.get("started_at"),
                     "updatedAt": now(),
@@ -2660,7 +2671,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
             scan_id = make_id("sc")
             try:
-                quota_result = quota.consume_scan_quota(
+                quota_result = quota.reserve_scan_quota(
                     user=context["user"],
                     repository=repository,
                     requested_by_user_id=context["user"]["id"],
@@ -2709,6 +2720,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "repoPath": None,
                 "billingUsage": quota_result["user"],
                 "repoUsage": quota_result["repository"],
+                "quotaState": "reserved",
+                "quotaReservedAt": now(),
                 "by": "api key",
             }
             if request_id:
@@ -2720,10 +2733,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             except Exception:
                 SCANS[:] = [item for item in SCANS if item.get("id") != scan_id]
                 mark_state_dirty()
-                quota.rollback_scan_quota(
+                quota.release_scan_quota_reservation(
                     scan_id=scan_id,
                     requested_by_user_id=context["user"]["id"],
                     request_id=request_id or None,
+                    record_ledger=False,
                 )
                 raise
         scan_logging.log_event(
@@ -2755,6 +2769,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan = active_scan_for_user_repo(context["user"]["id"], repository["id"])
             if not scan:
                 return self.error(HTTPStatus.NOT_FOUND, "No queued or running scan exists for this repository.")
+            release_scan_quota_reservation_for_scan(scan, reason="scan_cancelled")
             scan["status"] = "cancelled"
             scan["completedAt"] = now()
             mark_state_dirty()

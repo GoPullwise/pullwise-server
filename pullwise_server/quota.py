@@ -344,6 +344,452 @@ def quota_ledger_rows_for_user(
         return [dict(row) for row in rows]
 
 
+def _request_id_clause(request_id: str | None) -> tuple[str, list[object]]:
+    if request_id:
+        return "AND request_id = ?", [request_id]
+    return "AND request_id IS NULL", []
+
+
+def _quota_ledger_id(
+    bucket_id: str,
+    scan_id: str,
+    requested_by_user_id: str,
+    request_id: str | None,
+    reason: str,
+) -> str:
+    return db.quota_ledger_id(bucket_id, scan_id, requested_by_user_id, request_id, reason)
+
+
+def reserve_scan_quota(
+    *,
+    user: dict[str, Any],
+    repository: dict[str, Any],
+    requested_by_user_id: str,
+    scan_id: str,
+    request_id: str | None = None,
+    timestamp: int | None = None,
+) -> dict[str, Any]:
+    db.initialize()
+    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+    plan = entitlement["plan"]
+    period = entitlement["period"]
+    reset_at = entitlement["resetAt"]
+    user_limit = entitlement["userLimit"]
+    repository_limit = entitlement["repositoryLimit"]
+    user_id = str(user["id"])
+    repository_id = str(repository["id"])
+    repository_scope_id = repository_quota_scope_id(repository)
+    github_repo_id = str(repository["github_repo_id"])
+
+    with closing(db.connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            existing_request = None
+            if request_id:
+                existing_request = connection.execute(
+                    """
+                    SELECT 1
+                    FROM quota_ledger
+                    WHERE requested_by_user_id = ?
+                      AND request_id = ?
+                      AND repository_id = ?
+                      AND reason IN ('scan_reserved', 'scan_created', 'scan_consumed')
+                      AND delta > 0
+                    LIMIT 1
+                    """,
+                    (requested_by_user_id, request_id, repository_id),
+                ).fetchone()
+            user_bucket = _ensure_quota_bucket(
+                connection,
+                scope_type="user",
+                scope_id=user_id,
+                period=period,
+                plan=plan,
+                limit=user_limit,
+                reset_at=reset_at,
+            )
+            repository_bucket = _ensure_quota_bucket(
+                connection,
+                scope_type="repository",
+                scope_id=repository_scope_id,
+                period=period,
+                plan=plan,
+                limit=repository_limit,
+                reset_at=reset_at,
+            )
+            if existing_request:
+                connection.commit()
+                return {
+                    "deduplicated": True,
+                    "user": quota_payload(user_bucket, scope="user"),
+                    "repository": quota_payload(repository_bucket, scope="repository"),
+                    "bucketIds": {
+                        "user": user_bucket["id"],
+                        "repository": repository_bucket["id"],
+                    },
+                }
+
+            repo_updated = connection.execute(
+                """
+                UPDATE quota_buckets
+                SET reserved = reserved + 1, updated_at = strftime('%s', 'now')
+                WHERE id = ? AND used + reserved < quota_limit
+                """,
+                (repository_bucket["id"],),
+            ).rowcount
+            if repo_updated != 1:
+                connection.rollback()
+                raise QuotaExceeded(
+                    "QUOTA_EXCEEDED_REPOSITORY",
+                    "This repository has used its scan quota for the current billing period.",
+                    repo_id=repository_id,
+                )
+
+            user_updated = connection.execute(
+                """
+                UPDATE quota_buckets
+                SET reserved = reserved + 1, updated_at = strftime('%s', 'now')
+                WHERE id = ? AND used + reserved < quota_limit
+                """,
+                (user_bucket["id"],),
+            ).rowcount
+            if user_updated != 1:
+                connection.rollback()
+                raise QuotaExceeded(
+                    "QUOTA_EXCEEDED_USER",
+                    "Your account has used its scan quota for the current billing period.",
+                    repo_id=repository_id,
+                )
+
+            for bucket_id in (user_bucket["id"], repository_bucket["id"]):
+                connection.execute(
+                    """
+                    INSERT INTO quota_ledger (
+                        id, repository_id, github_repo_id, scan_id,
+                        requested_by_user_id, request_id, bucket_id, delta, reason, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'scan_reserved', strftime('%s', 'now'))
+                    """,
+                    (
+                        _quota_ledger_id(bucket_id, scan_id, requested_by_user_id, request_id, "scan_reserved"),
+                        repository_id,
+                        github_repo_id,
+                        scan_id,
+                        requested_by_user_id,
+                        request_id,
+                        bucket_id,
+                    ),
+                )
+
+            user_bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (user_bucket["id"],)).fetchone())
+            repository_bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (repository_bucket["id"],)).fetchone())
+            connection.commit()
+            return {
+                "deduplicated": False,
+                "user": quota_payload(user_bucket, scope="user"),
+                "repository": quota_payload(repository_bucket, scope="repository"),
+                "bucketIds": {
+                    "user": user_bucket["id"],
+                    "repository": repository_bucket["id"],
+                },
+            }
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+
+
+def consume_reserved_scan_quota(
+    *,
+    user: dict[str, Any],
+    repository: dict[str, Any],
+    requested_by_user_id: str,
+    scan_id: str,
+    request_id: str | None = None,
+    timestamp: int | None = None,
+) -> dict[str, Any]:
+    db.initialize()
+    requested_by_user_id = str(requested_by_user_id or "").strip()
+    scan_id = str(scan_id or "").strip()
+    request_id = str(request_id or "").strip() if request_id else None
+    if not requested_by_user_id or not scan_id:
+        return {"deduplicated": False, "consumed": False, "bucketIds": {}}
+    request_clause, request_params = _request_id_clause(request_id)
+    with closing(db.connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+            user_bucket = _ensure_quota_bucket(
+                connection,
+                scope_type="user",
+                scope_id=str(user["id"]),
+                period=entitlement["period"],
+                plan=entitlement["plan"],
+                limit=entitlement["userLimit"],
+                reset_at=entitlement["resetAt"],
+            )
+            repository_bucket = _ensure_quota_bucket(
+                connection,
+                scope_type="repository",
+                scope_id=repository_quota_scope_id(repository),
+                period=entitlement["period"],
+                plan=entitlement["plan"],
+                limit=entitlement["repositoryLimit"],
+                reset_at=entitlement["resetAt"],
+            )
+            existing_consumed = connection.execute(
+                f"""
+                SELECT 1
+                FROM quota_ledger
+                WHERE scan_id = ?
+                  AND requested_by_user_id = ?
+                  {request_clause}
+                  AND reason IN ('scan_created', 'scan_consumed')
+                  AND delta > 0
+                LIMIT 1
+                """,
+                [scan_id, requested_by_user_id, *request_params],
+            ).fetchone()
+            if existing_consumed:
+                connection.commit()
+                return {
+                    "deduplicated": True,
+                    "consumed": True,
+                    "user": quota_payload(user_bucket, scope="user"),
+                    "repository": quota_payload(repository_bucket, scope="repository"),
+                    "bucketIds": {
+                        "user": user_bucket["id"],
+                        "repository": repository_bucket["id"],
+                    },
+                }
+            existing_release = connection.execute(
+                f"""
+                SELECT 1
+                FROM quota_ledger
+                WHERE scan_id = ?
+                  AND requested_by_user_id = ?
+                  {request_clause}
+                  AND reason = 'scan_reservation_released'
+                  AND delta < 0
+                LIMIT 1
+                """,
+                [scan_id, requested_by_user_id, *request_params],
+            ).fetchone()
+            if existing_release:
+                connection.commit()
+                return {
+                    "deduplicated": True,
+                    "consumed": False,
+                    "released": True,
+                    "user": quota_payload(user_bucket, scope="user"),
+                    "repository": quota_payload(repository_bucket, scope="repository"),
+                    "bucketIds": {
+                        "user": user_bucket["id"],
+                        "repository": repository_bucket["id"],
+                    },
+                }
+            reservation_rows = connection.execute(
+                f"""
+                SELECT id, bucket_id, delta
+                FROM quota_ledger
+                WHERE scan_id = ?
+                  AND requested_by_user_id = ?
+                  {request_clause}
+                  AND reason = 'scan_reserved'
+                  AND delta > 0
+                """,
+                [scan_id, requested_by_user_id, *request_params],
+            ).fetchall()
+            if not reservation_rows:
+                connection.rollback()
+                return consume_scan_quota(
+                    user=user,
+                    repository=repository,
+                    requested_by_user_id=requested_by_user_id,
+                    scan_id=scan_id,
+                    request_id=request_id,
+                    timestamp=timestamp,
+                )
+
+            bucket_deltas: dict[str, int] = {}
+            for row in reservation_rows:
+                bucket_id = str(row["bucket_id"] or "")
+                delta = non_negative_int(row["delta"])
+                if bucket_id and delta:
+                    bucket_deltas[bucket_id] = bucket_deltas.get(bucket_id, 0) + delta
+            repository_id = str(repository["id"])
+            github_repo_id = str(repository["github_repo_id"])
+            for bucket_id, delta in bucket_deltas.items():
+                connection.execute(
+                    """
+                    UPDATE quota_buckets
+                    SET reserved = CASE WHEN reserved >= ? THEN reserved - ? ELSE 0 END,
+                        used = used + ?,
+                        updated_at = strftime('%s', 'now')
+                    WHERE id = ?
+                    """,
+                    (delta, delta, delta, bucket_id),
+                )
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO quota_ledger (
+                        id, repository_id, github_repo_id, scan_id,
+                        requested_by_user_id, request_id, bucket_id, delta, reason, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scan_consumed', strftime('%s', 'now'))
+                    """,
+                    (
+                        _quota_ledger_id(bucket_id, scan_id, requested_by_user_id, request_id, "scan_consumed"),
+                        repository_id,
+                        github_repo_id,
+                        scan_id,
+                        requested_by_user_id,
+                        request_id,
+                        bucket_id,
+                        delta,
+                    ),
+                )
+
+            user_bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (user_bucket["id"],)).fetchone())
+            repository_bucket = dict(connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (repository_bucket["id"],)).fetchone())
+            connection.commit()
+            return {
+                "deduplicated": False,
+                "consumed": True,
+                "user": quota_payload(user_bucket, scope="user"),
+                "repository": quota_payload(repository_bucket, scope="repository"),
+                "bucketIds": {
+                    "user": user_bucket["id"],
+                    "repository": repository_bucket["id"],
+                },
+            }
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+
+
+def release_scan_quota_reservation(
+    *,
+    scan_id: str,
+    requested_by_user_id: str,
+    request_id: str | None = None,
+    record_ledger: bool = True,
+) -> dict[str, int]:
+    db.initialize()
+    scan_id = str(scan_id or "").strip()
+    requested_by_user_id = str(requested_by_user_id or "").strip()
+    request_id = str(request_id or "").strip() if request_id else None
+    if not scan_id or not requested_by_user_id:
+        return {"ledgerRows": 0, "bucketRows": 0}
+    request_clause, request_params = _request_id_clause(request_id)
+    with closing(db.connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            existing_consumed = connection.execute(
+                f"""
+                SELECT 1
+                FROM quota_ledger
+                WHERE scan_id = ?
+                  AND requested_by_user_id = ?
+                  {request_clause}
+                  AND reason IN ('scan_created', 'scan_consumed')
+                  AND delta > 0
+                LIMIT 1
+                """,
+                [scan_id, requested_by_user_id, *request_params],
+            ).fetchone()
+            if existing_consumed:
+                connection.commit()
+                return {"ledgerRows": 0, "bucketRows": 0, "consumedRows": 1}
+            existing_release = connection.execute(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM quota_ledger
+                WHERE scan_id = ?
+                  AND requested_by_user_id = ?
+                  {request_clause}
+                  AND reason = 'scan_reservation_released'
+                  AND delta < 0
+                """,
+                [scan_id, requested_by_user_id, *request_params],
+            ).fetchone()
+            if existing_release and non_negative_int(existing_release["count"]):
+                connection.commit()
+                return {"ledgerRows": 0, "bucketRows": 0, "releasedRows": non_negative_int(existing_release["count"])}
+            rows = connection.execute(
+                f"""
+                SELECT q.id, q.repository_id, q.github_repo_id, q.bucket_id, q.delta
+                FROM quota_ledger q
+                WHERE q.scan_id = ?
+                  AND q.requested_by_user_id = ?
+                  {request_clause}
+                  AND q.reason = 'scan_reserved'
+                  AND q.delta > 0
+                """,
+                [scan_id, requested_by_user_id, *request_params],
+            ).fetchall()
+            if not rows:
+                connection.commit()
+                return {"ledgerRows": 0, "bucketRows": 0}
+            bucket_deltas: dict[str, int] = {}
+            for row in rows:
+                bucket_id = str(row["bucket_id"] or "")
+                delta = non_negative_int(row["delta"])
+                if bucket_id and delta:
+                    bucket_deltas[bucket_id] = bucket_deltas.get(bucket_id, 0) + delta
+            bucket_rows = 0
+            for bucket_id, delta in bucket_deltas.items():
+                bucket_rows += connection.execute(
+                    """
+                    UPDATE quota_buckets
+                    SET reserved = CASE WHEN reserved >= ? THEN reserved - ? ELSE 0 END,
+                        updated_at = strftime('%s', 'now')
+                    WHERE id = ?
+                    """,
+                    (delta, delta, bucket_id),
+                ).rowcount
+            if record_ledger:
+                for row in rows:
+                    bucket_id = str(row["bucket_id"] or "")
+                    delta = non_negative_int(row["delta"])
+                    if not bucket_id or not delta:
+                        continue
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO quota_ledger (
+                            id, repository_id, github_repo_id, scan_id,
+                            requested_by_user_id, request_id, bucket_id, delta, reason, created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scan_reservation_released', strftime('%s', 'now'))
+                        """,
+                        (
+                            _quota_ledger_id(bucket_id, scan_id, requested_by_user_id, request_id, "scan_reservation_released"),
+                            row["repository_id"],
+                            row["github_repo_id"],
+                            scan_id,
+                            requested_by_user_id,
+                            request_id,
+                            bucket_id,
+                            -delta,
+                        ),
+                    )
+            else:
+                ledger_ids = [str(row["id"]) for row in rows if str(row["id"] or "")]
+                if ledger_ids:
+                    placeholders = ",".join("?" for _ in ledger_ids)
+                    connection.execute(f"DELETE FROM quota_ledger WHERE id IN ({placeholders})", ledger_ids)
+            connection.commit()
+            return {"ledgerRows": len(rows) if record_ledger else 0, "bucketRows": bucket_rows}
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+
+
 def consume_scan_quota(
     *,
     user: dict[str, Any],
@@ -417,7 +863,7 @@ def consume_scan_quota(
                 """
                 UPDATE quota_buckets
                 SET used = used + 1, updated_at = strftime('%s', 'now')
-                WHERE id = ? AND used < quota_limit
+                WHERE id = ? AND used + reserved < quota_limit
                 """,
                 (repository_bucket["id"],),
             ).rowcount
@@ -433,7 +879,7 @@ def consume_scan_quota(
                 """
                 UPDATE quota_buckets
                 SET used = used + 1, updated_at = strftime('%s', 'now')
-                WHERE id = ? AND used < quota_limit
+                WHERE id = ? AND used + reserved < quota_limit
                 """,
                 (user_bucket["id"],),
             ).rowcount
@@ -513,7 +959,7 @@ def rollback_scan_quota(
                 WHERE scan_id = ?
                   AND requested_by_user_id = ?
                   {request_clause}
-                  AND reason = 'scan_created'
+                  AND reason IN ('scan_created', 'scan_consumed')
                   AND delta > 0
                 """,
                 params,

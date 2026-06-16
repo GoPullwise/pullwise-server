@@ -55,6 +55,7 @@ def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = N
             "period": entitlement["period"],
             "plan": entitlement["plan"],
             "used": 0,
+            "reserved": 0,
             "limit": entitlement["userLimit"],
             "remaining": entitlement["userLimit"],
         }
@@ -64,6 +65,7 @@ def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = N
         "interval": current.get("interval") if plan_id in billing.PAID_PLAN_IDS else "month",
         "period": usage["period"],
         "used": usage["used"],
+        "reserved": usage.get("reserved", 0),
         "limit": usage["limit"],
         "remaining": usage["remaining"],
     }
@@ -158,6 +160,11 @@ def billing_quota_scan_payload(scan: dict | None) -> dict:
         "startedAt",
         "completedAt",
         "updatedAt",
+        "quotaState",
+        "quotaReservedAt",
+        "quotaConsumedAt",
+        "quotaReleasedAt",
+        "quotaReleaseReason",
         "time",
         "quotaRefunded",
     )
@@ -167,6 +174,13 @@ def billing_quota_scan_payload(scan: dict | None) -> dict:
 def billing_scan_consumed_quota(scan: dict | None) -> bool:
     if not isinstance(scan, dict):
         return False
+    quota_state = public_issue_text(scan.get("quotaState"))
+    if quota_state in {"consumed", "refunded"}:
+        return True
+    if quota_state in {"reserved", "released"}:
+        return False
+    if pull_request_timestamp(scan.get("quotaConsumedAt")):
+        return True
     bucket_ids = scan.get("quotaBucketIds") if isinstance(scan.get("quotaBucketIds"), dict) else {}
     if bucket_ids.get("user"):
         return True
@@ -189,7 +203,7 @@ def billing_quota_activity_item(
     public_scan_id = public_issue_text(scan_info.get("id") or scan_id)
     if not public_scan_id:
         return {}
-    normalized_action = action if action in {"consumed", "refunded"} else "consumed"
+    normalized_action = action if action in {"consumed", "refunded", "reserved", "released"} else "consumed"
     normalized_amount = non_negative_int(amount) or 1
     normalized_delta = signed_int(delta)
     if normalized_delta == 0:
@@ -227,7 +241,13 @@ def billing_quota_activity_payload(user: dict) -> list[dict]:
         delta = signed_int(row.get("delta"))
         if delta == 0:
             continue
-        action = "refunded" if delta < 0 else "consumed"
+        reason = public_billing_text(row.get("reason"))
+        if reason == "scan_reserved":
+            action = "reserved"
+        elif reason == "scan_reservation_released":
+            action = "released"
+        else:
+            action = "refunded" if delta < 0 else "consumed"
         if action == "consumed":
             consumed_scan_ids.add(scan_id)
         item = billing_quota_activity_item(
@@ -235,7 +255,7 @@ def billing_quota_activity_payload(user: dict) -> list[dict]:
             scan=scans_by_id.get(scan_id),
             scan_id=scan_id,
             event_at=row.get("created_at"),
-            reason=row.get("reason"),
+            reason=reason,
             request_id=row.get("request_id"),
             ledger_id=row.get("id"),
             delta=delta,
@@ -317,6 +337,7 @@ def billing_account_payload(user: dict) -> dict:
         "usage": {
             "period": scan_usage["period"],
             "used": scan_usage["used"],
+            "reserved": scan_usage.get("reserved", 0),
             "limit": scan_usage["limit"],
             "remaining": scan_usage["remaining"],
             "plan": scan_usage["plan"],
