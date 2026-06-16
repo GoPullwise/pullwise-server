@@ -204,9 +204,13 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
 
 
 def worker_safe_service_id(worker_id: object) -> str:
+    text = public_issue_text(worker_id)
     allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
-    safe = "".join(char if char in allowed else "-" for char in public_issue_text(worker_id))
-    return safe[:48]
+    safe = "".join(char if char in allowed else "-" for char in text)
+    if len(safe) <= 48:
+        return safe
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
+    return f"{safe[:37]}-{digest}"
 
 
 def worker_release_package(version: str) -> str:
@@ -706,7 +710,18 @@ if ! command -v sha256sum >/dev/null 2>&1; then
   exit 1
 fi
 safe_worker_id() {
-  printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '-' | cut -c1-48
+  local raw safe digest prefix
+  raw="$1"
+  safe="$(printf '%s' "$raw" | tr -c 'A-Za-z0-9_-' '-')"
+  if [ "${#safe}" -le 48 ]; then
+    printf '%s\n' "$safe"
+    return 0
+  fi
+  digest="$(printf '%s' "$raw" | sha256sum)"
+  digest="${digest%% *}"
+  digest="$(printf '%s' "$digest" | cut -c1-10)"
+  prefix="$(printf '%s' "$safe" | cut -c1-37)"
+  printf '%s-%s\n' "$prefix" "$digest"
 }
 service_user_name() {
   local prefix digest
