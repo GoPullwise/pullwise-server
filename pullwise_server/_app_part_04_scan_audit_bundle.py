@@ -1031,7 +1031,12 @@ def scan_payload(scan: dict) -> dict:
     return payload
 
 
-def scan_list_payload(scan: dict) -> dict:
+def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
+    verification_counts = (
+        dict(issue_summary.get("counts"))
+        if isinstance(issue_summary, dict) and isinstance(issue_summary.get("counts"), dict)
+        else public_scan_verification_counts(scan)
+    )
     payload = {
         "id": public_issue_text(scan.get("id")),
         "userId": public_issue_text(scan.get("userId")),
@@ -1042,7 +1047,7 @@ def scan_list_payload(scan: dict) -> dict:
         "phase": public_scan_phase(scan.get("phase")),
         "progress": public_scan_progress(scan.get("progress")),
         "issues": public_scan_issue_counts(scan.get("issues")),
-        "verification": public_scan_verification_counts(scan),
+        "verification": verification_counts,
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
@@ -1058,7 +1063,7 @@ def scan_list_payload(scan: dict) -> dict:
     ai_usage = public_scan_ai_usage(ai_usage_source)
     if ai_usage:
         payload["aiUsage"] = ai_usage
-    verification_audit = public_scan_verification_audit(scan)
+    verification_audit = public_scan_verification_audit(scan, issue_summary=issue_summary)
     if public_scan_verification_audit_has_data(verification_audit):
         payload["verificationAudit"] = {
             key: value
@@ -1184,6 +1189,14 @@ def scan_list_payload(scan: dict) -> dict:
     if queue:
         payload["queue"] = queue
     return payload
+
+
+def scan_list_payloads(scans: list[dict]) -> list[dict]:
+    issue_summary_index = scan_issue_summary_index(scans)
+    return [
+        scan_list_payload(scan, issue_summary=issue_summary_index.get(scan_issue_summary_key(scan)))
+        for scan in scans
+    ]
 
 
 def public_scan_status(value: object) -> str:
@@ -2898,10 +2911,59 @@ def first_present(source: dict, *keys: str) -> object:
     return None
 
 
+def empty_scan_verification_counts() -> dict:
+    return {"verified": 0, "static_proof": 0, "potential_risk": 0, "unverified": 0}
+
+
+def scan_issue_summary_key(scan: dict) -> tuple[str, str]:
+    return (
+        public_issue_text(scan.get("id")) if isinstance(scan, dict) else "",
+        public_issue_text(scan.get("userId")) if isinstance(scan, dict) else "",
+    )
+
+
+def scan_issue_summary_index(scans: list[dict]) -> dict[tuple[str, str], dict]:
+    summaries: dict[tuple[str, str], dict] = {}
+    scan_users_by_id: dict[str, set[str]] = {}
+    for scan in scans:
+        scan_id, scan_user_id = scan_issue_summary_key(scan)
+        if not scan_id:
+            continue
+        key = (scan_id, scan_user_id)
+        summaries.setdefault(key, {"counts": empty_scan_verification_counts(), "downgradedCount": 0})
+        scan_users_by_id.setdefault(scan_id, set()).add(scan_user_id)
+    if not summaries:
+        return summaries
+
+    for issue in ISSUES:
+        scan_id = public_issue_text(issue.get("scanId"))
+        scan_user_ids = scan_users_by_id.get(scan_id)
+        if not scan_user_ids:
+            continue
+        issue_user_id = public_issue_text(issue.get("userId"))
+        matching_keys = [
+            (scan_id, scan_user_id)
+            for scan_user_id in scan_user_ids
+            if not scan_user_id or not issue_user_id or issue_user_id == scan_user_id
+        ]
+        if not matching_keys:
+            continue
+        status = public_issue_verification_status(issue)
+        if status not in ISSUE_VERIFICATION_STATUSES:
+            status = "potential_risk"
+        reported_status = public_issue_text(issue.get("reportedVerificationStatus")).lower()
+        for key in matching_keys:
+            summary = summaries[key]
+            summary["counts"][status] += 1
+            if reported_status in ISSUE_VERIFICATION_STATUSES and reported_status != status:
+                summary["downgradedCount"] += 1
+    return summaries
+
+
 def public_scan_verification_counts(scan: dict) -> dict:
     scan_id = public_issue_text(scan.get("id")) if isinstance(scan, dict) else ""
     scan_user_id = public_issue_text(scan.get("userId")) if isinstance(scan, dict) else ""
-    counts = {"verified": 0, "static_proof": 0, "potential_risk": 0, "unverified": 0}
+    counts = empty_scan_verification_counts()
     if not scan_id:
         return counts
     for issue in ISSUES:
@@ -3003,16 +3065,24 @@ def public_scan_verification_audit_input(value: object) -> dict:
     return payload
 
 
-def public_scan_verification_audit(scan: dict) -> dict:
+def public_scan_verification_audit(scan: dict, issue_summary: dict | None = None) -> dict:
     if not isinstance(scan, dict):
         scan = {}
     base = public_scan_verification_audit_input(scan.get("verificationAudit") or scan.get("verification_audit"))
-    counts = public_scan_verification_counts(scan)
+    counts = (
+        dict(issue_summary.get("counts"))
+        if isinstance(issue_summary, dict) and isinstance(issue_summary.get("counts"), dict)
+        else public_scan_verification_counts(scan)
+    )
     reported_count = sum(counts.values())
     scan_id = public_issue_text(scan.get("id"))
     scan_user_id = public_issue_text(scan.get("userId"))
-    downgraded_count = 0
-    if scan_id:
+    downgraded_count = (
+        public_scan_count(issue_summary.get("downgradedCount"))
+        if isinstance(issue_summary, dict)
+        else 0
+    )
+    if scan_id and not isinstance(issue_summary, dict):
         for issue in ISSUES:
             if public_issue_text(issue.get("scanId")) != scan_id:
                 continue

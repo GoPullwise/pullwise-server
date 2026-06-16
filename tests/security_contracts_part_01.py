@@ -104,8 +104,65 @@ class SecurityContractsPart01Test(SecurityContractsBase):
             "auditSwarm",
             "preflight",
             "changedFiles",
-        ):
+            ):
             self.assertNotIn(heavy_key, scan)
+
+    def test_scans_route_indexes_issue_verification_once_for_history_page(self) -> None:
+        app.SCANS = [
+            {
+                "id": f"sc_{index}",
+                "userId": "usr_1",
+                "status": "done",
+                "repo": "owner/repo",
+                "createdAt": 300 - index,
+                "issues": {"high": 3},
+            }
+            for index in range(3)
+        ]
+        app.ISSUES = [
+            {
+                "id": f"iss_{scan_id}_{issue_index}",
+                "userId": "usr_1",
+                "scanId": scan_id,
+                "status": "open",
+                "severity": "high",
+                "title": "Verified issue",
+                "repo": "owner/repo",
+                "file": "src/auth.py",
+                "line": issue_index + 1,
+                "verificationStatus": "static_proof",
+                "reportedVerificationStatus": "verified",
+            }
+            for scan_id in ("sc_0", "sc_1", "sc_2")
+            for issue_index in range(3)
+        ]
+        app.ISSUES.extend(
+            {
+                "id": f"iss_foreign_{index}",
+                "userId": "usr_1",
+                "scanId": "sc_not_on_page",
+                "status": "open",
+                "severity": "high",
+                "title": "Off page issue",
+                "repo": "owner/repo",
+                "file": "src/other.py",
+                "line": index + 1,
+                "verificationStatus": "static_proof",
+            }
+            for index in range(5)
+        )
+
+        with patch.object(app, "public_issue_verification_status", wraps=app.public_issue_verification_status) as status:
+            handler = RouteHarness("/scans?limit=2", cookie=self.signed_in())
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual([scan["id"] for scan in handler.payload["items"]], ["sc_0", "sc_1"])
+        self.assertEqual(status.call_count, 6)
+        for scan in handler.payload["items"]:
+            self.assertEqual(scan["verification"]["static_proof"], 3)
+            self.assertEqual(scan["verificationAudit"]["reportedCount"], 3)
+            self.assertEqual(scan["verificationAudit"]["downgradedCount"], 3)
 
     def test_issues_route_filters_and_paginates_signed_in_user_results(self) -> None:
         app.ISSUES = [
