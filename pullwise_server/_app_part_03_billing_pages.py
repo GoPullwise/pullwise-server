@@ -133,6 +133,165 @@ def billing_subscription_events_payload(user: dict) -> list[dict]:
     return payloads[:50]
 
 
+BILLING_QUOTA_ACTIVITY_LIMIT = 100
+
+
+def signed_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (OverflowError, TypeError, ValueError):
+        return 0
+
+
+def billing_quota_scan_payload(scan: dict | None) -> dict:
+    if not isinstance(scan, dict):
+        return {}
+    payload = scan_payload(scan)
+    allowed = (
+        "id",
+        "repo",
+        "branch",
+        "commit",
+        "status",
+        "createdAt",
+        "queuedAt",
+        "startedAt",
+        "completedAt",
+        "updatedAt",
+        "time",
+        "quotaRefunded",
+    )
+    return {key: payload[key] for key in allowed if key in payload}
+
+
+def billing_scan_consumed_quota(scan: dict | None) -> bool:
+    if not isinstance(scan, dict):
+        return False
+    bucket_ids = scan.get("quotaBucketIds") if isinstance(scan.get("quotaBucketIds"), dict) else {}
+    if bucket_ids.get("user"):
+        return True
+    return isinstance(scan.get("billingUsage"), dict) or isinstance(scan.get("repoUsage"), dict)
+
+
+def billing_quota_activity_item(
+    *,
+    action: str,
+    scan: dict | None,
+    scan_id: str,
+    event_at: object,
+    reason: object = None,
+    request_id: object = None,
+    ledger_id: object = None,
+    delta: int = 0,
+    amount: int = 1,
+) -> dict:
+    scan_info = billing_quota_scan_payload(scan)
+    public_scan_id = public_issue_text(scan_info.get("id") or scan_id)
+    if not public_scan_id:
+        return {}
+    normalized_action = action if action in {"consumed", "refunded"} else "consumed"
+    normalized_amount = non_negative_int(amount) or 1
+    normalized_delta = signed_int(delta)
+    if normalized_delta == 0:
+        normalized_delta = -normalized_amount if normalized_action == "refunded" else normalized_amount
+    item = {
+        "id": public_issue_text(ledger_id) or f"{public_scan_id}:{normalized_action}:{public_issue_text(request_id) or public_issue_text(reason) or 'scan'}",
+        "action": normalized_action,
+        "delta": normalized_delta,
+        "amount": normalized_amount,
+        "scanId": public_scan_id,
+        "repo": public_issue_text(scan_info.get("repo")),
+        "branch": public_issue_text(scan_info.get("branch")) or "main",
+        "commit": public_issue_text(scan_info.get("commit")) or "pending",
+        "status": public_issue_text(scan_info.get("status")) or "queued",
+        "createdAt": pull_request_timestamp(scan_info.get("createdAt")) or 0,
+        "eventAt": pull_request_timestamp(event_at) or pull_request_timestamp(scan_info.get("createdAt")) or 0,
+    }
+    if request_id := public_issue_text(request_id):
+        item["requestId"] = request_id
+    if reason := public_billing_text(reason):
+        item["reason"] = reason
+    return item
+
+
+def billing_quota_activity_payload(user: dict) -> list[dict]:
+    scans = user_scans({"userId": user.get("id")})
+    scans_by_id = {public_issue_text(scan.get("id")): scan for scan in scans if public_issue_text(scan.get("id"))}
+    items: list[dict] = []
+    consumed_scan_ids: set[str] = set()
+
+    for row in quota.quota_ledger_rows_for_user(user, scope_type="user", limit=BILLING_QUOTA_ACTIVITY_LIMIT):
+        scan_id = public_issue_text(row.get("scan_id"))
+        if not scan_id:
+            continue
+        delta = signed_int(row.get("delta"))
+        if delta == 0:
+            continue
+        action = "refunded" if delta < 0 else "consumed"
+        if action == "consumed":
+            consumed_scan_ids.add(scan_id)
+        item = billing_quota_activity_item(
+            action=action,
+            scan=scans_by_id.get(scan_id),
+            scan_id=scan_id,
+            event_at=row.get("created_at"),
+            reason=row.get("reason"),
+            request_id=row.get("request_id"),
+            ledger_id=row.get("id"),
+            delta=delta,
+            amount=abs(delta),
+        )
+        if item:
+            items.append(item)
+
+    for scan in scans:
+        scan_id = public_issue_text(scan.get("id"))
+        if not scan_id:
+            continue
+        scan_info = billing_quota_scan_payload(scan)
+        if scan_id not in consumed_scan_ids and billing_scan_consumed_quota(scan):
+            item = billing_quota_activity_item(
+                action="consumed",
+                scan=scan,
+                scan_id=scan_id,
+                event_at=scan_info.get("createdAt") or scan_info.get("queuedAt"),
+                reason="scan_created",
+                request_id=scan.get("requestId"),
+                delta=1,
+                amount=1,
+            )
+            if item:
+                items.append(item)
+                consumed_scan_ids.add(scan_id)
+        refunded = scan_info.get("quotaRefunded") if isinstance(scan_info.get("quotaRefunded"), dict) else {}
+        if not non_negative_int(refunded.get("ledgerRows")):
+            continue
+        item = billing_quota_activity_item(
+            action="refunded",
+            scan=scan,
+            scan_id=scan_id,
+            event_at=scan_info.get("completedAt") or scan_info.get("updatedAt") or scan_info.get("createdAt"),
+            reason=refunded.get("reason") or "quota_refunded",
+            request_id=scan.get("requestId"),
+            delta=-1,
+            amount=1,
+        )
+        if item:
+            item["ledgerRows"] = non_negative_int(refunded.get("ledgerRows"))
+            item["bucketRows"] = non_negative_int(refunded.get("bucketRows"))
+            items.append(item)
+
+    items.sort(
+        key=lambda item: (
+            non_negative_int(item.get("eventAt")),
+            1 if item.get("action") == "refunded" else 0,
+            public_issue_text(item.get("id")),
+        ),
+        reverse=True,
+    )
+    return items[:BILLING_QUOTA_ACTIVITY_LIMIT]
+
+
 def billing_account_payload(user: dict) -> dict:
     current = user_billing_state(user)
     entitlement = billing_entitlement_for_user(user)
@@ -164,6 +323,7 @@ def billing_account_payload(user: dict) -> dict:
             "scope": scan_usage["scope"],
             "resetAt": scan_usage["resetAt"],
         },
+        "quotaActivity": billing_quota_activity_payload(user),
         "subscriptionEvents": billing_subscription_events_payload(user),
     }
 

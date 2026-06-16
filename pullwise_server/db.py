@@ -151,6 +151,12 @@ def initialize() -> None:
             )
             connection.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_quota_ledger_user_created
+                ON quota_ledger(requested_by_user_id, created_at)
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS repo_fingerprints (
                     repository_id TEXT PRIMARY KEY,
                     default_branch TEXT,

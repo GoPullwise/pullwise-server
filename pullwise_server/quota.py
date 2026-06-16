@@ -292,6 +292,51 @@ def quota_payload_for_repository(repository: dict[str, Any], user: dict[str, Any
     return quota_payload(bucket, scope="repository")
 
 
+def quota_ledger_rows_for_user(
+    user: dict[str, Any],
+    *,
+    scope_type: str = "user",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    db.initialize()
+    user_id = str((user or {}).get("id") or "").strip()
+    if not user_id:
+        return []
+    normalized_scope = str(scope_type or "user").strip().lower()
+    if normalized_scope not in {"user", "repository"}:
+        normalized_scope = "user"
+    row_limit = non_negative_int(limit) or 100
+    row_limit = min(200, max(1, row_limit))
+    with closing(db.connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT
+                q.id,
+                q.repository_id,
+                q.github_repo_id,
+                q.scan_id,
+                q.requested_by_user_id,
+                q.request_id,
+                q.bucket_id,
+                q.delta,
+                q.reason,
+                q.created_at,
+                b.scope_type,
+                b.period,
+                b.plan
+            FROM quota_ledger q
+            JOIN quota_buckets b ON b.id = q.bucket_id
+            WHERE q.requested_by_user_id = ?
+              AND b.scope_type = ?
+            ORDER BY q.created_at DESC, q.id DESC
+            LIMIT ?
+            """,
+            (user_id, normalized_scope, row_limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def consume_scan_quota(
     *,
     user: dict[str, Any],

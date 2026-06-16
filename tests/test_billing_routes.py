@@ -609,6 +609,58 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(billing_payload["usage"]["resetAt"], first.payload["billingUsage"]["resetAt"])
         self.assertGreater(billing_payload["usage"]["resetAt"], app.now())
 
+    def test_billing_plan_exposes_scan_quota_activity(self) -> None:
+        cookie = seed_session()
+        authorize_repo_for_seed_user()
+        consumed = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_used"}, cookie=cookie)
+        refunded = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_refund"}, cookie=cookie)
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
+            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=5)),
+        ):
+            app.PullwiseHandler.handle_post(consumed, "/scans", {}, ["scans"])
+            app.SCANS[0]["status"] = "done"
+            app.SCANS[0]["completedAt"] = app.now() + 60
+
+            app.PullwiseHandler.handle_post(refunded, "/scans", {}, ["scans"])
+            refunded_scan = app.SCANS[0]
+            refunded_scan["status"] = "failed"
+            refunded_scan["completedAt"] = app.now() + 120
+            rollback = app.quota.rollback_scan_quota(
+                scan_id=refunded_scan["id"],
+                requested_by_user_id="usr_1",
+                request_id="scan_req_refund",
+            )
+            refunded_scan["billingUsage"] = app.quota.quota_payload_for_user(app.USERS["usr_1"])
+            refunded_scan["quotaRefunded"] = {
+                "reason": "REPOSITORY_TOO_LARGE",
+                "ledgerRows": rollback["ledgerRows"],
+                "bucketRows": rollback["bucketRows"],
+            }
+
+            handler = HandlerHarness(cookie=cookie)
+            app.PullwiseHandler.handle_get(handler, "/billing/plan", {}, ["billing", "plan"])
+
+        self.assertEqual(consumed.status, HTTPStatus.CREATED)
+        self.assertEqual(refunded.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        activity = handler.payload["account"]["quotaActivity"]
+        activity_keys = {(item["scanId"], item["action"]) for item in activity}
+
+        self.assertIn((consumed.payload["id"], "consumed"), activity_keys)
+        self.assertIn((refunded.payload["id"], "consumed"), activity_keys)
+        self.assertIn((refunded.payload["id"], "refunded"), activity_keys)
+        refund_item = next(
+            item
+            for item in activity
+            if item["scanId"] == refunded.payload["id"] and item["action"] == "refunded"
+        )
+        self.assertEqual(refund_item["delta"], -1)
+        self.assertEqual(refund_item["reason"], "REPOSITORY_TOO_LARGE")
+        self.assertEqual(refund_item["repo"], "owner/repo")
+        self.assertEqual(refund_item["status"], "failed")
+
     def test_consume_review_quota_uses_db_backed_user_quota(self) -> None:
         seed_session()
 
