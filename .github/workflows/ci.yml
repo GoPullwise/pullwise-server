@@ -19,7 +19,7 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest pip-audit
       - name: Audit Python dependencies
-        run: pip-audit
+        run: pip-audit .
       - name: Check Python dependency compatibility
         run: python -m pip check
       - name: Check shell scripts
