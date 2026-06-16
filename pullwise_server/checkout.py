@@ -21,7 +21,7 @@ class CheckoutCancelled(Exception):
     """Raised when a checkout subprocess is cancelled by the scan worker."""
 
 
-class CheckoutTimedOut(Exception):
+class CheckoutTimedOut(RuntimeError):
     """Raised when a checkout subprocess exceeds the configured timeout."""
 
 
