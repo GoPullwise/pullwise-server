@@ -196,13 +196,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scans = filter_user_scan_payloads([scan_payload(scan) for scan in user_scans(session)], params)
+            scans = filter_user_scan_payloads([scan_payload(scan) for scan in user_scans_for_read(session)], params)
             return self.json(paginated_response(scans, keys=("scans",), params=params))
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "audit-bundle.zip":
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
             filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
             cache_key = audit_bundle_cache_key(scan)
             return self.binary(
@@ -218,13 +218,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
             return self.json(scan_audit_bundle_payload(scan))
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "impact-graph":
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
             public_scan = scan_payload(scan)
             impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
             return self.json({"impactGraph": impact_graph})
@@ -232,7 +232,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
             focus_path = fix_workflow.safe_issue_file(params.get("path"))
             if not focus_path:
                 return self.error(HTTPStatus.BAD_REQUEST, "A repo-relative path is required.")
@@ -246,7 +246,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            return self.json(scan_payload(self.find_or_404(user_scans(session), segments[1], "Scan")))
+            return self.json(scan_payload(self.find_or_404(user_scans_for_read(session), segments[1], "Scan")))
         if path == "/issues":
             session = self.current_session()
             if not session:

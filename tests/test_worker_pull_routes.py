@@ -3915,6 +3915,90 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "cancelled")
         self.assertEqual(app.SCANS[0]["progress"], 0)
 
+    def test_scan_read_reconciles_cancelled_job_when_state_is_stale(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_stale_cancel",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "running",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 35,
+            "phase": "ai",
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        db.cancel_scan_job_for_scan(scan["id"])
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "cancelled")
+        cookie = {"Cookie": "pw_session=ses_1"}
+
+        detail = RouteHarness("/scans/sc_stale_cancel", headers=cookie)
+        listing = RouteHarness("/scans", headers=cookie)
+        app.PullwiseHandler.route(detail, "GET")
+        app.PullwiseHandler.route(listing, "GET")
+
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        self.assertEqual(detail.payload["status"], "cancelled")
+        self.assertEqual(detail.payload["phase"], "")
+        self.assertEqual(listing.status, HTTPStatus.OK)
+        self.assertEqual(listing.payload["items"][0]["status"], "cancelled")
+        self.assertEqual(app.SCANS[0]["status"], "cancelled")
+
+    def test_scan_list_reconciles_running_job_progress_when_state_is_stale(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_stale_running",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, timestamp=app.now())[0]
+        self.assertEqual(claimed["job_id"], job["job_id"])
+        db.update_scan_job_progress(
+            job["job_id"],
+            {"phase": "ai", "progress": 70, "message": "reviewing"},
+        )
+        self.assertEqual(app.SCANS[0]["status"], "queued")
+
+        listing = RouteHarness("/scans", headers={"Cookie": "pw_session=ses_1"})
+        app.PullwiseHandler.route(listing, "GET")
+
+        self.assertEqual(listing.status, HTTPStatus.OK)
+        row = listing.payload["items"][0]
+        self.assertEqual(row["status"], "running")
+        self.assertEqual(row["phase"], "ai")
+        self.assertEqual(row["progress"], 70)
+        self.assertEqual(app.SCANS[0]["status"], "running")
+
     def test_worker_result_must_match_current_claim_attempt(self) -> None:
         scan = {
             "id": "sc_attempt",

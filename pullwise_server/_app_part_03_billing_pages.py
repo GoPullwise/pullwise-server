@@ -560,7 +560,7 @@ def api_docs_payload() -> dict:
 
 def dashboard_overview_payload(session: dict) -> dict:
     user = USERS.get(session["userId"])
-    scans = [scan_payload(scan) for scan in user_scans(session)]
+    scans = [scan_payload(scan) for scan in user_scans_for_read(session)]
     repositories = repository_items_for_response(user, user.get("githubRepositoryAccess") if user else None) if user else []
     status_counts: dict[str, int] = {}
     for scan in scans:

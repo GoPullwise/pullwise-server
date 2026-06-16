@@ -742,6 +742,60 @@ def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
     return changed
 
 
+def scan_status_from_job_status(status: object) -> str:
+    normalized = public_issue_text(status).lower()
+    if normalized in {"claimed", "running", "uploading_result"}:
+        return "running"
+    if normalized == "retrying":
+        return "queued"
+    if normalized == "lost":
+        return "failed"
+    return normalized if normalized in {"queued", "done", "failed", "cancelled"} else ""
+
+
+def reconcile_scan_job_state_locked(scan: dict) -> bool:
+    scan_id = public_issue_text(scan.get("id"))
+    if not scan_id:
+        return False
+    job_id = public_issue_text(scan.get("jobId"))
+    job = db.get_scan_job(job_id) if job_id else None
+    if not job:
+        job = db.get_scan_job_for_scan(scan_id)
+    if not job:
+        return False
+
+    status = scan_status_from_job_status(job.get("status"))
+    if not status:
+        return False
+    if status in {"done", "failed", "cancelled"}:
+        return reconcile_terminal_scan_job_locked(scan, job)
+
+    before = json.dumps(db.to_jsonable(scan), sort_keys=True)
+    update = {
+        "jobId": public_issue_text(job.get("job_id")) or scan.get("jobId"),
+        "status": status,
+        "progress": 0 if status == "queued" else public_scan_progress(job.get("progress")),
+        "phase": None if status == "queued" else public_scan_phase(job.get("progress_phase")) or None,
+        "error": clean_scan_error(job.get("error")),
+    }
+    commit = clean_github_access_text(job.get("commit"))
+    if commit:
+        update["commit"] = commit
+    if status == "running":
+        update["claimedByWorkerId"] = public_issue_text(job.get("claimed_by_worker_id"))
+        claimed_at = pull_request_timestamp(job.get("claimed_at"))
+        if claimed_at is not None:
+            update["claimedAt"] = claimed_at
+    else:
+        update["claimedByWorkerId"] = None
+        update["claimedAt"] = None
+    scan.update(update)
+    changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
+    if changed:
+        mark_state_dirty()
+    return changed
+
+
 def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
     recovered = 0
     timestamp = now()

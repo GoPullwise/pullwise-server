@@ -924,6 +924,16 @@ def user_scans(session: dict | None) -> list[dict]:
     ]
 
 
+def user_scans_for_read(session: dict | None) -> list[dict]:
+    scans = user_scans(session)
+    if not scans:
+        return []
+    with STATE_LOCK:
+        for scan in scans:
+            reconcile_scan_job_state_locked(scan)
+    return scans
+
+
 def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
     if not request_id:
         return None
