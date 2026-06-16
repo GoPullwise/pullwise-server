@@ -252,11 +252,11 @@ Administrators manage workers at `/admin/*` endpoints:
 
 These admin APIs are the registry control plane. They manage desired state and
 credentials, including create, enable, disable, metadata update, token rotation,
-diagnostics, detail, audit, and soft delete. They should not remotely execute
-host commands. For restart, update, cleanup, or uninstall operations, use a
-pull-based command model where the admin creates a command, the worker receives
-it during heartbeat or command polling, executes it locally, and reports the
-result. See `docs/worker-management-control-plane.md`.
+diagnostics, detail, audit, and worker deletion. They should not directly execute
+host commands from the server. Delete/uninstall operations use a pull-based
+command model where the admin creates a command, the worker receives it during
+heartbeat or command polling, executes it locally, and reports the result. See
+`docs/worker-management-control-plane.md`.
 
 - `GET /admin/workers` — list all workers
 - `GET /admin/workers/{id}` — worker detail with audit events
@@ -264,7 +264,7 @@ result. See `docs/worker-management-control-plane.md`.
 - `POST /admin/workers/{id}/enable` — enable a disabled worker
 - `POST /admin/workers/{id}/disable` — disable a worker
 - `PATCH /admin/workers/{id}` — update worker metadata
-- `DELETE /admin/workers/{id}` — soft-delete a worker
+- `DELETE /admin/workers/{id}` — queue worker uninstall and remove it from admin lists
 - `GET /admin/status` — scan system status (admin view)
 
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
