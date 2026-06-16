@@ -56,6 +56,57 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertFalse(handler.payload["hasMore"])
         self.assertEqual([scan["id"] for scan in handler.payload["items"]], ["sc_old"])
         self.assertEqual(handler.payload["scans"], handler.payload["items"])
+
+    def test_scans_route_paginates_before_building_lightweight_history_payloads(self) -> None:
+        heavy_graph = {
+            "version": "repository-graph/0.1",
+            "nodes": [{"id": "file:src/app.py", "label": "app.py", "type": "file", "path": "src/app.py"}],
+            "edges": [],
+            "impactGraph": {
+                "version": "impact-graph/0.1",
+                "targets": [{"id": "file:src/app.py", "path": "src/app.py"}],
+            },
+        }
+        app.SCANS = [
+            {
+                "id": f"sc_{index}",
+                "userId": "usr_1",
+                "status": "done",
+                "repo": "owner/repo",
+                "branch": "main",
+                "commit": f"abc{index}",
+                "createdAt": 300 - index,
+                "repositoryGraph": heavy_graph,
+                "semanticGraph": {"version": "semantic-code-graph/0.1", "nodes": [], "edges": []},
+                "impactGraph": heavy_graph["impactGraph"],
+                "auditSwarm": {"summary": "large audit payload", "issueCards": []},
+                "preflight": {"summary": "large preflight payload"},
+                "changedFiles": ["src/app.py"],
+            }
+            for index in range(3)
+        ]
+
+        with patch.object(app, "scan_payload", wraps=app.scan_payload) as full_payload:
+            handler = RouteHarness("/scans?limit=1", cookie=self.signed_in())
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["total"], 3)
+        self.assertTrue(handler.payload["hasMore"])
+        self.assertEqual([scan["id"] for scan in handler.payload["items"]], ["sc_0"])
+        self.assertEqual(full_payload.call_count, 0)
+        scan = handler.payload["items"][0]
+        self.assertEqual(scan["repo"], "owner/repo")
+        for heavy_key in (
+            "repositoryGraph",
+            "semanticGraph",
+            "impactGraph",
+            "auditSwarm",
+            "preflight",
+            "changedFiles",
+        ):
+            self.assertNotIn(heavy_key, scan)
+
     def test_issues_route_filters_and_paginates_signed_in_user_results(self) -> None:
         app.ISSUES = [
             {
