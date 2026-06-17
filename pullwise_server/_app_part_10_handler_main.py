@@ -232,27 +232,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
             return self.json(scan_audit_bundle_payload(scan))
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "impact-graph":
-            session = self.current_session()
-            if not session:
-                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
-            public_scan = scan_payload(scan)
-            impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
-            return self.json({"impactGraph": impact_graph})
+            return self.error(HTTPStatus.GONE, "The legacy impact graph API has been removed.")
         if len(segments) == 4 and segments[0] == "scans" and segments[2] == "impact-graph" and segments[3] == "focus":
-            session = self.current_session()
-            if not session:
-                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
-            focus_path = fix_workflow.safe_issue_file(params.get("path"))
-            if not focus_path:
-                return self.error(HTTPStatus.BAD_REQUEST, "A repo-relative path is required.")
-            public_scan = scan_payload(scan)
-            impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
-            repository_graph = (
-                public_scan.get("repositoryGraph") if isinstance(public_scan.get("repositoryGraph"), dict) else {}
-            )
-            return self.json(public_impact_graph_focus(impact_graph, focus_path, repository_graph=repository_graph))
+            return self.error(HTTPStatus.GONE, "The legacy impact graph API has been removed.")
         if len(segments) == 2 and segments[0] == "scans":
             session = self.current_session()
             if not session:
@@ -2550,6 +2532,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
         if public_issue_text(current_job.get("status")) not in {"claimed", "running"}:
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
+        current_scan = next((item for item in SCANS if item.get("id") == current_job.get("scan_id")), None)
+        graph_verified_progress = worker_graph_verified_job_enabled(current_job, current_scan)
         phase = public_scan_phase(body.get("phase"))
         job = db.update_scan_job_progress(
             job_id,
@@ -2566,19 +2550,21 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
         if phase in {"ai", "report"}:
             finalize_scan_quota_for_job(job, trigger=f"phase_{phase}")
-        audit_swarm = public_scan_audit_swarm(body.get("audit_swarm") or body.get("auditSwarm"))
-        completion_audit = public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
-        job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
+        audit_swarm = {} if graph_verified_progress else public_scan_audit_swarm(body.get("audit_swarm") or body.get("auditSwarm"))
+        completion_audit = (
+            {} if graph_verified_progress else public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
+        )
+        job_trace = {} if graph_verified_progress else public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
         raw_repository_graph = body.get("repositoryGraph")
-        repository_graph = public_repository_graph(raw_repository_graph)
-        semantic_graph = public_repository_semantic_graph(body.get("semanticGraph"))
-        if not semantic_graph and isinstance(raw_repository_graph, dict):
+        repository_graph = {} if graph_verified_progress else public_repository_graph(raw_repository_graph)
+        semantic_graph = {} if graph_verified_progress else public_repository_semantic_graph(body.get("semanticGraph"))
+        if not graph_verified_progress and not semantic_graph and isinstance(raw_repository_graph, dict):
             semantic_graph = public_repository_semantic_graph(raw_repository_graph.get("semanticGraph"))
-        raw_impact_graph = body.get("impactGraph")
-        if not raw_impact_graph and isinstance(raw_repository_graph, dict):
+        raw_impact_graph = None if graph_verified_progress else body.get("impactGraph")
+        if not graph_verified_progress and not raw_impact_graph and isinstance(raw_repository_graph, dict):
             raw_impact_graph = raw_repository_graph.get("impactGraph")
-        impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
-        if repository_graph and impact_graph:
+        impact_graph = {} if graph_verified_progress else public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
+        if not graph_verified_progress and repository_graph and impact_graph:
             repository_graph["impactGraph"] = impact_graph
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
@@ -2602,6 +2588,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 if impact_graph:
                     update["impactGraph"] = impact_graph
                 scan.update(update)
+                if graph_verified_progress:
+                    for key in ("auditSwarm", "completionAudit", "impactGraph", "jobTrace", "repositoryGraph", "semanticGraph"):
+                        scan.pop(key, None)
                 mark_state_dirty()
         return self.json({"ok": True, "job": scan_job_payload(job)})
 

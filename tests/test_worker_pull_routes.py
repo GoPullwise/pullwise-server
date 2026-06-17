@@ -55,7 +55,56 @@ class RouteHarness(app.PullwiseHandler):
 
 
 class GraphVerifiedReportContractsTest(unittest.TestCase):
+    def graph_verified_item(self) -> dict:
+        return {
+            "candidate": {
+                "issue_id": "issue_1",
+                "claim": "Confirmed claim",
+                "graph_evidence": {
+                    "slice_id": "slice-1",
+                    "codegraph_files": ["src/app.py"],
+                },
+                "evidence": [
+                    {
+                        "file": "src/app.py",
+                        "line": 10,
+                        "end_line": 12,
+                        "why_it_matters": "The handler reaches the failing path.",
+                    }
+                ],
+            },
+            "judge": {
+                "status": "confirmed",
+                "level": "L2",
+                "safe_to_show_user": True,
+                "evidence_summary": {
+                    "command": "pytest tests/test_issue.py",
+                    "log_path": "logs/repro.log",
+                    "observable": "Assertion failed as expected.",
+                },
+            },
+            "repro": {
+                "status": "reproduced",
+                "level": "L2",
+                "commands_run": [
+                    {
+                        "cmd": "pytest tests/test_issue.py",
+                        "cwd": "/worker/repo",
+                        "exit_code": 1,
+                        "log_path": "logs/repro.log",
+                    }
+                ],
+                "graph_path_exercised": True,
+            },
+            "verification": {"verdict": "confirmed", "safe_to_show_user": True},
+        }
+
     def test_public_graph_verified_report_sanitizes_and_preserves_confirmed_only_artifacts(self) -> None:
+        confirmed_item = self.graph_verified_item()
+        confirmed_item["candidate"]["internal_secret"] = "must not leak"
+        confirmed_item["judge"]["raw_prompt"] = "must not leak"
+        confirmed_item["repro"]["commands_run"][0]["stdout"] = "must not leak"
+
         report = app.public_graph_verified_report(
             {
                 "runId": "run_1",
@@ -67,39 +116,7 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
                 "blockedCount": 0,
                 "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
                 "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
-                "finalJson": {
-                    "confirmed": [
-                        {
-                            "candidate": {
-                                "issue_id": "issue_1",
-                                "claim": "Confirmed claim",
-                                "internal_secret": "must not leak",
-                            },
-                            "judge": {
-                                "status": "confirmed",
-                                "safe_to_show_user": True,
-                                "evidence_summary": {
-                                    "command": "pytest tests/test_issue.py",
-                                    "observable": "Assertion failed as expected.",
-                                },
-                                "raw_prompt": "must not leak",
-                            },
-                            "repro": {
-                                "status": "reproduced",
-                                "level": "L2",
-                                "commands_run": [
-                                    {
-                                        "cmd": "pytest tests/test_issue.py",
-                                        "cwd": "/worker/repo",
-                                        "exit_code": 1,
-                                        "log_path": "logs/repro.log",
-                                        "stdout": "must not leak",
-                                    }
-                                ],
-                            },
-                        }
-                    ]
-                },
+                "finalJson": {"confirmed": [confirmed_item]},
             }
         )
 
@@ -110,6 +127,7 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         confirmed = report["finalJson"]["confirmed"][0]
         self.assertEqual(confirmed["candidate"]["issue_id"], "issue_1")
         self.assertEqual(confirmed["candidate"]["claim"], "Confirmed claim")
+        self.assertEqual(confirmed["candidate"]["evidence"][0]["lines"], "10-12")
         self.assertEqual(confirmed["judge"]["evidence_summary"]["command"], "pytest tests/test_issue.py")
         self.assertEqual(confirmed["repro"]["commands_run"][0]["exit_code"], 1)
         self.assertNotIn("internal_secret", json.dumps(report))
@@ -117,6 +135,9 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         self.assertNotIn("stdout", json.dumps(report))
         self.assertNotIn("finalMarkdown", report)
         self.assertNotIn("debugMarkdown", report)
+        findings = app.worker_graph_verified_findings({"repo": "acme/app"}, report)
+        self.assertEqual(findings[0]["codeEvidence"][0]["lines"], "10-12")
+        self.assertEqual(findings[0]["line"], 10)
 
         full_report = app.public_graph_verified_report(
             {
@@ -132,6 +153,46 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         )
         self.assertIn("Confirmed only.", full_report["finalMarkdown"])
         self.assertIn("Rejected candidates: 2", full_report["debugMarkdown"])
+
+    def test_graph_verified_report_gate_rejects_items_missing_required_public_evidence(self) -> None:
+        unsafe = self.graph_verified_item()
+        unsafe["judge"]["safe_to_show_user"] = False
+        weak_level = self.graph_verified_item()
+        weak_level["judge"]["level"] = "L1"
+        unreproduced = self.graph_verified_item()
+        unreproduced["repro"]["status"] = "not_reproduced"
+        no_graph_path = self.graph_verified_item()
+        no_graph_path["repro"]["graph_path_exercised"] = False
+        no_log = self.graph_verified_item()
+        no_log["judge"]["evidence_summary"].pop("log_path")
+        no_log["repro"]["commands_run"][0].pop("log_path")
+        no_exit_code = self.graph_verified_item()
+        no_exit_code["repro"]["commands_run"][0].pop("exit_code")
+        no_line = self.graph_verified_item()
+        no_line["candidate"]["evidence"][0].pop("line")
+        no_line["candidate"]["evidence"][0].pop("end_line")
+
+        report = {
+            "runId": "run_1",
+            "mode": "standard",
+            "confirmedCount": 7,
+            "finalJson": {
+                "confirmed": [
+                    unsafe,
+                    weak_level,
+                    unreproduced,
+                    no_graph_path,
+                    no_log,
+                    no_exit_code,
+                    no_line,
+                ]
+            },
+        }
+
+        public_report = app.public_graph_verified_report(report)
+        self.assertEqual(public_report["confirmedCount"], 0)
+        self.assertEqual(public_report["finalJson"]["confirmed"], [])
+        self.assertEqual(app.worker_graph_verified_findings({"repo": "acme/app"}, public_report), [])
 
     def test_audit_bundle_includes_graph_verified_report_artifacts(self) -> None:
         report = app.public_graph_verified_report(
@@ -2137,7 +2198,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(impact_graph["version"], "impact-graph/0.1")
         self.assertIn("src/app.py", impact_summary)
 
-    def test_scan_impact_graph_routes_return_full_and_focused_views(self) -> None:
+    def test_scan_impact_graph_routes_are_gone(self) -> None:
         scan = self.audit_bundle_cache_fixture()
         scan["repositoryGraph"] = app.public_repository_graph(repository_graph_v2_fixture())
         scan["impactGraph"] = app.public_impact_graph(impact_graph_fixture(), repository_graph=scan["repositoryGraph"])
@@ -2148,8 +2209,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(owner, "GET")
 
-        self.assertEqual(owner.status, HTTPStatus.OK)
-        self.assertEqual(owner.payload["impactGraph"]["targets"][0]["path"], "src/app.py")
+        self.assertEqual(owner.status, HTTPStatus.GONE)
 
         focus = RouteHarness(
             "/scans/sc_cache/impact-graph/focus?path=src/app.py",
@@ -2157,10 +2217,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(focus, "GET")
 
-        self.assertEqual(focus.status, HTTPStatus.OK)
-        self.assertEqual(focus.payload["focus"], {"path": "src/app.py", "nodeId": "file:src/app.py"})
-        self.assertEqual(focus.payload["target"]["path"], "src/app.py")
-        self.assertIn("subgraph", focus.payload)
+        self.assertEqual(focus.status, HTTPStatus.GONE)
 
     def test_scan_audit_bundle_zip_route_reuses_cached_archive(self) -> None:
         self.audit_bundle_cache_fixture()
@@ -2785,6 +2842,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                                     "safe_to_show_user": True,
                                     "evidence_summary": {
                                         "command": "pytest tests/test_app.py",
+                                        "log_path": "logs/repro.log",
                                         "observable": "Assertion failed as expected.",
                                     },
                                 },
@@ -2792,7 +2850,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
                                     "status": "reproduced",
                                     "level": "L2",
                                     "summary": "Local reproduction failed as expected.",
-                                    "commands_run": [{"cmd": "pytest tests/test_app.py", "exit_code": 1}],
+                                    "commands_run": [
+                                        {"cmd": "pytest tests/test_app.py", "exit_code": 1, "log_path": "logs/repro.log"}
+                                    ],
                                     "proof": {"expected": "pass", "actual": "failure"},
                                     "graph_path_exercised": True,
                                 },
@@ -2834,6 +2894,24 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertNotIn("graph_verified_report", app.SCANS[0])
         self.assertNotIn("graph_verified_report", public_payload)
         self.assertNotIn("snake_case_must_not_win", json.dumps(public_payload))
+
+        app.SCANS[0]["repositoryGraph"] = app.public_repository_graph(repository_graph_v2_fixture())
+        app.SCANS[0]["semanticGraph"] = app.public_repository_semantic_graph(semantic_graph_fixture())
+        app.SCANS[0]["impactGraph"] = app.public_impact_graph(impact_graph_fixture())
+        app.SCANS[0]["verificationAudit"] = {"candidateCount": 99}
+        bundle = app.scan_audit_bundle_payload(app.SCANS[0])
+        paths = {artifact["path"] for artifact in bundle["artifacts"]}
+        self.assertEqual(bundle["kind"], "pullwise.graph_verified_audit_bundle")
+        self.assertNotIn("verificationAudit", bundle)
+        self.assertNotIn("repositoryGraph", bundle)
+        self.assertNotIn("semanticGraph", bundle)
+        self.assertNotIn("impactGraph", bundle)
+        self.assertIn("scan/scan.json", paths)
+        self.assertIn("preflight/preflight.json", paths)
+        self.assertIn("graph-verified/final.json", paths)
+        self.assertNotIn("repository-graph.json", paths)
+        self.assertNotIn("semantic-graph.json", paths)
+        self.assertNotIn("impact-graph.json", paths)
 
     def test_repository_too_large_worker_result_refunds_only_that_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
@@ -3055,6 +3133,56 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["jobTrace"]["checkpoints"][0]["durationMs"], 123)
         self.assertNotIn("raw", json.dumps(payload["completionAudit"]))
         self.assertNotIn("raw", json.dumps(payload["jobTrace"]))
+
+    def test_worker_graph_verified_progress_ignores_legacy_artifacts(self) -> None:
+        app.billing.update_review_agent_config("free", {"provider": "codex", "graphVerified": {"enabled": True}})
+        scan = {
+            "id": "sc_progress_graph_verified",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        self.assertTrue(job["agentConfig"]["graphVerified"]["enabled"])
+
+        progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {
+                "phase": "ai",
+                "progress": 60,
+                "audit_swarm": {"protocol": "audit-swarm/0.1", "stage": "discovery"},
+                "completion_audit": {"protocol": "completion-audit/0.1", "status": "warning"},
+                "job_trace": {"protocol": "job-trace/0.1", "status": "running"},
+                "repositoryGraph": repository_graph_v2_fixture(),
+                "semanticGraph": semantic_graph_fixture(),
+                "impactGraph": impact_graph_fixture(),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(progress, "POST")
+
+        self.assertEqual(progress.status, HTTPStatus.OK)
+        payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(payload["phase"], "ai")
+        self.assertEqual(payload["progress"], 60)
+        self.assertNotIn("auditSwarm", payload)
+        self.assertNotIn("completionAudit", payload)
+        self.assertNotIn("jobTrace", payload)
+        self.assertNotIn("repositoryGraph", payload)
+        self.assertNotIn("semanticGraph", payload)
+        self.assertNotIn("impactGraph", payload)
 
     def test_worker_ai_progress_consumes_reserved_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}

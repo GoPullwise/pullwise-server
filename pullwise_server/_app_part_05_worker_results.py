@@ -115,6 +115,12 @@ def worker_agent_config_for_job(job: dict, scan: dict | None = None) -> dict:
     return billing.review_agent_config(worker_plan_for_job(job, scan))
 
 
+def worker_graph_verified_job_enabled(job: dict, scan: dict | None = None) -> bool:
+    agent_config = worker_agent_config_for_job(job, scan)
+    graph_config = agent_config.get("graphVerified") if isinstance(agent_config.get("graphVerified"), dict) else {}
+    return graph_config.get("enabled") is True
+
+
 def quota_request_id_for_scan(scan: dict | None) -> str | None:
     request_id = public_issue_text((scan or {}).get("requestId"))
     return request_id or None
@@ -749,21 +755,14 @@ def worker_graph_verified_findings(job: dict, report: dict, *, reserved_ids: set
 
 
 def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, index: int) -> dict:
+    if not graph_verified_report_item_is_public(item):
+        return {}
     candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
     judge = item.get("judge") if isinstance(item.get("judge"), dict) else {}
     repro = item.get("repro") if isinstance(item.get("repro"), dict) else {}
     verification = item.get("verification") if isinstance(item.get("verification"), dict) else {}
-    judge_status = public_issue_text(judge.get("status") or verification.get("status") or verification.get("verdict")).lower()
-    if judge_status and judge_status != "confirmed":
-        return {}
-    if judge.get("safe_to_show_user") is False or verification.get("safe_to_show_user") is False:
-        return {}
     graph_evidence = candidate.get("graph_evidence") if isinstance(candidate.get("graph_evidence"), dict) else {}
-    if not graph_evidence:
-        return {}
     reproduction = worker_graph_verified_reproduction(candidate, judge, repro)
-    if not reproduction.get("commands"):
-        return {}
     code_evidence = worker_graph_verified_code_evidence(candidate.get("evidence"), job=job)
     locations = worker_graph_verified_locations(code_evidence, job=job)
     primary = locations[0] if locations else {}
@@ -792,7 +791,7 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
         ),
         "reproduction": reproduction,
         "verificationLevel": public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")),
-        "safeToShowUser": judge.get("safe_to_show_user") is not False and verification.get("safe_to_show_user") is not False,
+        "safeToShowUser": True,
         "whyThisMatters": worker_graph_verified_why_this_matters(candidate, code_evidence),
         "suggestedFixDirection": review._safe_text_lenient(candidate.get("fix_direction") or candidate.get("suggested_fix")),
         "limitations": list(dict.fromkeys(item for item in limitations if item))[:8],
@@ -817,7 +816,7 @@ def worker_graph_verified_code_evidence(value: object, *, job: dict | None = Non
         if not isinstance(raw_item, dict):
             continue
         file_path = public_issue_file(raw_item.get("file") or raw_item.get("path"), job=job)
-        lines = public_issue_text(raw_item.get("lines"))
+        lines = graph_verified_evidence_line_text(raw_item)
         why = review._safe_text_lenient(raw_item.get("why_it_matters") or raw_item.get("summary"))
         item = {}
         if file_path:
@@ -853,12 +852,18 @@ def worker_graph_verified_locations(evidence: list[dict], *, job: dict | None = 
 
 def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict) -> dict:
     commands = []
+    exit_code = None
     raw_commands = repro.get("commands_run") if isinstance(repro.get("commands_run"), list) else []
     for item in raw_commands:
         if isinstance(item, dict):
             command = public_issue_text(item.get("cmd") or item.get("command"))
             if command:
                 commands.append(command)
+            if exit_code is None and graph_verified_command_has_exit_code(item):
+                try:
+                    exit_code = int(item.get("exit_code") if "exit_code" in item else item.get("exitCode"))
+                except (TypeError, ValueError):
+                    exit_code = None
         else:
             command = public_issue_text(item)
             if command:
@@ -874,7 +879,7 @@ def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict
             if log_path:
                 break
     log_path = log_path or public_issue_text(evidence_summary.get("log_path"))
-    return {
+    reproduction = {
         "commands": list(dict.fromkeys(commands))[:5],
         "input": review._safe_text_lenient(candidate.get("trigger_condition")),
         "expected": review._safe_text_lenient(proof.get("expected") or candidate.get("expected_behavior")),
@@ -886,6 +891,9 @@ def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict
         ),
         "logPath": log_path,
     }
+    if exit_code is not None:
+        reproduction["exitCode"] = exit_code
+    return reproduction
 
 
 def worker_graph_verified_observed_behavior(candidate: dict, judge: dict, repro: dict) -> str:

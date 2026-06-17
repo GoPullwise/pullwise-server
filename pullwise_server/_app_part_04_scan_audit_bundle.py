@@ -2134,6 +2134,128 @@ def review_calibration_safe_bucket_payload(value: object) -> dict:
     return payload
 
 
+def graph_verified_report_item_is_public(value: object) -> bool:
+    source = value if isinstance(value, dict) else {}
+    candidate = source.get("candidate") if isinstance(source.get("candidate"), dict) else {}
+    judge = source.get("judge") if isinstance(source.get("judge"), dict) else {}
+    repro = source.get("repro") if isinstance(source.get("repro"), dict) else {}
+    verification = source.get("verification") if isinstance(source.get("verification"), dict) else {}
+    if public_issue_text(judge.get("status")).lower() != "confirmed":
+        return False
+    verification_status = public_issue_text(verification.get("status") or verification.get("verdict")).lower()
+    if verification_status and verification_status != "confirmed":
+        return False
+    if judge.get("safe_to_show_user") is not True:
+        return False
+    if verification and verification.get("safe_to_show_user") is not True:
+        return False
+    level = public_issue_text(judge.get("level") or verification.get("level") or repro.get("level")).upper()
+    if level not in {"L2", "L3"}:
+        return False
+    if public_issue_text(repro.get("status")).lower() != "reproduced":
+        return False
+    if repro.get("graph_path_exercised") is not True:
+        return False
+    if not graph_verified_item_has_repro_log_and_exit_code(judge, repro):
+        return False
+    if not graph_verified_item_has_code_evidence_location(candidate):
+        return False
+    return graph_verified_item_has_graph_evidence(candidate)
+
+
+def graph_verified_item_has_graph_evidence(candidate: dict) -> bool:
+    graph_evidence = candidate.get("graph_evidence") if isinstance(candidate.get("graph_evidence"), dict) else {}
+    if not graph_evidence:
+        return False
+    if public_scan_compact_text(graph_evidence.get("slice_id"), max_length=240):
+        return True
+    for key in ("codegraph_files", "path_summary"):
+        values = public_scan_compact_text_list(graph_evidence.get(key), limit=20, max_length=1000)
+        if values:
+            return True
+    return False
+
+
+def graph_verified_item_has_repro_log_and_exit_code(judge: dict, repro: dict) -> bool:
+    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
+    summary_log_path = public_scan_compact_text(evidence_summary.get("log_path"), max_length=500)
+    commands = repro.get("commands_run") if isinstance(repro.get("commands_run"), list) else []
+    for command in commands:
+        if not isinstance(command, dict):
+            continue
+        command_text = review._safe_text_lenient(command.get("cmd") or command.get("command"))[:4000]
+        log_path = public_scan_compact_text(command.get("log_path") or command.get("logPath"), max_length=500)
+        if command_text and (log_path or summary_log_path) and graph_verified_command_has_exit_code(command):
+            return True
+    return False
+
+
+def graph_verified_command_has_exit_code(command: dict) -> bool:
+    if "exit_code" in command:
+        value = command.get("exit_code")
+    elif "exitCode" in command:
+        value = command.get("exitCode")
+    else:
+        return False
+    if isinstance(value, bool):
+        return False
+    try:
+        int(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def graph_verified_item_has_code_evidence_location(candidate: dict) -> bool:
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), list) else []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        if public_issue_file(item.get("file") or item.get("path")) and graph_verified_evidence_line_text(item):
+            return True
+    return False
+
+
+def graph_verified_evidence_has_line_number(item: dict) -> bool:
+    return bool(graph_verified_evidence_line_text(item))
+
+
+def graph_verified_evidence_line_text(item: dict) -> str:
+    lines = public_scan_compact_text(
+        item.get("lines") or item.get("lineRange") or item.get("line_range"),
+        max_length=80,
+    )
+    if lines and re.search(r"\d", lines):
+        return lines
+    start = 0
+    for key in ("line", "start_line", "startLine", "line_start", "lineStart"):
+        value = item.get(key)
+        if isinstance(value, bool):
+            continue
+        try:
+            start = int(value)
+            if start > 0:
+                break
+        except (TypeError, ValueError):
+            pass
+    if start <= 0:
+        return ""
+    end = 0
+    for key in ("end_line", "endLine", "line_end", "lineEnd"):
+        value = item.get(key)
+        if isinstance(value, bool):
+            continue
+        try:
+            end = int(value)
+            if end >= start:
+                break
+        except (TypeError, ValueError):
+            pass
+    if end and end != start:
+        return f"{start}-{end}"
+    return str(start)
+
+
 def public_graph_verified_report(
     value: object,
     *,
@@ -2141,13 +2263,13 @@ def public_graph_verified_report(
     include_debug: bool = False,
 ) -> dict:
     source = value if isinstance(value, dict) else {}
-    confirmed = public_scan_count(source.get("confirmedCount"))
     rejected = public_scan_count(source.get("rejectedCount"))
     blocked = public_scan_count(source.get("blockedCount"))
     final_json = source.get("finalJson")
     if not isinstance(final_json, dict):
         final_json = {}
     confirmed_items = public_graph_verified_confirmed_items(final_json.get("confirmed"))
+    confirmed = len(confirmed_items)
     payload = {
         "version": public_scan_compact_text(source.get("version"), max_length=64) or "graph-verified-code-review/1",
         "runId": public_scan_compact_text(source.get("runId"), max_length=128),
@@ -2200,6 +2322,8 @@ def public_graph_verified_confirmed_items(value: object) -> list[dict]:
 
 
 def public_graph_verified_confirmed_item(value: object) -> dict:
+    if not graph_verified_report_item_is_public(value):
+        return {}
     source = value if isinstance(value, dict) else {}
     candidate = public_graph_verified_candidate(source.get("candidate"))
     judge = public_graph_verified_judge(source.get("judge"))
@@ -2276,7 +2400,7 @@ def public_graph_verified_evidence_list(value: object) -> list[dict]:
         file_path = public_issue_file(raw_item.get("file") or raw_item.get("path"))
         if file_path:
             item["file"] = file_path
-        lines = public_scan_compact_text(raw_item.get("lines"), max_length=80)
+        lines = graph_verified_evidence_line_text(raw_item)
         if lines:
             item["lines"] = lines
         why = review._safe_text_lenient(raw_item.get("why_it_matters") or raw_item.get("summary"))[:2000]
@@ -3909,15 +4033,27 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         include_markdown=True,
         include_debug=True,
     )
+    is_graph_verified = bool(graph_verified_report)
+    if is_graph_verified:
+        public_scan = dict(public_scan)
+        for key in (
+            "auditSwarm",
+            "completionAudit",
+            "impactGraph",
+            "jobTrace",
+            "repositoryGraph",
+            "semanticGraph",
+            "verificationAudit",
+        ):
+            public_scan.pop(key, None)
     log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
     bundle = {
         "schemaVersion": 1,
         "generatedAt": now(),
-        "kind": "pullwise.audit_bundle",
+        "kind": "pullwise.graph_verified_audit_bundle" if is_graph_verified else "pullwise.audit_bundle",
         "scan": public_scan,
         "preflight": preflight,
         "verification": public_scan.get("verification") or public_scan_verification_counts(scan),
-        "verificationAudit": public_scan.get("verificationAudit") or public_scan_verification_audit(scan),
         "evidenceSummary": {
             "issueCount": len(issue_payloads),
             "evidenceItemCount": evidence_items,
@@ -3933,14 +4069,16 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
             "All repository links are pinned to the recorded commit when a valid commit SHA is available.",
         ],
     }
-    if repository_graph:
-        bundle["repositoryGraph"] = repository_graph
-    if semantic_graph:
-        bundle["semanticGraph"] = semantic_graph
-    if impact_graph:
-        bundle["impactGraph"] = impact_graph
-    if graph_verified_report:
+    if is_graph_verified:
         bundle["graphVerifiedReport"] = graph_verified_report
+    else:
+        bundle["verificationAudit"] = public_scan.get("verificationAudit") or public_scan_verification_audit(scan)
+    if repository_graph and not is_graph_verified:
+        bundle["repositoryGraph"] = repository_graph
+    if semantic_graph and not is_graph_verified:
+        bundle["semanticGraph"] = semantic_graph
+    if impact_graph and not is_graph_verified:
+        bundle["impactGraph"] = impact_graph
     artifacts = audit_bundle_artifacts(bundle)
     bundle["artifactManifest"] = [
         {key: artifact[key] for key in ("path", "mediaType", "size", "sha256")}
@@ -4091,6 +4229,55 @@ def get_or_create_scan_audit_bundle_zip_bytes(scan: dict) -> bytes:
 
 
 def audit_bundle_artifacts(bundle: dict) -> list[dict]:
+    if isinstance(bundle.get("graphVerifiedReport"), dict):
+        artifacts = [
+            audit_bundle_artifact("README.md", "text/markdown", audit_bundle_readme_markdown(bundle)),
+            audit_bundle_artifact("report.md", "text/markdown", audit_bundle_report_markdown(bundle)),
+            audit_bundle_artifact(
+                "scan/scan.json",
+                "application/json",
+                json.dumps(
+                    bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+            ),
+            audit_bundle_artifact(
+                "preflight/preflight.json",
+                "application/json",
+                json.dumps(
+                    bundle.get("preflight") if isinstance(bundle.get("preflight"), dict) else {},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+            ),
+            audit_bundle_artifact("reproduction/commands.txt", "text/plain", audit_bundle_repro_commands_text(bundle)),
+        ]
+        artifacts.extend(audit_bundle_graph_verified_artifacts(bundle["graphVerifiedReport"]))
+        artifacts.append(audit_bundle_artifact("audit.json", "application/json", audit_bundle_json_text(bundle)))
+        for issue in bundle.get("issues") if isinstance(bundle.get("issues"), list) else []:
+            if isinstance(issue, dict):
+                issue_id = audit_bundle_safe_artifact_name(public_issue_text(issue.get("id")) or "issue")
+                artifacts.append(
+                    audit_bundle_artifact(
+                        f"issues/{issue_id}.md",
+                        "text/markdown",
+                        audit_bundle_issue_markdown(issue),
+                    )
+                )
+        artifacts = artifacts[:99]
+        artifacts.append(
+            audit_bundle_artifact(
+                "artifact-manifest.json",
+                "application/json",
+                audit_bundle_artifact_manifest_json(artifacts),
+            )
+        )
+        return artifacts
     artifacts = [
         audit_bundle_artifact("README.md", "text/markdown", audit_bundle_readme_markdown(bundle)),
         audit_bundle_artifact("report.md", "text/markdown", audit_bundle_report_markdown(bundle)),
@@ -4314,6 +4501,21 @@ def audit_bundle_issue_title(issue: dict) -> str:
 
 def audit_bundle_readme_markdown(bundle: dict) -> str:
     scan = bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {}
+    graph_verified_report = bundle.get("graphVerifiedReport") if isinstance(bundle.get("graphVerifiedReport"), dict) else {}
+    if graph_verified_report:
+        return "\n".join(
+            [
+                "# Pullwise GraphVerified Audit Bundle",
+                "",
+                f"Repository: {public_issue_text(scan.get('repo')) or 'unknown'}",
+                f"Branch: {public_issue_text(scan.get('branch')) or 'main'}",
+                f"Commit: {public_issue_text(scan.get('commit')) or 'pending'}",
+                f"Generated at: {pull_request_timestamp(bundle.get('generatedAt')) or 0}",
+                "",
+                "This bundle contains only GraphVerified scan evidence. Start with report.md, then inspect graph-verified/final.json and issues/*.md.",
+                "",
+            ]
+        )
     verification_audit = bundle.get("verificationAudit") if isinstance(bundle.get("verificationAudit"), dict) else {}
     return "\n".join(
         [
@@ -4351,7 +4553,33 @@ def audit_bundle_report_markdown(bundle: dict) -> str:
     evidence_summary = bundle.get("evidenceSummary") if isinstance(bundle.get("evidenceSummary"), dict) else {}
     verification = bundle.get("verification") if isinstance(bundle.get("verification"), dict) else {}
     verification_audit = bundle.get("verificationAudit") if isinstance(bundle.get("verificationAudit"), dict) else {}
+    graph_verified_report = bundle.get("graphVerifiedReport") if isinstance(bundle.get("graphVerifiedReport"), dict) else {}
     issues = bundle.get("issues") if isinstance(bundle.get("issues"), list) else []
+    if graph_verified_report:
+        lines = [
+            "# GraphVerified Audit Report",
+            "",
+            f"Repo: {public_issue_text(scan.get('repo')) or 'unknown'}",
+            f"Commit: {public_issue_text(scan.get('commit')) or 'pending'}",
+            f"Scan: {public_issue_text(scan.get('id')) or 'unknown'}",
+            "",
+            "## Summary",
+            "",
+            f"- Confirmed issues: {public_scan_count(graph_verified_report.get('confirmedCount'))}",
+            f"- Rejected candidates: {public_scan_count(graph_verified_report.get('rejectedCount'))}",
+            f"- Blocked candidates: {public_scan_count(graph_verified_report.get('blockedCount'))}",
+            f"- Reproduction commands: {public_scan_count(evidence_summary.get('reproductionCommandCount'))}",
+            "",
+            "## Issues",
+            "",
+        ]
+        if not issues:
+            lines.append("No confirmed GraphVerified issues were included in this bundle.")
+        for issue in issues:
+            if isinstance(issue, dict):
+                lines.append(f"- [{audit_bundle_issue_title(issue)}](issues/{audit_bundle_safe_artifact_name(public_issue_text(issue.get('id')) or 'issue')}.md)")
+        lines.append("")
+        return "\n".join(lines)
     lines = [
         "# Repo Audit Report",
         "",
@@ -4621,10 +4849,12 @@ def audit_bundle_environment_json(bundle: dict) -> str:
         "scan": bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {},
         "preflight": bundle.get("preflight") if isinstance(bundle.get("preflight"), dict) else {},
         "verification": bundle.get("verification") if isinstance(bundle.get("verification"), dict) else {},
-        "verificationAudit": bundle.get("verificationAudit") if isinstance(bundle.get("verificationAudit"), dict) else {},
         "evidenceSummary": bundle.get("evidenceSummary") if isinstance(bundle.get("evidenceSummary"), dict) else {},
         "limitations": review._safe_text_list(bundle.get("limitations")),
     }
+    verification_audit = bundle.get("verificationAudit") if isinstance(bundle.get("verificationAudit"), dict) else {}
+    if verification_audit:
+        environment["verificationAudit"] = verification_audit
     return json.dumps(environment, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
