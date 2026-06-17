@@ -705,10 +705,122 @@ if [ -z "$SERVER_URL" ] || [ -z "$WORKER_ID" ] || [ -z "$WORKER_TOKEN" ]; then
   echo "missing --server, --worker-id, or worker token env/file" >&2
   exit 2
 fi
-if ! command -v sha256sum >/dev/null 2>&1; then
-  echo "missing required command: sha256sum" >&2
+
+case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
+case "$(uname -m)" in x86_64|aarch64|arm64) ;; *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;; esac
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run as root so the installer can create service users and systemd units." >&2
   exit 1
 fi
+
+read_os_value() {
+  local key="$1"
+  local os_file="${PULLWISE_WORKER_OS_RELEASE_FILE:-/etc/os-release}"
+  local line value
+  [ -f "$os_file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$key"=*)
+        value="${line#*=}"
+        value="${value%\"}"
+        value="${value#\"}"
+        printf '%s' "$value"
+        return 0
+        ;;
+    esac
+  done < "$os_file"
+}
+is_ubuntu_2204() {
+  [ "$(read_os_value ID)" = "ubuntu" ] && [ "$(read_os_value VERSION_ID)" = "22.04" ]
+}
+auto_install_enabled() {
+  case "${PULLWISE_WORKER_AUTO_INSTALL_DEPS:-1}" in
+    0|false|FALSE|no|NO|off|OFF) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+apt_get_bin() {
+  if [ -n "${PULLWISE_WORKER_APT_GET_BIN:-}" ]; then
+    printf '%s' "$PULLWISE_WORKER_APT_GET_BIN"
+    return 0
+  fi
+  command -v apt-get 2>/dev/null
+}
+install_ubuntu_packages() {
+  local packages=("$@")
+  [ "${#packages[@]}" -gt 0 ] || return 0
+  auto_install_enabled || {
+    echo "Missing dependencies: ${packages[*]}. Dependency auto-install is disabled by PULLWISE_WORKER_AUTO_INSTALL_DEPS." >&2
+    exit 1
+  }
+  is_ubuntu_2204 || {
+    echo "Missing dependencies: ${packages[*]}. Automatic installation is supported on Ubuntu 22.04 hosts." >&2
+    exit 1
+  }
+  local apt_get
+  apt_get="$(apt_get_bin)"
+  [ -n "$apt_get" ] || {
+    echo "Missing dependencies: ${packages[*]}. apt-get is required for Ubuntu 22.04 dependency installation." >&2
+    exit 1
+  }
+  echo "Installing Ubuntu packages: ${packages[*]}"
+  DEBIAN_FRONTEND=noninteractive "$apt_get" update
+  DEBIAN_FRONTEND=noninteractive "$apt_get" install -y --no-install-recommends "${packages[@]}"
+}
+ensure_command_available() {
+  local label="$1"
+  local command_name="$2"
+  shift 2
+  if command -v "$command_name" >/dev/null 2>&1; then
+    return 0
+  fi
+  install_ubuntu_packages "$@"
+  command -v "$command_name" >/dev/null 2>&1 || {
+    echo "$label is still unavailable after installing: $*" >&2
+    exit 1
+  }
+}
+ensure_python_runtime() {
+  if ! command -v python3.10 >/dev/null 2>&1 || ! python3.10 -m pip --version >/dev/null 2>&1; then
+    install_ubuntu_packages python3.10 python3.10-venv python3-pip
+  fi
+  command -v python3.10 >/dev/null 2>&1 || {
+    echo "python3.10 is still unavailable after installing Ubuntu packages." >&2
+    exit 1
+  }
+  python3.10 -m pip --version >/dev/null 2>&1 || {
+    echo "python3.10 pip is still unavailable after installing Ubuntu packages." >&2
+    exit 1
+  }
+  python3.10 - <<'PY'
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit("Pullwise worker requires Python 3.10 or newer.")
+PY
+  PYTHON_BIN="$(python3.10 -c 'import sys; print(sys.executable)')"
+}
+node20_available() {
+  command -v node >/dev/null 2>&1 || return 1
+  node --version 2>/dev/null | sed -n 's/^v\([0-9][0-9]*\).*/\1/p' | awk '{ exit ($1 >= 20 ? 0 : 1) }'
+}
+ensure_nodesource_nodejs() {
+  if node20_available && command -v npm >/dev/null 2>&1; then
+    return 0
+  fi
+  install_ubuntu_packages ca-certificates curl gnupg
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+  chmod 0644 /etc/apt/keyrings/nodesource.gpg
+  printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main' >/etc/apt/sources.list.d/nodesource.list
+  DEBIAN_FRONTEND=noninteractive "$(apt_get_bin)" update
+  DEBIAN_FRONTEND=noninteractive "$(apt_get_bin)" install -y --no-install-recommends nodejs
+  node20_available && command -v npm >/dev/null 2>&1 || {
+    echo "Node.js 20+ and npm are still unavailable after NodeSource install." >&2
+    exit 1
+  }
+}
+
+ensure_command_available "sha256sum" sha256sum coreutils
 safe_worker_id() {
   local raw safe digest prefix
   raw="$1"
@@ -864,15 +976,6 @@ XDG_CONFIG_HOME="$DATA_DIR/.config"
 XDG_CACHE_HOME="$DATA_DIR/.cache"
 XDG_DATA_HOME="$DATA_DIR/.local/share"
 
-case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
-case "$(uname -m)" in x86_64|aarch64|arm64) ;; *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;; esac
-
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Run as root so the installer can create service users and systemd units." >&2
-  exit 1
-fi
-
-need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
 run_as_service_user() {
   (
     cd "$DATA_DIR"
@@ -911,8 +1014,8 @@ ensure_scoped_command_path() {
   local label="${2:-provider}"
   local resolved_home resolved_command
   [ -n "$command_path" ] || return 0
-  resolved_home="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
-  resolved_command="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
+  resolved_home="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
+  resolved_command="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
   case "$resolved_command/" in
     "$resolved_home"/*) ;;
     *)
@@ -921,15 +1024,18 @@ ensure_scoped_command_path() {
       ;;
   esac
 }
-need_cmd python3
-need_cmd git
-need_cmd curl
-python3 - <<'PY'
-import sys
-if sys.version_info < (3, 9):
-    raise SystemExit("Pullwise worker requires Python 3.9 or newer.")
-PY
-PYTHON_BIN="$(python3 -c 'import sys; print(sys.executable)')"
+ensure_python_runtime
+ensure_command_available "git" git git
+ensure_command_available "curl" curl curl ca-certificates
+ensure_command_available "getent" getent libc-bin
+ensure_command_available "install" install coreutils
+ensure_command_available "runuser" runuser util-linux
+ensure_command_available "systemctl" systemctl systemd
+ensure_command_available "useradd" useradd passwd
+ensure_command_available "userdel" userdel passwd
+if provider_chain_has codex; then
+  ensure_nodesource_nodejs
+fi
 
 ROLLBACK_ENABLED=1
 if id "$SERVICE_USER" >/dev/null 2>&1; then
@@ -959,7 +1065,7 @@ if provider_chain_has codex; then
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi
 
-python3 -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
+"$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
 
 write_env_value() {
   local key="$1"
@@ -1068,7 +1174,7 @@ export XDG_CACHE_HOME="\$SERVICE_HOME/.cache"
 export XDG_DATA_HOME="\$SERVICE_HOME/.local/share"
 SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 export PATH="\$SERVICE_HOME/.local/bin:\$SERVICE_HOME/.codex/bin:\$SERVICE_PATH"
-PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"
+PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
 chmod 0755 "$BIN_PATH"
@@ -1174,5 +1280,3 @@ def worker_test_payload(worker: dict) -> dict:
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}
-
-

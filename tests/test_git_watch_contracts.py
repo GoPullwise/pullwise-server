@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -38,8 +40,43 @@ def run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def write_executable(path: Path, body: str) -> None:
+    path.write_text(textwrap.dedent(body).lstrip(), encoding="utf-8", newline="\n")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
 @unittest.skipIf(os.name == "nt", "git-watch shell contracts run on POSIX CI")
 class GitWatchContractsTest(unittest.TestCase):
+    def symlink_tool(self, root: Path, name: str) -> None:
+        target = shutil.which(name)
+        if not target:
+            raise unittest.SkipTest(f"{name} is required for this shell contract")
+        link = root / "bin" / name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if not link.exists():
+            link.symlink_to(target)
+
+    def write_fake_apt_get(self, root: Path) -> tuple[Path, Path]:
+        fake_apt = root / "bin" / "apt-get"
+        fake_apt.parent.mkdir(parents=True, exist_ok=True)
+        apt_log = root / "apt.log"
+        write_executable(
+            fake_apt,
+            """
+            #!/usr/bin/env sh
+            printf '%s\\n' "$*" >> "$PULLWISE_WATCH_APT_LOG"
+            if [ "$1" = "install" ]; then
+              cat > "$PULLWISE_FAKE_BIN/git" <<'GIT'
+#!/usr/bin/env sh
+exit 1
+GIT
+              chmod +x "$PULLWISE_FAKE_BIN/git"
+            fi
+            exit 0
+            """,
+        )
+        return fake_apt, apt_log
+
     def create_remote_and_clone(self, root: Path) -> Path:
         source = root / "source"
         source.mkdir()
@@ -110,3 +147,42 @@ class GitWatchContractsTest(unittest.TestCase):
             self.assertEqual(deploy_log.read_text(encoding="utf-8"), "restart")
             deployed_head = (app / ".pullwise" / "git-watch.deployed-head").read_text(encoding="utf-8").strip()
             self.assertEqual(deployed_head, run_git(["rev-parse", "HEAD"], app).stdout.strip())
+
+    def test_installs_missing_git_on_ubuntu_2204_before_polling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = root / "app"
+            app.mkdir()
+            for tool in ["date", "dirname", "id", "mkdir", "sed", "tee", "tr", "sh", "chmod", "cat"]:
+                self.symlink_tool(root, tool)
+            fake_apt, apt_log = self.write_fake_apt_get(root)
+            os_release = root / "os-release"
+            os_release.write_text('ID=ubuntu\nVERSION_ID="22.04"\n', encoding="utf-8")
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": str(root / "bin"),
+                    "PULLWISE_WATCH_APP_DIR": str(app),
+                    "PULLWISE_WATCH_LOG_FILE": str(app / ".pullwise" / "git-watch.log"),
+                    "PULLWISE_WATCH_LOCK_DIR": str(app / ".pullwise" / "git-watch.lock"),
+                    "PULLWISE_WATCH_APT_GET_BIN": str(fake_apt),
+                    "PULLWISE_WATCH_APT_LOG": str(apt_log),
+                    "PULLWISE_FAKE_BIN": str(root / "bin"),
+                    "PULLWISE_WATCH_OS_RELEASE_FILE": str(os_release),
+                }
+            )
+
+            result = subprocess.run(
+                [shell_executable(), str(project_root() / "git-watch.sh"), "--once"],
+                cwd=app,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            apt_calls = apt_log.read_text(encoding="utf-8")
+
+        self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("update", apt_calls)
+        self.assertIn("install -y --no-install-recommends git", apt_calls)

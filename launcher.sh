@@ -268,10 +268,6 @@ python_bin() {
     command -v python3.10
     return 0
   fi
-  if command -v python3 >/dev/null 2>&1; then
-    command -v python3
-    return 0
-  fi
   return 1
 }
 
@@ -298,12 +294,85 @@ tar_bin() {
   tool_bin PULLWISE_TAR_BIN tar || printf '%s' tar
 }
 
+apt_get_bin() {
+  tool_bin PULLWISE_APT_GET_BIN apt-get || true
+}
+
+sudo_bin() {
+  tool_bin PULLWISE_SUDO_BIN sudo || true
+}
+
 chgrp_bin() {
   tool_bin PULLWISE_CHGRP_BIN chgrp || true
 }
 
 chown_bin() {
   tool_bin PULLWISE_CHOWN_BIN chown || true
+}
+
+read_os_value() {
+  key=$1
+  os_file=${PULLWISE_OS_RELEASE_FILE:-/etc/os-release}
+  read_env_file_value "$os_file" "$key" 2>/dev/null || true
+}
+
+auto_install_enabled() {
+  ! is_true "${PULLWISE_SKIP_DEPENDENCY_INSTALL:-false}"
+}
+
+is_ubuntu_2204() {
+  [ "$(read_os_value ID)" = "ubuntu" ] && [ "$(read_os_value VERSION_ID)" = "22.04" ]
+}
+
+run_apt_get() {
+  apt_get=$1
+  shift
+  if [ "$(id -u 2>/dev/null || printf 1)" = "0" ]; then
+    DEBIAN_FRONTEND=noninteractive "$apt_get" "$@"
+    return $?
+  fi
+  sudo_cmd=$(sudo_bin)
+  [ -n "$sudo_cmd" ] || die "Missing dependencies and sudo is not available to install them."
+  "$sudo_cmd" env DEBIAN_FRONTEND=noninteractive "$apt_get" "$@"
+}
+
+install_ubuntu_packages() {
+  packages=$*
+  [ -n "$packages" ] || return 0
+  auto_install_enabled || die "Missing dependencies: $packages. Dependency auto-install is disabled by PULLWISE_SKIP_DEPENDENCY_INSTALL."
+  is_ubuntu_2204 || die "Missing dependencies: $packages. Automatic installation is supported on Ubuntu 22.04 hosts."
+  apt_get=$(apt_get_bin)
+  [ -n "$apt_get" ] || die "Missing dependencies: $packages. apt-get is required for Ubuntu 22.04 dependency installation."
+  info "installing Ubuntu packages: $packages"
+  run_apt_get "$apt_get" update || die "apt-get update failed."
+  run_apt_get "$apt_get" install -y --no-install-recommends "$@" || die "apt-get install failed: $packages"
+}
+
+ensure_command_available() {
+  label=$1
+  override_name=$2
+  command_name=$3
+  shift 3
+  bin=$(tool_bin "$override_name" "$command_name" || true)
+  if [ -n "$bin" ]; then
+    return 0
+  fi
+  install_ubuntu_packages "$@"
+  bin=$(tool_bin "$override_name" "$command_name" || true)
+  [ -n "$bin" ] || die "$label is still unavailable after installing: $*"
+}
+
+ensure_python_setup_dependencies() {
+  if [ -n "${PULLWISE_PYTHON_BIN-}" ]; then
+    return 0
+  fi
+  if command -v python3.10 >/dev/null 2>&1 && python3.10 -m venv --help >/dev/null 2>&1 && python3.10 -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+  install_ubuntu_packages python3.10 python3.10-venv python3-pip
+  command -v python3.10 >/dev/null 2>&1 || die "python3.10 is still unavailable after installing Ubuntu packages."
+  python3.10 -m venv --help >/dev/null 2>&1 || die "python3.10 venv is still unavailable after installing Ubuntu packages."
+  python3.10 -m pip --version >/dev/null 2>&1 || die "python3.10 pip is still unavailable after installing Ubuntu packages."
 }
 
 set_service_group_readable_file() {
@@ -435,6 +504,7 @@ print_systemctl_command() {
 }
 
 cmd_setup() {
+  ensure_python_setup_dependencies
   if [ -n "${PULLWISE_PYTHON_BIN-}" ]; then
     bootstrap_python=$PULLWISE_PYTHON_BIN
   elif command -v python3.10 >/dev/null 2>&1; then
@@ -585,6 +655,7 @@ cmd_install_service() {
 
   cmd_sync_env
   write_service_file
+  ensure_command_available "systemctl" PULLWISE_SYSTEMCTL_BIN systemctl systemd
   if command -v "$(systemctl_bin)" >/dev/null 2>&1; then
     "$(systemctl_bin)" daemon-reload || die "systemctl daemon-reload failed"
     if [ "$enable_service" = true ]; then
@@ -719,8 +790,8 @@ cmd_restart() {
 
 cmd_health() {
   url=$(health_url)
+  ensure_command_available "curl" PULLWISE_CURL_BIN curl curl
   curl_bin=$(tool_bin PULLWISE_CURL_BIN curl || true)
-  [ -n "$curl_bin" ] || die "curl is required for health checks."
   "$curl_bin" -fsS --max-time "${PULLWISE_HEALTH_TIMEOUT_SECONDS:-5}" "$url" || die "health check failed: $url"
   printf '\n'
 }
@@ -934,12 +1005,6 @@ python_version_ok() {
     }
     { exit 1 }
   '
-}
-
-read_os_value() {
-  key=$1
-  os_file=${PULLWISE_OS_RELEASE_FILE:-/etc/os-release}
-  read_env_file_value "$os_file" "$key" 2>/dev/null || true
 }
 
 check_os() {

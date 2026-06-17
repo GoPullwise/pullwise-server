@@ -82,6 +82,107 @@ die() {
   return 1
 }
 
+read_os_value() {
+  local key="$1"
+  local os_file="${PULLWISE_WATCH_OS_RELEASE_FILE:-/etc/os-release}"
+  local line value
+  [ -f "$os_file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$key"=*)
+        value="${line#*=}"
+        value="${value%\"}"
+        value="${value#\"}"
+        printf '%s' "$value"
+        return 0
+        ;;
+    esac
+  done < "$os_file"
+}
+
+is_ubuntu_2204() {
+  [ "$(read_os_value ID)" = "ubuntu" ] && [ "$(read_os_value VERSION_ID)" = "22.04" ]
+}
+
+auto_install_enabled() {
+  is_true "${PULLWISE_WATCH_SKIP_DEPENDENCY_INSTALL:-false}" && return 1
+  return 0
+}
+
+apt_get_bin() {
+  if [ -n "${PULLWISE_WATCH_APT_GET_BIN:-}" ]; then
+    printf '%s' "$PULLWISE_WATCH_APT_GET_BIN"
+    return 0
+  fi
+  command -v apt-get 2>/dev/null
+}
+
+sudo_bin() {
+  if [ -n "${PULLWISE_WATCH_SUDO_BIN:-}" ]; then
+    printf '%s' "$PULLWISE_WATCH_SUDO_BIN"
+    return 0
+  fi
+  command -v sudo 2>/dev/null
+}
+
+run_apt_get() {
+  local apt_get="$1"
+  shift
+  if [ "$(id -u 2>/dev/null || printf 1)" = "0" ]; then
+    DEBIAN_FRONTEND=noninteractive "$apt_get" "$@"
+    return $?
+  fi
+  local sudo_cmd
+  sudo_cmd="$(sudo_bin)"
+  [ -n "$sudo_cmd" ] || {
+    log "ERROR: Missing dependencies and sudo is not available to install them." >&2
+    return 1
+  }
+  "$sudo_cmd" env DEBIAN_FRONTEND=noninteractive "$apt_get" "$@"
+}
+
+install_ubuntu_packages() {
+  local packages=("$@")
+  [ "${#packages[@]}" -gt 0 ] || return 0
+  auto_install_enabled || {
+    log "ERROR: Missing dependencies: ${packages[*]}. Dependency auto-install is disabled by PULLWISE_WATCH_SKIP_DEPENDENCY_INSTALL." >&2
+    return 1
+  }
+  is_ubuntu_2204 || {
+    log "ERROR: Missing dependencies: ${packages[*]}. Automatic installation is supported on Ubuntu 22.04 hosts." >&2
+    return 1
+  }
+  local apt_get
+  apt_get="$(apt_get_bin)"
+  [ -n "$apt_get" ] || {
+    log "ERROR: Missing dependencies: ${packages[*]}. apt-get is required for Ubuntu 22.04 dependency installation." >&2
+    return 1
+  }
+  log "installing Ubuntu packages: ${packages[*]}"
+  run_apt_get "$apt_get" update || return 1
+  run_apt_get "$apt_get" install -y --no-install-recommends "${packages[@]}" || return 1
+}
+
+ensure_command_available() {
+  local label="$1"
+  local command_name="$2"
+  shift 2
+  if command -v "$command_name" >/dev/null 2>&1; then
+    return 0
+  fi
+  install_ubuntu_packages "$@" || return 1
+  command -v "$command_name" >/dev/null 2>&1 || {
+    log "ERROR: $label is still unavailable after installing: $*" >&2
+    return 1
+  }
+}
+
+ensure_host_dependencies() {
+  ensure_command_available "git" git git || return 1
+  ensure_command_available "tee" tee coreutils || return 1
+  ensure_command_available "sed" sed sed || return 1
+}
+
 run_command() {
   label=$1
   command_text=$2
@@ -244,6 +345,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+ensure_host_dependencies || exit 1
 mkdir -p "$(dirname -- "$LOG_FILE")" || exit 1
 
 if [ "$ONCE" = true ]; then

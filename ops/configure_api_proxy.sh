@@ -25,6 +25,95 @@ require_root() {
   fi
 }
 
+read_os_value() {
+  local key="$1"
+  local os_file="${PULLWISE_API_PROXY_OS_RELEASE_FILE:-/etc/os-release}"
+  local line value
+  [ -f "$os_file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$key"=*)
+        value="${line#*=}"
+        value="${value%\"}"
+        value="${value#\"}"
+        printf '%s' "$value"
+        return 0
+        ;;
+    esac
+  done < "$os_file"
+}
+
+is_true() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_ubuntu_2204() {
+  [ "$(read_os_value ID)" = "ubuntu" ] && [ "$(read_os_value VERSION_ID)" = "22.04" ]
+}
+
+apt_get_bin() {
+  if [ -n "${PULLWISE_API_PROXY_APT_GET_BIN:-}" ]; then
+    printf '%s' "$PULLWISE_API_PROXY_APT_GET_BIN"
+    return 0
+  fi
+  command -v apt-get 2>/dev/null
+}
+
+install_ubuntu_packages() {
+  local packages=("$@")
+  [ "${#packages[@]}" -gt 0 ] || return 0
+  if is_true "${PULLWISE_API_PROXY_SKIP_DEPENDENCY_INSTALL:-false}"; then
+    echo "Missing dependencies: ${packages[*]}. Dependency auto-install is disabled by PULLWISE_API_PROXY_SKIP_DEPENDENCY_INSTALL." >&2
+    exit 1
+  fi
+  if ! is_ubuntu_2204; then
+    echo "Missing dependencies: ${packages[*]}. Automatic installation is supported on Ubuntu 22.04 hosts." >&2
+    exit 1
+  fi
+  local apt_get
+  apt_get="$(apt_get_bin)"
+  if [ -z "$apt_get" ]; then
+    echo "Missing dependencies: ${packages[*]}. apt-get is required for Ubuntu 22.04 dependency installation." >&2
+    exit 1
+  fi
+  echo "Installing Ubuntu packages: ${packages[*]}"
+  "$apt_get" update
+  DEBIAN_FRONTEND=noninteractive "$apt_get" install -y --no-install-recommends "${packages[@]}"
+}
+
+ensure_command_available() {
+  local label="$1"
+  local command_name="$2"
+  shift 2
+  if command -v "$command_name" >/dev/null 2>&1; then
+    return 0
+  fi
+  install_ubuntu_packages "$@"
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "${label} is still unavailable after installing: $*" >&2
+    exit 1
+  fi
+}
+
+ensure_host_dependencies() {
+  ensure_command_available "getent" getent libc-bin
+  ensure_command_available "groupadd" groupadd passwd
+  ensure_command_available "useradd" useradd passwd
+  ensure_command_available "install" install coreutils
+  ensure_command_available "curl" curl curl
+  ensure_command_available "python3.10" python3.10 python3.10 python3.10-venv python3-pip
+  ensure_command_available "systemctl" systemctl systemd
+  ensure_command_available "nginx" nginx nginx
+  ensure_command_available "certbot" certbot certbot python3-certbot-dns-cloudflare
+}
+
 ensure_user_and_dirs() {
   if ! getent group "$SERVICE_GROUP" >/dev/null; then
     groupadd --system "$SERVICE_GROUP"
@@ -132,7 +221,7 @@ sync_cloudflare_dns_if_possible() {
   ROOT_DOMAIN="$ROOT_DOMAIN" \
   API_DOMAIN="$API_DOMAIN" \
   SERVER_IP="$server_ip" \
-  python3 <<'PY'
+  python3.10 <<'PY'
 import json
 import os
 import sys
@@ -296,6 +385,7 @@ start_backend() {
 
 main() {
   require_root
+  ensure_host_dependencies
   ensure_user_and_dirs
   write_env_defaults
   write_systemd_service

@@ -142,6 +142,18 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn("already exists with home", script)
         self.assertIn('useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"', script)
 
+    def test_installer_bootstraps_ubuntu_2204_python310_and_nodesource(self) -> None:
+        script = app.worker_install_script()
+
+        self.assertIn("install_ubuntu_packages python3.10 python3.10-venv python3-pip", script)
+        self.assertIn("Pullwise worker requires Python 3.10 or newer.", script)
+        self.assertNotIn("Pullwise worker requires Python 3.9", script)
+        self.assertIn('PYTHON_BIN="$(python3.10 -c', script)
+        self.assertIn('PYTHON_BIN="\\${PULLWISE_PYTHON_BIN:-python3.10}"', script)
+        self.assertIn('"$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"', script)
+        self.assertIn("https://deb.nodesource.com/node_22.x", script)
+        self.assertIn("Node.js 20+ and npm are still unavailable after NodeSource install.", script)
+
 
 if __name__ == "__main__":
     unittest.main()

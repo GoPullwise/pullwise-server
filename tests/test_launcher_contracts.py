@@ -177,6 +177,75 @@ class LauncherContractsTest(unittest.TestCase):
         )
         return fake_curl
 
+    def symlink_tool(self, root: Path, name: str) -> None:
+        target = shutil.which(name)
+        if not target:
+            raise unittest.SkipTest(f"{name} is required for this shell contract")
+        link = root / "bin" / name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if not link.exists():
+            link.symlink_to(target)
+
+    def write_fake_apt_get_for_launcher(self, root: Path) -> tuple[Path, Path]:
+        fake_apt = root / "bin" / "apt-get"
+        fake_apt.parent.mkdir(parents=True, exist_ok=True)
+        apt_log = root / "apt.log"
+        write_executable(
+            fake_apt,
+            """
+            #!/usr/bin/env sh
+            printf '%s\\n' "$*" >> "$PULLWISE_APT_LOG"
+            if [ "$1" = "install" ]; then
+              shift
+              [ "$1" = "-y" ] && shift
+              [ "$1" = "--no-install-recommends" ] && shift
+              for package in "$@"; do
+                case "$package" in
+                  python3.10)
+                    cat > "$PULLWISE_FAKE_BIN/python3.10" <<'PY'
+#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then
+  echo "Python 3.10.12"
+  exit 0
+fi
+if [ "$1" = "-m" ] && [ "$2" = "venv" ] && [ "$3" = "--help" ]; then
+  exit 0
+fi
+if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then
+  exit 0
+fi
+if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then
+  mkdir -p "$3/bin"
+  cat > "$3/bin/python" <<'VENV'
+#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then
+  echo "Python 3.10.12"
+  exit 0
+fi
+exit 0
+VENV
+  chmod +x "$3/bin/python"
+  exit 0
+fi
+exit 0
+PY
+                    chmod +x "$PULLWISE_FAKE_BIN/python3.10"
+                    ;;
+                  curl)
+                    cat > "$PULLWISE_FAKE_BIN/curl" <<'CURL'
+#!/usr/bin/env sh
+printf '{"ok":true}'
+CURL
+                    chmod +x "$PULLWISE_FAKE_BIN/curl"
+                    ;;
+                esac
+              done
+            fi
+            exit 0
+            """,
+        )
+        return fake_apt, apt_log
+
     def health_env(self, root: Path, *, curl_exit_code: int = 0) -> dict[str, str]:
         env = self.base_launcher_env(root)
         curl_log = root / "curl.log"
@@ -333,6 +402,59 @@ class LauncherContractsTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
         self.assertIn("health check failed", result.stderr)
+
+    def test_setup_installs_missing_python_packages_on_ubuntu_2204(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tool in ["dirname", "pwd", "mkdir", "chmod", "id", "sed", "tr", "sh", "cat"]:
+                self.symlink_tool(root, tool)
+            fake_apt, apt_log = self.write_fake_apt_get_for_launcher(root)
+            os_release = root / "os-release"
+            os_release.write_text('ID=ubuntu\nVERSION_ID="22.04"\n', encoding="utf-8")
+            env = {
+                "PATH": shell_path(root / "bin"),
+                "PULLWISE_APT_GET_BIN": shell_path(fake_apt),
+                "PULLWISE_APT_LOG": shell_path(apt_log),
+                "PULLWISE_FAKE_BIN": shell_path(root / "bin"),
+                "PULLWISE_OS_RELEASE_FILE": shell_path(os_release),
+                "PULLWISE_VENV_DIR": shell_path(root / "venv"),
+                "PULLWISE_LOCAL_ENV_FILE": shell_path(root / ".env.local"),
+                "PULLWISE_SYSTEM_ENV_FILE": shell_path(root / "server.env"),
+            }
+
+            result = self.run_launcher(["setup"], env)
+            apt_calls = apt_log.read_text(encoding="utf-8")
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("update", apt_calls)
+        self.assertIn("install -y --no-install-recommends python3.10 python3.10-venv python3-pip", apt_calls)
+        self.assertIn("setup complete", result.stdout)
+
+    def test_health_installs_missing_curl_on_ubuntu_2204(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            os_release = root / "os-release"
+            os_release.write_text('ID=ubuntu\nVERSION_ID="22.04"\n', encoding="utf-8")
+            env = self.base_launcher_env(root)
+            fake_apt, apt_log = self.write_fake_apt_get_for_launcher(root)
+            for tool in ["dirname", "pwd", "id", "sed", "tr", "sh", "cat", "chmod"]:
+                self.symlink_tool(root, tool)
+            env.update(
+                {
+                    "PATH": shell_path(root / "bin"),
+                    "PULLWISE_APT_GET_BIN": shell_path(fake_apt),
+                    "PULLWISE_APT_LOG": shell_path(apt_log),
+                    "PULLWISE_FAKE_BIN": shell_path(root / "bin"),
+                    "PULLWISE_OS_RELEASE_FILE": shell_path(os_release),
+                }
+            )
+
+            result = self.run_launcher(["health"], env)
+            apt_calls = apt_log.read_text(encoding="utf-8")
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("install -y --no-install-recommends curl", apt_calls)
+        self.assertIn('{"ok":true}', result.stdout)
 
     def test_init_env_creates_local_template_and_guides_required_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
