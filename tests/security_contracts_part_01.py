@@ -161,8 +161,7 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(status.call_count, 6)
         for scan in handler.payload["items"]:
             self.assertEqual(scan["verification"]["static_proof"], 3)
-            self.assertEqual(scan["verificationAudit"]["reportedCount"], 3)
-            self.assertEqual(scan["verificationAudit"]["downgradedCount"], 3)
+            self.assertNotIn("verificationAudit", scan)
 
     def test_scans_route_prefetches_scan_jobs_for_history_read(self) -> None:
         app.SCANS = [
