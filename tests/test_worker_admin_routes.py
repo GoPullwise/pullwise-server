@@ -445,6 +445,55 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(worker["doctor_status"], "degraded")
         self.assertEqual(app.computed_worker_status(worker), "busy")
 
+    def test_running_worker_with_deferred_codex_readiness_is_busy(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.4.18",
+                "max_concurrent_jobs": 4,
+                "running_jobs": 4,
+                "free_slots": 0,
+                "last_error": "worker not ready: codex_ready: ready check deferred while codex is running",
+                "doctor_status": "degraded",
+                "codex_ready": False,
+                "readyProviders": [],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        worker = db.get_worker(worker_id)
+        self.assertEqual(worker["doctor_status"], "degraded")
+        self.assertEqual(worker["codex_ready"], 0)
+        self.assertEqual(app.computed_worker_status(worker), "busy")
+
+        db.upsert_worker_heartbeat(
+            {
+                **worker,
+                "worker_id": worker_id,
+                "running_jobs": 1,
+                "free_slots": 3,
+                "timestamp": app.now(),
+            }
+        )
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "busy")
+
+        db.upsert_worker_heartbeat(
+            {
+                **worker,
+                "worker_id": worker_id,
+                "running_jobs": 0,
+                "free_slots": 4,
+                "timestamp": app.now(),
+            }
+        )
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
+
     def test_admin_worker_version_controls_release_package_in_install_command(self) -> None:
         handler = RouteHarness(
             "/admin/workers",
@@ -458,6 +507,27 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], expected)
         self.assertIn(f"--package '{expected}'", handler.payload["install_commands"]["standard"])
+
+    def test_admin_worker_create_includes_configured_codex_timeout_env(self) -> None:
+        with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):
+            handler = RouteHarness(
+                "/admin/workers",
+                {"name": "Timeout worker", "provider": "codex", "max_concurrent_jobs": 2},
+                cookie=self.admin_cookie,
+            )
+            app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_TIMEOUT_SECONDS"], "900")
+
+    def test_install_worker_script_writes_configured_codex_timeout_env(self) -> None:
+        with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):
+            script = app.worker_install_script()
+
+        self.assertIn(
+            'write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-900}"',
+            script,
+        )
 
     def test_worker_minimum_version_uses_numeric_components(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_MIN_WORKER_VERSION": "0.9.0"}, clear=False):

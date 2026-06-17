@@ -79,6 +79,8 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     last_heartbeat = pull_request_timestamp(worker.get("last_heartbeat_at"))
     if not last_heartbeat or last_heartbeat < current_time - worker_heartbeat_timeout_seconds():
         return "offline"
+    running_jobs = public_scan_count(worker.get("running_jobs"))
+    max_concurrent_jobs = max(1, public_scan_count(worker.get("max_concurrent_jobs")))
     doctor_status = public_issue_text(worker.get("doctor_status")).lower()
     codex_ready = worker.get("codex_ready")
     ready_providers = worker_record_ready_providers(worker)
@@ -88,10 +90,12 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     if (
         not worker_version_compatible(worker)
         or not worker_supported_provider(worker)
-        or provider_readiness_blocked
+        or (provider_readiness_blocked and running_jobs <= 0)
     ):
         return "degraded"
-    if public_scan_count(worker.get("running_jobs")) >= max(1, public_scan_count(worker.get("max_concurrent_jobs"))):
+    if provider_readiness_blocked and running_jobs > 0:
+        return "busy"
+    if running_jobs >= max_concurrent_jobs:
         return "busy"
     return "idle"
 
@@ -567,6 +571,7 @@ def worker_create_payload(worker: dict) -> dict:
     local_install_url = f"{local_server_url}/install-worker.sh"
     max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
     worker_package = default_worker_package(public.get("version"))
+    codex_timeout_seconds = str(system_config.worker_codex_timeout_seconds())
     provider_chain = worker_record_provider_chain(worker)
     provider_chain_text = ",".join(provider_chain)
     safe_worker_id = worker_safe_service_id(public["worker_id"])
@@ -617,6 +622,7 @@ def worker_create_payload(worker: dict) -> dict:
                 "PULLWISE_CODEX_COMMAND": f"{service_home}/.codex/bin/codex",
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
+                "PULLWISE_CODEX_TIMEOUT_SECONDS": codex_timeout_seconds,
             }
         )
     payload = {
@@ -1122,6 +1128,7 @@ if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
+  write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-__PULLWISE_CODEX_TIMEOUT_SECONDS__}"
 fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
@@ -1184,6 +1191,8 @@ cat > "$SERVICE_FILE" <<EOF
 Description=Pullwise Worker $WORKER_NAME
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -1217,6 +1226,8 @@ cat > "$WATCHER_SERVICE_FILE" <<EOF
 Description=Pullwise Worker Watcher $WORKER_NAME
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -1260,6 +1271,7 @@ run_as_service_user "$BIN_PATH" doctor || true
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
+        .replace("__PULLWISE_CODEX_TIMEOUT_SECONDS__", str(system_config.worker_codex_timeout_seconds()))
         .replace("\r\n", "\n")
     )
 

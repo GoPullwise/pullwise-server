@@ -71,6 +71,8 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('write_env_value PULLWISE_WATCHER_SERVICE_FILE "$WATCHER_SERVICE_FILE"', script)
         self.assertIn('cat > "$WATCHER_SERVICE_FILE" <<EOF', script)
         self.assertIn("ExecStart=$BIN_PATH watch", script)
+        self.assertEqual(script.count("StartLimitIntervalSec=300"), 2)
+        self.assertEqual(script.count("StartLimitBurst=5"), 2)
         self.assertIn('systemctl enable "$WATCHER_SERVICE_NAME"', script)
         self.assertIn('systemctl restart "$WATCHER_SERVICE_NAME"', script)
         self.assertIn('rollback_file "$WATCHER_SERVICE_FILE" "/etc/systemd/system" "$HAD_WATCHER_SERVICE_FILE"', script)

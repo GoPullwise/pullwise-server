@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
         "releaseApiUrl": "https://api.github.com/repos/GoPullwise/pullwise-worker/releases/latest",
         "releaseFetchTimeoutSeconds": 3,
         "releaseCacheSeconds": 300,
+        "codexTimeoutSeconds": 1800,
     },
     "billing": {
         "billingTimeoutSeconds": 15,
@@ -244,6 +245,13 @@ FIELD_METADATA = [
                 "type": "integer",
                 "min": 0,
                 "description": "How long the server caches the latest worker release response in memory.",
+            },
+            {
+                "path": "worker.codexTimeoutSeconds",
+                "label": "Codex timeout seconds",
+                "type": "integer",
+                "min": 60,
+                "description": "Default Codex subprocess timeout written to generated worker env files.",
             },
         ],
     },
@@ -899,6 +907,10 @@ def worker_release_fetch_timeout_seconds() -> int:
 
 def worker_release_cache_seconds() -> int:
     return max(0, int_setting("worker.releaseCacheSeconds"))
+
+
+def worker_codex_timeout_seconds() -> int:
+    return max(60, int_setting("worker.codexTimeoutSeconds"))
 
 
 def rate_limit_enabled() -> bool:

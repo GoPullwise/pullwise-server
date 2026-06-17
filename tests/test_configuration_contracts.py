@@ -143,6 +143,19 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("scan.maxRepoFiles", scan_fields)
         self.assertNotIn("scan.maxRepoBytes", scan_fields)
 
+    def test_worker_codex_timeout_is_admin_system_config_field(self) -> None:
+        config = app.system_config.default_config()
+        fields = {
+            field["path"]: field
+            for group in app.system_config.metadata()
+            if group["id"] == "worker"
+            for field in group["fields"]
+        }
+
+        self.assertEqual(config["worker"]["codexTimeoutSeconds"], 1800)
+        self.assertEqual(fields["worker.codexTimeoutSeconds"]["type"], "integer")
+        self.assertEqual(fields["worker.codexTimeoutSeconds"]["min"], 60)
+
     def test_global_repository_checkout_limits_do_not_migrate_to_plan_limits(self) -> None:
         config = app.system_config.default_config()
         for plan in app.system_config.PLAN_IDS:
