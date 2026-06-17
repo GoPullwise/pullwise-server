@@ -698,6 +698,59 @@ def recover_interrupted_scans() -> int:
     return recovered
 
 
+def graph_verified_report_required_error(exc: Exception) -> bool:
+    return "GraphVerified worker result must include graphVerifiedReport" in str(exc)
+
+
+def reject_non_graph_verified_completed_result_locked(row: dict, *, checksum: str) -> bool:
+    scan_id = public_issue_text(row.get("scan_id"))
+    scan = next((item for item in SCANS if public_issue_text(item.get("id")) == scan_id), None)
+    if not scan:
+        return False
+    before = json.dumps(db.to_jsonable(scan), sort_keys=True)
+    completed_at = pull_request_timestamp(row.get("completed_at")) or now()
+    job_id = public_issue_text(row.get("job_id"))
+    message = "Worker result is missing GraphVerified report; legacy result was rejected."
+    scan.update(
+        {
+            "status": "failed",
+            "phase": "report",
+            "progress": public_scan_progress(scan.get("progress")),
+            "completedAt": completed_at,
+            "error": message,
+            "errorCode": "GRAPH_VERIFIED_REPORT_MISSING",
+            "resultChecksum": public_issue_text(checksum),
+            "graphVerifiedReport": public_graph_verified_report(
+                {
+                    "version": "graph-verified-code-review/1",
+                    "runId": f"rejected-{job_id or scan_id}",
+                    "mode": "standard",
+                    "confirmedCount": 0,
+                    "rejectedCount": 0,
+                    "blockedCount": 1,
+                    "finalJson": {"confirmed": []},
+                },
+                include_markdown=True,
+                include_debug=True,
+            ),
+        }
+    )
+    for key in (
+        "auditSwarm",
+        "completionAudit",
+        "convergenceState",
+        "impactGraph",
+        "repositoryGraph",
+        "semanticGraph",
+        "verificationAudit",
+    ):
+        scan.pop(key, None)
+    changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
+    if changed:
+        mark_state_dirty()
+    return changed
+
+
 def reconcile_completed_scan_job_results_locked() -> int:
     reconciled = 0
     for row in db.list_completed_scan_job_results():
@@ -706,7 +759,13 @@ def reconcile_completed_scan_job_results_locked() -> int:
         if status not in {"done", "failed"}:
             continue
         checksum = clean_github_access_text(row.get("result_result_checksum") or row.get("result_checksum"))
-        if apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum):
+        try:
+            changed = apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum)
+        except ValueError as exc:
+            if not graph_verified_report_required_error(exc):
+                raise
+            changed = reject_non_graph_verified_completed_result_locked(row, checksum=checksum)
+        if changed:
             reconciled += 1
         rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
     return reconciled
@@ -783,12 +842,17 @@ def reconcile_scan_job_state_locked(
             result_status = public_issue_text(result.get("result_status") or result.get("status")).lower()
             checksum = clean_github_access_text(result.get("result_result_checksum") or result.get("result_checksum"))
             if result_status in {"done", "failed"}:
-                changed = apply_worker_job_result_to_state_locked(
-                    result,
-                    payload,
-                    status=result_status,
-                    checksum=checksum,
-                )
+                try:
+                    changed = apply_worker_job_result_to_state_locked(
+                        result,
+                        payload,
+                        status=result_status,
+                        checksum=checksum,
+                    )
+                except ValueError as exc:
+                    if not graph_verified_report_required_error(exc):
+                        raise
+                    changed = reject_non_graph_verified_completed_result_locked(result, checksum=checksum)
                 rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
                 if changed:
                     return True

@@ -95,6 +95,23 @@ def graph_verified_result_fields(title: str) -> dict:
     }
 
 
+def legacy_result_fields(title: str) -> dict:
+    return {
+        "audit_protocol": "audit-swarm/0.1",
+        "issue_cards": [
+            {
+                "issue_id": "issue-legacy",
+                "title": title,
+                "category": "Quality",
+                "severity": "P1",
+                "locations": [{"file": "src/app.py", "startLine": 12, "endLine": 12}],
+                "claim": title,
+            }
+        ],
+        "verification_results": [],
+    }
+
+
 class ScanRecoveryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -319,6 +336,61 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(len(app.ISSUES), 1)
         self.assertEqual(app.ISSUES[0]["title"], "Recovered finding")
         self.persist_state.assert_called_once()
+
+    def test_recover_interrupted_scans_rejects_legacy_completed_job_result(self) -> None:
+        timestamp = app.now()
+        app.SCANS = [
+            {
+                "id": "sc_legacy_done_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "running",
+                "createdAt": timestamp - 60,
+                "queuedAt": timestamp - 50,
+                "startedAt": timestamp - 40,
+                "progress": 80,
+                "phase": "ai",
+                "jobId": "job_legacy_done_in_db",
+                "userId": "usr_1",
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            }
+        ]
+        job = db.create_scan_job(
+            {
+                "job_id": "job_legacy_done_in_db",
+                "scan_id": "sc_legacy_done_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 30,
+                "user_id": "usr_1",
+            }
+        )
+        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=timestamp)[0]
+        db.record_scan_job_result(
+            job["job_id"],
+            attempt_id=f"wk_1-{claimed['attempt']}",
+            status="done",
+            result_checksum="checksum-legacy-done",
+            payload={
+                "status": "done",
+                "attempt_id": f"wk_1-{claimed['attempt']}",
+                "result_checksum": "checksum-legacy-done",
+                **legacy_result_fields("Legacy finding must not be recovered"),
+                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+            },
+        )
+
+        recovered = app.recover_interrupted_scans()
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["errorCode"], "GRAPH_VERIFIED_REPORT_MISSING")
+        self.assertEqual(app.SCANS[0]["graphVerifiedReport"]["blockedCount"], 1)
+        self.assertEqual(app.SCANS[0]["graphVerifiedReport"]["finalJson"]["confirmed"], [])
+        self.assertEqual(app.ISSUES, [])
 
     def test_recover_interrupted_scans_reconciles_terminal_jobs_without_results(self) -> None:
         timestamp = app.now()
