@@ -2572,6 +2572,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
         if not self.authenticated_worker_id_matches(worker_record, public_issue_text(job.get("claimed_by_worker_id"))):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
+        if public_issue_text(job.get("status")) not in {"claimed", "running"}:
+            try:
+                duplicate_result = apply_worker_job_result(job, body)
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            if duplicate_result.get("duplicate"):
+                return self.json({"ok": True, **duplicate_result})
+            if duplicate_result.get("conflict"):
+                return self.json({"message": "Result checksum conflicts with an existing attempt result."}, HTTPStatus.CONFLICT)
+            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting results.")
         try:
             result = apply_worker_job_result(job, body)
         except ValueError as exc:

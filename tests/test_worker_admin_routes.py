@@ -920,7 +920,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         self.assertEqual(
             admin.payload["agentConfigs"]["free"]["graphVerified"],
-            {"enabled": False, "mode": "standard", "maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False},
+            {"enabled": True, "mode": "standard", "maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False},
         )
 
     def test_plan_agent_config_reads_repair_invalid_persisted_provider(self) -> None:

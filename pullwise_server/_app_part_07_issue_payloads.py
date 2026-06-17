@@ -204,7 +204,7 @@ def public_issue_affected_locations(issue: dict, *, job: dict | None = None) -> 
 def public_issue_reproduction(issue: dict, *, job: dict | None = None) -> dict:
     source = issue.get("reproduction") if isinstance(issue.get("reproduction"), dict) else {}
     test_file = public_issue_file(source.get("testFile") or source.get("test_file"), issue=issue, job=job)
-    return {
+    payload = {
         "commands": review._safe_text_list(source.get("commands")),
         "input": review._safe_text_lenient(source.get("input")),
         "expected": review._safe_text_lenient(source.get("expected")),
@@ -212,6 +212,10 @@ def public_issue_reproduction(issue: dict, *, job: dict | None = None) -> dict:
         "testFile": test_file,
         "logPath": public_issue_text(source.get("logPath") or source.get("log_path")),
     }
+    if source.get("exitCode") is not None or source.get("exit_code") is not None:
+        exit_code = source.get("exitCode") if source.get("exitCode") is not None else source.get("exit_code")
+        payload["exitCode"] = review._safe_non_negative_int(exit_code)
+    return payload
 
 
 def public_optional_int(value: object) -> int | None:
@@ -622,48 +626,6 @@ def public_issue_audit_metadata(issue: dict, *, job: dict | None = None) -> dict
     return {key: value for key, value in metadata.items() if value}
 
 
-def public_issue_audit_swarm(issue: dict) -> dict:
-    source = issue.get("auditSwarm") if isinstance(issue.get("auditSwarm"), dict) else {}
-    payload = {
-        "protocol": public_issue_text(source.get("protocol")),
-        "shardId": public_issue_text(source.get("shardId") or source.get("shard_id")),
-        "agentRole": public_issue_text(source.get("agentRole") or source.get("agent_role")),
-        "verdict": public_issue_text(source.get("verdict")).lower(),
-    }
-    if payload["verdict"] not in {"confirmed", "rejected", "inconclusive", "candidate"}:
-        payload["verdict"] = ""
-    return {key: value for key, value in payload.items() if value}
-
-
-def public_issue_review_calibration(value: object) -> dict:
-    source = value if isinstance(value, dict) else {}
-    decision = public_issue_text(source.get("decision")).lower()
-    if decision not in {"reported", "audit_only", "rejected"}:
-        return {}
-    score_band = public_issue_text(source.get("scoreBand") or source.get("score_band")).lower()
-    if score_band not in {"report_band", "audit_band", "reject_band"}:
-        score_band = ""
-    score_kind = public_issue_text(source.get("scoreKind") or source.get("score_kind")).lower()
-    if score_kind not in {"ranking_score", "truth_probability"}:
-        score_kind = ""
-    verification_status = public_issue_text(
-        source.get("verificationStatus") or source.get("verification_status")
-    ).lower()
-    if verification_status not in ISSUE_VERIFICATION_STATUSES:
-        verification_status = ""
-    payload = {
-        "protocol": "pullwise-review-calibration-public/0.1",
-        "decision": decision,
-        "reason": public_issue_text(source.get("reason"))[:120],
-        "scoreBand": score_band,
-        "scoreKind": score_kind,
-        "verificationStatus": verification_status,
-        "auditOnly": source.get("auditOnly") is True or source.get("audit_only") is True,
-        "guardrailApplied": source.get("guardrailApplied") is True or source.get("guardrail_applied") is True,
-    }
-    return {key: item for key, item in payload.items() if item not in ("", [], {})}
-
-
 def public_issue_feedback_reason(value: object) -> str:
     reason = public_issue_text(value).lower().replace("-", "_").replace(" ", "_")
     if reason == "valid":
@@ -738,6 +700,9 @@ def public_graph_verified_issue_payload(issue: dict, *, list_item: bool = False)
     if affected_locations:
         payload["affectedLocations"] = affected_locations
     if not list_item:
+        graph_verified_item = issue.get("graphVerifiedItem") if isinstance(issue.get("graphVerifiedItem"), dict) else {}
+        judge_evidence = issue.get("judgeEvidence") if isinstance(issue.get("judgeEvidence"), dict) else {}
+        repro_proof = issue.get("reproProof") if isinstance(issue.get("reproProof"), dict) else {}
         payload.update(
             {
                 "triggerCondition": review._safe_text_lenient(issue.get("triggerCondition")),
@@ -752,6 +717,12 @@ def public_graph_verified_issue_payload(issue: dict, *, list_item: bool = False)
                 ),
             }
         )
+        if graph_verified_item:
+            payload["graphVerifiedItem"] = graph_verified_item
+        if judge_evidence:
+            payload["judgeEvidence"] = judge_evidence
+        if repro_proof:
+            payload["reproProof"] = repro_proof
         feedback = public_issue_feedback(issue)
         if feedback:
             payload["feedbackReason"] = feedback["reason"]
@@ -852,14 +823,6 @@ def issue_payload(issue: dict) -> dict:
     age = public_issue_text(issue.get("age"))
     if age:
         payload["age"] = age
-    audit_swarm = public_issue_audit_swarm(issue)
-    if audit_swarm:
-        payload["auditSwarm"] = audit_swarm
-    review_calibration = public_issue_review_calibration(
-        issue.get("reviewCalibration") or issue.get("review_calibration")
-    )
-    if review_calibration:
-        payload["reviewCalibration"] = review_calibration
     feedback = public_issue_feedback(issue)
     if feedback:
         payload["feedbackReason"] = feedback["reason"]

@@ -264,12 +264,6 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     payload["review_output_language_label"] = language["label"]
     if include_clone_token:
         payload["clone_token"] = installation_clone_token_payload(job)
-    convergence_context = worker_convergence_context_for_job(job)
-    if convergence_context:
-        payload["convergence_context"] = convergence_context
-    review_calibration_context = worker_review_calibration_context_for_job(job)
-    if review_calibration_context:
-        payload["review_calibration_context"] = review_calibration_context
     if isinstance(scan, dict):
         changed_files = public_changed_files(scan.get("changedFiles") or scan.get("changed_files"))
         if changed_files:
@@ -344,6 +338,13 @@ def worker_result_checksum(body: dict) -> str:
         "error_code": worker_result_error_code(body),
         "aiUsage": public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")),
         "preflight": public_scan_preflight(body.get("preflight")),
+        "reviewDecisionEvents": (
+            body.get("review_decision_events")
+            if isinstance(body.get("review_decision_events"), list)
+            else body.get("reviewDecisionEvents")
+            if isinstance(body.get("reviewDecisionEvents"), list)
+            else []
+        ),
         "graphVerifiedReport": public_graph_verified_report(
             body.get("graphVerifiedReport"),
             include_markdown=True,
@@ -469,6 +470,10 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     status = public_issue_text(body.get("status")).lower()
     if status not in {"done", "failed"}:
         raise ValueError("status must be done or failed")
+    expected_attempt_id = expected_worker_attempt_id(job)
+    attempt_id = clean_github_access_text(body.get("attempt_id")) or expected_attempt_id
+    if attempt_id != expected_attempt_id:
+        return {"accepted": False, "conflict": True}
     graph_verified_report = public_graph_verified_report(
         body.get("graphVerifiedReport"),
         include_markdown=True,
@@ -476,10 +481,6 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     )
     if not graph_verified_report:
         raise ValueError("GraphVerified worker result must include graphVerifiedReport.")
-    expected_attempt_id = expected_worker_attempt_id(job)
-    attempt_id = clean_github_access_text(body.get("attempt_id")) or expected_attempt_id
-    if attempt_id != expected_attempt_id:
-        return {"accepted": False, "conflict": True}
     checksum = worker_result_checksum(body)
     record_result = db.record_scan_job_result(
         str(job["job_id"]),
@@ -669,6 +670,7 @@ def worker_graph_verified_findings(job: dict, report: dict, *, reserved_ids: set
 def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, index: int) -> dict:
     if not graph_verified_report_item_is_public(item):
         return {}
+    public_item = public_graph_verified_confirmed_item(item)
     candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
     judge = item.get("judge") if isinstance(item.get("judge"), dict) else {}
     repro = item.get("repro") if isinstance(item.get("repro"), dict) else {}
@@ -687,10 +689,18 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
     limitations.extend(review._safe_text_list(repro.get("limitations")))
     finding = {
         "id": public_issue_text(candidate.get("issue_id")) or candidate_id,
+        "userId": public_issue_text(job.get("user_id")),
+        "scanId": public_issue_text(job.get("scan_id")),
+        "jobId": public_issue_text(job.get("job_id")),
+        "repo": clean_repository_full_name(job.get("repo")),
+        "branch": clean_github_access_text(job.get("branch")) or "main",
+        "commit": clean_github_access_text(job.get("commit")) or "pending",
+        "status": "open",
+        "createdAt": now(),
         "graphVerified": True,
         "candidateId": candidate_id,
         "dedupeKey": public_issue_text(candidate.get("dedupe_key")),
-        "severity": worker_audit_swarm_severity(candidate.get("severity")),
+        "severity": worker_graph_verified_severity(candidate.get("severity")),
         "category": review._safe_category(candidate.get("category")) or "Quality",
         "title": title[:240],
         "summary": review._safe_text_lenient(candidate.get("claim") or judge.get("reason") or repro.get("summary")),
@@ -702,6 +712,8 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
             review._safe_text_lenient(worker_graph_verified_observed_behavior(candidate, judge, repro))
         ),
         "reproduction": reproduction,
+        "judgeEvidence": worker_graph_verified_judge_evidence(judge),
+        "reproProof": worker_graph_verified_repro_proof(repro),
         "verificationLevel": public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")),
         "safeToShowUser": True,
         "whyThisMatters": worker_graph_verified_why_this_matters(candidate, code_evidence),
@@ -710,7 +722,6 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
         "affectedLocations": locations,
         "file": public_issue_text(primary.get("file")),
         "line": public_scan_count(primary.get("startLine")),
-        "verificationStatus": "verified",
         "graphVerifiedReport": {
             "runId": public_issue_text(report.get("runId")),
             "mode": public_issue_text(report.get("mode")),
@@ -718,6 +729,8 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
             "head": public_issue_text(report.get("head")),
         },
     }
+    if public_item:
+        finding["graphVerifiedItem"] = public_item
     return {key: value for key, value in finding.items() if value not in ("", [], {})}
 
 
@@ -753,7 +766,7 @@ def worker_graph_verified_locations(evidence: list[dict], *, job: dict | None = 
         file_path = public_issue_file(item.get("file"), job=job)
         if not file_path:
             continue
-        start_line, end_line = worker_audit_swarm_line_range(item)
+        start_line, end_line = worker_graph_verified_line_range(item)
         key = (file_path, start_line, end_line)
         if key in seen:
             continue
@@ -808,6 +821,36 @@ def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict
     return reproduction
 
 
+def worker_graph_verified_judge_evidence(judge: dict) -> dict:
+    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
+    payload = {
+        "status": public_issue_text(judge.get("status")),
+        "level": public_issue_text(judge.get("level")),
+        "safeToShowUser": judge.get("safe_to_show_user") is True,
+        "reason": review._safe_text_lenient(judge.get("reason")),
+        "command": public_issue_text(evidence_summary.get("command")),
+        "logPath": public_issue_text(evidence_summary.get("log_path")),
+        "observable": review._safe_text_lenient(evidence_summary.get("observable")),
+    }
+    if "safe_to_show_user" not in judge:
+        payload.pop("safeToShowUser", None)
+    return {key: value for key, value in payload.items() if value not in ("", [], {})}
+
+
+def worker_graph_verified_repro_proof(repro: dict) -> dict:
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    payload = {
+        "type": public_issue_text(proof.get("type")),
+        "expected": review._safe_text_lenient(proof.get("expected")),
+        "actual": review._safe_text_lenient(proof.get("actual")),
+        "logExcerpt": review._safe_text_lenient(proof.get("log_excerpt")),
+        "graphPathExercised": repro.get("graph_path_exercised") is True,
+    }
+    if "graph_path_exercised" not in repro:
+        payload.pop("graphPathExercised", None)
+    return {key: value for key, value in payload.items() if value not in ("", [], {})}
+
+
 def worker_graph_verified_observed_behavior(candidate: dict, judge: dict, repro: dict) -> str:
     proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
     evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
@@ -828,454 +871,37 @@ def worker_graph_verified_why_this_matters(candidate: dict, code_evidence: list[
     return review._safe_text_lenient(candidate.get("impact") or candidate.get("why_this_matters"))
 
 
-def worker_audit_swarm_findings(job: dict, body: dict, *, reserved_ids: set[str] | None = None) -> list[dict]:
-    cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
-    results = body.get("verification_results") if isinstance(body.get("verification_results"), list) else []
-    results_by_issue = worker_audit_swarm_results_by_issue(results)
-    projected = []
-    used_issue_ids = set(reserved_ids or set())
-    for index, card in enumerate(cards):
-        if not isinstance(card, dict):
-            continue
-        finding = worker_audit_swarm_card_to_finding(
-            card,
-            results_by_issue.get(worker_audit_swarm_issue_id(card), []),
-            index,
-            job=job,
-        )
-        issue = worker_finding_payload(job, finding, index)
-        issue["id"] = unique_issue_id(issue.get("id"), used_issue_ids)
-        projected.append(issue)
-    return projected
+def worker_graph_verified_severity(value: object) -> str:
+    severity = public_issue_text(value).lower()
+    return severity if severity in {"critical", "high", "medium", "low", "info"} else "info"
 
 
-def worker_audit_swarm_results_by_issue(results: list) -> dict[str, list[dict]]:
-    grouped: dict[str, list[dict]] = {}
-    for result in results:
-        if not isinstance(result, dict):
-            continue
-        issue_id = public_issue_text(result.get("issue_id") or result.get("issueId"))
-        if issue_id:
-            grouped.setdefault(issue_id, []).append(result)
-    return grouped
-
-
-def worker_audit_swarm_issue_id(card: dict) -> str:
-    return public_issue_text(card.get("issue_id") or card.get("issueId") or card.get("id"))
-
-
-def worker_audit_swarm_card_to_finding(card: dict, results: list[dict], index: int, *, job: dict | None = None) -> dict:
-    locations = worker_audit_swarm_locations(card, job=job)
-    primary = locations[0] if locations else {}
-    issue_id = worker_audit_swarm_issue_id(card) or make_id("iss")
-    verdict = worker_audit_swarm_verdict(results)
-    evidence = worker_audit_swarm_evidence(card, results, primary, job=job)
-    reproduction = worker_audit_swarm_reproduction(card, results)
-    false_positive_checks = review._safe_text_list(card.get("false_positive_checks") or card.get("falsePositiveChecks"))
-    invariants = review._safe_text_list(card.get("violated_invariants") or card.get("violatedInvariants"))
-    audit_swarm = {
-        "protocol": "audit-swarm/0.1",
-        "shardId": public_issue_text(card.get("shard_id") or card.get("shardId")),
-        "agentRole": public_issue_text(card.get("agent_role") or card.get("agentRole")),
-        "verdict": verdict,
-    }
-    finding = {
-        "id": issue_id,
-        "severity": worker_audit_swarm_severity(card.get("severity")),
-        "category": worker_audit_swarm_category(card),
-        "title": public_issue_text(card.get("title")) or f"Audit candidate {index + 1}",
-        "summary": review._safe_text_lenient(card.get("claim") or card.get("summary") or card.get("description")),
-        "impact": review._safe_text_lenient(card.get("impact")) or worker_audit_swarm_invariant_impact(invariants),
-        "detectionReasoning": worker_audit_swarm_detection_reasoning(card, results),
-        "reproductionPath": worker_audit_swarm_reproduction_path(card, results),
-        "verificationStatus": worker_audit_swarm_verification_status(verdict, results),
-        "verificationSummary": worker_audit_swarm_verification_summary(results, verdict),
-        "affectedLocations": locations,
-        "evidence": evidence,
-        "reproduction": reproduction,
-        "whyNotFalsePositive": false_positive_checks[:8],
-        "limitations": [
-            *(f"Violated invariant: {item}" for item in invariants),
-            *review._safe_text_list(card.get("limitations")),
-        ][:8],
-        "file": public_issue_text(primary.get("file")),
-        "line": public_scan_count(primary.get("startLine")),
-        "confidence": worker_audit_swarm_confidence(card.get("confidence"), verdict),
-        "confidenceRationale": worker_audit_swarm_confidence_rationale(card, results, verdict),
-        "autoFix": False,
-        "effort": public_issue_text(card.get("effort")) or "review required",
-        "fixBenefits": review._safe_text_lenient(card.get("fixBenefits") or card.get("fix_benefits")),
-        "fixRisks": review._safe_text_lenient(card.get("fixRisks") or card.get("fix_risks")),
-        "tags": worker_audit_swarm_tags(card, results),
-        "steps": worker_audit_swarm_steps(card, results),
-        "badCode": [],
-        "goodCode": [],
-        "references": worker_audit_swarm_references(card),
-        "auditSwarm": {key: value for key, value in audit_swarm.items() if value},
-    }
-    review_calibration = public_issue_review_calibration(
-        card.get("review_calibration") or card.get("reviewCalibration")
+def worker_graph_verified_line_range(source: dict) -> tuple[int, int]:
+    if not isinstance(source, dict):
+        return (0, 0)
+    lines = public_issue_text(source.get("lines"))
+    if lines:
+        numbers = [int(item) for item in re.findall(r"\d+", lines)[:2]]
+        if numbers:
+            start = numbers[0]
+            end = numbers[1] if len(numbers) > 1 and numbers[1] >= start else start
+            return start, end
+    start = review._safe_non_negative_int(
+        source.get("startLine")
+        or source.get("start_line")
+        or source.get("lineStart")
+        or source.get("line_start")
+        or source.get("line")
     )
-    if review_calibration:
-        finding["reviewCalibration"] = review_calibration
-    return finding
-
-
-def worker_audit_swarm_locations(card: dict, *, job: dict | None = None) -> list[dict]:
-    locations = []
-    seen = set()
-    raw_locations = card.get("locations") if isinstance(card.get("locations"), list) else []
-    for item in raw_locations:
-        if not isinstance(item, dict):
-            continue
-        file_path = public_issue_file(item.get("file") or item.get("path"), job=job)
-        if not file_path:
-            continue
-        start_line, end_line = worker_audit_swarm_line_range(item)
-        key = (file_path, start_line, end_line)
-        if key in seen:
-            continue
-        seen.add(key)
-        locations.append({"file": file_path, "startLine": start_line, "endLine": end_line})
-    return locations[:10]
-
-
-def worker_audit_swarm_line_range(source: dict) -> tuple[int, int]:
-    start = public_scan_count(source.get("startLine") or source.get("start_line") or source.get("line"))
-    end = public_scan_count(source.get("endLine") or source.get("end_line"))
-    lines = public_issue_text(source.get("lines") or source.get("lineRange") or source.get("line_range"))
-    if lines and not start:
-        match = re.search(r"(\d+)(?:\s*[-:]\s*(\d+))?", lines)
-        if match:
-            start = public_scan_count(match.group(1))
-            end = public_scan_count(match.group(2) or match.group(1))
-    if start and (not end or end < start):
+    end = review._safe_non_negative_int(
+        source.get("endLine")
+        or source.get("end_line")
+        or source.get("lineEnd")
+        or source.get("line_end")
+    )
+    if not end or end < start:
         end = start
     return start, end
-
-
-def worker_audit_swarm_verdict(results: list[dict]) -> str:
-    verdicts = [public_issue_text(result.get("verdict")).lower() for result in results]
-    if any(
-        public_issue_text(result.get("verdict")).lower() == "confirmed"
-        and worker_audit_swarm_confirmed_verification_has_support(result)
-        for result in results
-    ):
-        return "confirmed"
-    if verdicts and all(verdict == "rejected" for verdict in verdicts):
-        return "rejected"
-    if "inconclusive" in verdicts:
-        return "inconclusive"
-    return "candidate"
-
-
-def worker_audit_swarm_confirmed_verification_has_support(result: dict) -> bool:
-    if review._safe_text_list(result.get("commands_run") or result.get("commandsRun")):
-        return True
-    if review._safe_text_list(result.get("evidence")):
-        return True
-    if review._safe_text_lenient(result.get("result_summary") or result.get("resultSummary") or result.get("summary")):
-        return True
-    if review._safe_text_lenient(result.get("output")):
-        return True
-    if public_issue_text(result.get("logPath") or result.get("log_path")):
-        return True
-    return False
-
-
-def worker_audit_swarm_verification_status(verdict: str, results: list[dict]) -> str:
-    if verdict == "confirmed":
-        proof_types = {public_issue_text(result.get("proof_type") or result.get("proofType")).lower() for result in results}
-        has_command = any(review._safe_text_list(result.get("commands_run") or result.get("commandsRun")) for result in results)
-        if proof_types & {"failing_test", "runtime_log", "test", "command"} or has_command:
-            return "verified"
-        return "static_proof"
-    if verdict == "rejected":
-        return "unverified"
-    return "potential_risk"
-
-
-def worker_audit_swarm_severity(value: object) -> str:
-    severity = public_issue_text(value).lower()
-    return {
-        "p0": "critical",
-        "p1": "high",
-        "p2": "medium",
-        "p3": "low",
-        "p4": "info",
-        "critical": "critical",
-        "high": "high",
-        "medium": "medium",
-        "low": "low",
-        "info": "info",
-    }.get(severity, "medium")
-
-
-def worker_audit_swarm_category(card: dict) -> str:
-    raw = " ".join(
-        public_issue_text(value).lower()
-        for value in (card.get("category"), card.get("agent_role"), card.get("agentRole"))
-        if public_issue_text(value)
-    )
-    if "security" in raw or "auth" in raw or "permission" in raw:
-        return "Security"
-    if "performance" in raw:
-        return "Performance"
-    if "dependencies" in raw or "dependency" in raw or "cve" in raw:
-        return "Dependencies"
-    if "test" in raw or "coverage" in raw:
-        return "Tests"
-    if "doc" in raw:
-        return "Docs"
-    if "architecture" in raw or "contract" in raw or "api" in raw:
-        return "Architecture"
-    return "Quality"
-
-
-def worker_audit_swarm_confidence(value: object, verdict: str) -> float:
-    try:
-        confidence = float(value)
-    except (TypeError, ValueError, OverflowError):
-        confidence = 0.7
-    confidence = max(0.0, min(1.0, confidence))
-    if verdict == "confirmed":
-        return max(confidence, 0.85)
-    if verdict == "rejected":
-        return min(confidence, 0.2)
-    if verdict == "inconclusive":
-        return min(confidence, 0.79)
-    return confidence
-
-
-def worker_audit_swarm_evidence(
-    card: dict,
-    results: list[dict],
-    primary: dict,
-    *,
-    job: dict | None = None,
-) -> list[dict]:
-    evidence = []
-    raw_evidence = card.get("evidence") if isinstance(card.get("evidence"), list) else []
-    for index, item in enumerate(raw_evidence):
-        if isinstance(item, dict):
-            summary = review._safe_text_lenient(item.get("summary") or item.get("claim") or item.get("text"))
-            file_path = public_issue_file(item.get("file") or item.get("path"), job=job) or public_issue_text(primary.get("file"))
-            start_line, end_line = worker_audit_swarm_line_range(item)
-            output_redacted = bool(review._safe_text_lenient(item.get("output")) or item.get("outputRedacted") is True)
-            record = {
-                "type": worker_audit_swarm_evidence_type(item.get("type"), "code" if file_path else "path"),
-                "label": public_issue_text(item.get("label")) or "Discovery evidence",
-                "summary": summary,
-                "file": file_path,
-                "startLine": start_line or public_scan_count(primary.get("startLine")),
-                "endLine": end_line or public_scan_count(primary.get("endLine") or primary.get("startLine")),
-                "command": public_issue_text(item.get("command")),
-                "exitCode": public_scan_count(item.get("exitCode") or item.get("exit_code")),
-                "logPath": public_issue_text(item.get("logPath") or item.get("log_path")),
-                "outputRedacted": output_redacted,
-                "url": public_issue_text(item.get("url")),
-            }
-        else:
-            record = {
-                "type": "code" if primary.get("file") else "path",
-                "label": "Discovery evidence" if index == 0 else "Evidence",
-                "summary": review._safe_text_lenient(item),
-                "file": public_issue_text(primary.get("file")),
-                "startLine": public_scan_count(primary.get("startLine")),
-                "endLine": public_scan_count(primary.get("endLine") or primary.get("startLine")),
-                "command": "",
-                "exitCode": 0,
-                "logPath": "",
-                "outputRedacted": False,
-                "url": "",
-            }
-        if any(record.get(key) for key in ("summary", "file", "command", "logPath", "url")):
-            evidence.append(record)
-    for result in results:
-        if not isinstance(result, dict):
-            continue
-        role = public_issue_text(result.get("verifier_role") or result.get("verifierRole")) or "verifier"
-        proof_type = public_issue_text(result.get("proof_type") or result.get("proofType"))
-        commands = review._safe_text_list(result.get("commands_run") or result.get("commandsRun"))
-        for summary in review._safe_text_list(result.get("evidence"))[:4]:
-            evidence.append(
-                {
-                    "type": worker_audit_swarm_evidence_type(proof_type, "test" if commands else "tool"),
-                    "label": f"{role} verification",
-                    "summary": summary,
-                    "file": public_issue_text(primary.get("file")),
-                    "startLine": public_scan_count(primary.get("startLine")),
-                    "endLine": public_scan_count(primary.get("endLine") or primary.get("startLine")),
-                    "command": commands[0] if commands else "",
-                    "exitCode": 0,
-                    "logPath": public_issue_text(result.get("logPath") or result.get("log_path")),
-                    "outputRedacted": bool(
-                        review._safe_text_lenient(result.get("output")) or result.get("outputRedacted") is True
-                    ),
-                    "url": "",
-                }
-            )
-    return evidence[:20]
-
-
-def worker_audit_swarm_evidence_type(value: object, default: str) -> str:
-    raw = public_issue_text(value).lower()
-    if raw in {"failing_test", "test"}:
-        return "test"
-    if raw in {"runtime", "runtime_log", "command"}:
-        return "runtime_log"
-    if raw in {"static", "static_proof", "code"}:
-        return "code"
-    if raw in {"path", "reachability", "data_flow", "data-flow"}:
-        return "path"
-    if raw in {"trigger", "input"}:
-        return "trigger"
-    if raw in {"documentation", "docs"}:
-        return "documentation"
-    if raw in {"fix", "fix_verification"}:
-        return "fix_verification"
-    if raw in {"tool", "environment"}:
-        return raw
-    return default
-
-
-def worker_audit_swarm_reproduction(card: dict, results: list[dict]) -> dict:
-    commands = []
-    for result in results:
-        if isinstance(result, dict):
-            commands.extend(review._safe_text_list(result.get("commands_run") or result.get("commandsRun")))
-    reproduction = card.get("reproduction") if isinstance(card.get("reproduction"), dict) else {}
-    commands.extend(review._safe_text_list(reproduction.get("commands")))
-    return {
-        "commands": list(dict.fromkeys(command for command in commands if command))[:5],
-        "input": review._safe_text_lenient(reproduction.get("input") or card.get("input") or card.get("trigger")),
-        "expected": review._safe_text_lenient(reproduction.get("expected") or card.get("expected")),
-        "actual": worker_audit_swarm_actual(results) or review._safe_text_lenient(reproduction.get("actual") or card.get("actual")),
-        "testFile": public_issue_text(reproduction.get("testFile") or reproduction.get("test_file")),
-        "logPath": public_issue_text(reproduction.get("logPath") or reproduction.get("log_path")),
-    }
-
-
-def worker_audit_swarm_actual(results: list[dict]) -> str:
-    for result in results:
-        summary = review._safe_text_lenient(result.get("result_summary") or result.get("resultSummary"))
-        if summary:
-            return summary
-    return ""
-
-
-def worker_audit_swarm_detection_reasoning(card: dict, results: list[dict]) -> str:
-    parts = []
-    role = public_issue_text(card.get("agent_role") or card.get("agentRole"))
-    shard = public_issue_text(card.get("shard_id") or card.get("shardId"))
-    if role or shard:
-        parts.append(f"{role or 'reviewer'} reported this candidate" + (f" in shard `{shard}`." if shard else "."))
-    claim = review._safe_text_lenient(card.get("claim"))
-    if claim:
-        parts.append(f"Claim: {claim}")
-    for invariant in review._safe_text_list(card.get("violated_invariants") or card.get("violatedInvariants"))[:3]:
-        parts.append(f"Violated invariant: {invariant}")
-    for result in results[:3]:
-        role = public_issue_text(result.get("verifier_role") or result.get("verifierRole")) or "verifier"
-        verdict = public_issue_text(result.get("verdict"))
-        summary = review._safe_text_lenient(result.get("result_summary") or result.get("resultSummary"))
-        if verdict or summary:
-            parts.append(f"{role} verdict: {verdict or 'reviewed'}" + (f" - {summary}" if summary else "."))
-    return " ".join(parts)[:1200]
-
-
-def worker_audit_swarm_reproduction_path(card: dict, results: list[dict]) -> str:
-    parts = []
-    reproduction_idea = review._safe_text_lenient(card.get("reproduction_idea") or card.get("reproductionIdea"))
-    suggested_test = review._safe_text_lenient(card.get("suggested_test") or card.get("suggestedTest"))
-    if reproduction_idea:
-        parts.append(reproduction_idea)
-    if suggested_test:
-        parts.append(f"Suggested test: {suggested_test}")
-    for result in results:
-        commands = review._safe_text_list(result.get("commands_run") or result.get("commandsRun"))
-        if commands:
-            parts.append(f"Verifier command: {commands[0]}")
-            break
-    return " ".join(parts)[:1000]
-
-
-def worker_audit_swarm_verification_summary(results: list[dict], verdict: str) -> str:
-    for result in results:
-        summary = review._safe_text_lenient(result.get("result_summary") or result.get("resultSummary"))
-        if summary:
-            role = public_issue_text(result.get("verifier_role") or result.get("verifierRole"))
-            return f"{role}: {summary}" if role else summary
-    if verdict == "confirmed":
-        return "Audit verifier confirmed this candidate."
-    if verdict == "rejected":
-        return "Audit verifier rejected this candidate."
-    if verdict == "inconclusive":
-        return "Audit verifier could not conclusively prove or disprove this candidate."
-    return "Discovery candidate has not been independently verified."
-
-
-def worker_audit_swarm_verification_evidence(results: list[dict]) -> list[str]:
-    evidence = []
-    for result in results:
-        role = public_issue_text(result.get("verifier_role") or result.get("verifierRole")) or "verifier"
-        for item in review._safe_text_list(result.get("evidence"))[:3]:
-            evidence.append(f"{role}: {item}")
-    return evidence[:6]
-
-
-def worker_audit_swarm_invariant_impact(invariants: list[str]) -> str:
-    if invariants:
-        return f"The finding may violate this required behavior: {invariants[0]}"
-    return ""
-
-
-def worker_audit_swarm_confidence_rationale(card: dict, results: list[dict], verdict: str) -> str:
-    explicit = review._safe_text_lenient(card.get("confidenceRationale") or card.get("confidence_rationale"))
-    if explicit:
-        return explicit
-    if results:
-        return f"Audit Swarm verifier verdict is {verdict}."
-    return "Audit Swarm discovery supplied this confidence without an independent verifier result."
-
-
-def worker_audit_swarm_tags(card: dict, results: list[dict]) -> list[str]:
-    tags = ["audit-swarm"]
-    tags.extend(review._safe_text_list(card.get("risk_tags") or card.get("riskTags")))
-    for value in (card.get("agent_role"), card.get("agentRole"), card.get("shard_id"), card.get("shardId")):
-        text = public_issue_text(value)
-        if text:
-            tags.append(text)
-    for result in results:
-        role = public_issue_text(result.get("verifier_role") or result.get("verifierRole"))
-        if role:
-            tags.append(role)
-    return list(dict.fromkeys(re.sub(r"[^a-z0-9]+", "-", tag.lower()).strip("-")[:40] for tag in tags if tag))[:12]
-
-
-def worker_audit_swarm_steps(card: dict, results: list[dict]) -> list[str]:
-    steps = review._safe_text_list(card.get("steps"))
-    suggested_test = review._safe_text_lenient(card.get("suggested_test") or card.get("suggestedTest"))
-    if suggested_test:
-        steps.append(f"Add or run the suggested test: {suggested_test}")
-    for result in results:
-        steps.extend(review._safe_text_list(result.get("notes_for_fix") or result.get("notesForFix")))
-    return list(dict.fromkeys(step for step in steps if step))[:8]
-
-
-def worker_audit_swarm_references(card: dict) -> list[dict]:
-    references = []
-    raw = card.get("references") if isinstance(card.get("references"), list) else []
-    for item in raw:
-        if isinstance(item, dict):
-            label = public_issue_text(item.get("label")) or public_issue_text(item.get("url"))
-            url = public_issue_text(item.get("url"))
-        else:
-            label = public_issue_text(item)
-            url = public_issue_text(item)
-        if label and url.startswith(("http://", "https://")):
-            references.append({"label": label, "url": url})
-    return references[:10]
 
 
 def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
