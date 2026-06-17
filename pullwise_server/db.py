@@ -449,45 +449,14 @@ def initialize() -> None:
                     outcome_weight REAL NOT NULL,
                     label_reason TEXT,
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                    created_by TEXT,
-                    calibration_success_weight REAL NOT NULL DEFAULT 0,
-                    calibration_failure_weight REAL NOT NULL DEFAULT 0
+                    created_by TEXT
                 )
                 """
             )
-            ensure_column(connection, "review_outcome_labels", "calibration_success_weight", "REAL NOT NULL DEFAULT 0")
-            ensure_column(connection, "review_outcome_labels", "calibration_failure_weight", "REAL NOT NULL DEFAULT 0")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_review_outcome_labels_observation
                 ON review_outcome_labels(candidate_observation_key, created_at)
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS review_calibration_snapshots (
-                    id TEXT PRIMARY KEY,
-                    scope_key TEXT NOT NULL,
-                    cohort_key TEXT NOT NULL,
-                    snapshot_version TEXT NOT NULL,
-                    effective_samples REAL NOT NULL DEFAULT 0,
-                    posterior_alpha REAL,
-                    posterior_beta REAL,
-                    posterior_mean REAL,
-                    posterior_lb REAL,
-                    confidence_buckets_json TEXT NOT NULL DEFAULT '{}',
-                    metadata_json TEXT NOT NULL DEFAULT '{}',
-                    drift_state TEXT,
-                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                    UNIQUE(scope_key, cohort_key, snapshot_version)
-                )
-                """
-            )
-            ensure_column(connection, "review_calibration_snapshots", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_review_calibration_snapshots_scope
-                ON review_calibration_snapshots(scope_key, created_at)
                 """
             )
             configured_worker_token = os.environ.get("PULLWISE_WORKER_TOKEN", "").strip()
@@ -2902,10 +2871,9 @@ def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
                 """
                 INSERT INTO review_outcome_labels (
                     label_id, event_id, candidate_observation_key, outcome_label,
-                    label_source, outcome_weight, label_reason, created_at, created_by,
-                    calibration_success_weight, calibration_failure_weight
+                    label_source, outcome_weight, label_reason, created_at, created_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(label_id) DO UPDATE SET
                     event_id = excluded.event_id,
                     candidate_observation_key = excluded.candidate_observation_key,
@@ -2914,19 +2882,7 @@ def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
                     outcome_weight = excluded.outcome_weight,
                     label_reason = excluded.label_reason,
                     created_at = excluded.created_at,
-                    created_by = excluded.created_by,
-                    calibration_success_weight = CASE
-                        WHEN review_outcome_labels.label_source = 'user_explicit'
-                            AND review_outcome_labels.outcome_label != excluded.outcome_label
-                        THEN review_outcome_labels.calibration_success_weight + excluded.calibration_success_weight
-                        ELSE excluded.calibration_success_weight
-                    END,
-                    calibration_failure_weight = CASE
-                        WHEN review_outcome_labels.label_source = 'user_explicit'
-                            AND review_outcome_labels.outcome_label != excluded.outcome_label
-                        THEN review_outcome_labels.calibration_failure_weight + excluded.calibration_failure_weight
-                        ELSE excluded.calibration_failure_weight
-                    END
+                    created_by = excluded.created_by
                 """,
                 (
                     label_id,
@@ -2938,8 +2894,6 @@ def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
                     label.get("label_reason"),
                     int(label.get("created_at") or time.time()),
                     label.get("created_by"),
-                    float(label.get("calibration_success_weight") or 0.0),
-                    float(label.get("calibration_failure_weight") or 0.0),
                 ),
             )
             row = connection.execute(
@@ -2963,81 +2917,6 @@ def list_review_outcome_labels(candidate_observation_key: str) -> list[dict[str,
             ORDER BY created_at DESC, label_id DESC
             """,
             (observation_key,),
-        ).fetchall()
-    return [row_to_dict(row) or {} for row in rows]
-
-
-def upsert_review_calibration_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    ensure_initialized()
-    scope_key = str(snapshot.get("scope_key") or "").strip()
-    cohort_key = str(snapshot.get("cohort_key") or "").strip()
-    version = str(snapshot.get("snapshot_version") or "").strip()
-    if not scope_key or not cohort_key or not version:
-        raise ValueError("scope_key, cohort_key, and snapshot_version are required")
-    snapshot_id = str(snapshot.get("id") or stable_id("rcs", f"{scope_key}:{cohort_key}:{version}"))
-    with _LOCK, closing(connect()) as connection:
-        connection.row_factory = sqlite3.Row
-        with connection:
-            connection.execute(
-                """
-                INSERT INTO review_calibration_snapshots (
-                    id, scope_key, cohort_key, snapshot_version, effective_samples,
-                    posterior_alpha, posterior_beta, posterior_mean, posterior_lb,
-                    confidence_buckets_json, metadata_json, drift_state, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(scope_key, cohort_key, snapshot_version) DO UPDATE SET
-                    effective_samples = excluded.effective_samples,
-                    posterior_alpha = excluded.posterior_alpha,
-                    posterior_beta = excluded.posterior_beta,
-                    posterior_mean = excluded.posterior_mean,
-                    posterior_lb = excluded.posterior_lb,
-                    confidence_buckets_json = excluded.confidence_buckets_json,
-                    metadata_json = excluded.metadata_json,
-                    drift_state = excluded.drift_state,
-                    created_at = excluded.created_at
-                """,
-                (
-                    snapshot_id,
-                    scope_key,
-                    cohort_key,
-                    version,
-                    float(snapshot.get("effective_samples") or 0.0),
-                    snapshot.get("posterior_alpha"),
-                    snapshot.get("posterior_beta"),
-                    snapshot.get("posterior_mean"),
-                    snapshot.get("posterior_lb"),
-                    json.dumps(to_jsonable(snapshot.get("confidence_buckets") or {}), ensure_ascii=False, sort_keys=True),
-                    json.dumps(to_jsonable(snapshot.get("metadata") or {}), ensure_ascii=False, sort_keys=True),
-                    snapshot.get("drift_state"),
-                    int(snapshot.get("created_at") or time.time()),
-                ),
-            )
-            row = connection.execute(
-                """
-                SELECT * FROM review_calibration_snapshots
-                WHERE scope_key = ? AND cohort_key = ? AND snapshot_version = ?
-                """,
-                (scope_key, cohort_key, version),
-            ).fetchone()
-    return row_to_dict(row) or {}
-
-
-def list_review_calibration_snapshots(scope_key: str) -> list[dict[str, Any]]:
-    ensure_initialized()
-    scope_key = str(scope_key or "").strip()
-    if not scope_key:
-        return []
-    with _LOCK, closing(connect()) as connection:
-        connection.row_factory = sqlite3.Row
-        rows = connection.execute(
-            """
-            SELECT *
-            FROM review_calibration_snapshots
-            WHERE scope_key = ?
-            ORDER BY created_at DESC, cohort_key ASC
-            """,
-            (scope_key,),
         ).fetchall()
     return [row_to_dict(row) or {} for row in rows]
 
@@ -3316,10 +3195,6 @@ def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | N
             counts["reviewDecisionEvents"] = connection.execute(
                 "DELETE FROM review_decision_events WHERE user_id = ?",
                 (target_user_id,),
-            ).rowcount
-            counts["reviewCalibrationSnapshots"] = connection.execute(
-                "DELETE FROM review_calibration_snapshots WHERE scope_key LIKE ?",
-                (f"%user:{target_user_id}%",),
             ).rowcount
             counts["scanJobs"] = connection.execute(
                 "DELETE FROM scan_jobs WHERE user_id = ?",
