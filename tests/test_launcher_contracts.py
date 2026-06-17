@@ -186,6 +186,19 @@ class LauncherContractsTest(unittest.TestCase):
         if not link.exists():
             link.symlink_to(target)
 
+    def write_fake_root_id(self, root: Path) -> None:
+        write_executable(
+            root / "bin" / "id",
+            """
+            #!/usr/bin/env sh
+            if [ "$1" = "-u" ]; then
+              echo 0
+              exit 0
+            fi
+            exit 1
+            """,
+        )
+
     def write_fake_apt_get_for_launcher(self, root: Path) -> tuple[Path, Path]:
         fake_apt = root / "bin" / "apt-get"
         fake_apt.parent.mkdir(parents=True, exist_ok=True)
@@ -406,8 +419,9 @@ CURL
     def test_setup_installs_missing_python_packages_on_ubuntu_2204(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for tool in ["dirname", "pwd", "mkdir", "chmod", "id", "sed", "tr", "sh", "cat"]:
+            for tool in ["dirname", "pwd", "mkdir", "chmod", "sed", "tr", "sh", "cat"]:
                 self.symlink_tool(root, tool)
+            self.write_fake_root_id(root)
             fake_apt, apt_log = self.write_fake_apt_get_for_launcher(root)
             os_release = root / "os-release"
             os_release.write_text('ID=ubuntu\nVERSION_ID="22.04"\n', encoding="utf-8")
@@ -437,8 +451,9 @@ CURL
             os_release.write_text('ID=ubuntu\nVERSION_ID="22.04"\n', encoding="utf-8")
             env = self.base_launcher_env(root)
             fake_apt, apt_log = self.write_fake_apt_get_for_launcher(root)
-            for tool in ["dirname", "pwd", "id", "sed", "tr", "sh", "cat", "chmod"]:
+            for tool in ["dirname", "pwd", "sed", "tr", "sh", "cat", "chmod"]:
                 self.symlink_tool(root, tool)
+            self.write_fake_root_id(root)
             env.update(
                 {
                     "PATH": shell_path(root / "bin"),

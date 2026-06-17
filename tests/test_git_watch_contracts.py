@@ -56,6 +56,19 @@ class GitWatchContractsTest(unittest.TestCase):
         if not link.exists():
             link.symlink_to(target)
 
+    def write_fake_root_id(self, root: Path) -> None:
+        write_executable(
+            root / "bin" / "id",
+            """
+            #!/usr/bin/env sh
+            if [ "$1" = "-u" ]; then
+              echo 0
+              exit 0
+            fi
+            exit 1
+            """,
+        )
+
     def write_fake_apt_get(self, root: Path) -> tuple[Path, Path]:
         fake_apt = root / "bin" / "apt-get"
         fake_apt.parent.mkdir(parents=True, exist_ok=True)
@@ -153,8 +166,9 @@ GIT
             root = Path(tmp)
             app = root / "app"
             app.mkdir()
-            for tool in ["date", "dirname", "id", "mkdir", "sed", "tee", "tr", "sh", "chmod", "cat"]:
+            for tool in ["date", "dirname", "mkdir", "sed", "tee", "tr", "sh", "chmod", "cat"]:
                 self.symlink_tool(root, tool)
+            self.write_fake_root_id(root)
             fake_apt, apt_log = self.write_fake_apt_get(root)
             os_release = root / "os-release"
             os_release.write_text('ID=ubuntu\nVERSION_ID="22.04"\n', encoding="utf-8")
