@@ -338,42 +338,16 @@ def worker_result_checksum(body: dict) -> str:
     digest_payload = {
         "status": body.get("status"),
         "resolved_commit": worker_result_resolved_commit(body=body),
-        "audit_protocol": body.get("audit_protocol") or body.get("auditProtocol"),
-        "issue_cards": body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else [],
-        "verification_results": (
-            body.get("verification_results") if isinstance(body.get("verification_results"), list) else []
-        ),
         "summary": body.get("summary") if isinstance(body.get("summary"), dict) else {},
         "duration_ms": body.get("duration_ms"),
         "error": body.get("error"),
         "error_code": worker_result_error_code(body),
         "aiUsage": public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")),
         "preflight": public_scan_preflight(body.get("preflight")),
-        "completionAudit": public_scan_completion_audit(
-            body.get("completionAudit") or body.get("completion_audit")
-        ),
-        "jobTrace": public_scan_job_trace(body.get("jobTrace") or body.get("job_trace")),
-        "verification_audit": public_scan_verification_audit_input(
-            body.get("verification_audit") or body.get("verificationAudit")
-        ),
-        "review_decision_events": (
-            body.get("review_decision_events")
-            if isinstance(body.get("review_decision_events"), list)
-            else body.get("reviewDecisionEvents")
-            if isinstance(body.get("reviewDecisionEvents"), list)
-            else []
-        ),
-        "convergence_state": public_scan_convergence_state(
-            body.get("convergence_state") or body.get("convergenceState")
-        ),
         "graphVerifiedReport": public_graph_verified_report(
             body.get("graphVerifiedReport"),
             include_markdown=True,
             include_debug=True,
-        ),
-        "audit_swarm": public_scan_audit_swarm_from_worker_body(
-            body,
-            status=public_issue_text(body.get("status")).lower(),
         ),
     }
     data = json.dumps(db.to_jsonable(digest_payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -420,45 +394,16 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
         include_markdown=True,
         include_debug=True,
     )
-    if graph_verified_report:
-        normalized_findings = worker_graph_verified_findings(
-            job_for_findings,
-            graph_verified_report,
-            reserved_ids=worker_issue_reserved_ids(job_for_findings),
-        )
-        summary = public_scan_issue_counts(summarize_findings(normalized_findings))
-        verification_audit = {}
-        convergence_state = {}
-        audit_swarm = {}
-    else:
-        normalized_findings = worker_audit_swarm_findings(
-            job_for_findings,
-            body,
-            reserved_ids=worker_issue_reserved_ids(job_for_findings),
-        )
-        summary = public_scan_issue_counts(
-            body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings)
-        )
-        verification_audit = public_scan_verification_audit_input(
-            body.get("verification_audit") or body.get("verificationAudit")
-        )
-        convergence_state = convergence_state_from_worker_result(job, body)
-        audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
+    if not graph_verified_report:
+        raise ValueError("GraphVerified worker result must include graphVerifiedReport.")
+    normalized_findings = worker_graph_verified_findings(
+        job_for_findings,
+        graph_verified_report,
+        reserved_ids=worker_issue_reserved_ids(job_for_findings),
+    )
+    summary = public_scan_issue_counts(summarize_findings(normalized_findings))
     ai_usage = public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage"))
-    completion_audit = {} if graph_verified_report else public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
-    job_trace = {} if graph_verified_report else public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
-    raw_repository_graph = body.get("repositoryGraph")
-    repository_graph = {} if graph_verified_report else public_repository_graph(raw_repository_graph)
-    semantic_graph = {} if graph_verified_report else public_repository_semantic_graph(body.get("semanticGraph"))
-    if not graph_verified_report and not semantic_graph and isinstance(raw_repository_graph, dict):
-        semantic_graph = public_repository_semantic_graph(raw_repository_graph.get("semanticGraph"))
-    raw_impact_graph = None if graph_verified_report else body.get("impactGraph")
-    if not graph_verified_report and not raw_impact_graph and isinstance(raw_repository_graph, dict):
-        raw_impact_graph = raw_repository_graph.get("impactGraph")
-    impact_graph = {} if graph_verified_report else public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
-    if not graph_verified_report and repository_graph and impact_graph:
-        repository_graph["impactGraph"] = impact_graph
     error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
@@ -483,60 +428,24 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan.pop("errorCode", None)
         if resolved_commit:
             scan["commit"] = resolved_commit
-        if graph_verified_report:
-            for key in (
-                "auditSwarm",
-                "completionAudit",
-                "convergenceState",
-                "impactGraph",
-                "jobTrace",
-                "repositoryGraph",
-                "semanticGraph",
-                "verificationAudit",
-            ):
-                scan.pop(key, None)
+        for key in (
+            "auditSwarm",
+            "completionAudit",
+            "convergenceState",
+            "impactGraph",
+            "jobTrace",
+            "repositoryGraph",
+            "semanticGraph",
+            "verificationAudit",
+        ):
+            scan.pop(key, None)
         if preflight:
             scan["preflight"] = preflight
-        if any(
-            verification_audit.get(key)
-            for key in (
-                "candidateCount",
-                "reportedCount",
-                "auditOnlyCount",
-                "rejectedCount",
-                "downgradedCount",
-                "verifiedSuppressionCount",
-                "verifiedCount",
-                "staticProofCount",
-                "potentialRiskCount",
-                "unverifiedCount",
-                "summary",
-                "rejectedReasons",
-                "rejectedSamples",
-                "auditOnlySamples",
-            )
-        ):
-            scan["verificationAudit"] = verification_audit
-        if audit_swarm:
-            scan["auditSwarm"] = audit_swarm
         if ai_usage:
             scan["aiUsage"] = ai_usage
-        if completion_audit:
-            scan["completionAudit"] = completion_audit
-        if job_trace:
-            scan["jobTrace"] = job_trace
         if effective_agent_config:
             scan["effectiveAgentConfig"] = effective_agent_config
-        if graph_verified_report:
-            scan["graphVerifiedReport"] = graph_verified_report
-        if repository_graph:
-            scan["repositoryGraph"] = repository_graph
-        if semantic_graph:
-            scan["semanticGraph"] = semantic_graph
-        if impact_graph:
-            scan["impactGraph"] = impact_graph
-        if status == "done" and convergence_state:
-            scan["convergenceState"] = convergence_state
+        scan["graphVerifiedReport"] = graph_verified_report
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status == "done":
             before_issues = json.dumps(
@@ -560,6 +469,13 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     status = public_issue_text(body.get("status")).lower()
     if status not in {"done", "failed"}:
         raise ValueError("status must be done or failed")
+    graph_verified_report = public_graph_verified_report(
+        body.get("graphVerifiedReport"),
+        include_markdown=True,
+        include_debug=True,
+    )
+    if not graph_verified_report:
+        raise ValueError("GraphVerified worker result must include graphVerifiedReport.")
     expected_attempt_id = expected_worker_attempt_id(job)
     attempt_id = clean_github_access_text(body.get("attempt_id")) or expected_attempt_id
     if attempt_id != expected_attempt_id:
@@ -1410,4 +1326,3 @@ def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
     if not public_issue_text(issue.get("title")):
         issue["title"] = f"Finding {index + 1}"
     return issue
-
