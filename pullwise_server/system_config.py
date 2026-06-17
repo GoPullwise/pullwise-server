@@ -73,12 +73,6 @@ DEFAULT_CONFIG = {
         "requests": 600,
         "windowSeconds": 60,
     },
-    "reviewCalibration": {
-        "mode": "shadow",
-        "minEffectiveSamples": 20,
-        "shrinkageK": 20.0,
-        "halfLifeDays": 30.0,
-    },
 }
 
 
@@ -327,41 +321,6 @@ FIELD_METADATA = [
                 "type": "integer",
                 "min": 1,
                 "description": "Length of one rate-limit accounting window.",
-            },
-        ],
-    },
-    {
-        "id": "reviewCalibration",
-        "title": "Review calibration",
-        "description": "Calibration policy used when review decision probabilities and snapshots are computed.",
-        "fields": [
-            {
-                "path": "reviewCalibration.mode",
-                "label": "Calibration mode",
-                "type": "select",
-                "options": ["shadow", "enforce"],
-                "description": "Shadow records calibration data without enforcing decisions; enforce applies calibration to review decisions.",
-            },
-            {
-                "path": "reviewCalibration.minEffectiveSamples",
-                "label": "Minimum effective samples",
-                "type": "integer",
-                "min": 1,
-                "description": "Minimum effective labeled samples before calibration is considered reliable.",
-            },
-            {
-                "path": "reviewCalibration.shrinkageK",
-                "label": "Shrinkage K",
-                "type": "number",
-                "min": 0,
-                "description": "Bayesian shrinkage strength used while estimating calibrated confidence.",
-            },
-            {
-                "path": "reviewCalibration.halfLifeDays",
-                "label": "Half-life days",
-                "type": "number",
-                "min": 0,
-                "description": "Age-decay half life for calibration labels, in days.",
             },
         ],
     },
@@ -965,20 +924,3 @@ def creem_api_base_url() -> str:
 def creem_upgrade_behavior() -> str:
     behavior = text_setting("billing.creemUpgradeBehavior")
     return behavior if behavior in CREEM_UPDATE_BEHAVIORS else "proration-charge-immediately"
-
-
-def review_calibration_mode() -> str:
-    mode = text_setting("reviewCalibration.mode").lower()
-    return mode if mode in {"shadow", "enforce"} else "shadow"
-
-
-def review_calibration_min_effective_samples() -> int:
-    return max(1, int_setting("reviewCalibration.minEffectiveSamples"))
-
-
-def review_calibration_shrinkage_k() -> float:
-    return max(0.0, number_setting("reviewCalibration.shrinkageK"))
-
-
-def review_calibration_half_life_days() -> float:
-    return max(0.0, number_setting("reviewCalibration.halfLifeDays"))

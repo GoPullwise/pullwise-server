@@ -1919,10 +1919,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if segments == ["admin", "subscription-plans", "agent-configs"]:
             return self.json(billing.review_agent_configs_admin_payload())
         if segments == ["admin", "review-calibration"]:
-            scope_key = review_calibration_scope_key_from_params(params)
-            if not scope_key:
-                return self.error(HTTPStatus.BAD_REQUEST, "scope_key or user/repo/branch parameters are required.")
-            return self.json(review_calibration_admin_payload(scope_key))
+            return self.error(HTTPStatus.GONE, "Review calibration has been retired; Graph-Verified is the only review path.")
         if segments == ["admin", "workers", "defaults"]:
             force_refresh = public_issue_text(params.get("refresh") or params.get("force")).lower() in {"1", "true", "yes", "on"}
             return self.json(worker_defaults_payload(force_refresh=force_refresh))
@@ -1969,11 +1966,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
             return self.json(payload, HTTPStatus.ACCEPTED)
         if segments == ["admin", "review-calibration", "labels"]:
-            try:
-                payload = record_admin_manual_review_outcome(body, reviewer_id=session["userId"])
-            except ValueError as exc:
-                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-            return self.json(payload, HTTPStatus.CREATED)
+            return self.error(HTTPStatus.GONE, "Review calibration labels have been retired; use Graph-Verified review outcomes.")
         if segments == ["admin", "workers", "releases"]:
             return self.handle_admin_worker_release(session, body)
         if segments == ["admin", "workers"]:

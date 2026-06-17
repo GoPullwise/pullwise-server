@@ -149,10 +149,7 @@ AUDIT_SWARM_EVIDENCE_BLOCK_KINDS = {
     "invariant",
     "risk",
 }
-CONVERGENCE_PROTOCOL_VERSION = "pullwise-convergence/0.1"
 REVIEW_DECISION_EVENT_PROTOCOL_VERSION = "pullwise-review-decision/0.1"
-REVIEW_CALIBRATION_PROTOCOL_VERSION = "pullwise-review-calibration/0.2"
-REVIEW_CALIBRATION_SNAPSHOT_VERSION = "pullwise-review-calibration-snapshot/0.1"
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
 SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "lost", "retrying"}
 SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}

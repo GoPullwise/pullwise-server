@@ -1014,8 +1014,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         rejected = db.list_review_outcome_labels("obs_worker_rejected")
         self.assertEqual(confirmed, [])
         self.assertEqual(rejected, [])
-        snapshots = db.list_review_calibration_snapshots("user:usr_1|repo:repo_123|branch:main")
-        self.assertEqual(snapshots, [])
 
     def test_issue_status_updates_record_user_feedback_outcome_labels(self) -> None:
         app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
@@ -1459,85 +1457,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(distribution["0_82_0_90"], 1)
         self.assertEqual(distribution["0_70_0_82"], 1)
         self.assertEqual(distribution["lt_0_60"], 1)
-        gate = app.review_calibration_enforce_gate(evaluation)
-        self.assertTrue(gate["canConsiderEnforce"])
-
-    def test_review_calibration_snapshots_shrink_sparse_cohorts_toward_parent(self) -> None:
-        def event(index: int, *, category: str, observation_key: str) -> dict:
-            return {
-                "protocol": "pullwise-review-decision/0.1",
-                "event_id": f"evt_backoff_{index}",
-                "candidate_observation_key": observation_key,
-                "scan_id": "sc_backoff",
-                "job_id": "job_backoff",
-                "attempt_id": "wk_1-1",
-                "user_id": "usr_1",
-                "repo_id": "repo_123",
-                "github_repo_id": "123",
-                "repo_full_name": "acme/api",
-                "branch": "main",
-                "commit_sha": "a" * 40,
-                "candidate_id": f"candidate-{index}",
-                "fingerprint": f"fp-{index}",
-                "source": "correctness reviewer",
-                "provider": "codex",
-                "model": "gpt-5.5",
-                "category": category,
-                "severity": "medium",
-                "verification_status": "potential_risk",
-                "file_path": "src/app.py",
-                "line_start": 12,
-                "raw_confidence": 0.9,
-                "calibrated_confidence": 0.9,
-                "decision_score": 0.8,
-                "decision": "reported",
-                "decision_reason": "test",
-                "scoring_protocol": "pullwise-review-score/0.1",
-                "score_factors": {"scoreKind": "ranking_score", "proposedDecision": "reported"},
-                "created_at": app.now(),
-            }
-
-        events = [event(index, category="correctness", observation_key=f"obs_valid_{index}") for index in range(6)]
-        events.append(event(99, category="docs", observation_key="obs_sparse_docs"))
-        db.record_review_decision_events(events)
-        for index in range(6):
-            app.record_manual_review_outcome(
-                event_id=f"evt_backoff_{index}",
-                candidate_observation_key=f"obs_valid_{index}",
-                outcome_label="valid",
-                reviewer_id="admin_1",
-            )
-        app.record_manual_review_outcome(
-            event_id="evt_backoff_99",
-            candidate_observation_key="obs_sparse_docs",
-            outcome_label="false_positive",
-            reviewer_id="admin_1",
-        )
-
-        snapshots = {
-            item["cohort_key"]: item
-            for item in db.list_review_calibration_snapshots("user:usr_1|repo:repo_123|branch:main")
-        }
-        self.assertIn("provider:codex", snapshots)
-        self.assertIn("provider:codex|model:gpt 5 5", snapshots)
-        self.assertIn("provider:codex|model:gpt 5 5|source:correctness reviewer", snapshots)
-        sparse = snapshots["source:correctness reviewer|category:docs|status:potential_risk"]
-        metadata = json.loads(sparse["metadata_json"])
-        self.assertEqual(metadata["parent_cohort_key"], "source:correctness reviewer|category:docs")
-        self.assertLess(metadata["shrinkage_weight"], 0.1)
-        self.assertGreater(sparse["posterior_mean"], metadata["raw_posterior_mean"])
-        self.assertGreater(sparse["posterior_lb"], metadata["raw_posterior_lb"])
-        provider_sparse = snapshots[
-            "provider:codex|model:gpt 5 5|source:correctness reviewer|category:docs|status:potential_risk"
-        ]
-        provider_metadata = json.loads(provider_sparse["metadata_json"])
-        self.assertEqual(
-            provider_metadata["parent_cohort_key"],
-            "provider:codex|model:gpt 5 5|source:correctness reviewer|category:docs",
-        )
-        self.assertLess(provider_metadata["shrinkage_weight"], 0.1)
-        self.assertGreater(provider_sparse["posterior_mean"], provider_metadata["raw_posterior_mean"])
-        self.assertGreater(provider_sparse["posterior_lb"], provider_metadata["raw_posterior_lb"])
 
     def test_review_shadow_evaluation_counts_verified_suppression_guardrail(self) -> None:
         db.record_review_decision_events(

@@ -957,52 +957,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(stored["plans"]["pro"]["provider"], "codex")
         self.assertEqual(stored["plans"]["max"]["provider"], "codex")
 
-    def test_admin_review_calibration_summary_is_admin_only_and_sanitized(self) -> None:
-        event = {
-            "protocol": "pullwise-review-decision/0.1",
-            "event_id": "evt_admin_calibration",
-            "candidate_observation_key": "obs_admin_calibration",
-            "scan_id": "sc_admin_calibration",
-            "job_id": "job_admin_calibration",
-            "attempt_id": "wk_1-1",
-            "user_id": "usr_1",
-            "repo_id": "repo_123",
-            "github_repo_id": "123",
-            "repo_full_name": "acme/api",
-            "branch": "main",
-            "commit_sha": "a" * 40,
-            "candidate_id": "candidate-secret",
-            "fingerprint": "fp-admin",
-            "source": "correctness reviewer",
-            "provider": "codex",
-            "model": "gpt-5.5",
-            "category": "correctness",
-            "severity": "high",
-            "verification_status": "potential_risk",
-            "file_path": "src/app.py",
-            "line_start": 12,
-            "raw_confidence": 0.91,
-            "calibrated_confidence": 0.90,
-            "decision_score": 0.84,
-            "decision": "reported",
-            "decision_reason": "passed_convergence_gate",
-            "scoring_protocol": "pullwise-review-score/0.1",
-            "score_factors": {
-                "scoreKind": "ranking_score",
-                "proposedDecision": "reported",
-                "rawSnippet": "secret code must never be exposed",
-            },
-            "created_at": app.now(),
-        }
-        db.record_review_decision_events([event])
-        app.record_manual_review_outcome(
-            event_id="evt_admin_calibration",
-            candidate_observation_key="obs_admin_calibration",
-            outcome_label="valid",
-            reviewer_id="usr_admin",
-            reason="confirmed during review",
-        )
-
+    def test_admin_review_calibration_routes_are_retired(self) -> None:
         denied = RouteHarness(
             "/admin/review-calibration?scope_key=user:usr_1|repo:repo_123|branch:main",
             cookie=self.user_cookie,
@@ -1016,78 +971,18 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(handler, "GET")
 
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["protocol"], "pullwise-review-calibration/0.2")
-        self.assertEqual(handler.payload["scopeKey"], "user:usr_1|repo:repo_123|branch:main")
-        self.assertEqual(handler.payload["shadowEvaluation"]["candidateCount"], 1)
-        self.assertTrue(handler.payload["enforceGate"]["canConsiderEnforce"])
-        self.assertEqual(handler.payload["driftSummary"]["normal"], len(handler.payload["snapshots"]))
-        self.assertTrue(handler.payload["snapshots"])
-        snapshot = next(
-            item
-            for item in handler.payload["snapshots"]
-            if item["cohortKey"] == "source:correctness reviewer"
-        )
-        self.assertIn("posteriorMean", snapshot)
-        self.assertIn("confidenceBuckets", snapshot)
-        serialized = json.dumps(handler.payload)
-        self.assertNotIn("candidate-secret", serialized)
-        self.assertNotIn("secret code", serialized)
-        self.assertNotIn("review_decision_events", serialized)
+        self.assertEqual(handler.status, HTTPStatus.GONE)
+        self.assertIn("Graph-Verified", handler.payload["message"])
 
-    def test_admin_can_record_manual_review_outcome_label(self) -> None:
-        event = {
-            "protocol": "pullwise-review-decision/0.1",
-            "event_id": "evt_manual_label",
-            "candidate_observation_key": "obs_manual_label",
-            "scan_id": "sc_manual_label",
-            "job_id": "job_manual_label",
-            "attempt_id": "wk_1-1",
-            "user_id": "usr_1",
-            "repo_id": "repo_123",
-            "github_repo_id": "123",
-            "repo_full_name": "acme/api",
-            "branch": "main",
-            "commit_sha": "a" * 40,
-            "candidate_id": "candidate-manual",
-            "fingerprint": "fp-manual",
-            "source": "correctness reviewer",
-            "provider": "codex",
-            "model": "gpt-5.5",
-            "category": "correctness",
-            "severity": "medium",
-            "verification_status": "potential_risk",
-            "file_path": "src/app.py",
-            "line_start": 12,
-            "normalized_title": "manual review candidate",
-            "raw_confidence": 0.9,
-            "calibrated_confidence": 0.88,
-            "decision_score": 0.83,
-            "decision": "reported",
-            "decision_reason": "reported",
-            "scoring_protocol": "pullwise-review-score/0.1",
-            "score_factors": {"scoreKind": "ranking_score", "proposedDecision": "audit_only"},
-            "created_at": app.now(),
-        }
-        db.record_review_decision_events([event])
-
-        denied = RouteHarness(
+        label_denied = RouteHarness(
             "/admin/review-calibration/labels",
             {"candidateObservationKey": "obs_manual_label", "outcomeLabel": "false_positive"},
             cookie=self.user_cookie,
         )
-        app.PullwiseHandler.route(denied, "POST")
-        self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
+        app.PullwiseHandler.route(label_denied, "POST")
+        self.assertEqual(label_denied.status, HTTPStatus.FORBIDDEN)
 
-        invalid = RouteHarness(
-            "/admin/review-calibration/labels",
-            {"candidateObservationKey": "obs_manual_label", "outcomeLabel": "maybe"},
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(invalid, "POST")
-        self.assertEqual(invalid.status, HTTPStatus.BAD_REQUEST)
-
-        handler = RouteHarness(
+        label_handler = RouteHarness(
             "/admin/review-calibration/labels",
             {
                 "eventId": "evt_manual_label",
@@ -1097,25 +992,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             },
             cookie=self.admin_cookie,
         )
-        app.PullwiseHandler.route(handler, "POST")
-
-        self.assertEqual(handler.status, HTTPStatus.CREATED)
-        self.assertEqual(handler.payload["label"]["outcomeLabel"], "false_positive")
-        self.assertEqual(handler.payload["label"]["labelSource"], "manual_review")
-        self.assertEqual(handler.payload["label"]["createdBy"], "usr_admin")
-        self.assertEqual(handler.payload["effectiveLabel"]["outcomeLabel"], "false_positive")
-        labels = db.list_review_outcome_labels("obs_manual_label")
-        self.assertEqual(labels[0]["label_source"], "manual_review")
-        self.assertEqual(labels[0]["outcome_label"], "false_positive")
-        summary = RouteHarness(
-            "/admin/review-calibration?scope_key=user:usr_1|repo:repo_123|branch:main",
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(summary, "GET")
-        self.assertEqual(summary.status, HTTPStatus.OK)
-        self.assertEqual(summary.payload["shadowEvaluation"]["labeledOutcomeCount"], 1)
-        self.assertEqual(summary.payload["shadowEvaluation"]["currentReportedFalsePositiveCount"], 1)
-        self.assertTrue(summary.payload["snapshots"])
+        app.PullwiseHandler.route(label_handler, "POST")
+        self.assertEqual(label_handler.status, HTTPStatus.GONE)
+        self.assertIn("retired", label_handler.payload["message"])
 
     def test_admin_can_update_enable_disable_delete_and_rotate_worker(self) -> None:
         payload, token = self.create_worker()
