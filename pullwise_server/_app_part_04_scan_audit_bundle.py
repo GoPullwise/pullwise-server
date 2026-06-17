@@ -883,43 +883,14 @@ def scan_payload(scan: dict) -> dict:
     ai_usage = public_scan_ai_usage(ai_usage_source)
     if ai_usage:
         payload["aiUsage"] = ai_usage
-    verification_audit = public_scan_verification_audit(scan)
-    if public_scan_verification_audit_has_data(verification_audit):
-        payload["verificationAudit"] = verification_audit
-    completion_audit = public_scan_completion_audit(scan.get("completionAudit") or scan.get("completion_audit"))
-    if completion_audit:
-        payload["completionAudit"] = completion_audit
-    job_trace = public_scan_job_trace(scan.get("jobTrace") or scan.get("job_trace"))
-    if job_trace:
-        payload["jobTrace"] = job_trace
     preflight = public_scan_preflight(scan.get("preflight"))
     if preflight:
         payload["preflight"] = preflight
-    audit_swarm = public_scan_audit_swarm(scan.get("auditSwarm") or scan.get("audit_swarm"))
-    if audit_swarm:
-        payload["auditSwarm"] = audit_swarm
     graph_verified_report = public_graph_verified_report(
         scan.get("graphVerifiedReport")
     )
     if graph_verified_report:
         payload["graphVerifiedReport"] = graph_verified_report
-    raw_repository_graph = scan.get("repositoryGraph")
-    repository_graph = public_repository_graph(raw_repository_graph)
-    if repository_graph:
-        payload["repositoryGraph"] = repository_graph
-    semantic_graph = public_repository_semantic_graph(scan.get("semanticGraph"))
-    if not semantic_graph and isinstance(raw_repository_graph, dict):
-        semantic_graph = public_repository_semantic_graph(raw_repository_graph.get("semanticGraph"))
-    if semantic_graph:
-        payload["semanticGraph"] = semantic_graph
-    raw_impact_graph = scan.get("impactGraph")
-    if not raw_impact_graph and isinstance(raw_repository_graph, dict):
-        raw_impact_graph = raw_repository_graph.get("impactGraph")
-    impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
-    if impact_graph:
-        payload["impactGraph"] = impact_graph
-        if isinstance(payload.get("repositoryGraph"), dict):
-            payload["repositoryGraph"]["impactGraph"] = impact_graph
     changed_files = public_changed_files(scan.get("changedFiles") or scan.get("changed_files"))
     if changed_files:
         payload["changedFiles"] = changed_files
@@ -1057,32 +1028,9 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     ai_usage = public_scan_ai_usage(ai_usage_source)
     if ai_usage:
         payload["aiUsage"] = ai_usage
-    verification_audit = public_scan_verification_audit(scan, issue_summary=issue_summary)
-    if public_scan_verification_audit_has_data(verification_audit):
-        payload["verificationAudit"] = {
-            key: value
-            for key, value in verification_audit.items()
-            if key
-            in {
-                "candidateCount",
-                "reportedCount",
-                "auditOnlyCount",
-                "rejectedCount",
-                "downgradedCount",
-                "verifiedSuppressionCount",
-                "verifiedCount",
-                "staticProofCount",
-                "potentialRiskCount",
-                "unverifiedCount",
-                "summary",
-            }
-        }
-    completion_audit = public_scan_completion_audit(scan.get("completionAudit") or scan.get("completion_audit"))
-    if completion_audit:
-        payload["completionAudit"] = completion_audit
-    job_trace = public_scan_job_trace(scan.get("jobTrace") or scan.get("job_trace"))
-    if job_trace:
-        payload["jobTrace"] = job_trace
+    graph_verified_report = public_graph_verified_report(scan.get("graphVerifiedReport"))
+    if graph_verified_report:
+        payload["graphVerifiedReport"] = graph_verified_report
     base_commit = clean_github_access_text(scan.get("baseCommit") or scan.get("base_commit"))
     if base_commit:
         payload["baseCommit"] = base_commit
@@ -2186,13 +2134,16 @@ def review_calibration_safe_bucket_payload(value: object) -> dict:
     return payload
 
 
-def public_graph_verified_report(value: object) -> dict:
+def public_graph_verified_report(
+    value: object,
+    *,
+    include_markdown: bool = False,
+    include_debug: bool = False,
+) -> dict:
     source = value if isinstance(value, dict) else {}
     confirmed = public_scan_count(source.get("confirmedCount"))
     rejected = public_scan_count(source.get("rejectedCount"))
     blocked = public_scan_count(source.get("blockedCount"))
-    final_markdown = review._safe_text_lenient(source.get("finalMarkdown"))[:120000]
-    debug_markdown = review._safe_text_lenient(source.get("debugMarkdown"))[:120000]
     final_json = source.get("finalJson")
     if not isinstance(final_json, dict):
         final_json = {}
@@ -2206,12 +2157,18 @@ def public_graph_verified_report(value: object) -> dict:
         "confirmedCount": confirmed,
         "rejectedCount": rejected,
         "blockedCount": blocked,
-        "finalMarkdown": final_markdown,
-        "debugMarkdown": debug_markdown,
         "finalJson": {
             "confirmed": confirmed_items,
         },
     }
+    if include_markdown:
+        final_markdown = review._safe_text_lenient(source.get("finalMarkdown"))[:120000]
+        if final_markdown:
+            payload["finalMarkdown"] = final_markdown
+    if include_debug:
+        debug_markdown = review._safe_text_lenient(source.get("debugMarkdown"))[:120000]
+        if debug_markdown:
+            payload["debugMarkdown"] = debug_markdown
     if not any(
         [
             payload["runId"],
@@ -2221,8 +2178,8 @@ def public_graph_verified_report(value: object) -> dict:
             payload["confirmedCount"],
             payload["rejectedCount"],
             payload["blockedCount"],
-            payload["finalMarkdown"],
-            payload["debugMarkdown"],
+            payload.get("finalMarkdown"),
+            payload.get("debugMarkdown"),
             payload["finalJson"]["confirmed"],
         ]
     ):
@@ -3941,13 +3898,16 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
             if text and text not in reproduction_commands:
                 reproduction_commands.append(text)
         evidence = issue.get("evidence") if isinstance(issue.get("evidence"), list) else []
-        evidence_items += len(evidence)
+        code_evidence = issue.get("codeEvidence") if isinstance(issue.get("codeEvidence"), list) else []
+        evidence_items += len(evidence) + len(code_evidence)
     preflight = public_scan.get("preflight") or {}
     repository_graph = public_scan.get("repositoryGraph") if isinstance(public_scan.get("repositoryGraph"), dict) else {}
     semantic_graph = public_scan.get("semanticGraph") if isinstance(public_scan.get("semanticGraph"), dict) else {}
     impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
-    graph_verified_report = (
-        public_scan.get("graphVerifiedReport") if isinstance(public_scan.get("graphVerifiedReport"), dict) else {}
+    graph_verified_report = public_graph_verified_report(
+        scan.get("graphVerifiedReport"),
+        include_markdown=True,
+        include_debug=True,
     )
     log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
     bundle = {

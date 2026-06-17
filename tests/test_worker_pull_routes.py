@@ -115,7 +115,23 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         self.assertNotIn("internal_secret", json.dumps(report))
         self.assertNotIn("raw_prompt", json.dumps(report))
         self.assertNotIn("stdout", json.dumps(report))
-        self.assertIn("Confirmed only.", report["finalMarkdown"])
+        self.assertNotIn("finalMarkdown", report)
+        self.assertNotIn("debugMarkdown", report)
+
+        full_report = app.public_graph_verified_report(
+            {
+                "runId": "run_1",
+                "mode": "standard",
+                "confirmedCount": 1,
+                "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
+                "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
+                "finalJson": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
+            },
+            include_markdown=True,
+            include_debug=True,
+        )
+        self.assertIn("Confirmed only.", full_report["finalMarkdown"])
+        self.assertIn("Rejected candidates: 2", full_report["debugMarkdown"])
 
     def test_audit_bundle_includes_graph_verified_report_artifacts(self) -> None:
         report = app.public_graph_verified_report(
@@ -126,7 +142,9 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
                 "finalMarkdown": "# Final\n",
                 "debugMarkdown": "# Debug\n",
                 "finalJson": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
-            }
+            },
+            include_markdown=True,
+            include_debug=True,
         )
 
         artifacts = app.audit_bundle_graph_verified_artifacts(report)
@@ -2737,8 +2755,48 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "finalJson": {
                         "confirmed": [
                             {
-                                "candidate": {"issue_id": "issue-confirmed"},
-                                "verification": {"verdict": "confirmed"},
+                                "candidate": {
+                                    "issue_id": "issue-confirmed",
+                                    "candidate_id": "candidate-confirmed",
+                                    "dedupe_key": "graph:confirmed",
+                                    "severity": "high",
+                                    "category": "Quality",
+                                    "claim": "Confirmed GraphVerified issue.",
+                                    "trigger_condition": "Call the broken path.",
+                                    "expected_behavior": "The path should succeed.",
+                                    "actual_behavior_hypothesis": "The path fails.",
+                                    "graph_evidence": {
+                                        "slice_id": "slice-1",
+                                        "codegraph_files": ["src/app.py"],
+                                        "path_summary": ["route -> handler -> broken_call"],
+                                    },
+                                    "evidence": [
+                                        {
+                                            "file": "src/app.py",
+                                            "lines": "10-12",
+                                            "why_it_matters": "The handler reaches broken_call.",
+                                        }
+                                    ],
+                                    "fix_direction": "Guard the broken call.",
+                                },
+                                "judge": {
+                                    "status": "confirmed",
+                                    "level": "L2",
+                                    "safe_to_show_user": True,
+                                    "evidence_summary": {
+                                        "command": "pytest tests/test_app.py",
+                                        "observable": "Assertion failed as expected.",
+                                    },
+                                },
+                                "repro": {
+                                    "status": "reproduced",
+                                    "level": "L2",
+                                    "summary": "Local reproduction failed as expected.",
+                                    "commands_run": [{"cmd": "pytest tests/test_app.py", "exit_code": 1}],
+                                    "proof": {"expected": "pass", "actual": "failure"},
+                                    "graph_path_exercised": True,
+                                },
+                                "verification": {"verdict": "confirmed", "safe_to_show_user": True},
                             }
                         ]
                     },
@@ -2763,10 +2821,16 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored_report["confirmedCount"], 1)
         self.assertEqual(stored_report["finalMarkdown"], "# Graph-Verified Code Review Report\n\nConfirmed only.")
         self.assertEqual(stored_report["finalJson"]["confirmed"][0]["candidate"]["issue_id"], "issue-confirmed")
-        self.assertEqual(public_report, stored_report)
         self.assertEqual(public_report["runId"], "gv_run_1")
         self.assertEqual(public_report["confirmedCount"], 1)
         self.assertEqual(public_report["finalJson"]["confirmed"][0]["verification"]["verdict"], "confirmed")
+        self.assertNotIn("finalMarkdown", public_report)
+        self.assertNotIn("debugMarkdown", public_report)
+        self.assertEqual(len(app.ISSUES), 1)
+        self.assertTrue(app.ISSUES[0]["graphVerified"])
+        self.assertEqual(app.ISSUES[0]["candidateId"], "candidate-confirmed")
+        self.assertEqual(app.ISSUES[0]["graphEvidence"]["slice_id"], "slice-1")
+        self.assertEqual(app.ISSUES[0]["reproduction"]["commands"], ["pytest tests/test_app.py"])
         self.assertNotIn("graph_verified_report", app.SCANS[0])
         self.assertNotIn("graph_verified_report", public_payload)
         self.assertNotIn("snake_case_must_not_win", json.dumps(public_payload))

@@ -702,7 +702,73 @@ def public_issue_feedback(issue: dict) -> dict:
     return {"reason": fallback_reason} if fallback_reason else {}
 
 
+def public_graph_verified_issue_payload(issue: dict, *, list_item: bool = False) -> dict:
+    issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
+    audit_metadata = public_issue_audit_metadata(issue)
+    graph_evidence = issue.get("graphEvidence") if isinstance(issue.get("graphEvidence"), dict) else {}
+    code_evidence = issue.get("codeEvidence") if isinstance(issue.get("codeEvidence"), list) else []
+    reproduction = public_issue_reproduction(issue)
+    affected_locations = public_issue_affected_locations(issue)
+    payload = {
+        "id": issue_id,
+        "userId": public_issue_text(issue.get("userId")),
+        "scanId": public_issue_text(issue.get("scanId")),
+        "jobId": public_issue_text(issue.get("jobId")),
+        "repo": clean_repository_full_name(issue.get("repo")),
+        "branch": audit_metadata.get("branch", "main"),
+        "commit": audit_metadata.get("commit", "pending"),
+        "status": public_issue_status(issue.get("status")),
+        "severity": review._safe_severity(issue.get("severity")),
+        "category": review._safe_category(issue.get("category")),
+        "title": review._safe_text(issue.get("title"), "Untitled finding"),
+        "summary": review._safe_text_lenient(issue.get("summary")),
+        "graphVerified": True,
+        "candidateId": public_issue_text(issue.get("candidateId")),
+        "dedupeKey": public_issue_text(issue.get("dedupeKey")),
+        "verificationLevel": public_issue_text(issue.get("verificationLevel")),
+        "safeToShowUser": issue.get("safeToShowUser") is not False,
+        "file": public_issue_file(issue.get("file"), issue=issue),
+        "line": review._safe_non_negative_int(issue.get("line")),
+        "createdAt": pull_request_timestamp(issue.get("createdAt")) or 0,
+    }
+    if graph_evidence:
+        payload["graphEvidence"] = graph_evidence
+    if code_evidence:
+        payload["codeEvidence"] = code_evidence[:20]
+    if affected_locations:
+        payload["affectedLocations"] = affected_locations
+    if not list_item:
+        payload.update(
+            {
+                "triggerCondition": review._safe_text_lenient(issue.get("triggerCondition")),
+                "expectedBehavior": review._safe_text_lenient(issue.get("expectedBehavior")),
+                "observedBehavior": review._safe_text_lenient(issue.get("observedBehavior")),
+                "reproduction": reproduction,
+                "whyThisMatters": review._safe_text_lenient(issue.get("whyThisMatters")),
+                "suggestedFixDirection": review._safe_text_lenient(issue.get("suggestedFixDirection")),
+                "limitations": review._safe_text_list(issue.get("limitations")),
+                "graphVerifiedReport": (
+                    issue.get("graphVerifiedReport") if isinstance(issue.get("graphVerifiedReport"), dict) else {}
+                ),
+            }
+        )
+        feedback = public_issue_feedback(issue)
+        if feedback:
+            payload["feedbackReason"] = feedback["reason"]
+            if feedback.get("label"):
+                payload["feedbackLabel"] = feedback["label"]
+    updated_at = pull_request_timestamp(issue.get("updatedAt"))
+    if updated_at is not None:
+        payload["updatedAt"] = updated_at
+    age = public_issue_text(issue.get("age"))
+    if age:
+        payload["age"] = age
+    return {key: value for key, value in payload.items() if value not in ("", [], {})}
+
+
 def issue_payload(issue: dict) -> dict:
+    if issue.get("graphVerified") is True:
+        return public_graph_verified_issue_payload(issue)
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
     fixability = issue_fixability_state(issue)
     auto_fix = fixability["autoFixable"]
@@ -839,6 +905,8 @@ def public_issue_list_confidence_level(issue: dict, verification_status: str) ->
 
 
 def issue_list_payload(issue: dict) -> dict:
+    if issue.get("graphVerified") is True:
+        return public_graph_verified_issue_payload(issue, list_item=True)
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
     audit_metadata = public_issue_audit_metadata(issue)
     verification_status = public_issue_list_verification_status(issue)

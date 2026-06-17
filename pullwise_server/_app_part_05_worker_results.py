@@ -361,7 +361,9 @@ def worker_result_checksum(body: dict) -> str:
             body.get("convergence_state") or body.get("convergenceState")
         ),
         "graphVerifiedReport": public_graph_verified_report(
-            body.get("graphVerifiedReport")
+            body.get("graphVerifiedReport"),
+            include_markdown=True,
+            include_debug=True,
         ),
         "audit_swarm": public_scan_audit_swarm_from_worker_body(
             body,
@@ -407,34 +409,49 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     job_for_findings = dict(job)
     if resolved_commit:
         job_for_findings["commit"] = resolved_commit
-    normalized_findings = worker_audit_swarm_findings(
-        job_for_findings,
-        body,
-        reserved_ids=worker_issue_reserved_ids(job_for_findings),
-    )
-    summary = public_scan_issue_counts(body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings))
-    verification_audit = public_scan_verification_audit_input(
-        body.get("verification_audit") or body.get("verificationAudit")
-    )
-    convergence_state = convergence_state_from_worker_result(job, body)
-    audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
-    ai_usage = public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage"))
-    completion_audit = public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
-    job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
-    effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
     graph_verified_report = public_graph_verified_report(
-        body.get("graphVerifiedReport")
+        body.get("graphVerifiedReport"),
+        include_markdown=True,
+        include_debug=True,
     )
+    if graph_verified_report:
+        normalized_findings = worker_graph_verified_findings(
+            job_for_findings,
+            graph_verified_report,
+            reserved_ids=worker_issue_reserved_ids(job_for_findings),
+        )
+        summary = public_scan_issue_counts(summarize_findings(normalized_findings))
+        verification_audit = {}
+        convergence_state = {}
+        audit_swarm = {}
+    else:
+        normalized_findings = worker_audit_swarm_findings(
+            job_for_findings,
+            body,
+            reserved_ids=worker_issue_reserved_ids(job_for_findings),
+        )
+        summary = public_scan_issue_counts(
+            body.get("summary") if isinstance(body.get("summary"), dict) else summarize_findings(normalized_findings)
+        )
+        verification_audit = public_scan_verification_audit_input(
+            body.get("verification_audit") or body.get("verificationAudit")
+        )
+        convergence_state = convergence_state_from_worker_result(job, body)
+        audit_swarm = public_scan_audit_swarm_from_worker_body(body, status=status)
+    ai_usage = public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage"))
+    completion_audit = {} if graph_verified_report else public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
+    job_trace = {} if graph_verified_report else public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
+    effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
     raw_repository_graph = body.get("repositoryGraph")
-    repository_graph = public_repository_graph(raw_repository_graph)
-    semantic_graph = public_repository_semantic_graph(body.get("semanticGraph"))
-    if not semantic_graph and isinstance(raw_repository_graph, dict):
+    repository_graph = {} if graph_verified_report else public_repository_graph(raw_repository_graph)
+    semantic_graph = {} if graph_verified_report else public_repository_semantic_graph(body.get("semanticGraph"))
+    if not graph_verified_report and not semantic_graph and isinstance(raw_repository_graph, dict):
         semantic_graph = public_repository_semantic_graph(raw_repository_graph.get("semanticGraph"))
-    raw_impact_graph = body.get("impactGraph")
-    if not raw_impact_graph and isinstance(raw_repository_graph, dict):
+    raw_impact_graph = None if graph_verified_report else body.get("impactGraph")
+    if not graph_verified_report and not raw_impact_graph and isinstance(raw_repository_graph, dict):
         raw_impact_graph = raw_repository_graph.get("impactGraph")
-    impact_graph = public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
-    if repository_graph and impact_graph:
+    impact_graph = {} if graph_verified_report else public_impact_graph(raw_impact_graph, repository_graph=repository_graph)
+    if not graph_verified_report and repository_graph and impact_graph:
         repository_graph["impactGraph"] = impact_graph
     error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
@@ -460,6 +477,18 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan.pop("errorCode", None)
         if resolved_commit:
             scan["commit"] = resolved_commit
+        if graph_verified_report:
+            for key in (
+                "auditSwarm",
+                "completionAudit",
+                "convergenceState",
+                "impactGraph",
+                "jobTrace",
+                "repositoryGraph",
+                "semanticGraph",
+                "verificationAudit",
+            ):
+                scan.pop(key, None)
         if preflight:
             scan["preflight"] = preflight
         if any(
@@ -541,9 +570,8 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         return {"accepted": False, "conflict": True}
     duplicate = bool(record_result.get("duplicate"))
     if duplicate:
-        issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
         quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
-        result = {"accepted": True, "duplicate": True, "conflict": False, "issueCount": len(issue_cards)}
+        result = {"accepted": True, "duplicate": True, "conflict": False, "issueCount": worker_result_issue_count(body)}
         if quota_rollback.get("reservationReleased"):
             result["quotaRelease"] = quota_rollback
         elif quota_rollback.get("ledgerRows"):
@@ -563,12 +591,11 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     with STATE_LOCK:
         apply_worker_job_result_to_state_locked(job, body, status=status, checksum=checksum)
     quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
-    issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
     result = {
         "accepted": True,
         "duplicate": duplicate,
         "conflict": False,
-        "issueCount": len(issue_cards),
+        "issueCount": worker_result_issue_count(body),
         "reviewDecisionEvents": event_result,
     }
     if quota_finalized.get("consumed"):
@@ -578,6 +605,14 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     elif quota_rollback.get("ledgerRows"):
         result["quotaRollback"] = quota_rollback
     return result
+
+
+def worker_result_issue_count(body: dict) -> int:
+    report = public_graph_verified_report(body.get("graphVerifiedReport")) if isinstance(body, dict) else {}
+    if report:
+        return public_scan_count(report.get("confirmedCount"))
+    issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
+    return len(issue_cards)
 
 
 def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -> bool:
@@ -695,6 +730,182 @@ def unique_issue_id(base_id: object, used_ids: set[str]) -> str:
             used_ids.add(candidate)
             return candidate
         suffix += 1
+
+
+def worker_graph_verified_findings(job: dict, report: dict, *, reserved_ids: set[str] | None = None) -> list[dict]:
+    final_json = report.get("finalJson") if isinstance(report.get("finalJson"), dict) else {}
+    confirmed = final_json.get("confirmed") if isinstance(final_json.get("confirmed"), list) else []
+    used_issue_ids = set(reserved_ids or set())
+    findings = []
+    for index, item in enumerate(confirmed):
+        if not isinstance(item, dict):
+            continue
+        issue = worker_graph_verified_item_to_finding(job, report, item, index)
+        if not issue:
+            continue
+        issue["id"] = unique_issue_id(issue.get("id"), used_issue_ids)
+        findings.append(issue)
+    return findings
+
+
+def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, index: int) -> dict:
+    candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+    judge = item.get("judge") if isinstance(item.get("judge"), dict) else {}
+    repro = item.get("repro") if isinstance(item.get("repro"), dict) else {}
+    verification = item.get("verification") if isinstance(item.get("verification"), dict) else {}
+    judge_status = public_issue_text(judge.get("status") or verification.get("status") or verification.get("verdict")).lower()
+    if judge_status and judge_status != "confirmed":
+        return {}
+    if judge.get("safe_to_show_user") is False or verification.get("safe_to_show_user") is False:
+        return {}
+    graph_evidence = candidate.get("graph_evidence") if isinstance(candidate.get("graph_evidence"), dict) else {}
+    if not graph_evidence:
+        return {}
+    reproduction = worker_graph_verified_reproduction(candidate, judge, repro)
+    if not reproduction.get("commands"):
+        return {}
+    code_evidence = worker_graph_verified_code_evidence(candidate.get("evidence"), job=job)
+    locations = worker_graph_verified_locations(code_evidence, job=job)
+    primary = locations[0] if locations else {}
+    candidate_id = public_issue_text(candidate.get("candidate_id") or candidate.get("issue_id")) or f"candidate_{index + 1}"
+    title = public_issue_text(candidate.get("title")) or review._safe_text_lenient(candidate.get("claim")).split(". ", 1)[0]
+    if not title:
+        title = f"Graph-verified finding {index + 1}"
+    limitations = []
+    limitations.extend(review._safe_text_list(judge.get("limitations")))
+    limitations.extend(review._safe_text_list(repro.get("limitations")))
+    finding = {
+        "id": public_issue_text(candidate.get("issue_id")) or candidate_id,
+        "graphVerified": True,
+        "candidateId": candidate_id,
+        "dedupeKey": public_issue_text(candidate.get("dedupe_key")),
+        "severity": worker_audit_swarm_severity(candidate.get("severity")),
+        "category": review._safe_category(candidate.get("category")) or "Quality",
+        "title": title[:240],
+        "summary": review._safe_text_lenient(candidate.get("claim") or judge.get("reason") or repro.get("summary")),
+        "graphEvidence": graph_evidence,
+        "codeEvidence": code_evidence,
+        "triggerCondition": review._safe_text_lenient(candidate.get("trigger_condition")),
+        "expectedBehavior": review._safe_text_lenient(candidate.get("expected_behavior")),
+        "observedBehavior": (
+            review._safe_text_lenient(worker_graph_verified_observed_behavior(candidate, judge, repro))
+        ),
+        "reproduction": reproduction,
+        "verificationLevel": public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")),
+        "safeToShowUser": judge.get("safe_to_show_user") is not False and verification.get("safe_to_show_user") is not False,
+        "whyThisMatters": worker_graph_verified_why_this_matters(candidate, code_evidence),
+        "suggestedFixDirection": review._safe_text_lenient(candidate.get("fix_direction") or candidate.get("suggested_fix")),
+        "limitations": list(dict.fromkeys(item for item in limitations if item))[:8],
+        "affectedLocations": locations,
+        "file": public_issue_text(primary.get("file")),
+        "line": public_scan_count(primary.get("startLine")),
+        "verificationStatus": "verified",
+        "graphVerifiedReport": {
+            "runId": public_issue_text(report.get("runId")),
+            "mode": public_issue_text(report.get("mode")),
+            "base": public_issue_text(report.get("base")),
+            "head": public_issue_text(report.get("head")),
+        },
+    }
+    return {key: value for key, value in finding.items() if value not in ("", [], {})}
+
+
+def worker_graph_verified_code_evidence(value: object, *, job: dict | None = None) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    evidence = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        file_path = public_issue_file(raw_item.get("file") or raw_item.get("path"), job=job)
+        lines = public_issue_text(raw_item.get("lines"))
+        why = review._safe_text_lenient(raw_item.get("why_it_matters") or raw_item.get("summary"))
+        item = {}
+        if file_path:
+            item["file"] = file_path
+        if lines:
+            item["lines"] = lines
+        if why:
+            item["why_it_matters"] = why
+        if item:
+            evidence.append(item)
+        if len(evidence) >= 20:
+            break
+    return evidence
+
+
+def worker_graph_verified_locations(evidence: list[dict], *, job: dict | None = None) -> list[dict]:
+    locations = []
+    seen = set()
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        file_path = public_issue_file(item.get("file"), job=job)
+        if not file_path:
+            continue
+        start_line, end_line = worker_audit_swarm_line_range(item)
+        key = (file_path, start_line, end_line)
+        if key in seen:
+            continue
+        seen.add(key)
+        locations.append({"file": file_path, "startLine": start_line, "endLine": end_line})
+    return locations[:10]
+
+
+def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict) -> dict:
+    commands = []
+    raw_commands = repro.get("commands_run") if isinstance(repro.get("commands_run"), list) else []
+    for item in raw_commands:
+        if isinstance(item, dict):
+            command = public_issue_text(item.get("cmd") or item.get("command"))
+            if command:
+                commands.append(command)
+        else:
+            command = public_issue_text(item)
+            if command:
+                commands.append(command)
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
+    if not commands and public_issue_text(evidence_summary.get("command")):
+        commands.append(public_issue_text(evidence_summary.get("command")))
+    log_path = ""
+    for item in raw_commands:
+        if isinstance(item, dict):
+            log_path = public_issue_text(item.get("log_path") or item.get("logPath"))
+            if log_path:
+                break
+    log_path = log_path or public_issue_text(evidence_summary.get("log_path"))
+    return {
+        "commands": list(dict.fromkeys(commands))[:5],
+        "input": review._safe_text_lenient(candidate.get("trigger_condition")),
+        "expected": review._safe_text_lenient(proof.get("expected") or candidate.get("expected_behavior")),
+        "actual": review._safe_text_lenient(
+            proof.get("actual")
+            or evidence_summary.get("observable")
+            or repro.get("summary")
+            or candidate.get("actual_behavior_hypothesis")
+        ),
+        "logPath": log_path,
+    }
+
+
+def worker_graph_verified_observed_behavior(candidate: dict, judge: dict, repro: dict) -> str:
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
+    return (
+        proof.get("actual")
+        or evidence_summary.get("observable")
+        or repro.get("summary")
+        or candidate.get("actual_behavior_hypothesis")
+        or ""
+    )
+
+
+def worker_graph_verified_why_this_matters(candidate: dict, code_evidence: list[dict]) -> str:
+    for item in code_evidence:
+        text = review._safe_text_lenient(item.get("why_it_matters"))
+        if text:
+            return text
+    return review._safe_text_lenient(candidate.get("impact") or candidate.get("why_this_matters"))
 
 
 def worker_audit_swarm_findings(job: dict, body: dict, *, reserved_ids: set[str] | None = None) -> list[dict]:
