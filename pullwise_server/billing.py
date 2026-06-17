@@ -1107,7 +1107,7 @@ def event_created(event: dict) -> int | None:
     value = event.get("created") or event.get("createdAt") or event.get("created_at")
     if isinstance(value, bool):
         return None
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         if not math.isfinite(value):
             return None
         candidate = int(value)

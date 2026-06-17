@@ -423,7 +423,7 @@ def safe_pending_pull_request(value: dict, *, issue_id: str) -> dict:
 def pull_request_timestamp(value: object) -> int | None:
     if isinstance(value, bool):
         return None
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         if not math.isfinite(value):
             return None
         return int(value)

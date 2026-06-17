@@ -2,7 +2,7 @@
 name = "pullwise-server"
 version = "0.1.0"
 description = "Local Python API server for Pullwise Web"
-requires-python = ">=3.10.12,<3.11"
+requires-python = ">=3.9,<3.10"
 dependencies = [
   "Authlib>=1.6,<2",
   "cryptography>=48.0.1,<49",
