@@ -35,6 +35,9 @@ class FakeConnection:
 
 
 class DatabaseContractsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        db.reset_initialization_cache()
+
     def write_state_key(self, temp_dir: str) -> str:
         key_path = os.path.join(temp_dir, "state-encryption-key")
         with open(key_path, "w", encoding="ascii") as key_file:
@@ -48,6 +51,19 @@ class DatabaseContractsTest(unittest.TestCase):
             db.initialize()
 
         self.assertTrue(connection.closed)
+
+    def test_ensure_initialized_skips_schema_work_after_first_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                with patch(
+                    "pullwise_server.db.reconcile_worker_uninstall_deletes",
+                    wraps=db.reconcile_worker_uninstall_deletes,
+                ) as reconcile:
+                    db.ensure_initialized()
+                    db.ensure_initialized()
+
+        self.assertEqual(reconcile.call_count, 1)
 
     def test_load_state_closes_initialize_and_read_connections(self) -> None:
         initialize_connection = FakeConnection()

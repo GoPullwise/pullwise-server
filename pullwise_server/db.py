@@ -18,6 +18,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 _LOCK = threading.Lock()
+_INITIALIZE_LOCK = threading.Lock()
+_INITIALIZED_DATABASES: set[str] = set()
+SQLITE_BUSY_TIMEOUT_SECONDS = 30
 DEFAULT_STATE_ENCRYPTION_KEY_PATH = "/etc/pullwise/secrets/state-encryption-key"
 STATE_ENCRYPTION_KEY_PATH_ENV = "PULLWISE_STATE_ENCRYPTION_KEY_PATH"
 STATE_ENCRYPTION_MARKER = "pullwise-state-secret-v1"
@@ -45,14 +48,32 @@ def connect() -> sqlite3.Connection:
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    connection = sqlite3.connect(path, timeout=10)
-    connection.execute("PRAGMA journal_mode=WAL")
+    connection = sqlite3.connect(path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS)
+    connection.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_SECONDS * 1000}")
     connection.execute("PRAGMA foreign_keys=ON")
     return connection
 
 
+def ensure_initialized() -> None:
+    path = os.path.abspath(database_path())
+    if path in _INITIALIZED_DATABASES and os.path.exists(path):
+        return
+    with _INITIALIZE_LOCK:
+        if path in _INITIALIZED_DATABASES and os.path.exists(path):
+            return
+        initialize()
+        if os.path.exists(path):
+            _INITIALIZED_DATABASES.add(path)
+
+
+def reset_initialization_cache() -> None:
+    with _INITIALIZE_LOCK:
+        _INITIALIZED_DATABASES.clear()
+
+
 def initialize() -> None:
     with _LOCK, closing(connect()) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
         with connection:
             connection.execute(
                 """
@@ -817,7 +838,7 @@ def migrate_plaintext_state_secrets(state: dict[str, Any]) -> None:
 
 
 def load_state() -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         rows = connection.execute("SELECT name, payload FROM app_state").fetchall()
     state: dict[str, Any] = {}
@@ -831,7 +852,7 @@ def load_state() -> dict[str, Any]:
 
 
 def load_state_item(name: str) -> Any | None:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         row = connection.execute(
             "SELECT payload FROM app_state WHERE name = ?",
@@ -846,7 +867,7 @@ def load_state_item(name: str) -> Any | None:
 
 
 def save_state_item(name: str, payload: Any) -> None:
-    initialize()
+    ensure_initialized()
     storage_payload = to_jsonable(payload)
     with _LOCK, closing(connect()) as connection:
         with connection:
@@ -863,7 +884,7 @@ def save_state_item(name: str, payload: Any) -> None:
 
 
 def save_state(state: dict[str, Any]) -> None:
-    initialize()
+    ensure_initialized()
     storage_state = state_for_storage(state)
     with _LOCK, closing(connect()) as connection:
         with connection:
@@ -900,7 +921,7 @@ def record_rate_limit_hit(
     route: str = "api",
     timestamp: int | None = None,
 ) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     current_time = int(timestamp if timestamp is not None else time.time())
     window = max(1, int(window_seconds))
     window_start = current_time - (current_time % window)
@@ -1070,7 +1091,7 @@ def normalize_worker_lifecycle_command(command: Any) -> str:
 
 
 def create_worker_token(name: str = "worker") -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     token = "pww_" + secrets.token_urlsafe(32)
     token_hash = worker_token_hash(token)
     with _LOCK, closing(connect()) as connection:
@@ -1091,7 +1112,7 @@ def create_worker_token(name: str = "worker") -> dict[str, Any]:
 
 
 def create_worker(record: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     token = "pww_" + secrets.token_urlsafe(32)
     token_hash = worker_token_hash(token)
     worker_id = str(record.get("worker_id") or stable_id("wk", token_hash)).strip()
@@ -1131,7 +1152,7 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_workers(*, include_deleted: bool = False) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     where = "" if include_deleted else "WHERE deleted_at IS NULL"
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
@@ -1142,7 +1163,7 @@ def list_workers(*, include_deleted: bool = False) -> list[dict[str, Any]]:
 
 
 def get_worker(worker_id: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         return None
@@ -1163,7 +1184,7 @@ def update_worker(
     *,
     max_concurrency_cap: int | None = None,
 ) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     allowed = {
         "name": "name",
         "provider": "provider",
@@ -1207,7 +1228,7 @@ def update_worker(
 
 
 def set_worker_enabled(worker_id: str, enabled: bool) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     timestamp = int(time.time())
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
@@ -1226,7 +1247,7 @@ def set_worker_enabled(worker_id: str, enabled: bool) -> dict[str, Any] | None:
 
 
 def soft_delete_worker(worker_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     timestamp = int(time.time())
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
@@ -1243,7 +1264,7 @@ def soft_delete_worker(worker_id: str) -> dict[str, Any] | None:
 
 
 def rotate_worker_token(worker_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     token = "pww_" + secrets.token_urlsafe(32)
     token_hash = worker_token_hash(token)
     timestamp = int(time.time())
@@ -1266,7 +1287,7 @@ def rotate_worker_token(worker_id: str) -> dict[str, Any] | None:
 
 
 def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     token = str(token or "").strip()
     if not token:
         return None
@@ -1300,7 +1321,7 @@ def get_worker_by_token(
     allow_disabled: bool = False,
     include_deleted: bool = False,
 ) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     token = str(token or "").strip()
     if not token:
         return None
@@ -1327,7 +1348,7 @@ def get_worker_by_token(
 
 
 def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     worker_id = str(record.get("worker_id") or "").strip()
     if not worker_id:
         raise ValueError("worker_id is required")
@@ -1418,7 +1439,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def record_worker_audit_event(record: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     event_id = str(record.get("id") or stable_id("wae", f"{record.get('action')}:{time.time_ns()}"))
     changed_fields = record.get("changed_fields")
     changed_text = changed_fields if isinstance(changed_fields, str) else json.dumps(changed_fields or {}, sort_keys=True)
@@ -1449,7 +1470,7 @@ def record_worker_audit_event(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_worker_audit_events(worker_id: str | None = None, *, limit: int = 100) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         if worker_id:
@@ -1475,7 +1496,7 @@ def list_worker_audit_events(worker_id: str | None = None, *, limit: int = 100) 
 
 
 def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     worker_id = str(record.get("worker_id") or "").strip()
     if not worker_id:
         raise ValueError("worker_id is required")
@@ -1547,7 +1568,7 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def get_worker_command(command_id: str, *, worker_id: str | None = None) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     command_id = str(command_id or "").strip()
     if not command_id:
         return None
@@ -1564,7 +1585,7 @@ def get_worker_command(command_id: str, *, worker_id: str | None = None) -> dict
 
 
 def get_latest_worker_command(worker_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         return None
@@ -1584,7 +1605,7 @@ def get_latest_worker_command(worker_id: str) -> dict[str, Any] | None:
 
 
 def get_next_worker_command(worker_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         return None
@@ -1604,7 +1625,7 @@ def get_next_worker_command(worker_id: str) -> dict[str, Any] | None:
 
 
 def update_worker_command_status(record: dict[str, Any]) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     command_id = str(record.get("id") or "").strip()
     worker_id = str(record.get("worker_id") or "").strip()
     status = str(record.get("status") or "").strip().lower()
@@ -1682,7 +1703,7 @@ def cleanup_operational_records(
     scan_job_retention_seconds: int = 30 * 24 * 60 * 60,
     removable_scan_ids: set[str] | None = None,
 ) -> dict[str, int]:
-    initialize()
+    ensure_initialized()
     current_time = int(timestamp if timestamp is not None else time.time())
     command_cutoff = current_time - max(0, int(worker_command_retention_seconds))
     audit_cutoff = current_time - max(0, int(worker_audit_retention_seconds))
@@ -1726,7 +1747,7 @@ def cleanup_operational_records(
 
 
 def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     job_id = str(record.get("job_id") or stable_id("job", record.get("scan_id"))).strip()
     scan_id = str(record.get("scan_id") or "").strip()
     repo = str(record.get("repo") or "").strip()
@@ -1774,14 +1795,14 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_scan_job(job_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
 
 
 def get_scan_job_for_scan(scan_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     scan_id = str(scan_id or "").strip()
     if not scan_id:
         return None
@@ -1794,7 +1815,7 @@ def list_scan_jobs_for_scans(
     scan_ids: list[str] | set[str] | tuple[str, ...],
     job_ids: list[str] | set[str] | tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     unique_scan_ids = list(dict.fromkeys(str(value or "").strip() for value in scan_ids or [] if str(value or "").strip()))
     unique_job_ids = list(dict.fromkeys(str(value or "").strip() for value in job_ids or [] if str(value or "").strip()))
     if not unique_scan_ids and not unique_job_ids:
@@ -1826,7 +1847,7 @@ def list_scan_jobs_for_scans(
 
 
 def retry_scan_job(scan_id: str, *, timestamp: int | None = None) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     scan_id = str(scan_id or "").strip()
     if not scan_id:
         return None
@@ -1863,7 +1884,7 @@ def retry_scan_job(scan_id: str, *, timestamp: int | None = None) -> dict[str, A
 
 
 def list_scan_jobs_missing_from_state(scan_ids: list[str] | set[str]) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     existing_ids = sorted({str(scan_id or "").strip() for scan_id in scan_ids if str(scan_id or "").strip()})
     query = "SELECT * FROM scan_jobs"
     params: list[Any] = []
@@ -1878,7 +1899,7 @@ def list_scan_jobs_missing_from_state(scan_ids: list[str] | set[str]) -> list[di
 
 
 def list_orphan_scan_quota_consumptions(scan_ids: list[str] | set[str]) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     existing_ids = sorted({str(scan_id or "").strip() for scan_id in scan_ids if str(scan_id or "").strip()})
     params: list[Any] = []
     existing_clause = ""
@@ -1913,7 +1934,7 @@ def list_orphan_scan_quota_consumptions(scan_ids: list[str] | set[str]) -> list[
 
 
 def update_scan_job_commit(job_id: str, commit: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     job_id = str(job_id or "").strip()
     commit = str(commit or "").strip()
     if not job_id or not commit:
@@ -1941,7 +1962,7 @@ def renew_worker_scan_job_leases(
     lease_seconds: int = 3600,
     timestamp: int | None = None,
 ) -> int:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     unique_job_ids = []
     seen = set()
@@ -1981,7 +2002,7 @@ def requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
     grace_seconds: int = 120,
     timestamp: int | None = None,
 ) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         return []
@@ -2075,7 +2096,7 @@ def requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
 
 
 def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         return []
@@ -2107,7 +2128,7 @@ def list_worker_task_activity(worker_id: str, *, limit: int = 50) -> list[dict[s
 
 
 def count_worker_running_scan_jobs(worker_id: str) -> int:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         return 0
@@ -2125,7 +2146,7 @@ def count_worker_running_scan_jobs(worker_id: str) -> int:
 
 
 def list_completed_scan_job_results() -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
@@ -2156,7 +2177,7 @@ def list_completed_scan_job_results() -> list[dict[str, Any]]:
 
 
 def get_completed_scan_job_result(job_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     job_id = str(job_id or "").strip()
     if not job_id:
         return None
@@ -2190,7 +2211,7 @@ def get_completed_scan_job_result(job_id: str) -> dict[str, Any] | None:
 
 
 def list_completed_scan_job_results_for_job_ids(job_ids: list[str] | set[str] | tuple[str, ...]) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     unique_job_ids = list(dict.fromkeys(str(value or "").strip() for value in job_ids or [] if str(value or "").strip()))
     if not unique_job_ids:
         return []
@@ -2240,7 +2261,7 @@ def claim_next_scan_jobs(
     ready_providers: list[str] | None = None,
     timestamp: int | None = None,
 ) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         raise ValueError("worker_id is required")
@@ -2339,7 +2360,7 @@ def recover_expired_scan_jobs(
     *,
     worker_heartbeat_timeout_seconds: int = 120,
 ) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     current_time = int(timestamp if timestamp is not None else time.time())
     offline_after = max(60, int(worker_heartbeat_timeout_seconds or 120))
     with _LOCK, closing(connect()) as connection:
@@ -2356,7 +2377,7 @@ def recover_expired_scan_jobs(
 
 
 def requeue_interrupted_scan_job(scan_id: str, *, reason: str = "server_restart", timestamp: int | None = None) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     scan_id = str(scan_id or "").strip()
     if not scan_id:
         return None
@@ -2535,7 +2556,7 @@ def _requeue_stale_worker_jobs_locked(
 
 
 def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     current_time = int(time.time())
     raw_timeout_at = progress.get("timeout_at")
     try:
@@ -2581,7 +2602,7 @@ def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str,
 
 
 def cancel_scan_job_for_scan(scan_id: str) -> None:
-    initialize()
+    ensure_initialized()
     current_time = int(time.time())
     with _LOCK, closing(connect()) as connection:
         with connection:
@@ -2606,7 +2627,7 @@ def record_scan_job_result(
     result_checksum: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     job_id = str(job_id or "").strip()
     attempt_id = str(attempt_id or "").strip()
     status = str(status or "").strip().lower()
@@ -2698,7 +2719,7 @@ def record_scan_job_result(
 
 
 def record_review_decision_events(events: list[dict[str, Any]]) -> dict[str, int]:
-    initialize()
+    ensure_initialized()
     sanitized = [event for event in events if isinstance(event, dict)]
     if not sanitized:
         return {"inserted": 0, "duplicates": 0}
@@ -2786,7 +2807,7 @@ def record_review_decision_events(events: list[dict[str, Any]]) -> dict[str, int
 
 
 def list_review_decision_events(*, job_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     max_rows = max(1, min(500, int(limit or 100)))
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
@@ -2819,7 +2840,7 @@ def list_review_decision_events_for_scope(
     branch: str,
     limit: int = 5000,
 ) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     user_id = str(user_id or "").strip()
     repo_key = str(repo_key or "").strip()
     branch = str(branch or "").strip()
@@ -2848,7 +2869,7 @@ def list_review_decision_events_for_scope(
 
 
 def list_review_decision_events_for_observation(candidate_observation_key: str) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     observation_key = str(candidate_observation_key or "").strip()
     if not observation_key:
         return []
@@ -2867,7 +2888,7 @@ def list_review_decision_events_for_observation(candidate_observation_key: str) 
 
 
 def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     label_id = str(label.get("label_id") or "").strip()
     observation_key = str(label.get("candidate_observation_key") or "").strip()
     outcome_label = str(label.get("outcome_label") or "").strip()
@@ -2929,7 +2950,7 @@ def upsert_review_outcome_label(label: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_review_outcome_labels(candidate_observation_key: str) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     observation_key = str(candidate_observation_key or "").strip()
     if not observation_key:
         return []
@@ -2947,7 +2968,7 @@ def list_review_outcome_labels(candidate_observation_key: str) -> list[dict[str,
 
 
 def upsert_review_calibration_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     scope_key = str(snapshot.get("scope_key") or "").strip()
     cohort_key = str(snapshot.get("cohort_key") or "").strip()
     version = str(snapshot.get("snapshot_version") or "").strip()
@@ -3003,7 +3024,7 @@ def upsert_review_calibration_snapshot(snapshot: dict[str, Any]) -> dict[str, An
 
 
 def list_review_calibration_snapshots(scope_key: str) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     scope_key = str(scope_key or "").strip()
     if not scope_key:
         return []
@@ -3026,7 +3047,7 @@ def repository_id_for_github_repo(github_repo_id: object) -> str:
 
 
 def upsert_repository(repository: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     github_repo_id = str(repository.get("github_repo_id") or "").strip()
     if not github_repo_id:
         raise ValueError("github_repo_id is required")
@@ -3081,7 +3102,7 @@ def upsert_repository(repository: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_repository(repository_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         return row_to_dict(connection.execute("SELECT * FROM repositories WHERE id = ?", (repository_id,)).fetchone())
@@ -3091,7 +3112,7 @@ def get_repository_by_github_repo_id(github_repo_id: object) -> dict[str, Any] |
     github_repo_id_text = str(github_repo_id or "").strip()
     if not github_repo_id_text:
         return None
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         return row_to_dict(
@@ -3100,7 +3121,7 @@ def get_repository_by_github_repo_id(github_repo_id: object) -> dict[str, Any] |
 
 
 def upsert_repo_fingerprint(repository_id: str, fingerprint: dict[str, Any]) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     repository_id = str(repository_id or "").strip()
     if not repository_id:
         raise ValueError("repository id is required")
@@ -3142,7 +3163,7 @@ def upsert_repo_fingerprint(repository_id: str, fingerprint: dict[str, Any]) -> 
 
 
 def get_repo_fingerprint(repository_id: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     repository_id = str(repository_id or "").strip()
     if not repository_id:
         return None
@@ -3160,7 +3181,7 @@ def find_repo_fingerprint_match(
     repository_id: str,
     source_fingerprint: str,
 ) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     repository_id = str(repository_id or "").strip()
     source_fingerprint = str(source_fingerprint or "").strip()
     if not repository_id or not source_fingerprint:
@@ -3183,7 +3204,7 @@ def find_repo_fingerprint_match(
 
 
 def create_api_key(record: dict[str, Any]) -> dict[str, Any]:
-    initialize()
+    ensure_initialized()
     api_key_id = str(record.get("id") or "").strip()
     user_id = str(record.get("user_id") or "").strip()
     name = str(record.get("name") or "API key").strip() or "API key"
@@ -3210,7 +3231,7 @@ def create_api_key(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_api_keys_for_user(user_id: str) -> list[dict[str, Any]]:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
@@ -3225,7 +3246,7 @@ def list_api_keys_for_user(user_id: str) -> list[dict[str, Any]]:
 
 
 def get_api_key_by_hash(key_hash: str) -> dict[str, Any] | None:
-    initialize()
+    ensure_initialized()
     key_hash = str(key_hash or "").strip()
     if not key_hash:
         return None
@@ -3243,7 +3264,7 @@ def get_api_key_by_hash(key_hash: str) -> dict[str, Any] | None:
 
 
 def mark_api_key_used(api_key_id: str) -> None:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         with connection:
             connection.execute(
@@ -3253,7 +3274,7 @@ def mark_api_key_used(api_key_id: str) -> None:
 
 
 def revoke_api_key(api_key_id: str, user_id: str) -> bool:
-    initialize()
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         with connection:
             updated = connection.execute(
@@ -3268,7 +3289,7 @@ def revoke_api_key(api_key_id: str, user_id: str) -> bool:
 
 
 def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | None = None) -> dict[str, int]:
-    initialize()
+    ensure_initialized()
     target_user_id = str(user_id or "").strip()
     if not target_user_id:
         return {}

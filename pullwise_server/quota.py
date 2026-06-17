@@ -210,7 +210,7 @@ def ensure_quota_bucket(
     limit: int,
     reset_at: int | None = None,
 ) -> dict[str, Any]:
-    db.initialize()
+    db.ensure_initialized()
     period = period or current_period()
     with closing(db.connect()) as connection:
         connection.row_factory = sqlite3.Row
@@ -305,7 +305,7 @@ def quota_ledger_rows_for_user(
     scope_type: str = "user",
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    db.initialize()
+    db.ensure_initialized()
     user_id = str((user or {}).get("id") or "").strip()
     if not user_id:
         return []
@@ -369,7 +369,7 @@ def reserve_scan_quota(
     request_id: str | None = None,
     timestamp: int | None = None,
 ) -> dict[str, Any]:
-    db.initialize()
+    db.ensure_initialized()
     entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
     plan = entitlement["plan"]
     period = entitlement["period"]
@@ -509,7 +509,7 @@ def consume_reserved_scan_quota(
     request_id: str | None = None,
     timestamp: int | None = None,
 ) -> dict[str, Any]:
-    db.initialize()
+    db.ensure_initialized()
     requested_by_user_id = str(requested_by_user_id or "").strip()
     scan_id = str(scan_id or "").strip()
     request_id = str(request_id or "").strip() if request_id else None
@@ -678,7 +678,7 @@ def release_scan_quota_reservation(
     request_id: str | None = None,
     record_ledger: bool = True,
 ) -> dict[str, int]:
-    db.initialize()
+    db.ensure_initialized()
     scan_id = str(scan_id or "").strip()
     requested_by_user_id = str(requested_by_user_id or "").strip()
     request_id = str(request_id or "").strip() if request_id else None
@@ -799,7 +799,7 @@ def consume_scan_quota(
     request_id: str | None = None,
     timestamp: int | None = None,
 ) -> dict[str, Any]:
-    db.initialize()
+    db.ensure_initialized()
     entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
     plan = entitlement["plan"]
     period = entitlement["period"]
@@ -936,7 +936,7 @@ def rollback_scan_quota(
     request_id: str | None = None,
     match_request_id: bool = True,
 ) -> dict[str, int]:
-    db.initialize()
+    db.ensure_initialized()
     scan_id = str(scan_id or "").strip()
     requested_by_user_id = str(requested_by_user_id or "").strip()
     request_id = str(request_id or "").strip() if request_id else None
