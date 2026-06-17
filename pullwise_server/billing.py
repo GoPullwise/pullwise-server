@@ -35,6 +35,13 @@ REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh
 REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
 REVIEW_AGENT_GRAPH_VERIFIED_MODES = {"fast", "standard", "deep"}
+REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS = {
+    "enabled": False,
+    "mode": "standard",
+    "maxRepro": 0,
+    "minScoreForRepro": 8,
+    "requireRedGreen": False,
+}
 REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
 REVIEW_AGENT_CONFIG_STATE_KEY = "review_agent_config"
 
@@ -82,6 +89,14 @@ def clean_review_agent_effort(value: object, default: str) -> str:
     return effort if effort in REVIEW_AGENT_EFFORTS else default
 
 
+def clean_review_agent_config_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
+
+
 def clean_review_agent_provider_required(value: object, *, strict: bool = True) -> str:
     provider = clean_review_agent_provider(value)
     if provider:
@@ -102,10 +117,7 @@ def default_review_agent_plan_config(plan: str) -> dict:
             "model": REVIEW_CODEX_MODEL_DEFAULT,
             "reasoningEffort": effort,
         },
-        "graphVerified": {
-            "enabled": False,
-            "mode": "standard",
-        },
+        "graphVerified": copy.deepcopy(REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS),
     }
 
 
@@ -141,6 +153,20 @@ def normalize_review_agent_graph_verified_config(value: object, defaults: dict) 
     mode = clean_review_agent_config_text(source.get("mode")).lower()
     if mode in REVIEW_AGENT_GRAPH_VERIFIED_MODES:
         result["mode"] = mode
+    result["maxRepro"] = clean_review_agent_config_int(
+        source.get("maxRepro") if "maxRepro" in source else source.get("max_repro"),
+        int(result.get("maxRepro") or 0),
+        minimum=0,
+        maximum=100,
+    )
+    result["minScoreForRepro"] = clean_review_agent_config_int(
+        source.get("minScoreForRepro") if "minScoreForRepro" in source else source.get("min_score_for_repro"),
+        int(result.get("minScoreForRepro") or 8),
+        minimum=0,
+        maximum=50,
+    )
+    if "requireRedGreen" in source or "require_red_green" in source:
+        result["requireRedGreen"] = (source.get("requireRedGreen") if "requireRedGreen" in source else source.get("require_red_green")) is True
     return result
 
 
@@ -202,6 +228,9 @@ def review_agent_config(plan: str) -> dict:
         "graphVerified": {
             "enabled": configured["graphVerified"]["enabled"] is True,
             "mode": configured["graphVerified"]["mode"],
+            "maxRepro": configured["graphVerified"]["maxRepro"],
+            "minScoreForRepro": configured["graphVerified"]["minScoreForRepro"],
+            "requireRedGreen": configured["graphVerified"]["requireRedGreen"] is True,
         },
     }
 

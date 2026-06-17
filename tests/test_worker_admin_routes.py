@@ -822,21 +822,36 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             "/admin/subscription-plans/agent-configs/pro",
             {
                 "provider": "codex",
-                "graphVerified": {"enabled": True, "mode": "deep"},
+                "graphVerified": {
+                    "enabled": True,
+                    "mode": "deep",
+                    "maxRepro": 12,
+                    "minScoreForRepro": 7,
+                    "requireRedGreen": True,
+                },
             },
             cookie=self.admin_cookie,
         )
         app.PullwiseHandler.route(update, "PATCH")
 
         self.assertEqual(update.status, HTTPStatus.OK)
-        self.assertEqual(update.payload["agentConfig"]["graphVerified"], {"enabled": True, "mode": "deep"})
+        self.assertEqual(
+            update.payload["agentConfig"]["graphVerified"],
+            {"enabled": True, "mode": "deep", "maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
+        )
 
         admin = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin, "GET")
 
         self.assertEqual(admin.status, HTTPStatus.OK)
-        self.assertEqual(admin.payload["agentConfigs"]["pro"]["graphVerified"], {"enabled": True, "mode": "deep"})
-        self.assertEqual(admin.payload["agentConfigs"]["free"]["graphVerified"], {"enabled": False, "mode": "standard"})
+        self.assertEqual(
+            admin.payload["agentConfigs"]["pro"]["graphVerified"],
+            {"enabled": True, "mode": "deep", "maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
+        )
+        self.assertEqual(
+            admin.payload["agentConfigs"]["free"]["graphVerified"],
+            {"enabled": False, "mode": "standard", "maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False},
+        )
 
     def test_plan_agent_config_reads_repair_invalid_persisted_provider(self) -> None:
         db.save_state_item(
