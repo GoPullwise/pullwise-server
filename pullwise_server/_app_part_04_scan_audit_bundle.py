@@ -898,6 +898,11 @@ def scan_payload(scan: dict) -> dict:
     audit_swarm = public_scan_audit_swarm(scan.get("auditSwarm") or scan.get("audit_swarm"))
     if audit_swarm:
         payload["auditSwarm"] = audit_swarm
+    graph_verified_report = public_graph_verified_report(
+        scan.get("graphVerifiedReport") or scan.get("graph_verified_report")
+    )
+    if graph_verified_report:
+        payload["graphVerifiedReport"] = graph_verified_report
     raw_repository_graph = scan.get("repositoryGraph")
     repository_graph = public_repository_graph(raw_repository_graph)
     if repository_graph:
@@ -2178,6 +2183,50 @@ def review_calibration_safe_bucket_payload(value: object) -> dict:
         payload[key] = bucket
         if len(payload) >= 12:
             break
+    return payload
+
+
+def public_graph_verified_report(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    confirmed = public_scan_count(source.get("confirmedCount") or source.get("confirmed_count"))
+    rejected = public_scan_count(source.get("rejectedCount") or source.get("rejected_count"))
+    blocked = public_scan_count(source.get("blockedCount") or source.get("blocked_count"))
+    final_markdown = review._safe_text_lenient(source.get("finalMarkdown") or source.get("final_markdown"))[:120000]
+    debug_markdown = review._safe_text_lenient(source.get("debugMarkdown") or source.get("debug_markdown"))[:120000]
+    final_json = source.get("finalJson") or source.get("final_json")
+    if not isinstance(final_json, dict):
+        final_json = {}
+    confirmed_items = final_json.get("confirmed") if isinstance(final_json.get("confirmed"), list) else []
+    payload = {
+        "version": public_scan_compact_text(source.get("version"), max_length=64) or "graph-verified-code-review/1",
+        "runId": public_scan_compact_text(source.get("runId") or source.get("run_id"), max_length=128),
+        "mode": public_scan_compact_status(source.get("mode"), max_length=32),
+        "base": public_scan_compact_text(source.get("base"), max_length=128),
+        "head": public_scan_compact_text(source.get("head"), max_length=128),
+        "confirmedCount": confirmed,
+        "rejectedCount": rejected,
+        "blockedCount": blocked,
+        "finalMarkdown": final_markdown,
+        "debugMarkdown": debug_markdown,
+        "finalJson": {
+            "confirmed": confirmed_items[:50],
+        },
+    }
+    if not any(
+        [
+            payload["runId"],
+            payload["mode"],
+            payload["base"],
+            payload["head"],
+            payload["confirmedCount"],
+            payload["rejectedCount"],
+            payload["blockedCount"],
+            payload["finalMarkdown"],
+            payload["debugMarkdown"],
+            payload["finalJson"]["confirmed"],
+        ]
+    ):
+        return {}
     return payload
 
 
@@ -3695,6 +3744,9 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
     repository_graph = public_scan.get("repositoryGraph") if isinstance(public_scan.get("repositoryGraph"), dict) else {}
     semantic_graph = public_scan.get("semanticGraph") if isinstance(public_scan.get("semanticGraph"), dict) else {}
     impact_graph = public_scan.get("impactGraph") if isinstance(public_scan.get("impactGraph"), dict) else {}
+    graph_verified_report = (
+        public_scan.get("graphVerifiedReport") if isinstance(public_scan.get("graphVerifiedReport"), dict) else {}
+    )
     log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
     bundle = {
         "schemaVersion": 1,
@@ -3725,6 +3777,8 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         bundle["semanticGraph"] = semantic_graph
     if impact_graph:
         bundle["impactGraph"] = impact_graph
+    if graph_verified_report:
+        bundle["graphVerifiedReport"] = graph_verified_report
     artifacts = audit_bundle_artifacts(bundle)
     bundle["artifactManifest"] = [
         {key: artifact[key] for key in ("path", "mediaType", "size", "sha256")}
@@ -3913,6 +3967,8 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
                 audit_bundle_impact_summary_markdown(bundle["impactGraph"]),
             )
         )
+    if isinstance(bundle.get("graphVerifiedReport"), dict):
+        artifacts.extend(audit_bundle_graph_verified_artifacts(bundle["graphVerifiedReport"]))
     artifacts.append(audit_bundle_artifact("audit.json", "application/json", audit_bundle_json_text(bundle)))
     artifacts.extend(audit_bundle_log_artifacts(bundle))
     artifacts.extend(audit_bundle_patch_artifacts(bundle))
@@ -3947,6 +4003,24 @@ def audit_bundle_artifact(path: str, media_type: str, content: str) -> dict:
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "content": content,
     }
+
+
+def audit_bundle_graph_verified_artifacts(report: dict) -> list[dict]:
+    final_json = report.get("finalJson") if isinstance(report.get("finalJson"), dict) else {}
+    artifacts = [
+        audit_bundle_artifact(
+            "graph-verified/final.json",
+            "application/json",
+            json.dumps(final_json, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
+    ]
+    final_markdown = review._safe_text_lenient(report.get("finalMarkdown"))
+    if final_markdown:
+        artifacts.append(audit_bundle_artifact("graph-verified/final.md", "text/markdown", final_markdown + "\n"))
+    debug_markdown = review._safe_text_lenient(report.get("debugMarkdown"))
+    if debug_markdown:
+        artifacts.append(audit_bundle_artifact("graph-verified/debug.md", "text/markdown", debug_markdown + "\n"))
+    return artifacts
 
 
 def audit_bundle_impact_summary_markdown(impact_graph: dict) -> str:

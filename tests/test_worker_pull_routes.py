@@ -54,6 +54,50 @@ class RouteHarness(app.PullwiseHandler):
         self.json({"message": message}, status)
 
 
+class GraphVerifiedReportContractsTest(unittest.TestCase):
+    def test_public_graph_verified_report_sanitizes_and_preserves_confirmed_only_artifacts(self) -> None:
+        report = app.public_graph_verified_report(
+            {
+                "run_id": "run_1",
+                "mode": "standard",
+                "base": "origin/main",
+                "head": "HEAD",
+                "confirmed_count": 1,
+                "rejected_count": 2,
+                "blocked_count": 0,
+                "final_markdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
+                "debug_markdown": "# Debug Report\n\nRejected candidates: 2",
+                "final_json": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
+            }
+        )
+
+        self.assertEqual(report["version"], "graph-verified-code-review/1")
+        self.assertEqual(report["runId"], "run_1")
+        self.assertEqual(report["confirmedCount"], 1)
+        self.assertEqual(report["rejectedCount"], 2)
+        self.assertEqual(report["finalJson"]["confirmed"][0]["candidate"]["issue_id"], "issue_1")
+        self.assertIn("Confirmed only.", report["finalMarkdown"])
+
+    def test_audit_bundle_includes_graph_verified_report_artifacts(self) -> None:
+        report = app.public_graph_verified_report(
+            {
+                "runId": "run_1",
+                "mode": "standard",
+                "confirmedCount": 1,
+                "finalMarkdown": "# Final\n",
+                "debugMarkdown": "# Debug\n",
+                "finalJson": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
+            }
+        )
+
+        artifacts = app.audit_bundle_graph_verified_artifacts(report)
+        paths = {artifact["path"] for artifact in artifacts}
+
+        self.assertIn("graph-verified/final.json", paths)
+        self.assertIn("graph-verified/final.md", paths)
+        self.assertIn("graph-verified/debug.md", paths)
+
+
 def audit_issue_card(
     title: str,
     *,

@@ -34,6 +34,7 @@ REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
 REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
 REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
+REVIEW_AGENT_GRAPH_VERIFIED_MODES = {"fast", "standard", "deep"}
 REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
 REVIEW_AGENT_CONFIG_STATE_KEY = "review_agent_config"
 
@@ -101,6 +102,10 @@ def default_review_agent_plan_config(plan: str) -> dict:
             "model": REVIEW_CODEX_MODEL_DEFAULT,
             "reasoningEffort": effort,
         },
+        "graphVerified": {
+            "enabled": False,
+            "mode": "standard",
+        },
     }
 
 
@@ -128,6 +133,17 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
     return result
 
 
+def normalize_review_agent_graph_verified_config(value: object, defaults: dict) -> dict:
+    source = value if isinstance(value, dict) else {}
+    result = copy.deepcopy(defaults)
+    if "enabled" in source:
+        result["enabled"] = source.get("enabled") is True
+    mode = clean_review_agent_config_text(source.get("mode")).lower()
+    if mode in REVIEW_AGENT_GRAPH_VERIFIED_MODES:
+        result["mode"] = mode
+    return result
+
+
 def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     defaults = default_review_agent_plan_config(plan)
     source = value if isinstance(value, dict) else {}
@@ -135,6 +151,10 @@ def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     if "provider" in source:
         result["provider"] = clean_review_agent_provider_required(source.get("provider"), strict=False)
     result["codex"] = normalize_review_agent_provider_config("codex", source.get("codex"), defaults["codex"])
+    result["graphVerified"] = normalize_review_agent_graph_verified_config(
+        source.get("graphVerified") or source.get("graph_verified"),
+        defaults["graphVerified"],
+    )
     return result
 
 
@@ -178,6 +198,10 @@ def review_agent_config(plan: str) -> dict:
             "command": codex_config["command"],
             "model": codex_config["model"],
             "reasoningEffort": codex_config["reasoningEffort"],
+        },
+        "graphVerified": {
+            "enabled": configured["graphVerified"]["enabled"] is True,
+            "mode": configured["graphVerified"]["mode"],
         },
     }
 
@@ -226,6 +250,11 @@ def update_review_agent_config(plan: str, payload: dict) -> dict:
                 payload[provider],
                 current[provider],
             )
+    if "graphVerified" in payload or "graph_verified" in payload:
+        current["graphVerified"] = normalize_review_agent_graph_verified_config(
+            payload.get("graphVerified") or payload.get("graph_verified"),
+            current.get("graphVerified") or default_review_agent_plan_config(normalized_plan)["graphVerified"],
+        )
     state["plans"][normalized_plan] = normalize_review_agent_plan_config(normalized_plan, current)
     db.save_state_item(REVIEW_AGENT_CONFIG_STATE_KEY, state)
     return review_agent_config(normalized_plan)

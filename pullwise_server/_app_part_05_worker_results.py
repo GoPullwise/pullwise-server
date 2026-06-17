@@ -59,6 +59,7 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
         "effectiveAgentConfig",
         "error",
         "errorCode",
+        "graphVerifiedReport",
         "impactGraph",
         "jobTrace",
         "preflight",
@@ -359,6 +360,9 @@ def worker_result_checksum(body: dict) -> str:
         "convergence_state": public_scan_convergence_state(
             body.get("convergence_state") or body.get("convergenceState")
         ),
+        "graphVerifiedReport": public_graph_verified_report(
+            body.get("graphVerifiedReport") or body.get("graph_verified_report")
+        ),
         "audit_swarm": public_scan_audit_swarm_from_worker_body(
             body,
             status=public_issue_text(body.get("status")).lower(),
@@ -418,6 +422,9 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     completion_audit = public_scan_completion_audit(body.get("completionAudit") or body.get("completion_audit"))
     job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
+    graph_verified_report = public_graph_verified_report(
+        body.get("graphVerifiedReport") or body.get("graph_verified_report")
+    )
     raw_repository_graph = body.get("repositoryGraph")
     repository_graph = public_repository_graph(raw_repository_graph)
     semantic_graph = public_repository_semantic_graph(body.get("semanticGraph"))
@@ -485,6 +492,8 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
             scan["jobTrace"] = job_trace
         if effective_agent_config:
             scan["effectiveAgentConfig"] = effective_agent_config
+        if graph_verified_report:
+            scan["graphVerifiedReport"] = graph_verified_report
         if repository_graph:
             scan["repositoryGraph"] = repository_graph
         if semantic_graph:
