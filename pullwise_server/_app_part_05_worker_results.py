@@ -531,10 +531,7 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
 
 def worker_result_issue_count(body: dict) -> int:
     report = public_graph_verified_report(body.get("graphVerifiedReport")) if isinstance(body, dict) else {}
-    if report:
-        return public_scan_count(report.get("confirmedCount"))
-    issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
-    return len(issue_cards)
+    return public_scan_count(report.get("confirmedCount"))
 
 
 def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -> bool:
@@ -544,8 +541,7 @@ def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -
         return True
     if public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")):
         return True
-    issue_cards = body.get("issue_cards") if isinstance(body.get("issue_cards"), list) else []
-    return bool(issue_cards)
+    return False
 
 
 def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, status: str) -> dict:
