@@ -58,16 +58,48 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
     def test_public_graph_verified_report_sanitizes_and_preserves_confirmed_only_artifacts(self) -> None:
         report = app.public_graph_verified_report(
             {
-                "run_id": "run_1",
+                "runId": "run_1",
                 "mode": "standard",
                 "base": "origin/main",
                 "head": "HEAD",
-                "confirmed_count": 1,
-                "rejected_count": 2,
-                "blocked_count": 0,
-                "final_markdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
-                "debug_markdown": "# Debug Report\n\nRejected candidates: 2",
-                "final_json": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
+                "confirmedCount": 1,
+                "rejectedCount": 2,
+                "blockedCount": 0,
+                "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
+                "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
+                "finalJson": {
+                    "confirmed": [
+                        {
+                            "candidate": {
+                                "issue_id": "issue_1",
+                                "claim": "Confirmed claim",
+                                "internal_secret": "must not leak",
+                            },
+                            "judge": {
+                                "status": "confirmed",
+                                "safe_to_show_user": True,
+                                "evidence_summary": {
+                                    "command": "pytest tests/test_issue.py",
+                                    "observable": "Assertion failed as expected.",
+                                },
+                                "raw_prompt": "must not leak",
+                            },
+                            "repro": {
+                                "status": "reproduced",
+                                "level": "L2",
+                                "commands_run": [
+                                    {
+                                        "cmd": "pytest tests/test_issue.py",
+                                        "cwd": "/worker/repo",
+                                        "exit_code": 1,
+                                        "log_path": "logs/repro.log",
+                                        "stdout": "must not leak",
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                },
             }
         )
 
@@ -75,7 +107,14 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         self.assertEqual(report["runId"], "run_1")
         self.assertEqual(report["confirmedCount"], 1)
         self.assertEqual(report["rejectedCount"], 2)
-        self.assertEqual(report["finalJson"]["confirmed"][0]["candidate"]["issue_id"], "issue_1")
+        confirmed = report["finalJson"]["confirmed"][0]
+        self.assertEqual(confirmed["candidate"]["issue_id"], "issue_1")
+        self.assertEqual(confirmed["candidate"]["claim"], "Confirmed claim")
+        self.assertEqual(confirmed["judge"]["evidence_summary"]["command"], "pytest tests/test_issue.py")
+        self.assertEqual(confirmed["repro"]["commands_run"][0]["exit_code"], 1)
+        self.assertNotIn("internal_secret", json.dumps(report))
+        self.assertNotIn("raw_prompt", json.dumps(report))
+        self.assertNotIn("stdout", json.dumps(report))
         self.assertIn("Confirmed only.", report["finalMarkdown"])
 
     def test_audit_bundle_includes_graph_verified_report_artifacts(self) -> None:
@@ -2655,6 +2694,82 @@ class WorkerPullRoutesTest(unittest.TestCase):
             payload["verificationAudit"]["rejectedReasons"],
             [{"reason": "missing_evidence", "count": 2}],
         )
+
+    def test_worker_result_persists_canonical_graph_verified_report(self) -> None:
+        scan = {
+            "id": "sc_graph_verified",
+            "repo": "acme/app",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-graph-verified-report",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "graphVerifiedReport": {
+                    "runId": "gv_run_1",
+                    "mode": "standard",
+                    "base": "origin/main",
+                    "head": "HEAD",
+                    "confirmedCount": 1,
+                    "rejectedCount": 2,
+                    "blockedCount": 0,
+                    "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
+                    "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
+                    "finalJson": {
+                        "confirmed": [
+                            {
+                                "candidate": {"issue_id": "issue-confirmed"},
+                                "verification": {"verdict": "confirmed"},
+                            }
+                        ]
+                    },
+                },
+                "graph_verified_report": {
+                    "runId": "snake_case_must_not_win",
+                    "confirmedCount": 99,
+                    "finalMarkdown": "snake case report",
+                    "finalJson": {"confirmed": [{"candidate": {"issue_id": "snake-case"}}]},
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+        self.assertEqual(result.status, HTTPStatus.OK)
+
+        stored_report = app.SCANS[0]["graphVerifiedReport"]
+        public_payload = app.scan_payload(app.SCANS[0])
+        public_report = public_payload["graphVerifiedReport"]
+
+        self.assertEqual(stored_report["runId"], "gv_run_1")
+        self.assertEqual(stored_report["confirmedCount"], 1)
+        self.assertEqual(stored_report["finalMarkdown"], "# Graph-Verified Code Review Report\n\nConfirmed only.")
+        self.assertEqual(stored_report["finalJson"]["confirmed"][0]["candidate"]["issue_id"], "issue-confirmed")
+        self.assertEqual(public_report, stored_report)
+        self.assertEqual(public_report["runId"], "gv_run_1")
+        self.assertEqual(public_report["confirmedCount"], 1)
+        self.assertEqual(public_report["finalJson"]["confirmed"][0]["verification"]["verdict"], "confirmed")
+        self.assertNotIn("graph_verified_report", app.SCANS[0])
+        self.assertNotIn("graph_verified_report", public_payload)
+        self.assertNotIn("snake_case_must_not_win", json.dumps(public_payload))
 
     def test_repository_too_large_worker_result_refunds_only_that_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}

@@ -142,6 +142,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "pygithub" },
     { name = "requests" },
+    { name = "urllib3" },
 ]
 
 [package.metadata]
@@ -149,7 +150,8 @@ requires-dist = [
     { name = "authlib", specifier = ">=1.6,<2" },
     { name = "cryptography", specifier = ">=48.0.1,<49" },
     { name = "pygithub", specifier = ">=2.9,<3" },
-    { name = "requests", specifier = ">=2.32,<3" },
+    { name = "requests", specifier = ">=2.33,<3" },
+    { name = "urllib3", specifier = ">=2.7,<3" },
 ]
 
 [[package]]

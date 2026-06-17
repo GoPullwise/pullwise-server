@@ -899,7 +899,7 @@ def scan_payload(scan: dict) -> dict:
     if audit_swarm:
         payload["auditSwarm"] = audit_swarm
     graph_verified_report = public_graph_verified_report(
-        scan.get("graphVerifiedReport") or scan.get("graph_verified_report")
+        scan.get("graphVerifiedReport")
     )
     if graph_verified_report:
         payload["graphVerifiedReport"] = graph_verified_report
@@ -2188,18 +2188,18 @@ def review_calibration_safe_bucket_payload(value: object) -> dict:
 
 def public_graph_verified_report(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
-    confirmed = public_scan_count(source.get("confirmedCount") or source.get("confirmed_count"))
-    rejected = public_scan_count(source.get("rejectedCount") or source.get("rejected_count"))
-    blocked = public_scan_count(source.get("blockedCount") or source.get("blocked_count"))
-    final_markdown = review._safe_text_lenient(source.get("finalMarkdown") or source.get("final_markdown"))[:120000]
-    debug_markdown = review._safe_text_lenient(source.get("debugMarkdown") or source.get("debug_markdown"))[:120000]
-    final_json = source.get("finalJson") or source.get("final_json")
+    confirmed = public_scan_count(source.get("confirmedCount"))
+    rejected = public_scan_count(source.get("rejectedCount"))
+    blocked = public_scan_count(source.get("blockedCount"))
+    final_markdown = review._safe_text_lenient(source.get("finalMarkdown"))[:120000]
+    debug_markdown = review._safe_text_lenient(source.get("debugMarkdown"))[:120000]
+    final_json = source.get("finalJson")
     if not isinstance(final_json, dict):
         final_json = {}
-    confirmed_items = final_json.get("confirmed") if isinstance(final_json.get("confirmed"), list) else []
+    confirmed_items = public_graph_verified_confirmed_items(final_json.get("confirmed"))
     payload = {
         "version": public_scan_compact_text(source.get("version"), max_length=64) or "graph-verified-code-review/1",
-        "runId": public_scan_compact_text(source.get("runId") or source.get("run_id"), max_length=128),
+        "runId": public_scan_compact_text(source.get("runId"), max_length=128),
         "mode": public_scan_compact_status(source.get("mode"), max_length=32),
         "base": public_scan_compact_text(source.get("base"), max_length=128),
         "head": public_scan_compact_text(source.get("head"), max_length=128),
@@ -2209,7 +2209,7 @@ def public_graph_verified_report(value: object) -> dict:
         "finalMarkdown": final_markdown,
         "debugMarkdown": debug_markdown,
         "finalJson": {
-            "confirmed": confirmed_items[:50],
+            "confirmed": confirmed_items,
         },
     }
     if not any(
@@ -2228,6 +2228,208 @@ def public_graph_verified_report(value: object) -> dict:
     ):
         return {}
     return payload
+
+
+def public_graph_verified_confirmed_items(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    items = []
+    for item in raw_items:
+        public_item = public_graph_verified_confirmed_item(item)
+        if public_item:
+            items.append(public_item)
+        if len(items) >= 50:
+            break
+    return items
+
+
+def public_graph_verified_confirmed_item(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    candidate = public_graph_verified_candidate(source.get("candidate"))
+    judge = public_graph_verified_judge(source.get("judge"))
+    repro = public_graph_verified_repro(source.get("repro"))
+    verification = public_graph_verified_verification(source.get("verification"))
+    item = {}
+    if candidate:
+        item["candidate"] = candidate
+    if judge:
+        item["judge"] = judge
+    if repro:
+        item["repro"] = repro
+    if verification:
+        item["verification"] = verification
+    return item
+
+
+def public_graph_verified_candidate(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    candidate = {}
+    for key in (
+        "issue_id",
+        "candidate_id",
+        "dedupe_key",
+        "category",
+        "severity",
+        "confidence",
+        "repro_likelihood",
+    ):
+        text = public_scan_compact_text(source.get(key), max_length=240)
+        if text:
+            candidate[key] = text
+    for key in (
+        "claim",
+        "trigger_condition",
+        "expected_behavior",
+        "actual_behavior_hypothesis",
+        "minimal_repro_idea",
+        "suggested_fix",
+        "fix_direction",
+    ):
+        text = review._safe_text_lenient(source.get(key))[:4000]
+        if text:
+            candidate[key] = text
+    evidence = public_graph_verified_evidence_list(source.get("evidence"))
+    if evidence:
+        candidate["evidence"] = evidence
+    graph_evidence = source.get("graph_evidence") if isinstance(source.get("graph_evidence"), dict) else {}
+    public_graph_evidence = {}
+    slice_id = public_scan_compact_text(graph_evidence.get("slice_id"), max_length=240)
+    if slice_id:
+        public_graph_evidence["slice_id"] = slice_id
+    files = public_scan_compact_text_list(graph_evidence.get("codegraph_files"), limit=20, max_length=500)
+    if files:
+        public_graph_evidence["codegraph_files"] = files
+    path_summary = public_scan_compact_text_list(graph_evidence.get("path_summary"), limit=20, max_length=1000)
+    if path_summary:
+        public_graph_evidence["path_summary"] = path_summary
+    if public_graph_evidence:
+        candidate["graph_evidence"] = public_graph_evidence
+    affected_tests = public_scan_compact_text_list(source.get("affected_tests"), limit=20, max_length=500)
+    if affected_tests:
+        candidate["affected_tests"] = affected_tests
+    return candidate
+
+
+def public_graph_verified_evidence_list(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    items = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        item = {}
+        file_path = public_issue_file(raw_item.get("file") or raw_item.get("path"))
+        if file_path:
+            item["file"] = file_path
+        lines = public_scan_compact_text(raw_item.get("lines"), max_length=80)
+        if lines:
+            item["lines"] = lines
+        why = review._safe_text_lenient(raw_item.get("why_it_matters") or raw_item.get("summary"))[:2000]
+        if why:
+            item["why_it_matters"] = why
+        if item:
+            items.append(item)
+        if len(items) >= 20:
+            break
+    return items
+
+
+def public_graph_verified_judge(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    judge = {}
+    for key in ("candidate_id", "status", "level", "reason"):
+        text = public_scan_compact_text(source.get(key), max_length=1000)
+        if text:
+            judge[key] = text
+    safe_to_show = source.get("safe_to_show_user")
+    if isinstance(safe_to_show, bool):
+        judge["safe_to_show_user"] = safe_to_show
+    evidence_summary = source.get("evidence_summary") if isinstance(source.get("evidence_summary"), dict) else {}
+    public_summary = {}
+    for key in ("command", "log_path", "observable"):
+        text = review._safe_text_lenient(evidence_summary.get(key))[:4000]
+        if text:
+            public_summary[key] = text
+    if public_summary:
+        judge["evidence_summary"] = public_summary
+    limitations = public_scan_compact_text_list(source.get("limitations"), limit=20, max_length=1000)
+    if limitations:
+        judge["limitations"] = limitations
+    return judge
+
+
+def public_graph_verified_repro(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    repro = {}
+    for key in ("candidate_id", "status", "level", "summary", "why_valid", "why_not_reproduced", "safety_notes"):
+        text = review._safe_text_lenient(source.get(key))[:4000]
+        if text:
+            repro[key] = text
+    commands = public_graph_verified_repro_commands(source.get("commands_run"))
+    if commands:
+        repro["commands_run"] = commands
+    files_written = public_scan_compact_text_list(source.get("files_written"), limit=50, max_length=500)
+    if files_written:
+        repro["files_written"] = files_written
+    proof = public_graph_verified_proof(source.get("proof"))
+    if proof:
+        repro["proof"] = proof
+    graph_path_exercised = source.get("graph_path_exercised")
+    if isinstance(graph_path_exercised, bool):
+        repro["graph_path_exercised"] = graph_path_exercised
+    touched_symbols = public_scan_compact_text_list(source.get("touched_symbols"), limit=50, max_length=500)
+    if touched_symbols:
+        repro["touched_symbols"] = touched_symbols
+    return repro
+
+
+def public_graph_verified_repro_commands(value: object) -> list[dict]:
+    raw_items = value if isinstance(value, list) else []
+    commands = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        command = {
+            "cmd": review._safe_text_lenient(raw_item.get("cmd"))[:4000],
+            "cwd": public_scan_compact_text(raw_item.get("cwd"), max_length=500),
+            "log_path": public_scan_compact_text(raw_item.get("log_path"), max_length=500),
+        }
+        exit_code = raw_item.get("exit_code")
+        if not isinstance(exit_code, bool):
+            try:
+                command["exit_code"] = int(exit_code)
+            except (TypeError, ValueError):
+                pass
+        duration_ms = public_scan_count(raw_item.get("duration_ms"))
+        if duration_ms:
+            command["duration_ms"] = duration_ms
+        command = {key: val for key, val in command.items() if val not in ("", None)}
+        if command:
+            commands.append(command)
+        if len(commands) >= 20:
+            break
+    return commands
+
+
+def public_graph_verified_proof(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    proof = {}
+    for key in ("type", "expected", "actual", "log_excerpt"):
+        text = review._safe_text_lenient(source.get(key))[:4000]
+        if text:
+            proof[key] = text
+    return proof
+
+
+def public_graph_verified_verification(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    verification = {}
+    for key in ("verdict", "status", "level", "summary", "reason"):
+        text = review._safe_text_lenient(source.get(key))[:4000]
+        if text:
+            verification[key] = text
+    safe_to_show = source.get("safe_to_show_user")
+    if isinstance(safe_to_show, bool):
+        verification["safe_to_show_user"] = safe_to_show
+    return verification
 
 
 def public_scan_error_code(value: object) -> str:
@@ -4752,5 +4954,3 @@ def public_scan_preflight_verifier_attempts(value: object) -> list[dict]:
             record["outputRedacted"] = True
         attempts.append(record)
     return attempts[:3]
-
-

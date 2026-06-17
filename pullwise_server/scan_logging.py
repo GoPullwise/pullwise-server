@@ -28,7 +28,7 @@ def log_event(event: str, **fields: Any) -> None:
 
 
 def json_safe_value(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, str, int)):
+    if value is None or isinstance(value, bool | str | int):
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else None
@@ -36,8 +36,8 @@ def json_safe_value(value: Any) -> Any:
         return value.decode("utf-8", errors="replace")
     if isinstance(value, dict):
         return {str(key): json_safe_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [json_safe_value(item) for item in value]
-    if isinstance(value, (set, frozenset)):
+    if isinstance(value, set | frozenset):
         return [json_safe_value(item) for item in sorted(value, key=repr)]
     return f"<{type(value).__name__}>"

@@ -61,7 +61,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 if candidate and not any(char in candidate for char in "\r\n"):
                     return candidate[:128]
         address = getattr(self, "client_address", None)
-        if isinstance(address, (tuple, list)) and address:
+        if isinstance(address, tuple | list) and address:
             return str(address[0])[:128]
         return "unknown"
 

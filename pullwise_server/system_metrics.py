@@ -317,7 +317,7 @@ def machine_metrics_history(
     clean_history = [
         item
         for item in history
-        if isinstance(_number_or_none(item.get("collectedAt")), (int, float))
+        if isinstance(_number_or_none(item.get("collectedAt")), int | float)
         and int(item.get("collectedAt")) <= sample_timestamp
     ]
 

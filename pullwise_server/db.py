@@ -952,13 +952,13 @@ def record_rate_limit_hit(
 
 
 def to_jsonable(value: Any, *, path: str = "$") -> Any:
-    if value is None or isinstance(value, (str, bool, int)):
+    if value is None or isinstance(value, str | bool | int):
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
             raise TypeError(f"State value at {path} is not a finite JSON number.")
         return value
-    if isinstance(value, (datetime.datetime, datetime.date)):
+    if isinstance(value, datetime.datetime | datetime.date):
         return value.isoformat()
     if isinstance(value, dict):
         normalized = {}

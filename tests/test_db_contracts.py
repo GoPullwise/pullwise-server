@@ -175,7 +175,16 @@ class DatabaseContractsTest(unittest.TestCase):
     def test_production_save_state_requires_key_before_persisting_github_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path, "PULLWISE_MODE": "production"}, clear=True):
+            key_path = os.path.join(temp_dir, "missing-state-key")
+            with patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_DB_PATH": db_path,
+                    "PULLWISE_MODE": "production",
+                    "PULLWISE_STATE_ENCRYPTION_KEY_PATH": key_path,
+                },
+                clear=True,
+            ):
                 with self.assertRaisesRegex(RuntimeError, "PULLWISE_STATE_ENCRYPTION_KEY_PATH"):
                     db.save_state({"users": {"usr_1": {"id": "usr_1", "githubAccessToken": "gho_user_token"}}})
 

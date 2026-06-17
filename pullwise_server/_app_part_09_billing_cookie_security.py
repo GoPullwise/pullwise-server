@@ -24,7 +24,7 @@ def billing_update_scalar(value: object) -> object | None:
         return None
     if isinstance(value, str):
         return value if value.strip() else None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return value if math.isfinite(value) else None
     return None
 
@@ -37,7 +37,7 @@ def billing_event_created(update: dict) -> int | None:
     value = update.get("eventCreated")
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         if not math.isfinite(value):
             return None
         return int(value)
@@ -465,4 +465,3 @@ def active_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
             if scan.get("status") in {"queued", "running"}:
                 return scan
     return None
-

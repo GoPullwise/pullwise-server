@@ -361,7 +361,7 @@ def worker_result_checksum(body: dict) -> str:
             body.get("convergence_state") or body.get("convergenceState")
         ),
         "graphVerifiedReport": public_graph_verified_report(
-            body.get("graphVerifiedReport") or body.get("graph_verified_report")
+            body.get("graphVerifiedReport")
         ),
         "audit_swarm": public_scan_audit_swarm_from_worker_body(
             body,
@@ -423,7 +423,7 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     job_trace = public_scan_job_trace(body.get("jobTrace") or body.get("job_trace"))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
     graph_verified_report = public_graph_verified_report(
-        body.get("graphVerifiedReport") or body.get("graph_verified_report")
+        body.get("graphVerifiedReport")
     )
     raw_repository_graph = body.get("repositoryGraph")
     repository_graph = public_repository_graph(raw_repository_graph)
@@ -1191,5 +1191,4 @@ def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
     if not public_issue_text(issue.get("title")):
         issue["title"] = f"Finding {index + 1}"
     return issue
-
 

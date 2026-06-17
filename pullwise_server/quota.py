@@ -50,7 +50,7 @@ def reset_at_for_period(period: str) -> int:
 def timestamp_value(value: object) -> int | None:
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         if not math.isfinite(value):
             return None
         candidate = int(value)

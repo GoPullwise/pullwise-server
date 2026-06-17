@@ -154,19 +154,19 @@ def normalize_review_agent_graph_verified_config(value: object, defaults: dict) 
     if mode in REVIEW_AGENT_GRAPH_VERIFIED_MODES:
         result["mode"] = mode
     result["maxRepro"] = clean_review_agent_config_int(
-        source.get("maxRepro") if "maxRepro" in source else source.get("max_repro"),
+        source.get("maxRepro"),
         int(result.get("maxRepro") or 0),
         minimum=0,
         maximum=100,
     )
     result["minScoreForRepro"] = clean_review_agent_config_int(
-        source.get("minScoreForRepro") if "minScoreForRepro" in source else source.get("min_score_for_repro"),
+        source.get("minScoreForRepro"),
         int(result.get("minScoreForRepro") or 8),
         minimum=0,
         maximum=50,
     )
-    if "requireRedGreen" in source or "require_red_green" in source:
-        result["requireRedGreen"] = (source.get("requireRedGreen") if "requireRedGreen" in source else source.get("require_red_green")) is True
+    if "requireRedGreen" in source:
+        result["requireRedGreen"] = source.get("requireRedGreen") is True
     return result
 
 
@@ -178,7 +178,7 @@ def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
         result["provider"] = clean_review_agent_provider_required(source.get("provider"), strict=False)
     result["codex"] = normalize_review_agent_provider_config("codex", source.get("codex"), defaults["codex"])
     result["graphVerified"] = normalize_review_agent_graph_verified_config(
-        source.get("graphVerified") or source.get("graph_verified"),
+        source.get("graphVerified"),
         defaults["graphVerified"],
     )
     return result
@@ -279,9 +279,9 @@ def update_review_agent_config(plan: str, payload: dict) -> dict:
                 payload[provider],
                 current[provider],
             )
-    if "graphVerified" in payload or "graph_verified" in payload:
+    if "graphVerified" in payload:
         current["graphVerified"] = normalize_review_agent_graph_verified_config(
-            payload.get("graphVerified") or payload.get("graph_verified"),
+            payload.get("graphVerified"),
             current.get("graphVerified") or default_review_agent_plan_config(normalized_plan)["graphVerified"],
         )
     state["plans"][normalized_plan] = normalize_review_agent_plan_config(normalized_plan, current)
