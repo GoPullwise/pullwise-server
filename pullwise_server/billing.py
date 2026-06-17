@@ -36,7 +36,7 @@ REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
 REVIEW_AGENT_GRAPH_VERIFIED_MODES = {"fast", "standard", "deep"}
 REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS = {
-    "enabled": False,
+    "enabled": True,
     "mode": "standard",
     "maxRepro": 0,
     "minScoreForRepro": 8,
@@ -148,8 +148,7 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
 def normalize_review_agent_graph_verified_config(value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
-    if "enabled" in source:
-        result["enabled"] = source.get("enabled") is True
+    result["enabled"] = True
     mode = clean_review_agent_config_text(source.get("mode")).lower()
     if mode in REVIEW_AGENT_GRAPH_VERIFIED_MODES:
         result["mode"] = mode
