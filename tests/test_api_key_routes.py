@@ -253,7 +253,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(start, "POST")
         self.assertEqual(start.status, HTTPStatus.CREATED)
         job = db.get_scan_job_for_scan(start.payload["id"])
-        claimed = db.claim_next_scan_jobs("wk_api", max_jobs=1, timestamp=app.now())[0]
+        claimed = db.claim_next_scan_job("wk_api", timestamp=app.now())
         db.record_scan_job_result(
             job["job_id"],
             attempt_id=f"wk_api-{claimed['attempt']}",

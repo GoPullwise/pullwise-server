@@ -588,17 +588,17 @@ variables; it is stored in the server database and attached to each claimed job.
 In distributed worker mode, total running scan capacity comes from connected
 workers. Each worker processes exactly one job at a time and does not keep a
 local job queue; server-side scan jobs remain queued until a worker finishes its
-current job and claims the next one. The server keeps only the per-user running
-fairness limit plus queue limits. Edit those limits through admin system config;
-they are not read from worker hosts and they are not read from server
-environment variables after startup.
+current job and claims the next one. The server enforces the global queue limit
+and existing permission/quota checks, but it does not reject scans because the
+same user already has queued or running jobs. Edit global queue limits through
+admin system config; they are not read from worker hosts and they are not read
+from server environment variables after startup.
 
 If all online workers are busy, new scans remain `queued` until a worker
-finishes and claims more work. The per-user running limit prevents one user from
-occupying every worker in a multi-tenant deployment.
+finishes and claims more work.
 Queued scan payloads include `queue.position`, `queue.ahead`, `queue.reason`,
-`queue.message`, and the active fairness/queue limits so the frontend can
-explain why a scan is waiting and when it moves to running.
+`queue.message`, and global queue context so the frontend can explain why a scan
+is waiting and when it moves to running.
 
 Workers poll with bounded exponential backoff when the queue is empty or the
 server is temporarily unreachable. Tune `PULLWISE_WORKER_POLL_SECONDS`,

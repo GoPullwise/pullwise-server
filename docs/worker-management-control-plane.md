@@ -22,7 +22,7 @@ array, but each worker entry is limited to operational status fields:
 - `region`
 - `version`
 - `running_jobs`
-- `max_concurrent_jobs`
+- `max_concurrent_jobs`: compatibility field that is always `1`; it is not an admin setting
 - `free_slots`
 - `last_heartbeat_at`
 

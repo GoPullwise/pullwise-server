@@ -1094,14 +1094,6 @@ def worker_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def worker_max_concurrency_cap() -> int:
-    return 1
-
-
-def normalize_worker_capacity(value: Any, *, clamp: bool = True, cap: int | None = None) -> int:
-    return 1
-
-
 WORKER_PROVIDER_VALUES = {"codex"}
 
 
@@ -1197,7 +1189,6 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     token_hash = worker_token_hash(token)
     worker_id = str(record.get("worker_id") or stable_id("wk", token_hash)).strip()
     timestamp = int(record.get("timestamp") or time.time())
-    max_concurrency_cap = record.get("max_concurrency_cap")
     provider = (normalize_provider_list(record.get("provider")) or ["codex"])[0]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
     with _LOCK, closing(connect()) as connection:
@@ -1218,8 +1209,8 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
                     token_hash,
                     provider,
                     provider_chain,
-                    normalize_worker_capacity(record.get("max_concurrent_jobs"), cap=max_concurrency_cap),
-                    normalize_worker_capacity(record.get("max_concurrent_jobs"), cap=max_concurrency_cap),
+                    1,
+                    1,
                     record.get("version"),
                     record.get("region"),
                     timestamp,
@@ -1295,8 +1286,6 @@ def get_worker(worker_id: str, *, include_deleted: bool = False) -> dict[str, An
 def update_worker(
     worker_id: str,
     patch: dict[str, Any],
-    *,
-    max_concurrency_cap: int | None = None,
 ) -> dict[str, Any] | None:
     ensure_initialized()
     allowed = {
@@ -1305,7 +1294,6 @@ def update_worker(
         "provider_chain": "provider_chain",
         "region": "region",
         "version": "version",
-        "max_concurrent_jobs": "max_concurrent_jobs",
     }
     assignments = []
     values: list[Any] = []
@@ -1313,9 +1301,7 @@ def update_worker(
         if source_key not in patch:
             continue
         value = patch[source_key]
-        if column == "max_concurrent_jobs":
-            value = normalize_worker_capacity(value, cap=max_concurrency_cap)
-        elif column == "provider_chain":
+        if column == "provider_chain":
             value = provider_list_json(value)
             if value:
                 first_provider = normalize_provider_list(value)[0]
@@ -1467,10 +1453,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     if not worker_id:
         raise ValueError("worker_id is required")
     timestamp = int(record.get("timestamp") or time.time())
-    max_concurrent_jobs = normalize_worker_capacity(
-        record.get("max_concurrent_jobs"),
-        cap=record.get("max_concurrency_cap"),
-    )
+    max_concurrent_jobs = 1
     running_jobs = max(0, min(max_concurrent_jobs, int(record.get("running_jobs") or 0)))
     free_slots = max(0, max_concurrent_jobs - running_jobs)
     provider = str(record.get("provider") or "codex")[:60]
@@ -3178,15 +3161,14 @@ def update_user_issue(user_id: str, issue_id: str, payload: dict[str, Any], *, t
     return issue_from_row(row)
 
 
-def claim_next_scan_jobs(
+def claim_next_scan_job(
     worker_id: str,
     *,
-    max_jobs: int = 1,
     lease_seconds: int = 3600,
     worker_heartbeat_timeout_seconds: int = 120,
     ready_providers: list[str] | None = None,
     timestamp: int | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any] | None:
     ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
@@ -3195,7 +3177,7 @@ def claim_next_scan_jobs(
     timeout_at = current_time + max(60, int(lease_seconds))
     ready_provider_set = set(normalize_provider_list(ready_providers)) if ready_providers is not None else None
     if ready_provider_set is not None and "codex" not in ready_provider_set:
-        return []
+        return None
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -3206,7 +3188,7 @@ def claim_next_scan_jobs(
             ).fetchone()
             if worker and (int(worker["enabled"] or 0) == 0 or worker["deleted_at"] is not None):
                 connection.commit()
-                return []
+                return None
             offline_after = max(60, int(worker_heartbeat_timeout_seconds or 120))
             connection.execute(
                 """
@@ -3238,7 +3220,7 @@ def claim_next_scan_jobs(
             ).fetchone()
             if not row:
                 connection.commit()
-                return []
+                return None
             job_id = row["job_id"]
             updated = connection.execute(
                 """
@@ -3256,18 +3238,13 @@ def claim_next_scan_jobs(
             ).rowcount
             if updated != 1:
                 connection.commit()
-                return []
+                return None
             claimed_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
             connection.commit()
-            return [claimed_job] if claimed_job else []
+            return claimed_job
         except Exception:
             connection.rollback()
             raise
-
-
-def claim_next_scan_job(worker_id: str, *, lease_seconds: int = 3600, timestamp: int | None = None) -> dict[str, Any] | None:
-    jobs = claim_next_scan_jobs(worker_id, lease_seconds=lease_seconds, timestamp=timestamp)
-    return jobs[0] if jobs else None
 
 
 def recover_expired_scan_jobs(

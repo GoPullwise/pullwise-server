@@ -178,7 +178,7 @@ class ScanRecoveryTest(unittest.TestCase):
                 "max_attempts": 3,
             }
         )
-        db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=timestamp)
+        db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=timestamp)
 
         with patch("pullwise_server.app.now", return_value=timestamp + 30):
             recovered = app.recover_interrupted_scans()
@@ -310,7 +310,7 @@ class ScanRecoveryTest(unittest.TestCase):
                 "user_id": "usr_1",
             }
         )
-        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=timestamp)[0]
+        claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=timestamp)
         db.record_scan_job_result(
             job["job_id"],
             attempt_id=f"wk_1-{claimed['attempt']}",
@@ -368,7 +368,7 @@ class ScanRecoveryTest(unittest.TestCase):
                 "user_id": "usr_1",
             }
         )
-        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=timestamp)[0]
+        claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=timestamp)
         db.record_scan_job_result(
             job["job_id"],
             attempt_id=f"wk_1-{claimed['attempt']}",
@@ -515,7 +515,7 @@ class ScanRecoveryTest(unittest.TestCase):
                 "max_attempts": 3,
             }
         )
-        db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=60, timestamp=timestamp - 120)
+        db.claim_next_scan_job("wk_1", lease_seconds=60, timestamp=timestamp - 120)
 
         recovered = app.recover_interrupted_scans()
         stored = db.get_scan_job(job["job_id"])
@@ -567,7 +567,7 @@ class ScanRecoveryTest(unittest.TestCase):
                     "max_attempts": 3,
                 }
             )
-            db.claim_next_scan_jobs("wk_stale", max_jobs=1, lease_seconds=3600, timestamp=timestamp + 1)
+            db.claim_next_scan_job("wk_stale", lease_seconds=3600, timestamp=timestamp + 1)
 
             with patch("pullwise_server.app.now", return_value=timestamp + 121):
                 recovered = app.recover_interrupted_scans()

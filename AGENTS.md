@@ -40,12 +40,12 @@ directories.
 ## Worker Codex CLI Concurrency
 
 Never configure or schedule a single worker identity to run multiple Codex
-agent CLI processes concurrently when they share the same Codex login state or
-auth files.
+agent CLI processes concurrently.
 
-- Treat worker capacity for Codex jobs as `1` unless each concurrent process has
-  fully isolated auth state, including separate `CODEX_HOME`, provider home,
-  config/cache paths, and no shared system credential store.
+- Treat worker capacity for Codex jobs as permanently fixed at `1`.
+- Do not expose, persist, or route configurable worker job parallelism,
+  max-claim, or worker-side job queue controls. The server owns the scan job
+  queue; each worker claims a new job only after finishing the current job.
 - The failure mode is correctness, not just load: concurrent Codex agent CLI
   processes can refresh the same auth token/session at the same time and
   invalidate `auth.json` or stored credential state.

@@ -80,7 +80,6 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     if not last_heartbeat or last_heartbeat < current_time - worker_heartbeat_timeout_seconds():
         return "offline"
     running_jobs = public_scan_count(worker.get("running_jobs"))
-    max_concurrent_jobs = 1
     doctor_status = public_issue_text(worker.get("doctor_status")).lower()
     codex_ready = worker.get("codex_ready")
     ready_providers = worker_record_ready_providers(worker)
@@ -95,7 +94,7 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
         return "degraded"
     if provider_readiness_blocked and running_jobs > 0:
         return "busy"
-    if running_jobs >= max_concurrent_jobs:
+    if running_jobs >= 1:
         return "busy"
     return "idle"
 
@@ -105,13 +104,6 @@ def worker_can_claim(worker: dict, *, timestamp: int | None = None) -> tuple[boo
     if status in {"idle", "busy"}:
         return True, status
     return False, status
-
-
-def worker_available_claim_slots(worker: dict) -> int:
-    capacity = 1
-    running = max(0, public_scan_count(worker.get("running_jobs")))
-    reported_free = max(0, public_scan_count(worker.get("free_slots")))
-    return max(0, min(reported_free, capacity - running))
 
 
 def worker_command_payload(command: dict | None, *, admin: bool = False) -> dict | None:

@@ -25,7 +25,7 @@ web -> server -> global job queue <- workers
 - [x] 所有用户提交的 scan 进入 server 维护的全局 FIFO 队列。
 - [x] 队列状态持久化，server 重启后 queued/running/done/failed 状态不丢失。
 - [x] 支持全局 queued/running 限制。
-- [x] 支持单用户 queued/running 限制。
+- [x] 不按单用户 queued/running 数量限制 scan 入队；server 维护全局队列，用户提交只受权限、配额和全局队列保护。
 - [x] web 能看到 queued 状态、queue position、ahead count。
 - [x] worker 固定同一时间只处理 1 个 job，并通过 heartbeat 上报 running_jobs/free_slots。
 - [x] worker 不维护本地 job 队列；只在没有活跃 job 时向 server claim 1 个任务。
@@ -119,7 +119,7 @@ web -> server -> global job queue <- workers
 - [x] 单 worker 场景：创建 worker -> 部署 -> heartbeat online -> 用户提交 scan -> worker claim -> 上传 progress -> 上传 result -> web 显示 done。
 - [x] 多 worker 场景：部署 2 台以上 worker -> 同时提交多个 scan -> 不同 worker 各领取 1 个任务 -> 无重复 claim -> 全部完成。
 - [x] 队列场景：提交超过可用 worker 数的 scan -> 多余任务保持 queued -> web 显示 queue position -> worker 完成任务后自动领取下一个。
-- [x] 用户限流场景：单用户超过 queued/running 限制 -> server 拒绝或延迟入队，并返回明确错误。
+- [x] 单用户多 scan 场景：同一用户可以连续提交多个 queued scan；server 不按该用户已有 queued/running 数量拒绝。
 - [x] 全局限流场景：全局 queued/running 达上限 -> server 拒绝新任务或返回系统繁忙。
 - [x] Worker 掉线场景：worker claim 后停止服务 -> heartbeat 超时 -> job lost/timed_out -> 未超 retry 的任务重新入队 -> 其他 worker 可继续处理。
 - [x] Worker 禁用场景：admin 禁用 worker -> 该 worker 不能 claim 新任务 -> status 显示 disabled。
@@ -136,6 +136,7 @@ web -> server -> global job queue <- workers
   - 多 worker 各自只 claim 1 个 queued job，无重复 claim。
   - 超过可用 worker 数的 job 保持 queued，前序任务完成后可继续 claim。
   - 全局 queued 限流会在创建 job 前拒绝新 scan。
+  - 同一用户多个 queued scan 不触发用户队列限制。
   - result 重复上传幂等，同 attempt/checksum 不重复写 issue。
   - result checksum 冲突返回 conflict。
   - result attempt 必须匹配当前 claim attempt；旧 attempt late result 被拒绝。

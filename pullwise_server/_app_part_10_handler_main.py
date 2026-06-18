@@ -2380,7 +2380,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
         last_error = clean_scan_error(body.get("last_error"))
-        heartbeat_capacity = 1
         heartbeat_region = public_issue_text(body.get("region")) if "region" in body else ""
         heartbeat_timestamp = now()
         machine_metrics = system_metrics.sanitize_machine_metrics_payload(
@@ -2409,7 +2408,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "version": public_issue_text(body.get("version")),
                     "provider": public_issue_text(body.get("provider")) or "codex",
                     "provider_chain": body.get("providerChain") or body.get("provider_chain"),
-                    "max_concurrent_jobs": heartbeat_capacity,
+                    "max_concurrent_jobs": 1,
                     "running_jobs": public_scan_count(body.get("running_jobs")),
                     "free_slots": public_scan_count(body.get("free_slots")),
                     "hostname": public_issue_text(body.get("hostname")),
@@ -2505,56 +2504,53 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if recovered_jobs:
                 with STATE_LOCK:
                     apply_recovered_scan_jobs_locked(recovered_jobs)
-            jobs = db.claim_next_scan_jobs(
+            job = db.claim_next_scan_job(
                 worker_id,
-                max_jobs=1,
                 lease_seconds=system_config.scan_job_lease_seconds(),
                 worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
                 ready_providers=ready_providers,
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-        if not jobs:
+        if not job:
             return self.json({"job": None, "jobs": []})
         try:
-            payloads = [scan_job_payload(job, include_clone_token=True) for job in jobs]
+            payload = scan_job_payload(job, include_clone_token=True)
         except github_auth.GitHubError as exc:
-            for job in jobs:
-                db.requeue_interrupted_scan_job(
-                    str(job.get("scan_id") or ""),
-                    reason="clone_token_unavailable",
-                    timestamp=now(),
-                )
+            db.requeue_interrupted_scan_job(
+                str(job.get("scan_id") or ""),
+                reason="clone_token_unavailable",
+                timestamp=now(),
+            )
             return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
         with STATE_LOCK:
-            for job in jobs:
-                scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
-                if scan and scan.get("status") == "queued":
-                    scan.update(
-                        {
-                            "status": "running",
-                            "claimedAt": job.get("claimed_at"),
-                            "claimedByWorkerId": worker_id,
-                            "progress": 0,
-                            "phase": "clone",
-                            "jobId": job.get("job_id"),
-                        }
-                    )
-                    db.upsert_scan(scan)
-                    mark_state_dirty()
-                scan_logging.log_event(
-                    "worker_job_claimed",
-                    scanId=job.get("scan_id"),
-                    repo=job.get("repo"),
-                    repoId=job.get("repo_id"),
-                    githubRepoId=job.get("github_repo_id"),
-                    branch=job.get("branch"),
-                    commit=job.get("commit"),
-                    workerId=worker_id,
-                    jobId=job.get("job_id"),
-                    attempt=job.get("attempt"),
+            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+            if scan and scan.get("status") == "queued":
+                scan.update(
+                    {
+                        "status": "running",
+                        "claimedAt": job.get("claimed_at"),
+                        "claimedByWorkerId": worker_id,
+                        "progress": 0,
+                        "phase": "clone",
+                        "jobId": job.get("job_id"),
+                    }
                 )
-        return self.json({"job": payloads[0], "jobs": payloads})
+                db.upsert_scan(scan)
+                mark_state_dirty()
+            scan_logging.log_event(
+                "worker_job_claimed",
+                scanId=job.get("scan_id"),
+                repo=job.get("repo"),
+                repoId=job.get("repo_id"),
+                githubRepoId=job.get("github_repo_id"),
+                branch=job.get("branch"),
+                commit=job.get("commit"),
+                workerId=worker_id,
+                jobId=job.get("job_id"),
+                attempt=job.get("attempt"),
+            )
+        return self.json({"job": payload, "jobs": [payload]})
 
     def handle_worker_job_progress(self, job_id: str, body: dict, worker_record: dict) -> None:
         job_id = clean_github_access_text(job_id) or ""

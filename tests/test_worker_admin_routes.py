@@ -343,7 +343,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
-        claimed = db.claim_next_scan_jobs(worker_id, max_jobs=1, lease_seconds=3600, timestamp=timestamp)[0]
+        claimed = db.claim_next_scan_job(worker_id, lease_seconds=3600, timestamp=timestamp)
         db.update_scan_job_progress(
             claimed["job_id"],
             {"phase": "ai", "progress": 50, "message": "reviewing", "started_at": timestamp + 10},
@@ -395,10 +395,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.SCANS = scans
         for scan in scans:
             app.create_scan_job_for_scan(scan)
-        claimed = db.claim_next_scan_jobs(worker_id, max_jobs=2, lease_seconds=3600, timestamp=timestamp)
-        self.assertEqual(len(claimed), 1)
+        claimed = db.claim_next_scan_job(worker_id, lease_seconds=3600, timestamp=timestamp)
+        self.assertIsNotNone(claimed)
+        self.assertIsNone(db.claim_next_scan_job(worker_id, lease_seconds=3600, timestamp=timestamp + 1))
         db.update_scan_job_progress(
-            claimed[0]["job_id"],
+            claimed["job_id"],
             {"phase": "ai", "progress": 50, "message": "reviewing", "started_at": timestamp + 10},
         )
 
@@ -413,7 +414,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "free_slots": 0,
                 "doctor_status": "ok",
                 "codex_ready": True,
-                "active_job_ids": [job["job_id"] for job in claimed],
+                "active_job_ids": [claimed["job_id"]],
             },
             headers={"Authorization": f"Bearer {token}"},
         )

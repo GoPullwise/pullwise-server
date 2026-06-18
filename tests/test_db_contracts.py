@@ -597,7 +597,7 @@ class DatabaseContractsTest(unittest.TestCase):
                 )
                 queued_job = db.get_scan_job("job_lifecycle")
 
-                claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=120)[0]
+                claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=120)
                 stale_attempt_result = db.record_scan_job_result(
                     "job_claimed_lifecycle",
                     attempt_id="wk_1-2",
@@ -642,7 +642,7 @@ class DatabaseContractsTest(unittest.TestCase):
                         "user_id": "usr_1",
                     }
                 )
-                claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=120)[0]
+                claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=120)
                 payload = {
                     "status": "done",
                     "summary": {"high": 1},

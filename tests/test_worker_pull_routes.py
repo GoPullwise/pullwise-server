@@ -4191,7 +4191,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
-        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, timestamp=app.now())[0]
+        claimed = db.claim_next_scan_job("wk_1", timestamp=app.now())
         self.assertEqual(claimed["job_id"], job["job_id"])
         db.update_scan_job_progress(
             job["job_id"],
@@ -4234,7 +4234,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
-        claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, timestamp=app.now())[0]
+        claimed = db.claim_next_scan_job("wk_1", timestamp=app.now())
         db.update_scan_job_progress(
             job["job_id"],
             {"phase": "ai", "progress": 80, "message": "reviewing"},
@@ -4556,12 +4556,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         lock = threading.Lock()
 
         def claim(worker_id: str) -> None:
-            jobs = db.claim_next_scan_jobs(
-                worker_id,
-                max_jobs=1,
-            )
+            job = db.claim_next_scan_job(worker_id)
             with lock:
-                claimed.extend(job["job_id"] for job in jobs)
+                if job:
+                    claimed.append(job["job_id"])
 
         threads = [threading.Thread(target=claim, args=(f"wk_{index}",)) for index in range(2)]
         for thread in threads:
@@ -4587,7 +4585,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "max_attempts": 1,
             }
         )
-        db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=60, timestamp=timestamp - 120)
+        db.claim_next_scan_job("wk_1", lease_seconds=60, timestamp=timestamp - 120)
 
         recovered = db.recover_expired_scan_jobs(timestamp)
         stored = db.get_scan_job(job["job_id"])

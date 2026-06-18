@@ -764,14 +764,6 @@ def scan_job_startup_grace_seconds() -> int:
     return max(30, int_setting("scan.jobStartupGraceSeconds"))
 
 
-def worker_max_claim_jobs() -> int:
-    return 1
-
-
-def worker_max_concurrency_cap() -> int:
-    return 1
-
-
 def worker_heartbeat_timeout_seconds() -> int:
     return max(60, int_setting("worker.heartbeatTimeoutSeconds"))
 

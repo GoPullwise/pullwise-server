@@ -392,18 +392,6 @@ def public_scan_count(value: object) -> int:
     return max(0, count)
 
 
-def worker_max_concurrency_cap() -> int:
-    return 1
-
-
-def worker_admin_capacity(value: object) -> int:
-    return 1
-
-
-def worker_heartbeat_capacity(value: object) -> int:
-    return 1
-
-
 def public_scan_issue_counts(value: object) -> dict:
     counts = value if isinstance(value, dict) else {}
     return {
