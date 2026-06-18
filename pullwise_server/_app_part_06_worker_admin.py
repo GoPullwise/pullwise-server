@@ -227,6 +227,304 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
     return payload
 
 
+LOG_STREAM_LOCK = threading.RLock()
+LOG_STREAM_SESSIONS: dict[str, dict] = {}
+LOG_STREAM_TOKEN_RE = re.compile(
+    r"(?i)(x-access-token:)[^\s@]+|"
+    r"(Bearer\s+)[A-Za-z0-9._~+/=-]+|"
+    r"(pw[krs]_[A-Za-z0-9._~+/=-]+)|"
+    r"(sk-[A-Za-z0-9._~+/=-]+)"
+)
+
+
+def log_stream_idle_timeout_seconds() -> int:
+    return max(30, min(3600, env_int("PULLWISE_LOG_STREAM_IDLE_TIMEOUT_SECONDS", 300)))
+
+
+def log_stream_max_lines() -> int:
+    return max(200, min(5000, env_int("PULLWISE_LOG_STREAM_MAX_LINES", 2000)))
+
+
+def log_stream_read_max_bytes() -> int:
+    return max(4096, min(1024 * 1024, env_int("PULLWISE_LOG_STREAM_READ_MAX_BYTES", 128 * 1024)))
+
+
+def redact_log_stream_text(value: object) -> str:
+    text = public_issue_text(value)
+    if not text:
+        return ""
+    redacted = LOG_STREAM_TOKEN_RE.sub(lambda match: f"{match.group(1) or match.group(2) or ''}[redacted]", text)
+    return redacted[:4000]
+
+
+def log_stream_cleanup_expired(timestamp: int | None = None) -> None:
+    current_time = int(timestamp if timestamp is not None else now())
+    with LOG_STREAM_LOCK:
+        for session_id, session in list(LOG_STREAM_SESSIONS.items()):
+            if session.get("status") != "active" and session.get("updated_at", 0) < current_time - 60:
+                LOG_STREAM_SESSIONS.pop(session_id, None)
+                continue
+            if int(session.get("expires_at") or 0) < current_time:
+                session["status"] = "paused"
+                session["updated_at"] = current_time
+
+
+def log_stream_session_payload(session: dict | None) -> dict | None:
+    if not session:
+        return None
+    return {
+        "id": public_issue_text(session.get("id")),
+        "source": public_issue_text(session.get("source")),
+        "worker_id": public_issue_text(session.get("worker_id")),
+        "status": public_issue_text(session.get("status")) or "paused",
+        "created_at": pull_request_timestamp(session.get("created_at")),
+        "updated_at": pull_request_timestamp(session.get("updated_at")),
+        "expires_at": pull_request_timestamp(session.get("expires_at")),
+        "nextSequence": int(session.get("next_sequence") or 1),
+        "earliestSequence": log_stream_earliest_sequence(session),
+    }
+
+
+def log_stream_earliest_sequence(session: dict) -> int:
+    lines = session.get("lines") if isinstance(session.get("lines"), list) else []
+    if not lines:
+        return int(session.get("next_sequence") or 1)
+    return int(lines[0].get("sequence") or 1)
+
+
+def log_stream_append_locked(session: dict, entries: list[dict], *, timestamp: int | None = None) -> list[dict]:
+    appended = []
+    current_time = int(timestamp if timestamp is not None else now())
+    lines = session.setdefault("lines", [])
+    for entry in entries[:500]:
+        line = redact_log_stream_text(entry.get("line"))
+        if not line:
+            continue
+        item = {
+            "sequence": int(session.get("next_sequence") or 1),
+            "timestamp": pull_request_timestamp(entry.get("timestamp")) or current_time,
+            "source": public_issue_text(entry.get("source")) or public_issue_text(session.get("source")),
+            "stream": public_issue_text(entry.get("stream")) or "log",
+            "line": line,
+        }
+        session["next_sequence"] = item["sequence"] + 1
+        lines.append(item)
+        appended.append(item)
+    max_lines = log_stream_max_lines()
+    if len(lines) > max_lines:
+        del lines[: len(lines) - max_lines]
+    session["updated_at"] = current_time
+    return appended
+
+
+def server_log_path_for_timestamp(timestamp: float | None = None) -> str:
+    recorded_at = float(timestamp if timestamp is not None else time.time())
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging_config.DailyDatedFileHandler):
+            return handler.path_for_date(handler.log_date_for_timestamp(recorded_at))
+    log_dir = env("PULLWISE_LOG_DIR", "") or os.path.join(project_root(), ".pullwise", "logs")
+    rotation_time = logging_config.parse_rotation_time(env("PULLWISE_LOG_ROTATION_TIME", "00:00"))
+    helper = logging_config.DailyDatedFileHandler(log_dir, rotation_time=rotation_time)
+    return helper.path_for_date(helper.log_date_for_timestamp(recorded_at))
+
+
+def log_stream_file_offset(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def read_log_file_incremental(path: str, offset: int, partial: str, *, max_bytes: int) -> tuple[list[str], int, str]:
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return [], offset, partial
+    start = offset if 0 <= offset <= size else 0
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(start)
+            chunk = stream.read(max_bytes)
+            next_offset = stream.tell()
+    except OSError:
+        return [], offset, partial
+    if not chunk:
+        return [], next_offset, partial
+    text = partial + chunk.decode("utf-8", errors="replace")
+    parts = text.splitlines(keepends=True)
+    next_partial = ""
+    if parts and not parts[-1].endswith(("\n", "\r")):
+        next_partial = parts.pop()
+    return [part.rstrip("\r\n") for part in parts], next_offset, next_partial
+
+
+def collect_server_log_stream(session_id: str) -> None:
+    session_id = public_issue_text(session_id)
+    if not session_id:
+        return
+    with LOG_STREAM_LOCK:
+        session = LOG_STREAM_SESSIONS.get(session_id)
+        if not session or session.get("status") != "active" or session.get("source") != "server":
+            return
+        current_path = server_log_path_for_timestamp()
+        path = public_issue_text(session.get("server_path")) or current_path
+        if path != current_path and not os.path.exists(path):
+            path = current_path
+            session["server_offset"] = 0
+            session["server_partial"] = ""
+        lines, next_offset, next_partial = read_log_file_incremental(
+            path,
+            int(session.get("server_offset") or 0),
+            str(session.get("server_partial") or ""),
+            max_bytes=log_stream_read_max_bytes(),
+        )
+        session["server_path"] = path
+        session["server_offset"] = next_offset
+        session["server_partial"] = next_partial
+        if path != current_path and not lines:
+            session["server_path"] = current_path
+            session["server_offset"] = 0
+            session["server_partial"] = ""
+        if lines:
+            log_stream_append_locked(
+                session,
+                [{"source": "server", "stream": "app", "line": line, "timestamp": now()} for line in lines],
+            )
+
+
+def create_log_stream_session(source: str, *, worker_id: str = "") -> dict:
+    source = public_issue_text(source).lower()
+    if source not in {"server", "worker"}:
+        raise ValueError("Log source must be server or worker.")
+    worker_id = clean_github_access_text(worker_id) or ""
+    if source == "worker":
+        if not worker_id:
+            raise ValueError("worker_id is required for worker log streams.")
+        if not db.get_worker(worker_id, include_deleted=True):
+            raise ResourceNotFound("Worker not found.")
+    timestamp = now()
+    session_id = make_id("log")
+    session = {
+        "id": session_id,
+        "source": source,
+        "worker_id": worker_id,
+        "status": "active",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "expires_at": timestamp + log_stream_idle_timeout_seconds(),
+        "next_sequence": 1,
+        "lines": [],
+    }
+    if source == "server":
+        path = server_log_path_for_timestamp(timestamp)
+        session["server_path"] = path
+        session["server_offset"] = log_stream_file_offset(path)
+        session["server_partial"] = ""
+    with LOG_STREAM_LOCK:
+        log_stream_cleanup_expired(timestamp)
+        for existing in LOG_STREAM_SESSIONS.values():
+            if existing.get("source") == source and public_issue_text(existing.get("worker_id")) == worker_id:
+                existing["status"] = "paused"
+                existing["updated_at"] = timestamp
+        LOG_STREAM_SESSIONS[session_id] = session
+    return session
+
+
+def pause_log_stream_session(session_id: str) -> dict | None:
+    session_id = public_issue_text(session_id)
+    if not session_id:
+        return None
+    timestamp = now()
+    with LOG_STREAM_LOCK:
+        session = LOG_STREAM_SESSIONS.get(session_id)
+        if not session:
+            return None
+        session["status"] = "paused"
+        session["updated_at"] = timestamp
+        session["expires_at"] = timestamp
+        return dict(session)
+
+
+def log_stream_lines_payload(session_id: str, *, after: object = None, limit: object = None) -> dict | None:
+    session_id = public_issue_text(session_id)
+    if not session_id:
+        return None
+    collect_server_log_stream(session_id)
+    timestamp = now()
+    after_sequence = public_scan_count(after)
+    safe_limit = max(1, min(500, public_scan_count(limit) or 200))
+    with LOG_STREAM_LOCK:
+        log_stream_cleanup_expired(timestamp)
+        session = LOG_STREAM_SESSIONS.get(session_id)
+        if not session:
+            return None
+        if session.get("status") == "active":
+            session["expires_at"] = timestamp + log_stream_idle_timeout_seconds()
+            session["updated_at"] = timestamp
+        lines = session.get("lines") if isinstance(session.get("lines"), list) else []
+        selected = [line for line in lines if int(line.get("sequence") or 0) > after_sequence][:safe_limit]
+        earliest = log_stream_earliest_sequence(session)
+        return {
+            "ok": True,
+            "session": log_stream_session_payload(session),
+            "lines": selected,
+            "nextSequence": int(session.get("next_sequence") or 1),
+            "earliestSequence": earliest,
+            "truncated": bool(lines and after_sequence and after_sequence < earliest - 1),
+        }
+
+
+def worker_log_stream_poll_payload(worker_id: str) -> dict | None:
+    worker_id = clean_github_access_text(worker_id) or ""
+    if not worker_id:
+        return None
+    timestamp = now()
+    with LOG_STREAM_LOCK:
+        log_stream_cleanup_expired(timestamp)
+        active = [
+            session
+            for session in LOG_STREAM_SESSIONS.values()
+            if session.get("source") == "worker"
+            and session.get("status") == "active"
+            and public_issue_text(session.get("worker_id")) == worker_id
+            and int(session.get("expires_at") or 0) >= timestamp
+        ]
+        if not active:
+            return None
+        session = sorted(active, key=lambda item: int(item.get("created_at") or 0), reverse=True)[0]
+        return log_stream_session_payload(session)
+
+
+def append_worker_log_stream_lines(session_id: str, worker_id: str, entries: object) -> dict | None:
+    session_id = public_issue_text(session_id)
+    worker_id = clean_github_access_text(worker_id) or ""
+    if not session_id or not worker_id:
+        return None
+    if not isinstance(entries, list):
+        raise ValueError("lines must be a list.")
+    timestamp = now()
+    normalized = [entry for entry in entries if isinstance(entry, dict)]
+    with LOG_STREAM_LOCK:
+        session = LOG_STREAM_SESSIONS.get(session_id)
+        if (
+            not session
+            or session.get("source") != "worker"
+            or public_issue_text(session.get("worker_id")) != worker_id
+        ):
+            return None
+        if session.get("status") != "active" or int(session.get("expires_at") or 0) < timestamp:
+            session["status"] = "paused"
+            session["updated_at"] = timestamp
+            return {"accepted": False, "session": log_stream_session_payload(session), "nextSequence": session.get("next_sequence", 1)}
+        appended = log_stream_append_locked(session, normalized, timestamp=timestamp)
+        return {
+            "accepted": True,
+            "appended": len(appended),
+            "session": log_stream_session_payload(session),
+            "nextSequence": int(session.get("next_sequence") or 1),
+        }
+
+
 def worker_safe_service_id(worker_id: object) -> str:
     text = public_issue_text(worker_id)
     allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"

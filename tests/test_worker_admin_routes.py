@@ -65,6 +65,7 @@ def reset_state() -> None:
     app.BILLING_EVENTS = {}
     app.BILLING_PENDING_UPDATES = []
     app.LATEST_WORKER_RELEASE_CACHE.update({"version": "", "checked_at": 0.0})
+    app.LOG_STREAM_SESSIONS.clear()
     app.STATE_LOADED = True
     app.STATE_DIRTY = False
 
@@ -245,6 +246,80 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
         popen.assert_not_called()
+
+    def test_admin_server_log_stream_reads_only_lines_after_enable(self) -> None:
+        log_path = os.path.join(self.temp_dir.name, "pullwise.log")
+        with open(log_path, "w", encoding="utf-8") as stream:
+            stream.write("old line\n")
+        with patch.object(app, "server_log_path_for_timestamp", return_value=log_path):
+            start = RouteHarness("/admin/log-streams", {"source": "server"}, cookie=self.admin_cookie)
+            app.PullwiseHandler.route(start, "POST")
+            self.assertEqual(start.status, HTTPStatus.CREATED)
+            session_id = start.payload["session"]["id"]
+            with open(log_path, "a", encoding="utf-8") as stream:
+                stream.write("new line\n")
+
+            lines = RouteHarness(f"/admin/log-streams/{session_id}/lines?after=0&limit=10", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(lines, "GET")
+
+        self.assertEqual(lines.status, HTTPStatus.OK)
+        self.assertEqual([line["line"] for line in lines.payload["lines"]], ["new line"])
+        self.assertEqual(lines.payload["lines"][0]["sequence"], 1)
+
+    def test_worker_log_stream_is_polled_uploaded_and_paused(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        worker_auth = {"Authorization": f"Bearer {token}"}
+        start = RouteHarness(
+            "/admin/log-streams",
+            {"source": "worker", "worker_id": worker_id},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(start, "POST")
+        self.assertEqual(start.status, HTTPStatus.CREATED)
+        session_id = start.payload["session"]["id"]
+
+        poll = RouteHarness("/worker/commands/poll", {"worker_id": worker_id}, headers=worker_auth)
+        app.PullwiseHandler.route(poll, "POST")
+        self.assertEqual(poll.status, HTTPStatus.OK)
+        self.assertEqual(poll.payload["logSession"]["id"], session_id)
+
+        upload = RouteHarness(
+            f"/worker/log-streams/{session_id}/lines",
+            {
+                "worker_id": worker_id,
+                "lines": [
+                    {
+                        "source": "worker",
+                        "stream": "journal",
+                        "timestamp": 1781200000,
+                        "line": "claimed job with Bearer secret_token",
+                    }
+                ],
+            },
+            headers=worker_auth,
+        )
+        app.PullwiseHandler.route(upload, "POST")
+        self.assertEqual(upload.status, HTTPStatus.OK)
+        self.assertTrue(upload.payload["accepted"])
+        self.assertEqual(upload.payload["appended"], 1)
+
+        lines = RouteHarness(f"/admin/log-streams/{session_id}/lines?after=0", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(lines, "GET")
+        self.assertEqual(lines.status, HTTPStatus.OK)
+        self.assertEqual(lines.payload["lines"][0]["sequence"], 1)
+        self.assertIn("Bearer [redacted]", lines.payload["lines"][0]["line"])
+        self.assertNotIn("secret_token", lines.payload["lines"][0]["line"])
+
+        pause = RouteHarness(f"/admin/log-streams/{session_id}/pause", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(pause, "POST")
+        self.assertEqual(pause.status, HTTPStatus.OK)
+        self.assertEqual(pause.payload["session"]["status"], "paused")
+
+        poll_after_pause = RouteHarness("/worker/commands/poll", {"worker_id": worker_id}, headers=worker_auth)
+        app.PullwiseHandler.route(poll_after_pause, "POST")
+        self.assertEqual(poll_after_pause.status, HTTPStatus.OK)
+        self.assertIsNone(poll_after_pause.payload["logSession"])
 
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
         handler = RouteHarness(

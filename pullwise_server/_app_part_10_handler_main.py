@@ -1998,6 +1998,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     keys=("workers",),
                 )
             )
+        if len(segments) == 4 and segments[:2] == ["admin", "log-streams"] and segments[3] == "lines":
+            payload = log_stream_lines_payload(segments[2], after=params.get("after"), limit=params.get("limit"))
+            if payload is None:
+                return self.error(HTTPStatus.NOT_FOUND, "Log stream not found.")
+            return self.json(payload)
         if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
             worker = db.get_worker(segments[2], include_deleted=True)
             if not worker:
@@ -2037,6 +2042,21 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 payload.get("pid"),
             )
             return self.json(payload, HTTPStatus.ACCEPTED)
+        if segments == ["admin", "log-streams"]:
+            source = public_issue_text(body.get("source")).lower()
+            worker_id = public_issue_text(body.get("worker_id") or body.get("workerId"))
+            try:
+                session_record = create_log_stream_session(source, worker_id=worker_id)
+            except ResourceNotFound as exc:
+                return self.error(HTTPStatus.NOT_FOUND, str(exc))
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            return self.json({"ok": True, "session": log_stream_session_payload(session_record)}, HTTPStatus.CREATED)
+        if len(segments) == 4 and segments[:2] == ["admin", "log-streams"] and segments[3] == "pause":
+            session_record = pause_log_stream_session(segments[2])
+            if not session_record:
+                return self.error(HTTPStatus.NOT_FOUND, "Log stream not found.")
+            return self.json({"ok": True, "session": log_stream_session_payload(session_record)})
         if segments == ["admin", "review-calibration", "labels"]:
             return self.error(HTTPStatus.GONE, "Review calibration labels have been retired; use Graph-Verified review outcomes.")
         if segments == ["admin", "workers", "releases"]:
@@ -2320,8 +2340,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return record
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
-        allow_disabled = segments in (["worker", "heartbeat"], ["worker", "commands", "poll"]) or (
-            len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status"
+        allow_disabled = (
+            segments in (["worker", "heartbeat"], ["worker", "commands", "poll"])
+            or (len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status")
+            or (len(segments) == 4 and segments[:2] == ["worker", "log-streams"] and segments[3] == "lines")
         )
         allow_deleted = allow_disabled
         worker_record = self.require_worker(allow_disabled=allow_disabled, include_deleted=allow_deleted)
@@ -2343,6 +2365,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_worker_job_result(segments[2], body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status":
             return self.handle_worker_command_status(segments[2], body, worker_record)
+        if len(segments) == 4 and segments[:2] == ["worker", "log-streams"] and segments[3] == "lines":
+            return self.handle_worker_log_stream_lines(segments[2], body, worker_record)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def authenticated_worker_id_matches(self, worker_record: dict, worker_id: str) -> bool:
@@ -2372,8 +2396,26 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "running_jobs": running_jobs,
                 },
                 "command": worker_command_payload(command),
+                "logSession": worker_log_stream_poll_payload(worker_id),
             }
         )
+
+    def handle_worker_log_stream_lines(self, session_id: str, body: dict, worker_record: dict) -> None:
+        session_id = clean_github_access_text(session_id) or ""
+        if not session_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "log stream id is required.")
+        worker_id = clean_github_access_text(body.get("worker_id")) or ""
+        if not worker_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        try:
+            result = append_worker_log_stream_lines(session_id, worker_id, body.get("lines"))
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if result is None:
+            return self.error(HTTPStatus.NOT_FOUND, "Log stream not found.")
+        return self.json({"ok": True, **result})
 
     def handle_worker_heartbeat(self, body: dict, worker_record: dict) -> None:
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
@@ -2593,6 +2635,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     scan.pop(key, None)
                 db.upsert_scan(scan)
                 mark_state_dirty()
+        scan_logging.log_event(
+            "worker_job_progress",
+            scanId=job.get("scan_id"),
+            repo=job.get("repo"),
+            repoId=job.get("repo_id"),
+            githubRepoId=job.get("github_repo_id"),
+            branch=job.get("branch"),
+            commit=job.get("commit"),
+            workerId=worker_record.get("worker_id"),
+            jobId=job.get("job_id"),
+            phase=phase,
+            progress=public_scan_progress(body.get("progress")),
+            message=public_issue_text(body.get("message")),
+        )
         return self.json({"ok": True, "job": scan_job_payload(job)})
 
     def handle_worker_job_result(self, job_id: str, body: dict, worker_record: dict) -> None:

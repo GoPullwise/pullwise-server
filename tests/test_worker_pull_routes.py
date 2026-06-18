@@ -3023,9 +3023,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
             },
             headers=self.auth,
         )
-        app.PullwiseHandler.route(progress, "POST")
+        with patch.object(app.scan_logging, "log_event") as log_event:
+            app.PullwiseHandler.route(progress, "POST")
 
         self.assertEqual(progress.status, HTTPStatus.OK)
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.args[0], "worker_job_progress")
+        self.assertEqual(log_event.call_args.kwargs["scanId"], "sc_progress_audit")
+        self.assertEqual(log_event.call_args.kwargs["workerId"], "wk_1")
+        self.assertEqual(log_event.call_args.kwargs["jobId"], job["job_id"])
+        self.assertEqual(log_event.call_args.kwargs["phase"], "ai")
+        self.assertEqual(log_event.call_args.kwargs["progress"], 55)
         payload = app.scan_payload(app.SCANS[0])
         self.assertNotIn("completionAudit", payload)
         self.assertNotIn("jobTrace", payload)
