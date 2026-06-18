@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
 from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, system_config, system_metrics
+from ._app_imports import sync_compat_globals as _sync_compat_globals
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("pullwise_server.access")
@@ -527,12 +528,29 @@ def ensure_state_loaded() -> None:
             db.upsert_issue(issue)
         STATE_LOADED = True
         STATE_DIRTY = False
+        _sync_compat_globals(
+            globals(),
+            (
+                "USERS",
+                "SESSIONS",
+                "GITHUB_STATES",
+                "SETTINGS",
+                "BILLING_EVENTS",
+                "BILLING_PENDING_UPDATES",
+                "SCANS",
+                "ISSUES",
+                "SCAN_BY_ID",
+                "STATE_LOADED",
+                "STATE_DIRTY",
+            ),
+        )
 
 
 def mark_state_dirty() -> None:
     global STATE_DIRTY
     with STATE_LOCK:
         STATE_DIRTY = True
+        _sync_compat_globals(globals(), ("STATE_DIRTY",))
 
 
 def persist_state(*, force: bool = False) -> None:
@@ -558,6 +576,7 @@ def persist_state(*, force: bool = False) -> None:
             logger.exception("Failed to persist app state.")
             return
         STATE_DIRTY = False
+        _sync_compat_globals(globals(), ("SETTINGS", "STATE_DIRTY"))
 
 
 def cleanup_server_resources_if_due(*, force: bool = False) -> dict[str, int]:
@@ -567,6 +586,7 @@ def cleanup_server_resources_if_due(*, force: bool = False) -> dict[str, int]:
     if not force and current - LAST_RESOURCE_CLEANUP_AT < interval:
         return {}
     LAST_RESOURCE_CLEANUP_AT = current
+    _sync_compat_globals(globals(), ("LAST_RESOURCE_CLEANUP_AT",))
     try:
         return cleanup_server_resources()
     except Exception:

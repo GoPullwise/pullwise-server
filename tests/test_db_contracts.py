@@ -65,6 +65,67 @@ class DatabaseContractsTest(unittest.TestCase):
 
         self.assertEqual(reconcile.call_count, 1)
 
+    def test_initialize_migrates_legacy_worker_capacity_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            CREATE TABLE workers (
+                                worker_id TEXT PRIMARY KEY,
+                                name TEXT,
+                                token_hash TEXT UNIQUE,
+                                version TEXT,
+                                provider TEXT,
+                                provider_chain TEXT,
+                                enabled INTEGER NOT NULL DEFAULT 1,
+                                max_concurrent_jobs INTEGER NOT NULL DEFAULT 4,
+                                running_jobs INTEGER NOT NULL DEFAULT 2,
+                                free_slots INTEGER NOT NULL DEFAULT 2,
+                                hostname TEXT,
+                                region TEXT,
+                                last_error TEXT,
+                                status TEXT NOT NULL DEFAULT 'online',
+                                first_seen_at INTEGER NOT NULL DEFAULT 100,
+                                last_heartbeat_at INTEGER,
+                                token_last_used_at INTEGER,
+                                disabled_at INTEGER,
+                                deleted_at INTEGER
+                            )
+                            """
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO workers (
+                                worker_id, name, token_hash, version, provider, provider_chain,
+                                running_jobs, hostname, region, status, first_seen_at,
+                                last_heartbeat_at
+                            )
+                            VALUES (
+                                'wk_legacy', 'Legacy worker', 'hash_legacy', '0.1.0',
+                                'codex', '["codex"]', 3, 'host-1', 'us-east',
+                                'online', 100, 110
+                            )
+                            """
+                        )
+
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    columns = [row[1] for row in connection.execute("PRAGMA table_info(workers)").fetchall()]
+                    row = connection.execute("SELECT * FROM workers WHERE worker_id = 'wk_legacy'").fetchone()
+
+        self.assertNotIn("max_concurrent_jobs", columns)
+        self.assertNotIn("free_slots", columns)
+        self.assertIn("running_jobs", columns)
+        self.assertIn("created_at", columns)
+        self.assertIn("updated_at", columns)
+        self.assertIsNotNone(row)
+        self.assertEqual(row[columns.index("running_jobs")], 1)
+        self.assertIsNotNone(row[columns.index("created_at")])
+        self.assertIsNotNone(row[columns.index("updated_at")])
+
     def test_load_state_closes_initialize_and_read_connections(self) -> None:
         initialize_connection = FakeConnection()
         read_connection = FakeConnection([("users", "{}")])

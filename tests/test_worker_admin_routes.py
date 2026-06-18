@@ -1519,9 +1519,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         worker = db.get_worker(worker_id)
-        self.assertEqual(worker["max_concurrent_jobs"], 1)
         self.assertEqual(worker["running_jobs"], 1)
-        self.assertEqual(worker["free_slots"], 0)
+        self.assertNotIn("max_concurrent_jobs", worker)
+        self.assertNotIn("free_slots", worker)
         self.assertIsNotNone(worker["last_heartbeat_at"])
         self.assertEqual(worker["doctor_status"], "ok")
         self.assertEqual(worker["codex_ready"], 1)
@@ -1592,15 +1592,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertTrue(admin.payload["workers"][0]["codex_ready"])
         self.assertTrue(admin.payload["workers"][0]["systemd_active"])
 
-    def test_status_capacity_increases_with_multiple_online_workers(self) -> None:
+    def test_status_reports_worker_counts_without_capacity_fields(self) -> None:
         payload_one, token_one = self.create_worker()
         worker_one_id = payload_one["worker_id"]
         payload_two, token_two = self.create_worker()
         worker_two_id = payload_two["worker_id"]
 
-        for worker_id, token, capacity, running in (
-            (worker_one_id, token_one, 4, 1),
-            (worker_two_id, token_two, 2, 0),
+        for worker_id, token, running in (
+            (worker_one_id, token_one, 1),
+            (worker_two_id, token_two, 0),
         ):
             heartbeat = RouteHarness(
                 "/worker/heartbeat",
@@ -1608,9 +1608,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                     "worker_id": worker_id,
                     "provider": "codex",
                     "version": "0.1.0",
-                    "max_concurrent_jobs": capacity,
+                    "max_concurrent_jobs": 99,
                     "running_jobs": running,
-                    "free_slots": capacity - running,
+                    "free_slots": 99,
                     "doctor_status": "ok",
                     "codex_ready": True,
                 },
@@ -1619,14 +1619,32 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(heartbeat, "POST")
             self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
+        scan = {
+            "id": "sc_busy_worker",
+            "repo": "acme/busy",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        db.claim_next_scan_job(worker_one_id)
+
         public = RouteHarness("/status/system")
         app.PullwiseHandler.route(public, "GET")
 
         self.assertEqual(public.status, HTTPStatus.OK)
         self.assertEqual(public.payload["onlineWorkerCount"], 2)
         self.assertEqual(public.payload["totalWorkerCount"], 2)
-        self.assertEqual(public.payload["totalCapacity"], 2)
-        self.assertEqual(public.payload["availableCapacity"], 1)
+        self.assertEqual(public.payload["busyWorkerCount"], 1)
+        self.assertEqual(public.payload["idleWorkerCount"], 1)
+        self.assertNotIn("totalCapacity", public.payload)
+        self.assertNotIn("availableCapacity", public.payload)
         self.assertNotIn("workers", public.payload)
 
     def test_worker_capacity_inputs_are_ignored_for_admin_writes_and_heartbeat(self) -> None:
@@ -1637,7 +1655,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(create, "POST")
         self.assertEqual(create.status, HTTPStatus.CREATED)
-        self.assertEqual(create.payload["worker"]["max_concurrent_jobs"], 1)
+        self.assertNotIn("max_concurrent_jobs", create.payload["worker"])
+        self.assertNotIn("free_slots", create.payload["worker"])
         self.assertNotIn("PULLWISE_MAX_CONCURRENT_JOBS", create.payload["suggested_env"])
         self.assertNotIn("--max-concurrent-jobs", create.payload["install_commands"]["standard"])
 
@@ -1650,7 +1669,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(update, "PATCH")
         self.assertEqual(update.status, HTTPStatus.OK)
-        self.assertEqual(update.payload["worker"]["max_concurrent_jobs"], 1)
+        self.assertNotIn("max_concurrent_jobs", update.payload["worker"])
+        self.assertNotIn("free_slots", update.payload["worker"])
 
         heartbeat = RouteHarness(
             "/worker/heartbeat",
@@ -1661,9 +1681,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         stored = db.get_worker(worker_id)
-        self.assertEqual(stored["max_concurrent_jobs"], 1)
         self.assertEqual(stored["running_jobs"], 1)
-        self.assertEqual(stored["free_slots"], 0)
+        self.assertNotIn("max_concurrent_jobs", stored)
+        self.assertNotIn("free_slots", stored)
         self.assertEqual(stored["last_error"], "")
 
         heartbeat_with_error = RouteHarness(

@@ -2,6 +2,12 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_09_billing_cookie_security as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
@@ -2466,9 +2472,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "version": public_issue_text(body.get("version")),
                     "provider": public_issue_text(body.get("provider")) or "codex",
                     "provider_chain": body.get("providerChain") or body.get("provider_chain"),
-                    "max_concurrent_jobs": 1,
                     "running_jobs": public_scan_count(body.get("running_jobs")),
-                    "free_slots": public_scan_count(body.get("free_slots")),
                     "hostname": public_issue_text(body.get("hostname")),
                     "region": heartbeat_region or None,
                     "last_error": last_error,

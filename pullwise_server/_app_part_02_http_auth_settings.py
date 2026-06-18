@@ -2,6 +2,13 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_01_bootstrap_state as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+from ._app_imports import sync_compat_globals as _sync_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 def repository_scan_limits_payload(plan: object = "max") -> dict:
     return system_config.repository_scan_limits(plan)
 
@@ -857,6 +864,7 @@ def refresh_settings_from_storage() -> None:
     persisted = db.load_state_item("settings")
     if isinstance(persisted, dict):
         SETTINGS = persisted
+        _sync_compat_globals(globals(), ("SETTINGS",))
 
 
 def persist_settings_to_storage() -> None:

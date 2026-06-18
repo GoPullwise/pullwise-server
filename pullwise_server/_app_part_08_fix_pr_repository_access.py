@@ -2,6 +2,12 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_07_issue_payloads as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 @contextmanager
 def preview_scan_lock(scan_id: str) -> Iterator[None]:
     with PREVIEW_SCAN_LOCKS_GUARD:

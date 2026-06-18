@@ -2,6 +2,12 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_03_billing_pages as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 def public_scan_agent_text(value: object, *, max_length: int = 128) -> str:
     text = clean_github_access_text(value) or ""
     if len(text) > max_length:

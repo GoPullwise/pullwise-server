@@ -2,6 +2,12 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_04_scan_audit_bundle as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 def create_scan_job_for_scan(scan: dict) -> dict:
     user_id = str(scan.get("userId") or "").strip()
     user = USERS.get(user_id) if user_id else None

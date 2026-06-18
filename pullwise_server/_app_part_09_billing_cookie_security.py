@@ -2,6 +2,12 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_08_fix_pr_repository_access as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 MAX_BILLING_SUBSCRIPTION_RECORDS = 25
 MAX_BILLING_SUBSCRIPTION_EVENTS = 100
 

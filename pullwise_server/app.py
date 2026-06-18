@@ -1,28 +1,53 @@
 from __future__ import annotations
 
-from pathlib import Path as _Path
+import sys as _sys
+import types as _types
 
-_PART_FILES = (
-    "_app_part_01_bootstrap_state.py",
-    "_app_part_02_http_auth_settings.py",
-    "_app_part_03_billing_pages.py",
-    "_app_part_04_scan_audit_bundle.py",
-    "_app_part_05_worker_results.py",
-    "_app_part_06_worker_admin.py",
-    "_app_part_07_issue_payloads.py",
-    "_app_part_08_fix_pr_repository_access.py",
-    "_app_part_09_billing_cookie_security.py",
-    "_app_part_10_handler_main.py",
+from . import (
+    _app_part_01_bootstrap_state,
+    _app_part_02_http_auth_settings,
+    _app_part_03_billing_pages,
+    _app_part_04_scan_audit_bundle,
+    _app_part_05_worker_results,
+    _app_part_06_worker_admin,
+    _app_part_07_issue_payloads,
+    _app_part_08_fix_pr_repository_access,
+    _app_part_09_billing_cookie_security,
+    _app_part_10_handler_main as _assembled_app,
+)
+from ._app_imports import import_compat_globals as _import_compat_globals
+from ._app_imports import register_compat_targets as _register_compat_targets
+
+_APP_PARTS = (
+    _app_part_01_bootstrap_state,
+    _app_part_02_http_auth_settings,
+    _app_part_03_billing_pages,
+    _app_part_04_scan_audit_bundle,
+    _app_part_05_worker_results,
+    _app_part_06_worker_admin,
+    _app_part_07_issue_payloads,
+    _app_part_08_fix_pr_repository_access,
+    _app_part_09_billing_cookie_security,
+    _assembled_app,
 )
 
+_register_compat_targets(*_APP_PARTS, globals())
 
-def _load_part(filename: str) -> None:
-    path = _Path(__file__).with_name(filename)
-    source = path.read_text(encoding="utf-8")
-    exec(compile(source, str(path), "exec"), globals(), globals())
+for _part in _APP_PARTS:
+    _import_compat_globals(vars(_assembled_app), vars(_part))
+
+_import_compat_globals(vars(_assembled_app), globals())
 
 
-for _part_file in _PART_FILES:
-    _load_part(_part_file)
+class _CompatAppModule(_types.ModuleType):
+    def __setattr__(self, name: str, value: object) -> None:
+        super().__setattr__(name, value)
+        if name.startswith("__"):
+            return
+        for part in _APP_PARTS:
+            setattr(part, name, value)
 
-del _part_file, _load_part, _PART_FILES, _Path
+
+_sys.modules[__name__].__class__ = _CompatAppModule
+
+del _CompatAppModule, _assembled_app, _import_compat_globals, _part, _register_compat_targets, _sys, _types

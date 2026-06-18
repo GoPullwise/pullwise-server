@@ -237,9 +237,7 @@ def initialize() -> None:
                     provider TEXT,
                     provider_chain TEXT,
                     enabled INTEGER NOT NULL DEFAULT 1,
-                    max_concurrent_jobs INTEGER NOT NULL DEFAULT 1,
                     running_jobs INTEGER NOT NULL DEFAULT 0,
-                    free_slots INTEGER NOT NULL DEFAULT 0,
                     hostname TEXT,
                     region TEXT,
                     last_error TEXT,
@@ -281,6 +279,7 @@ def initialize() -> None:
                 ("workers", "machine_metrics_history", "TEXT"),
             ):
                 ensure_column(connection, table, column, definition)
+            normalize_workers_schema(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS worker_audit_events (
@@ -647,6 +646,103 @@ def reconcile_worker_uninstall_deletes(connection: sqlite3.Connection) -> None:
           )
         """
     )
+
+
+def normalize_workers_schema(connection: sqlite3.Connection) -> None:
+    desired_columns = [
+        "worker_id",
+        "name",
+        "token_hash",
+        "version",
+        "provider",
+        "provider_chain",
+        "enabled",
+        "running_jobs",
+        "hostname",
+        "region",
+        "last_error",
+        "doctor_status",
+        "codex_ready",
+        "ready_providers",
+        "systemd_active",
+        "doctor_checked_at",
+        "machine_metrics",
+        "machine_metrics_history",
+        "status",
+        "first_seen_at",
+        "last_heartbeat_at",
+        "created_at",
+        "updated_at",
+        "token_last_used_at",
+        "disabled_at",
+        "deleted_at",
+    ]
+    rows = connection.execute("PRAGMA table_info(workers)").fetchall()
+    existing_columns = [str(row[1]) for row in rows]
+    if not existing_columns or existing_columns == desired_columns:
+        return
+    deprecated_columns = {"max_concurrent_jobs", "free_slots"}
+    if not deprecated_columns.intersection(existing_columns):
+        return
+
+    connection.execute("DROP TABLE IF EXISTS workers_old")
+    connection.execute("ALTER TABLE workers RENAME TO workers_old")
+    connection.execute(
+        """
+        CREATE TABLE workers (
+            worker_id TEXT PRIMARY KEY,
+            name TEXT,
+            token_hash TEXT UNIQUE,
+            version TEXT,
+            provider TEXT,
+            provider_chain TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            running_jobs INTEGER NOT NULL DEFAULT 0,
+            hostname TEXT,
+            region TEXT,
+            last_error TEXT,
+            doctor_status TEXT,
+            codex_ready INTEGER,
+            ready_providers TEXT,
+            systemd_active INTEGER,
+            doctor_checked_at INTEGER,
+            machine_metrics TEXT,
+            machine_metrics_history TEXT,
+            status TEXT NOT NULL DEFAULT 'online',
+            first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            last_heartbeat_at INTEGER,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            token_last_used_at INTEGER,
+            disabled_at INTEGER,
+            deleted_at INTEGER
+        )
+        """
+    )
+    copy_columns = [column for column in desired_columns if column in existing_columns]
+    if copy_columns:
+        columns_sql = ", ".join(copy_columns)
+        value_expressions = []
+        for column in copy_columns:
+            if column == "enabled":
+                value_expressions.append("COALESCE(enabled, 1)")
+            elif column == "running_jobs":
+                value_expressions.append("CASE WHEN COALESCE(running_jobs, 0) > 0 THEN 1 ELSE 0 END")
+            elif column == "status":
+                value_expressions.append("COALESCE(NULLIF(status, ''), 'online')")
+            elif column in {"first_seen_at", "created_at", "updated_at"}:
+                value_expressions.append(f"COALESCE({column}, strftime('%s', 'now'))")
+            else:
+                value_expressions.append(column)
+        values_sql = ", ".join(value_expressions)
+        connection.execute(
+            f"""
+            INSERT OR IGNORE INTO workers ({columns_sql})
+            SELECT {values_sql}
+            FROM workers_old
+            """
+        )
+    connection.execute("DROP TABLE workers_old")
 
 
 def normalize_quota_ledger_schema(connection: sqlite3.Connection) -> None:
@@ -1198,10 +1294,10 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
                 """
                 INSERT INTO workers (
                     worker_id, name, token_hash, provider, provider_chain, enabled, status,
-                    max_concurrent_jobs, running_jobs, free_slots, version,
+                    running_jobs, version,
                     hostname, region, last_error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, 1, 'offline', ?, 0, ?, ?, NULL, ?, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 1, 'offline', 0, ?, NULL, ?, NULL, ?, ?)
                 """,
                 (
                     worker_id,
@@ -1209,8 +1305,6 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
                     token_hash,
                     provider,
                     provider_chain,
-                    1,
-                    1,
                     record.get("version"),
                     record.get("region"),
                     timestamp,
@@ -1453,9 +1547,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     if not worker_id:
         raise ValueError("worker_id is required")
     timestamp = int(record.get("timestamp") or time.time())
-    max_concurrent_jobs = 1
-    running_jobs = max(0, min(max_concurrent_jobs, int(record.get("running_jobs") or 0)))
-    free_slots = max(0, max_concurrent_jobs - running_jobs)
+    running_jobs = 1 if int(record.get("running_jobs") or 0) > 0 else 0
     provider = str(record.get("provider") or "codex")[:60]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
     ready_providers = heartbeat_ready_providers_json(record)
@@ -1477,19 +1569,17 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
             connection.execute(
                 """
                 INSERT INTO workers (
-                    worker_id, name, version, provider, provider_chain, enabled, max_concurrent_jobs, running_jobs,
-                    free_slots, hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
+                    worker_id, name, version, provider, provider_chain, enabled, running_jobs,
+                    hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
                     created_at, updated_at, doctor_status, codex_ready, ready_providers,
                     systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
                 )
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
                     provider_chain = COALESCE(excluded.provider_chain, workers.provider_chain),
-                    max_concurrent_jobs = excluded.max_concurrent_jobs,
                     running_jobs = excluded.running_jobs,
-                    free_slots = excluded.free_slots,
                     hostname = excluded.hostname,
                     region = COALESCE(NULLIF(excluded.region, ''), workers.region),
                     last_error = excluded.last_error,
@@ -1510,9 +1600,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("version"),
                     provider,
                     provider_chain,
-                    max_concurrent_jobs,
                     running_jobs,
-                    free_slots,
                     record.get("hostname"),
                     record.get("region"),
                     record.get("last_error"),

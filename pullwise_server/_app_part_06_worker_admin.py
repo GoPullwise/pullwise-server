@@ -2,6 +2,12 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_05_worker_results as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 def summarize_findings(findings: list[dict]) -> dict:
     summary = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     for finding in findings:
@@ -161,8 +167,8 @@ def annotate_worker_runtime_payloads(workers: list[dict], *, include_latest_comm
         item = dict(worker)
         worker_id = public_issue_text(item.get("worker_id"))
         running_jobs = running_counts.get(worker_id, 0)
+        item["running_jobs"] = running_jobs
         item["_running_jobs_count"] = running_jobs
-        item["_free_slots_count"] = max(0, 1 - running_jobs)
         if include_latest_commands:
             item["_latest_command_loaded"] = True
         if worker_id in latest_commands:
@@ -178,11 +184,6 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         if "_running_jobs_count" not in worker:
             running_jobs = db.count_worker_running_scan_jobs(public_issue_text(worker.get("worker_id")))
         worker["running_jobs"] = running_jobs
-        worker["free_slots"] = (
-            public_scan_count(worker.get("_free_slots_count"))
-            if "_free_slots_count" in worker
-            else max(0, 1 - running_jobs)
-        )
     provider_chain = worker_record_provider_chain(worker)
     ready_providers = worker_record_ready_providers(worker)
     payload = {
@@ -194,9 +195,7 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         "enabled": bool(worker.get("enabled")),
         "status": computed_worker_status(worker),
         "last_heartbeat_at": pull_request_timestamp(worker.get("last_heartbeat_at")),
-        "max_concurrent_jobs": 1,
         "running_jobs": public_scan_count(worker.get("running_jobs")),
-        "free_slots": public_scan_count(worker.get("free_slots")),
         "version": public_issue_text(worker.get("version")),
         "region": public_issue_text(worker.get("region")),
         "created_at": pull_request_timestamp(worker.get("created_at")),
@@ -1649,7 +1648,6 @@ def worker_test_payload(worker: dict) -> dict:
         "tokenRecentlyUsed": bool(token_used_at),
         "versionCompatible": worker_version_compatible(worker),
         "providerSupported": worker_supported_provider(worker),
-        "freeSlotsNormal": public_scan_count(worker.get("free_slots")) <= 1,
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}

@@ -2,6 +2,12 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import _app_part_06_worker_admin as _previous_app_part
+from ._app_imports import import_compat_globals as _import_compat_globals
+
+_import_compat_globals(vars(_previous_app_part), globals())
+del _import_compat_globals, _previous_app_part
+
 SCAN_SYSTEM_STATUS_CACHE_SECONDS = 5
 SCAN_SYSTEM_STATUS_CACHE: dict[str, dict] = {}
 
@@ -22,10 +28,10 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
         running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
     online = [worker for worker in workers if worker["status"] in {"idle", "busy"}]
+    busy_workers = [worker for worker in workers if worker["status"] == "busy"]
+    idle_workers = [worker for worker in workers if worker["status"] == "idle"]
     degraded = [worker for worker in workers if worker["status"] == "degraded"]
     offline = [worker for worker in workers if worker["status"] == "offline"]
-    total_capacity = sum(public_scan_count(worker.get("max_concurrent_jobs")) for worker in online + degraded)
-    available_capacity = sum(public_scan_count(worker.get("free_slots")) for worker in online + degraded)
     if not workers or (not online and not degraded):
         system_status = "down"
     elif degraded or offline:
@@ -36,8 +42,8 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         "scanSystemStatus": system_status,
         "onlineWorkerCount": len(online),
         "totalWorkerCount": len(workers),
-        "totalCapacity": total_capacity,
-        "availableCapacity": available_capacity,
+        "busyWorkerCount": len(busy_workers),
+        "idleWorkerCount": len(idle_workers),
         "runningJobs": running_jobs,
         "queuedJobs": queued_jobs,
         "degradedWorkerCount": len(degraded),
