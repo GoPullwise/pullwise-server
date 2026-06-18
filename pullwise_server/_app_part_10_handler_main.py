@@ -12,6 +12,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not rate_limit_enabled() or rate_limit_exempt_path(method, path):
             self._rate_limit_headers = {}
             return False
+        if self.admin_get_rate_limit_exempt(method, path):
+            self._rate_limit_headers = {}
+            return False
         if path.startswith("/worker/") and worker_token_record(self, allow_disabled=True, include_deleted=True):
             self._rate_limit_headers = {}
             return False
@@ -46,6 +49,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             headers={**headers, "Retry-After": retry_after},
         )
         return True
+
+    def admin_get_rate_limit_exempt(self, method: str, path: str) -> bool:
+        if method != "GET" or not path.startswith("/admin/"):
+            return False
+        session = self.current_session()
+        if not session:
+            return False
+        return user_is_admin(USERS.get(session["userId"]))
 
     def rate_limit_subject(self) -> str:
         session = self.current_session()

@@ -182,6 +182,56 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(collect.call_args.kwargs["timestamp"], 1781200000)
         self.assertEqual(collect.call_args.kwargs["storage_path"], os.path.dirname(db.database_path()))
 
+    def test_admin_server_metrics_bypasses_user_rate_limit(self) -> None:
+        expected = {
+            "ok": True,
+            "collectedAt": 1781200000,
+            "cpu": {"logicalCount": 8, "loadAverage": None},
+            "memory": {"totalBytes": 8589934592, "availableBytes": 4294967296, "usedBytes": 4294967296, "usedPercent": 50.0},
+            "storage": {"totalBytes": 107374182400, "freeBytes": 64424509440, "usedBytes": 42949672960, "usedPercent": 40.0},
+            "server": {"hostname": "api-1"},
+        }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+                },
+                clear=False,
+            ),
+            patch.object(app, "now", return_value=1781200000),
+            patch.object(app.system_metrics, "server_metrics_payload", return_value=expected),
+        ):
+            first = RouteHarness("/admin/server-metrics", cookie=self.admin_cookie)
+            second = RouteHarness("/admin/server-metrics", cookie=self.admin_cookie)
+
+            app.PullwiseHandler.route(first, "GET")
+            app.PullwiseHandler.route(second, "GET")
+
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertEqual(second.status, HTTPStatus.OK)
+
+    def test_non_admin_server_metrics_keeps_user_rate_limit(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+            },
+            clear=False,
+        ):
+            first = RouteHarness("/admin/server-metrics", cookie=self.user_cookie)
+            second = RouteHarness("/admin/server-metrics", cookie=self.user_cookie)
+
+            app.PullwiseHandler.route(first, "GET")
+            app.PullwiseHandler.route(second, "GET")
+
+        self.assertEqual(first.status, HTTPStatus.FORBIDDEN)
+        self.assertEqual(second.status, HTTPStatus.TOO_MANY_REQUESTS)
+
     def test_admin_can_start_pullwise_server_restart(self) -> None:
         fake_process = type("FakeProcess", (), {"pid": 4321})()
         with (
