@@ -107,6 +107,28 @@ class DatabaseContractsTest(unittest.TestCase):
             self.assertTrue(app.STATE_DIRTY)
             log_exception.assert_called_once()
 
+    def test_persist_state_excludes_scan_and_issue_business_data(self) -> None:
+        with (
+            patch.object(app, "STATE_LOADED", True),
+            patch.object(app, "STATE_DIRTY", True),
+            patch.object(app, "USERS", {"usr_1": {"id": "usr_1"}}),
+            patch.object(app, "SESSIONS", {}),
+            patch.object(app, "GITHUB_STATES", {}),
+            patch.object(app, "SETTINGS", {}),
+            patch.object(app, "BILLING_EVENTS", {}),
+            patch.object(app, "BILLING_PENDING_UPDATES", []),
+            patch.object(app, "SCANS", [{"id": "sc_1"}]),
+            patch.object(app, "ISSUES", [{"id": "iss_1"}]),
+            patch.object(app.db, "load_state_item", return_value=None),
+            patch.object(app.db, "save_state") as save_state,
+        ):
+            app.persist_state()
+
+        saved = save_state.call_args.args[0]
+        self.assertNotIn("scans", saved)
+        self.assertNotIn("issues", saved)
+        self.assertEqual(saved["users"], {"usr_1": {"id": "usr_1"}})
+
     def test_save_state_encrypts_github_oauth_tokens_at_rest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
@@ -602,6 +624,60 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertTrue(wrong_worker_result["conflict"])
         self.assertEqual(current_job["status"], "claimed")
         self.assertEqual(result_count, 0)
+
+    def test_record_scan_job_result_stores_large_payload_as_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                db.create_scan_job(
+                    {
+                        "job_id": "job_artifact",
+                        "scan_id": "sc_artifact",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": 100,
+                        "user_id": "usr_1",
+                    }
+                )
+                claimed = db.claim_next_scan_jobs("wk_1", max_jobs=1, lease_seconds=3600, timestamp=120)[0]
+                payload = {
+                    "status": "done",
+                    "summary": {"high": 1},
+                    "graphVerifiedReport": {
+                        "version": "graph-verified-code-review/1",
+                        "runId": "run_artifact",
+                        "confirmedCount": 1,
+                        "finalJson": {"confirmed": [{"candidate": {"issue_id": "iss_1"}}]},
+                        "debugMarkdown": "x" * 1000,
+                    },
+                }
+                result = db.record_scan_job_result(
+                    claimed["job_id"],
+                    attempt_id="wk_1-1",
+                    status="done",
+                    result_checksum="checksum-artifact",
+                    payload=payload,
+                )
+                restored = db.get_completed_scan_job_result(claimed["job_id"])
+                with closing(sqlite3.connect(db_path)) as connection:
+                    row = connection.execute(
+                        "SELECT payload, payload_artifact_id FROM job_results WHERE job_id = ?",
+                        (claimed["job_id"],),
+                    ).fetchone()
+                    artifact_count = connection.execute(
+                        "SELECT COUNT(*) FROM job_result_artifacts WHERE job_id = ?",
+                        (claimed["job_id"],),
+                    ).fetchone()[0]
+
+        self.assertTrue(result["accepted"])
+        self.assertEqual(artifact_count, 1)
+        self.assertIsNotNone(row[1])
+        self.assertIn("artifactId", row[0])
+        self.assertNotIn("debugMarkdown", row[0])
+        self.assertEqual(restored["result_payload"]["graphVerifiedReport"]["debugMarkdown"], "x" * 1000)
 
     def test_server_resource_cleanup_keeps_paid_scan_results(self) -> None:
         previous = {

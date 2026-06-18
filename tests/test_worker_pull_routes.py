@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import os
@@ -14,10 +15,17 @@ from pullwise_server import app, db
 
 
 class RouteHarness(app.PullwiseHandler):
-    def __init__(self, path: str, body: dict | None = None, *, headers: dict | None = None) -> None:
+    def __init__(
+        self,
+        path: str,
+        body: dict | None = None,
+        *,
+        headers: dict | None = None,
+        raw_body: bytes | None = None,
+    ) -> None:
         self.path = path
         self._body = body or {}
-        self._raw_body = json.dumps(self._body).encode("utf-8")
+        self._raw_body = raw_body if raw_body is not None else json.dumps(self._body).encode("utf-8")
         self.headers = {"Host": "api.pullwise.dev", **(headers or {})}
         self.payload = None
         self.status = None
@@ -52,6 +60,11 @@ class RouteHarness(app.PullwiseHandler):
 
     def error(self, status: int, message: str) -> None:
         self.json({"message": message}, status)
+
+
+class RawBodyRouteHarness(RouteHarness):
+    def read_json(self) -> dict:
+        return app.PullwiseHandler.read_json(self)
 
 
 class GraphVerifiedReportContractsTest(unittest.TestCase):
@@ -707,6 +720,172 @@ class WorkerPullRoutesTest(unittest.TestCase):
             }
         )
         return worker, worker["worker_token"]
+
+    def test_worker_result_route_accepts_gzip_json_body(self) -> None:
+        scan = {
+            "id": "sc_gzip_result",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        result_body = {
+            "status": "done",
+            "attempt_id": "wk_1-1",
+            "result_checksum": "checksum-gzip-result",
+            **audit_result_fields([]),
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        raw_body = gzip.compress(json.dumps(result_body).encode("utf-8"))
+        result = RawBodyRouteHarness(
+            f"/worker/jobs/{job['job_id']}/result",
+            raw_body=raw_body,
+            headers={**self.auth, "Content-Encoding": "gzip", "Content-Length": str(len(raw_body))},
+        )
+
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertTrue(result.payload["accepted"])
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "done")
+
+    def test_scan_and_issue_reads_use_database_pages_when_indexed(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scans = [
+            {
+                "id": f"sc_{index}",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "done",
+                "userId": "usr_1",
+                "createdAt": 300 - index,
+                "queuedAt": 300 - index,
+                "progress": 100,
+                "phase": "report",
+                "issues": {"critical": 0, "high": index, "medium": 0, "low": 0, "info": 0},
+            }
+            for index in range(3)
+        ]
+        app.SCANS = scans
+        for scan in scans:
+            app.create_scan_job_for_scan(scan)
+        class ExplodingScans(list):
+            def __iter__(self):
+                raise AssertionError("scan route should not iterate global SCANS when snapshots exist")
+
+        app.SCANS = ExplodingScans()
+        db.upsert_issue(
+            {
+                "id": "iss_db",
+                "userId": "usr_1",
+                "scanId": "sc_1",
+                "jobId": scans[1]["jobId"],
+                "repo": "acme/api",
+                "status": "open",
+                "severity": "high",
+                "title": "Indexed issue",
+                "createdAt": 200,
+            }
+        )
+
+        with (
+            patch.object(app, "cleanup_server_resources_if_due", return_value={}),
+            patch.object(app, "user_scans_for_read", side_effect=AssertionError("scan route should page in DB")),
+        ):
+            scans_route = RouteHarness("/scans?limit=1&offset=1", headers={"Cookie": "pw_session=ses_owner"})
+            app.PullwiseHandler.route(scans_route, "GET")
+        with (
+            patch.object(app, "cleanup_server_resources_if_due", return_value={}),
+            patch.object(app, "user_issues", side_effect=AssertionError("issue route should page in DB")),
+        ):
+            issues_route = RouteHarness("/issues?status=open&severity=high&limit=1", headers={"Cookie": "pw_session=ses_owner"})
+            app.PullwiseHandler.route(issues_route, "GET")
+
+        self.assertEqual(scans_route.status, HTTPStatus.OK)
+        self.assertEqual(scans_route.payload["total"], 3)
+        self.assertEqual([scan["id"] for scan in scans_route.payload["items"]], ["sc_1"])
+        self.assertEqual(issues_route.status, HTTPStatus.OK)
+        self.assertEqual(issues_route.payload["total"], 1)
+        self.assertEqual(issues_route.payload["items"][0]["id"], "iss_db")
+
+    def test_batch_scan_and_issue_status_routes(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_batch_status",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": 100,
+            "queuedAt": 100,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        db.upsert_issue(
+            {
+                "id": "iss_batch_status",
+                "userId": "usr_1",
+                "scanId": scan["id"],
+                "jobId": scan["jobId"],
+                "repo": "acme/api",
+                "status": "open",
+                "severity": "high",
+                "title": "Batch issue",
+                "createdAt": 101,
+            }
+        )
+
+        scans_route = RouteHarness(
+            "/scans/status",
+            {"ids": ["sc_batch_status", "missing"]},
+            headers={"Cookie": "pw_session=ses_owner"},
+        )
+        app.PullwiseHandler.route(scans_route, "POST")
+        issues_route = RouteHarness(
+            "/issues/status",
+            {"updates": [{"id": "iss_batch_status", "status": "fixed"}]},
+            headers={"Cookie": "pw_session=ses_owner"},
+        )
+        app.PullwiseHandler.route(issues_route, "PATCH")
+
+        self.assertEqual(scans_route.status, HTTPStatus.OK)
+        self.assertEqual([item["id"] for item in scans_route.payload["items"]], ["sc_batch_status"])
+        self.assertEqual(issues_route.status, HTTPStatus.OK)
+        self.assertEqual(issues_route.payload["items"][0]["id"], "iss_batch_status")
+        self.assertEqual(issues_route.payload["items"][0]["status"], "fixed")
+        self.assertEqual(issues_route.payload["errors"], [])
 
     def audit_bundle_cache_fixture(self, *, issue_title: str = "Cached issue") -> dict:
         timestamp = app.now()
@@ -3687,7 +3866,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(wrong_result, "POST")
         self.assertEqual(wrong_result.status, HTTPStatus.FORBIDDEN)
 
-    def test_worker_claim_with_no_free_slots_leaves_job_queued(self) -> None:
+    def test_worker_claim_ignores_client_free_slots_and_claims_one_job(self) -> None:
         scan = {
             "id": "sc_no_slots",
             "repo": "acme/no-slots",
@@ -3710,11 +3889,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.OK)
-        self.assertEqual(claim.payload["jobs"], [])
-        self.assertIsNone(claim.payload["job"])
-        self.assertEqual(scan["status"], "queued")
+        self.assertEqual([job["scan_id"] for job in claim.payload["jobs"]], ["sc_no_slots"])
+        self.assertIsNotNone(claim.payload["job"])
+        self.assertEqual(scan["status"], "running")
 
-    def test_worker_claim_refills_single_free_slot_after_partial_completion(self) -> None:
+    def test_worker_claim_waits_until_current_job_completes_before_next_claim(self) -> None:
         for index in range(1, 4):
             scan = {
                 "id": f"sc_refill_{index}",
@@ -3734,20 +3913,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
             app.SCANS.append(scan)
             app.create_scan_job_for_scan(scan)
 
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "2",
-                "PULLWISE_WORKER_MAX_CLAIM_JOBS": "4",
-            },
-            clear=False,
-        ):
-            first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 4}, headers=self.auth)
-            app.PullwiseHandler.route(first_claim, "POST")
+        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 4}, headers=self.auth)
+        app.PullwiseHandler.route(first_claim, "POST")
 
         self.assertEqual(first_claim.status, HTTPStatus.OK)
-        self.assertEqual([job["scan_id"] for job in first_claim.payload["jobs"]], ["sc_refill_1", "sc_refill_2"])
-        first_job, remaining_job = first_claim.payload["jobs"]
+        self.assertEqual([job["scan_id"] for job in first_claim.payload["jobs"]], ["sc_refill_1"])
+        first_job = first_claim.payload["job"]
+
+        blocked_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 4}, headers=self.auth)
+        app.PullwiseHandler.route(blocked_claim, "POST")
+        self.assertEqual(blocked_claim.status, HTTPStatus.OK)
+        self.assertEqual(blocked_claim.payload["jobs"], [])
+        self.assertIsNone(blocked_claim.payload["job"])
 
         result = RouteHarness(
             f"/worker/jobs/{first_job['job_id']}/result",
@@ -3763,39 +3940,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(result, "POST")
         self.assertEqual(result.status, HTTPStatus.OK)
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": "wk_1",
-                "version": "0.1.0",
-                "provider": "codex",
-                "providerChain": ["codex"],
-                "max_concurrent_jobs": 2,
-                "running_jobs": 1,
-                "free_slots": 1,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "readyProviders": ["codex"],
-                "active_job_ids": [remaining_job["job_id"]],
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(heartbeat, "POST")
-        self.assertEqual(heartbeat.status, HTTPStatus.OK)
-
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_MAX_RUNNING_SCANS_PER_USER": "2",
-                "PULLWISE_WORKER_MAX_CLAIM_JOBS": "4",
-            },
-            clear=False,
-        ):
-            refill_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 4}, headers=self.auth)
-            app.PullwiseHandler.route(refill_claim, "POST")
+        refill_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 4}, headers=self.auth)
+        app.PullwiseHandler.route(refill_claim, "POST")
 
         self.assertEqual(refill_claim.status, HTTPStatus.OK)
-        self.assertEqual([job["scan_id"] for job in refill_claim.payload["jobs"]], ["sc_refill_3"])
+        self.assertEqual([job["scan_id"] for job in refill_claim.payload["jobs"]], ["sc_refill_2"])
 
     def test_multi_worker_queue_claims_progress_and_results_complete_without_duplicate_claims(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
@@ -3807,7 +3956,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "branch": "main",
                 "commit": "pending",
                 "status": "queued",
-                "userId": f"usr_{index}",
+                "userId": "usr_multi",
                 "createdAt": app.now() + index,
                 "queuedAt": app.now() + index,
                 "progress": 0,
@@ -3819,15 +3968,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
             app.SCANS.append(scan)
             app.create_scan_job_for_scan(scan)
 
-        with patch.dict(
-            os.environ,
-            {"PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
-            clear=False,
-        ):
-            first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
-            second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2", "max_jobs": 2}, headers=worker_two_auth)
-            app.PullwiseHandler.route(first_claim, "POST")
-            app.PullwiseHandler.route(second_claim, "POST")
+        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
+        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2", "max_jobs": 2}, headers=worker_two_auth)
+        app.PullwiseHandler.route(first_claim, "POST")
+        app.PullwiseHandler.route(second_claim, "POST")
 
         self.assertEqual(first_claim.status, HTTPStatus.OK)
         self.assertEqual(second_claim.status, HTTPStatus.OK)
@@ -3835,11 +3979,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         second_jobs = second_claim.payload["jobs"]
         claimed_job_ids = [job["job_id"] for job in first_jobs + second_jobs]
         claimed_scan_ids = [job["scan_id"] for job in first_jobs + second_jobs]
-        self.assertEqual(len(claimed_job_ids), 4)
-        self.assertEqual(len(set(claimed_job_ids)), 4)
-        self.assertEqual(claimed_scan_ids, ["sc_multi_1", "sc_multi_2", "sc_multi_3", "sc_multi_4"])
-        self.assertEqual(app.SCANS[4]["status"], "queued")
-        queue = app.scan_queue_payload(app.SCANS[4])
+        self.assertEqual(len(claimed_job_ids), 2)
+        self.assertEqual(len(set(claimed_job_ids)), 2)
+        self.assertEqual(claimed_scan_ids, ["sc_multi_1", "sc_multi_2"])
+        self.assertEqual(app.SCANS[2]["status"], "queued")
+        queue = app.scan_queue_payload(app.SCANS[2])
         self.assertEqual(queue["position"], 1)
         self.assertEqual(queue["ahead"], 0)
 
@@ -3874,32 +4018,36 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 app.PullwiseHandler.route(result, "POST")
                 self.assertEqual(result.status, HTTPStatus.OK)
 
-        with patch.dict(
-            os.environ,
-            {"PULLWISE_MAX_RUNNING_SCANS_PER_USER": "1"},
-            clear=False,
-        ):
-            next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
-            app.PullwiseHandler.route(next_claim, "POST")
+        next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
+        app.PullwiseHandler.route(next_claim, "POST")
 
         self.assertEqual(next_claim.status, HTTPStatus.OK)
-        self.assertEqual([job["scan_id"] for job in next_claim.payload["jobs"]], ["sc_multi_5"])
-        last_job = next_claim.payload["job"]
-        final_result = RouteHarness(
-            f"/worker/jobs/{last_job['job_id']}/result",
-            {
-                "status": "done",
-                "attempt_id": f"wk_1-{last_job['attempt']}",
-                "result_checksum": f"checksum-{last_job['job_id']}",
-                **audit_result_fields([]),
-                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(final_result, "POST")
-        self.assertEqual(final_result.status, HTTPStatus.OK)
+        self.assertEqual([job["scan_id"] for job in next_claim.payload["jobs"]], ["sc_multi_3"])
+
+        remaining_job = next_claim.payload["job"]
+        for expected_scan_id in ("sc_multi_3", "sc_multi_4", "sc_multi_5"):
+            self.assertEqual(remaining_job["scan_id"], expected_scan_id)
+            final_result = RouteHarness(
+                f"/worker/jobs/{remaining_job['job_id']}/result",
+                {
+                    "status": "done",
+                    "attempt_id": f"wk_1-{remaining_job['attempt']}",
+                    "result_checksum": f"checksum-{remaining_job['job_id']}",
+                    **audit_result_fields([]),
+                    "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                },
+                headers=self.auth,
+            )
+            app.PullwiseHandler.route(final_result, "POST")
+            self.assertEqual(final_result.status, HTTPStatus.OK)
+            if expected_scan_id != "sc_multi_5":
+                followup_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1", "max_jobs": 2}, headers=self.auth)
+                app.PullwiseHandler.route(followup_claim, "POST")
+                self.assertEqual(followup_claim.status, HTTPStatus.OK)
+                remaining_job = followup_claim.payload["job"]
+
         self.assertEqual({scan["status"] for scan in app.SCANS}, {"done"})
-        self.assertEqual(len(app.ISSUES), 4)
+        self.assertEqual(len(app.ISSUES), 2)
 
     def test_cancelled_running_job_rejects_late_worker_result(self) -> None:
         scan = {
@@ -4354,23 +4502,22 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored["status"], "claimed")
         self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
 
-    def test_queue_limits_reject_new_scan_before_job_creation(self) -> None:
+    def test_many_queued_scans_for_same_user_do_not_hit_user_limit(self) -> None:
         app.SCANS = [
             {
-                "id": "sc_existing",
+                "id": f"sc_existing_{index}",
                 "repo": "acme/api",
                 "branch": "main",
                 "commit": "pending",
                 "status": "queued",
                 "userId": "usr_1",
-                "createdAt": app.now(),
-                "queuedAt": app.now(),
+                "createdAt": app.now() + index,
+                "queuedAt": app.now() + index,
             }
+            for index in range(25)
         ]
-        with patch.dict(os.environ, {"PULLWISE_MAX_QUEUED_SCANS_PER_USER": "1"}, clear=False):
-            error = app.scan_queue_limit_error("usr_1")
-        self.assertIsNotNone(error)
-        self.assertEqual(error[2], "QUEUE_FULL_USER")
+        error = app.scan_queue_limit_error("usr_1")
+        self.assertIsNone(error)
 
     def test_global_queue_limit_rejects_new_scan_before_job_creation(self) -> None:
         app.SCANS = [
@@ -4412,7 +4559,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
             jobs = db.claim_next_scan_jobs(
                 worker_id,
                 max_jobs=1,
-                per_user_running_limit=2,
             )
             with lock:
                 claimed.extend(job["job_id"] for job in jobs)

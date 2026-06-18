@@ -103,6 +103,23 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         return handler.payload, handler.payload["worker_token"]
 
+    def test_admin_workers_list_is_paginated_and_uses_aggregate_counts(self) -> None:
+        self.create_worker()
+        self.create_worker()
+
+        with (
+            patch.object(db, "count_worker_running_scan_jobs", side_effect=AssertionError("worker list should batch counts")),
+            patch.object(db, "get_latest_worker_command", side_effect=AssertionError("worker list should batch latest commands")),
+        ):
+            handler = RouteHarness("/admin/workers?limit=1&offset=0", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload["total"], 2)
+        self.assertEqual(handler.payload["limit"], 1)
+        self.assertTrue(handler.payload["hasMore"])
+        self.assertEqual(len(handler.payload["workers"]), 1)
+
     def test_admin_access_can_match_verified_github_email_alias(self) -> None:
         app.USERS["usr_admin"].update(
             {
@@ -379,7 +396,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         for scan in scans:
             app.create_scan_job_for_scan(scan)
         claimed = db.claim_next_scan_jobs(worker_id, max_jobs=2, lease_seconds=3600, timestamp=timestamp)
-        self.assertEqual(len(claimed), 2)
+        self.assertEqual(len(claimed), 1)
         db.update_scan_job_progress(
             claimed[0]["job_id"],
             {"phase": "ai", "progress": 50, "message": "reviewing", "started_at": timestamp + 10},
@@ -410,13 +427,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(admin_workers.status, HTTPStatus.OK)
         self.assertEqual(admin_workers.payload["workers"][0]["running_jobs"], 1)
-        self.assertEqual(admin_workers.payload["workers"][0]["status"], "idle")
+        self.assertEqual(admin_workers.payload["workers"][0]["status"], "busy")
         self.assertEqual(detail.status, HTTPStatus.OK)
         self.assertEqual(detail.payload["worker"]["running_jobs"], 1)
-        self.assertEqual(detail.payload["worker"]["status"], "idle")
+        self.assertEqual(detail.payload["worker"]["status"], "busy")
         self.assertEqual(
             [activity["status"] for activity in detail.payload["taskActivity"]],
-            ["running", "claimed"],
+            ["running"],
         )
 
     def test_ready_worker_running_jobs_are_not_degraded_by_doctor_warning(self) -> None:
@@ -1301,16 +1318,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         worker = db.get_worker(worker_id)
-        self.assertEqual(worker["max_concurrent_jobs"], 4)
-        self.assertEqual(worker["running_jobs"], 2)
+        self.assertEqual(worker["max_concurrent_jobs"], 1)
+        self.assertEqual(worker["running_jobs"], 1)
+        self.assertEqual(worker["free_slots"], 0)
         self.assertIsNotNone(worker["last_heartbeat_at"])
         self.assertEqual(worker["doctor_status"], "ok")
         self.assertEqual(worker["codex_ready"], 1)
         self.assertEqual(worker["systemd_active"], 1)
-        self.assertEqual(app.computed_worker_status(worker), "idle")
+        self.assertEqual(app.computed_worker_status(worker), "busy")
 
-        db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "running_jobs": 4, "free_slots": 0, "timestamp": app.now()})
-        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "busy")
+        db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "running_jobs": 0, "free_slots": 4, "timestamp": app.now()})
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "idle")
         db.upsert_worker_heartbeat(
             {
                 **worker,
@@ -1324,7 +1342,19 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             }
         )
         self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
-        db.upsert_worker_heartbeat({**worker, "worker_id": worker_id, "last_error": "internal stack", "timestamp": app.now()})
+        db.upsert_worker_heartbeat(
+            {
+                **worker,
+                "worker_id": worker_id,
+                "running_jobs": 0,
+                "free_slots": 4,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "ready_providers": ["codex"],
+                "last_error": "internal stack",
+                "timestamp": app.now(),
+            }
+        )
         self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "idle")
         with patch("pullwise_server.app.now", return_value=app.now() + 1000):
             self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "offline")
@@ -1394,18 +1424,21 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(public.status, HTTPStatus.OK)
         self.assertEqual(public.payload["onlineWorkerCount"], 2)
         self.assertEqual(public.payload["totalWorkerCount"], 2)
-        self.assertEqual(public.payload["totalCapacity"], 6)
-        self.assertEqual(public.payload["availableCapacity"], 5)
+        self.assertEqual(public.payload["totalCapacity"], 2)
+        self.assertEqual(public.payload["availableCapacity"], 1)
         self.assertNotIn("workers", public.payload)
 
-    def test_worker_capacity_is_capped_for_admin_writes_and_heartbeat(self) -> None:
+    def test_worker_capacity_inputs_are_ignored_for_admin_writes_and_heartbeat(self) -> None:
         create = RouteHarness(
             "/admin/workers",
             {"name": "Too large", "provider": "codex", "max_concurrent_jobs": 99},
             cookie=self.admin_cookie,
         )
         app.PullwiseHandler.route(create, "POST")
-        self.assertEqual(create.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(create.status, HTTPStatus.CREATED)
+        self.assertEqual(create.payload["worker"]["max_concurrent_jobs"], 1)
+        self.assertNotIn("PULLWISE_MAX_CONCURRENT_JOBS", create.payload["suggested_env"])
+        self.assertNotIn("--max-concurrent-jobs", create.payload["install_commands"]["standard"])
 
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -1415,7 +1448,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             cookie=self.admin_cookie,
         )
         app.PullwiseHandler.route(update, "PATCH")
-        self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(update.status, HTTPStatus.OK)
+        self.assertEqual(update.payload["worker"]["max_concurrent_jobs"], 1)
 
         heartbeat = RouteHarness(
             "/worker/heartbeat",
@@ -1426,10 +1460,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         stored = db.get_worker(worker_id)
-        self.assertEqual(stored["max_concurrent_jobs"], 32)
-        self.assertEqual(stored["running_jobs"], 32)
-        self.assertEqual(stored["free_slots"], 32)
-        self.assertEqual(stored["last_error"], "max_concurrent_jobs clamped to 32")
+        self.assertEqual(stored["max_concurrent_jobs"], 1)
+        self.assertEqual(stored["running_jobs"], 1)
+        self.assertEqual(stored["free_slots"], 0)
+        self.assertEqual(stored["last_error"], "")
 
         heartbeat_with_error = RouteHarness(
             "/worker/heartbeat",
@@ -1446,7 +1480,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(heartbeat_with_error.status, HTTPStatus.OK)
         stored = db.get_worker(worker_id)
-        self.assertEqual(stored["last_error"], "disk pressure; max_concurrent_jobs clamped to 32")
+        self.assertEqual(stored["last_error"], "disk pressure")
 
     def test_worker_test_records_audit(self) -> None:
         payload, _token = self.create_worker()

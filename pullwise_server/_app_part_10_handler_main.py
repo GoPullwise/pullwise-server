@@ -196,16 +196,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scans = filter_user_scan_records(user_scans_for_read(session), params)
-            limit, offset = pagination_params(params)
-            page = scans[offset : offset + limit]
-            scan_payloads = scan_list_payloads(page)
+            page = user_scans_page_for_read(session, params)
+            scan_payloads = scan_list_payloads(page["items"])
             return self.json(
                 paginated_page_response(
                     scan_payloads,
-                    total=len(scans),
-                    limit=limit,
-                    offset=offset,
+                    total=page["total"],
+                    limit=page["limit"],
+                    offset=page["offset"],
                     keys=("scans",),
                 )
             )
@@ -213,7 +211,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
+            scan = user_scan_for_read(session, segments[1])
+            if not scan:
+                raise ResourceNotFound("Scan")
             filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
             cache_key = audit_bundle_cache_key(scan)
             return self.binary(
@@ -229,7 +229,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = self.find_or_404(user_scans_for_read(session), segments[1], "Scan")
+            scan = user_scan_for_read(session, segments[1])
+            if not scan:
+                raise ResourceNotFound("Scan")
             return self.json(scan_audit_bundle_payload(scan))
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "impact-graph":
             return self.error(HTTPStatus.GONE, "The legacy impact graph API has been removed.")
@@ -239,21 +241,22 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            return self.json(scan_payload(self.find_or_404(user_scans_for_read(session), segments[1], "Scan")))
+            scan = user_scan_for_read(session, segments[1])
+            if not scan:
+                raise ResourceNotFound("Scan")
+            return self.json(scan_payload(scan))
         if path == "/issues":
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing issues.")
-            issues = filter_user_issue_records(user_issues(session), params)
-            limit, offset = pagination_params(params)
-            page = issues[offset : offset + limit]
-            issue_payloads = [issue_list_payload(issue) for issue in page]
+            page = user_issues_page_for_read(session, params)
+            issue_payloads = [issue_list_payload(issue) for issue in page["items"]]
             return self.json(
                 paginated_page_response(
                     issue_payloads,
-                    total=len(issues),
-                    limit=limit,
-                    offset=offset,
+                    total=page["total"],
+                    limit=page["limit"],
+                    offset=page["offset"],
                     keys=("issues",),
                 )
             )
@@ -261,7 +264,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing issues.")
-            return self.json(issue_payload(self.find_or_404(user_issues(session), segments[1], "Issue")))
+            issue = user_issue_for_read(session, segments[1])
+            if not issue:
+                raise ResourceNotFound("Issue")
+            return self.json(issue_payload(issue))
         if path == "/settings":
             session = self.current_session()
             if not session:
@@ -350,6 +356,22 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(payload)
         if path == "/scans/preflight":
             return self.handle_scan_preflight(body)
+        if path == "/scans/status":
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            raw_ids = body.get("ids")
+            if not isinstance(raw_ids, list):
+                return self.error(HTTPStatus.BAD_REQUEST, "ids must be an array.")
+            scan_ids = [public_issue_text(value) for value in raw_ids if public_issue_text(value)]
+            scan_payloads = []
+            for scan_id in list(dict.fromkeys(scan_ids))[:100]:
+                scan = user_scan_for_read(session, scan_id)
+                if scan:
+                    scan_payloads.append(scan_payload(scan))
+            return self.json({"items": scan_payloads, "scans": scan_payloads})
         if path == "/scans":
             session = self.current_session()
             if not session:
@@ -697,6 +719,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 release_scan_quota_reservation_for_scan(scan, reason="scan_cancelled")
                 scan["status"] = "cancelled"
                 scan["completedAt"] = now()
+                db.upsert_scan(scan)
                 mark_state_dirty()
                 db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
             return self.json(scan_payload(scan))
@@ -874,22 +897,42 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         body = self.read_json()
         if segments and segments[0] == "admin":
             return self.handle_admin_patch(segments, body)
+        if segments == ["issues", "status"]:
+            session = self.current_session()
+            if not session:
+                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating issue status.")
+            if not isinstance(body, dict):
+                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+            updates = body.get("updates")
+            if not isinstance(updates, list):
+                return self.error(HTTPStatus.BAD_REQUEST, "updates must be an array.")
+            items = []
+            errors = []
+            for index, update in enumerate(updates[:100]):
+                if not isinstance(update, dict):
+                    errors.append({"index": index, "message": "Update must be an object."})
+                    continue
+                issue_id = public_issue_text(update.get("id") or update.get("issueId"))
+                if not issue_id:
+                    errors.append({"index": index, "message": "Issue id is required."})
+                    continue
+                try:
+                    issue = self.update_issue_status_for_session(session, issue_id, update)
+                except ResourceNotFound:
+                    errors.append({"index": index, "id": issue_id, "message": "Issue not found."})
+                except ValueError as exc:
+                    errors.append({"index": index, "id": issue_id, "message": str(exc)})
+                else:
+                    items.append(issue_payload(issue))
+            return self.json({"items": items, "issues": items, "errors": errors})
         if len(segments) == 3 and segments[0] == "issues" and segments[2] == "status":
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before updating issue status.")
-            issue = find_issue_for_status_update(user_issues(session), segments[1], body)
-            if not isinstance(body, dict):
-                return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
-            next_status = str(body.get("status") or issue["status"]).strip().lower()
-            if next_status not in ISSUE_STATUSES:
-                return self.error(HTTPStatus.BAD_REQUEST, "Issue status must be open, fixed, or snoozed.")
-            issue["status"] = next_status
-            feedback_reason, _ = review_user_feedback_reason(body)
-            if feedback_reason:
-                issue["feedbackReason"] = feedback_reason
-            record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
-            mark_state_dirty()
+            try:
+                issue = self.update_issue_status_for_session(session, segments[1], body)
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             return self.json(issue_payload(issue))
         if len(segments) == 1 and segments[0] == "settings":
             session = self.current_session()
@@ -1892,6 +1935,24 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             }
         )
 
+    def update_issue_status_for_session(self, session: dict, issue_id: str, body: dict) -> dict:
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object.")
+        issue = db.get_user_issue(session["userId"], issue_id)
+        if issue is None:
+            issue = find_issue_for_status_update(user_issues(session), issue_id, body)
+        next_status = str(body.get("status") or issue["status"]).strip().lower()
+        if next_status not in ISSUE_STATUSES:
+            raise ValueError("Issue status must be open, fixed, or snoozed.")
+        issue["status"] = next_status
+        feedback_reason, _ = review_user_feedback_reason(body)
+        if feedback_reason:
+            issue["feedbackReason"] = feedback_reason
+        record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
+        db.upsert_issue(issue)
+        mark_state_dirty()
+        return issue
+
     def handle_admin_get(self, segments: list[str], params: dict) -> None:
         session = self.require_admin_session()
         if not session:
@@ -1924,8 +1985,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             force_refresh = public_issue_text(params.get("refresh") or params.get("force")).lower() in {"1", "true", "yes", "on"}
             return self.json(worker_defaults_payload(force_refresh=force_refresh))
         if segments == ["admin", "workers"]:
-            workers = [worker_public_payload(worker, admin=True) for worker in db.list_workers()]
-            return self.json({"items": workers, "workers": workers})
+            limit, offset = pagination_params(params, default_limit=50, max_limit=100)
+            page = db.list_workers_page(limit=limit, offset=offset)
+            worker_records = annotate_worker_runtime_payloads(page["items"], include_latest_commands=True)
+            workers = [worker_public_payload(worker, admin=True) for worker in worker_records]
+            return self.json(
+                paginated_page_response(
+                    workers,
+                    total=page["total"],
+                    limit=page["limit"],
+                    offset=page["offset"],
+                    keys=("workers",),
+                )
+            )
         if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
             worker = db.get_worker(segments[2], include_deleted=True)
             if not worker:
@@ -2009,7 +2081,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_admin_worker_create(self, session: dict, body: dict) -> None:
         try:
-            max_concurrent_jobs = worker_admin_capacity(body.get("max_concurrent_jobs"))
             provider_chain = worker_provider_chain(
                 body.get("providerChain"),
                 strict=("providerChain" in body),
@@ -2024,8 +2095,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "provider_chain": provider_chain,
                 "region": public_issue_text(body.get("region")),
                 "version": public_issue_text(body.get("version")),
-                "max_concurrent_jobs": max_concurrent_jobs,
-                "max_concurrency_cap": system_config.worker_max_concurrency_cap(),
             }
         )
         worker["provider_chain"] = provider_chain
@@ -2123,7 +2192,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             worker_id = clean_github_access_text(segments[2]) or ""
             changed = {
                 key: body.get(key)
-                for key in ("name", "provider", "region", "version", "max_concurrent_jobs")
+                for key in ("name", "provider", "region", "version")
                 if key in body
             }
             if "providerChain" in body:
@@ -2133,16 +2202,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
                     return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-            if "max_concurrent_jobs" in changed:
-                try:
-                    changed["max_concurrent_jobs"] = worker_admin_capacity(changed["max_concurrent_jobs"])
-                except ValueError as exc:
-                    self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
-                    return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             worker = db.update_worker(
                 worker_id,
                 changed,
-                max_concurrency_cap=system_config.worker_max_concurrency_cap(),
             )
             if not worker:
                 self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error="Worker not found.")
@@ -2317,12 +2379,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
-        reported_capacity = public_scan_count(body.get("max_concurrent_jobs")) or 1
-        heartbeat_capacity = worker_heartbeat_capacity(body.get("max_concurrent_jobs"))
         last_error = clean_scan_error(body.get("last_error"))
-        if reported_capacity > heartbeat_capacity:
-            clamp_error = f"max_concurrent_jobs clamped to {heartbeat_capacity}"
-            last_error = f"{last_error}; {clamp_error}" if last_error else clamp_error
+        heartbeat_capacity = 1
         heartbeat_region = public_issue_text(body.get("region")) if "region" in body else ""
         heartbeat_timestamp = now()
         machine_metrics = system_metrics.sanitize_machine_metrics_payload(
@@ -2365,7 +2423,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "machine_metrics": machine_metrics,
                     "machine_metrics_history": machine_metrics_history,
                     "timestamp": heartbeat_timestamp,
-                    "max_concurrency_cap": system_config.worker_max_concurrency_cap(),
                 }
             )
         except ValueError as exc:
@@ -2437,21 +2494,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 f"Worker is not ready to claim jobs: {worker_status}.",
             )
-        if "max_jobs" in body:
-            max_jobs = public_scan_count(body.get("max_jobs"))
-        elif "free_slots" in body:
-            max_jobs = public_scan_count(body.get("free_slots"))
-        else:
-            max_jobs = 1
-        if max_jobs <= 0:
-            return self.json({"job": None, "jobs": []})
-        max_jobs = min(
-            max_jobs,
-            worker_available_claim_slots(worker_record),
-            system_config.worker_max_claim_jobs(),
-        )
-        if max_jobs <= 0:
-            return self.json({"job": None, "jobs": []})
         ready_providers = worker_record_ready_providers(worker_record)
         if not ready_providers:
             return self.json({"job": None, "jobs": []})
@@ -2465,9 +2507,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     apply_recovered_scan_jobs_locked(recovered_jobs)
             jobs = db.claim_next_scan_jobs(
                 worker_id,
-                max_jobs=max_jobs,
+                max_jobs=1,
                 lease_seconds=system_config.scan_job_lease_seconds(),
-                per_user_running_limit=max_scan_concurrency_per_user(),
                 worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
                 ready_providers=ready_providers,
             )
@@ -2499,6 +2540,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             "jobId": job.get("job_id"),
                         }
                     )
+                    db.upsert_scan(scan)
                     mark_state_dirty()
                 scan_logging.log_event(
                     "worker_job_claimed",
@@ -2553,6 +2595,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 scan.update(update)
                 for key in ("auditSwarm", "completionAudit", "impactGraph", "jobTrace", "repositoryGraph", "semanticGraph"):
                     scan.pop(key, None)
+                db.upsert_scan(scan)
                 mark_state_dirty()
         return self.json({"ok": True, "job": scan_job_payload(job)})
 
@@ -2821,7 +2864,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raise ResourceNotFound(label)
 
     def read_json(self) -> dict:
-        return decode_json_body(self.read_raw_body())
+        return decode_json_body(self.read_raw_body(), self.headers.get("Content-Encoding", ""))
 
     def read_raw_body(self) -> bytes:
         length = self.request_content_length()

@@ -26,6 +26,8 @@ def create_scan_job_for_scan(scan: dict) -> dict:
         }
     )
     scan["jobId"] = job.get("job_id")
+    index_memory_scan(scan)
+    db.upsert_scan(scan)
     return job
 
 
@@ -33,6 +35,7 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
     scan_id = public_issue_text(scan.get("id"))
     if scan_id:
         ISSUES[:] = [issue for issue in ISSUES if public_issue_text(issue.get("scanId")) != scan_id]
+        db.delete_issues_for_scan(scan_id, user_id=public_issue_text(scan.get("userId")))
     queued_timestamp = pull_request_timestamp(queued_at) or now()
     scan.update(
         {
@@ -80,6 +83,7 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
         "verificationAudit",
     ):
         scan.pop(key, None)
+    db.upsert_scan(scan)
 
 
 def retry_scan_job_for_scan_locked(scan: dict, *, queued_at: int | None = None) -> dict:
@@ -182,6 +186,7 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
             scan["quotaConsumeTrigger"] = public_issue_text(trigger) or "codex_started"
             scan["quotaBucketIds"] = quota_result.get("bucketIds") or scan.get("quotaBucketIds") or {}
             refresh_scan_quota_usage_locked(scan, user, repository)
+            db.upsert_scan(scan)
             mark_state_dirty()
     return quota_result
 
@@ -207,29 +212,30 @@ def release_scan_quota_reservation_for_scan(scan: dict, *, reason: str = "scan_c
     scan["quotaReleasedAt"] = now()
     scan["quotaReleaseReason"] = public_scan_error_code(reason) or public_issue_text(reason) or "scan_cancelled"
     refresh_scan_quota_usage_locked(scan, user, repository)
+    db.upsert_scan(scan)
     mark_state_dirty()
     return release_result
 
 
-def scan_queue_limit_error(user_id: str) -> tuple[int, str, str] | None:
-    queued = [scan for scan in SCANS if scan.get("status") == "queued"]
-    queued_for_user = [scan for scan in queued if str(scan.get("userId") or "") == user_id]
-    running_for_user = [
-        scan
-        for scan in SCANS
-        if scan.get("status") == "running" and str(scan.get("userId") or "") == user_id
-    ]
-    if len(queued) >= max_queued_scans_global():
+def scan_queue_limit_error(_user_id: str = "") -> tuple[int, str, str] | None:
+    counts = db.scan_queue_limit_counts()
+    if counts["queued_global"] == 0:
+        queued = [scan for scan in SCANS if scan.get("status") == "queued"]
+        counts = {
+            "queued_global": len(queued),
+        }
+    if counts["queued_global"] >= max_queued_scans_global():
         return HTTPStatus.TOO_MANY_REQUESTS, "The global scan queue is full. Try again after queued scans start.", "QUEUE_FULL_GLOBAL"
-    if len(queued_for_user) >= max_queued_scans_per_user():
-        return HTTPStatus.TOO_MANY_REQUESTS, "You have too many queued scans. Wait for one to start before adding another.", "QUEUE_FULL_USER"
-    if len(running_for_user) >= max_scan_concurrency_per_user() and len(queued_for_user) >= max_queued_scans_per_user():
-        return HTTPStatus.TOO_MANY_REQUESTS, "You have too many active scans. Wait for one to finish before adding another.", "ACTIVE_LIMIT_USER"
     return None
 
 
 def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
-    scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+    scan = db.get_user_scan_snapshot(
+        public_issue_text(job.get("user_id")),
+        public_issue_text(job.get("scan_id")),
+    )
+    if scan is None:
+        scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
     payload = {
         "job_id": public_issue_text(job.get("job_id")),
         "scan_id": public_issue_text(job.get("scan_id")),
@@ -382,7 +388,7 @@ def expected_worker_attempt_id(job: dict) -> str:
     return f"attempt_{attempt}"
 
 
-def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: str, checksum: str) -> bool:
+def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, checksum: str) -> dict:
     preflight = public_scan_preflight(body.get("preflight"))
     resolved_commit = worker_result_resolved_commit(job=job, body=body, preflight=preflight)
     if resolved_commit:
@@ -407,7 +413,40 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
     error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
-    scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+    return {
+        "status": status,
+        "checksum": checksum,
+        "preflight": preflight,
+        "resolved_commit": resolved_commit,
+        "graph_verified_report": graph_verified_report,
+        "normalized_findings": normalized_findings,
+        "summary": summary,
+        "ai_usage": ai_usage,
+        "effective_agent_config": effective_agent_config,
+        "error_code": error_code,
+        "completed_at": completed_at,
+        "duration_ms": public_scan_count(body.get("duration_ms")),
+        "error": clean_scan_error(body.get("error")) if status == "failed" else "",
+    }
+
+
+def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) -> bool:
+    status = public_issue_text(prepared.get("status")).lower()
+    checksum = public_issue_text(prepared.get("checksum"))
+    preflight = prepared.get("preflight") if isinstance(prepared.get("preflight"), dict) else {}
+    resolved_commit = clean_github_access_text(prepared.get("resolved_commit"))
+    normalized_findings = prepared.get("normalized_findings") if isinstance(prepared.get("normalized_findings"), list) else []
+    summary = public_scan_issue_counts(prepared.get("summary"))
+    ai_usage = public_scan_ai_usage(prepared.get("ai_usage"))
+    effective_agent_config = public_scan_agent_config(prepared.get("effective_agent_config"))
+    error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
+    graph_verified_report = public_graph_verified_report(
+        prepared.get("graph_verified_report"),
+        include_markdown=True,
+        include_debug=True,
+    )
+    completed_at = pull_request_timestamp(prepared.get("completed_at")) or now()
+    scan = memory_scan_by_id(job.get("scan_id"))
     changed = False
     if scan:
         before = json.dumps(db.to_jsonable(scan), sort_keys=True)
@@ -417,9 +456,9 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
                 "phase": "report",
                 "progress": 100 if status == "done" else public_scan_progress(scan.get("progress")),
                 "completedAt": completed_at,
-                "durationMs": public_scan_count(body.get("duration_ms")),
+                "durationMs": public_scan_count(prepared.get("duration_ms")),
                 "issues": summary,
-                "error": clean_scan_error(body.get("error")) if status == "failed" else "",
+                "error": clean_scan_error(prepared.get("error")) if status == "failed" else "",
                 "resultChecksum": checksum,
             }
         )
@@ -459,11 +498,23 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
                 if not (issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id"))
             ]
             ISSUES.extend(normalized_findings)
+            db.replace_scan_issues(
+                public_issue_text(scan.get("id")),
+                user_id=public_issue_text(scan.get("userId")),
+                job_id=public_issue_text(job.get("job_id")),
+                issues=normalized_findings,
+            )
             after_issues = json.dumps(db.to_jsonable(normalized_findings), sort_keys=True)
             changed = changed or before_issues != after_issues
     if changed:
+        db.upsert_scan(scan)
         mark_state_dirty()
     return changed
+
+
+def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: str, checksum: str) -> bool:
+    prepared = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
+    return apply_prepared_worker_job_result_to_state_locked(job, prepared)
 
 
 def apply_worker_job_result(job: dict, body: dict) -> dict:
@@ -511,8 +562,9 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     quota_finalized = {}
     if worker_result_should_finalize_quota(job, body, status=status):
         quota_finalized = finalize_scan_quota_for_job(job, trigger="worker_result")
+    prepared_result = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     with STATE_LOCK:
-        apply_worker_job_result_to_state_locked(job, body, status=status, checksum=checksum)
+        apply_prepared_worker_job_result_to_state_locked(job, prepared_result)
     quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
     result = {
         "accepted": True,
@@ -578,6 +630,7 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
                 scan["quotaReleasedAt"] = now()
                 scan["quotaReleaseReason"] = "REPOSITORY_TOO_LARGE"
                 refresh_scan_quota_usage_locked(scan, user, repository)
+                db.upsert_scan(scan)
                 mark_state_dirty()
         release_result["reservationReleased"] = True
         return release_result
@@ -606,6 +659,7 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
                 "bucketRows": public_scan_count(rollback_result.get("bucketRows")),
             }
             scan["quotaState"] = "refunded"
+            db.upsert_scan(scan)
             mark_state_dirty()
     return rollback_result
 
@@ -625,6 +679,9 @@ def worker_issue_reserved_ids(job: dict) -> set[str]:
     user_id = public_issue_text(job.get("user_id"))
     scan_id = public_issue_text(job.get("scan_id"))
     job_id = public_issue_text(job.get("job_id"))
+    reserved = set(db.list_user_issue_ids(user_id, exclude_scan_id=scan_id, exclude_job_id=job_id))
+    if reserved or db.count_user_issues(user_id) > 0:
+        return reserved
     reserved = set()
     for issue in ISSUES:
         if user_id and public_issue_text(issue.get("userId")) != user_id:

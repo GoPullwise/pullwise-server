@@ -24,9 +24,7 @@ def readiness_payload() -> dict:
             "enabled": billing_provider == "creem",
         },
         "limits": {
-            "maxConcurrentScansPerUser": max_scan_concurrency_per_user(),
             "maxQueuedScansGlobal": max_queued_scans_global(),
-            "maxQueuedScansPerUser": max_queued_scans_per_user(),
             "repository": repository_scan_limits_payload(),
             "rateLimitEnabled": rate_limit_enabled(),
         },
@@ -951,6 +949,146 @@ def user_scans_for_read(session: dict | None) -> list[dict]:
         for scan in scans:
             reconcile_scan_job_state_locked(scan, job_lookup=job_lookup, result_lookup=result_lookup)
     return scans
+
+
+def scan_snapshot_with_job_state(scan: dict, job: dict) -> dict:
+    hydrated = dict(scan)
+    status = scan_status_from_job_status(job.get("status"))
+    if not status:
+        return hydrated
+    update = {
+        "jobId": public_issue_text(job.get("job_id")) or hydrated.get("jobId"),
+        "status": status,
+        "error": clean_scan_error(job.get("error")),
+    }
+    commit = clean_github_access_text(job.get("commit"))
+    if commit:
+        update["commit"] = commit
+    if status == "queued":
+        update["progress"] = 0
+        update["phase"] = None
+        update["claimedAt"] = None
+        update["claimedByWorkerId"] = None
+    elif status == "running":
+        update["progress"] = public_scan_progress(job.get("progress"))
+        update["phase"] = public_scan_phase(job.get("progress_phase")) or None
+        update["claimedByWorkerId"] = public_issue_text(job.get("claimed_by_worker_id"))
+        claimed_at = pull_request_timestamp(job.get("claimed_at"))
+        if claimed_at is not None:
+            update["claimedAt"] = claimed_at
+        started_at = pull_request_timestamp(job.get("started_at"))
+        if started_at is not None:
+            update["startedAt"] = started_at
+    else:
+        completed_at = pull_request_timestamp(job.get("completed_at"))
+        if completed_at is not None:
+            update["completedAt"] = completed_at
+        update["resultChecksum"] = public_issue_text(job.get("result_checksum"))
+        if status == "done":
+            update["phase"] = "report"
+            update["progress"] = 100
+            update["error"] = ""
+        elif status == "failed":
+            update["phase"] = "report"
+            update["progress"] = public_scan_progress(hydrated.get("progress"))
+        else:
+            update["phase"] = None
+    hydrated.update(update)
+    return hydrated
+
+
+def hydrate_scan_jobs_for_read(jobs: list[dict]) -> list[dict]:
+    if not jobs:
+        return []
+    scan_ids = {public_issue_text(job.get("scan_id")) for job in jobs if public_issue_text(job.get("scan_id"))}
+    snapshot_lookup = {
+        public_issue_text(scan.get("id")): scan
+        for scan in db.list_scan_snapshots_for_scan_ids(scan_ids)
+        if public_issue_text(scan.get("id"))
+    }
+    job_lookup: dict[tuple[str, str], dict] = {}
+    terminal_job_ids = []
+    for job in jobs:
+        job_id = public_issue_text(job.get("job_id"))
+        scan_id = public_issue_text(job.get("scan_id"))
+        if job_id:
+            job_lookup[("job", job_id)] = job
+        if scan_id:
+            job_lookup[("scan", scan_id)] = job
+        if job_id and scan_status_from_job_status(job.get("status")) in {"done", "failed"}:
+            terminal_job_ids.append(job_id)
+    result_lookup = {
+        public_issue_text(result.get("job_id")): result
+        for result in db.list_completed_scan_job_results_for_job_ids(terminal_job_ids)
+        if public_issue_text(result.get("job_id"))
+    }
+    indexed_memory_scans = {
+        scan_id: scan
+        for scan_id in scan_ids
+        if (scan := memory_scan_by_id(scan_id)) is not None
+    }
+    if not indexed_memory_scans and len(snapshot_lookup) == len(scan_ids):
+        return [
+            scan_snapshot_with_job_state(snapshot_lookup[public_issue_text(job.get("scan_id"))], job)
+            for job in jobs
+            if public_issue_text(job.get("scan_id")) in snapshot_lookup
+        ]
+    with STATE_LOCK:
+        hydrated = []
+        for job in jobs:
+            scan_id = public_issue_text(job.get("scan_id"))
+            snapshot = snapshot_lookup.get(scan_id)
+            if snapshot is not None:
+                memory_scan = indexed_memory_scans.get(scan_id)
+                if memory_scan is not None:
+                    reconcile_scan_job_state_locked(memory_scan, job_lookup=job_lookup, result_lookup=result_lookup)
+                hydrated.append(scan_snapshot_with_job_state(snapshot, job))
+                continue
+            scan = indexed_memory_scans.get(scan_id)
+            if scan is None:
+                scan = scan_from_recovered_job(job)
+            if not scan:
+                continue
+            reconcile_scan_job_state_locked(scan, job_lookup=job_lookup, result_lookup=result_lookup)
+            hydrated.append(scan)
+        return hydrated
+
+
+def user_scans_page_for_read(session: dict | None, params: dict) -> dict:
+    if not session:
+        return {"items": [], "total": 0, "limit": 50, "offset": 0}
+    user_id = public_issue_text(session.get("userId"))
+    limit, offset = pagination_params(params)
+    raw_status = public_issue_text(params.get("status")).lower()
+    status = public_scan_status(raw_status) if raw_status and raw_status != "all" else ""
+    repo = clean_repository_full_name(params.get("repo"))
+    page = db.list_user_scan_jobs_page(user_id, status=status, repo=repo, limit=limit, offset=offset)
+    if page["total"] == 0 and db.count_user_scan_jobs(user_id) == 0:
+        legacy_scans = filter_user_scan_records(user_scans_for_read(session), params)
+        legacy_page = legacy_scans[offset : offset + limit]
+        return {"items": legacy_page, "total": len(legacy_scans), "limit": limit, "offset": offset}
+    return {
+        "items": hydrate_scan_jobs_for_read(page["items"]),
+        "total": page["total"],
+        "limit": page["limit"],
+        "offset": page["offset"],
+    }
+
+
+def user_scan_for_read(session: dict | None, scan_id: str) -> dict | None:
+    if not session:
+        return None
+    user_id = public_issue_text(session.get("userId"))
+    target_scan_id = public_issue_text(scan_id)
+    if not user_id or not target_scan_id:
+        return None
+    job = db.get_user_scan_job(user_id, target_scan_id)
+    if job:
+        scans = hydrate_scan_jobs_for_read([job])
+        return scans[0] if scans else None
+    if db.count_user_scan_jobs(user_id) == 0:
+        return next((scan for scan in user_scans_for_read(session) if public_issue_text(scan.get("id")) == target_scan_id), None)
+    return None
 
 
 def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:

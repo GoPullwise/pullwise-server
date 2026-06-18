@@ -2,11 +2,25 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+SCAN_SYSTEM_STATUS_CACHE_SECONDS = 5
+SCAN_SYSTEM_STATUS_CACHE: dict[str, dict] = {}
+
+
 def scan_system_status_payload(*, admin: bool = False) -> dict:
-    worker_records = db.list_workers()
+    cache_key = "admin" if admin else "public"
+    current_time = now()
+    current_db_path = db.database_path()
+    cached = SCAN_SYSTEM_STATUS_CACHE.get(cache_key)
+    if cached and cached.get("databasePath") == current_db_path and pull_request_timestamp(cached.get("expiresAt")) > current_time:
+        return cached["payload"]
+    worker_records = annotate_worker_runtime_payloads(db.list_workers(), include_latest_commands=admin)
     workers = [worker_public_payload(worker, admin=False) for worker in worker_records]
-    queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
-    running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
+    job_counts = db.scan_job_status_counts()
+    queued_jobs = public_scan_count(job_counts.get("queued"))
+    running_jobs = public_scan_count(job_counts.get("running"))
+    if queued_jobs == 0 and running_jobs == 0 and SCANS:
+        queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
+        running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
     online = [worker for worker in workers if worker["status"] in {"idle", "busy"}]
     degraded = [worker for worker in workers if worker["status"] == "degraded"]
     offline = [worker for worker in workers if worker["status"] == "offline"]
@@ -31,6 +45,11 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
     }
     if admin:
         payload["workers"] = [worker_public_payload(worker, admin=True) for worker in worker_records]
+    SCAN_SYSTEM_STATUS_CACHE[cache_key] = {
+        "databasePath": current_db_path,
+        "expiresAt": current_time + SCAN_SYSTEM_STATUS_CACHE_SECONDS,
+        "payload": payload,
+    }
     return payload
 
 
@@ -64,7 +83,9 @@ def issue_repo_path(issue: dict | None) -> str | None:
     scan_id = public_issue_text(issue.get("scanId"))
     if not scan_id:
         return None
-    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+    scan = db.get_user_scan_snapshot(public_issue_text(issue.get("userId")), scan_id)
+    if scan is None:
+        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
     repo_path = scan.get("repoPath") if isinstance(scan, dict) else None
     return repo_path if isinstance(repo_path, str) and repo_path else None
 
@@ -88,6 +109,9 @@ def issue_scan(issue: dict | None) -> dict | None:
     scan_id = public_issue_text(issue.get("scanId"))
     if not scan_id:
         return None
+    scan = db.get_user_scan_snapshot(public_issue_text(issue.get("userId")), scan_id)
+    if scan is not None:
+        return scan
     return next((item for item in SCANS if item.get("id") == scan_id), None)
 
 
@@ -1024,25 +1048,50 @@ def scan_queue_payload(scan: dict) -> dict | None:
     if status not in {"queued", "running"}:
         return None
 
-    user_id = str(scan.get("userId") or "")
     limits = {
-        "perUser": max_scan_concurrency_per_user(),
         "queuedGlobal": max_queued_scans_global(),
-        "queuedPerUser": max_queued_scans_per_user(),
     }
+    scan_id = public_issue_text(scan.get("id"))
+    if scan_id and db.get_scan_job_for_scan(scan_id):
+        stats = db.scan_queue_stats(scan_id)
+        running_counts = {
+            "global": public_scan_count(stats.get("running_global")),
+        }
+        if status == "running":
+            return {
+                "position": 0,
+                "ahead": 0,
+                "reason": "running",
+                "message": "Your scan is running now.",
+                "limits": limits,
+                "running": running_counts,
+            }
+        position = public_scan_count(stats.get("position"))
+        ahead = public_scan_count(stats.get("ahead"))
+        if ahead > 0:
+            reason = "waiting_for_turn"
+            message = f"Queued with {plural(ahead, 'scan')} ahead."
+        else:
+            reason = "ready"
+            message = "Queued and waiting for the next available worker."
+        return {
+            "position": position,
+            "ahead": ahead,
+            "reason": reason,
+            "message": message,
+            "limits": limits,
+            "running": running_counts,
+        }
+
     running = [item for item in SCANS if item.get("status") == "running"]
-    running_for_user = [item for item in running if str(item.get("userId") or "") == user_id]
     running_counts = {
         "global": len(running),
-        "user": len(running_for_user),
     }
 
     if status == "running":
         return {
             "position": 0,
             "ahead": 0,
-            "userPosition": 0,
-            "userAhead": 0,
             "reason": "running",
             "message": "Your scan is running now.",
             "limits": limits,
@@ -1057,18 +1106,7 @@ def scan_queue_payload(scan: dict) -> dict | None:
     position = queue_index + 1 if queue_index >= 0 else 0
     ahead = max(0, position - 1)
 
-    user_queued = [item for item in queued if str(item.get("userId") or "") == user_id]
-    user_index = next((index for index, item in enumerate(user_queued) if item.get("id") == scan.get("id")), -1)
-    user_position = user_index + 1 if user_index >= 0 else 0
-    user_ahead = max(0, user_position - 1)
-
-    if running_counts["user"] >= limits["perUser"]:
-        reason = "user_limit"
-        message = (
-            f"You already have {plural(running_counts['user'], 'scan')} running; "
-            "this scan is queued and will start when one finishes."
-        )
-    elif ahead > 0:
+    if ahead > 0:
         reason = "waiting_for_turn"
         message = f"Queued with {plural(ahead, 'scan')} ahead."
     else:
@@ -1078,8 +1116,6 @@ def scan_queue_payload(scan: dict) -> dict | None:
     return {
         "position": position,
         "ahead": ahead,
-        "userPosition": user_position,
-        "userAhead": user_ahead,
         "reason": reason,
         "message": message,
         "limits": limits,
@@ -1094,16 +1130,8 @@ def scan_queue_sort_key(scan: dict) -> tuple[int, str]:
     )
 
 
-def max_scan_concurrency_per_user() -> int:
-    return system_config.max_running_scans_per_user()
-
-
 def max_queued_scans_global() -> int:
     return system_config.max_queued_scans_global()
-
-
-def max_queued_scans_per_user() -> int:
-    return system_config.max_queued_scans_per_user()
 
 
 def plural(count: int, word: str) -> str:
@@ -1114,6 +1142,95 @@ def user_issues(session: dict | None) -> list[dict]:
     if not session:
         return []
     return [issue for issue in ISSUES if issue.get("userId") == session["userId"]]
+
+
+def user_memory_issue_for_read(session: dict | None, issue_id: str) -> dict | None:
+    if not session:
+        return None
+    user_id = public_issue_text(session.get("userId"))
+    target_issue_id = public_issue_text(issue_id)
+    if not user_id or not target_issue_id:
+        return None
+    return next(
+        (
+            item
+            for item in ISSUES
+            if public_issue_text(item.get("userId")) == user_id
+            and public_issue_text(item.get("id")) == target_issue_id
+        ),
+        None,
+    )
+
+
+def issue_with_memory_pr_state(issue: dict | None, memory_issue: dict | None) -> dict | None:
+    if not issue or not memory_issue:
+        return issue
+    merged = issue
+    for key in ("pullRequest", "pullRequestPending"):
+        if key not in merged and isinstance(memory_issue.get(key), dict):
+            if merged is issue:
+                merged = dict(issue)
+            merged[key] = memory_issue[key]
+    return merged
+
+
+def sync_user_issues_from_memory_to_db(user_id: str) -> None:
+    target_user_id = public_issue_text(user_id)
+    if not target_user_id:
+        return
+    base_timestamp = now()
+    index = 0
+    for issue in ISSUES:
+        if public_issue_text(issue.get("userId")) == target_user_id:
+            db.upsert_issue(issue, timestamp=base_timestamp - index)
+            index += 1
+
+
+def user_issue_filters(params: dict) -> dict:
+    raw_status = public_issue_text(params.get("status")).lower()
+    raw_severity = public_issue_text(params.get("severity")).lower()
+    return {
+        "status": public_issue_status(raw_status) if raw_status and raw_status != "all" else "",
+        "severity": review._safe_severity(raw_severity) if raw_severity and raw_severity != "all" else "",
+        "scan_id": public_issue_text(params.get("scanId")),
+        "query": public_issue_text(params.get("q")).lower(),
+    }
+
+
+def user_issues_page_for_read(session: dict | None, params: dict) -> dict:
+    if not session:
+        return {"items": [], "total": 0, "limit": 50, "offset": 0}
+    user_id = public_issue_text(session.get("userId"))
+    if db.count_user_issues(user_id) == 0:
+        sync_user_issues_from_memory_to_db(user_id)
+    limit, offset = pagination_params(params)
+    filters = user_issue_filters(params)
+    return db.list_user_issues_page(
+        user_id,
+        status=filters["status"],
+        severity=filters["severity"],
+        scan_id=filters["scan_id"],
+        query=filters["query"],
+        limit=limit,
+        offset=offset,
+    )
+
+
+def user_issue_for_read(session: dict | None, issue_id: str) -> dict | None:
+    if not session:
+        return None
+    user_id = public_issue_text(session.get("userId"))
+    target_issue_id = public_issue_text(issue_id)
+    memory_issue = user_memory_issue_for_read(session, target_issue_id)
+    issue = db.get_user_issue(user_id, target_issue_id)
+    if issue:
+        return issue_with_memory_pr_state(issue, memory_issue)
+    if db.count_user_issues(user_id) == 0:
+        sync_user_issues_from_memory_to_db(user_id)
+        issue = db.get_user_issue(user_id, target_issue_id)
+        if issue:
+            return issue_with_memory_pr_state(issue, memory_issue)
+    return memory_issue
 
 
 ISSUE_STATUS_IDENTITY_FIELDS = ("scanId", "jobId", "repo", "file", "line", "title", "createdAt")

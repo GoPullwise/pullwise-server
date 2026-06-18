@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -209,6 +210,7 @@ DEFAULT_REPOSITORIES: list[dict] = [
 REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
+SCAN_BY_ID: dict[str, dict] = {}
 DEFAULT_WORKER_PACKAGE_VERSION = "0.5.23"
 DEFAULT_WORKER_PACKAGE = (
     "https://github.com/GoPullwise/pullwise-worker/releases/download/"
@@ -221,6 +223,24 @@ LATEST_WORKER_RELEASE_CACHE: dict[str, object] = {"version": "", "checked_at": 0
 # Re-entrant so worker mutations can call persist_state() while already holding
 # the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
 STATE_LOCK = threading.RLock()
+
+
+def index_memory_scan(scan: dict | None) -> None:
+    if not isinstance(scan, dict):
+        return
+    scan_id = public_issue_text(scan.get("id"))
+    if scan_id:
+        SCAN_BY_ID[scan_id] = scan
+
+
+def memory_scan_by_id(scan_id: object) -> dict | None:
+    target_scan_id = public_issue_text(scan_id)
+    if not target_scan_id:
+        return None
+    if not SCANS:
+        SCAN_BY_ID.clear()
+        return None
+    return SCAN_BY_ID.get(target_scan_id)
 
 
 class PreviewScanLockEntry:
@@ -296,9 +316,23 @@ def max_body_bytes() -> int:
     return max(0, env_int("PULLWISE_MAX_BODY_BYTES", 1024 * 1024))
 
 
-def decode_json_body(raw_bytes: bytes) -> dict:
+def max_decompressed_body_bytes() -> int:
+    return max(max_body_bytes(), env_int("PULLWISE_MAX_DECOMPRESSED_BODY_BYTES", 50 * 1024 * 1024))
+
+
+def decode_json_body(raw_bytes: bytes, content_encoding: str = "") -> dict:
     if not raw_bytes:
         return {}
+    encoding = str(content_encoding or "").strip().lower()
+    if encoding == "gzip":
+        try:
+            raw_bytes = gzip.decompress(raw_bytes)
+        except OSError:
+            raise ValueError("Request body must be valid gzip-compressed JSON.") from None
+        if len(raw_bytes) > max_decompressed_body_bytes():
+            raise RequestBodyTooLarge("Request body is too large after decompression.")
+    elif encoding and encoding not in {"identity"}:
+        raise ValueError("Unsupported Content-Encoding.")
     try:
         raw = raw_bytes.decode("utf-8")
     except UnicodeDecodeError:
@@ -442,7 +476,7 @@ def persisted_state_list(state: object, name: str) -> list:
 
 
 def ensure_state_loaded() -> None:
-    global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, GITHUB_STATES, SETTINGS, BILLING_EVENTS, BILLING_PENDING_UPDATES, SCANS, ISSUES
+    global STATE_DIRTY, STATE_LOADED, USERS, SESSIONS, GITHUB_STATES, SETTINGS, BILLING_EVENTS, BILLING_PENDING_UPDATES, SCANS, ISSUES, SCAN_BY_ID
     with STATE_LOCK:
         if STATE_LOADED:
             return
@@ -456,6 +490,12 @@ def ensure_state_loaded() -> None:
         BILLING_PENDING_UPDATES = persisted_state_list(state, "billingPendingUpdates")
         SCANS = persisted_state_list(state, "scans")
         ISSUES = persisted_state_list(state, "issues")
+        SCAN_BY_ID = {}
+        for scan in SCANS:
+            index_memory_scan(scan)
+            db.upsert_scan(scan)
+        for issue in ISSUES:
+            db.upsert_issue(issue)
         STATE_LOADED = True
         STATE_DIRTY = False
 
@@ -483,8 +523,6 @@ def persist_state(*, force: bool = False) -> None:
                     "settings": SETTINGS,
                     "billingEvents": BILLING_EVENTS,
                     "billingPendingUpdates": BILLING_PENDING_UPDATES,
-                    "scans": SCANS,
-                    "issues": ISSUES,
                 }
             )
         except Exception:
@@ -671,6 +709,9 @@ def recover_interrupted_scans() -> int:
         worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
     )
     with STATE_LOCK:
+        SCAN_BY_ID.clear()
+        for scan in SCANS:
+            index_memory_scan(scan)
         recovered += reconstruct_orphan_scan_jobs_locked()
         recovered += rollback_orphan_scan_quota_locked()
         recovered += reconcile_completed_scan_job_results_locked()
@@ -747,13 +788,25 @@ def reject_non_graph_verified_completed_result_locked(row: dict, *, checksum: st
         scan.pop(key, None)
     changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
     if changed:
+        db.upsert_scan(scan)
         mark_state_dirty()
     return changed
 
 
 def reconcile_completed_scan_job_results_locked() -> int:
     reconciled = 0
-    for row in db.list_completed_scan_job_results():
+    cursor = db.load_state_item("completedScanResultReconcileCursor")
+    if not isinstance(cursor, dict):
+        cursor = {}
+    cursor_created_at = pull_request_timestamp(cursor.get("createdAt")) or 0
+    cursor_job_id = public_issue_text(cursor.get("jobId"))
+    last_cursor: dict | None = None
+    rows = db.list_completed_scan_job_results(
+        after_created_at=cursor_created_at,
+        after_job_id=cursor_job_id,
+        limit=500,
+    )
+    for row in rows:
         payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
         status = public_issue_text(row.get("result_status") or row.get("status")).lower()
         if status not in {"done", "failed"}:
@@ -768,6 +821,12 @@ def reconcile_completed_scan_job_results_locked() -> int:
         if changed:
             reconciled += 1
         rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
+        last_cursor = {
+            "createdAt": pull_request_timestamp(row.get("result_created_at")) or cursor_created_at,
+            "jobId": public_issue_text(row.get("job_id")) or cursor_job_id,
+        }
+    if last_cursor:
+        db.save_state_item("completedScanResultReconcileCursor", last_cursor)
     return reconciled
 
 
@@ -794,6 +853,7 @@ def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
     scan.update(update)
     changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
     if changed:
+        db.upsert_scan(scan)
         mark_state_dirty()
     return changed
 
@@ -882,6 +942,7 @@ def reconcile_scan_job_state_locked(
     scan.update(update)
     changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
     if changed:
+        db.upsert_scan(scan)
         mark_state_dirty()
     return changed
 
@@ -920,6 +981,7 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
             )
         else:
             continue
+        db.upsert_scan(scan)
         recovered += 1
     if recovered:
         mark_state_dirty()

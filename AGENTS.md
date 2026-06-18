@@ -37,6 +37,22 @@ When changing worker installer generation, keep multi-worker deployments in
 mind: every worker on the same server must use only its own configured Codex
 directories.
 
+## Worker Codex CLI Concurrency
+
+Never configure or schedule a single worker identity to run multiple Codex
+agent CLI processes concurrently when they share the same Codex login state or
+auth files.
+
+- Treat worker capacity for Codex jobs as `1` unless each concurrent process has
+  fully isolated auth state, including separate `CODEX_HOME`, provider home,
+  config/cache paths, and no shared system credential store.
+- The failure mode is correctness, not just load: concurrent Codex agent CLI
+  processes can refresh the same auth token/session at the same time and
+  invalidate `auth.json` or stored credential state.
+- Do not change claim payloads, worker capacity, plan policy, or server-side
+  scheduling in a way that lets one worker launch parallel Codex agent CLI runs
+  under the same auth identity.
+
 ## Worker Install Secrets And Identity
 
 - The public `/install-worker.sh` script must not embed worker tokens or other
@@ -112,3 +128,32 @@ quota to workspace quota.
 - UI/API copy should say account, user, repository, or repo; avoid introducing
   workspace unless referring to a local checkout/worktree in the generic
   filesystem sense.
+
+## Performance And State Source Of Truth
+
+The server is being moved away from full in-memory scan/issue traversal. Keep
+new read and write paths aligned with the normalized SQLite tables.
+
+- `/scans`, `/issues`, scan detail, issue detail, status, and admin worker APIs
+  should use DB-side `user_id` filtering, sorting, counts, and pagination.
+  Hydrate only the current page or requested object.
+- Do not reintroduce `user_scans_for_read()` or `user_issues()` as a first step
+  for paginated routes. Those helpers are legacy compatibility paths, not the
+  scale path.
+- Issue detail compatibility may still need runtime fields from the matching
+  in-memory `ISSUES` item, especially `pullRequest` and `pullRequestPending` in
+  legacy tests. Merge those fields only after matching both `userId` and issue
+  id, and do not let list routes expose PR state.
+- `SCANS` and `ISSUES` are compatibility mirrors only. `persist_state()` must
+  not write bulk scan or issue business data into `app_state`; app state should
+  remain lightweight configuration/session state.
+- Worker result payloads may be large. Store full reports/log-heavy payloads in
+  result artifacts and keep the main job/result transaction to status,
+  checksum, summary, and artifact references.
+- Worker result routes accept gzip-compressed JSON bodies. Keep JSON decoding,
+  body-size checks, and decompressed-size limits in sync when changing request
+  parsing.
+- Startup/recovery should be incremental by cursor/timestamp/job id. Avoid
+  full reverse synchronization from all completed results back into memory.
+- Worker/admin/status pages should use aggregate queries and short TTL caches
+  rather than per-worker or per-scan loops.

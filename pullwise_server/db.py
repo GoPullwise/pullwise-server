@@ -366,6 +366,56 @@ def initialize() -> None:
             )
             connection.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_worker_status
+                ON scan_jobs(claimed_by_worker_id, status)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_status_created
+                ON scan_jobs(user_id, status, created_at DESC, job_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_repo_created
+                ON scan_jobs(user_id, repo, created_at DESC, job_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scans (
+                    scan_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    job_id TEXT,
+                    repo TEXT,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    payload TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scans_user_status_created
+                ON scans(user_id, status, created_at DESC, scan_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scans_user_repo_created
+                ON scans(user_id, repo, created_at DESC, scan_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scans_job_id
+                ON scans(job_id)
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS job_results (
                     id TEXT PRIMARY KEY,
                     job_id TEXT NOT NULL,
@@ -377,6 +427,70 @@ def initialize() -> None:
                     UNIQUE(job_id, attempt_id),
                     FOREIGN KEY(job_id) REFERENCES scan_jobs(job_id) ON DELETE CASCADE
                 )
+                """
+            )
+            ensure_column(connection, "job_results", "payload_artifact_id", "TEXT")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS job_result_artifacts (
+                    id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    UNIQUE(job_id, attempt_id, kind),
+                    FOREIGN KEY(job_id) REFERENCES scan_jobs(job_id) ON DELETE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_job_result_artifacts_job_attempt
+                ON job_result_artifacts(job_id, attempt_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS issues (
+                    issue_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    scan_id TEXT,
+                    job_id TEXT,
+                    repo TEXT,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    severity TEXT,
+                    category TEXT,
+                    title TEXT,
+                    file_path TEXT,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    payload TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_issues_user_status_created
+                ON issues(user_id, status, created_at DESC, issue_id ASC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_issues_user_severity_created
+                ON issues(user_id, severity, created_at DESC, issue_id ASC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_issues_user_scan_created
+                ON issues(user_id, scan_id, created_at DESC, issue_id ASC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_issues_scan_job
+                ON issues(scan_id, job_id)
                 """
             )
             connection.execute(
@@ -981,14 +1095,11 @@ def worker_token_hash(token: str) -> str:
 
 
 def worker_max_concurrency_cap() -> int:
-    return 32
+    return 1
 
 
 def normalize_worker_capacity(value: Any, *, clamp: bool = True, cap: int | None = None) -> int:
-    capacity = max(1, int(value or 1))
-    if clamp:
-        return min(capacity, max(1, int(cap or worker_max_concurrency_cap())))
-    return capacity
+    return 1
 
 
 WORKER_PROVIDER_VALUES = {"codex"}
@@ -1129,6 +1240,40 @@ def list_workers(*, include_deleted: bool = False) -> list[dict[str, Any]]:
             f"SELECT * FROM workers {where} ORDER BY created_at DESC, worker_id ASC"
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def count_workers(*, include_deleted: bool = False) -> int:
+    ensure_initialized()
+    where = "" if include_deleted else "WHERE deleted_at IS NULL"
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute(f"SELECT COUNT(*) FROM workers {where}").fetchone()
+    return max(0, int(row[0] if row else 0))
+
+
+def list_workers_page(*, include_deleted: bool = False, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    ensure_initialized()
+    where = "" if include_deleted else "WHERE deleted_at IS NULL"
+    safe_limit = max(1, min(100, int(limit or 50)))
+    safe_offset = max(0, int(offset or 0))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        total = int(connection.execute(f"SELECT COUNT(*) FROM workers {where}").fetchone()[0])
+        rows = connection.execute(
+            f"""
+            SELECT *
+            FROM workers
+            {where}
+            ORDER BY created_at DESC, worker_id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (safe_limit, safe_offset),
+        ).fetchall()
+    return {
+        "items": [dict(row) for row in rows],
+        "total": max(0, total),
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
 
 
 def get_worker(worker_id: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
@@ -1327,7 +1472,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
         cap=record.get("max_concurrency_cap"),
     )
     running_jobs = max(0, min(max_concurrent_jobs, int(record.get("running_jobs") or 0)))
-    free_slots = max(0, min(max_concurrent_jobs, int(record.get("free_slots") or 0)))
+    free_slots = max(0, max_concurrent_jobs - running_jobs)
     provider = str(record.get("provider") or "codex")[:60]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
     ready_providers = heartbeat_ready_providers_json(record)
@@ -1573,6 +1718,45 @@ def get_latest_worker_command(worker_id: str) -> dict[str, Any] | None:
         )
 
 
+def latest_worker_commands(worker_ids: list[str] | set[str] | tuple[str, ...]) -> dict[str, dict[str, Any]]:
+    ensure_initialized()
+    unique_worker_ids = list(dict.fromkeys(str(value or "").strip() for value in worker_ids or [] if str(value or "").strip()))
+    if not unique_worker_ids:
+        return {}
+    rows: list[sqlite3.Row] = []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        for start in range(0, len(unique_worker_ids), 400):
+            chunk = unique_worker_ids[start : start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows.extend(
+                connection.execute(
+                    f"""
+                    SELECT wc.*
+                    FROM worker_commands wc
+                    JOIN (
+                        SELECT worker_id, MAX(created_at) AS latest_created_at
+                        FROM worker_commands
+                        WHERE worker_id IN ({placeholders})
+                        GROUP BY worker_id
+                    ) latest
+                      ON latest.worker_id = wc.worker_id
+                     AND latest.latest_created_at = wc.created_at
+                    WHERE wc.worker_id IN ({placeholders})
+                    ORDER BY wc.worker_id ASC, wc.created_at DESC, wc.id DESC
+                    """,
+                    (*chunk, *chunk),
+                ).fetchall()
+            )
+    commands: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        item = dict(row)
+        worker_id = str(item.get("worker_id") or "").strip()
+        if worker_id and worker_id not in commands:
+            commands[worker_id] = item
+    return commands
+
+
 def get_next_worker_command(worker_id: str) -> dict[str, Any] | None:
     ensure_initialized()
     worker_id = str(worker_id or "").strip()
@@ -1715,6 +1899,146 @@ def cleanup_operational_records(
     }
 
 
+def scan_payload_for_storage(value: Any) -> Any:
+    if value is None or isinstance(value, str | bool | int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, datetime.datetime | datetime.date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): scan_payload_for_storage(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [scan_payload_for_storage(item) for item in value]
+    return str(value)
+
+
+def timestamp_field(value: Any, default: int) -> int:
+    try:
+        return max(0, int(value if value is not None else default))
+    except (TypeError, ValueError, OverflowError):
+        return max(0, int(default))
+
+
+def scan_storage_fields(record: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    current_time = int(timestamp if timestamp is not None else time.time())
+    payload = scan_payload_for_storage(record)
+    if not isinstance(payload, dict):
+        return None
+    scan_id = str(payload.get("id") or payload.get("scanId") or payload.get("scan_id") or "").strip()
+    user_id = str(payload.get("userId") or payload.get("user_id") or "").strip()
+    if not scan_id or not user_id:
+        return None
+    created_at = timestamp_field(
+        payload.get("createdAt") or payload.get("created_at") or payload.get("queuedAt") or payload.get("queued_at"),
+        current_time,
+    )
+    updated_at = timestamp_field(
+        payload.get("updatedAt")
+        or payload.get("updated_at")
+        or payload.get("completedAt")
+        or payload.get("completed_at")
+        or payload.get("startedAt")
+        or payload.get("started_at"),
+        created_at,
+    )
+    status = str(payload.get("status") or "queued").strip().lower() or "queued"
+    return {
+        "scan_id": scan_id,
+        "user_id": user_id,
+        "job_id": str(payload.get("jobId") or payload.get("job_id") or "").strip(),
+        "repo": str(payload.get("repo") or "").strip(),
+        "status": status,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "payload": payload,
+    }
+
+
+def scan_from_row(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    payload_text = row["payload"] if isinstance(row, sqlite3.Row) else row.get("payload")
+    try:
+        payload = json.loads(str(payload_text or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def upsert_scan(record: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any] | None:
+    ensure_initialized()
+    fields = scan_storage_fields(record, timestamp=timestamp)
+    if not fields:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO scans (scan_id, user_id, job_id, repo, status, created_at, updated_at, payload)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(scan_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    job_id = excluded.job_id,
+                    repo = excluded.repo,
+                    status = excluded.status,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    payload = excluded.payload
+                """,
+                (
+                    fields["scan_id"],
+                    fields["user_id"],
+                    fields["job_id"],
+                    fields["repo"],
+                    fields["status"],
+                    fields["created_at"],
+                    fields["updated_at"],
+                    json.dumps(fields["payload"], ensure_ascii=False, allow_nan=False, sort_keys=True),
+                ),
+            )
+            row = connection.execute("SELECT * FROM scans WHERE scan_id = ?", (fields["scan_id"],)).fetchone()
+    return scan_from_row(row)
+
+
+def get_user_scan_snapshot(user_id: str, scan_id: str) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    target_scan_id = str(scan_id or "").strip()
+    if not target_user_id or not target_scan_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT * FROM scans WHERE user_id = ? AND scan_id = ?",
+            (target_user_id, target_scan_id),
+        ).fetchone()
+    return scan_from_row(row)
+
+
+def list_scan_snapshots_for_scan_ids(scan_ids: list[str] | set[str] | tuple[str, ...]) -> list[dict[str, Any]]:
+    ensure_initialized()
+    unique_scan_ids = list(dict.fromkeys(str(value or "").strip() for value in scan_ids or [] if str(value or "").strip()))
+    if not unique_scan_ids:
+        return []
+    rows: list[sqlite3.Row] = []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        for start in range(0, len(unique_scan_ids), 400):
+            chunk = unique_scan_ids[start : start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows.extend(
+                connection.execute(
+                    f"SELECT * FROM scans WHERE scan_id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+            )
+    return [scan for row in rows if (scan := scan_from_row(row)) is not None]
+
+
 def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
     ensure_initialized()
     job_id = str(record.get("job_id") or stable_id("job", record.get("scan_id"))).strip()
@@ -1778,6 +2102,151 @@ def get_scan_job_for_scan(scan_id: str) -> dict[str, Any] | None:
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
+
+
+def scan_job_status_values_for_public_status(status: str) -> list[str]:
+    normalized = str(status or "").strip().lower()
+    if normalized == "running":
+        return ["claimed", "running", "uploading_result"]
+    if normalized == "queued":
+        return ["queued", "retrying"]
+    if normalized == "failed":
+        return ["failed", "lost"]
+    if normalized in {"done", "cancelled"}:
+        return [normalized]
+    return []
+
+
+def list_user_scan_jobs_page(
+    user_id: str,
+    *,
+    status: str = "",
+    repo: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+    safe_limit = max(1, min(100, int(limit or 50)))
+    safe_offset = max(0, int(offset or 0))
+    clauses = ["user_id = ?"]
+    params: list[Any] = [target_user_id]
+    status_values = scan_job_status_values_for_public_status(status)
+    if status_values:
+        placeholders = ",".join("?" for _ in status_values)
+        clauses.append(f"status IN ({placeholders})")
+        params.extend(status_values)
+    normalized_repo = str(repo or "").strip().lower()
+    if normalized_repo:
+        clauses.append("lower(repo) = ?")
+        params.append(normalized_repo)
+    where = " AND ".join(clauses)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        total = int(connection.execute(f"SELECT COUNT(*) FROM scan_jobs WHERE {where}", tuple(params)).fetchone()[0])
+        rows = connection.execute(
+            f"""
+            SELECT *
+            FROM scan_jobs
+            WHERE {where}
+            ORDER BY created_at DESC, job_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (*params, safe_limit, safe_offset),
+        ).fetchall()
+    return {
+        "items": [row_to_dict(row) or {} for row in rows],
+        "total": max(0, total),
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
+
+
+def count_user_scan_jobs(user_id: str) -> int:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return 0
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM scan_jobs WHERE user_id = ?", (target_user_id,)).fetchone()
+    return max(0, int(row[0] if row else 0))
+
+
+def get_user_scan_job(user_id: str, scan_id: str) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    target_scan_id = str(scan_id or "").strip()
+    if not target_user_id or not target_scan_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                "SELECT * FROM scan_jobs WHERE user_id = ? AND scan_id = ?",
+                (target_user_id, target_scan_id),
+            ).fetchone()
+        )
+
+
+def scan_queue_stats(scan_id: str) -> dict[str, Any]:
+    ensure_initialized()
+    target_scan_id = str(scan_id or "").strip()
+    if not target_scan_id:
+        return {
+            "running_global": 0,
+            "position": 0,
+            "ahead": 0,
+        }
+    queued_statuses = ("queued", "retrying")
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        job = connection.execute(
+            "SELECT scan_id, user_id, status, created_at FROM scan_jobs WHERE scan_id = ?",
+            (target_scan_id,),
+        ).fetchone()
+        running_global = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM scan_jobs WHERE status IN ('claimed', 'running', 'uploading_result')"
+            ).fetchone()[0]
+        )
+        if not job or str(job["status"] or "") not in queued_statuses:
+            return {
+                "running_global": max(0, running_global),
+                "position": 0,
+                "ahead": 0,
+            }
+        created_at = int(job["created_at"] or 0)
+        ahead = int(
+            connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM scan_jobs
+                WHERE status IN ('queued', 'retrying')
+                  AND (created_at < ? OR (created_at = ? AND scan_id < ?))
+                """,
+                (created_at, created_at, target_scan_id),
+            ).fetchone()[0]
+        )
+    return {
+        "running_global": max(0, running_global),
+        "position": ahead + 1,
+        "ahead": max(0, ahead),
+    }
+
+
+def scan_queue_limit_counts() -> dict[str, int]:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        queued_global = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM scan_jobs WHERE status IN ('queued', 'retrying')"
+            ).fetchone()[0]
+        )
+    return {
+        "queued_global": max(0, queued_global),
+    }
 
 
 def list_scan_jobs_for_scans(
@@ -2111,36 +2580,151 @@ def count_worker_running_scan_jobs(worker_id: str) -> int:
             """,
             (worker_id,),
         ).fetchone()
-        return max(0, int(row[0] if row else 0))
+    return max(0, int(row[0] if row else 0))
 
 
-def list_completed_scan_job_results() -> list[dict[str, Any]]:
+def worker_running_scan_job_counts(worker_ids: list[str] | set[str] | tuple[str, ...] | None = None) -> dict[str, int]:
     ensure_initialized()
+    unique_worker_ids = list(dict.fromkeys(str(value or "").strip() for value in worker_ids or [] if str(value or "").strip()))
+    clauses = ["status IN ('claimed', 'running', 'uploading_result')", "claimed_by_worker_id IS NOT NULL", "claimed_by_worker_id != ''"]
+    params: list[Any] = []
+    if unique_worker_ids:
+        placeholders = ",".join("?" for _ in unique_worker_ids)
+        clauses.append(f"claimed_by_worker_id IN ({placeholders})")
+        params.extend(unique_worker_ids)
+    with _LOCK, closing(connect()) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT claimed_by_worker_id, COUNT(*) AS running_count
+            FROM scan_jobs
+            WHERE {' AND '.join(clauses)}
+            GROUP BY claimed_by_worker_id
+            """,
+            tuple(params),
+        ).fetchall()
+    return {
+        str(row[0] or "").strip(): max(0, int(row[1] or 0))
+        for row in rows
+        if str(row[0] or "").strip()
+    }
+
+
+def scan_job_status_counts() -> dict[str, int]:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        rows = connection.execute(
+            """
+            SELECT status, COUNT(*) AS job_count
+            FROM scan_jobs
+            GROUP BY status
+            """
+        ).fetchall()
+    counts = {str(row[0] or "").strip().lower(): max(0, int(row[1] or 0)) for row in rows}
+    return {
+        "queued": counts.get("queued", 0) + counts.get("retrying", 0),
+        "running": counts.get("claimed", 0) + counts.get("running", 0) + counts.get("uploading_result", 0),
+        "done": counts.get("done", 0),
+        "failed": counts.get("failed", 0) + counts.get("lost", 0),
+        "cancelled": counts.get("cancelled", 0),
+    }
+
+
+def scan_job_result_artifact_id(job_id: str, attempt_id: str) -> str:
+    return stable_id("jra", f"{job_id}:{attempt_id}:payload")
+
+
+def scan_job_result_summary_payload(payload: dict[str, Any], *, artifact_id: str) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "artifactId": artifact_id,
+        "artifactKind": "worker_result_payload",
+        "status": payload.get("status") if isinstance(payload, dict) else None,
+    }
+    if isinstance(payload, dict):
+        for key in (
+            "result_checksum",
+            "resolved_commit",
+            "resolvedCommit",
+            "commit",
+            "duration_ms",
+            "error",
+            "error_code",
+            "errorCode",
+            "summary",
+            "aiUsage",
+            "ai_usage",
+            "preflight",
+            "effectiveAgentConfig",
+        ):
+            if key in payload:
+                summary[key] = payload.get(key)
+        report = payload.get("graphVerifiedReport")
+        if isinstance(report, dict):
+            summary["graphVerifiedReport"] = {
+                key: report.get(key)
+                for key in ("version", "runId", "mode", "confirmedCount", "rejectedCount", "blockedCount")
+                if key in report
+            }
+    return scan_payload_for_storage(summary)
+
+
+def result_payload_from_row(item: dict[str, Any]) -> dict[str, Any]:
+    artifact_text = item.pop("result_artifact_payload", None)
+    payload_text = artifact_text or item.get("result_payload")
+    try:
+        payload = json.loads(str(payload_text or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    item.pop("result_artifact_payload", None)
+    return payload if isinstance(payload, dict) else {}
+
+
+def list_completed_scan_job_results(
+    *,
+    after_created_at: int = 0,
+    after_job_id: str = "",
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    ensure_initialized()
+    cursor_time = max(0, int(after_created_at or 0))
+    cursor_job_id = str(after_job_id or "").strip()
+    cursor_clause = ""
+    params: list[Any] = []
+    if cursor_time > 0 or cursor_job_id:
+        cursor_clause = "AND (jr.created_at > ? OR (jr.created_at = ? AND sj.job_id > ?))"
+        params.extend([cursor_time, cursor_time, cursor_job_id])
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params.append(max(1, min(1000, int(limit or 500))))
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
-            """
+            f"""
             SELECT
                 sj.*,
                 jr.attempt_id AS result_attempt_id,
                 jr.result_checksum AS result_result_checksum,
                 jr.status AS result_status,
                 jr.payload AS result_payload,
+                jr.payload_artifact_id AS result_payload_artifact_id,
+                jra.payload AS result_artifact_payload,
                 jr.created_at AS result_created_at
             FROM scan_jobs sj
             JOIN job_results jr ON jr.job_id = sj.job_id
+            LEFT JOIN job_result_artifacts jra
+              ON jra.id = jr.payload_artifact_id
             WHERE sj.status IN ('done', 'failed')
               AND jr.attempt_id = sj.last_attempt_id
-            ORDER BY sj.completed_at ASC, sj.job_id ASC
-            """
+              {cursor_clause}
+            ORDER BY jr.created_at ASC, sj.job_id ASC
+            {limit_clause}
+            """,
+            tuple(params),
         ).fetchall()
     results: list[dict[str, Any]] = []
     for row in rows:
         item = row_to_dict(row) or {}
-        try:
-            item["result_payload"] = json.loads(str(item.get("result_payload") or "{}"))
-        except (TypeError, json.JSONDecodeError):
-            item["result_payload"] = {}
+        item["result_payload"] = result_payload_from_row(item)
         results.append(item)
     return results
 
@@ -2160,9 +2744,13 @@ def get_completed_scan_job_result(job_id: str) -> dict[str, Any] | None:
                 jr.result_checksum AS result_result_checksum,
                 jr.status AS result_status,
                 jr.payload AS result_payload,
+                jr.payload_artifact_id AS result_payload_artifact_id,
+                jra.payload AS result_artifact_payload,
                 jr.created_at AS result_created_at
             FROM scan_jobs sj
             JOIN job_results jr ON jr.job_id = sj.job_id
+            LEFT JOIN job_result_artifacts jra
+              ON jra.id = jr.payload_artifact_id
             WHERE sj.job_id = ?
               AND sj.status IN ('done', 'failed')
               AND jr.attempt_id = sj.last_attempt_id
@@ -2172,10 +2760,7 @@ def get_completed_scan_job_result(job_id: str) -> dict[str, Any] | None:
     item = row_to_dict(row) if row else None
     if not item:
         return None
-    try:
-        item["result_payload"] = json.loads(str(item.get("result_payload") or "{}"))
-    except (TypeError, json.JSONDecodeError):
-        item["result_payload"] = {}
+    item["result_payload"] = result_payload_from_row(item)
     return item
 
 
@@ -2199,9 +2784,13 @@ def list_completed_scan_job_results_for_job_ids(job_ids: list[str] | set[str] | 
                         jr.result_checksum AS result_result_checksum,
                         jr.status AS result_status,
                         jr.payload AS result_payload,
+                        jr.payload_artifact_id AS result_payload_artifact_id,
+                        jra.payload AS result_artifact_payload,
                         jr.created_at AS result_created_at
                     FROM scan_jobs sj
                     JOIN job_results jr ON jr.job_id = sj.job_id
+                    LEFT JOIN job_result_artifacts jra
+                      ON jra.id = jr.payload_artifact_id
                     WHERE sj.job_id IN ({placeholders})
                       AND sj.status IN ('done', 'failed')
                       AND jr.attempt_id = sj.last_attempt_id
@@ -2212,12 +2801,381 @@ def list_completed_scan_job_results_for_job_ids(job_ids: list[str] | set[str] | 
     results: list[dict[str, Any]] = []
     for row in rows:
         item = row_to_dict(row) or {}
-        try:
-            item["result_payload"] = json.loads(str(item.get("result_payload") or "{}"))
-        except (TypeError, json.JSONDecodeError):
-            item["result_payload"] = {}
+        item["result_payload"] = result_payload_from_row(item)
         results.append(item)
     return results
+
+
+def issue_payload_for_storage(value: Any) -> Any:
+    if value is None or isinstance(value, str | bool | int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, datetime.datetime | datetime.date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): issue_payload_for_storage(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [issue_payload_for_storage(item) for item in value]
+    return str(value)
+
+
+def issue_storage_fields(record: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    current_time = int(timestamp if timestamp is not None else time.time())
+    payload = issue_payload_for_storage(record)
+    if not isinstance(payload, dict):
+        return None
+    issue_id = str(payload.get("id") or payload.get("issueId") or payload.get("issue_id") or "").strip()
+    user_id = str(payload.get("userId") or payload.get("user_id") or "").strip()
+    scan_id = str(payload.get("scanId") or payload.get("scan_id") or "").strip()
+    job_id = str(payload.get("jobId") or payload.get("job_id") or "").strip()
+    title = str(payload.get("title") or payload.get("claim") or "Untitled finding").strip()
+    file_path = str(payload.get("file") or payload.get("path") or "").strip()
+    if not issue_id:
+        issue_id = stable_id("iss", f"{user_id}:{scan_id}:{job_id}:{file_path}:{title}")
+        payload["id"] = issue_id
+    if not issue_id or not user_id:
+        return None
+    try:
+        created_at = int(payload.get("createdAt") or payload.get("created_at") or current_time)
+    except (TypeError, ValueError, OverflowError):
+        created_at = current_time
+    try:
+        updated_at = int(payload.get("updatedAt") or payload.get("updated_at") or created_at)
+    except (TypeError, ValueError, OverflowError):
+        updated_at = created_at
+    return {
+        "issue_id": issue_id,
+        "user_id": user_id,
+        "scan_id": scan_id,
+        "job_id": job_id,
+        "repo": str(payload.get("repo") or "").strip(),
+        "status": str(payload.get("status") or "open").strip().lower() or "open",
+        "severity": str(payload.get("severity") or "").strip().lower(),
+        "category": str(payload.get("category") or "").strip().lower(),
+        "title": title,
+        "file_path": file_path,
+        "created_at": max(0, created_at),
+        "updated_at": max(0, updated_at),
+        "payload": payload,
+    }
+
+
+def issue_from_row(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    payload_text = row["payload"] if isinstance(row, sqlite3.Row) else row.get("payload")
+    try:
+        payload = json.loads(str(payload_text or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def upsert_issue(record: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any] | None:
+    ensure_initialized()
+    fields = issue_storage_fields(record, timestamp=timestamp)
+    if not fields:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO issues (
+                    issue_id, user_id, scan_id, job_id, repo, status, severity,
+                    category, title, file_path, created_at, updated_at, payload
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(issue_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    scan_id = excluded.scan_id,
+                    job_id = excluded.job_id,
+                    repo = excluded.repo,
+                    status = excluded.status,
+                    severity = excluded.severity,
+                    category = excluded.category,
+                    title = excluded.title,
+                    file_path = excluded.file_path,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    payload = excluded.payload
+                """,
+                (
+                    fields["issue_id"],
+                    fields["user_id"],
+                    fields["scan_id"],
+                    fields["job_id"],
+                    fields["repo"],
+                    fields["status"],
+                    fields["severity"],
+                    fields["category"],
+                    fields["title"],
+                    fields["file_path"],
+                    fields["created_at"],
+                    fields["updated_at"],
+                    json.dumps(fields["payload"], ensure_ascii=False, allow_nan=False, sort_keys=True),
+                ),
+            )
+            row = connection.execute("SELECT * FROM issues WHERE issue_id = ?", (fields["issue_id"],)).fetchone()
+    return issue_from_row(row)
+
+
+def replace_scan_issues(
+    scan_id: str,
+    *,
+    user_id: str = "",
+    job_id: str = "",
+    issues: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    timestamp: int | None = None,
+) -> list[dict[str, Any]]:
+    ensure_initialized()
+    target_scan_id = str(scan_id or "").strip()
+    target_user_id = str(user_id or "").strip()
+    target_job_id = str(job_id or "").strip()
+    if not target_scan_id:
+        return []
+    current_time = int(timestamp if timestamp is not None else time.time())
+    stored: list[dict[str, Any]] = []
+    fields_list = []
+    for issue in issues or []:
+        candidate = dict(issue)
+        candidate.setdefault("scanId", target_scan_id)
+        if target_user_id:
+            candidate.setdefault("userId", target_user_id)
+        if target_job_id:
+            candidate.setdefault("jobId", target_job_id)
+        fields = issue_storage_fields(candidate, timestamp=current_time)
+        if fields:
+            fields_list.append(fields)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            clauses = ["scan_id = ?"]
+            params: list[Any] = [target_scan_id]
+            if target_user_id:
+                clauses.append("user_id = ?")
+                params.append(target_user_id)
+            if target_job_id:
+                clauses.append("job_id = ?")
+                params.append(target_job_id)
+            connection.execute(f"DELETE FROM issues WHERE {' AND '.join(clauses)}", tuple(params))
+            for fields in fields_list:
+                connection.execute(
+                    """
+                    INSERT INTO issues (
+                        issue_id, user_id, scan_id, job_id, repo, status, severity,
+                        category, title, file_path, created_at, updated_at, payload
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fields["issue_id"],
+                        fields["user_id"],
+                        fields["scan_id"],
+                        fields["job_id"],
+                        fields["repo"],
+                        fields["status"],
+                        fields["severity"],
+                        fields["category"],
+                        fields["title"],
+                        fields["file_path"],
+                        fields["created_at"],
+                        fields["updated_at"],
+                        json.dumps(fields["payload"], ensure_ascii=False, allow_nan=False, sort_keys=True),
+                    ),
+                )
+                stored.append(dict(fields["payload"]))
+    return stored
+
+
+def delete_issues_for_scan(scan_id: str, *, user_id: str = "", job_id: str = "") -> int:
+    ensure_initialized()
+    target_scan_id = str(scan_id or "").strip()
+    if not target_scan_id:
+        return 0
+    clauses = ["scan_id = ?"]
+    params: list[Any] = [target_scan_id]
+    if user_id:
+        clauses.append("user_id = ?")
+        params.append(str(user_id).strip())
+    if job_id:
+        clauses.append("job_id = ?")
+        params.append(str(job_id).strip())
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            return max(0, connection.execute(f"DELETE FROM issues WHERE {' AND '.join(clauses)}", tuple(params)).rowcount)
+
+
+def count_user_issues(user_id: str) -> int:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return 0
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM issues WHERE user_id = ?", (target_user_id,)).fetchone()
+    return max(0, int(row[0] if row else 0))
+
+
+def list_user_issue_ids(
+    user_id: str,
+    *,
+    exclude_scan_id: str = "",
+    exclude_job_id: str = "",
+) -> list[str]:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return []
+    clauses = ["user_id = ?"]
+    params: list[Any] = [target_user_id]
+    target_scan_id = str(exclude_scan_id or "").strip()
+    target_job_id = str(exclude_job_id or "").strip()
+    if target_scan_id and target_job_id:
+        clauses.append("NOT (scan_id = ? AND job_id = ?)")
+        params.extend([target_scan_id, target_job_id])
+    elif target_scan_id:
+        clauses.append("scan_id != ?")
+        params.append(target_scan_id)
+    elif target_job_id:
+        clauses.append("job_id != ?")
+        params.append(target_job_id)
+    with _LOCK, closing(connect()) as connection:
+        rows = connection.execute(
+            f"SELECT issue_id FROM issues WHERE {' AND '.join(clauses)}",
+            tuple(params),
+        ).fetchall()
+    return [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
+
+
+def list_user_issues_page(
+    user_id: str,
+    *,
+    status: str = "",
+    severity: str = "",
+    scan_id: str = "",
+    query: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+    safe_limit = max(1, min(100, int(limit or 50)))
+    safe_offset = max(0, int(offset or 0))
+    clauses = ["user_id = ?"]
+    params: list[Any] = [target_user_id]
+    if status:
+        clauses.append("status = ?")
+        params.append(str(status).strip().lower())
+    if severity:
+        clauses.append("severity = ?")
+        params.append(str(severity).strip().lower())
+    if scan_id:
+        clauses.append("scan_id = ?")
+        params.append(str(scan_id).strip())
+    if query:
+        like = f"%{str(query).strip().lower()}%"
+        clauses.append(
+            "(lower(issue_id) LIKE ? OR lower(title) LIKE ? OR lower(file_path) LIKE ? OR lower(repo) LIKE ? OR lower(category) LIKE ?)"
+        )
+        params.extend([like, like, like, like, like])
+    where = " AND ".join(clauses)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        total = int(connection.execute(f"SELECT COUNT(*) FROM issues WHERE {where}", tuple(params)).fetchone()[0])
+        rows = connection.execute(
+            f"""
+            SELECT *
+            FROM issues
+            WHERE {where}
+            ORDER BY created_at DESC, issue_id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (*params, safe_limit, safe_offset),
+        ).fetchall()
+    return {
+        "items": [issue for row in rows if (issue := issue_from_row(row)) is not None],
+        "total": max(0, total),
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
+
+
+def get_user_issue(user_id: str, issue_id: str) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    target_issue_id = str(issue_id or "").strip()
+    if not target_user_id or not target_issue_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT * FROM issues WHERE user_id = ? AND issue_id = ?",
+            (target_user_id, target_issue_id),
+        ).fetchone()
+    return issue_from_row(row)
+
+
+def update_user_issue(user_id: str, issue_id: str, payload: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    target_issue_id = str(issue_id or "").strip()
+    if not target_user_id or not target_issue_id or not isinstance(payload, dict):
+        return None
+    current_time = int(timestamp if timestamp is not None else time.time())
+    record = dict(payload)
+    record["id"] = target_issue_id
+    record["userId"] = target_user_id
+    record["updatedAt"] = current_time
+    fields = issue_storage_fields(record, timestamp=current_time)
+    if not fields:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            updated = connection.execute(
+                """
+                UPDATE issues
+                SET scan_id = ?,
+                    job_id = ?,
+                    repo = ?,
+                    status = ?,
+                    severity = ?,
+                    category = ?,
+                    title = ?,
+                    file_path = ?,
+                    created_at = ?,
+                    updated_at = ?,
+                    payload = ?
+                WHERE user_id = ? AND issue_id = ?
+                """,
+                (
+                    fields["scan_id"],
+                    fields["job_id"],
+                    fields["repo"],
+                    fields["status"],
+                    fields["severity"],
+                    fields["category"],
+                    fields["title"],
+                    fields["file_path"],
+                    fields["created_at"],
+                    fields["updated_at"],
+                    json.dumps(fields["payload"], ensure_ascii=False, allow_nan=False, sort_keys=True),
+                    target_user_id,
+                    target_issue_id,
+                ),
+            ).rowcount
+            if updated <= 0:
+                return None
+            row = connection.execute(
+                "SELECT * FROM issues WHERE user_id = ? AND issue_id = ?",
+                (target_user_id, target_issue_id),
+            ).fetchone()
+    return issue_from_row(row)
 
 
 def claim_next_scan_jobs(
@@ -2225,7 +3183,6 @@ def claim_next_scan_jobs(
     *,
     max_jobs: int = 1,
     lease_seconds: int = 3600,
-    per_user_running_limit: int = 1,
     worker_heartbeat_timeout_seconds: int = 120,
     ready_providers: list[str] | None = None,
     timestamp: int | None = None,
@@ -2236,9 +3193,9 @@ def claim_next_scan_jobs(
         raise ValueError("worker_id is required")
     current_time = int(timestamp if timestamp is not None else time.time())
     timeout_at = current_time + max(60, int(lease_seconds))
-    requested = max(1, int(max_jobs or 1))
-    per_user_limit = max(1, int(per_user_running_limit or 1))
     ready_provider_set = set(normalize_provider_list(ready_providers)) if ready_providers is not None else None
+    if ready_provider_set is not None and "codex" not in ready_provider_set:
+        return []
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -2261,59 +3218,48 @@ def claim_next_scan_jobs(
             )
             _requeue_expired_jobs_locked(connection, current_time)
             _requeue_stale_worker_jobs_locked(connection, current_time, offline_after)
-            claimed: list[dict[str, Any]] = []
-            running_rows = connection.execute(
+            row = connection.execute(
                 """
-                SELECT user_id, COUNT(*) AS count
-                FROM scan_jobs
-                WHERE status IN ('claimed', 'running', 'uploading_result')
-                GROUP BY user_id
+                SELECT queued.job_id
+                FROM scan_jobs queued
+                WHERE queued.status = 'queued'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM scan_jobs worker_active
+                      WHERE worker_active.claimed_by_worker_id = ?
+                        AND worker_active.status IN ('claimed', 'running', 'uploading_result')
+                      LIMIT 1
+                  )
+                ORDER BY queued.created_at ASC, queued.job_id ASC
+                LIMIT 1
                 """
-            ).fetchall()
-            running_by_user = {str(row["user_id"] or ""): int(row["count"]) for row in running_rows}
-            rows = connection.execute(
-                """
-                SELECT * FROM scan_jobs
-                WHERE status = 'queued'
-                ORDER BY created_at ASC, job_id ASC
-                """
-            ).fetchall()
-            if not rows:
+                ,
+                (worker_id,),
+            ).fetchone()
+            if not row:
                 connection.commit()
                 return []
-            for row in rows:
-                if len(claimed) >= requested:
-                    break
-                if ready_provider_set is not None:
-                    job_provider_chain = normalize_provider_list(row["provider_chain"])
-                    if not ready_provider_set or (job_provider_chain and ready_provider_set.isdisjoint(job_provider_chain)):
-                        continue
-                user_id = str(row["user_id"] or "")
-                if running_by_user.get(user_id, 0) >= per_user_limit:
-                    continue
-                job_id = row["job_id"]
-                updated = connection.execute(
-                    """
-                    UPDATE scan_jobs
-                    SET status = 'claimed',
-                        attempt = attempt + 1,
-                        claimed_by_worker_id = ?,
-                        claimed_at = ?,
-                        timeout_at = ?,
-                        error = NULL,
-                        updated_at = ?
-                    WHERE job_id = ? AND status = 'queued'
-                    """,
-                    (worker_id, current_time, timeout_at, current_time, job_id),
-                ).rowcount
-                if updated != 1:
-                    continue
-                claimed_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
-                if claimed_job:
-                    claimed.append(claimed_job)
-                running_by_user[user_id] = running_by_user.get(user_id, 0) + 1
+            job_id = row["job_id"]
+            updated = connection.execute(
+                """
+                UPDATE scan_jobs
+                SET status = 'claimed',
+                    attempt = attempt + 1,
+                    claimed_by_worker_id = ?,
+                    claimed_at = ?,
+                    timeout_at = ?,
+                    error = NULL,
+                    updated_at = ?
+                WHERE job_id = ? AND status = 'queued'
+                """,
+                (worker_id, current_time, timeout_at, current_time, job_id),
+            ).rowcount
+            if updated != 1:
+                connection.commit()
+                return []
+            claimed_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
             connection.commit()
-            return claimed
+            return [claimed_job] if claimed_job else []
         except Exception:
             connection.rollback()
             raise
@@ -2606,7 +3552,10 @@ def record_scan_job_result(
     if status not in {"done", "failed"}:
         raise ValueError("status must be done or failed")
     current_time = int(time.time())
-    payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
+    artifact_id = scan_job_result_artifact_id(job_id, attempt_id)
+    artifact_payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
+    summary_payload = scan_job_result_summary_payload(payload, artifact_id=artifact_id)
+    summary_payload_text = json.dumps(to_jsonable(summary_payload), ensure_ascii=False, sort_keys=True)
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -2642,10 +3591,29 @@ def record_scan_job_result(
                 return {"accepted": False, "duplicate": False, "conflict": True}
             connection.execute(
                 """
-                INSERT INTO job_results (id, job_id, attempt_id, result_checksum, status, payload)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
+                VALUES (?, ?, ?, 'worker_result_payload', ?, ?)
+                ON CONFLICT(job_id, attempt_id, kind) DO UPDATE SET
+                    id = excluded.id,
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
                 """,
-                (stable_id("jr", f"{job_id}:{attempt_id}"), job_id, attempt_id, result_checksum, status, payload_text),
+                (artifact_id, job_id, attempt_id, artifact_payload_text, current_time),
+            )
+            connection.execute(
+                """
+                INSERT INTO job_results (id, job_id, attempt_id, result_checksum, status, payload, payload_artifact_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    stable_id("jr", f"{job_id}:{attempt_id}"),
+                    job_id,
+                    attempt_id,
+                    result_checksum,
+                    status,
+                    summary_payload_text,
+                    artifact_id,
+                ),
             )
             connection.execute(
                 """

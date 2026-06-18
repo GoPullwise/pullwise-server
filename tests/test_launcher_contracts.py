@@ -301,7 +301,6 @@ CURL
                 PULLWISE_GITHUB_APP_ID=123
                 PULLWISE_GITHUB_APP_PRIVATE_KEY_BASE64=cHJpdmF0ZS1rZXk=
                 PULLWISE_GITHUB_OAUTH_SCOPE=read:user user:email
-                PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
                 """
             ).strip()
             + "\n",
@@ -334,7 +333,6 @@ CURL
                 PULLWISE_GITHUB_APP_ID=123
                 PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH=secrets/github-app-private-key.pem
                 PULLWISE_STATE_ENCRYPTION_KEY_PATH=secrets/state-encryption-key
-                PULLWISE_MAX_RUNNING_SCANS_PER_USER=1
                 """
             ).strip()
             + "\n",
@@ -536,19 +534,11 @@ CURL
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = self.base_launcher_env(root)
-            env_file = Path(env["PULLWISE_SYSTEM_ENV_FILE"])
-            contents = "\n".join(
-                line
-                for line in env_file.read_text(encoding="utf-8").splitlines()
-                if not line.startswith("PULLWISE_MAX_RUNNING_SCANS_PER_USER=")
-            )
-            env_file.write_text(contents + "\n", encoding="utf-8", newline="\n")
             self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
 
             result = self.run_launcher(["doctor"], env)
 
         self.assertEqual(0, result.returncode, result.stderr + result.stdout)
-        self.assertNotIn("PULLWISE_MAX_RUNNING_SCANS_PER_USER", result.stderr + result.stdout)
         self.assertIn("Ubuntu 22.04", result.stdout)
 
     def test_doctor_rejects_missing_systemd_service_in_production(self) -> None:

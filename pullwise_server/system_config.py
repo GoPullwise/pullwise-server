@@ -40,16 +40,12 @@ DEFAULT_CONFIG = {
         },
     },
     "scan": {
-        "maxRunningScansPerUser": 1,
         "maxQueuedScansGlobal": 1000,
-        "maxQueuedScansPerUser": 20,
         "jobMaxAttempts": 3,
         "jobLeaseSeconds": 3600,
         "jobStartupGraceSeconds": 120,
     },
     "worker": {
-        "maxClaimJobs": 2,
-        "maxConcurrencyCap": 32,
         "heartbeatTimeoutSeconds": 120,
         "minVersion": "",
         "allowedProviders": ["codex"],
@@ -119,28 +115,14 @@ FIELD_METADATA = [
     {
         "id": "scan",
         "title": "Scan scheduling",
-        "description": "Queue, retry, and lease policy used by the server and worker job payloads.",
+        "description": "Global queue, retry, and lease policy used by the server and worker job payloads.",
         "fields": [
-            {
-                "path": "scan.maxRunningScansPerUser",
-                "label": "Max running scans per user",
-                "type": "integer",
-                "min": 1,
-                "description": "Maximum scans a single user may have running at the same time.",
-            },
             {
                 "path": "scan.maxQueuedScansGlobal",
                 "label": "Max queued scans global",
                 "type": "integer",
                 "min": 1,
                 "description": "Maximum queued scans across the whole service before new scan requests are rejected.",
-            },
-            {
-                "path": "scan.maxQueuedScansPerUser",
-                "label": "Max queued scans per user",
-                "type": "integer",
-                "min": 1,
-                "description": "Maximum queued scans a single user may hold before new scan requests are rejected.",
             },
             {
                 "path": "scan.jobMaxAttempts",
@@ -168,22 +150,8 @@ FIELD_METADATA = [
     {
         "id": "worker",
         "title": "Worker control plane",
-        "description": "Worker compatibility, heartbeat, claim, and release defaults used by admin worker management.",
+        "description": "Worker compatibility, heartbeat, and release defaults used by admin worker management.",
         "fields": [
-            {
-                "path": "worker.maxClaimJobs",
-                "label": "Max claim jobs",
-                "type": "integer",
-                "min": 1,
-                "description": "Maximum jobs the server will return to one worker claim request.",
-            },
-            {
-                "path": "worker.maxConcurrencyCap",
-                "label": "Max concurrency cap",
-                "type": "integer",
-                "min": 1,
-                "description": "Upper bound for per-worker concurrency accepted from admin or heartbeat data.",
-            },
             {
                 "path": "worker.heartbeatTimeoutSeconds",
                 "label": "Heartbeat timeout seconds",
@@ -390,9 +358,7 @@ def public_docs_payload() -> dict:
         "settings": {
             "plans": current["plans"],
             "scan": {
-                "maxRunningScansPerUser": current["scan"]["maxRunningScansPerUser"],
                 "maxQueuedScansGlobal": current["scan"]["maxQueuedScansGlobal"],
-                "maxQueuedScansPerUser": current["scan"]["maxQueuedScansPerUser"],
             },
             "rateLimit": current["rateLimit"],
             "billing": {
@@ -453,20 +419,8 @@ def public_docs_groups(current: dict, *, pro_products: list[str], max_products: 
         {
             "id": "scan",
             "title": "Scan limits",
-            "description": "Queue limits visible to users when scans are accepted or rejected.",
+            "description": "Global queue limits visible to users when scans are accepted or rejected.",
             "fields": [
-                public_field(
-                    "scan.maxRunningScansPerUser",
-                    "Concurrent scans per user",
-                    current["scan"]["maxRunningScansPerUser"],
-                    "Maximum scans one user can have running at the same time.",
-                ),
-                public_field(
-                    "scan.maxQueuedScansPerUser",
-                    "Queued scans per user",
-                    current["scan"]["maxQueuedScansPerUser"],
-                    "Maximum queued scans one user can hold before the server asks them to wait.",
-                ),
                 public_field(
                     "scan.maxQueuedScansGlobal",
                     "Global queued scans",
@@ -788,25 +742,11 @@ def repository_scan_limits(plan: object = "max") -> dict:
     }
 
 
-def max_running_scans_per_user() -> int:
-    configured = env_int("PULLWISE_MAX_RUNNING_SCANS_PER_USER")
-    if configured is not None:
-        return max(1, configured)
-    return max(1, int_setting("scan.maxRunningScansPerUser"))
-
-
 def max_queued_scans_global() -> int:
     configured = env_int("PULLWISE_MAX_QUEUED_SCANS_GLOBAL")
     if configured is not None:
         return max(1, configured)
     return max(1, int_setting("scan.maxQueuedScansGlobal"))
-
-
-def max_queued_scans_per_user() -> int:
-    configured = env_int("PULLWISE_MAX_QUEUED_SCANS_PER_USER")
-    if configured is not None:
-        return max(1, configured)
-    return max(1, int_setting("scan.maxQueuedScansPerUser"))
 
 
 def scan_job_max_attempts() -> int:
@@ -825,14 +765,11 @@ def scan_job_startup_grace_seconds() -> int:
 
 
 def worker_max_claim_jobs() -> int:
-    configured = env_int("PULLWISE_WORKER_MAX_CLAIM_JOBS")
-    if configured is not None:
-        return max(1, configured)
-    return max(1, int_setting("worker.maxClaimJobs"))
+    return 1
 
 
 def worker_max_concurrency_cap() -> int:
-    return max(1, int_setting("worker.maxConcurrencyCap"))
+    return 1
 
 
 def worker_heartbeat_timeout_seconds() -> int:

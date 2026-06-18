@@ -80,7 +80,7 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     if not last_heartbeat or last_heartbeat < current_time - worker_heartbeat_timeout_seconds():
         return "offline"
     running_jobs = public_scan_count(worker.get("running_jobs"))
-    max_concurrent_jobs = max(1, public_scan_count(worker.get("max_concurrent_jobs")))
+    max_concurrent_jobs = 1
     doctor_status = public_issue_text(worker.get("doctor_status")).lower()
     codex_ready = worker.get("codex_ready")
     ready_providers = worker_record_ready_providers(worker)
@@ -108,7 +108,7 @@ def worker_can_claim(worker: dict, *, timestamp: int | None = None) -> tuple[boo
 
 
 def worker_available_claim_slots(worker: dict) -> int:
-    capacity = max(1, public_scan_count(worker.get("max_concurrent_jobs")) or 1)
+    capacity = 1
     running = max(0, public_scan_count(worker.get("running_jobs")))
     reported_free = max(0, public_scan_count(worker.get("free_slots")))
     return max(0, min(reported_free, capacity - running))
@@ -160,13 +160,37 @@ def worker_machine_metrics_payload(worker: dict) -> dict | None:
     return payload
 
 
+def annotate_worker_runtime_payloads(workers: list[dict], *, include_latest_commands: bool = False) -> list[dict]:
+    worker_ids = [public_issue_text(worker.get("worker_id")) for worker in workers if public_issue_text(worker.get("worker_id"))]
+    running_counts = db.worker_running_scan_job_counts(worker_ids)
+    latest_commands = db.latest_worker_commands(worker_ids) if include_latest_commands else {}
+    annotated = []
+    for worker in workers:
+        item = dict(worker)
+        worker_id = public_issue_text(item.get("worker_id"))
+        running_jobs = running_counts.get(worker_id, 0)
+        item["_running_jobs_count"] = running_jobs
+        item["_free_slots_count"] = max(0, 1 - running_jobs)
+        if include_latest_commands:
+            item["_latest_command_loaded"] = True
+        if worker_id in latest_commands:
+            item["_latest_command"] = latest_commands[worker_id]
+        annotated.append(item)
+    return annotated
+
+
 def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_metrics: bool = False) -> dict:
     if admin:
         worker = dict(worker)
-        capacity = public_scan_count(worker.get("max_concurrent_jobs")) or 1
-        running_jobs = db.count_worker_running_scan_jobs(public_issue_text(worker.get("worker_id")))
+        running_jobs = public_scan_count(worker.get("_running_jobs_count"))
+        if "_running_jobs_count" not in worker:
+            running_jobs = db.count_worker_running_scan_jobs(public_issue_text(worker.get("worker_id")))
         worker["running_jobs"] = running_jobs
-        worker["free_slots"] = max(0, capacity - running_jobs)
+        worker["free_slots"] = (
+            public_scan_count(worker.get("_free_slots_count"))
+            if "_free_slots_count" in worker
+            else max(0, 1 - running_jobs)
+        )
     provider_chain = worker_record_provider_chain(worker)
     ready_providers = worker_record_ready_providers(worker)
     payload = {
@@ -178,7 +202,7 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         "enabled": bool(worker.get("enabled")),
         "status": computed_worker_status(worker),
         "last_heartbeat_at": pull_request_timestamp(worker.get("last_heartbeat_at")),
-        "max_concurrent_jobs": public_scan_count(worker.get("max_concurrent_jobs")) or 1,
+        "max_concurrent_jobs": 1,
         "running_jobs": public_scan_count(worker.get("running_jobs")),
         "free_slots": public_scan_count(worker.get("free_slots")),
         "version": public_issue_text(worker.get("version")),
@@ -196,10 +220,14 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         payload["systemd_active"] = bool(worker.get("systemd_active")) if worker.get("systemd_active") is not None else None
         payload["doctor_checked_at"] = pull_request_timestamp(worker.get("doctor_checked_at"))
         payload["test"] = worker_test_payload(worker)
-        payload["latest_command"] = worker_command_payload(
-            db.get_latest_worker_command(public_issue_text(worker.get("worker_id"))),
-            admin=True,
-        )
+        latest_command = worker.get("_latest_command") if isinstance(worker.get("_latest_command"), dict) else None
+        if worker.get("_latest_command_loaded") and latest_command is None:
+            payload["latest_command"] = None
+        else:
+            payload["latest_command"] = worker_command_payload(
+                latest_command or db.get_latest_worker_command(public_issue_text(worker.get("worker_id"))),
+                admin=True,
+            )
         if include_machine_metrics:
             machine_metrics = worker_machine_metrics_payload(worker)
             if machine_metrics:
@@ -569,7 +597,6 @@ def worker_create_payload(worker: dict) -> dict:
         or "http://127.0.0.1:18080"
     )
     local_install_url = f"{local_server_url}/install-worker.sh"
-    max_concurrent_jobs = max(1, public_scan_count(public.get("max_concurrent_jobs")) or 1)
     worker_package = default_worker_package(public.get("version"))
     codex_timeout_seconds = str(system_config.worker_codex_timeout_seconds())
     provider_chain = worker_record_provider_chain(worker)
@@ -582,7 +609,6 @@ def worker_create_payload(worker: dict) -> dict:
         server_url=server_url,
         worker_id=public["worker_id"],
         worker_name=public.get("name") or public["worker_id"],
-        max_concurrent_jobs=max_concurrent_jobs,
         worker_package=worker_package,
         provider_chain=provider_chain_text,
     )
@@ -591,7 +617,6 @@ def worker_create_payload(worker: dict) -> dict:
         server_url=local_server_url,
         worker_id=public["worker_id"],
         worker_name=public.get("name") or public["worker_id"],
-        max_concurrent_jobs=max_concurrent_jobs,
         worker_package=worker_package,
         provider_chain=provider_chain_text,
     )
@@ -602,7 +627,6 @@ def worker_create_payload(worker: dict) -> dict:
         "PULLWISE_WORKER_TOKEN": token,
         "PULLWISE_PROVIDER": provider_chain[0],
         "PULLWISE_PROVIDER_CHAIN": provider_chain_text,
-        "PULLWISE_MAX_CONCURRENT_JOBS": str(max_concurrent_jobs),
         "PULLWISE_CHECKOUT_ROOT": f"{service_home}/checkouts",
         "PULLWISE_LOG_DIR": service_log_dir,
         "PULLWISE_WORKER_PACKAGE": worker_package,
@@ -650,7 +674,6 @@ def worker_install_command(
     server_url: str,
     worker_id: str,
     worker_name: str,
-    max_concurrent_jobs: int,
     worker_package: str,
     provider_chain: str,
 ) -> str:
@@ -662,8 +685,7 @@ def worker_install_command(
         f"--worker-id {shell_quote(worker_id)} "
         f"--worker-name {shell_quote(worker_name)} "
         f"--package {shell_quote(worker_package)} "
-        f"--provider-chain {shell_quote(provider_chain)} "
-        f"--max-concurrent-jobs {max_concurrent_jobs}"
+        f"--provider-chain {shell_quote(provider_chain)}"
     )
 
 
@@ -683,7 +705,6 @@ SERVER_URL=""
 WORKER_ID=""
 WORKER_TOKEN=""
 WORKER_NAME="pullwise-worker"
-MAX_CONCURRENT_JOBS="1"
 PROVIDER="codex"
 PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
@@ -695,7 +716,7 @@ while [ "$#" -gt 0 ]; do
     --worker-id) WORKER_ID="${2:-}"; shift 2 ;;
     --worker-token-file) WORKER_TOKEN="$(cat "${2:-}")"; shift 2 ;;
     --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
-    --max-concurrent-jobs) MAX_CONCURRENT_JOBS="${2:-1}"; shift 2 ;;
+    --max-concurrent-jobs) shift 2 ;;
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
     --provider-chain) PROVIDER_CHAIN="${2:-}"; shift 2 ;;
     --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
@@ -1120,7 +1141,6 @@ write_env_value PULLWISE_WORKER_ID "$WORKER_ID"
 write_env_value PULLWISE_WORKER_TOKEN "$WORKER_TOKEN"
 write_env_value PULLWISE_PROVIDER "$PROVIDER"
 write_env_value PULLWISE_PROVIDER_CHAIN "$PROVIDER_CHAIN"
-write_env_value PULLWISE_MAX_CONCURRENT_JOBS "$MAX_CONCURRENT_JOBS"
 write_env_value PULLWISE_CHECKOUT_ROOT "$CHECKOUT_ROOT"
 write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
@@ -1288,7 +1308,7 @@ def worker_test_payload(worker: dict) -> dict:
         "tokenRecentlyUsed": bool(token_used_at),
         "versionCompatible": worker_version_compatible(worker),
         "providerSupported": worker_supported_provider(worker),
-        "freeSlotsNormal": public_scan_count(worker.get("free_slots")) <= max(1, public_scan_count(worker.get("max_concurrent_jobs"))),
+        "freeSlotsNormal": public_scan_count(worker.get("free_slots")) <= 1,
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}

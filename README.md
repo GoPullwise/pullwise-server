@@ -226,9 +226,7 @@ Expected shape:
   },
   "billing": {"provider": "creem", "enabled": true},
   "limits": {
-    "maxConcurrentScansPerUser": 1,
     "maxQueuedScansGlobal": 1000,
-    "maxQueuedScansPerUser": 20,
     "rateLimitEnabled": true
   }
 }
@@ -245,7 +243,7 @@ so multiple workers never receive the same job.
 
 Public status is available at `GET /status/system`. It returns scan-system
 summary fields plus a sanitized `workers` list for the web status page. Public
-worker entries expose capacity and heartbeat status only; hostnames, internal
+worker entries expose fixed capacity and heartbeat status only; hostnames, internal
 errors, worker tokens, token hashes, and audit events remain admin-only.
 
 Administrators manage workers at `/admin/*` endpoints:
@@ -283,7 +281,7 @@ pinned by default as `@openai/codex@0.135.0`; override it with
 
 Worker endpoints (authenticated via bearer token):
 
-- `POST /worker/heartbeat` — report capacity, running jobs, health
+- `POST /worker/heartbeat` — report running jobs, health, and fixed single-job capacity
 - `POST /worker/jobs/claim` — atomically claim queued jobs
 - `POST /worker/jobs/{id}/progress` — report scan phase and progress
 - `POST /worker/jobs/{id}/result` — upload completed scan results
@@ -588,21 +586,20 @@ Subscription plan policy is not read from worker or server environment
 variables; it is stored in the server database and attached to each claimed job.
 
 In distributed worker mode, total running scan capacity comes from connected
-workers and their advertised free slots. Each worker controls its local
-parallelism with `PULLWISE_MAX_CONCURRENT_JOBS`. The server keeps only the
-per-user running fairness limit plus queue limits. Edit those limits through
-admin system config; they are not read from worker hosts and they are not read
-from server environment variables after startup.
+workers. Each worker processes exactly one job at a time and does not keep a
+local job queue; server-side scan jobs remain queued until a worker finishes its
+current job and claims the next one. The server keeps only the per-user running
+fairness limit plus queue limits. Edit those limits through admin system config;
+they are not read from worker hosts and they are not read from server
+environment variables after startup.
 
-If all online workers have no free slots, new scans remain `queued` until a
-worker reports capacity and claims more work. The per-user running limit prevents
-one user from occupying every worker slot in a multi-tenant deployment.
+If all online workers are busy, new scans remain `queued` until a worker
+finishes and claims more work. The per-user running limit prevents one user from
+occupying every worker in a multi-tenant deployment.
 Queued scan payloads include `queue.position`, `queue.ahead`, `queue.reason`,
 `queue.message`, and the active fairness/queue limits so the frontend can
 explain why a scan is waiting and when it moves to running.
 
-Raise worker `PULLWISE_MAX_CONCURRENT_JOBS` only after sizing CPU, RAM, checkout
-storage, and provider rate limits on that worker host.
 Workers poll with bounded exponential backoff when the queue is empty or the
 server is temporarily unreachable. Tune `PULLWISE_WORKER_POLL_SECONDS`,
 `PULLWISE_WORKER_POLL_JITTER_SECONDS`, and

@@ -159,7 +159,6 @@ write_env_defaults() {
   upsert_env PULLWISE_RATE_LIMIT_ENABLED true
   upsert_env PULLWISE_RATE_LIMIT_REQUESTS 600
   upsert_env PULLWISE_RATE_LIMIT_WINDOW_SECONDS 60
-  upsert_env PULLWISE_MAX_RUNNING_SCANS_PER_USER 1
 
   if ! grep -qE '^PULLWISE_REVIEW_PROVIDER=' "$ENV_FILE"; then
     upsert_env PULLWISE_REVIEW_PROVIDER disabled

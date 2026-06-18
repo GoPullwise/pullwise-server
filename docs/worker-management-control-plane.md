@@ -6,7 +6,7 @@ Date: 2026-05-31
 
 Pullwise separates worker visibility from worker control:
 
-- Public users may see read-only, sanitized worker capacity and status on the web status page.
+- Public users may see read-only, sanitized worker status and fixed single-job capacity on the web status page.
 - Administrators may manage worker registry state and worker credentials through `/admin/workers/*`.
 - The server must not become a remote shell, SSH orchestrator, or root-level host manager for worker machines.
 
@@ -49,7 +49,7 @@ admin-only and are limited to registry state, desired state, and credentials:
 - `GET /admin/workers`: list admin worker details
 - `GET /admin/workers/{id}`: worker detail plus audit events
 - `POST /admin/workers`: create a worker and return the worker token once
-- `PATCH /admin/workers/{id}`: update metadata such as name, provider, region, version, and capacity
+- `PATCH /admin/workers/{id}`: update metadata such as name, provider, region, and version
 - `POST /admin/workers/{id}/enable`: allow a worker to claim new jobs
 - `POST /admin/workers/{id}/disable`: prevent a worker from claiming new jobs
 - `POST /admin/workers/{id}/rotate-token`: rotate the worker credential and return the new token once

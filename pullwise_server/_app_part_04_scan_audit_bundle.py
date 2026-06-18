@@ -393,19 +393,15 @@ def public_scan_count(value: object) -> int:
 
 
 def worker_max_concurrency_cap() -> int:
-    return system_config.worker_max_concurrency_cap()
+    return 1
 
 
 def worker_admin_capacity(value: object) -> int:
-    capacity = public_scan_count(value) or 1
-    cap = worker_max_concurrency_cap()
-    if capacity > cap:
-        raise ValueError(f"max_concurrent_jobs cannot exceed {cap}.")
-    return capacity
+    return 1
 
 
 def worker_heartbeat_capacity(value: object) -> int:
-    return min(public_scan_count(value) or 1, worker_max_concurrency_cap())
+    return 1
 
 
 def public_scan_issue_counts(value: object) -> dict:

@@ -27,8 +27,8 @@ web -> server -> global job queue <- workers
 - [x] 支持全局 queued/running 限制。
 - [x] 支持单用户 queued/running 限制。
 - [x] web 能看到 queued 状态、queue position、ahead count。
-- [x] worker 能通过 heartbeat 上报 max_concurrent_jobs、running_jobs、free_slots。
-- [x] worker 能按 free slots 一次 claim 一个或多个任务。
+- [x] worker 固定同一时间只处理 1 个 job，并通过 heartbeat 上报 running_jobs/free_slots。
+- [x] worker 不维护本地 job 队列；只在没有活跃 job 时向 server claim 1 个任务。
 - [x] claim 是原子的，多个 worker 同时 claim 不会拿到同一个 job。
 - [x] job 被 claim 后，server 记录 claimed_by_worker_id、claimed_at、attempt。
 - [x] job 被 claim 后，web 能看到任务从 queued 变为 running/processing。
@@ -48,7 +48,7 @@ web -> server -> global job queue <- workers
 ## 阶段 2：Worker 管理与可观测性
 
 - [x] server 持久化 worker registry。
-- [x] worker registry 至少包含 worker id、name、token hash、provider、enabled、status、heartbeat、capacity、version、region、last error、created/updated/disabled/deleted 时间。
+- [x] worker registry 至少包含 worker id、name、token hash、provider、enabled、status、heartbeat、固定单任务 capacity、version、region、last error、created/updated/disabled/deleted 时间。
 - [x] worker token 只保存 hash，不保存明文。
 - [x] 创建 worker 或 rotate token 时，明文 token 只返回一次。
 - [x] 支持 admin 权限判断。
@@ -61,12 +61,12 @@ web -> server -> global job queue <- workers
 - [x] admin 可以 soft delete worker。
 - [x] admin 可以 rotate worker token。
 - [x] disabled/deleted worker 不能 claim 新任务。
-- [x] worker heartbeat 能更新 registry 中的 capacity、running jobs、free slots、version、hostname、region、last heartbeat。
+- [x] worker heartbeat 能更新 registry 中的 running jobs、free slots、version、hostname、region、last heartbeat；capacity 固定为 1。
 - [x] server 能计算 worker 状态：idle、busy、degraded、offline、disabled。
 - [x] heartbeat 超时的 worker 会显示 offline。
 - [x] 有 last_error 或版本不兼容的 worker 会显示 degraded。
-- [x] capacity 用满的 worker 会显示 busy。
-- [x] /admin/workers/{id}/test 能基于 heartbeat、token 使用情况、version、provider、capacity、last error 给出检测结果。
+- [x] 单个 job 槽位用满的 worker 会显示 busy。
+- [x] /admin/workers/{id}/test 能基于 heartbeat、token 使用情况、version、provider、固定 capacity、last error 给出检测结果。
 - [x] public status API 能返回 scan system summary。
 - [x] public status 至少包含 ok/degraded/down、online worker count、total worker count、total capacity、running jobs、queued jobs、degraded/offline count。
 - [x] admin status API 能返回 worker 详情。
@@ -96,7 +96,7 @@ web -> server -> global job queue <- workers
 - [x] server/web 能看到新 worker online、degraded 或 not_ready。
 - [x] Codex CLI 未登录时，doctor 能明确识别，worker 不应被误判 ready。
 - [x] 管理员完成 codex login 后，doctor 能确认 Codex ready。
-- [x] worker 能按配置上报 max_concurrent_jobs。
+- [x] worker 固定上报 max_concurrent_jobs=1。
 - [x] pullwise-worker doctor 能检查 server URL、token、heartbeat、Git、Codex、Codex login、目录权限、磁盘空间、systemd 状态。
 - [x] pullwise-worker status 能显示本地服务状态。
 - [x] pullwise-worker restart 能重启服务。
@@ -117,8 +117,8 @@ web -> server -> global job queue <- workers
 ## 端到端验收场景
 
 - [x] 单 worker 场景：创建 worker -> 部署 -> heartbeat online -> 用户提交 scan -> worker claim -> 上传 progress -> 上传 result -> web 显示 done。
-- [x] 多 worker 场景：部署 2 台以上 worker -> 同时提交多个 scan -> 不同 worker 按 capacity 领取任务 -> 无重复 claim -> 全部完成。
-- [x] 队列场景：提交超过 capacity 的 scan -> 多余任务保持 queued -> web 显示 queue position -> worker 完成任务后自动领取下一个。
+- [x] 多 worker 场景：部署 2 台以上 worker -> 同时提交多个 scan -> 不同 worker 各领取 1 个任务 -> 无重复 claim -> 全部完成。
+- [x] 队列场景：提交超过可用 worker 数的 scan -> 多余任务保持 queued -> web 显示 queue position -> worker 完成任务后自动领取下一个。
 - [x] 用户限流场景：单用户超过 queued/running 限制 -> server 拒绝或延迟入队，并返回明确错误。
 - [x] 全局限流场景：全局 queued/running 达上限 -> server 拒绝新任务或返回系统繁忙。
 - [x] Worker 掉线场景：worker claim 后停止服务 -> heartbeat 超时 -> job lost/timed_out -> 未超 retry 的任务重新入队 -> 其他 worker 可继续处理。
@@ -133,8 +133,8 @@ web -> server -> global job queue <- workers
 
 - `tests.test_worker_pull_routes`
   - worker heartbeat -> claim -> progress -> result -> scan done。
-  - 多 worker 按 capacity claim 多个 queued job，无重复 claim。
-  - 超过 capacity 的 job 保持 queued，前序任务完成后可继续 claim。
+  - 多 worker 各自只 claim 1 个 queued job，无重复 claim。
+  - 超过可用 worker 数的 job 保持 queued，前序任务完成后可继续 claim。
   - 全局 queued 限流会在创建 job 前拒绝新 scan。
   - result 重复上传幂等，同 attempt/checksum 不重复写 issue。
   - result checksum 冲突返回 conflict。
@@ -156,7 +156,7 @@ web -> server -> global job queue <- workers
   - rotate token 后旧 token 失效，新 token 能恢复 heartbeat。
   - 非 admin 不能访问 admin worker 管理接口。
   - disabled/deleted worker 不能 claim 新任务。
-  - heartbeat 更新 capacity、running jobs、free slots、version、hostname、region、doctor 状态。
+  - heartbeat 更新固定 capacity、running jobs、free slots、version、hostname、region、doctor 状态。
   - worker 状态可计算 idle、busy、degraded、offline、disabled。
   - 多个 online worker 会增加 public status 的 total capacity 和 available capacity。
   - public status 不泄露 hostname、last error 或 token；admin status 返回 worker 详情。
@@ -172,7 +172,7 @@ web -> server -> global job queue <- workers
   - cleanup 只删除 worker checkout 范围内目录。
   - deploy assets 覆盖 install、systemd、logrotate、cleanup、update、restart、uninstall。
 - `pullwise-web` queue/status tests
-  - web 能渲染 queued 状态、queue position、ahead count 和 capacity limits。
+  - web 能渲染 queued 状态、queue position、ahead count、固定 worker capacity 和 queue limits。
   - web status 普通用户能看到 scan system summary。
   - web status 管理员能看到 worker 列表、capacity、last heartbeat、provider/version、region、最近错误。
 
@@ -183,6 +183,6 @@ web -> server -> global job queue <- workers
 - 在真实 Linux 主机上运行 `/install-worker.sh`，验证 OS/CPU、Python/Node/Git/Codex CLI、systemd、logrotate、目录权限。
 - 使用真实 GitHub App installation token clone 私有 repo。
 - 使用真实已登录 Codex CLI 完成一次 scan。
-- 部署 2 台以上真实 worker，验证 server 同时接收 heartbeat、capacity 增加、web status 刷新。
+- 部署 2 台以上真实 worker，验证 server 同时接收 heartbeat、总 capacity 按 worker 数增加、web status 刷新。
 - 验证生产日志中不出现 worker token、GitHub clone token、Codex session 或 repo secret。
 - 验证磁盘空间告警/最大占用策略在真实 checkout 压力下符合预期。
