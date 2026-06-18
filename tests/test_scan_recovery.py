@@ -151,11 +151,12 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
         self.persist_state.assert_called_once()
 
-    def test_recover_interrupted_scans_requeues_matching_unexpired_job(self) -> None:
+    def test_recover_interrupted_scans_preserves_matching_unexpired_job(self) -> None:
         timestamp = app.now()
         app.SCANS = [
             {
                 "id": "sc_unexpired",
+                "jobId": "job_unexpired",
                 "status": "running",
                 "progress": 44,
                 "phase": "ai",
@@ -185,12 +186,14 @@ class ScanRecoveryTest(unittest.TestCase):
         stored = db.get_scan_job(job["job_id"])
 
         self.assertEqual(recovered, 1)
-        self.assertEqual(stored["status"], "queued")
-        self.assertEqual(stored["error"], "server_restart")
-        self.assertIsNone(stored["claimed_by_worker_id"])
-        self.assertIsNone(stored["timeout_at"])
-        self.assertEqual(app.SCANS[0]["status"], "queued")
-        self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
+        self.assertEqual(stored["status"], "claimed")
+        self.assertIsNone(stored["error"])
+        self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
+        self.assertGreater(stored["timeout_at"], timestamp + 30)
+        self.assertEqual(app.SCANS[0]["status"], "running")
+        self.assertEqual(app.SCANS[0]["jobId"], "job_unexpired")
+        self.assertEqual(app.SCANS[0]["claimedByWorkerId"], "wk_1")
+        self.assertNotIn("recoveryReason", app.SCANS[0])
 
     def test_recover_interrupted_scans_reconstructs_orphan_scan_job(self) -> None:
         timestamp = app.now()

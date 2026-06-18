@@ -161,6 +161,47 @@ GIT
             deployed_head = (app / ".pullwise" / "git-watch.deployed-head").read_text(encoding="utf-8").strip()
             self.assertEqual(deployed_head, run_git(["rev-parse", "HEAD"], app).stdout.strip())
 
+    def test_health_check_retries_after_restart_before_marking_deployed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = self.create_remote_and_clone(root)
+            deploy_log = app / ".pullwise" / "deploy.log"
+            health_script = root / "health.sh"
+            health_count = root / "health-count"
+            write_executable(
+                health_script,
+                f"""
+                #!/usr/bin/env sh
+                count=0
+                if [ -f {health_count} ]; then
+                  count=$(cat {health_count})
+                fi
+                count=$((count + 1))
+                printf '%s' "$count" > {health_count}
+                if [ "$count" -lt 3 ]; then
+                  exit 7
+                fi
+                exit 0
+                """,
+            )
+
+            result = self.run_watcher(
+                app,
+                {
+                    "PULLWISE_WATCH_RESTART_COMMAND": f"printf restart >> {deploy_log}",
+                    "PULLWISE_WATCH_RUN_HEALTH": "true",
+                    "PULLWISE_WATCH_HEALTH_COMMAND": str(health_script),
+                    "PULLWISE_WATCH_HEALTH_RETRIES": "3",
+                    "PULLWISE_WATCH_HEALTH_RETRY_SECONDS": "0",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(deploy_log.read_text(encoding="utf-8"), "restart")
+            self.assertEqual(health_count.read_text(encoding="utf-8"), "3")
+            deployed_head = (app / ".pullwise" / "git-watch.deployed-head").read_text(encoding="utf-8").strip()
+            self.assertEqual(deployed_head, run_git(["rev-parse", "HEAD"], app).stdout.strip())
+
     def test_installs_missing_git_on_ubuntu_2204_before_polling(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

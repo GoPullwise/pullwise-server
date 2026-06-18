@@ -702,10 +702,21 @@ def rollback_orphan_scan_quota_locked() -> int:
     return rolled_back
 
 
+def scan_job_has_active_restart_lease(job: dict | None, timestamp: int) -> bool:
+    if not isinstance(job, dict):
+        return False
+    status = public_issue_text(job.get("status")).lower()
+    if status not in {"claimed", "running", "uploading_result"}:
+        return False
+    timeout_at = pull_request_timestamp(job.get("timeout_at")) or 0
+    return timeout_at > int(timestamp)
+
+
 def recover_interrupted_scans() -> int:
     recovered = 0
+    timestamp = now()
     recovered_jobs = db.recover_expired_scan_jobs(
-        now(),
+        timestamp,
         worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
     )
     with STATE_LOCK:
@@ -726,11 +737,15 @@ def recover_interrupted_scans() -> int:
                     if reconcile_terminal_scan_job_locked(scan, job):
                         recovered += 1
                     continue
-            db.requeue_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=now())
+                if scan_job_has_active_restart_lease(job, timestamp):
+                    if reconcile_scan_job_state_locked(scan):
+                        recovered += 1
+                    continue
+            db.requeue_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=timestamp)
             scan["status"] = "queued"
             scan["progress"] = 0
             scan["phase"] = None
-            scan["recoveredAt"] = now()
+            scan["recoveredAt"] = timestamp
             scan["recoveryReason"] = "server_restart"
             recovered += 1
         if recovered:

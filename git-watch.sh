@@ -21,6 +21,8 @@ RUN_SYNC_ENV=${PULLWISE_WATCH_RUN_SYNC_ENV:-false}
 RUN_DOCTOR=${PULLWISE_WATCH_RUN_DOCTOR:-false}
 RUN_HEALTH=${PULLWISE_WATCH_RUN_HEALTH:-true}
 ALLOW_DIRTY=${PULLWISE_WATCH_ALLOW_DIRTY:-false}
+HEALTH_RETRIES=${PULLWISE_WATCH_HEALTH_RETRIES:-30}
+HEALTH_RETRY_SECONDS=${PULLWISE_WATCH_HEALTH_RETRY_SECONDS:-2}
 
 SETUP_COMMAND=${PULLWISE_WATCH_SETUP_COMMAND:-./launcher.sh setup}
 TEST_COMMAND=${PULLWISE_WATCH_TEST_COMMAND:-.venv/bin/python -m unittest discover -s tests}
@@ -45,6 +47,8 @@ Common environment overrides:
   PULLWISE_WATCH_BRANCH=main
   PULLWISE_WATCH_RUN_SYNC_ENV=false
   PULLWISE_WATCH_RUN_DOCTOR=false
+  PULLWISE_WATCH_HEALTH_RETRIES=30
+  PULLWISE_WATCH_HEALTH_RETRY_SECONDS=2
   PULLWISE_WATCH_DEPLOYED_HEAD_FILE=.pullwise/git-watch.deployed-head
   PULLWISE_WATCH_RESTART_COMMAND='./launcher.sh restart'
 
@@ -190,6 +194,32 @@ run_command() {
   sh -c "$command_text"
 }
 
+run_health_command() {
+  attempts=$HEALTH_RETRIES
+  delay=$HEALTH_RETRY_SECONDS
+  case "$attempts" in
+    ""|*[!0-9]*)
+      attempts=1
+      ;;
+  esac
+  [ "$attempts" -gt 0 ] || attempts=1
+
+  attempt=1
+  while [ "$attempt" -le "$attempts" ]; do
+    if run_command "health" "$HEALTH_COMMAND"; then
+      return 0
+    fi
+    if [ "$attempt" -lt "$attempts" ]; then
+      log "health check attempt $attempt/$attempts failed; retrying in ${delay}s"
+      sleep "$delay"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  log "ERROR: health check failed after $attempts attempt(s)" >&2
+  return 1
+}
+
 read_deployed_head() {
   [ -f "$DEPLOYED_HEAD_FILE" ] || return 1
   sed -n '1p' "$DEPLOYED_HEAD_FILE" | tr -cd '0-9a-fA-F'
@@ -249,7 +279,7 @@ deploy_after_pull() {
   fi
   run_command "restart" "$RESTART_COMMAND" || return 1
   if is_true "$RUN_HEALTH"; then
-    run_command "health" "$HEALTH_COMMAND" || return 1
+    run_health_command || return 1
   fi
 }
 
