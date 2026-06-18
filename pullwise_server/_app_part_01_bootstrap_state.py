@@ -243,6 +243,25 @@ def memory_scan_by_id(scan_id: object) -> dict | None:
     return SCAN_BY_ID.get(target_scan_id)
 
 
+def remember_scan_snapshot_locked(scan: dict | None) -> dict | None:
+    if not isinstance(scan, dict):
+        return None
+    scan_id = public_issue_text(scan.get("id"))
+    if not scan_id:
+        return scan
+    existing = SCAN_BY_ID.get(scan_id)
+    if existing is None:
+        existing = next((item for item in SCANS if public_issue_text(item.get("id")) == scan_id), None)
+    if existing is not None and existing is not scan:
+        existing.clear()
+        existing.update(scan)
+        scan = existing
+    elif existing is None:
+        SCANS.insert(0, scan)
+    index_memory_scan(scan)
+    return scan
+
+
 class PreviewScanLockEntry:
     def __init__(self) -> None:
         self.lock = threading.RLock()
@@ -488,12 +507,22 @@ def ensure_state_loaded() -> None:
         SETTINGS = persisted_state_dict(state, "settings")
         BILLING_EVENTS = persisted_state_dict(state, "billingEvents")
         BILLING_PENDING_UPDATES = persisted_state_list(state, "billingPendingUpdates")
-        SCANS = persisted_state_list(state, "scans")
+        legacy_scans = persisted_state_list(state, "scans")
         ISSUES = persisted_state_list(state, "issues")
         SCAN_BY_ID = {}
-        for scan in SCANS:
-            index_memory_scan(scan)
+        for scan in legacy_scans:
             db.upsert_scan(scan)
+        db_scan_ids = set()
+        SCANS = []
+        for scan in db.list_scan_snapshots(limit=env_int("PULLWISE_SCAN_MEMORY_CACHE_LIMIT", 1000)):
+            scan_id = public_issue_text(scan.get("id"))
+            if scan_id:
+                db_scan_ids.add(scan_id)
+            remember_scan_snapshot_locked(scan)
+        for scan in legacy_scans:
+            scan_id = public_issue_text(scan.get("id"))
+            if scan_id and scan_id not in db_scan_ids:
+                remember_scan_snapshot_locked(scan)
         for issue in ISSUES:
             db.upsert_issue(issue)
         STATE_LOADED = True

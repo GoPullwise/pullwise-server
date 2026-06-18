@@ -1094,10 +1094,19 @@ def user_scan_for_read(session: dict | None, scan_id: str) -> dict | None:
 def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
     if not request_id:
         return None
-    for scan in SCANS:
-        if scan.get("userId") == user_id and scan.get("requestId") == request_id:
-            return scan
-    return None
+    with STATE_LOCK:
+        for scan in SCANS:
+            if scan.get("userId") == user_id and scan.get("requestId") == request_id:
+                return scan
+    scan = db.find_user_scan_snapshot_by_request_id(user_id, request_id)
+    if not scan:
+        return None
+    job = db.get_scan_job_for_scan(public_issue_text(scan.get("id")))
+    if job:
+        hydrated = hydrate_scan_jobs_for_read([job])
+        scan = hydrated[0] if hydrated else scan
+    with STATE_LOCK:
+        return remember_scan_snapshot_locked(scan)
 
 
 IDEMPOTENCY_KEY_REUSED_MESSAGE = "This idempotency key is already attached to a different repository scan."
@@ -1114,5 +1123,3 @@ def scan_matches_requested_repository(scan: dict, *, requested_repo_id: str | No
     if requested_repository and clean_repository_full_name(scan.get("repo")) == requested_repository:
         return True
     return False
-
-

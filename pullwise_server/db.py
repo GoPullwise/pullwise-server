@@ -2022,6 +2022,47 @@ def list_scan_snapshots_for_scan_ids(scan_ids: list[str] | set[str] | tuple[str,
     return [scan for row in rows if (scan := scan_from_row(row)) is not None]
 
 
+def list_scan_snapshots(*, limit: int = 1000) -> list[dict[str, Any]]:
+    ensure_initialized()
+    safe_limit = max(1, min(10000, int(limit or 1000)))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM scans
+            ORDER BY updated_at DESC, scan_id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+    return [scan for row in rows if (scan := scan_from_row(row)) is not None]
+
+
+def find_user_scan_snapshot_by_request_id(user_id: str, request_id: str) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    target_request_id = str(request_id or "").strip()
+    if not target_user_id or not target_request_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM scans
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, scan_id DESC
+            """,
+            (target_user_id,),
+        ).fetchall()
+    for row in rows:
+        scan = scan_from_row(row)
+        if isinstance(scan, dict) and str(scan.get("requestId") or "").strip() == target_request_id:
+            return scan
+    return None
+
+
 def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
     ensure_initialized()
     job_id = str(record.get("job_id") or stable_id("job", record.get("scan_id"))).strip()
@@ -2169,6 +2210,33 @@ def get_user_scan_job(user_id: str, scan_id: str) -> dict[str, Any] | None:
             connection.execute(
                 "SELECT * FROM scan_jobs WHERE user_id = ? AND scan_id = ?",
                 (target_user_id, target_scan_id),
+            ).fetchone()
+        )
+
+
+def get_latest_user_repo_scan_job(user_id: str, repo_id: str, *, active_only: bool = False) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    target_repo_id = str(repo_id or "").strip()
+    if not target_user_id or not target_repo_id:
+        return None
+    clauses = ["user_id = ?", "repo_id = ?"]
+    params: list[Any] = [target_user_id, target_repo_id]
+    if active_only:
+        clauses.append("status IN ('queued', 'retrying', 'claimed', 'running', 'uploading_result')")
+    where = " AND ".join(clauses)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                f"""
+                SELECT *
+                FROM scan_jobs
+                WHERE {where}
+                ORDER BY created_at DESC, job_id DESC
+                LIMIT 1
+                """,
+                tuple(params),
             ).fetchone()
         )
 

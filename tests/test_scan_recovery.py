@@ -151,6 +151,68 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
         self.persist_state.assert_called_once()
 
+    def test_state_loader_uses_database_scan_snapshots_as_memory_cache(self) -> None:
+        db.reset_initialization_cache()
+        db.initialize()
+        db.upsert_scan(
+            {
+                "id": "sc_db_loaded",
+                "userId": "usr_1",
+                "repo": "acme/api",
+                "repoId": "repo_1",
+                "status": "queued",
+                "createdAt": app.now(),
+                "requestId": "req_db_loaded",
+            }
+        )
+        app.STATE_LOADED = False
+        app.SCANS = []
+        app.SCAN_BY_ID = {}
+
+        with patch.object(app.db, "load_state", return_value={}):
+            app.ensure_state_loaded()
+
+        self.assertTrue(app.STATE_LOADED)
+        self.assertEqual(app.SCANS[0]["id"], "sc_db_loaded")
+        self.assertEqual(app.memory_scan_by_id("sc_db_loaded")["requestId"], "req_db_loaded")
+
+    def test_scan_lookup_helpers_use_database_after_memory_cache_is_empty(self) -> None:
+        timestamp = app.now()
+        db.upsert_scan(
+            {
+                "id": "sc_db_lookup",
+                "userId": "usr_1",
+                "repo": "acme/api",
+                "repoId": "repo_1",
+                "status": "queued",
+                "createdAt": timestamp,
+                "requestId": "req_db_lookup",
+            }
+        )
+        db.create_scan_job(
+            {
+                "job_id": "job_db_lookup",
+                "scan_id": "sc_db_lookup",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp,
+                "user_id": "usr_1",
+                "repo_id": "repo_1",
+            }
+        )
+        app.SCANS = []
+        app.SCAN_BY_ID = {}
+
+        by_request = app.user_scan_by_request_id("usr_1", "req_db_lookup")
+        active = app.active_scan_for_user_repo("usr_1", "repo_1")
+
+        self.assertEqual(by_request["id"], "sc_db_lookup")
+        self.assertEqual(active["id"], "sc_db_lookup")
+        self.assertEqual(active["status"], "queued")
+        self.assertEqual(app.memory_scan_by_id("sc_db_lookup")["id"], "sc_db_lookup")
+
     def test_recover_interrupted_scans_preserves_matching_unexpired_job(self) -> None:
         timestamp = app.now()
         app.SCANS = [

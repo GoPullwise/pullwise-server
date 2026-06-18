@@ -448,6 +448,12 @@ def api_repository_payload(row: dict, user: dict | None = None) -> dict:
 
 
 def latest_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
+    job = db.get_latest_user_repo_scan_job(user_id, repo_id)
+    if job:
+        scans = hydrate_scan_jobs_for_read([job])
+        if scans:
+            with STATE_LOCK:
+                return remember_scan_snapshot_locked(scans[0])
     with STATE_LOCK:
         for scan in SCANS:
             if scan.get("userId") == user_id and scan.get("repoId") == repo_id:
@@ -457,6 +463,12 @@ def latest_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
 
 
 def active_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
+    job = db.get_latest_user_repo_scan_job(user_id, repo_id, active_only=True)
+    if job:
+        scans = hydrate_scan_jobs_for_read([job])
+        if scans:
+            with STATE_LOCK:
+                return remember_scan_snapshot_locked(scans[0])
     with STATE_LOCK:
         for scan in SCANS:
             if scan.get("userId") != user_id or scan.get("repoId") != repo_id:
