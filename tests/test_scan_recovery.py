@@ -532,6 +532,48 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertIsNone(app.SCANS[0]["claimedAt"])
         self.assertIsNone(app.SCANS[0]["claimedByWorkerId"])
 
+    def test_recover_interrupted_scans_fails_exhausted_queued_job_and_scan(self) -> None:
+        timestamp = app.now()
+        app.SCANS = [
+            {
+                "id": "sc_exhausted",
+                "status": "queued",
+                "progress": 0,
+                "phase": None,
+                "createdAt": timestamp - 180,
+                "queuedAt": timestamp - 180,
+            },
+        ]
+        job = db.create_scan_job(
+            {
+                "job_id": "job_exhausted",
+                "scan_id": "sc_exhausted",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 180,
+                "user_id": "usr_1",
+                "max_attempts": 2,
+            }
+        )
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            with connection:
+                connection.execute(
+                    "UPDATE scan_jobs SET attempt = 2 WHERE job_id = ?",
+                    (job["job_id"],),
+                )
+
+        recovered = app.recover_interrupted_scans()
+        stored = db.get_scan_job(job["job_id"])
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(stored["status"], "failed")
+        self.assertEqual(stored["error"], "retry_attempts_exhausted")
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["error"], "Scan exceeded the configured retry attempts before completing.")
+        self.assertEqual(app.SCANS[0]["recoveryReason"], "retry_attempts_exhausted")
+
     def test_recover_interrupted_scans_requeues_job_when_worker_heartbeat_times_out(self) -> None:
         timestamp = app.now()
         with patch.dict(os.environ, {"PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": "60"}, clear=False):

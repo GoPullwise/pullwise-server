@@ -985,13 +985,19 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
                 }
             )
         elif job.get("status") == "failed":
+            reason = public_issue_text(job.get("reason")) or "timed_out"
+            error = (
+                "Scan exceeded the configured retry attempts before completing."
+                if reason == "retry_attempts_exhausted"
+                else "Scan worker timed out before completing the job."
+            )
             scan.update(
                 {
                     "status": "failed",
                     "completedAt": timestamp,
-                    "error": "Scan worker timed out before completing the job.",
+                    "error": error,
                     "recoveredAt": timestamp,
-                    "recoveryReason": public_issue_text(job.get("reason")) or "timed_out",
+                    "recoveryReason": reason,
                 }
             )
         else:

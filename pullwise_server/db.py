@@ -3200,11 +3200,13 @@ def claim_next_scan_job(
             )
             _requeue_expired_jobs_locked(connection, current_time)
             _requeue_stale_worker_jobs_locked(connection, current_time, offline_after)
+            _fail_exhausted_queued_jobs_locked(connection, current_time)
             row = connection.execute(
                 """
                 SELECT queued.job_id
                 FROM scan_jobs queued
                 WHERE queued.status = 'queued'
+                  AND queued.attempt < queued.max_attempts
                   AND NOT EXISTS (
                       SELECT 1
                       FROM scan_jobs worker_active
@@ -3233,6 +3235,7 @@ def claim_next_scan_job(
                     error = NULL,
                     updated_at = ?
                 WHERE job_id = ? AND status = 'queued'
+                  AND attempt < max_attempts
                 """,
                 (worker_id, current_time, timeout_at, current_time, job_id),
             ).rowcount
@@ -3259,7 +3262,8 @@ def recover_expired_scan_jobs(
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
         try:
-            recovered = _requeue_expired_jobs_locked(connection, current_time)
+            recovered = _fail_exhausted_queued_jobs_locked(connection, current_time)
+            recovered.extend(_requeue_expired_jobs_locked(connection, current_time))
             recovered.extend(_requeue_stale_worker_jobs_locked(connection, current_time, offline_after))
             connection.commit()
             return recovered
@@ -3293,6 +3297,44 @@ def requeue_interrupted_scan_job(scan_id: str, *, reason: str = "server_restart"
                 (reason, current_time, scan_id),
             )
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
+
+
+def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_time: int) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT job_id, scan_id, attempt, max_attempts
+        FROM scan_jobs
+        WHERE status = 'queued' AND attempt >= max_attempts
+        """
+    ).fetchall()
+    recovered: list[dict[str, Any]] = []
+    for row in rows:
+        connection.execute(
+            """
+            UPDATE scan_jobs
+            SET status = 'failed',
+                claimed_by_worker_id = NULL,
+                claimed_at = NULL,
+                started_at = NULL,
+                completed_at = ?,
+                timeout_at = NULL,
+                error = 'retry_attempts_exhausted',
+                updated_at = ?
+            WHERE job_id = ? AND status = 'queued'
+            """,
+            (current_time, current_time, row["job_id"]),
+        )
+        recovered.append(
+            {
+                "job_id": row["job_id"],
+                "scan_id": row["scan_id"],
+                "status": "failed",
+                "reason": "retry_attempts_exhausted",
+                "attempt": int(row["attempt"]),
+                "max_attempts": int(row["max_attempts"]),
+            }
+        )
+    return recovered
 
 
 def _requeue_expired_jobs_locked(connection: sqlite3.Connection, current_time: int) -> list[dict[str, Any]]:

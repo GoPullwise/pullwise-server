@@ -625,6 +625,41 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(current_job["status"], "claimed")
         self.assertEqual(result_count, 0)
 
+    def test_exhausted_queued_scan_job_fails_before_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                db.create_scan_job(
+                    {
+                        "job_id": "job_exhausted",
+                        "scan_id": "sc_exhausted",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": 100,
+                        "user_id": "usr_1",
+                        "max_attempts": 2,
+                    }
+                )
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            "UPDATE scan_jobs SET attempt = 2 WHERE job_id = ?",
+                            ("job_exhausted",),
+                        )
+
+                recovered = db.recover_expired_scan_jobs(120)
+                claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=121)
+                stored = db.get_scan_job("job_exhausted")
+
+        self.assertEqual(claimed, None)
+        self.assertEqual(recovered[0]["status"], "failed")
+        self.assertEqual(recovered[0]["reason"], "retry_attempts_exhausted")
+        self.assertEqual(stored["status"], "failed")
+        self.assertEqual(stored["error"], "retry_attempts_exhausted")
+
     def test_record_scan_job_result_stores_large_payload_as_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
