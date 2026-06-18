@@ -316,6 +316,60 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual([line["line"] for line in lines.payload["lines"]], ["new line"])
         self.assertEqual(lines.payload["lines"][0]["sequence"], 1)
 
+    def test_admin_log_stream_creation_does_not_consume_rate_limit(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+            },
+            clear=False,
+        ):
+            server_stream = RouteHarness("/admin/log-streams", {"source": "server"}, cookie=self.admin_cookie)
+            worker_stream = RouteHarness(
+                "/admin/log-streams",
+                {"source": "worker", "worker_id": worker_id},
+                cookie=self.admin_cookie,
+            )
+
+            app.PullwiseHandler.route(server_stream, "POST")
+            app.PullwiseHandler.route(worker_stream, "POST")
+
+        self.assertEqual(server_stream.status, HTTPStatus.CREATED)
+        self.assertEqual(worker_stream.status, HTTPStatus.CREATED)
+
+    def test_admin_log_stream_pause_does_not_consume_rate_limit(self) -> None:
+        first_start = RouteHarness("/admin/log-streams", {"source": "server"}, cookie=self.admin_cookie)
+        second_start = RouteHarness("/admin/log-streams", {"source": "server"}, cookie=self.admin_cookie)
+        app.PullwiseHandler.route(first_start, "POST")
+        app.PullwiseHandler.route(second_start, "POST")
+        self.assertEqual(first_start.status, HTTPStatus.CREATED)
+        self.assertEqual(second_start.status, HTTPStatus.CREATED)
+
+        first_session_id = first_start.payload["session"]["id"]
+        second_session_id = second_start.payload["session"]["id"]
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+            },
+            clear=False,
+        ):
+            first_pause = RouteHarness(f"/admin/log-streams/{first_session_id}/pause", cookie=self.admin_cookie)
+            second_pause = RouteHarness(f"/admin/log-streams/{second_session_id}/pause", cookie=self.admin_cookie)
+
+            app.PullwiseHandler.route(first_pause, "POST")
+            app.PullwiseHandler.route(second_pause, "POST")
+
+        self.assertEqual(first_pause.status, HTTPStatus.OK)
+        self.assertEqual(second_pause.status, HTTPStatus.OK)
+
     def test_worker_log_stream_is_polled_uploaded_and_paused(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]

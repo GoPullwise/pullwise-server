@@ -12,7 +12,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not rate_limit_enabled() or rate_limit_exempt_path(method, path):
             self._rate_limit_headers = {}
             return False
-        if self.admin_get_rate_limit_exempt(method, path):
+        if self.admin_rate_limit_exempt(method, path):
             self._rate_limit_headers = {}
             return False
         if path.startswith("/worker/") and worker_token_record(self, allow_disabled=True, include_deleted=True):
@@ -50,8 +50,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         return True
 
-    def admin_get_rate_limit_exempt(self, method: str, path: str) -> bool:
-        if method != "GET" or not path.startswith("/admin/"):
+    def admin_rate_limit_exempt(self, method: str, path: str) -> bool:
+        is_admin_get = method == "GET" and path.startswith("/admin/")
+        is_log_stream_post = method == "POST" and (
+            path == "/admin/log-streams"
+            or (path.startswith("/admin/log-streams/") and path.endswith("/pause"))
+        )
+        if not is_admin_get and not is_log_stream_post:
             return False
         session = self.current_session()
         if not session:
