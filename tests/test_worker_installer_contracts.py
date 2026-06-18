@@ -87,9 +87,31 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('auth_command="$(codex_device_auth_command)"', script)
         self.assertIn('if ! eval "$auth_command"; then', script)
         self.assertIn(
-            'print_auth_commands\nrun_default_auth_commands\nrun_as_service_user "$BIN_PATH" doctor || true',
+            "print_auth_commands\nrun_default_auth_commands\nconfigure_codegraph_codex_mcp\nsystemctl restart \"$SERVICE_NAME\"",
             script,
         )
+
+    def test_installer_prepares_codegraph_before_starting_worker(self) -> None:
+        script = app.worker_install_script()
+
+        self.assertIn(
+            'CODEGRAPH_INSTALL_URL="${PULLWISE_CODEGRAPH_INSTALL_URL:-https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh}"',
+            script,
+        )
+        self.assertIn('CODEGRAPH_INSTALL_DIR="$DATA_DIR/.codegraph"', script)
+        self.assertIn('CODEGRAPH_BIN_DIR="$DATA_DIR/.local/bin"', script)
+        self.assertIn("ensure_codegraph_cli() {", script)
+        self.assertIn("configure_codegraph_codex_mcp() {", script)
+        self.assertIn('run_as_service_user sh -lc \'curl -fsSL "$CODEGRAPH_INSTALL_URL" | sh\'', script)
+        self.assertIn("run_as_service_user codegraph install --target=codex --location=global --yes", script)
+
+        configure_call = script.index("\nconfigure_codegraph_codex_mcp\n")
+        service_start = script.index('\nsystemctl restart "$SERVICE_NAME"\n')
+        doctor_call = script.index('\nif ! run_as_service_user "$BIN_PATH" doctor; then\n')
+        self.assertLess(configure_call, service_start)
+        self.assertLess(service_start, doctor_call)
+        self.assertIn('if ! run_as_service_user "$BIN_PATH" doctor; then', script)
+        self.assertNotIn('run_as_service_user "$BIN_PATH" doctor || true', script)
 
     def test_service_user_name_uses_digest_to_avoid_prefix_collisions(self) -> None:
         shell = shutil.which("sh") or shutil.which("bash")
@@ -154,6 +176,7 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('PYTHON_BIN="\\${PULLWISE_PYTHON_BIN:-python3.10}"', script)
         self.assertIn('"$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"', script)
         self.assertIn("https://deb.nodesource.com/node_22.x", script)
+        self.assertIn('ensure_command_available "tar" tar tar', script)
         self.assertIn("Node.js 20+ and npm are still unavailable after NodeSource install.", script)
 
 
