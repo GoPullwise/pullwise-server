@@ -370,6 +370,27 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(first_pause.status, HTTPStatus.OK)
         self.assertEqual(second_pause.status, HTTPStatus.OK)
 
+    def test_admin_missing_log_stream_lines_returns_paused_payload(self) -> None:
+        lines = RouteHarness("/admin/log-streams/log_missing/lines?after=0&limit=10", cookie=self.admin_cookie)
+
+        app.PullwiseHandler.route(lines, "GET")
+
+        self.assertEqual(lines.status, HTTPStatus.OK)
+        self.assertEqual(lines.payload["lines"], [])
+        self.assertEqual(lines.payload["session"]["id"], "log_missing")
+        self.assertEqual(lines.payload["session"]["status"], "paused")
+        self.assertNotIn("message", lines.payload)
+
+    def test_admin_missing_log_stream_pause_returns_paused_payload(self) -> None:
+        pause = RouteHarness("/admin/log-streams/log_missing/pause", cookie=self.admin_cookie)
+
+        app.PullwiseHandler.route(pause, "POST")
+
+        self.assertEqual(pause.status, HTTPStatus.OK)
+        self.assertEqual(pause.payload["session"]["id"], "log_missing")
+        self.assertEqual(pause.payload["session"]["status"], "paused")
+        self.assertNotIn("message", pause.payload)
+
     def test_worker_log_stream_is_polled_uploaded_and_paused(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]

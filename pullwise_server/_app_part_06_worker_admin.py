@@ -285,6 +285,31 @@ def log_stream_session_payload(session: dict | None) -> dict | None:
     }
 
 
+def missing_log_stream_session_payload(session_id: object) -> dict:
+    return {
+        "id": public_issue_text(session_id),
+        "source": "",
+        "worker_id": "",
+        "status": "paused",
+        "created_at": 0,
+        "updated_at": 0,
+        "expires_at": 0,
+        "nextSequence": 1,
+        "earliestSequence": 1,
+    }
+
+
+def missing_log_stream_lines_payload(session_id: object) -> dict:
+    return {
+        "ok": True,
+        "session": missing_log_stream_session_payload(session_id),
+        "lines": [],
+        "nextSequence": 1,
+        "earliestSequence": 1,
+        "truncated": False,
+    }
+
+
 def log_stream_earliest_sequence(session: dict) -> int:
     lines = session.get("lines") if isinstance(session.get("lines"), list) else []
     if not lines:

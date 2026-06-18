@@ -2017,7 +2017,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 4 and segments[:2] == ["admin", "log-streams"] and segments[3] == "lines":
             payload = log_stream_lines_payload(segments[2], after=params.get("after"), limit=params.get("limit"))
             if payload is None:
-                return self.error(HTTPStatus.NOT_FOUND, "Log stream not found.")
+                return self.json(missing_log_stream_lines_payload(segments[2]))
             return self.json(payload)
         if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
             worker = db.get_worker(segments[2], include_deleted=True)
@@ -2071,7 +2071,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 4 and segments[:2] == ["admin", "log-streams"] and segments[3] == "pause":
             session_record = pause_log_stream_session(segments[2])
             if not session_record:
-                return self.error(HTTPStatus.NOT_FOUND, "Log stream not found.")
+                return self.json({"ok": True, "session": missing_log_stream_session_payload(segments[2])})
             return self.json({"ok": True, "session": log_stream_session_payload(session_record)})
         if segments == ["admin", "review-calibration", "labels"]:
             return self.error(HTTPStatus.GONE, "Review calibration labels have been retired; use Graph-Verified review outcomes.")
