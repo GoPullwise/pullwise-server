@@ -267,7 +267,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
                     "version": "graph-verified-code-review/1",
                     "runId": "run_api_stale_done",
                     "mode": "standard",
-                    "base": "abc123^",
                     "head": "abc123",
                     "confirmedCount": 0,
                     "rejectedCount": 0,

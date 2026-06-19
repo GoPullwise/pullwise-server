@@ -122,7 +122,6 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
             {
                 "runId": "run_1",
                 "mode": "standard",
-                "base": "origin/main",
                 "head": "HEAD",
                 "confirmedCount": 1,
                 "rejectedCount": 2,
@@ -440,7 +439,6 @@ def audit_result_fields(issue_cards: list[dict], verification_results: list[dict
             "version": "graph-verified-code-review/1",
             "runId": "gv_test_run",
             "mode": "standard",
-            "base": "origin/main",
             "head": "HEAD",
             "confirmedCount": len(confirmed),
             "rejectedCount": max(0, len(issue_cards) - len(confirmed)),
@@ -551,10 +549,10 @@ def impact_graph_fixture() -> dict:
             "testsEdges": 1,
             "documentsEdges": 1,
             "configuresEdges": 1,
-            "changedFiles": 1,
+            "repositoryFiles": 1,
             "truncated": False,
         },
-        "changedFiles": ["src/app.py", "C:\\worker\\repo\\secret.py"],
+        "repositoryFiles": ["src/app.py", "C:\\worker\\repo\\secret.py"],
         "targets": [
             {
                 "id": "file:src/app.py",
@@ -1002,7 +1000,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(findings, [])
 
-    def test_scan_job_payload_includes_changeset_context_from_scan_state(self) -> None:
+    def test_scan_job_payload_uses_repository_scan_context(self) -> None:
         scan = {
             "id": "sc_changes",
             "repo": "acme/api",
@@ -1014,8 +1012,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "queuedAt": app.now(),
             "progress": 0,
             "phase": None,
-            "changedFiles": ["src/app.py", "C:\\worker\\repo\\secret.py"],
-            "baseCommit": "def456",
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
@@ -1023,10 +1019,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         payload = app.scan_job_payload(job)
         scan_public = app.scan_payload(scan)
 
-        self.assertEqual(payload["changed_files"], ["src/app.py"])
-        self.assertEqual(payload["base_commit"], "def456")
-        self.assertEqual(scan_public["changedFiles"], ["src/app.py"])
-        self.assertEqual(scan_public["baseCommit"], "def456")
+        self.assertEqual(payload["repo"], "acme/api")
+        self.assertEqual(payload["commit"], "abc123")
+        self.assertEqual(scan_public["repo"], "acme/api")
+        self.assertEqual(scan_public["commit"], "abc123")
 
     def test_worker_result_exposes_graph_verified_judge_and_repro_summary_on_issue_payload(self) -> None:
         scan = {
@@ -2704,7 +2700,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "graphVerifiedReport": {
                     "runId": "gv_run_1",
                     "mode": "standard",
-                    "base": "origin/main",
                     "head": "HEAD",
                     "confirmedCount": 1,
                     "rejectedCount": 2,

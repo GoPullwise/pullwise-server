@@ -81,7 +81,6 @@ class SecurityContractsPart01Test(SecurityContractsBase):
                 "impactGraph": heavy_graph["impactGraph"],
                 "auditSwarm": {"summary": "large audit payload", "issueCards": []},
                 "preflight": {"summary": "large preflight payload"},
-                "changedFiles": ["src/app.py"],
             }
             for index in range(3)
         ]
@@ -103,7 +102,6 @@ class SecurityContractsPart01Test(SecurityContractsBase):
             "impactGraph",
             "auditSwarm",
             "preflight",
-            "changedFiles",
             ):
             self.assertNotIn(heavy_key, scan)
 

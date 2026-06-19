@@ -413,8 +413,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan_created = False
             branch = ""
             commit = "pending"
-            changed_files = public_changed_files(body.get("changedFiles") or body.get("changed_files"))
-            base_commit = clean_github_access_text(body.get("baseCommit") or body.get("base_commit"))
             with STATE_LOCK:
                 user = USERS.get(session["userId"]) or {}
                 github_access = user.get("githubRepositoryAccess")
@@ -565,10 +563,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             }
                             if request_id:
                                 scan["requestId"] = request_id
-                            if changed_files:
-                                scan["changedFiles"] = changed_files
-                            if base_commit:
-                                scan["baseCommit"] = base_commit
                             SCANS.insert(0, scan)
                             scan_created = True
                             mark_state_dirty()

@@ -66,21 +66,6 @@ def public_scan_agent_config(value: object) -> dict:
     return payload
 
 
-def public_changed_files(value: object) -> list[str]:
-    raw_items = value if isinstance(value, list) else []
-    files = []
-    seen = set()
-    for item in raw_items:
-        path = public_issue_file(item)
-        if not path or path in seen:
-            continue
-        seen.add(path)
-        files.append(path)
-        if len(files) >= 100:
-            break
-    return files
-
-
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -116,12 +101,6 @@ def scan_payload(scan: dict) -> dict:
     )
     if graph_verified_report:
         payload["graphVerifiedReport"] = graph_verified_report
-    changed_files = public_changed_files(scan.get("changedFiles") or scan.get("changed_files"))
-    if changed_files:
-        payload["changedFiles"] = changed_files
-    base_commit = clean_github_access_text(scan.get("baseCommit") or scan.get("base_commit"))
-    if base_commit:
-        payload["baseCommit"] = base_commit
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0
@@ -256,9 +235,6 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     graph_verified_report = public_graph_verified_report(scan.get("graphVerifiedReport"))
     if graph_verified_report:
         payload["graphVerifiedReport"] = graph_verified_report
-    base_commit = clean_github_access_text(scan.get("baseCommit") or scan.get("base_commit"))
-    if base_commit:
-        payload["baseCommit"] = base_commit
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0
@@ -901,7 +877,6 @@ def public_graph_verified_report(
         "version": public_scan_compact_text(source.get("version"), max_length=64) or "graph-verified-code-review/1",
         "runId": public_scan_compact_text(source.get("runId"), max_length=128),
         "mode": public_scan_compact_status(source.get("mode"), max_length=32),
-        "base": public_scan_compact_text(source.get("base"), max_length=128),
         "head": public_scan_compact_text(source.get("head"), max_length=128),
         "confirmedCount": confirmed,
         "rejectedCount": rejected,
@@ -922,7 +897,6 @@ def public_graph_verified_report(
         [
             payload["runId"],
             payload["mode"],
-            payload["base"],
             payload["head"],
             payload["confirmedCount"],
             payload["rejectedCount"],

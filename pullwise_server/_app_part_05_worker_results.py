@@ -276,15 +276,6 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     payload["review_output_language_label"] = language["label"]
     if include_clone_token:
         payload["clone_token"] = installation_clone_token_payload(job)
-    if isinstance(scan, dict):
-        changed_files = public_changed_files(scan.get("changedFiles") or scan.get("changed_files"))
-        if changed_files:
-            payload["changed_files"] = changed_files
-            payload["changedFiles"] = changed_files
-        base_commit = clean_github_access_text(scan.get("baseCommit") or scan.get("base_commit"))
-        if base_commit:
-            payload["base_commit"] = base_commit
-            payload["baseCommit"] = base_commit
     return payload
 
 
@@ -788,7 +779,6 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
         "graphVerifiedReport": {
             "runId": public_issue_text(report.get("runId")),
             "mode": public_issue_text(report.get("mode")),
-            "base": public_issue_text(report.get("base")),
             "head": public_issue_text(report.get("head")),
         },
     }

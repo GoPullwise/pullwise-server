@@ -16,7 +16,6 @@ def graph_verified_result_fields(title: str) -> dict:
             "version": "graph-verified-code-review/1",
             "runId": "gv_recovery_run",
             "mode": "standard",
-            "base": "origin/main",
             "head": "HEAD",
             "confirmedCount": 1,
             "rejectedCount": 0,
