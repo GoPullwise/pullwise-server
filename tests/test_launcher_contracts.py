@@ -693,6 +693,7 @@ CURL
             self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
             env["PULLWISE_SYSTEMCTL_BIN"] = shell_path(fake_systemctl)
             env["PULLWISE_SYSTEMCTL_LOG"] = shell_path(systemctl_log)
+            env["PULLWISE_RESTART_WAIT_HEALTH"] = "false"
 
             start = self.run_launcher(["start"], env)
             stop = self.run_launcher(["stop"], env)
@@ -708,6 +709,46 @@ CURL
         self.assertIn("stop pullwise-server", calls)
         self.assertIn("restart pullwise-server", calls)
         self.assertIn("status pullwise-server --no-pager", calls)
+
+    def test_systemd_restart_waits_for_health_before_returning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            fake_systemctl, systemctl_log = self.write_fake_systemctl(root)
+            health_count = root / "health-count"
+            fake_curl = root / "bin" / "curl-retry"
+            write_executable(
+                fake_curl,
+                f"""
+                #!/usr/bin/env sh
+                count=0
+                if [ -f {shell_path(health_count)} ]; then
+                  count=$(cat {shell_path(health_count)})
+                fi
+                count=$((count + 1))
+                printf '%s' "$count" > {shell_path(health_count)}
+                if [ "$count" -lt 3 ]; then
+                  exit 7
+                fi
+                printf '{{"ok":true}}'
+                exit 0
+                """,
+            )
+            self.write_minimal_service(root, env["PULLWISE_SYSTEM_ENV_FILE"])
+            env["PULLWISE_SYSTEMCTL_BIN"] = shell_path(fake_systemctl)
+            env["PULLWISE_SYSTEMCTL_LOG"] = shell_path(systemctl_log)
+            env["PULLWISE_CURL_BIN"] = shell_path(fake_curl)
+            env["PULLWISE_RESTART_HEALTH_RETRIES"] = "3"
+            env["PULLWISE_RESTART_HEALTH_RETRY_SECONDS"] = "0"
+
+            restart = self.run_launcher(["restart"], env)
+            calls = systemctl_log.read_text(encoding="utf-8")
+            count = health_count.read_text(encoding="utf-8")
+
+        self.assertEqual(0, restart.returncode, restart.stderr + restart.stdout)
+        self.assertIn("restart pullwise-server", calls)
+        self.assertEqual("3", count)
+        self.assertIn("health endpoint responded after restart", restart.stdout)
 
     def test_start_dry_run_can_still_print_direct_server_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

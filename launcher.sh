@@ -782,17 +782,56 @@ cmd_restart() {
   if [ "$(manager_mode)" = systemd ]; then
     "$(systemctl_bin)" restart "$SERVICE_NAME" || die "systemctl restart failed"
     ok "$SERVICE_NAME restarted"
+    wait_for_restart_health
     return 0
   fi
   cmd_stop "$@"
   cmd_start
 }
 
-cmd_health() {
+wait_for_restart_health() {
+  is_true "$(env_value PULLWISE_RESTART_WAIT_HEALTH "true")" || return 0
+
+  attempts=$(env_value PULLWISE_RESTART_HEALTH_RETRIES "30")
+  delay=$(env_value PULLWISE_RESTART_HEALTH_RETRY_SECONDS "2")
+  case "$attempts" in
+    ""|*[!0-9]*)
+      attempts=30
+      ;;
+  esac
+  [ "$attempts" -gt 0 ] || attempts=30
+  case "$delay" in
+    ""|*[!0-9]*)
+      delay=2
+      ;;
+  esac
+
+  attempt=1
+  while [ "$attempt" -le "$attempts" ]; do
+    if run_health_request >/dev/null 2>&1; then
+      ok "health endpoint responded after restart"
+      return 0
+    fi
+    if [ "$attempt" -lt "$attempts" ]; then
+      info "health not ready after restart; retrying in ${delay}s ($attempt/$attempts)"
+      sleep "$delay"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  run_health_request || die "health check failed after restart: $(health_url)"
+  printf '\n'
+}
+
+run_health_request() {
   url=$(health_url)
   ensure_command_available "curl" PULLWISE_CURL_BIN curl curl
   curl_bin=$(tool_bin PULLWISE_CURL_BIN curl || true)
-  "$curl_bin" -fsS --max-time "${PULLWISE_HEALTH_TIMEOUT_SECONDS:-5}" "$url" || die "health check failed: $url"
+  "$curl_bin" -fsS --max-time "${PULLWISE_HEALTH_TIMEOUT_SECONDS:-5}" "$url"
+}
+
+cmd_health() {
+  run_health_request || die "health check failed: $(health_url)"
   printf '\n'
 }
 
