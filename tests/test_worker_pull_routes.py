@@ -719,6 +719,21 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         return worker, worker["worker_token"]
 
+    def test_worker_auth_rejection_is_logged_without_token_value(self) -> None:
+        claim = RouteHarness(
+            "/worker/jobs/claim",
+            {"worker_id": "wk_1"},
+            headers={"Authorization": "Bearer invalid-worker-token"},
+        )
+        with self.assertLogs(app.logger, level="WARNING") as logs:
+            app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.UNAUTHORIZED)
+        output = "\n".join(logs.output)
+        self.assertIn("Rejected worker request path=/worker/jobs/claim", output)
+        self.assertIn("bearer_present=True", output)
+        self.assertNotIn("invalid-worker-token", output)
+
     def test_worker_result_route_accepts_gzip_json_body(self) -> None:
         scan = {
             "id": "sc_gzip_result",
@@ -3032,6 +3047,73 @@ class WorkerPullRoutesTest(unittest.TestCase):
         payload = app.scan_payload(app.SCANS[0])
         self.assertNotIn("completionAudit", payload)
         self.assertNotIn("jobTrace", payload)
+
+    def test_worker_result_log_event_includes_failure_diagnostics(self) -> None:
+        scan = {
+            "id": "sc_result_diagnostics",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+
+        graph_report = {
+            "version": "graph-verified-code-review/1",
+            "runId": "run_diag",
+            "mode": "standard",
+            "head": "HEAD",
+            "confirmedCount": 0,
+            "rejectedCount": 0,
+            "blockedCount": 97,
+            "finalJson": {"confirmed": []},
+            "summary": {
+                "finder": {"tasks": 97, "blocked": 97, "candidates": 0},
+                "candidates": {"valid": 0},
+                "reports": {"blocked": 97},
+            },
+        }
+        result_body = {
+            "status": "failed",
+            "attempt_id": f"wk_1-{job['attempt']}",
+            "result_checksum": "checksum-result-diagnostics",
+            "error": "GraphVerified finder pipeline blocked every finder task before producing candidates",
+            "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
+            "graphVerifiedReport": graph_report,
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
+        with patch.object(app.scan_logging, "log_event") as log_event:
+            app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.args[0], "worker_job_result")
+        self.assertEqual(log_event.call_args.kwargs["scanId"], "sc_result_diagnostics")
+        self.assertEqual(log_event.call_args.kwargs["jobId"], job["job_id"])
+        self.assertEqual(log_event.call_args.kwargs["attemptId"], f"wk_1-{job['attempt']}")
+        self.assertEqual(log_event.call_args.kwargs["workerId"], "wk_1")
+        self.assertEqual(log_event.call_args.kwargs["status"], "failed")
+        self.assertEqual(log_event.call_args.kwargs["errorCode"], "GRAPH_VERIFIED_COMPLETION_FAILED")
+        self.assertEqual(log_event.call_args.kwargs["error"], result_body["error"])
+        self.assertEqual(log_event.call_args.kwargs["graphVerifiedRunId"], "run_diag")
+        self.assertEqual(log_event.call_args.kwargs["graphVerifiedMode"], "standard")
+        self.assertEqual(log_event.call_args.kwargs["graphVerifiedBlockedCount"], 97)
+        self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderTasks"], 97)
+        self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderBlocked"], 97)
+        self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderCandidates"], 0)
+        self.assertEqual(log_event.call_args.kwargs["graphVerifiedValidCandidates"], 0)
 
     def test_worker_graph_verified_progress_ignores_legacy_artifacts(self) -> None:
         app.billing.update_review_agent_config("free", {"provider": "codex", "graphVerified": {"enabled": True}})

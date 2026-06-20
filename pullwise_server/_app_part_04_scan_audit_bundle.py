@@ -1116,7 +1116,7 @@ def public_graph_verified_verification(value: object) -> dict:
 
 def public_scan_error_code(value: object) -> str:
     error_code = public_issue_text(value).replace("-", "_").upper()
-    return error_code if error_code in {"REPOSITORY_TOO_LARGE"} else ""
+    return error_code if error_code in {"GRAPH_VERIFIED_COMPLETION_FAILED", "REPOSITORY_TOO_LARGE"} else ""
 
 
 def public_review_float(value: object) -> float | None:
