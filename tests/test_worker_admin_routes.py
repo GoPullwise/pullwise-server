@@ -446,6 +446,25 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(poll_after_pause.status, HTTPStatus.OK)
         self.assertIsNone(poll_after_pause.payload["logSession"])
 
+    def test_worker_heartbeat_includes_active_log_session(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        worker_auth = {"Authorization": f"Bearer {token}"}
+        start = RouteHarness(
+            "/admin/log-streams",
+            {"source": "worker", "worker_id": worker_id},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(start, "POST")
+        self.assertEqual(start.status, HTTPStatus.CREATED)
+        session_id = start.payload["session"]["id"]
+
+        heartbeat = RouteHarness("/worker/heartbeat", {"worker_id": worker_id}, headers=worker_auth)
+        app.PullwiseHandler.route(heartbeat, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(heartbeat.payload["logSession"]["id"], session_id)
+
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
         handler = RouteHarness(
             "/admin/workers",

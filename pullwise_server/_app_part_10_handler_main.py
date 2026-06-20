@@ -2509,6 +2509,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "last_heartbeat_at": record.get("last_heartbeat_at"),
                 },
                 "command": worker_command_payload(command),
+                "logSession": worker_log_stream_poll_payload(worker_id),
             }
         )
 
