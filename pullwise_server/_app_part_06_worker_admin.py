@@ -1316,18 +1316,14 @@ CODEX_HOME="$DATA_DIR/.codex"
 XDG_CONFIG_HOME="$DATA_DIR/.config"
 XDG_CACHE_HOME="$DATA_DIR/.cache"
 XDG_DATA_HOME="$DATA_DIR/.local/share"
-CODEGRAPH_INSTALL_DIR="$DATA_DIR/.codegraph"
-CODEGRAPH_BIN_DIR="$DATA_DIR/.local/bin"
-CODEGRAPH_INSTALL_URL="${PULLWISE_CODEGRAPH_INSTALL_URL:-https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh}"
-CODEGRAPH_VERSION="${PULLWISE_CODEGRAPH_VERSION:-}"
 
 run_as_service_user() {
   (
     cd "$DATA_DIR"
     if command -v runuser >/dev/null 2>&1; then
-      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" CODEGRAPH_INSTALL_DIR="$CODEGRAPH_INSTALL_DIR" CODEGRAPH_BIN_DIR="$CODEGRAPH_BIN_DIR" CODEGRAPH_INSTALL_URL="$CODEGRAPH_INSTALL_URL" CODEGRAPH_VERSION="$CODEGRAPH_VERSION" PATH="$SERVICE_TOOL_PATH" "$@"
+      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     elif command -v sudo >/dev/null 2>&1; then
-      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" CODEGRAPH_INSTALL_DIR="$CODEGRAPH_INSTALL_DIR" CODEGRAPH_BIN_DIR="$CODEGRAPH_BIN_DIR" CODEGRAPH_INSTALL_URL="$CODEGRAPH_INSTALL_URL" CODEGRAPH_VERSION="$CODEGRAPH_VERSION" PATH="$SERVICE_TOOL_PATH" "$@"
+      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     else
       echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
       return 127
@@ -1410,22 +1406,6 @@ if provider_chain_has codex; then
   fi
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi
-
-ensure_codegraph_cli() {
-  provider_chain_has codex || return 0
-  if [ -x "$CODEGRAPH_BIN_DIR/codegraph" ]; then
-    return 0
-  fi
-  echo "Installing CodeGraph CLI"
-  run_as_service_user sh -lc 'curl -fsSL "$CODEGRAPH_INSTALL_URL" | sh'
-  run_as_service_user sh -lc 'test -x "$CODEGRAPH_BIN_DIR/codegraph" && codegraph --version >/dev/null'
-}
-
-configure_codegraph_codex_mcp() {
-  provider_chain_has codex || return 0
-  ensure_codegraph_cli
-  run_as_service_user codegraph install --target=codex --location=global --yes
-}
 
 "$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
 
@@ -1613,7 +1593,6 @@ EOF
 systemctl daemon-reload
 print_auth_commands
 run_default_auth_commands
-configure_codegraph_codex_mcp
 systemctl restart "$SERVICE_NAME"
 if ! run_as_service_user "$BIN_PATH" doctor; then
   echo "Pullwise worker doctor failed; leaving service stopped and rolling back install." >&2
