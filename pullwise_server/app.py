@@ -51,3 +51,6 @@ class _CompatAppModule(_types.ModuleType):
 _sys.modules[__name__].__class__ = _CompatAppModule
 
 del _CompatAppModule, _assembled_app, _import_compat_globals, _part, _register_compat_targets, _sys, _types
+
+if __name__ == "__main__":
+    main()

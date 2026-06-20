@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from http import HTTPStatus
+from pathlib import Path
 from unittest.mock import patch
 
 from pullwise_server import app, db
@@ -744,6 +746,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_WORKER_PACKAGE"], expected)
         self.assertIn(f"--package '{expected}'", handler.payload["install_commands"]["standard"])
+
+    def test_default_worker_package_version_matches_checked_in_worker_package(self) -> None:
+        worker_init = Path(__file__).resolve().parents[2] / "pullwise-worker" / "pullwise_worker" / "__init__.py"
+        if not worker_init.is_file():
+            self.skipTest("pullwise-worker checkout is not available beside pullwise-server")
+        match = re.search(r'^__version__ = "([^"]+)"', worker_init.read_text(encoding="utf-8"), flags=re.MULTILINE)
+        self.assertIsNotNone(match)
+        worker_version = match.group(1)
+
+        self.assertEqual(app.DEFAULT_WORKER_PACKAGE_VERSION, worker_version)
+        self.assertEqual(app.DEFAULT_WORKER_PACKAGE, app.worker_release_package(worker_version))
 
     def test_admin_worker_create_includes_configured_codex_timeout_env(self) -> None:
         with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):

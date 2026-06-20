@@ -212,7 +212,7 @@ REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
 SCAN_BY_ID: dict[str, dict] = {}
-DEFAULT_WORKER_PACKAGE_VERSION = "0.6.8"
+DEFAULT_WORKER_PACKAGE_VERSION = "0.6.27"
 DEFAULT_WORKER_PACKAGE = (
     "https://github.com/GoPullwise/pullwise-worker/releases/download/"
     f"v{DEFAULT_WORKER_PACKAGE_VERSION}/pullwise_worker-{DEFAULT_WORKER_PACKAGE_VERSION}-py3-none-any.whl"
