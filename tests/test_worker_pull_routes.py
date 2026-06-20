@@ -734,6 +734,30 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn("bearer_present=True", output)
         self.assertNotIn("invalid-worker-token", output)
 
+    def test_worker_agent_configs_accepts_disabled_worker_token_without_impersonation(self) -> None:
+        worker, token = self.create_registry_worker("wk_disabled_agent_configs")
+        db.set_worker_enabled(worker["worker_id"], False)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        agent_configs = RouteHarness(
+            "/worker/agent-configs",
+            {"worker_id": worker["worker_id"]},
+            headers=headers,
+        )
+        app.PullwiseHandler.route(agent_configs, "POST")
+
+        self.assertEqual(agent_configs.status, HTTPStatus.OK)
+        self.assertIn("agentConfigs", agent_configs.payload)
+
+        impersonation = RouteHarness(
+            "/worker/agent-configs",
+            {"worker_id": "wk_other"},
+            headers=headers,
+        )
+        app.PullwiseHandler.route(impersonation, "POST")
+
+        self.assertEqual(impersonation.status, HTTPStatus.FORBIDDEN)
+
     def test_worker_result_route_accepts_gzip_json_body(self) -> None:
         scan = {
             "id": "sc_gzip_result",

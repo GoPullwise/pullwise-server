@@ -2365,6 +2365,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
         allow_disabled = (
             segments in (["worker", "heartbeat"], ["worker", "commands", "poll"])
+            or segments == ["worker", "agent-configs"]
             or (len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status")
             or (len(segments) == 4 and segments[:2] == ["worker", "log-streams"] and segments[3] == "lines")
         )
