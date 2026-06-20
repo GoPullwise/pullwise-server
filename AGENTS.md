@@ -111,6 +111,13 @@ The server owns subscription plan agent policy.
 - Keep the plan review-agent provider as a single `provider` field in
   worker-facing API responses.
 
+## Graph-Verified Result Semantics
+
+Worker GraphVerified results are full-repository snapshot reviews. Server
+claim/result APIs, artifacts, and copy should preserve that scope. Preserve
+review-unit coverage metadata in stored artifacts even when the confirmed
+finding list is empty.
+
 ## Quota And Account Terminology
 
 Pullwise does not have a workspace quota concept. Do not rename account/user
@@ -138,13 +145,13 @@ new read and write paths aligned with the normalized SQLite tables.
   should use DB-side `user_id` filtering, sorting, counts, and pagination.
   Hydrate only the current page or requested object.
 - Do not reintroduce `user_scans_for_read()` or `user_issues()` as a first step
-  for paginated routes. Those helpers are legacy compatibility paths, not the
-  scale path.
-- Issue detail compatibility may still need runtime fields from the matching
+  for paginated routes. Those helpers are older bridge paths, not the scale
+  path.
+- Issue detail bridges may still need runtime fields from the matching
   in-memory `ISSUES` item, especially `pullRequest` and `pullRequestPending` in
-  legacy tests. Merge those fields only after matching both `userId` and issue
+  older tests. Merge those fields only after matching both `userId` and issue
   id, and do not let list routes expose PR state.
-- `SCANS` and `ISSUES` are compatibility mirrors only. `persist_state()` must
+- `SCANS` and `ISSUES` are in-memory mirrors only. `persist_state()` must
   not write bulk scan or issue business data into `app_state`; app state should
   remain lightweight configuration/session state.
 - Worker result payloads may be large. Store full reports/log-heavy payloads in
