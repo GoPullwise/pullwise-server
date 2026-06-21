@@ -3079,6 +3079,67 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertNotIn("completionAudit", payload)
         self.assertNotIn("jobTrace", payload)
 
+    def test_worker_progress_exposes_graphverified_detail_on_scan_routes(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_graphverified_progress",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+
+        progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {
+                "phase": "ai",
+                "progress": 80,
+                "message": "Graph: mapping shards 12/80",
+                "logs_summary": "run=gv_run stage=graph progress=12/80 task=graph-0012",
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(progress, "POST")
+        self.assertEqual(progress.status, HTTPStatus.OK)
+
+        headers = {"Cookie": "pw_session=ses_owner"}
+        listing = RouteHarness("/scans", headers=headers)
+        detail = RouteHarness("/scans/sc_graphverified_progress", headers=headers)
+        app.PullwiseHandler.route(listing, "GET")
+        app.PullwiseHandler.route(detail, "GET")
+
+        self.assertEqual(listing.status, HTTPStatus.OK)
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        list_scan = listing.payload["items"][0]
+        for payload in (list_scan, detail.payload):
+            self.assertEqual(payload["phase"], "ai")
+            self.assertEqual(payload["progress"], 80)
+            self.assertEqual(payload["progressMessage"], "Graph: mapping shards 12/80")
+            self.assertEqual(
+                payload["logsSummary"],
+                "run=gv_run stage=graph progress=12/80 task=graph-0012",
+            )
+
     def test_worker_result_log_event_includes_failure_diagnostics(self) -> None:
         scan = {
             "id": "sc_result_diagnostics",
