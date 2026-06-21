@@ -4521,6 +4521,56 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "cancelled")
         self.assertEqual(app.SCANS[0]["progress"], 0)
 
+    def test_cancelled_claimed_job_does_not_block_same_worker_from_new_same_ref_scan(self) -> None:
+        commit = "a" * 40
+        first_scan = {
+            "id": "sc_cancel_same_ref_first",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": commit,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [first_scan]
+        first_job = app.create_scan_job_for_scan(first_scan)
+        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(first_claim, "POST")
+        self.assertEqual(first_claim.status, HTTPStatus.OK)
+        self.assertEqual(first_claim.payload["job"]["scan_id"], first_scan["id"])
+
+        first_scan["status"] = "cancelled"
+        db.cancel_scan_job_for_scan(first_scan["id"])
+
+        second_scan = {
+            "id": "sc_cancel_same_ref_second",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": commit,
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now() + 1,
+            "queuedAt": app.now() + 1,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS.append(second_scan)
+        second_job = app.create_scan_job_for_scan(second_scan)
+
+        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(second_claim, "POST")
+
+        self.assertEqual(second_claim.status, HTTPStatus.OK)
+        self.assertEqual(second_claim.payload["job"]["scan_id"], second_scan["id"])
+        self.assertEqual(second_claim.payload["job"]["job_id"], second_job["job_id"])
+        self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "cancelled")
+        self.assertEqual(db.get_scan_job(second_job["job_id"])["claimed_by_worker_id"], "wk_1")
+
     def test_scan_read_reconciles_cancelled_job_when_state_is_stale(self) -> None:
         app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
         app.SESSIONS = {
@@ -4780,6 +4830,49 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored["timeout_at"], timestamp + 7300)
         self.assertEqual(db.recover_expired_scan_jobs(timestamp + 3701), [])
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
+
+    def test_worker_heartbeat_reports_cancelled_active_job_ids(self) -> None:
+        timestamp = app.now()
+        scan = {
+            "id": "sc_cancelled_active_heartbeat",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        with patch("pullwise_server.app.now", return_value=timestamp):
+            app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        db.cancel_scan_job_for_scan(scan["id"])
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "running_jobs": 1,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "active_job_ids": [job["job_id"]],
+            },
+            headers=self.auth,
+        )
+        with patch("pullwise_server.app.now", return_value=timestamp + 1):
+            app.PullwiseHandler.route(heartbeat, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(heartbeat.payload["cancelled_job_ids"], [job["job_id"]])
+        self.assertEqual(heartbeat.payload["cancelledJobIds"], [job["job_id"]])
 
     def test_worker_heartbeat_requeues_unstarted_claim_missing_from_active_jobs(self) -> None:
         timestamp = app.now()

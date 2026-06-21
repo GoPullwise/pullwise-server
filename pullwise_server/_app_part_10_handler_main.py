@@ -2500,6 +2500,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if recovered_jobs:
                 with STATE_LOCK:
                     apply_recovered_scan_jobs_locked(recovered_jobs)
+        cancelled_job_ids = []
+        if active_job_ids:
+            cancelled_job_ids = db.worker_job_ids_no_longer_accepting_updates(worker_id, active_job_ids)
         if active_job_ids:
             db.renew_worker_scan_job_leases(
                 worker_id,
@@ -2518,6 +2521,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 },
                 "command": worker_command_payload(command),
                 "logSession": worker_log_stream_poll_payload(worker_id),
+                "cancelled_job_ids": cancelled_job_ids,
+                "cancelledJobIds": cancelled_job_ids,
             }
         )
 
