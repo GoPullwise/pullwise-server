@@ -66,6 +66,28 @@ def public_scan_agent_config(value: object) -> dict:
     return payload
 
 
+def public_scan_retry(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    max_attempts = max(1, public_scan_count(value.get("maxAttempts") or value.get("max_attempts") or 1))
+    attempt = public_scan_count(value.get("attempt"))
+    retry_attempts = public_scan_count(value.get("retryAttempts") or value.get("retry_attempts"))
+    if "retryAttempts" not in value and "retry_attempts" not in value:
+        retry_attempts = max(0, max_attempts - 1)
+    remaining = public_scan_count(value.get("remainingAttempts") or value.get("remaining_attempts"))
+    payload = {
+        "attempt": attempt,
+        "maxAttempts": max_attempts,
+        "retryAttempts": max(0, retry_attempts),
+        "remainingAttempts": max(0, min(remaining, max_attempts)),
+        "attemptedWorkers": public_scan_count(value.get("attemptedWorkers") or value.get("attempted_workers")),
+    }
+    reason = public_issue_text(value.get("reason"))
+    if reason:
+        payload["reason"] = reason
+    return payload
+
+
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -80,6 +102,12 @@ def scan_payload(scan: dict) -> dict:
         "verification": public_scan_verification_counts(scan),
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
+    progress_message = public_issue_text(scan.get("progressMessage") or scan.get("progress_message"))
+    if progress_message:
+        payload["progressMessage"] = progress_message
+    logs_summary = public_issue_text(scan.get("logsSummary") or scan.get("logs_summary"))
+    if logs_summary:
+        payload["logsSummary"] = logs_summary
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
@@ -197,6 +225,9 @@ def scan_payload(scan: dict) -> dict:
     queue = scan_queue_payload(scan)
     if queue:
         payload["queue"] = queue
+    retry = public_scan_retry(scan.get("retry"))
+    if retry:
+        payload["retry"] = retry
     return payload
 
 
@@ -219,6 +250,12 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
         "verification": verification_counts,
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
+    progress_message = public_issue_text(scan.get("progressMessage") or scan.get("progress_message"))
+    if progress_message:
+        payload["progressMessage"] = progress_message
+    logs_summary = public_issue_text(scan.get("logsSummary") or scan.get("logs_summary"))
+    if logs_summary:
+        payload["logsSummary"] = logs_summary
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
@@ -331,6 +368,9 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     queue = scan_queue_payload(scan)
     if queue:
         payload["queue"] = queue
+    retry = public_scan_retry(scan.get("retry"))
+    if retry:
+        payload["retry"] = retry
     return payload
 
 

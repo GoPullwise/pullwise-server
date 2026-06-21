@@ -3040,6 +3040,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             {
                 "phase": "ai",
                 "progress": 55,
+                "message": "Graph: mapping shards 3/12",
+                "logs_summary": "stage=graph progress=3/12 task=graph-0003",
                 "completion_audit": {
                     "protocol": "completion-audit/0.1",
                     "status": "warning",
@@ -3070,7 +3072,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(log_event.call_args.kwargs["jobId"], job["job_id"])
         self.assertEqual(log_event.call_args.kwargs["phase"], "ai")
         self.assertEqual(log_event.call_args.kwargs["progress"], 55)
+        self.assertEqual(log_event.call_args.kwargs["message"], "Graph: mapping shards 3/12")
         payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(payload["progressMessage"], "Graph: mapping shards 3/12")
+        self.assertEqual(payload["logsSummary"], "stage=graph progress=3/12 task=graph-0003")
         self.assertNotIn("completionAudit", payload)
         self.assertNotIn("jobTrace", payload)
 
@@ -3140,6 +3145,225 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderBlocked"], 97)
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderCandidates"], 0)
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedValidCandidates"], 0)
+
+    def test_failed_worker_result_requeues_once_for_different_worker_without_extra_quota(self) -> None:
+        _worker_two, worker_two_token = self.create_registry_worker("wk_2")
+        worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
+        user = {"id": "usr_retry_worker", "name": "Owner", "providers": []}
+        app.USERS = {user["id"]: user}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "12001",
+                "full_name": "acme/retry-worker",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "private": False,
+                "clone_url": "https://github.com/acme/retry-worker.git",
+            }
+        )
+        quota_result = app.quota.consume_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_retry_worker",
+            request_id="req_retry_worker",
+        )
+        scan = {
+            "id": "sc_retry_worker",
+            "repo": repository["full_name"],
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_retry_worker",
+            "quotaBucketIds": quota_result["bucketIds"],
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+            "quotaState": "consumed",
+            "quotaConsumedAt": app.now(),
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(first_claim, "POST")
+        self.assertEqual(first_claim.status, HTTPStatus.OK)
+        first_job = first_claim.payload["job"]
+
+        first_failure_body = {
+            "status": "failed",
+            "attempt_id": f"wk_1-{first_job['attempt']}",
+            "result_checksum": "checksum-worker-failed-first",
+            "error": "Worker failed while running GraphVerified.",
+            "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
+            **audit_result_fields([]),
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        failed_result = RouteHarness(
+            f"/worker/jobs/{first_job['job_id']}/result",
+            first_failure_body,
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(failed_result, "POST")
+        self.assertEqual(failed_result.status, HTTPStatus.OK)
+        self.assertTrue(failed_result.payload["retryQueued"])
+        stored_after_failure = db.get_scan_job(first_job["job_id"])
+        self.assertEqual(stored_after_failure["status"], "queued")
+        self.assertEqual(stored_after_failure["attempt"], 1)
+        self.assertEqual(app.SCANS[0]["status"], "queued")
+        self.assertEqual(app.SCANS[0]["retry"]["attempt"], 1)
+        self.assertEqual(app.SCANS[0]["retry"]["maxAttempts"], 2)
+        self.assertEqual(app.SCANS[0]["retry"]["remainingAttempts"], 1)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+
+        duplicate_failed_result = RouteHarness(
+            f"/worker/jobs/{first_job['job_id']}/result",
+            first_failure_body,
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(duplicate_failed_result, "POST")
+        self.assertEqual(duplicate_failed_result.status, HTTPStatus.OK)
+        self.assertTrue(duplicate_failed_result.payload["duplicate"])
+        self.assertFalse(duplicate_failed_result.payload.get("retryQueued", False))
+        self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "queued")
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+
+        same_worker_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(same_worker_claim, "POST")
+        self.assertEqual(same_worker_claim.status, HTTPStatus.OK)
+        self.assertIsNone(same_worker_claim.payload["job"])
+
+        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
+        app.PullwiseHandler.route(second_claim, "POST")
+        self.assertEqual(second_claim.status, HTTPStatus.OK)
+        second_job = second_claim.payload["job"]
+        self.assertEqual(second_job["job_id"], first_job["job_id"])
+        self.assertEqual(second_job["attempt"], 2)
+        self.assertEqual(second_job["retry"]["maxAttempts"], 2)
+
+        late_duplicate_failed_result = RouteHarness(
+            f"/worker/jobs/{first_job['job_id']}/result",
+            first_failure_body,
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(late_duplicate_failed_result, "POST")
+        self.assertEqual(late_duplicate_failed_result.status, HTTPStatus.OK)
+        self.assertTrue(late_duplicate_failed_result.payload["duplicate"])
+        self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "claimed")
+
+        done_result = RouteHarness(
+            f"/worker/jobs/{second_job['job_id']}/result",
+            {
+                "status": "done",
+                "attempt_id": f"wk_2-{second_job['attempt']}",
+                "result_checksum": "checksum-worker-retry-done",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=worker_two_auth,
+        )
+        app.PullwiseHandler.route(done_result, "POST")
+        self.assertEqual(done_result.status, HTTPStatus.OK)
+        self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "done")
+        self.assertEqual(app.SCANS[0]["status"], "done")
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+
+    def test_second_worker_failure_exhausts_auto_retry(self) -> None:
+        _worker_two, worker_two_token = self.create_registry_worker("wk_2")
+        worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
+        scan = {
+            "id": "sc_retry_exhausted",
+            "repo": "acme/retry-exhausted",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(first_claim, "POST")
+        self.assertEqual(first_claim.status, HTTPStatus.OK)
+        first_job = first_claim.payload["job"]
+
+        first_failed_result = RouteHarness(
+            f"/worker/jobs/{first_job['job_id']}/result",
+            {
+                "status": "failed",
+                "attempt_id": f"wk_1-{first_job['attempt']}",
+                "result_checksum": "checksum-worker-exhaust-first",
+                "error": "First worker failed.",
+                "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(first_failed_result, "POST")
+        self.assertEqual(first_failed_result.status, HTTPStatus.OK)
+        self.assertTrue(first_failed_result.payload["retryQueued"])
+
+        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
+        app.PullwiseHandler.route(second_claim, "POST")
+        self.assertEqual(second_claim.status, HTTPStatus.OK)
+        second_job = second_claim.payload["job"]
+        self.assertEqual(second_job["attempt"], 2)
+
+        second_failed_result = RouteHarness(
+            f"/worker/jobs/{second_job['job_id']}/result",
+            {
+                "status": "failed",
+                "attempt_id": f"wk_2-{second_job['attempt']}",
+                "result_checksum": "checksum-worker-exhaust-second",
+                "error": "Second worker failed.",
+                "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=worker_two_auth,
+        )
+        app.PullwiseHandler.route(second_failed_result, "POST")
+        self.assertEqual(second_failed_result.status, HTTPStatus.OK)
+        self.assertFalse(second_failed_result.payload.get("retryQueued", False))
+        stored = db.get_scan_job(first_job["job_id"])
+        self.assertEqual(stored["status"], "failed")
+        self.assertEqual(stored["attempt"], 2)
+        self.assertEqual(db.scan_job_retry_state(stored)["remainingAttempts"], 0)
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+
+    def test_retry_attempt_capacity_is_capped_by_enabled_worker_count(self) -> None:
+        self.create_registry_worker("wk_2")
+        self.create_registry_worker("wk_3")
+        job = db.create_scan_job(
+            {
+                "job_id": "job_retry_cap",
+                "scan_id": "sc_retry_cap",
+                "repo": "acme/cap",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "user_id": "usr_1",
+                "max_attempts": 6,
+            }
+        )
+
+        retry = db.scan_job_retry_state(job)
+
+        self.assertEqual(retry["maxAttempts"], 3)
+        self.assertEqual(retry["retryAttempts"], 2)
 
     def test_worker_graph_verified_progress_ignores_legacy_artifacts(self) -> None:
         app.billing.update_review_agent_config("free", {"provider": "codex", "graphVerified": {"enabled": True}})
@@ -4498,6 +4722,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
     def test_worker_heartbeat_requeues_unstarted_claim_missing_from_active_jobs(self) -> None:
         timestamp = app.now()
+        self.create_registry_worker("wk_2")
         scan = {
             "id": "sc_startup_lost",
             "repo": "acme/api",

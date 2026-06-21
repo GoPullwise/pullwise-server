@@ -648,6 +648,15 @@ class ScanRecoveryTest(unittest.TestCase):
                     "timestamp": timestamp,
                 }
             )
+            db.upsert_worker_heartbeat(
+                {
+                    "worker_id": "wk_ready",
+                    "provider": "codex",
+                    "running_jobs": 0,
+                    "free_slots": 1,
+                    "timestamp": timestamp + 1,
+                }
+            )
             app.SCANS = [
                 {
                     "id": "sc_stale_worker",

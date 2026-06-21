@@ -347,7 +347,7 @@ def initialize() -> None:
                     progress INTEGER NOT NULL DEFAULT 0,
                     progress_message TEXT,
                     logs_summary TEXT,
-                    max_attempts INTEGER NOT NULL DEFAULT 3,
+                    max_attempts INTEGER NOT NULL DEFAULT 2,
                     review_output_language TEXT,
                     provider_chain TEXT,
                     last_attempt_id TEXT
@@ -379,6 +379,37 @@ def initialize() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_repo_created
                 ON scan_jobs(user_id, repo, created_at DESC, job_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scan_job_attempts (
+                    id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'claimed',
+                    claimed_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    error TEXT,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    UNIQUE(job_id, attempt),
+                    UNIQUE(job_id, worker_id),
+                    FOREIGN KEY(job_id) REFERENCES scan_jobs(job_id) ON DELETE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scan_job_attempts_job
+                ON scan_job_attempts(job_id, attempt)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scan_job_attempts_worker
+                ON scan_job_attempts(worker_id, status)
                 """
             )
             connection.execute(
@@ -2191,7 +2222,7 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("github_repo_id"),
                     record.get("installation_id"),
                     record.get("clone_url"),
-                    max(1, int(record.get("max_attempts") or 3)),
+                    max(1, int(record.get("max_attempts") or 2)),
                     record.get("review_output_language"),
                     provider_chain,
                 ),
@@ -2423,7 +2454,7 @@ def list_scan_jobs_for_scans(
     return list(deduped.values())
 
 
-def retry_scan_job(scan_id: str, *, timestamp: int | None = None) -> dict[str, Any] | None:
+def retry_scan_job(scan_id: str, *, timestamp: int | None = None, max_attempts: int | None = None) -> dict[str, Any] | None:
     ensure_initialized()
     scan_id = str(scan_id or "").strip()
     if not scan_id:
@@ -2432,10 +2463,20 @@ def retry_scan_job(scan_id: str, *, timestamp: int | None = None) -> dict[str, A
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            existing = connection.execute("SELECT job_id, max_attempts FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()
+            if not existing:
+                return None
+            job_id = str(existing["job_id"] or "")
+            configured_max_attempts = max(1, int(max_attempts or existing["max_attempts"] or 1))
+            connection.execute("DELETE FROM scan_job_attempts WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM job_result_artifacts WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM job_results WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM review_decision_events WHERE job_id = ?", (job_id,))
             cursor = connection.execute(
                 """
                 UPDATE scan_jobs
                 SET status = 'queued',
+                    attempt = 0,
                     claimed_by_worker_id = NULL,
                     claimed_at = NULL,
                     started_at = NULL,
@@ -2447,13 +2488,14 @@ def retry_scan_job(scan_id: str, *, timestamp: int | None = None) -> dict[str, A
                     progress = 0,
                     progress_message = NULL,
                     logs_summary = NULL,
+                    max_attempts = ?,
                     last_attempt_id = NULL,
                     created_at = ?,
                     updated_at = ?
                 WHERE scan_id = ?
                   AND status IN ('failed', 'cancelled', 'lost')
                 """,
-                (current_time, current_time, scan_id),
+                (configured_max_attempts, current_time, current_time, scan_id),
             )
             if cursor.rowcount != 1:
                 return None
@@ -2617,7 +2659,17 @@ def requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
             ).fetchall()
             recovered: list[dict[str, Any]] = []
             for row in rows:
-                if int(row["attempt"]) < int(row["max_attempts"]):
+                effective_max_attempts = _effective_scan_job_max_attempts_locked(connection, row["max_attempts"])
+                _complete_scan_job_attempt_locked(
+                    connection,
+                    job_id=row["job_id"],
+                    attempt=int(row["attempt"]),
+                    worker_id=worker_id,
+                    status="failed",
+                    completed_at=current_time,
+                    error="worker_job_startup_lost",
+                )
+                if int(row["attempt"]) < effective_max_attempts:
                     connection.execute(
                         """
                         UPDATE scan_jobs
@@ -2639,7 +2691,7 @@ def requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
                             "status": "queued",
                             "reason": "worker_job_startup_lost",
                             "attempt": int(row["attempt"]),
-                            "max_attempts": int(row["max_attempts"]),
+                            "max_attempts": effective_max_attempts,
                         }
                     )
                 else:
@@ -2662,7 +2714,7 @@ def requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
                             "status": "failed",
                             "reason": "worker_job_startup_lost",
                             "attempt": int(row["attempt"]),
-                            "max_attempts": int(row["max_attempts"]),
+                            "max_attempts": effective_max_attempts,
                         }
                     )
             connection.commit()
@@ -2745,6 +2797,158 @@ def worker_running_scan_job_counts(worker_ids: list[str] | set[str] | tuple[str,
         str(row[0] or "").strip(): max(0, int(row[1] or 0))
         for row in rows
         if str(row[0] or "").strip()
+    }
+
+
+def _enabled_worker_count_locked(connection: sqlite3.Connection) -> int:
+    row = connection.execute(
+        """
+        SELECT COUNT(*) AS worker_count
+        FROM workers
+        WHERE enabled = 1
+          AND deleted_at IS NULL
+        """
+    ).fetchone()
+    return max(0, int(row[0] if row else 0))
+
+
+def count_enabled_workers() -> int:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        return _enabled_worker_count_locked(connection)
+
+
+def _effective_scan_job_max_attempts_locked(connection: sqlite3.Connection, max_attempts: object) -> int:
+    try:
+        configured = int(max_attempts or 1)
+    except (TypeError, ValueError):
+        configured = 1
+    configured = max(1, configured)
+    worker_count = _enabled_worker_count_locked(connection)
+    if worker_count <= 0:
+        return configured
+    return max(1, min(configured, worker_count))
+
+
+def scan_job_effective_max_attempts(job: dict[str, Any] | None) -> int:
+    ensure_initialized()
+    if not job:
+        return 1
+    with _LOCK, closing(connect()) as connection:
+        return _effective_scan_job_max_attempts_locked(connection, job.get("max_attempts"))
+
+
+def _scan_job_attempt_id(job_id: str, attempt: int) -> str:
+    return stable_id("sja", f"{job_id}:{attempt}")
+
+
+def _record_scan_job_attempt_locked(
+    connection: sqlite3.Connection,
+    *,
+    job_id: str,
+    attempt: int,
+    worker_id: str,
+    claimed_at: int,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO scan_job_attempts (
+            id, job_id, attempt, worker_id, status, claimed_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, 'claimed', ?, ?, ?)
+        ON CONFLICT(job_id, attempt) DO UPDATE SET
+            worker_id = excluded.worker_id,
+            status = 'claimed',
+            claimed_at = excluded.claimed_at,
+            completed_at = NULL,
+            error = NULL,
+            updated_at = excluded.updated_at
+        """,
+        (_scan_job_attempt_id(job_id, attempt), job_id, attempt, worker_id, claimed_at, claimed_at, claimed_at),
+    )
+
+
+def _complete_scan_job_attempt_locked(
+    connection: sqlite3.Connection,
+    *,
+    job_id: str,
+    attempt: int,
+    worker_id: str,
+    status: str,
+    completed_at: int,
+    error: object = None,
+) -> None:
+    clean_status = str(status or "").strip().lower() or "failed"
+    error_text = str(error or "").strip() or None
+    updated = connection.execute(
+        """
+        UPDATE scan_job_attempts
+        SET status = ?,
+            completed_at = ?,
+            error = ?,
+            updated_at = ?
+        WHERE job_id = ?
+          AND attempt = ?
+        """,
+        (clean_status, completed_at, error_text, completed_at, job_id, attempt),
+    ).rowcount
+    if updated:
+        return
+    if worker_id:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO scan_job_attempts (
+                id, job_id, attempt, worker_id, status, claimed_at, completed_at, error, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _scan_job_attempt_id(job_id, attempt),
+                job_id,
+                attempt,
+                worker_id,
+                clean_status,
+                completed_at,
+                completed_at,
+                error_text,
+                completed_at,
+                completed_at,
+            ),
+        )
+
+
+def _attempted_worker_count_locked(connection: sqlite3.Connection, job_id: str) -> int:
+    row = connection.execute(
+        """
+        SELECT COUNT(DISTINCT worker_id)
+        FROM scan_job_attempts
+        WHERE job_id = ?
+          AND worker_id IS NOT NULL
+          AND worker_id != ''
+        """,
+        (job_id,),
+    ).fetchone()
+    return max(0, int(row[0] if row else 0))
+
+
+def scan_job_retry_state(job: dict[str, Any] | None) -> dict[str, int]:
+    ensure_initialized()
+    if not job:
+        return {"attempt": 0, "maxAttempts": 1, "retryAttempts": 0, "remainingAttempts": 0, "attemptedWorkers": 0}
+    job_id = str(job.get("job_id") or "").strip()
+    try:
+        attempt = max(0, int(job.get("attempt") or 0))
+    except (TypeError, ValueError):
+        attempt = 0
+    with _LOCK, closing(connect()) as connection:
+        effective_max = _effective_scan_job_max_attempts_locked(connection, job.get("max_attempts"))
+        attempted_workers = _attempted_worker_count_locked(connection, job_id) if job_id else 0
+    return {
+        "attempt": attempt,
+        "maxAttempts": effective_max,
+        "retryAttempts": max(0, effective_max - 1),
+        "remainingAttempts": max(0, effective_max - attempt),
+        "attemptedWorkers": attempted_workers,
     }
 
 
@@ -3373,6 +3577,13 @@ def claim_next_scan_job(
                   AND queued.attempt < queued.max_attempts
                   AND NOT EXISTS (
                       SELECT 1
+                      FROM scan_job_attempts attempted
+                      WHERE attempted.job_id = queued.job_id
+                        AND attempted.worker_id = ?
+                      LIMIT 1
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
                       FROM scan_jobs worker_active
                       WHERE worker_active.claimed_by_worker_id = ?
                         AND worker_active.status IN ('claimed', 'running', 'uploading_result')
@@ -3382,7 +3593,7 @@ def claim_next_scan_job(
                 LIMIT 1
                 """
                 ,
-                (worker_id,),
+                (worker_id, worker_id),
             ).fetchone()
             if not row:
                 connection.commit()
@@ -3407,6 +3618,14 @@ def claim_next_scan_job(
                 connection.commit()
                 return None
             claimed_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+            if claimed_job:
+                _record_scan_job_attempt_locked(
+                    connection,
+                    job_id=job_id,
+                    attempt=max(0, int(claimed_job.get("attempt") or 0)),
+                    worker_id=worker_id,
+                    claimed_at=current_time,
+                )
             connection.commit()
             return claimed_job
         except Exception:
@@ -3468,11 +3687,14 @@ def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_t
         """
         SELECT job_id, scan_id, attempt, max_attempts
         FROM scan_jobs
-        WHERE status = 'queued' AND attempt >= max_attempts
+        WHERE status = 'queued'
         """
     ).fetchall()
     recovered: list[dict[str, Any]] = []
     for row in rows:
+        effective_max_attempts = _effective_scan_job_max_attempts_locked(connection, row["max_attempts"])
+        if int(row["attempt"]) < effective_max_attempts:
+            continue
         connection.execute(
             """
             UPDATE scan_jobs
@@ -3495,7 +3717,7 @@ def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_t
                 "status": "failed",
                 "reason": "retry_attempts_exhausted",
                 "attempt": int(row["attempt"]),
-                "max_attempts": int(row["max_attempts"]),
+                "max_attempts": effective_max_attempts,
             }
         )
     return recovered
@@ -3504,7 +3726,7 @@ def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_t
 def _requeue_expired_jobs_locked(connection: sqlite3.Connection, current_time: int) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT job_id, scan_id, attempt, max_attempts
+        SELECT job_id, scan_id, attempt, max_attempts, claimed_by_worker_id
         FROM scan_jobs
         WHERE status IN ('claimed', 'running', 'uploading_result') AND timeout_at IS NOT NULL AND timeout_at <= ?
         """,
@@ -3512,7 +3734,17 @@ def _requeue_expired_jobs_locked(connection: sqlite3.Connection, current_time: i
     ).fetchall()
     recovered: list[dict[str, Any]] = []
     for row in rows:
-        if int(row["attempt"]) < int(row["max_attempts"]):
+        effective_max_attempts = _effective_scan_job_max_attempts_locked(connection, row["max_attempts"])
+        _complete_scan_job_attempt_locked(
+            connection,
+            job_id=row["job_id"],
+            attempt=int(row["attempt"]),
+            worker_id=str(row["claimed_by_worker_id"] or ""),
+            status="failed",
+            completed_at=current_time,
+            error="timed_out",
+        )
+        if int(row["attempt"]) < effective_max_attempts:
             connection.execute(
                 """
                 UPDATE scan_jobs
@@ -3543,7 +3775,7 @@ def _requeue_expired_jobs_locked(connection: sqlite3.Connection, current_time: i
                     "status": "queued",
                     "reason": "timed_out",
                     "attempt": int(row["attempt"]),
-                    "max_attempts": int(row["max_attempts"]),
+                    "max_attempts": effective_max_attempts,
                 }
             )
         else:
@@ -3578,7 +3810,7 @@ def _requeue_expired_jobs_locked(connection: sqlite3.Connection, current_time: i
                     "status": "failed",
                     "reason": "timed_out",
                     "attempt": int(row["attempt"]),
-                    "max_attempts": int(row["max_attempts"]),
+                    "max_attempts": effective_max_attempts,
                 }
             )
     return recovered
@@ -3591,7 +3823,7 @@ def _requeue_stale_worker_jobs_locked(
 ) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT sj.job_id, sj.scan_id, sj.attempt, sj.max_attempts
+        SELECT sj.job_id, sj.scan_id, sj.attempt, sj.max_attempts, sj.claimed_by_worker_id
         FROM scan_jobs sj
         JOIN workers w ON w.worker_id = sj.claimed_by_worker_id
         WHERE sj.status IN ('claimed', 'running', 'uploading_result')
@@ -3602,7 +3834,17 @@ def _requeue_stale_worker_jobs_locked(
     ).fetchall()
     recovered: list[dict[str, Any]] = []
     for row in rows:
-        if int(row["attempt"]) < int(row["max_attempts"]):
+        effective_max_attempts = _effective_scan_job_max_attempts_locked(connection, row["max_attempts"])
+        _complete_scan_job_attempt_locked(
+            connection,
+            job_id=row["job_id"],
+            attempt=int(row["attempt"]),
+            worker_id=str(row["claimed_by_worker_id"] or ""),
+            status="failed",
+            completed_at=current_time,
+            error="worker_heartbeat_timed_out",
+        )
+        if int(row["attempt"]) < effective_max_attempts:
             connection.execute(
                 """
                 UPDATE scan_jobs
@@ -3624,7 +3866,7 @@ def _requeue_stale_worker_jobs_locked(
                     "status": "queued",
                     "reason": "worker_heartbeat_timed_out",
                     "attempt": int(row["attempt"]),
-                    "max_attempts": int(row["max_attempts"]),
+                    "max_attempts": effective_max_attempts,
                 }
             )
         else:
@@ -3647,7 +3889,7 @@ def _requeue_stale_worker_jobs_locked(
                     "status": "failed",
                     "reason": "worker_heartbeat_timed_out",
                     "attempt": int(row["attempt"]),
-                    "max_attempts": int(row["max_attempts"]),
+                    "max_attempts": effective_max_attempts,
                 }
             )
     return recovered
@@ -3724,6 +3966,7 @@ def record_scan_job_result(
     status: str,
     result_checksum: str,
     payload: dict[str, Any],
+    retryable: bool = True,
 ) -> dict[str, Any]:
     ensure_initialized()
     job_id = str(job_id or "").strip()
@@ -3744,7 +3987,7 @@ def record_scan_job_result(
         connection.execute("BEGIN IMMEDIATE")
         try:
             job = connection.execute(
-                "SELECT status, last_attempt_id, claimed_by_worker_id, attempt FROM scan_jobs WHERE job_id = ?",
+                "SELECT status, last_attempt_id, claimed_by_worker_id, attempt, max_attempts FROM scan_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
             if not job:
@@ -3772,6 +4015,15 @@ def record_scan_job_result(
             if not expected_attempt_id or attempt_id != expected_attempt_id:
                 connection.commit()
                 return {"accepted": False, "duplicate": False, "conflict": True}
+            _complete_scan_job_attempt_locked(
+                connection,
+                job_id=job_id,
+                attempt=attempt,
+                worker_id=claimed_worker_id,
+                status=status,
+                completed_at=current_time,
+                error=payload.get("error"),
+            )
             connection.execute(
                 """
                 INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
@@ -3807,6 +4059,47 @@ def record_scan_job_result(
                 """,
                 (current_time, job_id),
             )
+            effective_max_attempts = _effective_scan_job_max_attempts_locked(connection, job["max_attempts"])
+            retry_queued = status == "failed" and bool(retryable) and attempt < effective_max_attempts
+            if retry_queued:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET status = 'queued',
+                        claimed_by_worker_id = NULL,
+                        claimed_at = NULL,
+                        started_at = NULL,
+                        completed_at = NULL,
+                        timeout_at = NULL,
+                        error = ?,
+                        result_checksum = ?,
+                        last_attempt_id = ?,
+                        progress_phase = NULL,
+                        progress = 0,
+                        progress_message = NULL,
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (
+                        payload.get("error") or "worker_result_failed",
+                        result_checksum,
+                        attempt_id,
+                        current_time,
+                        job_id,
+                    ),
+                )
+                next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+                connection.commit()
+                return {
+                    "accepted": True,
+                    "duplicate": False,
+                    "conflict": False,
+                    "retry_queued": True,
+                    "job_status": "queued",
+                    "attempt": attempt,
+                    "max_attempts": effective_max_attempts,
+                    "job": next_job or {},
+                }
             connection.execute(
                 """
                 UPDATE scan_jobs
@@ -3831,8 +4124,18 @@ def record_scan_job_result(
                     job_id,
                 ),
             )
+            next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
             connection.commit()
-            return {"accepted": True, "duplicate": False, "conflict": False}
+            return {
+                "accepted": True,
+                "duplicate": False,
+                "conflict": False,
+                "retry_queued": False,
+                "job_status": status,
+                "attempt": attempt,
+                "max_attempts": effective_max_attempts,
+                "job": next_job or {},
+            }
         except Exception:
             connection.rollback()
             raise

@@ -959,6 +959,23 @@ def user_scans_for_read(session: dict | None) -> list[dict]:
     return scans
 
 
+def scan_retry_summary_for_job(job: dict | None, *, reason: str = "") -> dict:
+    if not job:
+        return {}
+    state = db.scan_job_retry_state(job)
+    payload = {
+        "attempt": public_scan_count(state.get("attempt")),
+        "maxAttempts": max(1, public_scan_count(state.get("maxAttempts"))),
+        "retryAttempts": public_scan_count(state.get("retryAttempts")),
+        "remainingAttempts": public_scan_count(state.get("remainingAttempts")),
+        "attemptedWorkers": public_scan_count(state.get("attemptedWorkers")),
+    }
+    retry_reason = public_issue_text(reason)
+    if retry_reason:
+        payload["reason"] = retry_reason
+    return payload
+
+
 def scan_snapshot_with_job_state(scan: dict, job: dict) -> dict:
     hydrated = dict(scan)
     status = scan_status_from_job_status(job.get("status"))
@@ -968,7 +985,20 @@ def scan_snapshot_with_job_state(scan: dict, job: dict) -> dict:
         "jobId": public_issue_text(job.get("job_id")) or hydrated.get("jobId"),
         "status": status,
         "error": clean_scan_error(job.get("error")),
+        "retry": scan_retry_summary_for_job(job),
     }
+    progress_message = "" if status == "queued" else public_issue_text(job.get("progress_message"))
+    if progress_message:
+        update["progressMessage"] = progress_message
+    else:
+        hydrated.pop("progressMessage", None)
+        hydrated.pop("progress_message", None)
+    logs_summary = "" if status == "queued" else public_issue_text(job.get("logs_summary"))
+    if logs_summary:
+        update["logsSummary"] = logs_summary
+    else:
+        hydrated.pop("logsSummary", None)
+        hydrated.pop("logs_summary", None)
     commit = clean_github_access_text(job.get("commit"))
     if commit:
         update["commit"] = commit

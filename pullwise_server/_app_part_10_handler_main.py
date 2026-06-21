@@ -2599,6 +2599,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "progress": 0,
                         "phase": "clone",
                         "jobId": job.get("job_id"),
+                        "retry": scan_retry_summary_for_job(job),
                     }
                 )
                 db.upsert_scan(scan)
@@ -2650,6 +2651,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 update = {
                     "phase": phase,
                     "progress": public_scan_progress(body.get("progress")),
+                    "progressMessage": public_issue_text(body.get("message")),
+                    "logsSummary": public_issue_text(body.get("logs_summary")),
                     "startedAt": job.get("started_at"),
                     "updatedAt": now(),
                 }
@@ -2681,7 +2684,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         job = db.get_scan_job(job_id)
         if not job:
             return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
-        if not self.authenticated_worker_id_matches(worker_record, public_issue_text(job.get("claimed_by_worker_id"))):
+        claimed_worker_id = public_issue_text(job.get("claimed_by_worker_id"))
+        body_attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId"))
+        last_attempt_id = clean_github_access_text(job.get("last_attempt_id"))
+        allowed_worker_id = claimed_worker_id
+        if last_attempt_id and body_attempt_id == last_attempt_id:
+            allowed_worker_id = worker_id_from_attempt_id(body_attempt_id)
+        if not self.authenticated_worker_id_matches(worker_record, allowed_worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
         if public_issue_text(job.get("status")) not in {"claimed", "running"}:
             try:

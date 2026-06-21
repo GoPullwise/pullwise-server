@@ -156,6 +156,22 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(fields["worker.codexTimeoutSeconds"]["type"], "integer")
         self.assertEqual(fields["worker.codexTimeoutSeconds"]["min"], 60)
 
+    def test_scan_job_retry_attempts_default_to_one_retry(self) -> None:
+        config = app.system_config.default_config()
+        fields = {
+            field["path"]: field
+            for group in app.system_config.metadata()
+            if group["id"] == "scan"
+            for field in group["fields"]
+        }
+
+        self.assertEqual(config["scan"]["jobRetryAttempts"], 1)
+        self.assertNotIn("jobMaxAttempts", config["scan"])
+        self.assertEqual(fields["scan.jobRetryAttempts"]["min"], 0)
+        with patch.dict(os.environ, {"PULLWISE_SCAN_JOB_RETRY_ATTEMPTS": "1"}, clear=False):
+            self.assertEqual(app.system_config.scan_job_retry_attempts(), 1)
+            self.assertEqual(app.system_config.scan_job_max_attempts(), 2)
+
     def test_global_repository_checkout_limits_do_not_migrate_to_plan_limits(self) -> None:
         config = app.system_config.default_config()
         for plan in app.system_config.PLAN_IDS:

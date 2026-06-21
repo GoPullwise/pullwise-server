@@ -41,7 +41,7 @@ DEFAULT_CONFIG = {
     },
     "scan": {
         "maxQueuedScansGlobal": 1000,
-        "jobMaxAttempts": 3,
+        "jobRetryAttempts": 1,
         "jobLeaseSeconds": 3600,
         "jobStartupGraceSeconds": 120,
     },
@@ -125,11 +125,11 @@ FIELD_METADATA = [
                 "description": "Maximum queued scans across the whole service before new scan requests are rejected.",
             },
             {
-                "path": "scan.jobMaxAttempts",
-                "label": "Scan job max attempts",
+                "path": "scan.jobRetryAttempts",
+                "label": "Scan job retry attempts",
                 "type": "integer",
-                "min": 1,
-                "description": "Maximum worker attempts for one scan job before it is marked failed.",
+                "min": 0,
+                "description": "Automatic retries after a worker result fails. The server caps total attempts by the number of available worker instances so each attempt can use a different worker.",
             },
             {
                 "path": "scan.jobLeaseSeconds",
@@ -750,7 +750,14 @@ def max_queued_scans_global() -> int:
 
 
 def scan_job_max_attempts() -> int:
-    return max(1, int_setting("scan.jobMaxAttempts"))
+    return max(1, scan_job_retry_attempts() + 1)
+
+
+def scan_job_retry_attempts() -> int:
+    configured = env_int("PULLWISE_SCAN_JOB_RETRY_ATTEMPTS")
+    if configured is not None:
+        return max(0, configured)
+    return max(0, int_setting("scan.jobRetryAttempts"))
 
 
 def scan_job_lease_seconds() -> int:

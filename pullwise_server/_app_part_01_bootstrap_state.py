@@ -699,6 +699,12 @@ def scan_from_recovered_job(job: dict) -> dict | None:
         "recoveredAt": now(),
         "recoveryReason": "orphan_scan_job",
     }
+    progress_message = public_issue_text(job.get("progress_message"))
+    if progress_message:
+        scan["progressMessage"] = progress_message
+    logs_summary = public_issue_text(job.get("logs_summary"))
+    if logs_summary:
+        scan["logsSummary"] = logs_summary
     if completed_at is not None:
         scan["completedAt"] = completed_at
     error = clean_scan_error(job.get("error"))
@@ -933,6 +939,23 @@ def scan_status_from_job_status(status: object) -> str:
     return normalized if normalized in {"queued", "done", "failed", "cancelled"} else ""
 
 
+def scan_retry_summary_for_job(job: dict | None, *, reason: str = "") -> dict:
+    if not job:
+        return {}
+    state = db.scan_job_retry_state(job)
+    payload = {
+        "attempt": public_scan_count(state.get("attempt")),
+        "maxAttempts": max(1, public_scan_count(state.get("maxAttempts"))),
+        "retryAttempts": public_scan_count(state.get("retryAttempts")),
+        "remainingAttempts": public_scan_count(state.get("remainingAttempts")),
+        "attemptedWorkers": public_scan_count(state.get("attemptedWorkers")),
+    }
+    retry_reason = public_issue_text(reason)
+    if retry_reason:
+        payload["reason"] = retry_reason
+    return payload
+
+
 def reconcile_scan_job_state_locked(
     scan: dict,
     *,
@@ -991,7 +1014,20 @@ def reconcile_scan_job_state_locked(
         "progress": 0 if status == "queued" else public_scan_progress(job.get("progress")),
         "phase": None if status == "queued" else public_scan_phase(job.get("progress_phase")) or None,
         "error": clean_scan_error(job.get("error")),
+        "retry": scan_retry_summary_for_job(job),
     }
+    progress_message = "" if status == "queued" else public_issue_text(job.get("progress_message"))
+    if progress_message:
+        update["progressMessage"] = progress_message
+    else:
+        scan.pop("progressMessage", None)
+        scan.pop("progress_message", None)
+    logs_summary = "" if status == "queued" else public_issue_text(job.get("logs_summary"))
+    if logs_summary:
+        update["logsSummary"] = logs_summary
+    else:
+        scan.pop("logsSummary", None)
+        scan.pop("logs_summary", None)
     commit = clean_github_access_text(job.get("commit"))
     if commit:
         update["commit"] = commit
@@ -1022,6 +1058,7 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
         if not scan:
             continue
         if job.get("status") == "queued":
+            stored_job = db.get_scan_job(public_issue_text(job.get("job_id"))) if public_issue_text(job.get("job_id")) else None
             scan.update(
                 {
                     "status": "queued",
@@ -1031,10 +1068,12 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
                     "claimedByWorkerId": None,
                     "recoveredAt": timestamp,
                     "recoveryReason": public_issue_text(job.get("reason")) or "timed_out",
+                    "retry": scan_retry_summary_for_job(stored_job or job, reason=public_issue_text(job.get("reason"))),
                 }
             )
         elif job.get("status") == "failed":
             reason = public_issue_text(job.get("reason")) or "timed_out"
+            stored_job = db.get_scan_job(public_issue_text(job.get("job_id"))) if public_issue_text(job.get("job_id")) else None
             error = (
                 "Scan exceeded the configured retry attempts before completing."
                 if reason == "retry_attempts_exhausted"
@@ -1047,6 +1086,7 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
                     "error": error,
                     "recoveredAt": timestamp,
                     "recoveryReason": reason,
+                    "retry": scan_retry_summary_for_job(stored_job or job, reason=reason),
                 }
             )
         else:

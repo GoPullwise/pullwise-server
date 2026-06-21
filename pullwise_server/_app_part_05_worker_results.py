@@ -101,7 +101,11 @@ def retry_scan_job_for_scan_locked(scan: dict, *, queued_at: int | None = None) 
         job_status = public_issue_text(job.get("status")).lower()
         if job_status not in {"failed", "lost", "cancelled"}:
             raise RuntimeError("Only failed, lost, or cancelled scan jobs can be retried.")
-        retried_job = db.retry_scan_job(scan_id, timestamp=queued_at)
+        retried_job = db.retry_scan_job(
+            scan_id,
+            timestamp=queued_at,
+            max_attempts=system_config.scan_job_max_attempts(),
+        )
         if not retried_job:
             raise RuntimeError("Scan job could not be retried.")
         job = retried_job
@@ -257,6 +261,8 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "timeout_at": pull_request_timestamp(job.get("timeout_at")),
         "error": clean_scan_error(job.get("error")),
         "result_checksum": public_issue_text(job.get("result_checksum")),
+        "max_attempts": max(1, public_scan_count(db.scan_job_retry_state(job).get("maxAttempts"))),
+        "retry": scan_retry_summary_for_job(job),
         "repo_id": clean_github_access_text(job.get("repo_id"), allow_int=True),
         "github_repo_id": clean_github_access_text(job.get("github_repo_id"), allow_int=True),
         "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
@@ -383,6 +389,16 @@ def expected_worker_attempt_id(job: dict) -> str:
     if worker_id and attempt:
         return f"{worker_id}-{attempt}"
     return f"attempt_{attempt}"
+
+
+def worker_id_from_attempt_id(attempt_id: object) -> str:
+    text = clean_github_access_text(attempt_id)
+    if not text or "-" not in text:
+        return ""
+    worker_id, attempt = text.rsplit("-", 1)
+    if not worker_id or not attempt.isdigit():
+        return ""
+    return worker_id
 
 
 def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, checksum: str) -> dict:
@@ -514,13 +530,63 @@ def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: st
     return apply_prepared_worker_job_result_to_state_locked(job, prepared)
 
 
+def apply_worker_job_retry_to_state_locked(job: dict, body: dict, *, checksum: str) -> bool:
+    scan_id = public_issue_text(job.get("scan_id"))
+    if not scan_id:
+        return False
+    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+    if scan is None:
+        scan = scan_from_recovered_job(job)
+        if scan:
+            SCANS.append(scan)
+    if scan is None:
+        return False
+    before = json.dumps(db.to_jsonable(scan), sort_keys=True)
+    queued_at = now()
+    retry = scan_retry_summary_for_job(job, reason="worker_result_failed")
+    scan.update(
+        {
+            "status": "queued",
+            "queuedAt": queued_at,
+            "progress": 0,
+            "phase": None,
+            "jobId": public_issue_text(job.get("job_id")) or public_issue_text(scan.get("jobId")),
+            "retry": retry,
+            "updatedAt": queued_at,
+            "recoveryReason": "worker_result_failed",
+            "lastWorkerResultChecksum": checksum,
+        }
+    )
+    commit = worker_result_resolved_commit(job=job, body=body)
+    if commit:
+        scan["commit"] = commit
+    for key in (
+        "claimedAt",
+        "claimedByWorkerId",
+        "completedAt",
+        "durationMs",
+        "error",
+        "errorCode",
+        "graphVerifiedReport",
+        "resultChecksum",
+        "startedAt",
+    ):
+        scan.pop(key, None)
+    changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
+    if changed:
+        db.upsert_scan(scan)
+        mark_state_dirty()
+    return changed
+
+
 def apply_worker_job_result(job: dict, body: dict) -> dict:
     status = public_issue_text(body.get("status")).lower()
     if status not in {"done", "failed"}:
         raise ValueError("status must be done or failed")
     expected_attempt_id = expected_worker_attempt_id(job)
-    attempt_id = clean_github_access_text(body.get("attempt_id")) or expected_attempt_id
-    if attempt_id != expected_attempt_id:
+    attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId")) or expected_attempt_id
+    last_attempt_id = clean_github_access_text(job.get("last_attempt_id"))
+    if attempt_id != expected_attempt_id and attempt_id != last_attempt_id:
         return {"accepted": False, "conflict": True}
     graph_verified_report = public_graph_verified_report(
         body.get("graphVerifiedReport"),
@@ -536,6 +602,7 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         status=status,
         result_checksum=checksum,
         payload=body,
+        retryable=worker_result_allows_auto_retry(body, status=status),
     )
     if record_result.get("conflict"):
         return {"accepted": False, "conflict": True}
@@ -559,6 +626,25 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     quota_finalized = {}
     if worker_result_should_finalize_quota(job, body, status=status):
         quota_finalized = finalize_scan_quota_for_job(job, trigger="worker_result")
+    retry_queued = bool(record_result.get("retry_queued"))
+    if retry_queued:
+        retry_job = record_result.get("job") if isinstance(record_result.get("job"), dict) else job
+        if resolved_commit:
+            retry_job = {**retry_job, "commit": resolved_commit}
+        with STATE_LOCK:
+            apply_worker_job_retry_to_state_locked(retry_job, body, checksum=checksum)
+        result = {
+            "accepted": True,
+            "duplicate": duplicate,
+            "conflict": False,
+            "retryQueued": True,
+            "issueCount": worker_result_issue_count(body),
+            "reviewDecisionEvents": event_result,
+            "retry": scan_retry_summary_for_job(retry_job, reason="worker_result_failed"),
+        }
+        if quota_finalized.get("consumed"):
+            result["quotaConsumed"] = True
+        return result
     prepared_result = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     with STATE_LOCK:
         apply_prepared_worker_job_result_to_state_locked(job, prepared_result)
@@ -592,6 +678,14 @@ def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -
     if public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")):
         return True
     return False
+
+
+def worker_result_allows_auto_retry(body: dict, *, status: str) -> bool:
+    if status != "failed":
+        return False
+    if worker_result_error_code(body) == "REPOSITORY_TOO_LARGE":
+        return False
+    return True
 
 
 def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, status: str) -> dict:
