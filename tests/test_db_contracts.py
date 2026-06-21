@@ -745,6 +745,7 @@ class DatabaseContractsTest(unittest.TestCase):
                     "graphVerifiedReport": {
                         "version": "graph-verified-code-review/1",
                         "runId": "run_artifact",
+                        "scanMode": "full-strict",
                         "confirmedCount": 1,
                         "finalJson": {"confirmed": [{"candidate": {"issue_id": "iss_1"}}]},
                         "debugMarkdown": "x" * 1000,
@@ -772,6 +773,7 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(artifact_count, 1)
         self.assertIsNotNone(row[1])
         self.assertIn("artifactId", row[0])
+        self.assertIn("full-strict", row[0])
         self.assertNotIn("debugMarkdown", row[0])
         self.assertEqual(restored["result_payload"]["graphVerifiedReport"]["debugMarkdown"], "x" * 1000)
 

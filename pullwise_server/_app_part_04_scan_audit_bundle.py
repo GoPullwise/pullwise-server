@@ -877,6 +877,7 @@ def public_graph_verified_report(
         "version": public_scan_compact_text(source.get("version"), max_length=64) or "graph-verified-code-review/1",
         "runId": public_scan_compact_text(source.get("runId"), max_length=128),
         "mode": public_scan_compact_status(source.get("mode"), max_length=32),
+        "scanMode": public_scan_compact_status(source.get("scanMode"), max_length=32),
         "head": public_scan_compact_text(source.get("head"), max_length=128),
         "confirmedCount": confirmed,
         "rejectedCount": rejected,
@@ -897,6 +898,7 @@ def public_graph_verified_report(
         [
             payload["runId"],
             payload["mode"],
+            payload["scanMode"],
             payload["head"],
             payload["confirmedCount"],
             payload["rejectedCount"],

@@ -122,6 +122,7 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
             {
                 "runId": "run_1",
                 "mode": "standard",
+                "scanMode": "full-strict",
                 "head": "HEAD",
                 "confirmedCount": 1,
                 "rejectedCount": 2,
@@ -134,6 +135,7 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
 
         self.assertEqual(report["version"], "graph-verified-code-review/1")
         self.assertEqual(report["runId"], "run_1")
+        self.assertEqual(report["scanMode"], "full-strict")
         self.assertEqual(report["confirmedCount"], 1)
         self.assertEqual(report["rejectedCount"], 2)
         confirmed = report["finalJson"]["confirmed"][0]
