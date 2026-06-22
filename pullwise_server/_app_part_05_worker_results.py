@@ -129,12 +129,6 @@ def worker_agent_config_for_job(job: dict, scan: dict | None = None) -> dict:
     return billing.review_agent_config(worker_plan_for_job(job, scan))
 
 
-def worker_graph_verified_job_enabled(job: dict, scan: dict | None = None) -> bool:
-    agent_config = worker_agent_config_for_job(job, scan)
-    graph_config = agent_config.get("graphVerified") if isinstance(agent_config.get("graphVerified"), dict) else {}
-    return graph_config.get("enabled") is True
-
-
 def quota_request_id_for_scan(scan: dict | None) -> str | None:
     request_id = public_issue_text((scan or {}).get("requestId"))
     return request_id or None

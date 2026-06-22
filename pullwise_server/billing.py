@@ -34,10 +34,7 @@ REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
 REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
 REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
-REVIEW_AGENT_GRAPH_VERIFIED_MODES = {"fast", "standard", "deep"}
 REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS = {
-    "enabled": True,
-    "mode": "standard",
     "maxRepro": 0,
     "minScoreForRepro": 8,
     "requireRedGreen": False,
@@ -148,10 +145,6 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
 def normalize_review_agent_graph_verified_config(value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
-    result["enabled"] = True
-    mode = clean_review_agent_config_text(source.get("mode")).lower()
-    if mode in REVIEW_AGENT_GRAPH_VERIFIED_MODES:
-        result["mode"] = mode
     result["maxRepro"] = clean_review_agent_config_int(
         source.get("maxRepro"),
         int(result.get("maxRepro") or 0),
@@ -225,8 +218,6 @@ def review_agent_config(plan: str) -> dict:
             "reasoningEffort": codex_config["reasoningEffort"],
         },
         "graphVerified": {
-            "enabled": configured["graphVerified"]["enabled"] is True,
-            "mode": configured["graphVerified"]["mode"],
             "maxRepro": configured["graphVerified"]["maxRepro"],
             "minScoreForRepro": configured["graphVerified"]["minScoreForRepro"],
             "requireRedGreen": configured["graphVerified"]["requireRedGreen"] is True,

@@ -3427,7 +3427,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(retry["retryAttempts"], 2)
 
     def test_worker_graph_verified_progress_ignores_legacy_artifacts(self) -> None:
-        app.billing.update_review_agent_config("free", {"provider": "codex", "graphVerified": {"enabled": True}})
         scan = {
             "id": "sc_progress_graph_verified",
             "repo": "acme/api",
@@ -3447,7 +3446,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(claim, "POST")
         self.assertEqual(claim.status, HTTPStatus.OK)
         job = claim.payload["job"]
-        self.assertTrue(job["agentConfig"]["graphVerified"]["enabled"])
+        self.assertEqual(job["agentConfig"]["graphVerified"], {"maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False})
 
         progress = RouteHarness(
             f"/worker/jobs/{job['job_id']}/progress",

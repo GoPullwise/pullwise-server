@@ -1143,8 +1143,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             {
                 "provider": "codex",
                 "graphVerified": {
-                    "enabled": True,
-                    "mode": "deep",
                     "maxRepro": 12,
                     "minScoreForRepro": 7,
                     "requireRedGreen": True,
@@ -1157,7 +1155,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(update.status, HTTPStatus.OK)
         self.assertEqual(
             update.payload["agentConfig"]["graphVerified"],
-            {"enabled": True, "mode": "deep", "maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
+            {"maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
         )
 
         admin = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
@@ -1166,11 +1164,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin.status, HTTPStatus.OK)
         self.assertEqual(
             admin.payload["agentConfigs"]["pro"]["graphVerified"],
-            {"enabled": True, "mode": "deep", "maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
+            {"maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
         )
         self.assertEqual(
             admin.payload["agentConfigs"]["free"]["graphVerified"],
-            {"enabled": True, "mode": "standard", "maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False},
+            {"maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False},
         )
 
     def test_plan_agent_config_reads_repair_invalid_persisted_provider(self) -> None:
