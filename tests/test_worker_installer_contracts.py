@@ -61,6 +61,18 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('install -d -m 0755 -o root -g root "$BASE_DATA_DIR" "$BASE_LOG_DIR"', script)
         self.assertNotIn('install -d -m 1770 -o root -g "$SERVICE_GROUP" "$BASE_DATA_DIR" "$BASE_LOG_DIR"', script)
 
+    def test_installer_scopes_codex_sqlite_state_and_config(self) -> None:
+        script = app.worker_install_script()
+
+        self.assertIn('CODEX_SQLITE_HOME="$DATA_DIR/.codex-sqlite"', script)
+        self.assertIn('CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME"', script)
+        self.assertIn('CODEX_SQLITE_HOME=%q', script)
+        self.assertIn('"$CODEX_SQLITE_HOME"', script)
+        self.assertIn('install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"', script)
+        self.assertIn('write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"', script)
+        self.assertIn('export CODEX_SQLITE_HOME="\\$SERVICE_HOME/.codex-sqlite"', script)
+        self.assertIn("Environment=CODEX_SQLITE_HOME=$DATA_DIR/.codex-sqlite", script)
+
     def test_installer_creates_one_watcher_service_per_worker_instance(self) -> None:
         script = app.worker_install_script()
 

@@ -1313,6 +1313,7 @@ fi
 PROVIDER="${PROVIDER_CHAIN%%,*}"
 SERVICE_TOOL_PATH="$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$SERVICE_PATH"
 CODEX_HOME="$DATA_DIR/.codex"
+CODEX_SQLITE_HOME="$DATA_DIR/.codex-sqlite"
 XDG_CONFIG_HOME="$DATA_DIR/.config"
 XDG_CACHE_HOME="$DATA_DIR/.cache"
 XDG_DATA_HOME="$DATA_DIR/.local/share"
@@ -1321,9 +1322,9 @@ run_as_service_user() {
   (
     cd "$DATA_DIR"
     if command -v runuser >/dev/null 2>&1; then
-      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
+      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     elif command -v sudo >/dev/null 2>&1; then
-      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
+      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     else
       echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
       return 127
@@ -1336,8 +1337,8 @@ service_user_auth_command() {
   for part in "$@"; do
     command_line="${command_line:+$command_line }$(printf '%q' "$part")"
   done
-  printf 'sudo -u %q env HOME=%q USERPROFILE=%q CODEX_HOME=%q XDG_CONFIG_HOME=%q XDG_CACHE_HOME=%q XDG_DATA_HOME=%q PATH=%q sh -lc %q\n' \
-    "$SERVICE_USER" "$DATA_DIR" "$DATA_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
+  printf 'sudo -u %q env HOME=%q USERPROFILE=%q CODEX_HOME=%q CODEX_SQLITE_HOME=%q XDG_CONFIG_HOME=%q XDG_CACHE_HOME=%q XDG_DATA_HOME=%q PATH=%q sh -lc %q\n' \
+    "$SERVICE_USER" "$DATA_DIR" "$DATA_DIR" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
 }
 scoped_command_path() {
   local fallback_one="${1:-}"
@@ -1391,8 +1392,11 @@ else
 fi
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
 install -d -m 0755 -o root -g root "$BASE_DATA_DIR" "$BASE_LOG_DIR"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin" "$DATA_DIR/.codex/bin"
+if [ ! -f "$CODEX_HOME/config.toml" ]; then
+  install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"
+fi
 
 if provider_chain_has codex; then
   if [ -n "$CODEX_COMMAND" ]; then
@@ -1461,6 +1465,7 @@ write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
 if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
+  write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
   write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-__PULLWISE_CODEX_TIMEOUT_SECONDS__}"
@@ -1511,6 +1516,7 @@ SERVICE_HOME="\${PULLWISE_SERVICE_HOME:-/var/lib/pullwise-worker}"
 export HOME="\$SERVICE_HOME"
 export USERPROFILE="\$SERVICE_HOME"
 export CODEX_HOME="\$SERVICE_HOME/.codex"
+export CODEX_SQLITE_HOME="\$SERVICE_HOME/.codex-sqlite"
 export XDG_CONFIG_HOME="\$SERVICE_HOME/.config"
 export XDG_CACHE_HOME="\$SERVICE_HOME/.cache"
 export XDG_DATA_HOME="\$SERVICE_HOME/.local/share"
@@ -1539,6 +1545,7 @@ Environment=PATH=$SERVICE_TOOL_PATH
 Environment=HOME=$DATA_DIR
 Environment=USERPROFILE=$DATA_DIR
 Environment=CODEX_HOME=$DATA_DIR/.codex
+Environment=CODEX_SQLITE_HOME=$DATA_DIR/.codex-sqlite
 Environment=XDG_CONFIG_HOME=$DATA_DIR/.config
 Environment=XDG_CACHE_HOME=$DATA_DIR/.cache
 Environment=XDG_DATA_HOME=$DATA_DIR/.local/share
