@@ -53,6 +53,23 @@ agent CLI processes concurrently.
   scheduling in a way that lets one worker launch parallel Codex agent CLI runs
   under the same auth identity.
 
+## Worker Cancellation Slot Accounting
+
+Cancelled jobs must release the worker's single execution slot immediately from
+the server scheduler's point of view.
+
+- Do not trust heartbeat `running_jobs` alone for worker slot accounting when
+  `active_job_ids` is present. Reconcile reported active job ids against
+  `scan_jobs` and count only jobs still accepting worker updates:
+  `claimed`, `running`, or `uploading_result`.
+- A job in `cancelled`, `done`, `failed`, or `lost` must not keep the worker
+  busy, must not receive lease renewal, and must not block the same worker from
+  claiming the next queued job, even if a stale heartbeat still reports that job
+  as active.
+- Keep regression coverage for this path. The important scenario is: worker
+  claims a job, the scan/job is cancelled, the worker heartbeat reports the old
+  job in `active_job_ids`, and the same worker can still claim a new queued job.
+
 ## Worker Install Secrets And Identity
 
 - The public `/install-worker.sh` script must not embed worker tokens or other

@@ -2467,6 +2467,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 job_id = clean_github_access_text(value)
                 if job_id and job_id not in active_job_ids:
                     active_job_ids.append(job_id)
+        cancelled_job_ids = []
+        active_job_ids_accepting_updates = active_job_ids
+        if active_job_ids:
+            cancelled_job_ids = db.worker_job_ids_no_longer_accepting_updates(worker_id, active_job_ids)
+            active_job_ids_accepting_updates = db.worker_job_ids_accepting_updates(worker_id, active_job_ids)
+        running_jobs = public_scan_count(body.get("running_jobs"))
+        if active_job_ids_provided:
+            running_jobs = 1 if running_jobs and active_job_ids_accepting_updates else 0
         try:
             record = db.upsert_worker_heartbeat(
                 {
@@ -2474,7 +2482,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "version": public_issue_text(body.get("version")),
                     "provider": public_issue_text(body.get("provider")) or "codex",
                     "provider_chain": body.get("providerChain") or body.get("provider_chain"),
-                    "running_jobs": public_scan_count(body.get("running_jobs")),
+                    "running_jobs": running_jobs,
                     "hostname": public_issue_text(body.get("hostname")),
                     "region": heartbeat_region or None,
                     "last_error": last_error,
@@ -2500,13 +2508,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if recovered_jobs:
                 with STATE_LOCK:
                     apply_recovered_scan_jobs_locked(recovered_jobs)
-        cancelled_job_ids = []
-        if active_job_ids:
-            cancelled_job_ids = db.worker_job_ids_no_longer_accepting_updates(worker_id, active_job_ids)
-        if active_job_ids:
+        if active_job_ids_accepting_updates:
             db.renew_worker_scan_job_leases(
                 worker_id,
-                active_job_ids,
+                active_job_ids_accepting_updates,
                 lease_seconds=system_config.scan_job_lease_seconds(),
                 timestamp=heartbeat_timestamp,
             )
