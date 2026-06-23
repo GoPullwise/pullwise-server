@@ -415,6 +415,16 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         graph_verified_report,
         reserved_ids=worker_issue_reserved_ids(job_for_findings),
     )
+    deterministic_findings = body.get("deterministicFindings")
+    if isinstance(deterministic_findings, list):
+        reserved_ids = {finding.get("id") for finding in normalized_findings if isinstance(finding, dict)}
+        reserved_ids.update(worker_issue_reserved_ids(job_for_findings))
+        for finding in deterministic_findings:
+            if not isinstance(finding, dict):
+                continue
+            issue = worker_finding_payload(job_for_findings, finding, len(normalized_findings))
+            issue["id"] = unique_issue_id(issue.get("id"), reserved_ids)
+            normalized_findings.append(issue)
     summary = public_scan_issue_counts(summarize_findings(normalized_findings))
     ai_usage = public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage"))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))

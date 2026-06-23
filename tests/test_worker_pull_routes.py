@@ -1000,6 +1000,58 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual([finding["id"] for finding in findings], ["issue-duplicate-2", "issue-duplicate-3"])
 
+    def test_worker_result_merges_deterministic_findings_into_issues(self) -> None:
+        job = {
+            "scan_id": "sc_static",
+            "job_id": "job_static",
+            "user_id": "usr_1",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+        }
+        body = {
+            "status": "done",
+            "graphVerifiedReport": {
+                "version": "graph-verified-code-review/1",
+                "runId": "gv_run",
+                "confirmedCount": 0,
+                "rejectedCount": 0,
+                "blockedCount": 0,
+                "finalJson": {"confirmed": []},
+            },
+            "deterministicFindings": [
+                {
+                    "id": "static_secret_1",
+                    "severity": "high",
+                    "category": "Security",
+                    "title": "Committed token",
+                    "summary": "A committed token was detected.",
+                    "file": "app.env",
+                    "line": 1,
+                    "verificationStatus": "static_proof",
+                    "affectedLocations": [{"file": "app.env", "startLine": 1, "endLine": 1}],
+                    "evidence": [
+                        {
+                            "type": "code",
+                            "summary": "Line 1 contains a token-shaped value.",
+                            "file": "app.env",
+                            "startLine": 1,
+                            "endLine": 1,
+                        }
+                    ],
+                }
+            ],
+        }
+
+        prepared = app.prepare_worker_job_result_state(job, body, status="done", checksum="checksum")
+        findings = prepared["normalized_findings"]
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["id"], "static_secret_1")
+        self.assertEqual(findings[0]["verificationStatus"], "static_proof")
+        self.assertEqual(findings[0]["affectedLocations"][0]["file"], "app.env")
+        self.assertEqual(prepared["summary"]["high"], 1)
+
     def test_worker_graph_verified_missing_repro_log_is_not_reported(self) -> None:
         report = audit_result_fields(
             [audit_issue_card("Unsupported verifier confirmation", issue_id="issue-unsupported")]
