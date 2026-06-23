@@ -875,7 +875,7 @@ CURL
         self.assertIn("server error", error.stdout)
         self.assertIn("app log", app.stdout)
 
-    def test_export_packages_env_state_logs_checkouts_and_private_key(self) -> None:
+    def test_export_defaults_to_non_secret_runtime_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = self.base_launcher_env(root)
@@ -889,8 +889,8 @@ CURL
             (root / "checkouts" / "usr" / "scan" / "repo" / "README.md").write_text("repo", encoding="utf-8")
             (root / "secrets").mkdir(exist_ok=True)
             (root / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
-            (root / "secrets" / "state-encryption-key").chmod(0o600)
             (root / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
+            (root / "secrets" / "state-encryption-key").chmod(0o600)
             (root / ".pullwise" / "extra").mkdir(parents=True)
             (root / ".pullwise" / "extra" / "artifact.txt").write_text("artifact", encoding="utf-8")
             archive = root / "pullwise-export.tar.gz"
@@ -902,14 +902,38 @@ CURL
             contents = tar_contents(archive)
             for expected in [
                 "manifest.env",
-                "config/server.env",
                 "data/pullwise.sqlite3",
                 "logs/pullwise-2026-05-23.log",
                 "checkouts/usr/scan/repo/README.md",
-                "secrets/github-app-private-key.pem",
                 "pullwise-state/extra/artifact.txt",
             ]:
                 self.assertIn(expected, contents)
+            self.assertNotIn("config/server.env", contents)
+            self.assertNotIn("secrets/github-app-private-key.pem", contents)
+            self.assertNotIn("secrets/state-encryption-key", contents)
+
+    def test_export_include_secrets_packages_env_and_private_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+            env["PULLWISE_APP_DIR"] = shell_path(root)
+            env["PULLWISE_SYSTEM_ENV_FILE"] = shell_path(self.write_relative_migration_env(root))
+            (root / "data").mkdir()
+            (root / "data" / "pullwise.sqlite3").write_text("sqlite", encoding="utf-8")
+            (root / "secrets").mkdir(exist_ok=True)
+            (root / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
+            (root / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
+            (root / "secrets" / "state-encryption-key").chmod(0o600)
+            archive = root / "pullwise-export.tar.gz"
+
+            result = self.run_launcher(["export", "--include-secrets", shell_path(archive)], env)
+
+            self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+            contents = tar_contents(archive)
+            self.assertIn("manifest.env", contents)
+            self.assertIn("config/server.env", contents)
+            self.assertIn("data/pullwise.sqlite3", contents)
+            self.assertIn("secrets/github-app-private-key.pem", contents)
             self.assertNotIn("secrets/state-encryption-key", contents)
 
     def test_import_restores_package_and_renders_service(self) -> None:
@@ -928,11 +952,11 @@ CURL
             (source / "checkouts" / "usr" / "scan" / "repo.txt").write_text("repo", encoding="utf-8")
             (source / "secrets").mkdir(exist_ok=True)
             (source / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
-            (source / "secrets" / "state-encryption-key").chmod(0o600)
             (source / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
+            (source / "secrets" / "state-encryption-key").chmod(0o600)
             archive = workspace / "pullwise-export.tar.gz"
 
-            export_result = self.run_launcher(["export", shell_path(archive)], source_env)
+            export_result = self.run_launcher(["export", "--include-secrets", shell_path(archive)], source_env)
             self.assertEqual(0, export_result.returncode, export_result.stderr + export_result.stdout)
 
             dest = workspace / "dest"

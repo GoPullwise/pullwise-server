@@ -563,13 +563,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             }
                             if request_id:
                                 scan["requestId"] = request_id
-                            SCANS.insert(0, scan)
+                            remember_scan_snapshot_locked(scan)
                             scan_created = True
                             mark_state_dirty()
                             try:
                                 create_scan_job_for_scan(scan)
                             except Exception:
-                                SCANS[:] = [item for item in SCANS if item.get("id") != scan_id]
+                                forget_memory_scan_locked(scan_id)
                                 scan_created = False
                                 mark_state_dirty()
                                 if not quota_result.get("deduplicated"):
@@ -989,9 +989,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, f"{segments[1]} integration disconnect is not implemented on this backend.")
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before disconnecting GitHub.")
-            USERS[session["userId"]]["githubRepositoryAccess"] = None
-            USERS[session["userId"]].pop("githubRepositoryAccessPending", None)
-            mark_state_dirty()
+            with STATE_LOCK:
+                USERS[session["userId"]]["githubRepositoryAccess"] = None
+                USERS[session["userId"]].pop("githubRepositoryAccessPending", None)
+                mark_state_dirty()
             return self.json({"ok": True, "provider": "github", "connected": False})
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
@@ -1772,33 +1773,34 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return None
 
     def current_session_for_id(self, session_id: str) -> dict | None:
-        session = SESSIONS.get(session_id)
-        if not session:
-            return None
-        if not isinstance(session, dict):
-            SESSIONS.pop(session_id, None)
-            mark_state_dirty()
-            return None
-        expires_at = pull_request_timestamp(session.get("expiresAt"))
-        user_id = session.get("userId")
-        if expires_at is None or not isinstance(user_id, str) or not user_id:
-            SESSIONS.pop(session_id, None)
-            mark_state_dirty()
-            return None
-        if expires_at < now():
-            SESSIONS.pop(session_id, None)
-            mark_state_dirty()
-            return None
-        user = USERS.get(user_id)
-        if not user:
-            SESSIONS.pop(session_id, None)
-            mark_state_dirty()
-            return None
-        if github_auth.oauth_configured() and user and "github" in user.get("providers", []) and not user.get("githubAccessToken"):
-            SESSIONS.pop(session_id, None)
-            mark_state_dirty()
-            return None
-        return session
+        with STATE_LOCK:
+            session = SESSIONS.get(session_id)
+            if not session:
+                return None
+            if not isinstance(session, dict):
+                SESSIONS.pop(session_id, None)
+                mark_state_dirty()
+                return None
+            expires_at = pull_request_timestamp(session.get("expiresAt"))
+            user_id = session.get("userId")
+            if expires_at is None or not isinstance(user_id, str) or not user_id:
+                SESSIONS.pop(session_id, None)
+                mark_state_dirty()
+                return None
+            if expires_at < now():
+                SESSIONS.pop(session_id, None)
+                mark_state_dirty()
+                return None
+            user = USERS.get(user_id)
+            if not user:
+                SESSIONS.pop(session_id, None)
+                mark_state_dirty()
+                return None
+            if github_auth.oauth_configured() and user and "github" in user.get("providers", []) and not user.get("githubAccessToken"):
+                SESSIONS.pop(session_id, None)
+                mark_state_dirty()
+                return None
+            return session
 
     def current_session_id(self) -> str | None:
         candidates = self.current_session_id_candidates()
@@ -2911,12 +2913,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             }
             if request_id:
                 scan["requestId"] = request_id
-            SCANS.insert(0, scan)
+            remember_scan_snapshot_locked(scan)
             mark_state_dirty()
             try:
                 create_scan_job_for_scan(scan)
             except Exception:
-                SCANS[:] = [item for item in SCANS if item.get("id") != scan_id]
+                forget_memory_scan_locked(scan_id)
                 mark_state_dirty()
                 quota.release_scan_quota_reservation(
                     scan_id=scan_id,
@@ -2957,14 +2959,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             release_scan_quota_reservation_for_scan(scan, reason="scan_cancelled")
             scan["status"] = "cancelled"
             scan["completedAt"] = now()
+            db.upsert_scan(scan)
             mark_state_dirty()
             db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
         return self.json(scan_payload(scan))
 
     def clear_current_session(self) -> None:
         session_id = self.current_session_id()
-        if session_id and SESSIONS.pop(session_id, None):
-            mark_state_dirty()
+        with STATE_LOCK:
+            if session_id and SESSIONS.pop(session_id, None):
+                mark_state_dirty()
 
     def find_or_404(self, collection: list[dict], item_id: str, label: str) -> dict:
         for item in collection:

@@ -175,6 +175,83 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["id"], "sc_db_loaded")
         self.assertEqual(app.memory_scan_by_id("sc_db_loaded")["requestId"], "req_db_loaded")
 
+    def test_state_loader_skips_legacy_scan_issue_replay_when_normalized_tables_exist(self) -> None:
+        db.reset_initialization_cache()
+        db.initialize()
+        timestamp = app.now()
+        db.upsert_scan(
+            {
+                "id": "sc_normalized",
+                "userId": "usr_1",
+                "repo": "acme/api",
+                "repoId": "repo_1",
+                "status": "fixed",
+                "createdAt": timestamp,
+                "requestId": "req_normalized",
+            }
+        )
+        db.upsert_issue(
+            {
+                "id": "iss_normalized",
+                "userId": "usr_1",
+                "scanId": "sc_normalized",
+                "repo": "acme/api",
+                "status": "fixed",
+                "severity": "high",
+                "title": "Fixed normalized issue",
+                "createdAt": timestamp,
+            }
+        )
+        legacy_scan = {
+            "id": "sc_legacy_deleted",
+            "userId": "usr_1",
+            "repo": "acme/api",
+            "repoId": "repo_1",
+            "status": "running",
+            "createdAt": timestamp - 60,
+            "requestId": "req_legacy",
+        }
+        legacy_issue = {
+            "id": "iss_legacy_deleted",
+            "userId": "usr_1",
+            "scanId": "sc_legacy_deleted",
+            "repo": "acme/api",
+            "status": "open",
+            "severity": "critical",
+            "title": "Legacy issue should not revive",
+            "createdAt": timestamp - 60,
+        }
+        app.STATE_LOADED = False
+        app.SCANS = []
+        app.SCAN_BY_ID = {}
+        app.ISSUES = []
+
+        with patch.object(app.db, "load_state", return_value={"scans": [legacy_scan], "issues": [legacy_issue]}):
+            app.ensure_state_loaded()
+
+        self.assertTrue(app.STATE_LOADED)
+        self.assertEqual(["sc_normalized"], [scan.get("id") for scan in app.SCANS])
+        self.assertIsNone(app.memory_scan_by_id("sc_legacy_deleted"))
+        self.assertEqual(1, db.count_scan_snapshots())
+        self.assertEqual(1, db.count_issue_snapshots())
+        self.assertIsNone(db.load_state_item("scans"))
+        self.assertIsNone(db.load_state_item("issues"))
+        marker = db.load_state_item(app.LEGACY_SCAN_ISSUE_IMPORT_STATE_KEY)
+        self.assertIsInstance(marker, dict)
+        self.assertTrue(marker.get("imported"))
+        self.assertEqual(1, marker.get("scansSkipped"))
+        self.assertEqual(1, marker.get("issuesSkipped"))
+
+    def test_memory_scan_by_id_rejects_stale_scan_index_entry(self) -> None:
+        current_scan = {"id": "sc_current", "status": "queued"}
+        stale_scan = {"id": "sc_stale", "status": "running"}
+        app.SCANS = [current_scan]
+        app.SCAN_BY_ID = {"sc_stale": stale_scan}
+
+        self.assertIsNone(app.memory_scan_by_id("sc_stale"))
+        self.assertNotIn("sc_stale", app.SCAN_BY_ID)
+        self.assertIs(app.memory_scan_by_id("sc_current"), current_scan)
+
     def test_scan_lookup_helpers_use_database_after_memory_cache_is_empty(self) -> None:
         timestamp = app.now()
         db.upsert_scan(

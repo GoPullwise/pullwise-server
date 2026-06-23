@@ -1076,6 +1076,24 @@ def load_state_item(name: str) -> Any | None:
         return None
 
 
+def delete_state_items(names: list[str] | tuple[str, ...] | set[str]) -> int:
+    ensure_initialized()
+    unique_names = list(dict.fromkeys(str(name or "").strip() for name in names if str(name or "").strip()))
+    if not unique_names:
+        return 0
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            removed = 0
+            for start in range(0, len(unique_names), 400):
+                chunk = unique_names[start : start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                removed += connection.execute(
+                    f"DELETE FROM app_state WHERE name IN ({placeholders})",
+                    tuple(chunk),
+                ).rowcount
+    return max(0, removed)
+
+
 def save_state_item(name: str, payload: Any) -> None:
     ensure_initialized()
     storage_payload = to_jsonable(payload)
@@ -2158,6 +2176,47 @@ def list_scan_snapshots(*, limit: int = 1000) -> list[dict[str, Any]]:
     return [scan for row in rows if (scan := scan_from_row(row)) is not None]
 
 
+def count_scan_snapshots() -> int:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM scans").fetchone()
+    return max(0, int(row[0] if row else 0))
+
+
+def delete_scan_snapshots(
+    scan_ids: list[str] | set[str] | tuple[str, ...],
+    *,
+    user_id: str = "",
+) -> dict[str, int]:
+    ensure_initialized()
+    unique_scan_ids = list(dict.fromkeys(str(value or "").strip() for value in scan_ids or [] if str(value or "").strip()))
+    if not unique_scan_ids:
+        return {"scans": 0, "issues": 0}
+    target_user_id = str(user_id or "").strip()
+    counts = {"scans": 0, "issues": 0}
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            for start in range(0, len(unique_scan_ids), 400):
+                chunk = unique_scan_ids[start : start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                issue_clauses = [f"scan_id IN ({placeholders})"]
+                scan_clauses = [f"scan_id IN ({placeholders})"]
+                params: list[Any] = list(chunk)
+                if target_user_id:
+                    issue_clauses.append("user_id = ?")
+                    scan_clauses.append("user_id = ?")
+                    params.append(target_user_id)
+                counts["issues"] += connection.execute(
+                    f"DELETE FROM issues WHERE {' AND '.join(issue_clauses)}",
+                    tuple(params),
+                ).rowcount
+                counts["scans"] += connection.execute(
+                    f"DELETE FROM scans WHERE {' AND '.join(scan_clauses)}",
+                    tuple(params),
+                ).rowcount
+    return {key: max(0, value) for key, value in counts.items()}
+
+
 def find_user_scan_snapshot_by_request_id(user_id: str, request_id: str) -> dict[str, Any] | None:
     ensure_initialized()
     target_user_id = str(user_id or "").strip()
@@ -2314,6 +2373,13 @@ def count_user_scan_jobs(user_id: str) -> int:
         return 0
     with _LOCK, closing(connect()) as connection:
         row = connection.execute("SELECT COUNT(*) FROM scan_jobs WHERE user_id = ?", (target_user_id,)).fetchone()
+    return max(0, int(row[0] if row else 0))
+
+
+def count_scan_jobs() -> int:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM scan_jobs").fetchone()
     return max(0, int(row[0] if row else 0))
 
 
@@ -3414,6 +3480,30 @@ def delete_issues_for_scan(scan_id: str, *, user_id: str = "", job_id: str = "")
     with _LOCK, closing(connect()) as connection:
         with connection:
             return max(0, connection.execute(f"DELETE FROM issues WHERE {' AND '.join(clauses)}", tuple(params)).rowcount)
+
+
+def list_issue_snapshots(*, limit: int = 5000) -> list[dict[str, Any]]:
+    ensure_initialized()
+    safe_limit = max(1, min(20000, int(limit or 5000)))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM issues
+            ORDER BY updated_at DESC, created_at DESC, issue_id ASC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+    return [issue for row in rows if (issue := issue_from_row(row)) is not None]
+
+
+def count_issue_snapshots() -> int:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM issues").fetchone()
+    return max(0, int(row[0] if row else 0))
 
 
 def count_user_issues(user_id: str) -> int:
@@ -4706,12 +4796,28 @@ def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | N
                 "DELETE FROM review_decision_events WHERE user_id = ?",
                 (target_user_id,),
             ).rowcount
+            counts["issues"] = connection.execute(
+                "DELETE FROM issues WHERE user_id = ?",
+                (target_user_id,),
+            ).rowcount
+            counts["scans"] = connection.execute(
+                "DELETE FROM scans WHERE user_id = ?",
+                (target_user_id,),
+            ).rowcount
             counts["scanJobs"] = connection.execute(
                 "DELETE FROM scan_jobs WHERE user_id = ?",
                 (target_user_id,),
             ).rowcount
             if target_scan_ids:
                 placeholders = ",".join("?" for _ in target_scan_ids)
+                counts["issues"] += connection.execute(
+                    f"DELETE FROM issues WHERE scan_id IN ({placeholders})",
+                    target_scan_ids,
+                ).rowcount
+                counts["scans"] += connection.execute(
+                    f"DELETE FROM scans WHERE scan_id IN ({placeholders})",
+                    target_scan_ids,
+                ).rowcount
                 counts["scanJobs"] += connection.execute(
                     f"DELETE FROM scan_jobs WHERE scan_id IN ({placeholders})",
                     target_scan_ids,

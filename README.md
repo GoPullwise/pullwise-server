@@ -495,19 +495,28 @@ commit in `.pullwise/git-watch.deployed-head`; if setup, tests, restart, or
 health checks fail after a pull, the next polling cycle retries deployment even
 when Git is already at the latest upstream commit.
 
-For server migration or backup, export the runtime state:
+For a non-secret support bundle, export the runtime state:
 
 ```bash
 sudo ./launcher.sh export /tmp/pullwise-server-$(date +%Y%m%d).tar.gz
 ```
 
-The archive includes `server.env`, the SQLite database plus WAL/SHM sidecars
-when present, logs, checkouts, the configured GitHub App private key PEM, and
-other `.pullwise` generated state. It intentionally excludes the state
-encryption key, so provision the same
-`PULLWISE_STATE_ENCRYPTION_KEY_PATH` file separately before starting an
-imported encrypted database. On a new host, copy the archive into the repository
-directory and import it:
+The default archive includes the SQLite database plus WAL/SHM sidecars when
+present, logs, checkouts, and other `.pullwise` generated state. It excludes
+`server.env`, the configured GitHub App private key PEM, and the state
+encryption key.
+
+For a restorable host migration package, explicitly include secrets:
+
+```bash
+sudo ./launcher.sh export --include-secrets /tmp/pullwise-server-$(date +%Y%m%d).tar.gz
+```
+
+That migration archive includes `server.env` and the configured GitHub App
+private key PEM. It still intentionally excludes the state encryption key, so
+provision the same `PULLWISE_STATE_ENCRYPTION_KEY_PATH` file separately before
+starting an imported encrypted database. On a new host, copy the archive into
+the repository directory and import it:
 
 ```bash
 sudo ./launcher.sh import /tmp/pullwise-server-20260523.tar.gz

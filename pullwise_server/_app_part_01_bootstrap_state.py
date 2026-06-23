@@ -224,6 +224,7 @@ LATEST_WORKER_RELEASE_CACHE: dict[str, object] = {"version": "", "checked_at": 0
 # Re-entrant so worker mutations can call persist_state() while already holding
 # the lock. Protects against worker/handler interleaving on SCANS and ISSUES.
 STATE_LOCK = threading.RLock()
+LEGACY_SCAN_ISSUE_IMPORT_STATE_KEY = "legacyScanIssueStateImported"
 
 
 def index_memory_scan(scan: dict | None) -> None:
@@ -234,6 +235,12 @@ def index_memory_scan(scan: dict | None) -> None:
         SCAN_BY_ID[scan_id] = scan
 
 
+def rebuild_scan_index_locked() -> None:
+    SCAN_BY_ID.clear()
+    for scan in SCANS:
+        index_memory_scan(scan)
+
+
 def memory_scan_by_id(scan_id: object) -> dict | None:
     target_scan_id = public_issue_text(scan_id)
     if not target_scan_id:
@@ -241,7 +248,20 @@ def memory_scan_by_id(scan_id: object) -> dict | None:
     if not SCANS:
         SCAN_BY_ID.clear()
         return None
-    return SCAN_BY_ID.get(target_scan_id)
+    scan = SCAN_BY_ID.get(target_scan_id)
+    if scan is not None:
+        if any(item is scan for item in SCANS):
+            return scan
+        replacement = next((item for item in SCANS if public_issue_text(item.get("id")) == target_scan_id), None)
+        if replacement is not None:
+            SCAN_BY_ID[target_scan_id] = replacement
+            return replacement
+        SCAN_BY_ID.pop(target_scan_id, None)
+        return None
+    scan = next((item for item in SCANS if public_issue_text(item.get("id")) == target_scan_id), None)
+    if scan is not None:
+        SCAN_BY_ID[target_scan_id] = scan
+    return scan
 
 
 def remember_scan_snapshot_locked(scan: dict | None) -> dict | None:
@@ -251,6 +271,9 @@ def remember_scan_snapshot_locked(scan: dict | None) -> dict | None:
     if not scan_id:
         return scan
     existing = SCAN_BY_ID.get(scan_id)
+    if existing is not None and not any(item is existing for item in SCANS):
+        SCAN_BY_ID.pop(scan_id, None)
+        existing = None
     if existing is None:
         existing = next((item for item in SCANS if public_issue_text(item.get("id")) == scan_id), None)
     if existing is not None and existing is not scan:
@@ -261,6 +284,26 @@ def remember_scan_snapshot_locked(scan: dict | None) -> dict | None:
         SCANS.insert(0, scan)
     index_memory_scan(scan)
     return scan
+
+
+def forget_memory_scans_locked(scan_ids: list[str] | set[str] | tuple[str, ...]) -> int:
+    targets = {public_issue_text(scan_id) for scan_id in scan_ids if public_issue_text(scan_id)}
+    if not targets:
+        return 0
+    before = len(SCANS)
+    SCANS[:] = [
+        scan
+        for scan in SCANS
+        if not (isinstance(scan, dict) and public_issue_text(scan.get("id")) in targets)
+    ]
+    for scan_id in targets:
+        SCAN_BY_ID.pop(scan_id, None)
+    return before - len(SCANS)
+
+
+def forget_memory_scan_locked(scan_id: object) -> int:
+    target = public_issue_text(scan_id)
+    return forget_memory_scans_locked([target]) if target else 0
 
 
 class PreviewScanLockEntry:
@@ -509,23 +552,38 @@ def ensure_state_loaded() -> None:
         BILLING_EVENTS = persisted_state_dict(state, "billingEvents")
         BILLING_PENDING_UPDATES = persisted_state_list(state, "billingPendingUpdates")
         legacy_scans = persisted_state_list(state, "scans")
-        ISSUES = persisted_state_list(state, "issues")
+        legacy_issues = persisted_state_list(state, "issues")
+        legacy_marker = state.get(LEGACY_SCAN_ISSUE_IMPORT_STATE_KEY)
+        legacy_imported = isinstance(legacy_marker, dict) and legacy_marker.get("imported") is True
+        has_legacy_state = bool(legacy_scans or legacy_issues)
+        if has_legacy_state:
+            normalized_scans_exist = db.count_scan_snapshots() > 0 or db.count_scan_jobs() > 0
+            normalized_issues_exist = db.count_issue_snapshots() > 0
+            import_legacy_scans = bool(legacy_scans) and not legacy_imported and not normalized_scans_exist
+            import_legacy_issues = bool(legacy_issues) and not legacy_imported and not normalized_issues_exist
+            if import_legacy_scans:
+                for scan in legacy_scans:
+                    db.upsert_scan(scan)
+            if import_legacy_issues:
+                for issue in legacy_issues:
+                    db.upsert_issue(issue)
+            db.save_state_item(
+                LEGACY_SCAN_ISSUE_IMPORT_STATE_KEY,
+                {
+                    "imported": True,
+                    "importedAt": now(),
+                    "scansImported": len(legacy_scans) if import_legacy_scans else 0,
+                    "issuesImported": len(legacy_issues) if import_legacy_issues else 0,
+                    "scansSkipped": 0 if import_legacy_scans else len(legacy_scans),
+                    "issuesSkipped": 0 if import_legacy_issues else len(legacy_issues),
+                },
+            )
+            db.delete_state_items(("scans", "issues"))
         SCAN_BY_ID = {}
-        for scan in legacy_scans:
-            db.upsert_scan(scan)
-        db_scan_ids = set()
         SCANS = []
         for scan in db.list_scan_snapshots(limit=env_int("PULLWISE_SCAN_MEMORY_CACHE_LIMIT", 1000)):
-            scan_id = public_issue_text(scan.get("id"))
-            if scan_id:
-                db_scan_ids.add(scan_id)
             remember_scan_snapshot_locked(scan)
-        for scan in legacy_scans:
-            scan_id = public_issue_text(scan.get("id"))
-            if scan_id and scan_id not in db_scan_ids:
-                remember_scan_snapshot_locked(scan)
-        for issue in ISSUES:
-            db.upsert_issue(issue)
+        ISSUES = db.list_issue_snapshots(limit=env_int("PULLWISE_ISSUE_MEMORY_CACHE_LIMIT", 5000))
         STATE_LOADED = True
         STATE_DIRTY = False
         _sync_compat_globals(
@@ -723,7 +781,7 @@ def reconstruct_orphan_scan_jobs_locked() -> int:
         scan = scan_from_recovered_job(job)
         if not scan:
             continue
-        SCANS.insert(0, scan)
+        remember_scan_snapshot_locked(scan)
         existing_scan_ids.add(scan_id)
         reconstructed += 1
     if reconstructed:
@@ -775,9 +833,7 @@ def recover_interrupted_scans() -> int:
         worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
     )
     with STATE_LOCK:
-        SCAN_BY_ID.clear()
-        for scan in SCANS:
-            index_memory_scan(scan)
+        rebuild_scan_index_locked()
         recovered += reconstruct_orphan_scan_jobs_locked()
         recovered += rollback_orphan_scan_quota_locked()
         recovered += reconcile_completed_scan_job_results_locked()

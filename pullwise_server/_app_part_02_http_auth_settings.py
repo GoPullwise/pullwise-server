@@ -149,30 +149,32 @@ def make_id(prefix: str) -> str:
 
 def remember_github_state(kind: str, redirect_to: str, **extra: object) -> str:
     state = secrets.token_urlsafe(32)
-    GITHUB_STATES[state] = {
-        "kind": kind,
-        "redirectTo": redirect_to,
-        "expiresAt": now() + GITHUB_STATE_MAX_AGE,
-        **extra,
-    }
-    mark_state_dirty()
+    with STATE_LOCK:
+        GITHUB_STATES[state] = {
+            "kind": kind,
+            "redirectTo": redirect_to,
+            "expiresAt": now() + GITHUB_STATE_MAX_AGE,
+            **extra,
+        }
+        mark_state_dirty()
     return state
 
 
 def github_state_record(state: str, *, consume: bool, expected_kind: str | None = None) -> dict:
-    record = GITHUB_STATES.pop(state, None) if consume else GITHUB_STATES.get(state)
-    if consume and record is not None:
-        mark_state_dirty()
-    if not isinstance(record, dict):
-        raise ValueError("GitHub authorization state is invalid or expired.")
-    expires_at = pull_request_timestamp(record.get("expiresAt"))
-    kind = record.get("kind")
-    if expires_at is None or expires_at < now() or (expected_kind is not None and kind != expected_kind):
-        if not consume and (expires_at is None or expires_at < now()):
-            GITHUB_STATES.pop(state, None)
+    with STATE_LOCK:
+        record = GITHUB_STATES.pop(state, None) if consume else GITHUB_STATES.get(state)
+        if consume and record is not None:
             mark_state_dirty()
-        raise ValueError("GitHub authorization state is invalid or expired.")
-    return record
+        if not isinstance(record, dict):
+            raise ValueError("GitHub authorization state is invalid or expired.")
+        expires_at = pull_request_timestamp(record.get("expiresAt"))
+        kind = record.get("kind")
+        if expires_at is None or expires_at < now() or (expected_kind is not None and kind != expected_kind):
+            if not consume and (expires_at is None or expires_at < now()):
+                GITHUB_STATES.pop(state, None)
+                mark_state_dirty()
+            raise ValueError("GitHub authorization state is invalid or expired.")
+        return record
 
 
 def peek_github_state(kind: str, state: str) -> dict:
@@ -195,26 +197,27 @@ def remember_github_repository_authorization(
     manage: bool = False,
     selected_github_identity_id: str | None = None,
 ) -> str:
-    state = remember_github_state(
-        "install",
-        redirect_to,
-        userId=user["id"],
-        requestedScope=requested_scope,
-        selectedGithubIdentityId=selected_github_identity_id,
-    )
-    github_access = user.get("githubRepositoryAccess")
-    if not isinstance(github_access, dict):
-        github_access = {}
-    timestamp = now()
-    user["githubRepositoryAccessPending"] = {
-        "state": state,
-        "startedAt": timestamp,
-        "expiresAt": timestamp + GITHUB_STATE_MAX_AGE,
-        "previousInstallationId": github_access.get("installationId"),
-        "manage": bool(manage),
-    }
-    mark_state_dirty()
-    return state
+    with STATE_LOCK:
+        state = remember_github_state(
+            "install",
+            redirect_to,
+            userId=user["id"],
+            requestedScope=requested_scope,
+            selectedGithubIdentityId=selected_github_identity_id,
+        )
+        github_access = user.get("githubRepositoryAccess")
+        if not isinstance(github_access, dict):
+            github_access = {}
+        timestamp = now()
+        user["githubRepositoryAccessPending"] = {
+            "state": state,
+            "startedAt": timestamp,
+            "expiresAt": timestamp + GITHUB_STATE_MAX_AGE,
+            "previousInstallationId": github_access.get("installationId"),
+            "manage": bool(manage),
+        }
+        mark_state_dirty()
+        return state
 
 
 def remember_github_repository_identity_authorization(
@@ -225,29 +228,30 @@ def remember_github_repository_identity_authorization(
     add: bool = False,
     manage: bool = False,
 ) -> str:
-    state = remember_github_state(
-        "install_identity",
-        redirect_to,
-        userId=user["id"],
-        requestedScope=requested_scope,
-        add=bool(add),
-        manage=bool(manage),
-    )
-    github_access = user.get("githubRepositoryAccess")
-    if not isinstance(github_access, dict):
-        github_access = {}
-    timestamp = now()
-    user["githubRepositoryAccessPending"] = {
-        "state": state,
-        "startedAt": timestamp,
-        "expiresAt": timestamp + GITHUB_STATE_MAX_AGE,
-        "previousInstallationId": github_access.get("installationId"),
-        "add": bool(add),
-        "manage": bool(manage),
-        "needsIdentitySelection": True,
-    }
-    mark_state_dirty()
-    return state
+    with STATE_LOCK:
+        state = remember_github_state(
+            "install_identity",
+            redirect_to,
+            userId=user["id"],
+            requestedScope=requested_scope,
+            add=bool(add),
+            manage=bool(manage),
+        )
+        github_access = user.get("githubRepositoryAccess")
+        if not isinstance(github_access, dict):
+            github_access = {}
+        timestamp = now()
+        user["githubRepositoryAccessPending"] = {
+            "state": state,
+            "startedAt": timestamp,
+            "expiresAt": timestamp + GITHUB_STATE_MAX_AGE,
+            "previousInstallationId": github_access.get("installationId"),
+            "add": bool(add),
+            "manage": bool(manage),
+            "needsIdentitySelection": True,
+        }
+        mark_state_dirty()
+        return state
 
 
 def remember_github_installation_manage_state(
@@ -274,14 +278,15 @@ def github_repository_authorization_pending(user: dict | None) -> dict | None:
     if not user:
         return None
 
-    timestamp = now()
-    pending = user.get("githubRepositoryAccessPending")
-    if isinstance(pending, dict):
-        pending_expires_at = pull_request_timestamp(pending.get("expiresAt"))
-        if pending_expires_at is not None and pending_expires_at >= timestamp:
-            return pending
-        user.pop("githubRepositoryAccessPending", None)
-        mark_state_dirty()
+    with STATE_LOCK:
+        timestamp = now()
+        pending = user.get("githubRepositoryAccessPending")
+        if isinstance(pending, dict):
+            pending_expires_at = pull_request_timestamp(pending.get("expiresAt"))
+            if pending_expires_at is not None and pending_expires_at >= timestamp:
+                return pending
+            user.pop("githubRepositoryAccessPending", None)
+            mark_state_dirty()
 
     return None
 
@@ -290,27 +295,28 @@ def clear_github_repository_authorization_pending(user: dict | None, state: str 
     if not user:
         return
 
-    pending = user.get("githubRepositoryAccessPending")
-    if isinstance(pending, dict) and (not state or pending.get("state") == state):
-        user.pop("githubRepositoryAccessPending", None)
-        mark_state_dirty()
+    with STATE_LOCK:
+        pending = user.get("githubRepositoryAccessPending")
+        if isinstance(pending, dict) and (not state or pending.get("state") == state):
+            user.pop("githubRepositoryAccessPending", None)
+            mark_state_dirty()
 
-    states_to_clear = []
-    for stored_state, record in GITHUB_STATES.items():
-        if not isinstance(record, dict):
-            if not state or stored_state == state:
+        states_to_clear = []
+        for stored_state, record in GITHUB_STATES.items():
+            if not isinstance(record, dict):
+                if not state or stored_state == state:
+                    states_to_clear.append(stored_state)
+                continue
+            if (
+                record.get("kind") == "install"
+                and record.get("userId") == user.get("id")
+                and (not state or stored_state == state)
+            ):
                 states_to_clear.append(stored_state)
-            continue
-        if (
-            record.get("kind") == "install"
-            and record.get("userId") == user.get("id")
-            and (not state or stored_state == state)
-        ):
-            states_to_clear.append(stored_state)
-    for stored_state in states_to_clear:
-        GITHUB_STATES.pop(stored_state, None)
-    if states_to_clear:
-        mark_state_dirty()
+        for stored_state in states_to_clear:
+            GITHUB_STATES.pop(stored_state, None)
+        if states_to_clear:
+            mark_state_dirty()
 
 
 def url_origin(value: str) -> str | None:
@@ -481,13 +487,8 @@ def delete_authorized_user(user_id: str, *, actor_user_id: str | None = None) ->
             for scan in SCANS
             if isinstance(scan, dict) and scan_user_id(scan) == target_user_id and public_issue_text(scan.get("id"))
         }
-        removed_scans = len(target_scan_ids)
+        removed_scans = forget_memory_scans_locked(target_scan_ids)
         removed_issues = 0
-        SCANS[:] = [
-            scan
-            for scan in SCANS
-            if not (isinstance(scan, dict) and scan_user_id(scan) == target_user_id)
-        ]
         kept_issues = []
         for issue in ISSUES:
             if isinstance(issue, dict) and (
@@ -531,22 +532,23 @@ def get_or_create_github_user() -> dict:
     login = env("PULLWISE_DEV_GITHUB_LOGIN", "taylor-dev")
     email = env("PULLWISE_DEV_EMAIL", "taylor@acme.io")
     user_id = "usr_github_" + re.sub(r"[^a-z0-9]+", "_", login.lower()).strip("_")
-    if user_id not in USERS:
-        USERS[user_id] = {
-            "id": user_id,
-            "name": login,
-            "email": email,
-            "avatarUrl": None,
-            "createdAt": now(),
-            "providers": ["github"],
-            "githubLogin": login,
-            "githubRepositoryAccess": None,
-        }
-        mark_state_dirty()
-    elif "github" not in USERS[user_id]["providers"]:
-        USERS[user_id]["providers"].append("github")
-        mark_state_dirty()
-    return USERS[user_id]
+    with STATE_LOCK:
+        if user_id not in USERS:
+            USERS[user_id] = {
+                "id": user_id,
+                "name": login,
+                "email": email,
+                "avatarUrl": None,
+                "createdAt": now(),
+                "providers": ["github"],
+                "githubLogin": login,
+                "githubRepositoryAccess": None,
+            }
+            mark_state_dirty()
+        elif "github" not in USERS[user_id]["providers"]:
+            USERS[user_id]["providers"].append("github")
+            mark_state_dirty()
+        return USERS[user_id]
 
 
 def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
@@ -564,40 +566,41 @@ def get_or_create_real_github_user(profile: dict, token_payload: dict) -> dict:
         verified_emails = github_auth.unique_account_email_addresses([email, *verified_emails])
     avatar_url = trusted_public_url(profile.get("avatar_url"))
     github_html_url = trusted_github_web_url(profile.get("html_url"))
-    if user_id not in USERS:
-        USERS[user_id] = {
-            "id": user_id,
-            "name": profile_name or login,
-            "email": email,
-            "avatarUrl": avatar_url,
-            "createdAt": now(),
-            "providers": ["github"],
-            "githubRepositoryAccess": None,
-            "githubVerifiedEmails": verified_emails,
-        }
-        mark_state_dirty()
+    with STATE_LOCK:
+        if user_id not in USERS:
+            USERS[user_id] = {
+                "id": user_id,
+                "name": profile_name or login,
+                "email": email,
+                "avatarUrl": avatar_url,
+                "createdAt": now(),
+                "providers": ["github"],
+                "githubRepositoryAccess": None,
+                "githubVerifiedEmails": verified_emails,
+            }
+            mark_state_dirty()
 
-    user = USERS[user_id]
-    user.update(
-        {
-            "name": profile_name or clean_user_profile_text(user.get("name")) or login,
-            "email": email,
-            "avatarUrl": avatar_url,
-            "githubVerifiedEmails": verified_emails,
-            "githubId": github_id,
-            "githubLogin": login,
-            "githubHtmlUrl": github_html_url,
-            "githubAccessToken": token_payload.get("access_token"),
-            "githubTokenType": token_payload.get("token_type"),
-            "githubOAuthScope": token_payload.get("scope"),
-            "githubAccessTokenUpdatedAt": now(),
-        }
-    )
-    if "github" not in user["providers"]:
-        user["providers"].append("github")
-    upsert_github_identity(user, profile, token_payload)
-    mark_state_dirty()
-    return user
+        user = USERS[user_id]
+        user.update(
+            {
+                "name": profile_name or clean_user_profile_text(user.get("name")) or login,
+                "email": email,
+                "avatarUrl": avatar_url,
+                "githubVerifiedEmails": verified_emails,
+                "githubId": github_id,
+                "githubLogin": login,
+                "githubHtmlUrl": github_html_url,
+                "githubAccessToken": token_payload.get("access_token"),
+                "githubTokenType": token_payload.get("token_type"),
+                "githubOAuthScope": token_payload.get("scope"),
+                "githubAccessTokenUpdatedAt": now(),
+            }
+        )
+        if "github" not in user["providers"]:
+            user["providers"].append("github")
+        upsert_github_identity(user, profile, token_payload)
+        mark_state_dirty()
+        return user
 
 
 def github_profile_id(profile: dict, login: str) -> str:
@@ -841,8 +844,9 @@ def create_session(user: dict) -> dict:
         "createdAt": now(),
         "expiresAt": now() + SESSION_MAX_AGE,
     }
-    SESSIONS[session_id] = session
-    mark_state_dirty()
+    with STATE_LOCK:
+        SESSIONS[session_id] = session
+        mark_state_dirty()
     return session
 
 
@@ -863,26 +867,30 @@ def refresh_settings_from_storage() -> None:
     global SETTINGS
     persisted = db.load_state_item("settings")
     if isinstance(persisted, dict):
-        SETTINGS = persisted
-        _sync_compat_globals(globals(), ("SETTINGS",))
+        with STATE_LOCK:
+            SETTINGS = persisted
+            _sync_compat_globals(globals(), ("SETTINGS",))
 
 
 def persist_settings_to_storage() -> None:
-    db.save_state_item("settings", SETTINGS)
+    with STATE_LOCK:
+        db.save_state_item("settings", SETTINGS)
 
 
 def settings_payload(user_id: str) -> dict:
     refresh_settings_from_storage()
-    return clean_settings_payload(user_id, SETTINGS.get(user_id))
+    with STATE_LOCK:
+        return clean_settings_payload(user_id, SETTINGS.get(user_id))
 
 
 def default_settings(user_id: str) -> dict:
     refresh_settings_from_storage()
-    if not isinstance(SETTINGS.get(user_id), dict):
-        SETTINGS[user_id] = default_settings_payload(user_id)
-        persist_settings_to_storage()
-        mark_state_dirty()
-    return SETTINGS[user_id]
+    with STATE_LOCK:
+        if not isinstance(SETTINGS.get(user_id), dict):
+            SETTINGS[user_id] = default_settings_payload(user_id)
+            persist_settings_to_storage()
+            mark_state_dirty()
+        return SETTINGS[user_id]
 
 
 def clean_settings_payload(user_id: str, value: object) -> dict:
@@ -907,17 +915,18 @@ def apply_settings_update(user_id: str, body: dict) -> dict:
     profile = body.get("profile") if isinstance(body.get("profile"), dict) else {}
     name = public_issue_text(profile.get("name"))
     email = github_auth.clean_account_email_address(profile.get("email"))
-    if name:
-        settings["profile"]["name"] = name
-    if email:
-        settings["profile"]["email"] = email
     review_body = body.get("review") if isinstance(body.get("review"), dict) else {}
-    if "outputLanguage" in review_body:
-        settings["review"]["outputLanguage"] = clean_review_output_language(review_body.get("outputLanguage"))
-    SETTINGS[user_id] = settings
-    persist_settings_to_storage()
-    mark_state_dirty()
-    return settings
+    with STATE_LOCK:
+        if name:
+            settings["profile"]["name"] = name
+        if email:
+            settings["profile"]["email"] = email
+        if "outputLanguage" in review_body:
+            settings["review"]["outputLanguage"] = clean_review_output_language(review_body.get("outputLanguage"))
+        SETTINGS[user_id] = settings
+        persist_settings_to_storage()
+        mark_state_dirty()
+        return settings
 
 
 def user_scans(session: dict | None) -> list[dict]:

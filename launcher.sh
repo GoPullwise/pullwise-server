@@ -55,7 +55,8 @@ Commands:
   doctor                    Audit Ubuntu 22.04 production readiness
   audit                     Alias for doctor
   config                    Print effective non-secret launcher configuration
-  export <archive.tar.gz>   Package env, db, logs, checkouts, PEM, and state; excludes state encryption key
+  export [--include-secrets] <archive.tar.gz>
+                            Package db, logs, checkouts, and state; env/PEM only with --include-secrets
   import <archive.tar.gz>   Restore a migration package and render service
   help                      Show this help
 
@@ -1409,19 +1410,47 @@ remove_staged_state_encryption_key() {
 }
 
 cmd_export() {
-  archive=${1:-}
-  [ -n "$archive" ] || die "Usage: ./launcher.sh export <archive.tar.gz>"
+  archive=
+  include_secrets=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --include-secrets)
+        include_secrets=1
+        ;;
+      -h|--help)
+        die "Usage: ./launcher.sh export [--include-secrets] <archive.tar.gz>"
+        ;;
+      -*)
+        die "Unknown export option: $1"
+        ;;
+      *)
+        if [ -n "$archive" ]; then
+          die "Usage: ./launcher.sh export [--include-secrets] <archive.tar.gz>"
+        fi
+        archive=$1
+        ;;
+    esac
+    shift
+  done
+  [ -n "$archive" ] || die "Usage: ./launcher.sh export [--include-secrets] <archive.tar.gz>"
   archive=$(abs_path "$archive")
-  [ -f "$ENV_FILE" ] || die "env file not found: $ENV_FILE"
+  if [ "$include_secrets" = "1" ] && [ ! -f "$ENV_FILE" ]; then
+    die "env file not found: $ENV_FILE"
+  fi
   mkdir -p "$(dirname -- "$archive")" || die "Unable to create archive directory"
 
   stage=$(mktemp -d "${TMPDIR:-/tmp}/pullwise-export.XXXXXX") || die "Unable to create temp directory"
-  mkdir -p "$stage/config"
-  cp "$ENV_FILE" "$stage/config/server.env" || die "Unable to stage env file"
+  if [ "$include_secrets" = "1" ]; then
+    mkdir -p "$stage/config"
+    cp "$ENV_FILE" "$stage/config/server.env" || die "Unable to stage env file"
+  else
+    warn "export excludes server.env and GitHub App private key; pass --include-secrets for a restorable migration package"
+  fi
   cat > "$stage/manifest.env" <<MANIFEST
 PULLWISE_EXPORT_VERSION=1
 APP_NAME=$APP_NAME
 EXPORTED_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date)
+PULLWISE_EXPORT_SECRETS_INCLUDED=$include_secrets
 MANIFEST
 
   db=$(db_path)
@@ -1436,14 +1465,16 @@ MANIFEST
   mkdir -p "$stage/checkouts"
   copy_dir_contents "$(checkout_root)" "$stage/checkouts"
 
-  key_path=$(env_value PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH "")
-  if [ -n "$key_path" ]; then
-    resolved_key=$(abs_path "$key_path")
-    if [ -r "$resolved_key" ]; then
-      mkdir -p "$stage/secrets"
-      cp "$resolved_key" "$stage/secrets/$(basename -- "$resolved_key")" || die "Unable to stage private key"
-    else
-      warn "private key path configured but not readable, skipped: $resolved_key"
+  if [ "$include_secrets" = "1" ]; then
+    key_path=$(env_value PULLWISE_GITHUB_APP_PRIVATE_KEY_PATH "")
+    if [ -n "$key_path" ]; then
+      resolved_key=$(abs_path "$key_path")
+      if [ -r "$resolved_key" ]; then
+        mkdir -p "$stage/secrets"
+        cp "$resolved_key" "$stage/secrets/$(basename -- "$resolved_key")" || die "Unable to stage private key"
+      else
+        warn "private key path configured but not readable, skipped: $resolved_key"
+      fi
     fi
   fi
 
@@ -1454,7 +1485,8 @@ MANIFEST
     find "$stage/pullwise-state/run" -type f -name '*.pid' -delete 2>/dev/null || true
   fi
 
-  items="manifest.env config"
+  items="manifest.env"
+  [ -d "$stage/config" ] && items="$items config"
   [ -d "$stage/data" ] && items="$items data"
   [ -d "$stage/logs" ] && items="$items logs"
   [ -d "$stage/checkouts" ] && items="$items checkouts"

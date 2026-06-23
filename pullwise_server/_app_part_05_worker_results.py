@@ -32,8 +32,9 @@ def create_scan_job_for_scan(scan: dict) -> dict:
         }
     )
     scan["jobId"] = job.get("job_id")
-    index_memory_scan(scan)
-    db.upsert_scan(scan)
+    with STATE_LOCK:
+        remember_scan_snapshot_locked(scan)
+        db.upsert_scan(scan)
     return job
 
 
@@ -542,7 +543,7 @@ def apply_worker_job_retry_to_state_locked(job: dict, body: dict, *, checksum: s
     if scan is None:
         scan = scan_from_recovered_job(job)
         if scan:
-            SCANS.append(scan)
+            remember_scan_snapshot_locked(scan)
     if scan is None:
         return False
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)
