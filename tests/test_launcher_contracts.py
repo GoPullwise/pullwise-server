@@ -889,8 +889,7 @@ CURL
             (root / "checkouts" / "usr" / "scan" / "repo" / "README.md").write_text("repo", encoding="utf-8")
             (root / "secrets").mkdir(exist_ok=True)
             (root / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
-            (root / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
-            (root / "secrets" / "state-encryption-key").chmod(0o600)
+            self.write_state_encryption_key(root)
             (root / ".pullwise" / "extra").mkdir(parents=True)
             (root / ".pullwise" / "extra" / "artifact.txt").write_text("artifact", encoding="utf-8")
             archive = root / "pullwise-export.tar.gz"
@@ -922,8 +921,7 @@ CURL
             (root / "data" / "pullwise.sqlite3").write_text("sqlite", encoding="utf-8")
             (root / "secrets").mkdir(exist_ok=True)
             (root / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
-            (root / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
-            (root / "secrets" / "state-encryption-key").chmod(0o600)
+            self.write_state_encryption_key(root)
             archive = root / "pullwise-export.tar.gz"
 
             result = self.run_launcher(["export", "--include-secrets", shell_path(archive)], env)
@@ -952,8 +950,7 @@ CURL
             (source / "checkouts" / "usr" / "scan" / "repo.txt").write_text("repo", encoding="utf-8")
             (source / "secrets").mkdir(exist_ok=True)
             (source / "secrets" / "github-app-private-key.pem").write_text("pem", encoding="utf-8")
-            (source / "secrets" / "state-encryption-key").write_text("state-key", encoding="utf-8")
-            (source / "secrets" / "state-encryption-key").chmod(0o600)
+            self.write_state_encryption_key(source)
             archive = workspace / "pullwise-export.tar.gz"
 
             export_result = self.run_launcher(["export", "--include-secrets", shell_path(archive)], source_env)

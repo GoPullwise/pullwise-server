@@ -517,13 +517,13 @@ def delete_authorized_user(user_id: str, *, actor_user_id: str | None = None) ->
         "user": admin_user_payload(target_user, current_user_id=actor_user_id),
         "deleted": True,
         "removed": {
+            **database_counts,
             "users": 1,
             "sessions": removed_sessions,
             "githubStates": removed_github_states,
             "settings": removed_settings,
             "scans": removed_scans,
             "issues": removed_issues,
-            **database_counts,
         },
     }
 
