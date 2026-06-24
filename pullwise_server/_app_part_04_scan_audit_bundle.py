@@ -1158,7 +1158,16 @@ def public_graph_verified_verification(value: object) -> dict:
 
 def public_scan_error_code(value: object) -> str:
     error_code = public_issue_text(value).replace("-", "_").upper()
-    return error_code if error_code in {"GRAPH_VERIFIED_COMPLETION_FAILED", "REPOSITORY_TOO_LARGE"} else ""
+    return error_code if error_code in {
+        "GRAPH_VERIFIED_COMPLETION_FAILED",
+        "REPOSITORY_TOO_LARGE",
+        "CODEX_AUTH_REQUIRED",
+        "CODEX_AUTH_EXPIRED",
+        "CODEX_AUTHORIZATION_FAILED",
+        "CODEX_SUBSCRIPTION_INACTIVE",
+        "CODEX_QUOTA_EXHAUSTED",
+        "CODEX_VERSION_UNSUPPORTED",
+    } else ""
 
 
 def public_review_float(value: object) -> float | None:

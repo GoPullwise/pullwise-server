@@ -685,16 +685,30 @@ def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -
     return False
 
 
+WORKER_TERMINAL_REFUNDABLE_ERROR_CODES = frozenset(
+    {
+        "REPOSITORY_TOO_LARGE",
+        "CODEX_AUTH_REQUIRED",
+        "CODEX_AUTH_EXPIRED",
+        "CODEX_AUTHORIZATION_FAILED",
+        "CODEX_SUBSCRIPTION_INACTIVE",
+        "CODEX_QUOTA_EXHAUSTED",
+        "CODEX_VERSION_UNSUPPORTED",
+    }
+)
+
+
 def worker_result_allows_auto_retry(body: dict, *, status: str) -> bool:
     if status != "failed":
         return False
-    if worker_result_error_code(body) == "REPOSITORY_TOO_LARGE":
+    if worker_result_error_code(body) in WORKER_TERMINAL_REFUNDABLE_ERROR_CODES:
         return False
     return True
 
 
 def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, status: str) -> dict:
-    if status != "failed" or worker_result_error_code(body) != "REPOSITORY_TOO_LARGE":
+    error_code = worker_result_error_code(body)
+    if status != "failed" or error_code not in WORKER_TERMINAL_REFUNDABLE_ERROR_CODES:
         return {}
     scan_id = public_issue_text(job.get("scan_id"))
     user_id = public_issue_text(job.get("user_id"))
@@ -706,7 +720,7 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
         repo_id = public_issue_text((scan or {}).get("repoId") or job.get("repo_id"))
         has_repository_limit_evidence = worker_result_has_repository_limit_evidence(body, scan)
         quota_consumed = scan_quota_has_been_consumed(scan)
-    if not has_repository_limit_evidence:
+    if error_code == "REPOSITORY_TOO_LARGE" and not has_repository_limit_evidence:
         return {}
     if not quota_consumed:
         release_result = quota.release_scan_quota_reservation(
@@ -724,7 +738,7 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
             if scan:
                 scan["quotaState"] = "released"
                 scan["quotaReleasedAt"] = now()
-                scan["quotaReleaseReason"] = "REPOSITORY_TOO_LARGE"
+                scan["quotaReleaseReason"] = error_code
                 refresh_scan_quota_usage_locked(scan, user, repository)
                 db.upsert_scan(scan)
                 mark_state_dirty()
@@ -750,7 +764,7 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
             if repo_usage:
                 scan["repoUsage"] = repo_usage
             scan["quotaRefunded"] = {
-                "reason": "REPOSITORY_TOO_LARGE",
+                "reason": error_code,
                 "ledgerRows": public_scan_count(rollback_result.get("ledgerRows")),
                 "bucketRows": public_scan_count(rollback_result.get("bucketRows")),
             }
