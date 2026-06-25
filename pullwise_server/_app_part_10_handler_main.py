@@ -8,6 +8,52 @@ from ._app_imports import import_compat_globals as _import_compat_globals
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
 
+def worker_progress_log_time(body: dict) -> int:
+    return (
+        pull_request_timestamp(body.get("log_time") or body.get("logTime") or body.get("time"))
+        or pull_request_timestamp(body.get("started_at"))
+        or now()
+    )
+
+
+def scan_progress_log_entry(
+    *,
+    phase: str,
+    progress: int,
+    message: str,
+    logs_summary: str,
+    log_time: int,
+) -> dict:
+    return public_scan_progress_log(
+        {
+            "time": log_time,
+            "phase": phase,
+            "progress": progress,
+            "message": message,
+            "logsSummary": logs_summary,
+        }
+    )
+
+
+def scan_progress_log_key(entry: dict) -> tuple:
+    return (
+        public_scan_phase(entry.get("phase")),
+        public_scan_progress(entry.get("progress")),
+        public_issue_text(entry.get("message")),
+        public_issue_text(entry.get("logsSummary") or entry.get("logs_summary")),
+    )
+
+
+def append_scan_progress_log(scan: dict, entry: dict) -> list[dict]:
+    current = public_scan_progress_logs(scan.get("progressLogs") or scan.get("progress_logs"))
+    if not entry:
+        return current
+    entry_key = scan_progress_log_key(entry)
+    if any(scan_progress_log_key(item) == entry_key for item in current):
+        return current
+    return [*current, entry][-20:]
+
+
 class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
@@ -2642,15 +2688,26 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if public_issue_text(current_job.get("status")) not in {"claimed", "running"}:
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
         phase = public_scan_phase(body.get("phase"))
+        progress_value = public_scan_progress(body.get("progress"))
+        progress_message = public_issue_text(body.get("message"))
+        logs_summary = public_issue_text(body.get("logs_summary"))
+        progress_log_time = worker_progress_log_time(body)
+        progress_entry = scan_progress_log_entry(
+            phase=phase,
+            progress=progress_value,
+            message=progress_message,
+            logs_summary=logs_summary,
+            log_time=progress_log_time,
+        )
         job = db.update_scan_job_progress(
             job_id,
             {
                 "phase": phase,
-                "progress": public_scan_progress(body.get("progress")),
-                "message": public_issue_text(body.get("message")),
-                "started_at": pull_request_timestamp(body.get("started_at")) or now(),
+                "progress": progress_value,
+                "message": progress_message,
+                "started_at": pull_request_timestamp(body.get("started_at")) or progress_log_time,
                 "timeout_at": now() + system_config.scan_job_lease_seconds(),
-                "logs_summary": public_issue_text(body.get("logs_summary")),
+                "logs_summary": logs_summary,
             },
         )
         if not job:
@@ -2662,12 +2719,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if scan and scan.get("status") == "running":
                 update = {
                     "phase": phase,
-                    "progress": public_scan_progress(body.get("progress")),
-                    "progressMessage": public_issue_text(body.get("message")),
-                    "logsSummary": public_issue_text(body.get("logs_summary")),
+                    "progress": progress_value,
+                    "progressMessage": progress_message,
+                    "logsSummary": logs_summary,
                     "startedAt": job.get("started_at"),
-                    "updatedAt": now(),
+                    "updatedAt": progress_log_time,
                 }
+                progress_logs = append_scan_progress_log(scan, progress_entry)
+                if progress_logs:
+                    update["progressLogs"] = progress_logs
                 scan.update(update)
                 for key in ("auditSwarm", "completionAudit", "impactGraph", "jobTrace", "repositoryGraph", "semanticGraph"):
                     scan.pop(key, None)
@@ -2684,8 +2744,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             workerId=worker_record.get("worker_id"),
             jobId=job.get("job_id"),
             phase=phase,
-            progress=public_scan_progress(body.get("progress")),
-            message=public_issue_text(body.get("message")),
+            progress=progress_value,
+            message=progress_message,
         )
         return self.json({"ok": True, "job": scan_job_payload(job)})
 

@@ -88,6 +88,37 @@ def public_scan_retry(value: object) -> dict:
     return payload
 
 
+def public_scan_progress_log(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    payload = {}
+    timestamp = pull_request_timestamp(value.get("time") or value.get("logTime") or value.get("log_time"))
+    if timestamp is not None:
+        payload["time"] = timestamp
+    phase = public_scan_phase(value.get("phase"))
+    if phase:
+        payload["phase"] = phase
+    if "progress" in value:
+        payload["progress"] = public_scan_progress(value.get("progress"))
+    message = public_issue_text(value.get("message") or value.get("progressMessage") or value.get("progress_message"))
+    if message:
+        payload["message"] = message
+    logs_summary = public_issue_text(value.get("logsSummary") or value.get("logs_summary"))
+    if logs_summary:
+        payload["logsSummary"] = logs_summary
+    return payload if payload.get("time") is not None or phase or message or logs_summary else {}
+
+
+def public_scan_progress_logs(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    logs = []
+    for item in value:
+        entry = public_scan_progress_log(item)
+        if entry:
+            logs.append(entry)
+    return logs[-20:]
+
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -108,6 +139,9 @@ def scan_payload(scan: dict) -> dict:
     logs_summary = public_issue_text(scan.get("logsSummary") or scan.get("logs_summary"))
     if logs_summary:
         payload["logsSummary"] = logs_summary
+    progress_logs = public_scan_progress_logs(scan.get("progressLogs") or scan.get("progress_logs"))
+    if progress_logs:
+        payload["progressLogs"] = progress_logs
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
@@ -256,6 +290,9 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     logs_summary = public_issue_text(scan.get("logsSummary") or scan.get("logs_summary"))
     if logs_summary:
         payload["logsSummary"] = logs_summary
+    progress_logs = public_scan_progress_logs(scan.get("progressLogs") or scan.get("progress_logs"))
+    if progress_logs:
+        payload["progressLogs"] = progress_logs
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config

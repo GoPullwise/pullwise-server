@@ -3171,11 +3171,26 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "progress": 80,
                 "message": "Graph: mapping shards 12/80",
                 "logs_summary": "run=gv_run stage=graph progress=12/80 task=graph-0012",
+                "log_time": 1700000123,
             },
             headers=self.auth,
         )
         app.PullwiseHandler.route(progress, "POST")
         self.assertEqual(progress.status, HTTPStatus.OK)
+
+        duplicate_progress = RouteHarness(
+            f"/worker/jobs/{job['job_id']}/progress",
+            {
+                "phase": "ai",
+                "progress": 80,
+                "message": "Graph: mapping shards 12/80",
+                "logs_summary": "run=gv_run stage=graph progress=12/80 task=graph-0012",
+                "log_time": 1700000999,
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(duplicate_progress, "POST")
+        self.assertEqual(duplicate_progress.status, HTTPStatus.OK)
 
         headers = {"Cookie": "pw_session=ses_owner"}
         listing = RouteHarness("/scans", headers=headers)
@@ -3193,6 +3208,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
             self.assertEqual(
                 payload["logsSummary"],
                 "run=gv_run stage=graph progress=12/80 task=graph-0012",
+            )
+            self.assertEqual(
+                payload["progressLogs"],
+                [
+                    {
+                        "time": 1700000123,
+                        "phase": "ai",
+                        "progress": 80,
+                        "message": "Graph: mapping shards 12/80",
+                        "logsSummary": "run=gv_run stage=graph progress=12/80 task=graph-0012",
+                    }
+                ],
             )
             self.assertIsInstance(payload.get("updatedAt"), int)
 
