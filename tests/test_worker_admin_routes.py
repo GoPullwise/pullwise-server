@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pullwise_server import app, db
+from tests.db_template import install_initialized_db_template, start_fast_sqlite_connections
 
 
 class RouteHarness(app.PullwiseHandler):
@@ -75,6 +76,7 @@ def reset_state() -> None:
 class WorkerAdminRoutesTest(unittest.TestCase):
     def setUp(self) -> None:
         reset_state()
+        start_fast_sqlite_connections(self)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.env = patch.dict(
@@ -91,7 +93,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         self.env.start()
         self.addCleanup(self.env.stop)
-        db.initialize()
+        install_initialized_db_template(os.environ["PULLWISE_DB_PATH"])
         self.admin_cookie = "pw_session=ses_admin"
         self.user_cookie = "pw_session=ses_user"
 

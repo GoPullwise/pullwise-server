@@ -12,6 +12,7 @@ from http import HTTPStatus
 from unittest.mock import patch
 
 from pullwise_server import app, db
+from tests.db_template import install_initialized_db_template, start_fast_sqlite_connections
 
 
 class RouteHarness(app.PullwiseHandler):
@@ -662,6 +663,7 @@ def repository_graph_v2_fixture() -> dict:
 
 class WorkerPullRoutesTest(unittest.TestCase):
     def setUp(self) -> None:
+        start_fast_sqlite_connections(self)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.env = patch.dict(
@@ -684,7 +686,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.ISSUES = []
         app.STATE_LOADED = True
         app.STATE_DIRTY = False
-        db.initialize()
+        install_initialized_db_template(os.environ["PULLWISE_DB_PATH"], worker_token="worker-secret", worker_id="wk_1")
         db.upsert_worker_heartbeat(
             {
                 "worker_id": "wk_1",
