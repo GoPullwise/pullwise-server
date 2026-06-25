@@ -1008,6 +1008,9 @@ def scan_snapshot_with_job_state(scan: dict, job: dict) -> dict:
     else:
         hydrated.pop("logsSummary", None)
         hydrated.pop("logs_summary", None)
+    updated_at = pull_request_timestamp(job.get("updated_at"))
+    if updated_at is not None:
+        update["updatedAt"] = updated_at
     commit = clean_github_access_text(job.get("commit"))
     if commit:
         update["commit"] = commit

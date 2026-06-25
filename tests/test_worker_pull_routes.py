@@ -3128,6 +3128,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(payload["progressMessage"], "Graph: mapping shards 3/12")
         self.assertEqual(payload["logsSummary"], "stage=graph progress=3/12 task=graph-0003")
+        self.assertIsInstance(payload.get("updatedAt"), int)
         self.assertNotIn("completionAudit", payload)
         self.assertNotIn("jobTrace", payload)
 
@@ -3191,6 +3192,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 payload["logsSummary"],
                 "run=gv_run stage=graph progress=12/80 task=graph-0012",
             )
+            self.assertIsInstance(payload.get("updatedAt"), int)
 
     def test_worker_result_log_event_includes_failure_diagnostics(self) -> None:
         scan = {
