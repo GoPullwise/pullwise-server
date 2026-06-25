@@ -241,7 +241,11 @@ def log_stream_idle_timeout_seconds() -> int:
 
 
 def log_stream_max_lines() -> int:
-    return max(200, min(5000, env_int("PULLWISE_LOG_STREAM_MAX_LINES", 2000)))
+    return max(100, min(2000, env_int("PULLWISE_LOG_STREAM_MAX_LINES", 500)))
+
+
+def log_stream_max_sessions() -> int:
+    return max(1, min(256, env_int("PULLWISE_LOG_STREAM_MAX_SESSIONS", 16)))
 
 
 def log_stream_read_max_bytes() -> int:
@@ -256,16 +260,40 @@ def redact_log_stream_text(value: object) -> str:
     return redacted[:4000]
 
 
-def log_stream_cleanup_expired(timestamp: int | None = None) -> None:
+def log_stream_cleanup_expired(timestamp: int | None = None) -> int:
     current_time = int(timestamp if timestamp is not None else now())
+    removed = 0
     with LOG_STREAM_LOCK:
         for session_id, session in list(LOG_STREAM_SESSIONS.items()):
             if session.get("status") != "active" and session.get("updated_at", 0) < current_time - 60:
                 LOG_STREAM_SESSIONS.pop(session_id, None)
+                removed += 1
                 continue
             if int(session.get("expires_at") or 0) < current_time:
                 session["status"] = "paused"
                 session["updated_at"] = current_time
+        removed += log_stream_trim_sessions_locked(current_time)
+    return removed
+
+
+def log_stream_trim_sessions_locked(timestamp: int | None = None) -> int:
+    del timestamp
+    max_sessions = log_stream_max_sessions()
+    overflow = len(LOG_STREAM_SESSIONS) - max_sessions
+    if overflow <= 0:
+        return 0
+    ordered = sorted(
+        LOG_STREAM_SESSIONS.items(),
+        key=lambda item: (
+            1 if item[1].get("status") == "active" else 0,
+            int(item[1].get("updated_at") or 0),
+            int(item[1].get("created_at") or 0),
+            public_issue_text(item[0]),
+        ),
+    )
+    for session_id, _session in ordered[:overflow]:
+        LOG_STREAM_SESSIONS.pop(session_id, None)
+    return overflow
 
 
 def log_stream_session_payload(session: dict | None) -> dict | None:
@@ -451,6 +479,7 @@ def create_log_stream_session(source: str, *, worker_id: str = "") -> dict:
                 existing["status"] = "paused"
                 existing["updated_at"] = timestamp
         LOG_STREAM_SESSIONS[session_id] = session
+        log_stream_trim_sessions_locked(timestamp)
     return session
 
 
@@ -961,6 +990,8 @@ def worker_create_payload(worker: dict) -> dict:
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
                 "PULLWISE_CODEX_TIMEOUT_SECONDS": codex_timeout_seconds,
+                "PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS": "1800",
+                "PULLWISE_CODEX_APP_SERVER_MAX_TURNS": "8",
             }
         )
     payload = {
@@ -1469,6 +1500,8 @@ if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
   write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-__PULLWISE_CODEX_TIMEOUT_SECONDS__}"
+  write_env_value PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS "${PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS:-1800}"
+  write_env_value PULLWISE_CODEX_APP_SERVER_MAX_TURNS "${PULLWISE_CODEX_APP_SERVER_MAX_TURNS:-8}"
 fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"

@@ -320,6 +320,34 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual([line["line"] for line in lines.payload["lines"]], ["new line"])
         self.assertEqual(lines.payload["lines"][0]["sequence"], 1)
 
+    def test_log_stream_cleanup_bounds_session_count(self) -> None:
+        app.LOG_STREAM_SESSIONS.update(
+            {
+                "old_paused": {"id": "old_paused", "status": "paused", "updated_at": 980, "created_at": 900},
+                "active": {"id": "active", "status": "active", "updated_at": 970, "created_at": 910},
+                "new_paused": {"id": "new_paused", "status": "paused", "updated_at": 990, "created_at": 920},
+            }
+        )
+
+        with patch.dict(os.environ, {"PULLWISE_LOG_STREAM_MAX_SESSIONS": "2"}, clear=False):
+            removed = app.log_stream_cleanup_expired(timestamp=1000)
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(set(app.LOG_STREAM_SESSIONS), {"active", "new_paused"})
+
+    def test_server_resource_cleanup_removes_expired_log_stream_sessions(self) -> None:
+        app.LOG_STREAM_SESSIONS.update(
+            {
+                "expired": {"id": "expired", "status": "paused", "updated_at": 900, "created_at": 890},
+                "active": {"id": "active", "status": "active", "updated_at": 990, "created_at": 980, "expires_at": 1100},
+            }
+        )
+
+        removed = app.cleanup_server_resources(timestamp=1000)
+
+        self.assertEqual(removed["log_stream_sessions"], 1)
+        self.assertEqual(set(app.LOG_STREAM_SESSIONS), {"active"})
+
     def test_admin_log_stream_creation_does_not_consume_rate_limit(self) -> None:
         payload, _token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -771,6 +799,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_TIMEOUT_SECONDS"], "900")
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS"], "1800")
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_TURNS"], "8")
 
     def test_install_worker_script_writes_configured_codex_timeout_env(self) -> None:
         with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):
@@ -778,6 +808,14 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertIn(
             'write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-900}"',
+            script,
+        )
+        self.assertIn(
+            'write_env_value PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS "${PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS:-1800}"',
+            script,
+        )
+        self.assertIn(
+            'write_env_value PULLWISE_CODEX_APP_SERVER_MAX_TURNS "${PULLWISE_CODEX_APP_SERVER_MAX_TURNS:-8}"',
             script,
         )
 

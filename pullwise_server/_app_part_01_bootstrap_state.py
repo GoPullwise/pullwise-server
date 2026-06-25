@@ -212,7 +212,7 @@ REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
 SCAN_BY_ID: dict[str, dict] = {}
-DEFAULT_WORKER_PACKAGE_VERSION = "0.7.32"
+DEFAULT_WORKER_PACKAGE_VERSION = "0.7.33"
 DEFAULT_WORKER_PACKAGE = (
     "https://github.com/GoPullwise/pullwise-worker/releases/download/"
     f"v{DEFAULT_WORKER_PACKAGE_VERSION}/pullwise_worker-{DEFAULT_WORKER_PACKAGE_VERSION}-py3-none-any.whl"
@@ -655,6 +655,10 @@ def cleanup_server_resources_if_due(*, force: bool = False) -> dict[str, int]:
 def cleanup_server_resources(*, timestamp: int | None = None) -> dict[str, int]:
     current_time = int(timestamp if timestamp is not None else now())
     state_removed = cleanup_expired_state_records(current_time)
+    log_stream_removed = 0
+    log_stream_cleanup = globals().get("log_stream_cleanup_expired")
+    if callable(log_stream_cleanup):
+        log_stream_removed = int(log_stream_cleanup(current_time) or 0)
     database_removed = db.cleanup_operational_records(
         timestamp=current_time,
         worker_command_retention_seconds=max(
@@ -671,7 +675,7 @@ def cleanup_server_resources(*, timestamp: int | None = None) -> dict[str, int]:
         ),
         removable_scan_ids=terminal_scan_ids_with_retained_results(),
     )
-    return {**state_removed, **database_removed}
+    return {**state_removed, "log_stream_sessions": log_stream_removed, **database_removed}
 
 
 def terminal_scan_ids_with_retained_results() -> set[str]:
