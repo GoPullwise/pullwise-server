@@ -236,6 +236,7 @@ def public_issue_reproduction(issue: dict, *, job: dict | None = None) -> dict:
     test_file = public_issue_file(source.get("testFile") or source.get("test_file"), issue=issue, job=job)
     payload = {
         "commands": review._safe_text_list(source.get("commands")),
+        "steps": review._safe_text_list(source.get("steps") or source.get("verification_steps"))[:8],
         "input": review._safe_text_lenient(source.get("input")),
         "expected": review._safe_text_lenient(source.get("expected")),
         "actual": review._safe_text_lenient(source.get("actual")),
@@ -246,7 +247,6 @@ def public_issue_reproduction(issue: dict, *, job: dict | None = None) -> dict:
         exit_code = source.get("exitCode") if source.get("exitCode") is not None else source.get("exit_code")
         payload["exitCode"] = review._safe_non_negative_int(exit_code)
     return payload
-
 
 def public_optional_int(value: object) -> int | None:
     if value is None or value == "":
@@ -701,6 +701,8 @@ def public_graph_verified_issue_payload(issue: dict, *, list_item: bool = False)
     code_evidence = issue.get("codeEvidence") if isinstance(issue.get("codeEvidence"), list) else []
     reproduction = public_issue_reproduction(issue)
     affected_locations = public_issue_affected_locations(issue)
+    verification_status = public_issue_list_verification_status(issue)
+    confidence_level = public_issue_list_confidence_level(issue, verification_status)
     payload = {
         "id": issue_id,
         "userId": public_issue_text(issue.get("userId")),
@@ -718,6 +720,9 @@ def public_graph_verified_issue_payload(issue: dict, *, list_item: bool = False)
         "candidateId": public_issue_text(issue.get("candidateId")),
         "dedupeKey": public_issue_text(issue.get("dedupeKey")),
         "verificationLevel": public_issue_text(issue.get("verificationLevel")),
+        "reproductionPath": review._safe_text_lenient(issue.get("reproductionPath")),
+        "verificationStatus": verification_status,
+        "confidenceLevel": confidence_level,
         "safeToShowUser": issue.get("safeToShowUser") is not False,
         "file": public_issue_file(issue.get("file"), issue=issue),
         "line": review._safe_non_negative_int(issue.get("line")),

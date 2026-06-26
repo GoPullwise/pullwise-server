@@ -169,6 +169,63 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         self.assertIn("Confirmed only.", full_report["finalMarkdown"])
         self.assertIn("Rejected candidates: 2", full_report["debugMarkdown"])
 
+    def test_public_graph_verified_report_accepts_static_proof_items(self) -> None:
+        item = self.graph_verified_item()
+        steps = [
+            "Inspect src/app.py and confirm the handler returns the documented error path.",
+            "Compare the observed error path with the expected successful response.",
+        ]
+        item["judge"] = {
+            "status": "confirmed",
+            "level": "L1",
+            "safe_to_show_user": True,
+            "reason": "Static proof confirms the documented behavior gap.",
+            "evidence_summary": {"observable": steps[0]},
+        }
+        item["repro"] = {
+            "status": "static_proof",
+            "level": "L1",
+            "summary": "The handler returns the error path.",
+            "commands_run": [],
+            "proof": {
+                "type": "static-proof",
+                "expected": "The handler should return a successful response.",
+                "actual": "The handler returns the error path.",
+                "verification_steps": steps,
+            },
+            "graph_path_exercised": True,
+        }
+        item["verification"] = {
+            "status": "confirmed",
+            "level": "L1",
+            "proof_type": "static-proof",
+            "safe_to_show_user": True,
+        }
+
+        report = app.public_graph_verified_report(
+            {
+                "runId": "run_static",
+                "mode": "standard",
+                "confirmedCount": 1,
+                "finalJson": {"confirmed": [item]},
+            }
+        )
+        confirmed = report["finalJson"]["confirmed"][0]
+        self.assertEqual(report["confirmedCount"], 1)
+        self.assertEqual(confirmed["repro"]["proof"]["verification_steps"], steps)
+
+        findings = app.worker_graph_verified_findings({"repo": "acme/app"}, report)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["verificationStatus"], "static_proof")
+        self.assertEqual(findings[0]["reproduction"]["steps"], steps)
+
+        payload = app.issue_payload(findings[0])
+        self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(payload["confidenceLevel"], "high")
+        self.assertEqual(payload["reproduction"]["steps"], steps)
+        self.assertEqual(payload["reproProof"]["verificationSteps"], steps)
+        self.assertIn("Inspect src/app.py", payload["reproductionPath"])
+
     def test_graph_verified_report_gate_rejects_items_missing_required_public_evidence(self) -> None:
         unsafe = self.graph_verified_item()
         unsafe["judge"]["safe_to_show_user"] = False
@@ -1982,7 +2039,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["reproProof"]["actual"], "500 internal server error")
         self.assertTrue(payload["reproProof"]["graphPathExercised"])
         self.assertEqual(payload["limitations"], ["A production API gateway could reject page < 1 before the app."])
-        self.assertNotIn("verificationStatus", payload)
+        self.assertEqual(payload["verificationStatus"], "verified")
         self.assertNotIn("auditSwarm", payload)
         self.assertNotIn("verificationAudit", payload)
         scan_payload = app.scan_payload(app.SCANS[0])
@@ -3894,7 +3951,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn(f"/blob/{resolved_commit}/src/app.py#L12", payload["affectedLocations"][0]["url"])
         self.assertEqual(payload["codeEvidence"][0]["file"], "src/app.py")
         self.assertNotIn("audit", payload)
-        self.assertNotIn("verificationStatus", payload)
+        self.assertEqual(payload["verificationStatus"], "verified")
 
     def test_claim_payload_includes_short_lived_clone_token_when_github_app_is_configured(self) -> None:
         job = {

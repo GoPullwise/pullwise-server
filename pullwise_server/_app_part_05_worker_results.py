@@ -825,6 +825,54 @@ def worker_graph_verified_findings(job: dict, report: dict, *, reserved_ids: set
     return findings
 
 
+def worker_graph_verified_proof_type(repro: dict, verification: dict) -> str:
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    raw = public_issue_text(proof.get("type") or repro.get("proof_type") or verification.get("proof_type")).lower()
+    value = raw.replace("_", "-").strip()
+    if value in {
+        "static",
+        "static-proof",
+        "code-proof",
+        "config-proof",
+        "lifecycle-proof",
+        "security-proof",
+        "documentation-proof",
+        "workflow-proof",
+    }:
+        return "static-proof"
+    if value in {"runtime", "runtime-command", "failing-test", "failing_test"}:
+        return "runtime-command"
+    return value
+
+
+def worker_graph_verified_verification_status(judge: dict, repro: dict, verification: dict) -> str:
+    if worker_graph_verified_proof_type(repro, verification) == "static-proof":
+        return "static_proof"
+    level = public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")).upper()
+    repro_status = public_issue_text(repro.get("status")).lower().replace("-", "_")
+    if repro_status == "reproduced" and level in {"L2", "L3"} and graph_verified_item_has_repro_log_and_exit_code(judge, repro):
+        return "verified"
+    return "static_proof"
+
+
+def worker_graph_verified_confidence_level(verification_status: str, code_evidence: list[dict]) -> str:
+    if verification_status == "verified":
+        return "high"
+    if verification_status == "static_proof" and code_evidence:
+        return "high"
+    return "medium"
+
+
+def worker_graph_verified_reproduction_path(candidate: dict, reproduction: dict) -> str:
+    candidate_path = review._safe_text_lenient(candidate.get("minimal_repro_idea") or candidate.get("reproduction_idea"))
+    if candidate_path:
+        return candidate_path
+    steps = reproduction.get("steps") if isinstance(reproduction.get("steps"), list) else []
+    if steps:
+        return review._safe_text_lenient("Static proof: " + " ".join(str(item) for item in steps[:3]))
+    return ""
+
+
 def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, index: int) -> dict:
     if not graph_verified_report_item_is_public(item):
         return {}
@@ -838,6 +886,9 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
     code_evidence = worker_graph_verified_code_evidence(candidate.get("evidence"), job=job)
     locations = worker_graph_verified_locations(code_evidence, job=job)
     primary = locations[0] if locations else {}
+    verification_status = worker_graph_verified_verification_status(judge, repro, verification)
+    confidence_level = worker_graph_verified_confidence_level(verification_status, code_evidence)
+    reproduction_path = worker_graph_verified_reproduction_path(candidate, reproduction)
     candidate_id = public_issue_text(candidate.get("candidate_id") or candidate.get("issue_id")) or f"candidate_{index + 1}"
     title = public_issue_text(candidate.get("title")) or review._safe_text_lenient(candidate.get("claim")).split(". ", 1)[0]
     if not title:
@@ -870,6 +921,10 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
             review._safe_text_lenient(worker_graph_verified_observed_behavior(candidate, judge, repro))
         ),
         "reproduction": reproduction,
+        "reproductionPath": reproduction_path,
+        "verificationStatus": verification_status,
+        "reportedVerificationStatus": verification_status,
+        "confidenceLevel": confidence_level,
         "judgeEvidence": worker_graph_verified_judge_evidence(judge),
         "reproProof": worker_graph_verified_repro_proof(repro),
         "verificationLevel": public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")),
@@ -931,7 +986,6 @@ def worker_graph_verified_locations(evidence: list[dict], *, job: dict | None = 
         locations.append({"file": file_path, "startLine": start_line, "endLine": end_line})
     return locations[:10]
 
-
 def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict) -> dict:
     commands = []
     exit_code = None
@@ -961,8 +1015,12 @@ def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict
             if log_path:
                 break
     log_path = log_path or public_issue_text(evidence_summary.get("log_path"))
+    steps = review._safe_text_list(
+        proof.get("verification_steps") or proof.get("verificationSteps") or repro.get("verification_steps")
+    )[:8]
     reproduction = {
         "commands": list(dict.fromkeys(commands))[:5],
+        "steps": steps,
         "input": review._safe_text_lenient(candidate.get("trigger_condition")),
         "expected": review._safe_text_lenient(proof.get("expected") or candidate.get("expected_behavior")),
         "actual": review._safe_text_lenient(
@@ -976,7 +1034,6 @@ def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict
     if exit_code is not None:
         reproduction["exitCode"] = exit_code
     return reproduction
-
 
 def worker_graph_verified_judge_evidence(judge: dict) -> dict:
     evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
@@ -996,17 +1053,22 @@ def worker_graph_verified_judge_evidence(judge: dict) -> dict:
 
 def worker_graph_verified_repro_proof(repro: dict) -> dict:
     proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    proof_type = public_issue_text(proof.get("type"))
+    if not proof_type and public_issue_text(repro.get("status")).lower().replace("-", "_") == "static_proof":
+        proof_type = "static-proof"
     payload = {
-        "type": public_issue_text(proof.get("type")),
+        "type": proof_type,
         "expected": review._safe_text_lenient(proof.get("expected")),
         "actual": review._safe_text_lenient(proof.get("actual")),
         "logExcerpt": review._safe_text_lenient(proof.get("log_excerpt")),
+        "verificationSteps": review._safe_text_list(
+            proof.get("verification_steps") or proof.get("verificationSteps") or repro.get("verification_steps")
+        )[:8],
         "graphPathExercised": repro.get("graph_path_exercised") is True,
     }
     if "graph_path_exercised" not in repro:
         payload.pop("graphPathExercised", None)
     return {key: value for key, value in payload.items() if value not in ("", [], {})}
-
 
 def worker_graph_verified_observed_behavior(candidate: dict, judge: dict, repro: dict) -> str:
     proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
