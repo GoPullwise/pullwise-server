@@ -704,6 +704,30 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         self.auth = {"Authorization": "Bearer worker-secret"}
 
+    def test_scan_payload_omits_ai_usage_even_when_scan_has_legacy_usage(self) -> None:
+        scan = {
+            "id": "sc_ai_usage_legacy",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "done",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "aiUsage": {"provider": "codex", "model": "gpt-5.5", "reasoningEffort": "medium"},
+            "effectiveAgentConfig": {
+                "provider": "codex",
+                "agent": {"command": "codex", "model": "gpt-5.5", "reasoningEffort": "medium"},
+            },
+        }
+
+        payload = app.scan_payload(scan)
+        list_payload = app.scan_list_payload(scan)
+
+        self.assertIn("effectiveAgentConfig", payload)
+        self.assertIn("effectiveAgentConfig", list_payload)
+        self.assertNotIn("aiUsage", payload)
+        self.assertNotIn("aiUsage", list_payload)
     def create_registry_worker(self, worker_id: str) -> tuple[dict, str]:
         worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})
         db.upsert_worker_heartbeat(

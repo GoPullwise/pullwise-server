@@ -58,7 +58,6 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
     if commit:
         scan["commit"] = commit
     for key in (
-        "aiUsage",
         "auditSwarm",
         "claimedAt",
         "claimedByWorkerId",
@@ -340,7 +339,6 @@ def worker_result_checksum(body: dict) -> str:
         "duration_ms": body.get("duration_ms"),
         "error": body.get("error"),
         "error_code": worker_result_error_code(body),
-        "aiUsage": public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")),
         "preflight": public_scan_preflight(body.get("preflight")),
         "reviewDecisionEvents": (
             body.get("review_decision_events")
@@ -427,7 +425,6 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
             issue["id"] = unique_issue_id(issue.get("id"), reserved_ids)
             normalized_findings.append(issue)
     summary = public_scan_issue_counts(summarize_findings(normalized_findings))
-    ai_usage = public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage"))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
     error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
@@ -439,7 +436,6 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         "graph_verified_report": graph_verified_report,
         "normalized_findings": normalized_findings,
         "summary": summary,
-        "ai_usage": ai_usage,
         "effective_agent_config": effective_agent_config,
         "error_code": error_code,
         "completed_at": completed_at,
@@ -455,7 +451,6 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
     resolved_commit = clean_github_access_text(prepared.get("resolved_commit"))
     normalized_findings = prepared.get("normalized_findings") if isinstance(prepared.get("normalized_findings"), list) else []
     summary = public_scan_issue_counts(prepared.get("summary"))
-    ai_usage = public_scan_ai_usage(prepared.get("ai_usage"))
     effective_agent_config = public_scan_agent_config(prepared.get("effective_agent_config"))
     error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
     graph_verified_report = public_graph_verified_report(
@@ -499,8 +494,6 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan.pop(key, None)
         if preflight:
             scan["preflight"] = preflight
-        if ai_usage:
-            scan["aiUsage"] = ai_usage
         if effective_agent_config:
             scan["effectiveAgentConfig"] = effective_agent_config
         scan["graphVerifiedReport"] = graph_verified_report
@@ -679,8 +672,6 @@ def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -
     if status == "done":
         return True
     if public_scan_phase(job.get("progress_phase")) in {"ai", "report"}:
-        return True
-    if public_scan_ai_usage(body.get("aiUsage") or body.get("ai_usage")):
         return True
     return False
 

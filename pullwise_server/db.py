@@ -3115,8 +3115,6 @@ def scan_job_result_summary_payload(payload: dict[str, Any], *, artifact_id: str
             "error_code",
             "errorCode",
             "summary",
-            "aiUsage",
-            "ai_usage",
             "preflight",
             "effectiveAgentConfig",
         ):

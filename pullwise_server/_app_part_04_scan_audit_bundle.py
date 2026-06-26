@@ -145,16 +145,6 @@ def scan_payload(scan: dict) -> dict:
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
-    ai_usage_source = dict(scan.get("aiUsage") if isinstance(scan.get("aiUsage"), dict) else {})
-    if effective_agent_config:
-        effective_agent = effective_agent_config["agent"]
-        ai_usage_source.setdefault("agentCli", effective_agent["command"] or effective_agent_config["provider"])
-        ai_usage_source.setdefault("provider", effective_agent_config["provider"])
-        ai_usage_source.setdefault("model", effective_agent["model"])
-        ai_usage_source.setdefault("reasoningEffort", effective_agent["reasoningEffort"])
-    ai_usage = public_scan_ai_usage(ai_usage_source)
-    if ai_usage:
-        payload["aiUsage"] = ai_usage
     preflight = public_scan_preflight(scan.get("preflight"))
     if preflight:
         payload["preflight"] = preflight
@@ -296,16 +286,6 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
-    ai_usage_source = dict(scan.get("aiUsage") if isinstance(scan.get("aiUsage"), dict) else {})
-    if effective_agent_config:
-        effective_agent = effective_agent_config["agent"]
-        ai_usage_source.setdefault("agentCli", effective_agent["command"] or effective_agent_config["provider"])
-        ai_usage_source.setdefault("provider", effective_agent_config["provider"])
-        ai_usage_source.setdefault("model", effective_agent["model"])
-        ai_usage_source.setdefault("reasoningEffort", effective_agent["reasoningEffort"])
-    ai_usage = public_scan_ai_usage(ai_usage_source)
-    if ai_usage:
-        payload["aiUsage"] = ai_usage
     graph_verified_report = public_graph_verified_report(scan.get("graphVerifiedReport"))
     if graph_verified_report:
         payload["graphVerifiedReport"] = graph_verified_report
@@ -461,23 +441,6 @@ def public_scan_issue_counts(value: object) -> dict:
         "info": public_scan_count(counts.get("info")),
     }
 
-
-def public_scan_ai_usage(value: object) -> dict:
-    source = value if isinstance(value, dict) else {}
-    agent_cli = public_scan_agent_text(source.get("agentCli"))
-    provider = public_scan_agent_provider(source.get("provider"))
-    model = clean_github_access_text(source.get("model"))
-    reasoning_effort = public_scan_agent_reasoning_effort(source.get("reasoningEffort"))
-    payload = {}
-    if agent_cli:
-        payload["agentCli"] = agent_cli
-    if provider:
-        payload["provider"] = provider
-    if model:
-        payload["model"] = model
-    if reasoning_effort:
-        payload["reasoningEffort"] = reasoning_effort
-    return payload
 
 
 def public_scan_compact_text(value: object, *, max_length: int = 240) -> str:
