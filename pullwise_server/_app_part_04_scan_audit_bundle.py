@@ -792,19 +792,82 @@ def graph_verified_report_item_is_public(value: object) -> bool:
         return False
     if verification and verification.get("safe_to_show_user") is not True:
         return False
-    level = public_issue_text(judge.get("level") or verification.get("level") or repro.get("level")).upper()
-    if level not in {"L2", "L3"}:
+    if not graph_verified_item_has_code_evidence_location(candidate):
         return False
-    if public_issue_text(repro.get("status")).lower() != "reproduced":
+    if not graph_verified_item_has_graph_evidence(candidate):
+        return False
+    if graph_verified_item_has_runtime_proof(judge, repro, verification):
+        return True
+    return graph_verified_item_has_static_proof(judge, repro, verification)
+
+
+def graph_verified_item_level(judge: dict, repro: dict, verification: dict) -> str:
+    return public_issue_text(judge.get("level") or verification.get("level") or repro.get("level")).upper()
+
+
+def graph_verified_repro_status(repro: dict) -> str:
+    return public_issue_text(repro.get("status")).lower().replace("-", "_")
+
+
+def graph_verified_item_proof_type(repro: dict, verification: dict) -> str:
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    raw = public_issue_text(proof.get("type") or repro.get("proof_type") or verification.get("proof_type")).lower()
+    value = raw.replace("_", "-").strip()
+    if value in {
+        "static",
+        "static-proof",
+        "code-proof",
+        "config-proof",
+        "lifecycle-proof",
+        "security-proof",
+        "documentation-proof",
+        "workflow-proof",
+    }:
+        return "static-proof"
+    if value in {"runtime", "runtime-command"}:
+        return "runtime-command"
+    return value
+
+
+def graph_verified_static_steps(judge: dict, repro: dict) -> list[str]:
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    steps = public_scan_compact_text_list(
+        proof.get("verification_steps") or proof.get("verificationSteps") or repro.get("verification_steps"),
+        limit=20,
+        max_length=1000,
+    )
+    if steps:
+        return steps
+    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
+    observable = public_scan_compact_text(evidence_summary.get("observable"), max_length=1000)
+    return [observable] if observable else []
+
+
+def graph_verified_item_has_runtime_proof(judge: dict, repro: dict, verification: dict) -> bool:
+    if graph_verified_item_level(judge, repro, verification) not in {"L2", "L3"}:
+        return False
+    if graph_verified_repro_status(repro) != "reproduced":
         return False
     if repro.get("graph_path_exercised") is not True:
         return False
     if not graph_verified_item_has_repro_log_and_exit_code(judge, repro):
         return False
-    if not graph_verified_item_has_code_evidence_location(candidate):
-        return False
-    return graph_verified_item_has_graph_evidence(candidate)
+    return True
 
+
+def graph_verified_item_has_static_proof(judge: dict, repro: dict, verification: dict) -> bool:
+    if graph_verified_item_level(judge, repro, verification) not in {"L1", "L2", "L3"}:
+        return False
+    if repro.get("graph_path_exercised") is not True:
+        return False
+    if graph_verified_repro_status(repro) != "static_proof" and graph_verified_item_proof_type(repro, verification) != "static-proof":
+        return False
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    expected = review._safe_text_lenient(proof.get("expected"))[:4000]
+    actual = review._safe_text_lenient(proof.get("actual") or repro.get("summary"))[:4000]
+    if not expected or not actual or expected.strip().lower() == actual.strip().lower():
+        return False
+    return bool(graph_verified_static_steps(judge, repro))
 
 def graph_verified_item_has_graph_evidence(candidate: dict) -> bool:
     graph_evidence = candidate.get("graph_evidence") if isinstance(candidate.get("graph_evidence"), dict) else {}
@@ -1096,6 +1159,9 @@ def public_graph_verified_repro(value: object) -> dict:
     proof = public_graph_verified_proof(source.get("proof"))
     if proof:
         repro["proof"] = proof
+    steps = public_scan_compact_text_list(source.get("verification_steps"), limit=20, max_length=1000)
+    if steps:
+        repro["verification_steps"] = steps
     graph_path_exercised = source.get("graph_path_exercised")
     if isinstance(graph_path_exercised, bool):
         repro["graph_path_exercised"] = graph_path_exercised
@@ -1103,7 +1169,6 @@ def public_graph_verified_repro(value: object) -> dict:
     if touched_symbols:
         repro["touched_symbols"] = touched_symbols
     return repro
-
 
 def public_graph_verified_repro_commands(value: object) -> list[dict]:
     raw_items = value if isinstance(value, list) else []
@@ -1140,13 +1205,19 @@ def public_graph_verified_proof(value: object) -> dict:
         text = review._safe_text_lenient(source.get(key))[:4000]
         if text:
             proof[key] = text
+    steps = public_scan_compact_text_list(
+        source.get("verification_steps") or source.get("verificationSteps"),
+        limit=20,
+        max_length=1000,
+    )
+    if steps:
+        proof["verification_steps"] = steps
     return proof
-
 
 def public_graph_verified_verification(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     verification = {}
-    for key in ("verdict", "status", "level", "summary", "reason"):
+    for key in ("verdict", "status", "level", "proof_type", "summary", "reason"):
         text = review._safe_text_lenient(source.get(key))[:4000]
         if text:
             verification[key] = text
@@ -1154,7 +1225,6 @@ def public_graph_verified_verification(value: object) -> dict:
     if isinstance(safe_to_show, bool):
         verification["safe_to_show_user"] = safe_to_show
     return verification
-
 
 def public_scan_error_code(value: object) -> str:
     error_code = public_issue_text(value).replace("-", "_").upper()
