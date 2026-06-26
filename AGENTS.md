@@ -135,6 +135,22 @@ claim/result APIs, artifacts, and copy should preserve that scope. Preserve
 review-unit coverage metadata in stored artifacts even when the confirmed
 finding list is empty.
 
+## Public REST API Rate Limits
+
+The API rate limit is scoped to public REST API automation, not normal browser
+web app session traffic.
+
+- Apply the `rateLimit` system config to `/api/v1/*` and `/v1/*` public REST
+  endpoints.
+- Do not apply this narrow API limit to signed-in web app routes such as
+  `/auth/session`, `/repositories`, `/scans`, `/issues`, `/settings`, or
+  `/billing`.
+- Authenticated worker endpoints remain exempt. Separate unauthenticated worker
+  probe protection is allowed, but do not describe it as browser/web app rate
+  limiting.
+- User-facing docs should say public REST API rate limit or API-key automation
+  rate limit, not a shared browser web app rate limit.
+
 ## Quota And Account Terminology
 
 Pullwise does not have a workspace quota concept. Do not rename account/user

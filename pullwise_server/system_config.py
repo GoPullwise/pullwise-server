@@ -268,13 +268,13 @@ FIELD_METADATA = [
     {
         "id": "rateLimit",
         "title": "API rate limit",
-        "description": "Server-side request rate limiting for browser and API-key traffic. Worker endpoints are exempt.",
+        "description": "Server-side request rate limiting for public REST API traffic. Browser web app session routes and authenticated worker endpoints are exempt.",
         "fields": [
             {
                 "path": "rateLimit.enabled",
                 "label": "Rate limit enabled",
                 "type": "boolean",
-                "description": "Turns request rate limiting on or off for non-exempt endpoints.",
+                "description": "Turns request rate limiting on or off for public REST API endpoints and unauthenticated worker probes.",
             },
             {
                 "path": "rateLimit.requests",
@@ -432,13 +432,13 @@ def public_docs_groups(current: dict, *, pro_products: list[str], max_products: 
         {
             "id": "rateLimit",
             "title": "API rate limit",
-            "description": "Request rate limiting applied by the server to browser and API-key traffic.",
+            "description": "Request rate limiting applied by the server to public REST API traffic, not normal web app session traffic.",
             "fields": [
                 public_field(
                     "rateLimit.enabled",
                     "Rate limiting enabled",
                     current["rateLimit"]["enabled"],
-                    "Whether non-exempt user/API requests are rate limited.",
+                    "Whether public REST API requests are rate limited.",
                 ),
                 public_field(
                     "rateLimit.requests",

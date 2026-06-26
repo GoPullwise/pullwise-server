@@ -75,7 +75,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["profile"]["email"], "dev@example.com")
 
-    def test_sqlite_rate_limit_blocks_after_configured_window_limit(self) -> None:
+    def test_sqlite_rate_limit_blocks_public_rest_api_after_configured_window_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
 
@@ -89,13 +89,13 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 },
                 clear=True,
             ):
-                first = HandlerHarness("/auth/session")
-                second = HandlerHarness("/auth/session")
+                first = HandlerHarness("/api/v1/repositories")
+                second = HandlerHarness("/api/v1/repositories")
 
                 app.PullwiseHandler.route(first, "GET")
                 app.PullwiseHandler.route(second, "GET")
 
-            self.assertEqual(first.status, HTTPStatus.OK)
+            self.assertEqual(first.status, HTTPStatus.UNAUTHORIZED)
             self.assertEqual(second.status, HTTPStatus.TOO_MANY_REQUESTS)
             self.assertIn("rate limit", second.payload["message"].lower())
 
@@ -105,6 +105,38 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 ).fetchall()
 
         self.assertEqual(rows, [("ip:203.0.113.10", 2)])
+
+    def test_browser_session_routes_do_not_consume_public_rest_api_rate_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_DB_PATH": db_path,
+                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+                },
+                clear=True,
+            ):
+                db.initialize()
+                first = HandlerHarness("/auth/session")
+                second = HandlerHarness("/auth/session")
+
+                app.PullwiseHandler.route(first, "GET")
+                app.PullwiseHandler.route(second, "GET")
+
+            self.assertEqual(first.status, HTTPStatus.OK)
+            self.assertEqual(second.status, HTTPStatus.OK)
+            self.assertEqual(second.payload["authenticated"], False)
+
+            with closing(sqlite3.connect(db_path)) as connection:
+                rows = connection.execute(
+                    "SELECT subject, request_count FROM api_rate_limits"
+                ).fetchall()
+
+        self.assertEqual(rows, [])
 
     def test_unauthenticated_worker_routes_are_rate_limited(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -179,7 +211,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
             self.assertEqual(poll.payload["command"]["id"], command["id"])
 
     def test_rate_limit_storage_failures_do_not_block_api_requests(self) -> None:
-        handler = HandlerHarness("/auth/session")
+        handler = HandlerHarness("/api/v1/repositories")
 
         with (
             patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
@@ -188,8 +220,8 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         ):
             app.PullwiseHandler.route(handler, "GET")
 
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertFalse(handler.payload["authenticated"])
+        self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+        self.assertEqual(handler.payload["message"], "A valid Pullwise API key is required.")
         self.assertEqual(handler.headers_out, {})
         log_exception.assert_called_once()
 

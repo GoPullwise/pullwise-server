@@ -60,8 +60,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         access_logger.info("%s - %s", self.address_string(), fmt % args)
 
-    def apply_rate_limit(self, method: str, path: str) -> bool:
+    def apply_rate_limit(self, method: str, path: str, segments: list[str] | None = None) -> bool:
         if not rate_limit_enabled() or rate_limit_exempt_path(method, path):
+            self._rate_limit_headers = {}
+            return False
+        segments = segments if segments is not None else [unquote(part) for part in path.split("/") if part]
+        applies_to_public_rest_api = external_api_segments(segments) is not None
+        applies_to_unauthenticated_worker_probe = path.startswith("/worker/") and not worker_token_record(
+            self,
+            allow_disabled=True,
+            include_deleted=True,
+        )
+        if not applies_to_public_rest_api and not applies_to_unauthenticated_worker_probe:
             self._rate_limit_headers = {}
             return False
         if self.admin_rate_limit_exempt(method, path):
@@ -165,7 +175,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
         try:
             try:
-                if self.apply_rate_limit(method, path):
+                if self.apply_rate_limit(method, path, segments):
                     return
                 self.enforce_body_size_limit(method)
                 if cookie_state_change_needs_origin_check(method, path, segments, self) and not request_origin_is_trusted(self):

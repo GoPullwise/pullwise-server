@@ -385,11 +385,13 @@ repository returns `409 Conflict`.
 The machine-readable API description is available at `GET /api-docs` and
 `GET /api/docs`.
 
-When the database-backed rate limit setting is enabled, each request is counted
-in SQLite in the `api_rate_limits` table. The limiter keys by signed-in user id
-when a valid session is present, otherwise by client IP address. Defaults are
-`600` requests per `60` seconds, with blocking disabled until enabled in admin
-system config.
+When the database-backed API rate limit setting is enabled, public REST API
+requests under `/api/v1` are counted in SQLite in the `api_rate_limits` table.
+The limiter keys by signed-in user id when a valid session is present,
+otherwise by client IP address. Normal browser web app session routes such as
+`/auth/session`, `/repositories`, and `/scans` do not consume this narrow REST
+API limit. Defaults are `600` REST API requests per `60` seconds, with blocking
+disabled until enabled in admin system config.
 
 ### Ubuntu 22.04 launcher
 
