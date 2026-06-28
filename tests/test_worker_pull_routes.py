@@ -1476,7 +1476,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(confirmed, [])
         self.assertEqual(rejected, [])
 
-    def test_issue_status_updates_record_user_feedback_outcome_labels(self) -> None:
+    def test_issue_status_updates_record_lifecycle_outcome_labels(self) -> None:
         app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
         app.SESSIONS = {
             "ses_owner": {
@@ -1488,7 +1488,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [
             {
-                "id": "sc_feedback",
+                "id": "sc_lifecycle",
                 "repo": "acme/api",
                 "branch": "main",
                 "commit": "abc123",
@@ -1496,7 +1496,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "userId": "usr_1",
                 "createdAt": app.now(),
                 "completedAt": app.now(),
-                "issues": {"critical": 0, "high": 3, "medium": 0, "low": 0, "info": 0},
+                "issues": {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0},
                 "repoId": "repo_123",
                 "githubRepoId": "123",
             }
@@ -1505,8 +1505,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             {
                 "id": "issue-fixed",
                 "userId": "usr_1",
-                "scanId": "sc_feedback",
-                "jobId": "job_feedback",
+                "scanId": "sc_lifecycle",
+                "jobId": "job_lifecycle",
                 "repo": "acme/api",
                 "branch": "main",
                 "status": "open",
@@ -1517,31 +1517,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "verificationStatus": "static_proof",
             },
             {
-                "id": "issue-fp",
+                "id": "issue-snoozed",
                 "userId": "usr_1",
-                "scanId": "sc_feedback",
-                "jobId": "job_feedback",
+                "scanId": "sc_lifecycle",
+                "jobId": "job_lifecycle",
                 "repo": "acme/api",
                 "branch": "main",
                 "status": "open",
                 "severity": "high",
-                "title": "False positive issue",
+                "title": "Snoozed issue",
                 "file": "src/app.py",
                 "line": 22,
-                "verificationStatus": "potential_risk",
-            },
-            {
-                "id": "issue-duplicate",
-                "userId": "usr_1",
-                "scanId": "sc_feedback",
-                "jobId": "job_feedback",
-                "repo": "acme/api",
-                "branch": "main",
-                "status": "open",
-                "severity": "high",
-                "title": "Duplicate issue",
-                "file": "src/app.py",
-                "line": 32,
                 "verificationStatus": "potential_risk",
             },
         ]
@@ -1551,8 +1537,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "protocol": "pullwise-review-decision/0.1",
                     "event_id": "evt_status_fixed",
                     "candidate_observation_key": "obs_status_fixed",
-                    "scan_id": "sc_feedback",
-                    "job_id": "job_feedback",
+                    "scan_id": "sc_lifecycle",
+                    "job_id": "job_lifecycle",
                     "attempt_id": "wk_1-1",
                     "user_id": "usr_1",
                     "repo_id": "repo_123",
@@ -1572,16 +1558,16 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 },
                 {
                     "protocol": "pullwise-review-decision/0.1",
-                    "event_id": "evt_status_fp",
-                    "candidate_observation_key": "obs_status_fp",
-                    "scan_id": "sc_feedback",
-                    "job_id": "job_feedback",
+                    "event_id": "evt_status_snoozed",
+                    "candidate_observation_key": "obs_status_snoozed",
+                    "scan_id": "sc_lifecycle",
+                    "job_id": "job_lifecycle",
                     "attempt_id": "wk_1-1",
                     "user_id": "usr_1",
                     "repo_id": "repo_123",
                     "repo_full_name": "acme/api",
                     "branch": "main",
-                    "candidate_id": "issue-fp",
+                    "candidate_id": "issue-snoozed",
                     "source": "correctness-reviewer",
                     "category": "correctness",
                     "severity": "high",
@@ -1589,30 +1575,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "file_path": "src/app.py",
                     "line_start": 22,
                     "raw_confidence": 0.92,
-                    "normalized_title": "False positive issue",
-                    "decision": "reported",
-                    "scoring_protocol": "pullwise-review-score/0.1",
-                },
-                {
-                    "protocol": "pullwise-review-decision/0.1",
-                    "event_id": "evt_status_duplicate",
-                    "candidate_observation_key": "obs_status_duplicate",
-                    "scan_id": "sc_feedback",
-                    "job_id": "job_feedback",
-                    "attempt_id": "wk_1-1",
-                    "user_id": "usr_1",
-                    "repo_id": "repo_123",
-                    "repo_full_name": "acme/api",
-                    "branch": "main",
-                    "candidate_id": "issue-duplicate",
-                    "source": "correctness-reviewer",
-                    "category": "correctness",
-                    "severity": "high",
-                    "verification_status": "potential_risk",
-                    "file_path": "src/app.py",
-                    "line_start": 32,
-                    "raw_confidence": 0.92,
-                    "normalized_title": "Duplicate issue",
+                    "normalized_title": "Snoozed issue",
                     "decision": "reported",
                     "scoring_protocol": "pullwise-review-score/0.1",
                 },
@@ -1631,37 +1594,23 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(fixed_labels[0]["label_source"], "user_explicit")
         self.assertEqual(fixed_labels[0]["outcome_label"], "valid")
 
-        false_positive = RouteHarness(
-            "/issues/issue-fp/status",
-            {"falsePositive": True, "reason": "Not reachable in this repo."},
+        snoozed = RouteHarness(
+            "/issues/issue-snoozed/status",
+            {"status": "snoozed", "reason": "Review later."},
             headers=headers,
         )
-        app.PullwiseHandler.route(false_positive, "PATCH")
+        app.PullwiseHandler.route(snoozed, "PATCH")
 
-        self.assertEqual(false_positive.status, HTTPStatus.OK)
-        self.assertEqual(false_positive.payload["status"], "open")
-        fp_labels = db.list_review_outcome_labels("obs_status_fp")
-        self.assertEqual(fp_labels[0]["label_source"], "user_explicit")
-        self.assertEqual(fp_labels[0]["outcome_label"], "false_positive")
-        self.assertEqual(fp_labels[0]["label_reason"], "Not reachable in this repo.")
-
-        duplicate = RouteHarness(
-            "/issues/issue-duplicate/status",
-            {"feedbackReason": "duplicate", "reason": "Duplicate issue."},
-            headers=headers,
-        )
-        app.PullwiseHandler.route(duplicate, "PATCH")
-
-        self.assertEqual(duplicate.status, HTTPStatus.OK)
-        self.assertEqual(duplicate.payload["status"], "open")
-        self.assertEqual(duplicate.payload["feedbackReason"], "duplicate")
-        duplicate_labels = db.list_review_outcome_labels("obs_status_duplicate")
-        self.assertEqual(duplicate_labels[0]["label_source"], "user_explicit")
-        self.assertEqual(duplicate_labels[0]["outcome_label"], "ambiguous")
-        self.assertEqual(duplicate_labels[0]["label_reason"], "feedback:duplicate - Duplicate issue.")
+        self.assertEqual(snoozed.status, HTTPStatus.OK)
+        self.assertEqual(snoozed.payload["status"], "snoozed")
+        self.assertNotIn("feedbackReason", snoozed.payload)
+        snoozed_labels = db.list_review_outcome_labels("obs_status_snoozed")
+        self.assertEqual(snoozed_labels[0]["label_source"], "weak_lifecycle")
+        self.assertEqual(snoozed_labels[0]["outcome_label"], "ambiguous")
+        self.assertEqual(snoozed_labels[0]["label_reason"], "Review later.")
 
         next_scan = {
-            "id": "sc_feedback_next",
+            "id": "sc_lifecycle_next",
             "repo": "acme/api",
             "branch": "main",
             "commit": "pending",
@@ -1682,110 +1631,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(next_claim.status, HTTPStatus.OK)
         self.assertNotIn("review_calibration_context", next_claim.payload["job"])
-
-    def test_repeated_user_feedback_uses_latest_selection(self) -> None:
-        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
-        app.SESSIONS = {
-            "ses_owner": {
-                "id": "ses_owner",
-                "userId": "usr_1",
-                "createdAt": app.now(),
-                "expiresAt": app.now() + 3600,
-            }
-        }
-        app.SCANS = [
-            {
-                "id": "sc_feedback_repeat",
-                "repo": "acme/api",
-                "branch": "main",
-                "commit": "abc123",
-                "status": "done",
-                "userId": "usr_1",
-                "createdAt": app.now(),
-                "completedAt": app.now(),
-                "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
-                "repoId": "repo_123",
-                "githubRepoId": "123",
-            }
-        ]
-        app.ISSUES = [
-            {
-                "id": "issue-repeat",
-                "userId": "usr_1",
-                "scanId": "sc_feedback_repeat",
-                "jobId": "job_feedback_repeat",
-                "repo": "acme/api",
-                "branch": "main",
-                "status": "open",
-                "severity": "high",
-                "title": "Repeat feedback issue",
-                "file": "src/app.py",
-                "line": 12,
-            }
-        ]
-        db.record_review_decision_events(
-            [
-                {
-                    "protocol": "pullwise-review-decision/0.1",
-                    "event_id": "evt_status_repeat",
-                    "candidate_observation_key": "obs_status_repeat",
-                    "scan_id": "sc_feedback_repeat",
-                    "job_id": "job_feedback_repeat",
-                    "attempt_id": "wk_1-1",
-                    "user_id": "usr_1",
-                    "repo_id": "repo_123",
-                    "repo_full_name": "acme/api",
-                    "branch": "main",
-                    "candidate_id": "issue-repeat",
-                    "source": "correctness-reviewer",
-                    "category": "correctness",
-                    "severity": "high",
-                    "verification_status": "potential_risk",
-                    "file_path": "src/app.py",
-                    "line_start": 12,
-                    "raw_confidence": 0.92,
-                    "normalized_title": "Repeat feedback issue",
-                    "decision": "reported",
-                    "scoring_protocol": "pullwise-review-score/0.1",
-                }
-            ]
-        )
-        headers = {"Cookie": "pw_session=ses_owner"}
-
-        with patch.object(app, "now", return_value=123456):
-            useful = RouteHarness(
-                "/issues/issue-repeat/status",
-                {
-                    "feedbackReason": "useful",
-                    "falsePositive": False,
-                    "reason": "User marked issue useful / valid.",
-                },
-                headers=headers,
-            )
-            app.PullwiseHandler.route(useful, "PATCH")
-            false_positive = RouteHarness(
-                "/issues/issue-repeat/status",
-                {
-                    "feedbackReason": "false_positive",
-                    "falsePositive": True,
-                    "reason": "False positive.",
-                },
-                headers=headers,
-            )
-            app.PullwiseHandler.route(false_positive, "PATCH")
-
-        self.assertEqual(useful.status, HTTPStatus.OK)
-        self.assertEqual(useful.payload["feedbackReason"], "useful")
-        self.assertEqual(false_positive.status, HTTPStatus.OK)
-        self.assertEqual(false_positive.payload["status"], "open")
-        self.assertEqual(false_positive.payload["feedbackReason"], "false_positive")
-        labels = db.list_review_outcome_labels("obs_status_repeat")
-        self.assertEqual(len(labels), 1)
-        self.assertEqual(labels[0]["label_source"], "user_explicit")
-        self.assertEqual(labels[0]["outcome_label"], "false_positive")
-        self.assertEqual(app.effective_review_outcome_label("obs_status_repeat")["outcome_label"], "false_positive")
-        app.ISSUES[0].pop("feedbackReason", None)
-        self.assertEqual(app.issue_payload(app.ISSUES[0])["feedbackReason"], "false_positive")
 
     def test_worker_result_fallback_checksum_includes_review_decision_events(self) -> None:
         base = {

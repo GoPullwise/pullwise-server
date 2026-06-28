@@ -2050,9 +2050,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         updated_at = now()
         issue["status"] = next_status
         issue["updatedAt"] = updated_at
-        feedback_reason, _ = review_user_feedback_reason(body)
-        if feedback_reason:
-            issue["feedbackReason"] = feedback_reason
         record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
         stored_issue = db.upsert_issue(issue, timestamp=updated_at) or issue
         if memory_issue is None:

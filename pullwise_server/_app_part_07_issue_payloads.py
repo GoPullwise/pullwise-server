@@ -234,15 +234,17 @@ def public_issue_affected_locations(issue: dict, *, job: dict | None = None) -> 
 def public_issue_reproduction(issue: dict, *, job: dict | None = None) -> dict:
     source = issue.get("reproduction") if isinstance(issue.get("reproduction"), dict) else {}
     test_file = public_issue_file(source.get("testFile") or source.get("test_file"), issue=issue, job=job)
+    steps = review._safe_text_list(source.get("steps") or source.get("verification_steps"))[:8]
     payload = {
         "commands": review._safe_text_list(source.get("commands")),
-        "steps": review._safe_text_list(source.get("steps") or source.get("verification_steps"))[:8],
         "input": review._safe_text_lenient(source.get("input")),
         "expected": review._safe_text_lenient(source.get("expected")),
         "actual": review._safe_text_lenient(source.get("actual")),
         "testFile": test_file,
         "logPath": public_issue_text(source.get("logPath") or source.get("log_path")),
     }
+    if steps:
+        payload["steps"] = steps
     if source.get("exitCode") is not None or source.get("exit_code") is not None:
         exit_code = source.get("exitCode") if source.get("exitCode") is not None else source.get("exit_code")
         payload["exitCode"] = review._safe_non_negative_int(exit_code)
@@ -656,44 +658,6 @@ def public_issue_audit_metadata(issue: dict, *, job: dict | None = None) -> dict
     return {key: value for key, value in metadata.items() if value}
 
 
-def public_issue_feedback_reason(value: object) -> str:
-    reason = public_issue_text(value).lower().replace("-", "_").replace(" ", "_")
-    if reason == "valid":
-        return "useful"
-    if reason == "speculative":
-        return "too_speculative"
-    return reason if reason in REVIEW_USER_FEEDBACK_REASONS else ""
-
-
-def public_issue_feedback_reason_from_label(label: dict) -> str:
-    if public_issue_text(label.get("label_source")).lower() != "user_explicit":
-        return ""
-    reason = " ".join(review._safe_text_lenient(label.get("label_reason")).split())
-    prefix = "feedback:"
-    if not reason.lower().startswith(prefix):
-        return ""
-    value = reason[len(prefix) :].split(" ", 1)[0]
-    return public_issue_feedback_reason(value)
-
-
-def public_issue_feedback(issue: dict) -> dict:
-    fallback_reason = public_issue_feedback_reason(issue.get("feedbackReason") or issue.get("feedback_reason"))
-    event = review_decision_event_for_issue(issue)
-    observation_key = public_issue_text(event.get("candidate_observation_key"))
-    if observation_key:
-        user_id = public_issue_text(issue.get("userId"))
-        for label in db.list_review_outcome_labels(observation_key):
-            if user_id and public_issue_text(label.get("created_by")) not in {"", user_id}:
-                continue
-            feedback_reason = public_issue_feedback_reason_from_label(label)
-            if feedback_reason:
-                return {
-                    "reason": feedback_reason,
-                    "label": review_outcome_label_payload(label),
-                }
-    return {"reason": fallback_reason} if fallback_reason else {}
-
-
 def public_graph_verified_issue_payload(issue: dict, *, list_item: bool = False) -> dict:
     issue_id = public_issue_text(issue.get("id")) or clean_pull_request_issue_id(issue.get("id"))
     audit_metadata = public_issue_audit_metadata(issue)
@@ -758,11 +722,6 @@ def public_graph_verified_issue_payload(issue: dict, *, list_item: bool = False)
             payload["judgeEvidence"] = judge_evidence
         if repro_proof:
             payload["reproProof"] = repro_proof
-        feedback = public_issue_feedback(issue)
-        if feedback:
-            payload["feedbackReason"] = feedback["reason"]
-            if feedback.get("label"):
-                payload["feedbackLabel"] = feedback["label"]
     updated_at = pull_request_timestamp(issue.get("updatedAt"))
     if updated_at is not None:
         payload["updatedAt"] = updated_at
@@ -858,11 +817,6 @@ def issue_payload(issue: dict) -> dict:
     age = public_issue_text(issue.get("age"))
     if age:
         payload["age"] = age
-    feedback = public_issue_feedback(issue)
-    if feedback:
-        payload["feedbackReason"] = feedback["reason"]
-        if feedback.get("label"):
-            payload["feedbackLabel"] = feedback["label"]
     reported_verification_status = public_issue_text(issue.get("reportedVerificationStatus")).lower()
     if reported_verification_status in ISSUE_VERIFICATION_STATUSES and reported_verification_status != verification_status:
         payload["reportedVerificationStatus"] = reported_verification_status
@@ -935,9 +889,6 @@ def issue_list_payload(issue: dict) -> dict:
     age = public_issue_text(issue.get("age"))
     if age:
         payload["age"] = age
-    feedback = public_issue_feedback(issue)
-    if feedback:
-        payload["feedbackReason"] = feedback["reason"]
     return payload
 
 
