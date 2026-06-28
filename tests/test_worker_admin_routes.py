@@ -217,7 +217,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(first.status, HTTPStatus.OK)
         self.assertEqual(second.status, HTTPStatus.OK)
 
-    def test_non_admin_server_metrics_keeps_user_rate_limit(self) -> None:
+    def test_non_admin_server_metrics_bypasses_user_rate_limit(self) -> None:
         with patch.dict(
             os.environ,
             {
@@ -234,7 +234,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(second, "GET")
 
         self.assertEqual(first.status, HTTPStatus.FORBIDDEN)
-        self.assertEqual(second.status, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(second.status, HTTPStatus.FORBIDDEN)
 
     def test_admin_can_start_pullwise_server_restart(self) -> None:
         fake_process = type("FakeProcess", (), {"pid": 4321})()
@@ -1192,10 +1192,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(update, "PATCH")
 
+        expected_pro_graph = {
+            **app.billing.default_review_agent_graph_verified_config("pro"),
+            "maxRepro": 12,
+            "minScoreForRepro": 7,
+            "requireRedGreen": True,
+        }
         self.assertEqual(update.status, HTTPStatus.OK)
         self.assertEqual(
             update.payload["agentConfig"]["graphVerified"],
-            {"maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
+            expected_pro_graph,
         )
 
         admin = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
@@ -1204,11 +1210,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin.status, HTTPStatus.OK)
         self.assertEqual(
             admin.payload["agentConfigs"]["pro"]["graphVerified"],
-            {"maxRepro": 12, "minScoreForRepro": 7, "requireRedGreen": True},
+            expected_pro_graph,
         )
         self.assertEqual(
             admin.payload["agentConfigs"]["free"]["graphVerified"],
-            {"maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False},
+            app.billing.default_review_agent_graph_verified_config("free"),
         )
 
     def test_plan_agent_config_reads_repair_invalid_persisted_provider(self) -> None:
@@ -1351,9 +1357,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
         app.PullwiseHandler.route(delete, "DELETE")
         self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
-        self.assertTrue(delete.payload["deleted"])
+        self.assertTrue(delete.payload["deleteQueued"])
+        self.assertFalse(delete.payload["deleted"])
         self.assertEqual(delete.payload["command"]["command"], "uninstall")
-        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+        self.assertIsNone(db.get_worker(worker_id)["deleted_at"])
 
         actions = [event["action"] for event in db.list_worker_audit_events(worker_id, limit=20)]
         for expected in ["update_worker", "disable_worker", "enable_worker", "rotate_worker_token", "delete_worker"]:
@@ -1368,12 +1375,12 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(delete, "DELETE")
 
         self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
-        self.assertTrue(delete.payload["deleted"])
+        self.assertTrue(delete.payload["deleteQueued"])
+        self.assertFalse(delete.payload["deleted"])
         command = delete.payload["command"]
         self.assertEqual(command["command"], "uninstall")
         self.assertEqual(command["status"], "pending")
-        self.assertIsNone(db.get_worker(worker_id))
-        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+        self.assertIsNone(db.get_worker(worker_id)["deleted_at"])
 
         poll = RouteHarness(
             "/worker/commands/poll",
@@ -1464,17 +1471,19 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(uninstall.status, HTTPStatus.ACCEPTED)
         uninstall_command = uninstall.payload["command"]
         self.assertEqual(uninstall_command["command"], "uninstall")
-        self.assertIsNone(db.get_worker(worker_id))
+        self.assertTrue(uninstall.payload["deleteQueued"])
+        self.assertFalse(uninstall.payload["deleted"])
         worker_after_uninstall_request = db.get_worker(worker_id, include_deleted=True)
         self.assertIsNotNone(worker_after_uninstall_request)
         self.assertFalse(worker_after_uninstall_request["enabled"])
-        self.assertIsNotNone(worker_after_uninstall_request["deleted_at"])
-        self.assertIsNotNone(uninstall.payload["worker"]["deleted_at"])
+        self.assertIsNone(worker_after_uninstall_request["deleted_at"])
+        self.assertIsNone(uninstall.payload["worker"]["deleted_at"])
 
         admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin_workers, "GET")
         self.assertEqual(admin_workers.status, HTTPStatus.OK)
-        self.assertEqual(admin_workers.payload["workers"], [])
+        self.assertEqual(admin_workers.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["status"], "pending")
 
         deleted_heartbeat = RouteHarness(
             "/worker/heartbeat",
@@ -1495,7 +1504,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIsNone(db.get_worker(worker_id))
         self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
 
-    def test_uninstall_command_immediately_soft_deletes_degraded_worker(self) -> None:
+    def test_uninstall_command_keeps_degraded_worker_visible_until_cleanup_finishes(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
 
@@ -1524,13 +1533,29 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(uninstall.status, HTTPStatus.ACCEPTED)
         self.assertEqual(uninstall.payload["command"]["command"], "uninstall")
-        self.assertIsNone(db.get_worker(worker_id))
-        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+        uninstall_command = uninstall.payload["command"]
+        self.assertIsNone(db.get_worker(worker_id)["deleted_at"])
 
         admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin_workers, "GET")
         self.assertEqual(admin_workers.status, HTTPStatus.OK)
-        self.assertEqual(admin_workers.payload["workers"], [])
+        self.assertEqual(admin_workers.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["status"], "pending")
+
+        uninstall_failed = RouteHarness(
+            f"/worker/commands/{uninstall_command['id']}/status",
+            {"worker_id": worker_id, "status": "failed", "error": "watcher cleanup failed"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(uninstall_failed, "POST")
+        self.assertEqual(uninstall_failed.status, HTTPStatus.OK)
+        self.assertIsNone(db.get_worker(worker_id)["deleted_at"])
+
+        admin_workers_after_failure = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(admin_workers_after_failure, "GET")
+        self.assertEqual(admin_workers_after_failure.status, HTTPStatus.OK)
+        self.assertEqual(admin_workers_after_failure.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(admin_workers_after_failure.payload["workers"][0]["latest_command"]["status"], "failed")
 
     def test_worker_can_unregister_itself_from_registry(self) -> None:
         payload, token = self.create_worker()

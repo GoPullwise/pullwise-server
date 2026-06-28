@@ -34,10 +34,43 @@ REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
 REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
 REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
-REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS = {
-    "maxRepro": 0,
-    "minScoreForRepro": 8,
-    "requireRedGreen": False,
+REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS_BY_PLAN = {
+    "free": {
+        "mode": "fast",
+        "scanMode": "full-cached",
+        "maxRepro": 4,
+        "minScoreForRepro": 8,
+        "requireRedGreen": False,
+        "finderMaxTurnsPerScan": 1,
+        "simpleMaxDiscoveryTurns": 10,
+        "simpleMaxBatchFiles": 40,
+        "simpleMaxBatchBytes": 500_000,
+        "maxCandidatesPerUnit": 1,
+    },
+    "pro": {
+        "mode": "standard",
+        "scanMode": "full-cached",
+        "maxRepro": 8,
+        "minScoreForRepro": 8,
+        "requireRedGreen": False,
+        "finderMaxTurnsPerScan": 2,
+        "simpleMaxDiscoveryTurns": 20,
+        "simpleMaxBatchFiles": 80,
+        "simpleMaxBatchBytes": 1_000_000,
+        "maxCandidatesPerUnit": 1,
+    },
+    "max": {
+        "mode": "standard",
+        "scanMode": "full-cached",
+        "maxRepro": 12,
+        "minScoreForRepro": 8,
+        "requireRedGreen": False,
+        "finderMaxTurnsPerScan": 3,
+        "simpleMaxDiscoveryTurns": 32,
+        "simpleMaxBatchFiles": 100,
+        "simpleMaxBatchBytes": 1_250_000,
+        "maxCandidatesPerUnit": 2,
+    },
 }
 REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
 REVIEW_AGENT_CONFIG_STATE_KEY = "review_agent_config"
@@ -94,6 +127,16 @@ def clean_review_agent_config_int(value: object, default: int, *, minimum: int, 
     return max(minimum, min(maximum, number))
 
 
+def clean_review_agent_graph_mode(value: object, default: str) -> str:
+    mode = clean_review_agent_config_text(value).lower()
+    return mode if mode in {"fast", "standard", "deep"} else default
+
+
+def clean_review_agent_graph_scan_mode(value: object, default: str) -> str:
+    mode = clean_review_agent_config_text(value).lower()
+    return mode if mode in {"full-cached", "full-strict"} else default
+
+
 def clean_review_agent_provider_required(value: object, *, strict: bool = True) -> str:
     provider = clean_review_agent_provider(value)
     if provider:
@@ -101,6 +144,11 @@ def clean_review_agent_provider_required(value: object, *, strict: bool = True) 
     if strict:
         raise ValueError("provider must be codex.")
     return "codex"
+
+
+def default_review_agent_graph_verified_config(plan: str) -> dict:
+    normalized_plan = normalize_plan(plan, default="free")
+    return copy.deepcopy(REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS_BY_PLAN[normalized_plan])
 
 
 def default_review_agent_plan_config(plan: str) -> dict:
@@ -114,7 +162,7 @@ def default_review_agent_plan_config(plan: str) -> dict:
             "model": REVIEW_CODEX_MODEL_DEFAULT,
             "reasoningEffort": effort,
         },
-        "graphVerified": copy.deepcopy(REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS),
+        "graphVerified": default_review_agent_graph_verified_config(normalized_plan),
     }
 
 
@@ -145,6 +193,8 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
 def normalize_review_agent_graph_verified_config(value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
+    result["mode"] = clean_review_agent_graph_mode(source.get("mode"), str(result.get("mode") or "standard"))
+    result["scanMode"] = clean_review_agent_graph_scan_mode(source.get("scanMode"), str(result.get("scanMode") or "full-cached"))
     result["maxRepro"] = clean_review_agent_config_int(
         source.get("maxRepro"),
         int(result.get("maxRepro") or 0),
@@ -159,6 +209,36 @@ def normalize_review_agent_graph_verified_config(value: object, defaults: dict) 
     )
     if "requireRedGreen" in source:
         result["requireRedGreen"] = source.get("requireRedGreen") is True
+    result["finderMaxTurnsPerScan"] = clean_review_agent_config_int(
+        source.get("finderMaxTurnsPerScan"),
+        int(result.get("finderMaxTurnsPerScan") or 3),
+        minimum=1,
+        maximum=16,
+    )
+    result["simpleMaxDiscoveryTurns"] = clean_review_agent_config_int(
+        source.get("simpleMaxDiscoveryTurns"),
+        int(result.get("simpleMaxDiscoveryTurns") or 20),
+        minimum=1,
+        maximum=64,
+    )
+    result["simpleMaxBatchFiles"] = clean_review_agent_config_int(
+        source.get("simpleMaxBatchFiles"),
+        int(result.get("simpleMaxBatchFiles") or 80),
+        minimum=10,
+        maximum=400,
+    )
+    result["simpleMaxBatchBytes"] = clean_review_agent_config_int(
+        source.get("simpleMaxBatchBytes"),
+        int(result.get("simpleMaxBatchBytes") or 1_000_000),
+        minimum=100_000,
+        maximum=5_000_000,
+    )
+    result["maxCandidatesPerUnit"] = clean_review_agent_config_int(
+        source.get("maxCandidatesPerUnit"),
+        int(result.get("maxCandidatesPerUnit") or 1),
+        minimum=1,
+        maximum=4,
+    )
     return result
 
 
@@ -217,11 +297,7 @@ def review_agent_config(plan: str) -> dict:
             "model": codex_config["model"],
             "reasoningEffort": codex_config["reasoningEffort"],
         },
-        "graphVerified": {
-            "maxRepro": configured["graphVerified"]["maxRepro"],
-            "minScoreForRepro": configured["graphVerified"]["minScoreForRepro"],
-            "requireRedGreen": configured["graphVerified"]["requireRedGreen"] is True,
-        },
+        "graphVerified": copy.deepcopy(configured["graphVerified"]),
     }
 
 

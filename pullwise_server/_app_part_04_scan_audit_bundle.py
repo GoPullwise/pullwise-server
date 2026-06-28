@@ -625,6 +625,65 @@ def public_scan_compact_text_list(value: object, *, limit: int = 8, max_length: 
     return items
 
 
+GRAPH_VERIFIED_METADATA_BLOCKED_KEY_PARTS = (
+    "auth",
+    "credential",
+    "internal",
+    "password",
+    "private",
+    "prompt",
+    "raw",
+    "secret",
+    "token",
+)
+
+
+def public_graph_verified_metadata_key(value: object) -> str:
+    key = public_scan_compact_text(value, max_length=80)
+    lowered = key.lower()
+    if not key or any(part in lowered for part in GRAPH_VERIFIED_METADATA_BLOCKED_KEY_PARTS):
+        return ""
+    return key
+
+
+def public_graph_verified_metadata_value(value: object, *, depth: int = 0) -> object:
+    if depth > 4:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        payload = {}
+        for raw_key, raw_item in value.items():
+            key = public_graph_verified_metadata_key(raw_key)
+            if not key:
+                continue
+            item = public_graph_verified_metadata_value(raw_item, depth=depth + 1)
+            if item not in ("", None, [], {}):
+                payload[key] = item
+            if len(payload) >= 80:
+                break
+        return payload
+    if isinstance(value, list):
+        items = []
+        for raw_item in value:
+            item = public_graph_verified_metadata_value(raw_item, depth=depth + 1)
+            if item not in ("", None, [], {}):
+                items.append(item)
+            if len(items) >= 200:
+                break
+        return items
+    return public_scan_compact_text(value, max_length=1000)
+
+
+def public_graph_verified_metadata(value: object) -> object:
+    payload = public_graph_verified_metadata_value(value)
+    return payload if payload not in ("", None, [], {}) else None
+
+
 def public_scan_completion_audit_checks(value: object) -> list[dict]:
     raw_items = value if isinstance(value, list) else []
     checks = []
@@ -1129,6 +1188,13 @@ def public_graph_verified_report(
         final_json = {}
     confirmed_items = public_graph_verified_confirmed_items(final_json.get("confirmed"))
     confirmed = len(confirmed_items)
+    final_json_payload = {
+        "confirmed": confirmed_items,
+    }
+    for metadata_key in ("coverage", "reviewUnits", "review_units"):
+        metadata = public_graph_verified_metadata(final_json.get(metadata_key))
+        if metadata is not None:
+            final_json_payload[metadata_key] = metadata
     payload = {
         "version": public_scan_compact_text(source.get("version"), max_length=64) or "graph-verified-code-review/1",
         "runId": public_scan_compact_text(source.get("runId"), max_length=128),
@@ -1138,10 +1204,12 @@ def public_graph_verified_report(
         "confirmedCount": confirmed,
         "rejectedCount": rejected,
         "blockedCount": blocked,
-        "finalJson": {
-            "confirmed": confirmed_items,
-        },
+        "finalJson": final_json_payload,
     }
+    for metadata_key in ("coverage", "reviewUnits", "review_units"):
+        metadata = public_graph_verified_metadata(source.get(metadata_key))
+        if metadata is not None:
+            payload[metadata_key] = metadata
     if include_markdown:
         final_markdown = review._safe_text_lenient(source.get("finalMarkdown"))[:120000]
         if final_markdown:
@@ -1162,6 +1230,12 @@ def public_graph_verified_report(
             payload.get("finalMarkdown"),
             payload.get("debugMarkdown"),
             payload["finalJson"]["confirmed"],
+            payload.get("coverage"),
+            payload.get("reviewUnits"),
+            payload.get("review_units"),
+            payload["finalJson"].get("coverage"),
+            payload["finalJson"].get("reviewUnits"),
+            payload["finalJson"].get("review_units"),
         ]
     ):
         return {}

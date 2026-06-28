@@ -169,6 +169,42 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         self.assertIn("Confirmed only.", full_report["finalMarkdown"])
         self.assertIn("Rejected candidates: 2", full_report["debugMarkdown"])
 
+    def test_public_graph_verified_report_preserves_coverage_metadata_without_findings(self) -> None:
+        report = app.public_graph_verified_report(
+            {
+                "coverage": {
+                    "scope": "full-repository snapshot",
+                    "reviewUnitCount": 2,
+                    "files": ["pullwise_server/app.py"],
+                    "internal_secret": "must not leak",
+                },
+                "reviewUnits": [
+                    {
+                        "unit_id": "unit-0001",
+                        "area": "server",
+                        "files": [{"path": "pullwise_server/app.py", "line_count": 120}],
+                        "token": "must not leak",
+                    }
+                ],
+                "finalJson": {
+                    "confirmed": [],
+                    "coverage": {"reviewedFiles": 1},
+                    "reviewUnits": [{"unit_id": "unit-0001", "status": "covered"}],
+                },
+            }
+        )
+
+        self.assertEqual(report["confirmedCount"], 0)
+        self.assertEqual(report["finalJson"]["confirmed"], [])
+        self.assertEqual(report["coverage"]["scope"], "full-repository snapshot")
+        self.assertEqual(report["coverage"]["reviewUnitCount"], 2)
+        self.assertEqual(report["reviewUnits"][0]["unit_id"], "unit-0001")
+        self.assertEqual(report["finalJson"]["coverage"]["reviewedFiles"], 1)
+        self.assertEqual(report["finalJson"]["reviewUnits"][0]["status"], "covered")
+        self.assertNotIn("must not leak", json.dumps(report))
+        self.assertNotIn("internal_secret", json.dumps(report))
+        self.assertNotIn("token", json.dumps(report).lower())
+
     def test_public_graph_verified_report_accepts_static_proof_items(self) -> None:
         item = self.graph_verified_item()
         steps = [
@@ -1008,6 +1044,80 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(issues_route.payload["items"][0]["id"], "iss_batch_status")
         self.assertEqual(issues_route.payload["items"][0]["status"], "fixed")
         self.assertEqual(issues_route.payload["errors"], [])
+
+    def test_issue_status_update_survives_scan_filtered_history_navigation(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_owner": {
+                "id": "ses_owner",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_history_status",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "done",
+            "userId": "usr_1",
+            "createdAt": 100,
+            "completedAt": 120,
+            "progress": 100,
+            "phase": "report",
+            "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        issue = {
+            "id": "iss_history_status",
+            "userId": "usr_1",
+            "scanId": scan["id"],
+            "jobId": scan["jobId"],
+            "repo": "acme/api",
+            "status": "open",
+            "severity": "high",
+            "category": "Security",
+            "title": "Validate redirects",
+            "file": "src/auth.py",
+            "line": 42,
+            "createdAt": 101,
+        }
+        app.ISSUES = [dict(issue)]
+        db.upsert_issue(dict(issue))
+
+        update_route = RouteHarness(
+            "/issues/iss_history_status/status",
+            {
+                "status": "fixed",
+                "scanId": scan["id"],
+                "jobId": scan["jobId"],
+                "repo": "acme/api",
+                "file": "src/auth.py",
+                "line": 42,
+                "title": "Validate redirects",
+                "createdAt": 101,
+            },
+            headers={"Cookie": "pw_session=ses_owner"},
+        )
+        app.PullwiseHandler.route(update_route, "PATCH")
+
+        self.assertEqual(update_route.status, HTTPStatus.OK)
+        self.assertEqual(update_route.payload["status"], "fixed")
+        self.assertEqual(app.ISSUES[0]["status"], "fixed")
+
+        db.delete_issues_for_scan(scan["id"], user_id="usr_1", job_id=scan["jobId"])
+        issues_route = RouteHarness(
+            "/issues?scanId=sc_history_status&status=all",
+            headers={"Cookie": "pw_session=ses_owner"},
+        )
+        app.PullwiseHandler.route(issues_route, "GET")
+
+        self.assertEqual(issues_route.status, HTTPStatus.OK)
+        self.assertEqual(issues_route.payload["total"], 1)
+        self.assertEqual(issues_route.payload["items"][0]["id"], "iss_history_status")
+        self.assertEqual(issues_route.payload["items"][0]["status"], "fixed")
 
     def audit_bundle_cache_fixture(self, *, issue_title: str = "Cached issue") -> dict:
         timestamp = app.now()
@@ -2880,9 +2990,22 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "confirmedCount": 1,
                     "rejectedCount": 2,
                     "blockedCount": 0,
+                    "coverage": {
+                        "scope": "full-repository snapshot",
+                        "reviewUnitCount": 1,
+                    },
+                    "reviewUnits": [
+                        {
+                            "unit_id": "unit-0001",
+                            "area": "server",
+                            "files": [{"path": "src/app.py", "line_count": 20}],
+                        }
+                    ],
                     "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
                     "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
                     "finalJson": {
+                        "coverage": {"reviewedFiles": 1},
+                        "reviewUnits": [{"unit_id": "unit-0001", "status": "covered"}],
                         "confirmed": [
                             {
                                 "candidate": {
@@ -3012,10 +3135,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(stored_report["runId"], "gv_run_1")
         self.assertEqual(stored_report["confirmedCount"], 1)
+        self.assertEqual(stored_report["coverage"]["reviewUnitCount"], 1)
+        self.assertEqual(stored_report["reviewUnits"][0]["unit_id"], "unit-0001")
+        self.assertEqual(stored_report["finalJson"]["coverage"]["reviewedFiles"], 1)
         self.assertEqual(stored_report["finalMarkdown"], "# Graph-Verified Code Review Report\n\nConfirmed only.")
         self.assertEqual(stored_report["finalJson"]["confirmed"][0]["candidate"]["issue_id"], "issue-confirmed")
         self.assertEqual(public_report["runId"], "gv_run_1")
         self.assertEqual(public_report["confirmedCount"], 1)
+        self.assertEqual(public_report["coverage"]["scope"], "full-repository snapshot")
+        self.assertEqual(public_report["finalJson"]["reviewUnits"][0]["status"], "covered")
         self.assertEqual(public_report["finalJson"]["confirmed"][0]["verification"]["verdict"], "confirmed")
         self.assertNotIn("finalMarkdown", public_report)
         self.assertNotIn("debugMarkdown", public_report)
@@ -3679,7 +3807,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(claim, "POST")
         self.assertEqual(claim.status, HTTPStatus.OK)
         job = claim.payload["job"]
-        self.assertEqual(job["agentConfig"]["graphVerified"], {"maxRepro": 0, "minScoreForRepro": 8, "requireRedGreen": False})
+        self.assertEqual(
+            job["agentConfig"]["graphVerified"],
+            app.billing.default_review_agent_graph_verified_config("free"),
+        )
 
         progress = RouteHarness(
             f"/worker/jobs/{job['job_id']}/progress",

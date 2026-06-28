@@ -54,6 +54,27 @@ def append_scan_progress_log(scan: dict, entry: dict) -> list[dict]:
     return [*current, entry][-20:]
 
 
+def issue_status_update_has_identity(body: dict) -> bool:
+    return isinstance(body, dict) and any(field in body for field in ISSUE_STATUS_IDENTITY_FIELDS)
+
+
+def issue_matches_status_update_identity(issue: dict | None, issue_id: str, body: dict) -> bool:
+    if not isinstance(issue, dict):
+        return False
+    if public_issue_text(issue.get("id")) != issue_id:
+        return False
+    if not issue_status_update_has_identity(body):
+        return True
+    return issue_status_identity_matches(issue, body)
+
+
+def memory_issue_for_status_update(session: dict, issue_id: str, body: dict) -> dict | None:
+    for issue in user_issues(session):
+        if issue_matches_status_update_identity(issue, issue_id, body):
+            return issue
+    return None
+
+
 class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
@@ -2012,18 +2033,33 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def update_issue_status_for_session(self, session: dict, issue_id: str, body: dict) -> dict:
         if not isinstance(body, dict):
             raise ValueError("Request body must be a JSON object.")
-        issue = db.get_user_issue(session["userId"], issue_id)
+        target_issue_id = public_issue_text(issue_id)
+        scoped_update = issue_status_update_has_identity(body)
+        memory_issue = memory_issue_for_status_update(session, target_issue_id, body)
+        issue = db.get_user_issue(session["userId"], target_issue_id)
+        if issue is not None and scoped_update and not issue_matches_status_update_identity(issue, target_issue_id, body):
+            issue = memory_issue
         if issue is None:
-            issue = find_issue_for_status_update(user_issues(session), issue_id, body)
+            if memory_issue is None:
+                issue = find_issue_for_status_update(user_issues(session), target_issue_id, body)
+            else:
+                issue = memory_issue
         next_status = str(body.get("status") or issue["status"]).strip().lower()
         if next_status not in ISSUE_STATUSES:
             raise ValueError("Issue status must be open, fixed, or snoozed.")
+        updated_at = now()
         issue["status"] = next_status
+        issue["updatedAt"] = updated_at
         feedback_reason, _ = review_user_feedback_reason(body)
         if feedback_reason:
             issue["feedbackReason"] = feedback_reason
         record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
-        db.upsert_issue(issue)
+        stored_issue = db.upsert_issue(issue, timestamp=updated_at) or issue
+        if memory_issue is None:
+            memory_issue = memory_issue_for_status_update(session, target_issue_id, body)
+        if memory_issue is not None and memory_issue is not stored_issue:
+            memory_issue.update(stored_issue)
+        issue = stored_issue
         mark_state_dirty()
         return issue
 
@@ -2263,16 +2299,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             changed_fields={
                 "command": command,
                 "commandId": worker_command.get("id"),
-                **({"deleted": True} if command == "uninstall" else {}),
+                **({"deleteQueued": True} if command == "uninstall" else {}),
             },
         )
         worker = db.get_worker(worker_id, include_deleted=True) or {}
+        response = {
+            "ok": True,
+            "worker": worker_public_payload(worker, admin=True),
+            "command": worker_command_payload(worker_command, admin=True),
+        }
+        if command == "uninstall":
+            response["deleteQueued"] = True
+            response["deleted"] = bool(worker.get("deleted_at"))
         return self.json(
-            {
-                "ok": True,
-                "worker": worker_public_payload(worker, admin=True),
-                "command": worker_command_payload(worker_command, admin=True),
-            },
+            response,
             HTTPStatus.ACCEPTED,
         )
 
@@ -2383,7 +2423,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "delete_worker",
                 worker_id=worker_id,
                 changed_fields={
-                    "deleted": True,
+                    "deleteQueued": True,
                     "command": "uninstall",
                     "commandId": worker_command.get("id"),
                 },
@@ -2392,7 +2432,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 {
                     "worker": worker_public_payload(worker, admin=True),
                     "command": worker_command_payload(worker_command, admin=True),
-                    "deleted": True,
+                    "deleteQueued": True,
+                    "deleted": bool(worker.get("deleted_at")),
                 },
                 HTTPStatus.ACCEPTED,
             )

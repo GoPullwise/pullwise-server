@@ -644,25 +644,50 @@ def reconcile_worker_uninstall_deletes(connection: sqlite3.Connection) -> None:
         """
         UPDATE workers
         SET enabled = 0,
-            deleted_at = COALESCE(
-                deleted_at,
+            disabled_at = COALESCE(
+                disabled_at,
                 (
-                    SELECT MIN(worker_commands.created_at)
+                    SELECT MIN(COALESCE(worker_commands.created_at, worker_commands.updated_at))
                     FROM worker_commands
                     WHERE worker_commands.worker_id = workers.worker_id
                       AND worker_commands.command = 'uninstall'
-                      AND worker_commands.status IN ('pending', 'running')
+                      AND worker_commands.status IN ('pending', 'running', 'succeeded', 'failed')
+                ),
+                strftime('%s', 'now')
+            ),
+            updated_at = strftime('%s', 'now')
+        WHERE EXISTS (
+              SELECT 1
+              FROM worker_commands
+              WHERE worker_commands.worker_id = workers.worker_id
+                AND worker_commands.command = 'uninstall'
+                AND worker_commands.status IN ('pending', 'running', 'succeeded', 'failed')
+          )
+        """
+    )
+    connection.execute(
+        """
+        UPDATE workers
+        SET enabled = 0,
+            deleted_at = COALESCE(
+                deleted_at,
+                (
+                    SELECT MIN(COALESCE(worker_commands.completed_at, worker_commands.updated_at, worker_commands.created_at))
+                    FROM worker_commands
+                    WHERE worker_commands.worker_id = workers.worker_id
+                      AND worker_commands.command = 'uninstall'
+                      AND worker_commands.status = 'succeeded'
                 ),
                 strftime('%s', 'now')
             ),
             disabled_at = COALESCE(
                 disabled_at,
                 (
-                    SELECT MIN(worker_commands.created_at)
+                    SELECT MIN(COALESCE(worker_commands.completed_at, worker_commands.updated_at, worker_commands.created_at))
                     FROM worker_commands
                     WHERE worker_commands.worker_id = workers.worker_id
                       AND worker_commands.command = 'uninstall'
-                      AND worker_commands.status IN ('pending', 'running')
+                      AND worker_commands.status = 'succeeded'
                 ),
                 strftime('%s', 'now')
             ),
@@ -673,7 +698,7 @@ def reconcile_worker_uninstall_deletes(connection: sqlite3.Connection) -> None:
               FROM worker_commands
               WHERE worker_commands.worker_id = workers.worker_id
                 AND worker_commands.command = 'uninstall'
-                AND worker_commands.status IN ('pending', 'running')
+                AND worker_commands.status = 'succeeded'
           )
         """
     )
@@ -1775,29 +1800,16 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                     timestamp,
                 ),
             )
-            if command == "uninstall":
-                connection.execute(
-                    """
-                    UPDATE workers
-                    SET enabled = 0,
-                        deleted_at = COALESCE(deleted_at, ?),
-                        disabled_at = COALESCE(disabled_at, ?),
-                        updated_at = ?
-                    WHERE worker_id = ?
-                    """,
-                    (timestamp, timestamp, timestamp, worker_id),
-                )
-            else:
-                connection.execute(
-                    """
-                    UPDATE workers
-                    SET enabled = 0,
-                        disabled_at = COALESCE(disabled_at, ?),
-                        updated_at = ?
-                    WHERE worker_id = ?
-                    """,
-                    (timestamp, timestamp, worker_id),
-                )
+            connection.execute(
+                """
+                UPDATE workers
+                SET enabled = 0,
+                    disabled_at = COALESCE(disabled_at, ?),
+                    updated_at = ?
+                WHERE worker_id = ?
+                """,
+                (timestamp, timestamp, worker_id),
+            )
             return row_to_dict(connection.execute("SELECT * FROM worker_commands WHERE id = ?", (command_id,)).fetchone())
 
 
@@ -1830,7 +1842,7 @@ def get_latest_worker_command(worker_id: str) -> dict[str, Any] | None:
                 """
                 SELECT * FROM worker_commands
                 WHERE worker_id = ?
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT 1
                 """,
                 (worker_id,),
@@ -1863,7 +1875,7 @@ def latest_worker_commands(worker_ids: list[str] | set[str] | tuple[str, ...]) -
                       ON latest.worker_id = wc.worker_id
                      AND latest.latest_created_at = wc.created_at
                     WHERE wc.worker_id IN ({placeholders})
-                    ORDER BY wc.worker_id ASC, wc.created_at DESC, wc.id DESC
+                    ORDER BY wc.worker_id ASC, wc.created_at DESC, wc.rowid DESC
                     """,
                     (*chunk, *chunk),
                 ).fetchall()

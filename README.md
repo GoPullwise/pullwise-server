@@ -262,7 +262,7 @@ heartbeat or command polling, executes it locally, and reports the result. See
 - `POST /admin/workers/{id}/enable` — enable a disabled worker
 - `POST /admin/workers/{id}/disable` — disable a worker
 - `PATCH /admin/workers/{id}` — update worker metadata
-- `DELETE /admin/workers/{id}` — queue worker uninstall and remove it from admin lists
+- `DELETE /admin/workers/{id}` — queue worker uninstall and keep cleanup status visible until completion
 - `GET /admin/status` — scan system status (admin view)
 
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
