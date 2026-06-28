@@ -506,6 +506,7 @@ def api_docs_payload() -> dict:
         "website": "https://pull-wise.com",
         "contact": "contact@pull-wise.com",
         "subscriptionPlans": {"method": "GET", "href": "/docs/subscription-plans"},
+        "serverConfig": {"method": "GET", "href": "/docs/server-config"},
         "authentication": {
             "type": "apiKey",
             "headers": ["Authorization: Bearer <api_key>", "X-Pullwise-Api-Key: <api_key>"],
@@ -517,19 +518,25 @@ def api_docs_payload() -> dict:
                 "method": "GET",
                 "path": "/docs/subscription-plans",
                 "scope": None,
-                "description": "Read server-configured subscription plan agent settings for public docs.",
+                "description": "Read server-configured subscription plan agent settings, account quotas, repository quotas, and checkout limits for public docs.",
+            },
+            {
+                "method": "GET",
+                "path": "/docs/server-config",
+                "scope": None,
+                "description": "Read public server configuration for docs, including plan limits, scan queue limits, public REST API rate limits, and billing catalog status.",
             },
             {
                 "method": "GET",
                 "path": "/api/v1/repositories",
                 "scope": "repositories:read",
-                "description": "List authorized repositories for the API key, including repoId.",
+                "description": "List repositories authorized for the API key, including repoId, repository quota, and scan action links.",
             },
             {
                 "method": "POST",
                 "path": "/api/v1/repositories/{repoId}/scans",
                 "scope": "scans:write",
-                "description": "Start a scan for an authorized repository.",
+                "description": "Start a scan for an authorized repository. Optional JSON fields are branch, commit SHA, requestId, and idempotencyKey.",
             },
             {
                 "method": "POST",
@@ -541,7 +548,7 @@ def api_docs_payload() -> dict:
                 "method": "GET",
                 "path": "/api/v1/repositories/{repoId}/scans/current",
                 "scope": "scans:read",
-                "description": "Read the latest scan status for the repository.",
+                "description": "Read the latest scan status for the repository. Returns idle when no scan exists.",
             },
             {
                 "method": "GET",
@@ -551,14 +558,15 @@ def api_docs_payload() -> dict:
             },
         ],
         "errors": [
-            {"status": 400, "description": "Malformed JSON, invalid scope, invalid repoId, or invalid request body."},
+            {"status": 400, "description": "Malformed JSON, invalid scope, invalid repoId, invalid commit SHA, unavailable branch, or invalid request body."},
             {"status": 401, "description": "Missing or invalid Pullwise API key."},
             {"status": 403, "description": "API key is valid but lacks the required scope."},
             {"status": 404, "description": "Route not found, repository not authorized, or no active scan exists."},
             {"status": 409, "description": "requestId was reused for a different repository."},
             {"status": 402, "description": "Scan quota is exhausted."},
             {"status": 413, "description": "Request body is too large."},
-            {"status": 429, "description": "Rate limit exceeded when rate limiting is enabled."},
+            {"status": 429, "description": "Rate limit exceeded when rate limiting is enabled. Responses include X-RateLimit-Limit, X-RateLimit-Remaining, and X-RateLimit-Reset headers."},
+            {"status": 502, "description": "Requested branch validation failed against GitHub."},
             {"status": 503, "description": "Review provider is not configured."},
         ],
     }
@@ -607,5 +615,4 @@ def safe_billing_redirect_response(result: dict, label: str, *, require_url: boo
         return payload
     payload["url"] = billing.provider_redirect_url(payload.get("url"), provider, label)
     return payload
-
 
