@@ -119,6 +119,150 @@ def public_scan_progress_logs(value: object) -> list[dict]:
             logs.append(entry)
     return logs[-20:]
 
+
+def public_result_status(value: object) -> str:
+    status = public_issue_text(value).lower()
+    return status if status in {"done", "failed"} else ""
+
+
+def public_result_reading_guide(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    guide = {}
+    for key in ("forUser", "forAgentQuick", "forAgentDeep", "forDebug"):
+        text = public_scan_compact_text(source.get(key), max_length=240)
+        if text:
+            guide[key] = text
+    return guide
+
+
+def public_result_human_report(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    report = {}
+    title = public_scan_compact_text(source.get("title"), max_length=240)
+    if title:
+        report["title"] = title
+    summary_markdown = review._safe_text_lenient(source.get("summaryMarkdown"))[:12000]
+    if summary_markdown:
+        report["summaryMarkdown"] = summary_markdown
+    sections = []
+    raw_sections = source.get("sections") if isinstance(source.get("sections"), list) else []
+    for raw_section in raw_sections:
+        if not isinstance(raw_section, dict):
+            continue
+        section = {}
+        heading = public_scan_compact_text(raw_section.get("heading"), max_length=160)
+        markdown = review._safe_text_lenient(raw_section.get("markdown"))[:12000]
+        if heading:
+            section["heading"] = heading
+        if markdown:
+            section["markdown"] = markdown
+        if section:
+            sections.append(section)
+        if len(sections) >= 20:
+            break
+    if sections:
+        report["sections"] = sections
+    return report
+
+
+def public_result_agent_issue(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    issue = {}
+    issue_id = public_issue_text(source.get("id"))
+    if issue_id:
+        issue["id"] = issue_id
+    severity = public_scan_compact_text(source.get("severity"), max_length=32).lower()
+    if severity in {"critical", "high", "medium", "low", "info"}:
+        issue["severity"] = severity
+    title = public_scan_compact_text(source.get("title"), max_length=240)
+    if title:
+        issue["title"] = title
+    primary_file = public_issue_file(source.get("primaryFile"))
+    if primary_file:
+        issue["primaryFile"] = primary_file
+    primary_line = public_scan_count(source.get("primaryLine"))
+    if primary_line:
+        issue["primaryLine"] = primary_line
+    confidence = public_scan_compact_text(source.get("confidence"), max_length=80)
+    if confidence:
+        issue["confidence"] = confidence
+    tags = public_scan_compact_text_list(source.get("tags"), limit=12, max_length=80)
+    if tags:
+        issue["tags"] = tags
+    read_next = public_scan_compact_text_list(source.get("readNext"), limit=8, max_length=500)
+    if read_next:
+        issue["readNext"] = read_next
+    for key in ("evidencePath", "reproPath", "sourcePath"):
+        text = public_scan_compact_text(source.get(key), max_length=500)
+        if text:
+            issue[key] = text
+    return issue
+
+
+def public_result_agent_action(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    action_type = public_scan_compact_text(source.get("type"), max_length=80)
+    if action_type not in {"inspect_file", "write_fix"}:
+        return {}
+    action = {"type": action_type}
+    target_issue_id = public_issue_text(source.get("targetIssueId"))
+    if target_issue_id:
+        action["targetIssueId"] = target_issue_id
+    path = public_issue_file(source.get("path"))
+    if path:
+        action["path"] = path
+    reason = public_scan_compact_text(source.get("reason"), max_length=240)
+    if reason:
+        action["reason"] = reason
+    return action
+
+
+def public_result_agent_tokens_hint(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    hint = {}
+    for key in ("recommendedEntry", "detailsPath", "debugPath"):
+        text = public_scan_compact_text(source.get(key), max_length=500)
+        if text:
+            hint[key] = text
+    return hint
+
+
+def public_result_agent_report(value: object) -> dict:
+    source = value if isinstance(value, dict) else {}
+    report = {}
+    schema_version = public_scan_compact_text(source.get("schemaVersion"), max_length=80)
+    report["schemaVersion"] = schema_version or "pullwise-agent-result/1"
+    one_line = public_scan_compact_text(source.get("oneLine"), max_length=800)
+    if one_line:
+        report["oneLine"] = one_line
+    status = public_result_status(source.get("status"))
+    if status:
+        report["status"] = status
+    raw_issues = source.get("issueIndex") if isinstance(source.get("issueIndex"), list) else []
+    issue_index = []
+    for raw_issue in raw_issues:
+        issue = public_result_agent_issue(raw_issue)
+        if issue:
+            issue_index.append(issue)
+        if len(issue_index) >= 50:
+            break
+    report["issueIndex"] = issue_index
+    raw_actions = source.get("nextActions") if isinstance(source.get("nextActions"), list) else []
+    actions = []
+    for raw_action in raw_actions:
+        action = public_result_agent_action(raw_action)
+        if action:
+            actions.append(action)
+        if len(actions) >= 20:
+            break
+    if actions:
+        report["nextActions"] = actions
+    tokens_hint = public_result_agent_tokens_hint(source.get("tokensHint"))
+    if tokens_hint:
+        report["tokensHint"] = tokens_hint
+    return report if one_line or issue_index or actions or tokens_hint else {}
+
+
 def scan_payload(scan: dict) -> dict:
     payload = {
         "id": public_issue_text(scan.get("id")),
@@ -153,6 +297,15 @@ def scan_payload(scan: dict) -> dict:
     )
     if graph_verified_report:
         payload["graphVerifiedReport"] = graph_verified_report
+    human_report = public_result_human_report(scan.get("humanReport"))
+    if human_report:
+        payload["humanReport"] = human_report
+    agent_report = public_result_agent_report(scan.get("agentReport"))
+    if agent_report:
+        payload["agentReport"] = agent_report
+    reading_guide = public_result_reading_guide(scan.get("readingGuide"))
+    if reading_guide:
+        payload["readingGuide"] = reading_guide
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0

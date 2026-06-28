@@ -129,6 +129,61 @@ class ScanRecoveryTest(unittest.TestCase):
         app.STATE_DIRTY = False
         app.ISSUES = []
 
+    def seed_reserved_scan(
+        self,
+        *,
+        scan_id: str,
+        request_id: str,
+        status: str = "queued",
+        phase: str | None = None,
+        timestamp: int | None = None,
+    ) -> tuple[dict, dict, dict]:
+        timestamp = timestamp or app.now()
+        user = {"id": "usr_1", "email": "dev@example.com", "providers": []}
+        app.USERS = {user["id"]: user}
+        repository = db.upsert_repository(
+            {
+                "id": db.repository_id_for_github_repo("123"),
+                "github_repo_id": "123",
+                "full_name": "acme/api",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "private": True,
+                "clone_url": "https://github.com/acme/api.git",
+            }
+        )
+        quota_result = app.quota.reserve_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id=scan_id,
+            request_id=request_id,
+            timestamp=timestamp,
+        )
+        scan = {
+            "id": scan_id,
+            "repo": repository["full_name"],
+            "branch": "main",
+            "commit": "pending",
+            "status": status,
+            "userId": user["id"],
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": phase,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": request_id,
+            "quotaBucketIds": quota_result["bucketIds"],
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+            "quotaState": "reserved",
+            "quotaReservedAt": timestamp,
+        }
+        app.SCANS = [scan]
+        return user, repository, scan
+
     def test_recover_interrupted_scans_requeues_running_scans(self) -> None:
         app.SCANS = [
             {
@@ -711,6 +766,114 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertEqual(app.SCANS[0]["error"], "Scan exceeded the configured retry attempts before completing.")
         self.assertEqual(app.SCANS[0]["recoveryReason"], "retry_attempts_exhausted")
+
+    def test_recover_interrupted_scans_releases_reserved_quota_for_exhausted_job_before_ai(self) -> None:
+        timestamp = app.now()
+        user, repository, scan = self.seed_reserved_scan(
+            scan_id="sc_reserved_exhausted",
+            request_id="req_reserved_exhausted",
+            timestamp=timestamp,
+        )
+        job = db.create_scan_job(
+            {
+                "job_id": "job_reserved_exhausted",
+                "scan_id": scan["id"],
+                "repo": repository["full_name"],
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 180,
+                "user_id": user["id"],
+                "repo_id": repository["id"],
+                "github_repo_id": repository["github_repo_id"],
+                "max_attempts": 1,
+            }
+        )
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            with connection:
+                connection.execute("UPDATE scan_jobs SET attempt = 1 WHERE job_id = ?", (job["job_id"],))
+
+        recovered = app.recover_interrupted_scans()
+
+        usage = app.quota.quota_payload_for_user(user)
+        self.assertEqual(recovered, 1)
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "failed")
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["quotaState"], "released")
+        self.assertEqual(app.SCANS[0]["quotaReleaseReason"], "retry_attempts_exhausted")
+        self.assertEqual(usage["used"], 0)
+        self.assertEqual(usage["reserved"], 0)
+        self.assertEqual(app.SCANS[0]["billingUsage"]["reserved"], 0)
+
+    def test_recover_interrupted_scans_releases_historical_failed_reserved_scan_without_queue(self) -> None:
+        timestamp = app.now()
+        user, _repository, scan = self.seed_reserved_scan(
+            scan_id="sc_reserved_failed_history",
+            request_id="req_reserved_failed_history",
+            status="failed",
+            timestamp=timestamp,
+        )
+        scan["error"] = "worker_job_startup_lost"
+
+        recovered = app.recover_interrupted_scans()
+
+        usage = app.quota.quota_payload_for_user(user)
+        self.assertEqual(recovered, 1)
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["quotaState"], "released")
+        self.assertEqual(app.SCANS[0]["quotaReleaseReason"], "worker_job_startup_lost")
+        self.assertEqual(usage["used"], 0)
+        self.assertEqual(usage["reserved"], 0)
+
+    def test_recover_interrupted_scans_consumes_reserved_quota_for_failed_job_after_ai_started(self) -> None:
+        timestamp = app.now()
+        user, repository, scan = self.seed_reserved_scan(
+            scan_id="sc_reserved_ai_failed",
+            request_id="req_reserved_ai_failed",
+            status="running",
+            phase="ai",
+            timestamp=timestamp,
+        )
+        job = db.create_scan_job(
+            {
+                "job_id": "job_reserved_ai_failed",
+                "scan_id": scan["id"],
+                "repo": repository["full_name"],
+                "branch": "main",
+                "commit": "pending",
+                "status": "failed",
+                "created_at": timestamp - 180,
+                "user_id": user["id"],
+                "repo_id": repository["id"],
+                "github_repo_id": repository["github_repo_id"],
+                "max_attempts": 1,
+            }
+        )
+        scan["jobId"] = job["job_id"]
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET progress_phase = 'ai',
+                        progress = 60,
+                        completed_at = ?,
+                        error = 'timed_out'
+                    WHERE job_id = ?
+                    """,
+                    (timestamp, job["job_id"]),
+                )
+
+        recovered = app.recover_interrupted_scans()
+
+        usage = app.quota.quota_payload_for_user(user)
+        self.assertEqual(recovered, 1)
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["quotaState"], "consumed")
+        self.assertEqual(usage["used"], 1)
+        self.assertEqual(usage["reserved"], 0)
+        self.assertEqual(app.SCANS[0]["billingUsage"]["used"], 1)
+        self.assertNotIn("quotaReleaseReason", app.SCANS[0])
 
     def test_recover_interrupted_scans_requeues_job_when_worker_heartbeat_times_out(self) -> None:
         timestamp = app.now()

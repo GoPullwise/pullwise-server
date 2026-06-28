@@ -426,6 +426,9 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
             normalized_findings.append(issue)
     summary = public_scan_issue_counts(summarize_findings(normalized_findings))
     effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
+    human_report = public_result_human_report(body.get("humanReport"))
+    agent_report = public_result_agent_report(body.get("agentReport"))
+    reading_guide = public_result_reading_guide(body.get("readingGuide"))
     error_code = worker_result_error_code(body)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     return {
@@ -437,6 +440,9 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         "normalized_findings": normalized_findings,
         "summary": summary,
         "effective_agent_config": effective_agent_config,
+        "human_report": human_report,
+        "agent_report": agent_report,
+        "reading_guide": reading_guide,
         "error_code": error_code,
         "completed_at": completed_at,
         "duration_ms": public_scan_count(body.get("duration_ms")),
@@ -452,6 +458,9 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
     normalized_findings = prepared.get("normalized_findings") if isinstance(prepared.get("normalized_findings"), list) else []
     summary = public_scan_issue_counts(prepared.get("summary"))
     effective_agent_config = public_scan_agent_config(prepared.get("effective_agent_config"))
+    human_report = public_result_human_report(prepared.get("human_report"))
+    agent_report = public_result_agent_report(prepared.get("agent_report"))
+    reading_guide = public_result_reading_guide(prepared.get("reading_guide"))
     error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
     graph_verified_report = public_graph_verified_report(
         prepared.get("graph_verified_report"),
@@ -496,6 +505,18 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["preflight"] = preflight
         if effective_agent_config:
             scan["effectiveAgentConfig"] = effective_agent_config
+        if human_report:
+            scan["humanReport"] = human_report
+        else:
+            scan.pop("humanReport", None)
+        if agent_report:
+            scan["agentReport"] = agent_report
+        else:
+            scan.pop("agentReport", None)
+        if reading_guide:
+            scan["readingGuide"] = reading_guide
+        else:
+            scan.pop("readingGuide", None)
         scan["graphVerifiedReport"] = graph_verified_report
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status == "done":

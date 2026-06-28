@@ -3117,6 +3117,9 @@ def scan_job_result_summary_payload(payload: dict[str, Any], *, artifact_id: str
             "summary",
             "preflight",
             "effectiveAgentConfig",
+            "humanReport",
+            "agentReport",
+            "readingGuide",
         ):
             if key in payload:
                 summary[key] = payload.get(key)

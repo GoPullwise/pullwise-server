@@ -843,6 +843,9 @@ def recover_interrupted_scans() -> int:
         recovered += reconcile_completed_scan_job_results_locked()
         recovered += apply_recovered_scan_jobs_locked(recovered_jobs)
         for scan in SCANS:
+            if reconcile_terminal_reserved_scan_quota_locked(scan):
+                recovered += 1
+        for scan in SCANS:
             if scan.get("status") != "running":
                 continue
             job_id = public_issue_text(scan.get("jobId"))
@@ -960,6 +963,50 @@ def reconcile_completed_scan_job_results_locked() -> int:
     return reconciled
 
 
+def reconcile_terminal_scan_quota_locked(scan: dict, job: dict, *, status: str, reason: str = "") -> None:
+    normalized_status = public_issue_text(status).lower()
+    if normalized_status == "done" or (
+        normalized_status == "failed" and public_scan_phase(job.get("progress_phase")) in {"ai", "report"}
+    ):
+        trigger = public_issue_text(reason) or f"terminal_{normalized_status}"
+        finalize_scan_quota_for_job(job, trigger=trigger)
+        return
+    if normalized_status in {"failed", "cancelled"}:
+        release_scan_quota_reservation_for_scan(scan, reason=public_issue_text(reason) or f"scan_{normalized_status}")
+
+
+def terminal_scan_quota_job(scan: dict, job: dict | None = None) -> dict:
+    if isinstance(job, dict) and job:
+        return job
+    return {
+        "scan_id": public_issue_text(scan.get("id")),
+        "user_id": public_issue_text(scan.get("userId")),
+        "repo_id": public_issue_text(scan.get("repoId")),
+        "progress_phase": public_scan_phase(scan.get("phase")),
+    }
+
+
+def reconcile_terminal_reserved_scan_quota_locked(scan: dict) -> bool:
+    if public_issue_text(scan.get("quotaState")) != "reserved":
+        return False
+    status = public_issue_text(scan.get("status")).lower()
+    if status not in {"done", "failed", "cancelled"}:
+        return False
+    scan_id = public_issue_text(scan.get("id"))
+    job_id = public_issue_text(scan.get("jobId"))
+    job = db.get_scan_job(job_id) if job_id else None
+    if not job and scan_id:
+        job = db.get_scan_job_for_scan(scan_id)
+    before = json.dumps(db.to_jsonable(scan), sort_keys=True)
+    reason = public_issue_text(scan.get("recoveryReason")) or clean_scan_error(scan.get("error")) or status
+    reconcile_terminal_scan_quota_locked(scan, terminal_scan_quota_job(scan, job), status=status, reason=reason)
+    changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
+    if changed:
+        db.upsert_scan(scan)
+        mark_state_dirty()
+    return changed
+
+
 def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
     status = public_issue_text(job.get("status")).lower()
     if status not in {"done", "failed", "cancelled"}:
@@ -981,6 +1028,7 @@ def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
     else:
         update["phase"] = None
     scan.update(update)
+    reconcile_terminal_scan_quota_locked(scan, job, status=status, reason=clean_scan_error(job.get("error")) or status)
     changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
     if changed:
         db.upsert_scan(scan)
@@ -1149,6 +1197,7 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
                     "retry": scan_retry_summary_for_job(stored_job or job, reason=reason),
                 }
             )
+            reconcile_terminal_scan_quota_locked(scan, stored_job or job, status="failed", reason=reason)
         else:
             continue
         db.upsert_scan(scan)

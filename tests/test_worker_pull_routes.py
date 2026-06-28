@@ -2934,6 +2934,65 @@ class WorkerPullRoutesTest(unittest.TestCase):
                         ]
                     },
                 },
+                "humanReport": {
+                    "title": "Confirmed GraphVerified issues",
+                    "summaryMarkdown": "GraphVerified review completed with 1 confirmed finding.",
+                    "sections": [
+                        {
+                            "heading": "High findings",
+                            "markdown": "- Confirmed GraphVerified issue `src/app.py:10`",
+                            "internal": "must not leak",
+                        }
+                    ],
+                    "internal": "must not leak",
+                },
+                "agentReport": {
+                    "schemaVersion": "pullwise-agent-result/1",
+                    "oneLine": "1 confirmed finding.",
+                    "status": "done",
+                    "issueIndex": [
+                        {
+                            "id": "issue-confirmed",
+                            "severity": "high",
+                            "title": "Confirmed GraphVerified issue",
+                            "primaryFile": "src/app.py",
+                            "primaryLine": 10,
+                            "confidence": "confirmed",
+                            "tags": ["graph-verified", "high", "quality"],
+                            "readNext": [
+                                "graphVerifiedReport.finalJson.confirmed[0]",
+                                "agentReport.issueIndex[0]",
+                            ],
+                            "evidencePath": "graphVerifiedReport.finalJson.confirmed[0].candidate.evidence",
+                            "reproPath": "graphVerifiedReport.finalJson.confirmed[0].repro",
+                            "sourcePath": "graphVerifiedReport.finalJson.confirmed[0]",
+                            "internal": "must not leak",
+                        }
+                    ],
+                    "nextActions": [
+                        {
+                            "type": "inspect_file",
+                            "path": "src/app.py",
+                            "targetIssueId": "issue-confirmed",
+                            "reason": "Primary evidence for confirmed finding",
+                        },
+                        {"type": "internal_action", "path": "secret.txt"},
+                    ],
+                    "tokensHint": {
+                        "recommendedEntry": "agentReport.issueIndex",
+                        "detailsPath": "graphVerifiedReport.finalJson.confirmed",
+                        "debugPath": "graphVerifiedReport.debugMarkdown",
+                        "internal": "must not leak",
+                    },
+                    "internal": "must not leak",
+                },
+                "readingGuide": {
+                    "forUser": "humanReport.summaryMarkdown",
+                    "forAgentQuick": "agentReport.issueIndex",
+                    "forAgentDeep": "graphVerifiedReport.finalJson.confirmed",
+                    "forDebug": "graphVerifiedReport.debugMarkdown",
+                    "forInternal": "must not leak",
+                },
                 "graph_verified_report": {
                     "runId": "snake_case_must_not_win",
                     "confirmedCount": 99,
@@ -2949,6 +3008,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         stored_report = app.SCANS[0]["graphVerifiedReport"]
         public_payload = app.scan_payload(app.SCANS[0])
         public_report = public_payload["graphVerifiedReport"]
+        public_agent_report = public_payload["agentReport"]
 
         self.assertEqual(stored_report["runId"], "gv_run_1")
         self.assertEqual(stored_report["confirmedCount"], 1)
@@ -2959,6 +3019,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(public_report["finalJson"]["confirmed"][0]["verification"]["verdict"], "confirmed")
         self.assertNotIn("finalMarkdown", public_report)
         self.assertNotIn("debugMarkdown", public_report)
+        self.assertEqual(app.SCANS[0]["humanReport"]["title"], "Confirmed GraphVerified issues")
+        self.assertEqual(public_payload["humanReport"]["sections"][0]["heading"], "High findings")
+        self.assertEqual(public_agent_report["schemaVersion"], "pullwise-agent-result/1")
+        self.assertEqual(public_agent_report["issueIndex"][0]["primaryFile"], "src/app.py")
+        self.assertEqual(public_agent_report["issueIndex"][0]["primaryLine"], 10)
+        self.assertEqual(public_agent_report["nextActions"][0]["type"], "inspect_file")
+        self.assertEqual(public_agent_report["tokensHint"]["recommendedEntry"], "agentReport.issueIndex")
+        self.assertEqual(public_payload["readingGuide"]["forAgentQuick"], "agentReport.issueIndex")
         self.assertEqual(len(app.ISSUES), 1)
         self.assertTrue(app.ISSUES[0]["graphVerified"])
         self.assertEqual(app.ISSUES[0]["candidateId"], "candidate-confirmed")
@@ -2967,6 +3035,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertNotIn("graph_verified_report", app.SCANS[0])
         self.assertNotIn("graph_verified_report", public_payload)
         self.assertNotIn("snake_case_must_not_win", json.dumps(public_payload))
+        self.assertNotIn("must not leak", json.dumps(public_payload))
 
         app.SCANS[0]["repositoryGraph"] = {"version": "repository-graph/legacy"}
         app.SCANS[0]["semanticGraph"] = {"version": "semantic-code-graph/legacy"}
