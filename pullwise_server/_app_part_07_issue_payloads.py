@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
+from . import alerts
 from . import _app_part_06_worker_admin as _previous_app_part
 from ._app_imports import import_compat_globals as _import_compat_globals
 
@@ -49,8 +50,12 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         "degradedWorkerCount": len(degraded),
         "offlineWorkerCount": len(offline),
     }
+    alert_workers = workers
     if admin:
-        payload["workers"] = [worker_public_payload(worker, admin=True) for worker in worker_records]
+        admin_workers = [worker_public_payload(worker, admin=True) for worker in worker_records]
+        payload["workers"] = admin_workers
+        alert_workers = admin_workers
+    alerts.sync_scan_system_alerts(payload, alert_workers)
     SCAN_SYSTEM_STATUS_CACHE[cache_key] = {
         "databasePath": current_db_path,
         "expiresAt": current_time + SCAN_SYSTEM_STATUS_CACHE_SECONDS,

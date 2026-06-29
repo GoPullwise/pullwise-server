@@ -181,3 +181,54 @@ def _worker_alert(worker):
             'status': status,
         }
     }
+
+
+def _sync_alerts(alerts, clear_prefixes):
+    with _LOCK:
+        active = _load_active()
+        changed = False
+        for key in list(active):
+            if any(key.startswith(prefix) for prefix in clear_prefixes) and key not in alerts:
+                active.pop(key, None)
+                changed = True
+        current_time = int(time.time())
+        for key, alert in alerts.items():
+            if key in active:
+                continue
+            attempted = send_alert_email(alert.get('subject'), alert.get('body'))
+            if not attempted:
+                continue
+            active[key] = {
+                'sentAt': current_time,
+                'subject': _clean_text(alert.get('subject'), 300),
+                'kind': _clean_text(alert.get('kind'), 60),
+                'status': _clean_text(alert.get('status'), 60),
+            }
+            changed = True
+        if changed:
+            _save_active(active)
+
+
+def sync_scan_system_alerts(payload, workers):
+    try:
+        alerts = _system_alert(payload if isinstance(payload, dict) else {})
+        for worker in workers or []:
+            alerts.update(_worker_alert(worker if isinstance(worker, dict) else {}))
+        _sync_alerts(alerts, ['server:scan-system:', 'worker:'])
+    except Exception as exc:
+        logger.exception('scan system alert sync failed: %s', exc)
+
+
+def sync_worker_alert(worker):
+    try:
+        if not isinstance(worker, dict):
+            return
+        worker_id = _clean_text(worker.get('worker_id') or worker.get('id'), 128)
+        if not worker_id:
+            return
+        _sync_alerts(_worker_alert(worker), [f'worker:{worker_id}:'])
+    except Exception as exc:
+        logger.exception('worker alert sync failed: %s', exc)
+
+
+__all__ = ['send_alert_email', 'sync_scan_system_alerts', 'sync_worker_alert']

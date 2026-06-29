@@ -69,6 +69,7 @@ def reset_state() -> None:
     app.BILLING_PENDING_UPDATES = []
     app.LATEST_WORKER_RELEASE_CACHE.update({"version": "", "checked_at": 0.0})
     app.LOG_STREAM_SESSIONS.clear()
+    app.SCAN_SYSTEM_STATUS_CACHE.clear()
     app.STATE_LOADED = True
     app.STATE_DIRTY = False
 
@@ -496,6 +497,88 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         self.assertEqual(heartbeat.payload["logSession"]["id"], session_id)
+
+    def test_worker_alert_email_is_sent_once_per_active_problem(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        headers = {"Authorization": "Bearer " + token}
+        degraded = {
+            "worker_id": worker_id,
+            "doctor_status": "degraded",
+            "codex_ready": False,
+            "readyProviders": [],
+            "last_error": "codex_quota_exhausted: credits exhausted",
+        }
+        ready = {
+            "worker_id": worker_id,
+            "doctor_status": "ok",
+            "codex_ready": True,
+            "readyProviders": ["codex"],
+        }
+
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            first = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(first, "POST")
+            second = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(second, "POST")
+
+            self.assertEqual(first.status, HTTPStatus.OK)
+            self.assertEqual(second.status, HTTPStatus.OK)
+            self.assertEqual(send_alert.call_count, 1)
+            state = db.load_state_item("alert_notifications")
+            self.assertIn(f"worker:{worker_id}:degraded", state["active"])
+
+            recovered = RouteHarness("/worker/heartbeat", ready, headers=headers)
+            app.PullwiseHandler.route(recovered, "POST")
+            self.assertEqual(recovered.status, HTTPStatus.OK)
+            state = db.load_state_item("alert_notifications")
+            self.assertNotIn(f"worker:{worker_id}:degraded", state.get("active", {}))
+
+            repeated = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(repeated, "POST")
+            self.assertEqual(repeated.status, HTTPStatus.OK)
+            self.assertEqual(send_alert.call_count, 2)
+
+
+    def test_scan_system_alert_email_is_sent_once_per_active_problem(self) -> None:
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            first = RouteHarness("/status/system")
+            app.PullwiseHandler.route(first, "GET")
+            second = RouteHarness("/status/system")
+            app.PullwiseHandler.route(second, "GET")
+
+            self.assertEqual(first.status, HTTPStatus.OK)
+            self.assertEqual(second.status, HTTPStatus.OK)
+            self.assertEqual(first.payload["scanSystemStatus"], "down")
+            self.assertEqual(send_alert.call_count, 1)
+            state = db.load_state_item("alert_notifications")
+            self.assertIn("server:scan-system:down", state["active"])
+
+            payload, token = self.create_worker()
+            worker_id = payload["worker_id"]
+            ready = {
+                "worker_id": worker_id,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "readyProviders": ["codex"],
+            }
+            heartbeat = RouteHarness(
+                "/worker/heartbeat",
+                ready,
+                headers={"Authorization": "Bearer " + token},
+            )
+            app.PullwiseHandler.route(heartbeat, "POST")
+            app.SCAN_SYSTEM_STATUS_CACHE.clear()
+            recovered = RouteHarness("/status/system")
+            app.PullwiseHandler.route(recovered, "GET")
+
+            self.assertEqual(heartbeat.status, HTTPStatus.OK)
+            self.assertEqual(recovered.status, HTTPStatus.OK)
+            self.assertEqual(recovered.payload["scanSystemStatus"], "ok")
+            state = db.load_state_item("alert_notifications")
+            self.assertNotIn("server:scan-system:down", state.get("active", {}))
+            self.assertEqual(send_alert.call_count, 1)
+
 
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
         handler = RouteHarness(

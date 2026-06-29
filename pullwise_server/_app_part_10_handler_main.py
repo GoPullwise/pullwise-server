@@ -2611,6 +2611,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 lease_seconds=system_config.scan_job_lease_seconds(),
                 timestamp=heartbeat_timestamp,
             )
+        alerts.sync_worker_alert(worker_public_payload(record, admin=True))
         command = db.get_next_worker_command(worker_id)
         return self.json(
             {
