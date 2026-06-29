@@ -1057,7 +1057,6 @@ def hydrate_scan_jobs_for_read(jobs: list[dict]) -> list[dict]:
         if public_issue_text(scan.get("id"))
     }
     job_lookup: dict[tuple[str, str], dict] = {}
-    terminal_job_ids = []
     for job in jobs:
         job_id = public_issue_text(job.get("job_id"))
         scan_id = public_issue_text(job.get("scan_id"))
@@ -1065,13 +1064,6 @@ def hydrate_scan_jobs_for_read(jobs: list[dict]) -> list[dict]:
             job_lookup[("job", job_id)] = job
         if scan_id:
             job_lookup[("scan", scan_id)] = job
-        if job_id and scan_status_from_job_status(job.get("status")) in {"done", "failed"}:
-            terminal_job_ids.append(job_id)
-    result_lookup = {
-        public_issue_text(result.get("job_id")): result
-        for result in db.list_completed_scan_job_results_for_job_ids(terminal_job_ids)
-        if public_issue_text(result.get("job_id"))
-    }
     indexed_memory_scans = {
         scan_id: scan
         for scan_id in scan_ids
@@ -1083,6 +1075,21 @@ def hydrate_scan_jobs_for_read(jobs: list[dict]) -> list[dict]:
             for job in jobs
             if public_issue_text(job.get("scan_id")) in snapshot_lookup
         ]
+    terminal_job_ids = [
+        public_issue_text(job.get("job_id"))
+        for job in jobs
+        if public_issue_text(job.get("job_id"))
+        and scan_status_from_job_status(job.get("status")) in {"done", "failed"}
+        and (
+            public_issue_text(job.get("scan_id")) in indexed_memory_scans
+            or public_issue_text(job.get("scan_id")) not in snapshot_lookup
+        )
+    ]
+    result_lookup = {
+        public_issue_text(result.get("job_id")): result
+        for result in db.list_completed_scan_job_results_for_job_ids(terminal_job_ids)
+        if public_issue_text(result.get("job_id"))
+    }
     with STATE_LOCK:
         hydrated = []
         for job in jobs:

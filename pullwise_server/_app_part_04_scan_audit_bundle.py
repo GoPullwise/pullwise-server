@@ -264,15 +264,16 @@ def public_result_agent_report(value: object) -> dict:
 
 
 def scan_payload(scan: dict) -> dict:
+    status = public_scan_status(scan.get("status"))
     payload = {
         "id": public_issue_text(scan.get("id")),
         "userId": public_issue_text(scan.get("userId")),
         "repo": clean_repository_full_name(scan.get("repo")),
         "branch": clean_github_access_text(scan.get("branch")) or "main",
         "commit": clean_github_access_text(scan.get("commit")) or "pending",
-        "status": public_scan_status(scan.get("status")),
+        "status": status,
         "phase": public_scan_phase(scan.get("phase")),
-        "progress": public_scan_progress(scan.get("progress")),
+        "progress": public_scan_display_progress(status, scan.get("progress")),
         "issues": public_scan_issue_counts(scan.get("issues")),
         "verification": public_scan_verification_counts(scan),
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
@@ -409,6 +410,7 @@ def scan_payload(scan: dict) -> dict:
 
 
 def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
+    status = public_scan_status(scan.get("status"))
     verification_counts = (
         dict(issue_summary.get("counts"))
         if isinstance(issue_summary, dict) and isinstance(issue_summary.get("counts"), dict)
@@ -420,9 +422,9 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
         "repo": clean_repository_full_name(scan.get("repo")),
         "branch": clean_github_access_text(scan.get("branch")) or "main",
         "commit": clean_github_access_text(scan.get("commit")) or "pending",
-        "status": public_scan_status(scan.get("status")),
+        "status": status,
         "phase": public_scan_phase(scan.get("phase")),
-        "progress": public_scan_progress(scan.get("progress")),
+        "progress": public_scan_display_progress(status, scan.get("progress")),
         "issues": public_scan_issue_counts(scan.get("issues")),
         "verification": verification_counts,
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
@@ -572,6 +574,19 @@ def public_scan_progress(value: object) -> float:
     if not math.isfinite(progress):
         return 0
     return min(100, max(0, progress))
+
+
+INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX = 94
+
+
+def public_scan_display_progress(status_value: object, progress_value: object) -> float:
+    status = public_scan_status(status_value)
+    progress = public_scan_progress(progress_value)
+    if status == "done":
+        return 100
+    if status in {"failed", "cancelled", "lost"}:
+        return min(progress, INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
+    return progress
 
 
 def public_scan_count(value: object) -> int:
@@ -1987,18 +2002,45 @@ def scan_issue_summary_index(scans: list[dict]) -> dict[tuple[str, str], dict]:
     return summaries
 
 
-def public_scan_verification_counts(scan: dict) -> dict:
+def scan_issue_records_for_read(scan: dict) -> list[dict]:
     scan_id = public_issue_text(scan.get("id")) if isinstance(scan, dict) else ""
     scan_user_id = public_issue_text(scan.get("userId")) if isinstance(scan, dict) else ""
-    counts = empty_scan_verification_counts()
+    issue_records: list[dict] = []
+    if scan_id and scan_user_id:
+        offset = 0
+        while True:
+            page = db.list_user_issues_page(scan_user_id, scan_id=scan_id, limit=100, offset=offset)
+            items = page.get("items") if isinstance(page, dict) else []
+            if not isinstance(items, list) or not items:
+                break
+            issue_records.extend(issue for issue in items if isinstance(issue, dict))
+            offset += len(items)
+            try:
+                total = int(page.get("total") or 0)
+            except (TypeError, ValueError, OverflowError):
+                total = 0
+            if total <= 0 or len(issue_records) >= total:
+                break
+    if issue_records:
+        return issue_records
     if not scan_id:
-        return counts
+        return []
+    fallback_records = []
     for issue in ISSUES:
+        if not isinstance(issue, dict):
+            continue
         if public_issue_text(issue.get("scanId")) != scan_id:
             continue
         issue_user_id = public_issue_text(issue.get("userId"))
         if scan_user_id and issue_user_id and issue_user_id != scan_user_id:
             continue
+        fallback_records.append(issue)
+    return fallback_records
+
+
+def public_scan_verification_counts(scan: dict) -> dict:
+    counts = empty_scan_verification_counts()
+    for issue in scan_issue_records_for_read(scan):
         status = public_issue_verification_status(issue)
         if status not in counts:
             status = "potential_risk"
@@ -2008,15 +2050,8 @@ def public_scan_verification_counts(scan: dict) -> dict:
 
 def scan_audit_bundle_payload(scan: dict) -> dict:
     public_scan = scan_payload(scan)
-    scan_id = public_issue_text(scan.get("id"))
-    scan_user_id = public_issue_text(scan.get("userId"))
     issue_payloads = []
-    for issue in ISSUES:
-        if public_issue_text(issue.get("scanId")) != scan_id:
-            continue
-        issue_user_id = public_issue_text(issue.get("userId"))
-        if scan_user_id and issue_user_id and issue_user_id != scan_user_id:
-            continue
+    for issue in scan_issue_records_for_read(scan):
         issue_payloads.append(issue_payload(issue))
     reproduction_commands = []
     evidence_items = 0
@@ -2111,17 +2146,7 @@ def audit_bundle_cache_dir() -> str:
 
 
 def audit_bundle_cache_source(scan: dict) -> dict:
-    scan_id = public_issue_text(scan.get("id"))
-    scan_user_id = public_issue_text(scan.get("userId"))
-    issues = []
-    for issue in ISSUES:
-        if public_issue_text(issue.get("scanId")) != scan_id:
-            continue
-        issue_user_id = public_issue_text(issue.get("userId"))
-        if scan_user_id and issue_user_id and issue_user_id != scan_user_id:
-            continue
-        issues.append(issue)
-    return {"scan": scan, "issues": issues}
+    return {"scan": scan, "issues": scan_issue_records_for_read(scan)}
 
 
 def audit_bundle_cache_key(scan: dict) -> str:

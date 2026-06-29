@@ -476,7 +476,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             {
                 "status": status,
                 "phase": "report",
-                "progress": 100 if status == "done" else public_scan_progress(scan.get("progress")),
+                "progress": public_scan_display_progress(status, scan.get("progress")),
                 "completedAt": completed_at,
                 "durationMs": public_scan_count(prepared.get("duration_ms")),
                 "issues": summary,

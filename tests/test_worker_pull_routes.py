@@ -918,6 +918,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(result.payload["accepted"])
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "done")
 
+    def test_decode_json_body_rejects_oversized_gzip_json(self) -> None:
+        raw_body = gzip.compress(json.dumps({"payload": "x" * 256}).encode("utf-8"))
+
+        with patch.dict(
+            app.os.environ,
+            {"PULLWISE_MAX_BODY_BYTES": "32", "PULLWISE_MAX_DECOMPRESSED_BODY_BYTES": "32"},
+            clear=False,
+        ):
+            with self.assertRaises(app.RequestBodyTooLarge):
+                app.decode_json_body(raw_body, "gzip")
+
     def test_scan_and_issue_reads_use_database_pages_when_indexed(self) -> None:
         app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
         app.SESSIONS = {
@@ -969,6 +980,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with (
             patch.object(app, "cleanup_server_resources_if_due", return_value={}),
             patch.object(app, "user_scans_for_read", side_effect=AssertionError("scan route should page in DB")),
+            patch.object(
+                app.db,
+                "list_completed_scan_job_results_for_job_ids",
+                side_effect=AssertionError("scan route should not read full result artifacts when snapshots exist"),
+            ),
         ):
             scans_route = RouteHarness("/scans?limit=1&offset=1", headers={"Cookie": "pw_session=ses_owner"})
             app.PullwiseHandler.route(scans_route, "GET")
@@ -2161,6 +2177,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "line": 1,
             },
         ]
+        db.upsert_issue(app.ISSUES[0])
+        app.ISSUES = [app.ISSUES[1]]
 
         owner = RouteHarness(
             "/scans/sc_bundle/audit-bundle",
@@ -4929,6 +4947,59 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(row["issues"]["high"], 1)
         self.assertEqual(app.SCANS[0]["status"], "done")
         self.assertEqual(len(app.ISSUES), 1)
+
+    def test_worker_failed_result_caps_progress_below_complete(self) -> None:
+        scan = {
+            "id": "sc_failed_progress_cap",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        with patch.object(app.system_config, "scan_job_max_attempts", return_value=1):
+            job = app.create_scan_job_for_scan(scan)
+        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(claim, "POST")
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        self.assertEqual(claimed["job_id"], job["job_id"])
+        progress = RouteHarness(
+            f"/worker/jobs/{claimed['job_id']}/progress",
+            {"phase": "report", "progress": 100, "message": "Uploading failed result"},
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(progress, "POST")
+        self.assertEqual(progress.status, HTTPStatus.OK)
+
+        result = RouteHarness(
+            f"/worker/jobs/{claimed['job_id']}/result",
+            {
+                "status": "failed",
+                "attempt_id": "wk_1-1",
+                "result_checksum": "checksum-failed-progress-cap",
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "error": "GraphVerified completion gate failed.",
+                "error_code": "CODEX_AUTH_REQUIRED",
+                "errorCode": "CODEX_AUTH_REQUIRED",
+                **audit_result_fields([]),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["phase"], "report")
+        self.assertEqual(app.SCANS[0]["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
+        self.assertEqual(app.scan_payload(app.SCANS[0])["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
+        self.assertEqual(app.scan_list_payload(app.SCANS[0])["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
 
     def test_worker_result_must_match_current_claim_attempt(self) -> None:
         scan = {

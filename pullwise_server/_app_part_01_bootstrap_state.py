@@ -383,17 +383,24 @@ def max_decompressed_body_bytes() -> int:
     return max(max_body_bytes(), env_int("PULLWISE_MAX_DECOMPRESSED_BODY_BYTES", 50 * 1024 * 1024))
 
 
+def decompress_gzip_body(raw_bytes: bytes, *, max_bytes: int) -> bytes:
+    limit = max(0, int(max_bytes or 0))
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(raw_bytes)) as gzip_file:
+            decompressed = gzip_file.read(limit + 1)
+    except (OSError, EOFError):
+        raise ValueError("Request body must be valid gzip-compressed JSON.") from None
+    if len(decompressed) > limit:
+        raise RequestBodyTooLarge("Request body is too large after decompression.")
+    return decompressed
+
+
 def decode_json_body(raw_bytes: bytes, content_encoding: str = "") -> dict:
     if not raw_bytes:
         return {}
     encoding = str(content_encoding or "").strip().lower()
     if encoding == "gzip":
-        try:
-            raw_bytes = gzip.decompress(raw_bytes)
-        except OSError:
-            raise ValueError("Request body must be valid gzip-compressed JSON.") from None
-        if len(raw_bytes) > max_decompressed_body_bytes():
-            raise RequestBodyTooLarge("Request body is too large after decompression.")
+        raw_bytes = decompress_gzip_body(raw_bytes, max_bytes=max_decompressed_body_bytes())
     elif encoding and encoding not in {"identity"}:
         raise ValueError("Unsupported Content-Encoding.")
     try:
