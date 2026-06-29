@@ -1148,6 +1148,39 @@ def user_scan_for_read(session: dict | None, scan_id: str) -> dict | None:
     return None
 
 
+def user_scans_for_read_by_ids(session: dict | None, scan_ids: list[str]) -> list[dict]:
+    if not session:
+        return []
+    user_id = public_issue_text(session.get("userId"))
+    ordered_ids = []
+    seen = set()
+    for value in scan_ids:
+        scan_id = public_issue_text(value)
+        if not scan_id or scan_id in seen:
+            continue
+        seen.add(scan_id)
+        ordered_ids.append(scan_id)
+    if not user_id or not ordered_ids:
+        return []
+    jobs = db.list_user_scan_jobs_by_scan_ids(user_id, ordered_ids)
+    if jobs:
+        hydrated = hydrate_scan_jobs_for_read(jobs)
+        by_scan_id = {
+            public_issue_text(scan.get("id")): scan
+            for scan in hydrated
+            if public_issue_text(scan.get("id"))
+        }
+        return [by_scan_id[scan_id] for scan_id in ordered_ids if scan_id in by_scan_id]
+    if db.count_user_scan_jobs(user_id) == 0:
+        legacy = {
+            public_issue_text(scan.get("id")): scan
+            for scan in user_scans_for_read(session)
+            if public_issue_text(scan.get("id")) in seen
+        }
+        return [legacy[scan_id] for scan_id in ordered_ids if scan_id in legacy]
+    return []
+
+
 def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
     if not request_id:
         return None

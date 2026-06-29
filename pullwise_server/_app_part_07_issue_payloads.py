@@ -1156,11 +1156,14 @@ def sync_user_issues_from_memory_to_db(user_id: str) -> None:
 def user_issue_filters(params: dict) -> dict:
     raw_status = public_issue_text(params.get("status")).lower()
     raw_severity = public_issue_text(params.get("severity")).lower()
+    raw_sort = public_issue_text(params.get("sort")).lower()
+    sort = raw_sort if raw_sort in {"severity", "newest", "file"} else ""
     return {
         "status": public_issue_status(raw_status) if raw_status and raw_status != "all" else "",
         "severity": review._safe_severity(raw_severity) if raw_severity and raw_severity != "all" else "",
         "scan_id": public_issue_text(params.get("scanId")),
         "query": public_issue_text(params.get("q")).lower(),
+        "sort": sort,
     }
 
 
@@ -1178,6 +1181,7 @@ def user_issues_page_for_read(session: dict | None, params: dict) -> dict:
         severity=filters["severity"],
         scan_id=filters["scan_id"],
         query=filters["query"],
+        sort=filters["sort"],
         limit=limit,
         offset=offset,
     )

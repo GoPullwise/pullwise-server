@@ -574,24 +574,42 @@ def api_docs_payload() -> dict:
 
 def dashboard_overview_payload(session: dict) -> dict:
     user = USERS.get(session["userId"])
-    scans = [scan_payload(scan) for scan in user_scans_for_read(session)]
-    repositories = repository_items_for_response(user, user.get("githubRepositoryAccess") if user else None) if user else []
-    status_counts: dict[str, int] = {}
-    for scan in scans:
-        status = scan.get("status") or "unknown"
-        status_counts[status] = status_counts.get(status, 0) + 1
+    user_id = public_issue_text(session.get("userId"))
+    recent_page = db.list_user_scan_jobs_page(user_id, limit=10, offset=0)
+    if recent_page["total"] == 0 and db.count_user_scan_jobs(user_id) == 0:
+        scans = [scan_payload(scan) for scan in user_scans_for_read(session)]
+        recent_scans = scans[:10]
+        status_counts: dict[str, int] = {}
+        for scan in scans:
+            status = scan.get("status") or "unknown"
+            status_counts[status] = status_counts.get(status, 0) + 1
+        scan_total = len(scans)
+    else:
+        recent_scans = [scan_payload(scan) for scan in hydrate_scan_jobs_for_read(recent_page["items"])]
+        status_counts = db.count_user_scan_jobs_by_public_status(user_id)
+        scan_total = recent_page["total"]
+    repository_page = (
+        paginated_repository_items_for_response(
+            user,
+            user.get("githubRepositoryAccess") if user else None,
+            {"limit": 10, "offset": 0},
+        )
+        if user
+        else {"items": [], "total": 0, "hasMore": False}
+    )
     return {
         "breadcrumbs": [{"label": "Overview", "href": "/dashboard/overview"}],
         "scanTotals": {
-            "total": len(scans),
+            "total": scan_total,
             "byStatus": status_counts,
         },
         "authorizedRepositories": {
-            "count": len(repositories),
+            "count": repository_page["total"],
             "href": "/repositories",
-            "items": repositories,
+            "items": repository_page["items"],
+            "hasMore": repository_page["hasMore"],
         },
-        "recentScans": scans[:10],
+        "recentScans": recent_scans,
     }
 
 
@@ -615,4 +633,3 @@ def safe_billing_redirect_response(result: dict, label: str, *, require_url: boo
         return payload
     payload["url"] = billing.provider_redirect_url(payload.get("url"), provider, label)
     return payload
-

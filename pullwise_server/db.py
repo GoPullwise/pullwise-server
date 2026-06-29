@@ -377,6 +377,12 @@ def initialize() -> None:
             )
             connection.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_created
+                ON scan_jobs(user_id, created_at DESC, job_id DESC)
+                """
+            )
+            connection.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_repo_created
                 ON scan_jobs(user_id, repo, created_at DESC, job_id DESC)
                 """
@@ -430,6 +436,12 @@ def initialize() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_scans_user_status_created
                 ON scans(user_id, status, created_at DESC, scan_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scans_user_created
+                ON scans(user_id, created_at DESC, scan_id DESC)
                 """
             )
             connection.execute(
@@ -507,8 +519,20 @@ def initialize() -> None:
             )
             connection.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_issues_user_created
+                ON issues(user_id, created_at DESC, issue_id ASC)
+                """
+            )
+            connection.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_issues_user_severity_created
                 ON issues(user_id, severity, created_at DESC, issue_id ASC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_issues_user_status_severity_created
+                ON issues(user_id, status, severity, created_at DESC, issue_id ASC)
                 """
             )
             connection.execute(
@@ -2378,6 +2402,70 @@ def list_user_scan_jobs_page(
     }
 
 
+def list_user_scan_jobs_by_scan_ids(user_id: str, scan_ids: list[str]) -> list[dict[str, Any]]:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    ordered_ids = []
+    seen = set()
+    for value in scan_ids:
+        scan_id = str(value or "").strip()
+        if not scan_id or scan_id in seen:
+            continue
+        seen.add(scan_id)
+        ordered_ids.append(scan_id)
+    if not target_user_id or not ordered_ids:
+        return []
+    placeholders = ",".join("?" for _ in ordered_ids)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            f"""
+            SELECT *
+            FROM scan_jobs
+            WHERE user_id = ? AND scan_id IN ({placeholders})
+            """,
+            (target_user_id, *ordered_ids),
+        ).fetchall()
+    by_scan_id = {
+        str(row["scan_id"] or "").strip(): row_to_dict(row) or {}
+        for row in rows
+        if str(row["scan_id"] or "").strip()
+    }
+    return [by_scan_id[scan_id] for scan_id in ordered_ids if scan_id in by_scan_id]
+
+
+def count_user_scan_jobs_by_public_status(user_id: str) -> dict[str, int]:
+    ensure_initialized()
+    target_user_id = str(user_id or "").strip()
+    if not target_user_id:
+        return {}
+    with _LOCK, closing(connect()) as connection:
+        rows = connection.execute(
+            """
+            SELECT status, COUNT(*) AS count
+            FROM scan_jobs
+            WHERE user_id = ?
+            GROUP BY status
+            """,
+            (target_user_id,),
+        ).fetchall()
+    counts: dict[str, int] = {}
+    for status, count in rows:
+        raw_status = str(status or "").strip().lower()
+        if raw_status in {"claimed", "running", "uploading_result"}:
+            public_status = "running"
+        elif raw_status in {"queued", "retrying"}:
+            public_status = "queued"
+        elif raw_status in {"failed", "lost"}:
+            public_status = "failed"
+        elif raw_status in {"done", "cancelled"}:
+            public_status = raw_status
+        else:
+            public_status = raw_status or "unknown"
+        counts[public_status] = counts.get(public_status, 0) + max(0, int(count or 0))
+    return counts
+
+
 def count_user_scan_jobs(user_id: str) -> int:
     ensure_initialized()
     target_user_id = str(user_id or "").strip()
@@ -3567,6 +3655,7 @@ def list_user_issues_page(
     severity: str = "",
     scan_id: str = "",
     query: str = "",
+    sort: str = "",
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -3594,6 +3683,24 @@ def list_user_issues_page(
         )
         params.extend([like, like, like, like, like])
     where = " AND ".join(clauses)
+    sort_key = str(sort or "").strip().lower()
+    if sort_key == "severity":
+        order_by = """
+            CASE severity
+                WHEN 'critical' THEN 5
+                WHEN 'high' THEN 4
+                WHEN 'medium' THEN 3
+                WHEN 'low' THEN 2
+                WHEN 'info' THEN 1
+                ELSE 0
+            END DESC,
+            created_at DESC,
+            issue_id ASC
+        """
+    elif sort_key == "file":
+        order_by = "lower(file_path) ASC, created_at DESC, issue_id ASC"
+    else:
+        order_by = "created_at DESC, issue_id ASC"
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         total = int(connection.execute(f"SELECT COUNT(*) FROM issues WHERE {where}", tuple(params)).fetchone()[0])
@@ -3602,7 +3709,7 @@ def list_user_issues_page(
             SELECT *
             FROM issues
             WHERE {where}
-            ORDER BY created_at DESC, issue_id ASC
+            ORDER BY {order_by}
             LIMIT ? OFFSET ?
             """,
             (*params, safe_limit, safe_offset),
@@ -3695,6 +3802,7 @@ def claim_next_scan_job(
     worker_heartbeat_timeout_seconds: int = 120,
     ready_providers: list[str] | None = None,
     timestamp: int | None = None,
+    recover_before_claim: bool = True,
 ) -> dict[str, Any] | None:
     ensure_initialized()
     worker_id = str(worker_id or "").strip()
@@ -3725,9 +3833,10 @@ def claim_next_scan_job(
                 """,
                 (current_time - offline_after,),
             )
-            _requeue_expired_jobs_locked(connection, current_time)
-            _requeue_stale_worker_jobs_locked(connection, current_time, offline_after)
-            _fail_exhausted_queued_jobs_locked(connection, current_time)
+            if recover_before_claim:
+                _requeue_expired_jobs_locked(connection, current_time)
+                _requeue_stale_worker_jobs_locked(connection, current_time, offline_after)
+                _fail_exhausted_queued_jobs_locked(connection, current_time)
             row = connection.execute(
                 """
                 SELECT queued.job_id
@@ -3842,12 +3951,21 @@ def requeue_interrupted_scan_job(scan_id: str, *, reason: str = "server_restart"
 
 
 def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_time: int) -> list[dict[str, Any]]:
+    worker_count = _enabled_worker_count_locked(connection)
+    if worker_count > 0:
+        effective_attempts_sql = "MAX(1, CASE WHEN max_attempts > ? THEN ? ELSE max_attempts END)"
+        params: tuple[Any, ...] = (worker_count, worker_count)
+    else:
+        effective_attempts_sql = "MAX(1, max_attempts)"
+        params = ()
     rows = connection.execute(
-        """
+        f"""
         SELECT job_id, scan_id, attempt, max_attempts
         FROM scan_jobs
         WHERE status = 'queued'
-        """
+          AND attempt >= {effective_attempts_sql}
+        """,
+        params,
     ).fetchall()
     recovered: list[dict[str, Any]] = []
     for row in rows:
@@ -4118,6 +4236,29 @@ def cancel_scan_job_for_scan(scan_id: str) -> None:
             )
 
 
+def _store_scan_job_result_artifact(
+    *,
+    artifact_id: str,
+    job_id: str,
+    attempt_id: str,
+    payload_text: str,
+    timestamp: int,
+) -> None:
+    with closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
+                VALUES (?, ?, ?, 'worker_result_payload', ?, ?)
+                ON CONFLICT(job_id, attempt_id, kind) DO UPDATE SET
+                    id = excluded.id,
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
+                """,
+                (artifact_id, job_id, attempt_id, payload_text, timestamp),
+            )
+
+
 def record_scan_job_result(
     job_id: str,
     *,
@@ -4141,6 +4282,7 @@ def record_scan_job_result(
     artifact_payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
     summary_payload = scan_job_result_summary_payload(payload, artifact_id=artifact_id)
     summary_payload_text = json.dumps(to_jsonable(summary_payload), ensure_ascii=False, sort_keys=True)
+    result: dict[str, Any] | None = None
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -4182,17 +4324,6 @@ def record_scan_job_result(
                 status=status,
                 completed_at=current_time,
                 error=payload.get("error"),
-            )
-            connection.execute(
-                """
-                INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
-                VALUES (?, ?, ?, 'worker_result_payload', ?, ?)
-                ON CONFLICT(job_id, attempt_id, kind) DO UPDATE SET
-                    id = excluded.id,
-                    payload = excluded.payload,
-                    created_at = excluded.created_at
-                """,
-                (artifact_id, job_id, attempt_id, artifact_payload_text, current_time),
             )
             connection.execute(
                 """
@@ -4248,8 +4379,7 @@ def record_scan_job_result(
                     ),
                 )
                 next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
-                connection.commit()
-                return {
+                result = {
                     "accepted": True,
                     "duplicate": False,
                     "conflict": False,
@@ -4259,45 +4389,55 @@ def record_scan_job_result(
                     "max_attempts": effective_max_attempts,
                     "job": next_job or {},
                 }
-            connection.execute(
-                """
-                UPDATE scan_jobs
-                SET status = ?,
-                    completed_at = ?,
-                    timeout_at = NULL,
-                    error = ?,
-                    result_checksum = ?,
-                    last_attempt_id = ?,
-                    progress = CASE WHEN ? = 'done' THEN 100 ELSE progress END,
-                    updated_at = ?
-                WHERE job_id = ?
-                """,
-                (
-                    status,
-                    current_time,
-                    payload.get("error"),
-                    result_checksum,
-                    attempt_id,
-                    status,
-                    current_time,
-                    job_id,
-                ),
-            )
-            next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+            else:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET status = ?,
+                        completed_at = ?,
+                        timeout_at = NULL,
+                        error = ?,
+                        result_checksum = ?,
+                        last_attempt_id = ?,
+                        progress = CASE WHEN ? = 'done' THEN 100 ELSE progress END,
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (
+                        status,
+                        current_time,
+                        payload.get("error"),
+                        result_checksum,
+                        attempt_id,
+                        status,
+                        current_time,
+                        job_id,
+                    ),
+                )
+                next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+                result = {
+                    "accepted": True,
+                    "duplicate": False,
+                    "conflict": False,
+                    "retry_queued": False,
+                    "job_status": status,
+                    "attempt": attempt,
+                    "max_attempts": effective_max_attempts,
+                    "job": next_job or {},
+                }
             connection.commit()
-            return {
-                "accepted": True,
-                "duplicate": False,
-                "conflict": False,
-                "retry_queued": False,
-                "job_status": status,
-                "attempt": attempt,
-                "max_attempts": effective_max_attempts,
-                "job": next_job or {},
-            }
         except Exception:
             connection.rollback()
             raise
+    if result and result.get("accepted") and not result.get("duplicate"):
+        _store_scan_job_result_artifact(
+            artifact_id=artifact_id,
+            job_id=job_id,
+            attempt_id=attempt_id,
+            payload_text=artifact_payload_text,
+            timestamp=current_time,
+        )
+    return result or {"accepted": False, "duplicate": False, "conflict": True}
 
 
 def record_review_decision_events(events: list[dict[str, Any]]) -> dict[str, int]:

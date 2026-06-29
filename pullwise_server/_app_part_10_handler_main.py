@@ -465,11 +465,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not isinstance(raw_ids, list):
                 return self.error(HTTPStatus.BAD_REQUEST, "ids must be an array.")
             scan_ids = [public_issue_text(value) for value in raw_ids if public_issue_text(value)]
-            scan_payloads = []
-            for scan_id in list(dict.fromkeys(scan_ids))[:100]:
-                scan = user_scan_for_read(session, scan_id)
-                if scan:
-                    scan_payloads.append(scan_payload(scan))
+            scans = user_scans_for_read_by_ids(session, list(dict.fromkeys(scan_ids))[:100])
+            scan_payloads = [scan_payload(scan) for scan in scans]
             return self.json({"items": scan_payloads, "scans": scan_payloads})
         if path == "/scans":
             session = self.current_session()
@@ -490,6 +487,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan_created = False
             branch = ""
             commit = "pending"
+            user = None
+            github_access = None
+            repo_meta = None
+            repository_record = None
+            quota_result = None
+            requested_branch = ""
+            request_key = None
+            scan_id = ""
             with STATE_LOCK:
                 user = USERS.get(session["userId"]) or {}
                 github_access = user.get("githubRepositoryAccess")
@@ -502,161 +507,161 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 elif github_repositories_need_sync(github_access):
                     scan_error = (HTTPStatus.FORBIDDEN, "Sync GitHub repositories before starting a scan.")
                     scan_error_code = "REPOSITORY_SYNC_REQUIRED"
+            if scan_error is None:
+                scan = user_scan_by_request_id(session["userId"], request_id)
+                if scan is not None and not scan_matches_requested_repository(
+                    scan,
+                    requested_repo_id=requested_repo_id,
+                    requested_repository=requested_repository,
+                ):
+                    scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
+                    scan_error_code = "IDEMPOTENCY_KEY_REUSED"
+                    scan_error_repo_id = clean_github_access_text(scan.get("repoId"), allow_int=True)
+                    scan = None
+            if scan_error is None and scan is None:
+                limit_error = scan_queue_limit_error(session["userId"])
+                if limit_error:
+                    scan_error = (limit_error[0], limit_error[1])
+                    scan_error_code = limit_error[2]
+            if scan_error is None and scan is None:
+                repo_meta, request_key = repository_item_for_scan_request(github_access, body)
+                if not repo_meta:
+                    scan_error = (
+                        HTTPStatus.FORBIDDEN,
+                        "Repository is not authorized for this GitHub App installation.",
+                    )
+                    scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
                 else:
-                    scan = user_scan_by_request_id(session["userId"], request_id)
-                    if scan is not None and not scan_matches_requested_repository(
-                        scan,
-                        requested_repo_id=requested_repo_id,
-                        requested_repository=requested_repository,
-                    ):
-                        scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
-                        scan_error_code = "IDEMPOTENCY_KEY_REUSED"
-                        scan_error_repo_id = clean_github_access_text(scan.get("repoId"), allow_int=True)
-                        scan = None
-                    elif scan is None:
-                        limit_error = scan_queue_limit_error(session["userId"])
-                        if limit_error:
-                            scan_error = (limit_error[0], limit_error[1])
-                            scan_error_code = limit_error[2]
-                        if scan_error is not None:
-                            pass
-                        else:
-                            repo_meta, request_key = repository_item_for_scan_request(github_access, body)
-                            if not repo_meta:
-                                scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
-                                scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
-                            else:
-                                repository = clean_repository_full_name(repo_meta.get("fullName"), requested_repository)
-                                if not repository:
-                                    scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
-                                    scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
-                                elif request_key != "repoId" and not repository_is_authorized(github_access, repository):
-                                    scan_error = (HTTPStatus.FORBIDDEN, "Repository is not authorized for this GitHub App installation.")
-                                    scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
-                        if scan_error is None:
-                            commit, commit_error = scan_commit_from_body(body)
-                            if commit_error:
-                                scan_error = (HTTPStatus.BAD_REQUEST, commit_error)
-                                scan_error_code = "INVALID_COMMIT"
-                        if scan_error is None:
-                            requested_branch = github_auth.clean_branch_name(body.get("branch"))
-                            branch = (
-                                requested_branch
-                                or github_auth.clean_branch_name(repo_meta.get("defaultBranch"))
-                                or "main"
-                            )
-                            if requested_branch:
-                                try:
-                                    branch_available = scan_branch_is_available(github_access, repo_meta, branch)
-                                except github_auth.GitHubError as exc:
-                                    scan_error = (HTTPStatus.BAD_GATEWAY, str(exc))
-                                    scan_error_code = "BRANCH_LOOKUP_FAILED"
-                                if scan_error is None and not branch_available:
-                                    scan_error = (
-                                        HTTPStatus.BAD_REQUEST,
-                                        "Selected branch is not available for this repository.",
-                                    )
-                                    scan_error_code = "BRANCH_NOT_AVAILABLE"
-                        if scan_error is None:
-                            scan_id = make_id("sc")
-                            try:
-                                scan_user, repository_record = scan_resource_context(user, github_access, repo_meta)
-                            except ValueError as exc:
-                                code = str(exc)
-                                if code == "REPOSITORY_SYNC_REQUIRED":
-                                    scan_error = (
-                                        HTTPStatus.CONFLICT,
-                                        "Sync GitHub repositories before starting a scan so Pullwise can verify the stable repository ID.",
-                                    )
-                                    scan_error_code = "REPOSITORY_SYNC_REQUIRED"
-                                else:
-                                    scan_error = (HTTPStatus.BAD_REQUEST, "Unable to resolve repository context.")
-                            else:
-                                try:
-                                    quota_result = quota.reserve_scan_quota(
-                                        user=scan_user,
-                                        repository=repository_record,
-                                        requested_by_user_id=session["userId"],
-                                        scan_id=scan_id,
-                                        request_id=request_id or None,
-                                    )
-                                except quota.QuotaExceeded as exc:
-                                    scan_error = (HTTPStatus.PAYMENT_REQUIRED, exc.message)
-                                    scan_error_code = exc.code
-                                    scan_error_repo_id = exc.repo_id
-                                else:
-                                    entitlement = quota_result["user"]
-                                    if quota_result.get("deduplicated"):
-                                        scan = user_scan_by_request_id(session["userId"], request_id)
-                                        if scan is None or not scan_matches_requested_repository(
-                                            scan,
-                                            requested_repo_id=requested_repo_id,
-                                            requested_repository=requested_repository,
-                                        ):
-                                            scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
-                                            scan_error_code = "IDEMPOTENCY_KEY_REUSED"
-                        if scan_error:
-                            pass
-                        elif scan is not None:
-                            pass
-                        else:
-                            review_output_language = settings_payload(session["userId"])["review"]["outputLanguage"]
-                            scan = {
-                                "id": scan_id,
-                                "repo": repository,
-                                "branch": branch,
-                                "commit": commit,
-                                "status": "queued",
-                                "userId": session["userId"],
-                                "createdAt": now(),
-                                "queuedAt": now(),
-                                "progress": 0,
-                                "phase": None,
-                                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                                "reviewOutputLanguage": review_output_language,
-                                "installationId": (
-                                    clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
-                                    or clean_github_access_text(github_access.get("installationId"), allow_int=True)
-                                ),
-                                "installationAccount": (
-                                    clean_github_access_text(repo_meta.get("installationAccount"))
-                                    or clean_github_access_text(github_access.get("installationAccount"))
-                                ),
-                                "repositorySelection": (
-                                    clean_github_access_text(repo_meta.get("repositorySelection"))
-                                    or clean_github_access_text(github_access.get("repositorySelection"))
-                                ),
-                                "repoId": repository_record["id"],
-                                "githubRepoId": repository_record["github_repo_id"],
-                                "quotaBucketIds": quota_result["bucketIds"],
-                                "cloneUrl": repo_meta.get("cloneUrl"),
-                                "repositoryPrivate": bool(repo_meta.get("private")),
-                                "repoPath": None,
-                                "billingUsage": quota_result["user"],
-                                "repoUsage": quota_result["repository"],
-                                "quotaState": "reserved",
-                                "quotaReservedAt": now(),
-                                "by": "you",
-                            }
-                            if request_id:
-                                scan["requestId"] = request_id
-                            remember_scan_snapshot_locked(scan)
-                            scan_created = True
-                            mark_state_dirty()
-                            try:
-                                create_scan_job_for_scan(scan)
-                            except Exception:
-                                forget_memory_scan_locked(scan_id)
-                                scan_created = False
-                                mark_state_dirty()
-                                if not quota_result.get("deduplicated"):
-                                    quota.release_scan_quota_reservation(
-                                        scan_id=scan_id,
-                                        requested_by_user_id=session["userId"],
-                                        request_id=request_id or None,
-                                        record_ledger=False,
-                                    )
-                                raise
+                    repository = clean_repository_full_name(repo_meta.get("fullName"), requested_repository)
+                    if not repository:
+                        scan_error = (
+                            HTTPStatus.FORBIDDEN,
+                            "Repository is not authorized for this GitHub App installation.",
+                        )
+                        scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+                    elif request_key != "repoId" and not repository_is_authorized(github_access, repository):
+                        scan_error = (
+                            HTTPStatus.FORBIDDEN,
+                            "Repository is not authorized for this GitHub App installation.",
+                        )
+                        scan_error_code = "REPOSITORY_NOT_AUTHORIZED"
+            if scan_error is None and scan is None:
+                commit, commit_error = scan_commit_from_body(body)
+                if commit_error:
+                    scan_error = (HTTPStatus.BAD_REQUEST, commit_error)
+                    scan_error_code = "INVALID_COMMIT"
+            if scan_error is None and scan is None:
+                requested_branch = github_auth.clean_branch_name(body.get("branch"))
+                branch = (
+                    requested_branch
+                    or github_auth.clean_branch_name(repo_meta.get("defaultBranch"))
+                    or "main"
+                )
+            if scan_error is None and scan is None and requested_branch:
+                try:
+                    branch_available = scan_branch_is_available(github_access, repo_meta, branch)
+                except github_auth.GitHubError as exc:
+                    scan_error = (HTTPStatus.BAD_GATEWAY, str(exc))
+                    scan_error_code = "BRANCH_LOOKUP_FAILED"
+                if scan_error is None and not branch_available:
+                    scan_error = (
+                        HTTPStatus.BAD_REQUEST,
+                        "Selected branch is not available for this repository.",
+                    )
+                    scan_error_code = "BRANCH_NOT_AVAILABLE"
+            if scan_error is None and scan is None:
+                scan_id = make_id("sc")
+                try:
+                    scan_user, repository_record = scan_resource_context(user, github_access, repo_meta)
+                except ValueError as exc:
+                    code = str(exc)
+                    if code == "REPOSITORY_SYNC_REQUIRED":
+                        scan_error = (
+                            HTTPStatus.CONFLICT,
+                            "Sync GitHub repositories before starting a scan so Pullwise can verify the stable repository ID.",
+                        )
+                        scan_error_code = "REPOSITORY_SYNC_REQUIRED"
+                    else:
+                        scan_error = (HTTPStatus.BAD_REQUEST, "Unable to resolve repository context.")
+                else:
+                    try:
+                        quota_result = quota.reserve_scan_quota(
+                            user=scan_user,
+                            repository=repository_record,
+                            requested_by_user_id=session["userId"],
+                            scan_id=scan_id,
+                            request_id=request_id or None,
+                        )
+                    except quota.QuotaExceeded as exc:
+                        scan_error = (HTTPStatus.PAYMENT_REQUIRED, exc.message)
+                        scan_error_code = exc.code
+                        scan_error_repo_id = exc.repo_id
+                    else:
+                        if quota_result.get("deduplicated"):
+                            scan = user_scan_by_request_id(session["userId"], request_id)
+                            if scan is None or not scan_matches_requested_repository(
+                                scan,
+                                requested_repo_id=requested_repo_id,
+                                requested_repository=requested_repository,
+                            ):
+                                scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
+                                scan_error_code = "IDEMPOTENCY_KEY_REUSED"
+            if scan_error is None and scan is None:
+                review_output_language = settings_payload(session["userId"])["review"]["outputLanguage"]
+                scan = {
+                    "id": scan_id,
+                    "repo": repository,
+                    "branch": branch,
+                    "commit": commit,
+                    "status": "queued",
+                    "userId": session["userId"],
+                    "createdAt": now(),
+                    "queuedAt": now(),
+                    "progress": 0,
+                    "phase": None,
+                    "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                    "reviewOutputLanguage": review_output_language,
+                    "installationId": (
+                        clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
+                        or clean_github_access_text(github_access.get("installationId"), allow_int=True)
+                    ),
+                    "installationAccount": (
+                        clean_github_access_text(repo_meta.get("installationAccount"))
+                        or clean_github_access_text(github_access.get("installationAccount"))
+                    ),
+                    "repositorySelection": (
+                        clean_github_access_text(repo_meta.get("repositorySelection"))
+                        or clean_github_access_text(github_access.get("repositorySelection"))
+                    ),
+                    "repoId": repository_record["id"],
+                    "githubRepoId": repository_record["github_repo_id"],
+                    "quotaBucketIds": quota_result["bucketIds"],
+                    "cloneUrl": repo_meta.get("cloneUrl"),
+                    "repositoryPrivate": bool(repo_meta.get("private")),
+                    "repoPath": None,
+                    "billingUsage": quota_result["user"],
+                    "repoUsage": quota_result["repository"],
+                    "quotaState": "reserved",
+                    "quotaReservedAt": now(),
+                    "by": "you",
+                }
+                if request_id:
+                    scan["requestId"] = request_id
+                try:
+                    create_scan_job_for_scan(scan)
+                    scan_created = True
+                except Exception:
+                    with STATE_LOCK:
+                        forget_memory_scan_locked(scan_id)
+                        mark_state_dirty()
+                    if quota_result and not quota_result.get("deduplicated"):
+                        quota.release_scan_quota_reservation(
+                            scan_id=scan_id,
+                            requested_by_user_id=session["userId"],
+                            request_id=request_id or None,
+                            record_ledger=False,
+                        )
+                    raise
 
             if scan_error:
                 scan_logging.log_event(
@@ -729,6 +734,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         job and job_status not in {"failed", "lost", "cancelled"}
                     ):
                         return self.error(HTTPStatus.CONFLICT, "Only failed, lost, or cancelled scans can be retried.")
+                    limit_error = scan_queue_limit_error(session["userId"])
+                    if limit_error:
+                        return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
                     if not retry_request_id or retry_request_id == public_issue_text(scan.get("requestId")):
                         retry_request_id = make_id("retry")
                     repo_id = public_issue_text(scan.get("repoId"))
@@ -2681,6 +2689,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 lease_seconds=system_config.scan_job_lease_seconds(),
                 worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
                 ready_providers=ready_providers,
+                recover_before_claim=False,
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
@@ -2933,109 +2942,110 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         request_id = scan_request_id_from_body(body)
         github_access = context["user"].get("githubRepositoryAccess") or {}
         repository_item_meta = repo_context[1] if isinstance(repo_context[1], dict) else {}
-        with STATE_LOCK:
+        existing = user_scan_by_request_id(context["user"]["id"], request_id)
+        if existing and existing.get("repoId") == repository["id"]:
+            return self.json(scan_payload(existing))
+        if existing:
+            return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
+        commit, commit_error = scan_commit_from_body(body)
+        if commit_error:
+            return self.json({"message": commit_error, "code": "INVALID_COMMIT"}, HTTPStatus.BAD_REQUEST)
+        requested_branch = github_auth.clean_branch_name(body.get("branch"))
+        branch = (
+            requested_branch
+            or github_auth.clean_branch_name(repository_item_meta.get("defaultBranch"))
+            or github_auth.clean_branch_name(repository.get("default_branch"))
+            or "main"
+        )
+        if requested_branch:
+            try:
+                branch_available = scan_branch_is_available(github_access, repository_item_meta, branch)
+            except github_auth.GitHubError as exc:
+                return self.json({"message": str(exc), "code": "BRANCH_LOOKUP_FAILED"}, HTTPStatus.BAD_GATEWAY)
+            if not branch_available:
+                return self.json(
+                    {
+                        "message": "Selected branch is not available for this repository.",
+                        "code": "BRANCH_NOT_AVAILABLE",
+                    },
+                    HTTPStatus.BAD_REQUEST,
+                )
+        limit_error = scan_queue_limit_error(context["user"]["id"])
+        if limit_error:
+            return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
+        scan_id = make_id("sc")
+        try:
+            quota_result = quota.reserve_scan_quota(
+                user=context["user"],
+                repository=repository,
+                requested_by_user_id=context["user"]["id"],
+                scan_id=scan_id,
+                request_id=request_id or None,
+            )
+        except quota.QuotaExceeded as exc:
+            payload = {"message": exc.message, "code": exc.code}
+            if exc.repo_id:
+                payload["repoId"] = exc.repo_id
+            return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
+        if quota_result.get("deduplicated"):
             existing = user_scan_by_request_id(context["user"]["id"], request_id)
             if existing and existing.get("repoId") == repository["id"]:
                 return self.json(scan_payload(existing))
             if existing:
                 return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
-            commit, commit_error = scan_commit_from_body(body)
-            if commit_error:
-                return self.json({"message": commit_error, "code": "INVALID_COMMIT"}, HTTPStatus.BAD_REQUEST)
-            requested_branch = github_auth.clean_branch_name(body.get("branch"))
-            branch = (
-                requested_branch
-                or github_auth.clean_branch_name(repository_item_meta.get("defaultBranch"))
-                or github_auth.clean_branch_name(repository.get("default_branch"))
-                or "main"
+            return self.json(
+                {"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"},
+                HTTPStatus.CONFLICT,
             )
-            if requested_branch:
-                try:
-                    branch_available = scan_branch_is_available(github_access, repository_item_meta, branch)
-                except github_auth.GitHubError as exc:
-                    return self.json({"message": str(exc), "code": "BRANCH_LOOKUP_FAILED"}, HTTPStatus.BAD_GATEWAY)
-                if not branch_available:
-                    return self.json(
-                        {
-                            "message": "Selected branch is not available for this repository.",
-                            "code": "BRANCH_NOT_AVAILABLE",
-                        },
-                        HTTPStatus.BAD_REQUEST,
-                    )
-            limit_error = scan_queue_limit_error(context["user"]["id"])
-            if limit_error:
-                return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
-            scan_id = make_id("sc")
-            try:
-                quota_result = quota.reserve_scan_quota(
-                    user=context["user"],
-                    repository=repository,
-                    requested_by_user_id=context["user"]["id"],
-                    scan_id=scan_id,
-                    request_id=request_id or None,
-                )
-            except quota.QuotaExceeded as exc:
-                payload = {"message": exc.message, "code": exc.code}
-                if exc.repo_id:
-                    payload["repoId"] = exc.repo_id
-                return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
-            if quota_result.get("deduplicated"):
-                existing = user_scan_by_request_id(context["user"]["id"], request_id)
-                if existing and existing.get("repoId") == repository["id"]:
-                    return self.json(scan_payload(existing))
-                if existing:
-                    return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
-                return self.json({"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"}, HTTPStatus.CONFLICT)
 
-            review_output_language = settings_payload(context["user"]["id"])["review"]["outputLanguage"]
-            scan = {
-                "id": scan_id,
-                "repo": repository["full_name"],
-                "branch": branch,
-                "commit": commit,
-                "status": "queued",
-                "userId": context["user"]["id"],
-                "apiKeyId": context["apiKey"]["id"],
-                "createdAt": now(),
-                "queuedAt": now(),
-                "progress": 0,
-                "phase": None,
-                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                "reviewOutputLanguage": review_output_language,
-                "installationId": clean_github_access_text(repository_item_meta.get("installationId"), allow_int=True)
-                or clean_github_access_text(github_access.get("installationId"), allow_int=True),
-                "installationAccount": clean_github_access_text(repository_item_meta.get("installationAccount"))
-                or clean_github_access_text(github_access.get("installationAccount")),
-                "repositorySelection": clean_github_access_text(repository_item_meta.get("repositorySelection"))
-                or clean_github_access_text(github_access.get("repositorySelection")),
-                "repoId": repository["id"],
-                "githubRepoId": repository["github_repo_id"],
-                "quotaBucketIds": quota_result["bucketIds"],
-                "cloneUrl": trusted_github_web_url(repository_item_meta.get("cloneUrl")) or repository.get("clone_url"),
-                "repositoryPrivate": bool(repository.get("private")),
-                "repoPath": None,
-                "billingUsage": quota_result["user"],
-                "repoUsage": quota_result["repository"],
-                "quotaState": "reserved",
-                "quotaReservedAt": now(),
-                "by": "api key",
-            }
-            if request_id:
-                scan["requestId"] = request_id
-            remember_scan_snapshot_locked(scan)
-            mark_state_dirty()
-            try:
-                create_scan_job_for_scan(scan)
-            except Exception:
+        review_output_language = settings_payload(context["user"]["id"])["review"]["outputLanguage"]
+        scan = {
+            "id": scan_id,
+            "repo": repository["full_name"],
+            "branch": branch,
+            "commit": commit,
+            "status": "queued",
+            "userId": context["user"]["id"],
+            "apiKeyId": context["apiKey"]["id"],
+            "createdAt": now(),
+            "queuedAt": now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "reviewOutputLanguage": review_output_language,
+            "installationId": clean_github_access_text(repository_item_meta.get("installationId"), allow_int=True)
+            or clean_github_access_text(github_access.get("installationId"), allow_int=True),
+            "installationAccount": clean_github_access_text(repository_item_meta.get("installationAccount"))
+            or clean_github_access_text(github_access.get("installationAccount")),
+            "repositorySelection": clean_github_access_text(repository_item_meta.get("repositorySelection"))
+            or clean_github_access_text(github_access.get("repositorySelection")),
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "quotaBucketIds": quota_result["bucketIds"],
+            "cloneUrl": trusted_github_web_url(repository_item_meta.get("cloneUrl")) or repository.get("clone_url"),
+            "repositoryPrivate": bool(repository.get("private")),
+            "repoPath": None,
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+            "quotaState": "reserved",
+            "quotaReservedAt": now(),
+            "by": "api key",
+        }
+        if request_id:
+            scan["requestId"] = request_id
+        try:
+            create_scan_job_for_scan(scan)
+        except Exception:
+            with STATE_LOCK:
                 forget_memory_scan_locked(scan_id)
                 mark_state_dirty()
-                quota.release_scan_quota_reservation(
-                    scan_id=scan_id,
-                    requested_by_user_id=context["user"]["id"],
-                    request_id=request_id or None,
-                    record_ledger=False,
-                )
-                raise
+            quota.release_scan_quota_reservation(
+                scan_id=scan_id,
+                requested_by_user_id=context["user"]["id"],
+                request_id=request_id or None,
+                record_ledger=False,
+            )
+            raise
         scan_logging.log_event(
             "scan_queued",
             scanId=scan["id"],
