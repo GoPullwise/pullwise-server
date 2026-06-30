@@ -2137,6 +2137,28 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         return self.json({"worker": worker_public_payload(updated or worker, admin=True)})
 
+    def create_or_reuse_worker_uninstall_command(self, session: dict, worker_id: str, *, action_name: str) -> tuple[dict | None, bool]:
+        try:
+            command = db.create_worker_command(
+                {
+                    "worker_id": worker_id,
+                    "command": "uninstall",
+                    "requested_by_user_id": session.get("userId"),
+                    "request_id": request_id_from_handler(self),
+                    "created_at": now(),
+                }
+            )
+            return command, False
+        except ValueError as exc:
+            active = db.get_next_worker_command(worker_id)
+            active_command = public_issue_text(active.get("command") if active else "").lower()
+            active_status = public_issue_text(active.get("status") if active else "").lower()
+            if active_command == "uninstall" and active_status in {"pending", "running"}:
+                return active, True
+            self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
+            self.error(HTTPStatus.CONFLICT, str(exc))
+            return None, False
+
     def handle_private_workers_delete(self, segments: list[str]) -> None:
         session = self.current_session()
         if not session:
@@ -2146,34 +2168,30 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         worker = self.require_private_worker_owner(session, segments[1])
         if not worker:
             return
-        try:
-            worker_command = db.create_worker_command(
-                {
-                    "worker_id": worker["worker_id"],
-                    "command": "uninstall",
-                    "requested_by_user_id": session.get("userId"),
-                    "request_id": request_id_from_handler(self),
-                    "created_at": now(),
-                }
-            )
-        except ValueError as exc:
-            self.audit_worker_action(session, "delete_private_worker", worker_id=worker["worker_id"], success=False, error=str(exc))
-            return self.error(HTTPStatus.CONFLICT, str(exc))
+        worker_command, reused_command = self.create_or_reuse_worker_uninstall_command(
+            session,
+            worker["worker_id"],
+            action_name="delete_private_worker",
+        )
+        if worker_command is None:
+            return
         if not worker_command:
             self.audit_worker_action(session, "delete_private_worker", worker_id=worker["worker_id"], success=False, error="Worker not found.")
             return self.error(HTTPStatus.NOT_FOUND, "Private worker not found.")
         updated = db.get_worker(worker["worker_id"], include_deleted=True) or worker
-        self.audit_worker_action(
-            session,
-            "delete_private_worker",
-            worker_id=worker["worker_id"],
-            changed_fields={"deleteQueued": True, "command": "uninstall", "commandId": worker_command.get("id")},
-        )
+        if not reused_command:
+            self.audit_worker_action(
+                session,
+                "delete_private_worker",
+                worker_id=worker["worker_id"],
+                changed_fields={"deleteQueued": True, "command": "uninstall", "commandId": worker_command.get("id")},
+            )
         return self.json(
             {
                 "worker": worker_public_payload(updated, admin=True),
                 "command": worker_command_payload(worker_command, admin=True),
                 "deleteQueued": True,
+                "alreadyQueued": reused_command,
             },
             HTTPStatus.ACCEPTED,
         )
@@ -2600,19 +2618,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not db.get_worker(worker_id, worker_scope=db.WORKER_SCOPE_SHARED):
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
-            try:
-                worker_command = db.create_worker_command(
-                    {
-                        "worker_id": worker_id,
-                        "command": "uninstall",
-                        "requested_by_user_id": session.get("userId"),
-                        "request_id": request_id_from_handler(self),
-                        "created_at": now(),
-                    }
-                )
-            except ValueError as exc:
-                self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error=str(exc))
-                return self.error(HTTPStatus.CONFLICT, str(exc))
+            worker_command, reused_command = self.create_or_reuse_worker_uninstall_command(
+                session,
+                worker_id,
+                action_name="delete_worker",
+            )
+            if worker_command is None:
+                return
             if not worker_command:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
@@ -2620,22 +2632,24 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not worker:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
-            self.audit_worker_action(
-                session,
-                "delete_worker",
-                worker_id=worker_id,
-                changed_fields={
-                    "deleteQueued": True,
-                    "command": "uninstall",
-                    "commandId": worker_command.get("id"),
-                },
-            )
+            if not reused_command:
+                self.audit_worker_action(
+                    session,
+                    "delete_worker",
+                    worker_id=worker_id,
+                    changed_fields={
+                        "deleteQueued": True,
+                        "command": "uninstall",
+                        "commandId": worker_command.get("id"),
+                    },
+                )
             return self.json(
                 {
                     "worker": worker_public_payload(worker, admin=True),
                     "command": worker_command_payload(worker_command, admin=True),
                     "deleteQueued": True,
                     "deleted": bool(worker.get("deleted_at")),
+                    "alreadyQueued": reused_command,
                 },
                 HTTPStatus.ACCEPTED,
             )

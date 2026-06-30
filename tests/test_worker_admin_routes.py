@@ -1657,6 +1657,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin_workers.payload["workers"][0]["worker_id"], worker_id)
         self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["status"], "pending")
 
+        duplicate_delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(duplicate_delete, "DELETE")
+        self.assertEqual(duplicate_delete.status, HTTPStatus.ACCEPTED)
+        self.assertTrue(duplicate_delete.payload["deleteQueued"])
+        self.assertTrue(duplicate_delete.payload["alreadyQueued"])
+        self.assertEqual(duplicate_delete.payload["command"]["id"], uninstall_command["id"])
+
         deleted_heartbeat = RouteHarness(
             "/worker/heartbeat",
             {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},

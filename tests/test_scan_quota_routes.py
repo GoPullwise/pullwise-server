@@ -280,6 +280,14 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(owner_delete.status, HTTPStatus.ACCEPTED)
         self.assertTrue(owner_delete.payload["deleteQueued"])
         self.assertEqual(owner_delete.payload["worker"]["worker_id"], worker_id)
+        uninstall_command_id = owner_delete.payload["command"]["id"]
+
+        owner_delete_again = RouteHarness({}, cookie=owner_cookie, path=f"/private-workers/{worker_id}")
+        app.PullwiseHandler.route(owner_delete_again, "DELETE")
+        self.assertEqual(owner_delete_again.status, HTTPStatus.ACCEPTED)
+        self.assertTrue(owner_delete_again.payload["deleteQueued"])
+        self.assertTrue(owner_delete_again.payload["alreadyQueued"])
+        self.assertEqual(owner_delete_again.payload["command"]["id"], uninstall_command_id)
 
     def test_same_installation_shares_user_quota_across_repos(self) -> None:
         with (
