@@ -1,10 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import hashlib
 import hmac
 import math
-import secrets
+import time
 import copy
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urljoin, urlparse
@@ -27,6 +27,7 @@ PLAN_IDS = ("free", *PAID_PLAN_IDS)
 PLAN_RANK = {"free": 0, "pro": 1, "max": 2}
 PAID_PLAN_ENTITLEMENT_STATUSES = {"active", "trialing", "canceling"}
 PAID_PLAN_CHANGE_STATUSES = {"active", "trialing", "canceling"}
+CREEM_CHECKOUT_REQUEST_ID_WINDOW_SECONDS = 10 * 60
 CREEM_PRO_ENTITLEMENT_STATUSES = PAID_PLAN_ENTITLEMENT_STATUSES
 CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
 REVIEW_CODEX_COMMAND_DEFAULT = "codex"
@@ -607,6 +608,7 @@ def public_plan() -> dict:
     return {
         "provider": provider,
         "enabled": provider != "disabled",
+        "checkoutTimeoutMs": billing_timeout_seconds() * 1000,
         "currency": currency,
         "name": pro_plan["name"],
         "description": pro_plan["description"],
@@ -729,13 +731,22 @@ def validate_checkout_selection(plan: str, interval: str) -> tuple[str, str]:
     return normalized_plan, normalized_interval
 
 
+def creem_checkout_request_id(user_id: object, *, product_id: str, plan: str, interval: str, now: float | None = None) -> str:
+    user_text = str(user_id or "").strip()
+    bucket = int((time.time() if now is None else now) // CREEM_CHECKOUT_REQUEST_ID_WINDOW_SECONDS)
+    source = "\0".join([user_text, product_id, plan, interval, str(bucket)])
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:24]
+    safe_user = "".join(char if char.isalnum() else "_" for char in user_text)[:32].strip("_") or "user"
+    return f"pw_checkout_{safe_user}_{digest}"
+
+
 def create_creem_checkout_session(user: dict, *, success_url: str, cancel_url: str, plan: str, interval: str) -> dict:
     success_url = request_redirect_url(success_url, default_success_url(), "success")
     request_redirect_url(cancel_url, default_cancel_url(), "cancel")
     product_id = creem_product_id(interval, plan=plan)
     if not product_id:
         raise BillingConfigurationError(f"Creem {plan.title()} {interval} product is not configured.")
-    request_id = f"pw_{user['id']}_{secrets.token_urlsafe(8)}"
+    request_id = creem_checkout_request_id(user["id"], product_id=product_id, plan=plan, interval=interval)
     existing_customer_id = None
     raw_existing_customer_id = (user.get("billing") or {}).get("customerId")
     if isinstance(raw_existing_customer_id, str) and raw_existing_customer_id.strip():

@@ -92,6 +92,7 @@ class BillingContractsTest(unittest.TestCase):
             plans__free__userReviewLimit=6,
             plans__pro__userReviewLimit=66,
             billing__creemProProductIds=["prod_db_monthly", "prod_db_yearly"],
+            billing__billingTimeoutSeconds=22,
         )
         with (
             patch.dict(
@@ -121,7 +122,7 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(plan["plans"][1]["reviewLimit"], 66)
         self.assertEqual(plan["plans"][1]["prices"]["month"]["productId"], "prod_db_monthly")
         self.assertEqual(plan["plans"][1]["prices"]["year"]["productId"], "prod_db_yearly")
-
+        self.assertEqual(plan["checkoutTimeoutMs"], 22_000)
     def test_creem_request_settings_use_database_and_ignore_removed_env(self) -> None:
         config = database_config(
             billing__billingTimeoutSeconds=22,
@@ -332,6 +333,43 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(json_payload["customer"]["email"], "dev@example.com")
         self.assertNotIn("id", json_payload["customer"])
         self.assertEqual(json_payload["metadata"]["userId"], "usr_1")
+        self.assertEqual(session["requestId"], json_payload["request_id"])
+        self.assertTrue(json_payload["request_id"].startswith("pw_checkout_usr_1_"))
+
+    def test_creem_checkout_request_id_is_stable_inside_retry_window(self) -> None:
+        first = billing.creem_checkout_request_id(
+            "usr_1",
+            product_id="prod_123",
+            plan="pro",
+            interval="month",
+            now=1200,
+        )
+        repeated = billing.creem_checkout_request_id(
+            "usr_1",
+            product_id="prod_123",
+            plan="pro",
+            interval="month",
+            now=1200 + billing.CREEM_CHECKOUT_REQUEST_ID_WINDOW_SECONDS - 1,
+        )
+        later = billing.creem_checkout_request_id(
+            "usr_1",
+            product_id="prod_123",
+            plan="pro",
+            interval="month",
+            now=1200 + billing.CREEM_CHECKOUT_REQUEST_ID_WINDOW_SECONDS,
+        )
+        different_interval = billing.creem_checkout_request_id(
+            "usr_1",
+            product_id="prod_123",
+            plan="pro",
+            interval="year",
+            now=1200,
+        )
+
+        self.assertEqual(first, repeated)
+        self.assertNotEqual(first, later)
+        self.assertNotEqual(first, different_interval)
+        self.assertTrue(first.startswith("pw_checkout_usr_1_"))
 
     def test_creem_checkout_keeps_existing_customer_id_without_sending_it_to_checkout(self) -> None:
         response = Mock()
