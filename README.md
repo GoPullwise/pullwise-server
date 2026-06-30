@@ -142,7 +142,6 @@ PULLWISE_COOKIE_SECURE=true
 PULLWISE_COOKIE_SAME_SITE=Lax
 PULLWISE_ADMIN_USER_IDS=
 PULLWISE_ADMIN_EMAILS=admin@example.com
-PULLWISE_WORKER_JOB_TIMEOUT_SECONDS=1800
 ```
 
 Plan quotas, scan queue/retry/lease limits, repository scan limits, rate
@@ -150,7 +149,9 @@ limits, worker control-plane defaults, operational alert email settings,
 review calibration settings, and the non-secret Creem catalog live in the
 server database. Edit them through the admin app Settings page or
 `PATCH /admin/system-config`; the server seeds hardcoded defaults when the DB
-has no value.
+has no value. The default scan job lease is 14400 seconds, and the default
+worker Codex turn timeout written to generated worker env files is 3600
+seconds.
 
 Server cleanup only prunes operational records: expired sessions/GitHub OAuth state, terminal worker commands/audit rows, and terminal scan job/result duplicates that have already been applied to the user-visible scan state. User scan results in `SCANS`/`ISSUES` are retained.
 

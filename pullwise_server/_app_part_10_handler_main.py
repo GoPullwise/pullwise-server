@@ -598,7 +598,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         scan_error_repo_id = exc.repo_id
                     else:
                         if quota_result.get("deduplicated"):
-                            scan = user_scan_by_request_id(session["userId"], request_id)
+                            scan = wait_for_user_scan_by_request_id(session["userId"], request_id)
                             if scan is None or not scan_matches_requested_repository(
                                 scan,
                                 requested_repo_id=requested_repo_id,
@@ -2988,7 +2988,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 payload["repoId"] = exc.repo_id
             return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
         if quota_result.get("deduplicated"):
-            existing = user_scan_by_request_id(context["user"]["id"], request_id)
+            existing = wait_for_user_scan_by_request_id(context["user"]["id"], request_id)
             if existing and existing.get("repoId") == repository["id"]:
                 return self.json(scan_payload(existing))
             if existing:

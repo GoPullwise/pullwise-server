@@ -1199,6 +1199,33 @@ def user_scan_by_request_id(user_id: str, request_id: str) -> dict | None:
         return remember_scan_snapshot_locked(scan)
 
 
+def wait_for_user_scan_by_request_id(
+    user_id: str,
+    request_id: str,
+    *,
+    timeout_seconds: float = 2.0,
+    interval_seconds: float = 0.02,
+) -> dict | None:
+    scan = user_scan_by_request_id(user_id, request_id)
+    if scan or not request_id:
+        return scan
+    try:
+        timeout = max(0.0, float(timeout_seconds))
+    except (TypeError, ValueError):
+        timeout = 0.0
+    try:
+        interval = min(0.1, max(0.001, float(interval_seconds)))
+    except (TypeError, ValueError):
+        interval = 0.02
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
+        scan = user_scan_by_request_id(user_id, request_id)
+        if scan:
+            return scan
+    return user_scan_by_request_id(user_id, request_id)
+
+
 IDEMPOTENCY_KEY_REUSED_MESSAGE = "This idempotency key is already attached to a different repository scan."
 
 

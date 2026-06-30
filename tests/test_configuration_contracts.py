@@ -160,18 +160,40 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("scan.maxRepoFiles", scan_fields)
         self.assertNotIn("scan.maxRepoBytes", scan_fields)
 
-    def test_worker_codex_timeout_is_admin_system_config_field(self) -> None:
+    def test_scan_job_lease_and_worker_codex_timeout_are_admin_system_config_fields(self) -> None:
         config = app.system_config.default_config()
-        fields = {
+        scan_fields = {
+            field["path"]: field
+            for group in app.system_config.metadata()
+            if group["id"] == "scan"
+            for field in group["fields"]
+        }
+        worker_fields = {
             field["path"]: field
             for group in app.system_config.metadata()
             if group["id"] == "worker"
             for field in group["fields"]
         }
 
-        self.assertEqual(config["worker"]["codexTimeoutSeconds"], 1800)
-        self.assertEqual(fields["worker.codexTimeoutSeconds"]["type"], "integer")
-        self.assertEqual(fields["worker.codexTimeoutSeconds"]["min"], 60)
+        self.assertEqual(config["scan"]["jobLeaseSeconds"], 14400)
+        self.assertEqual(scan_fields["scan.jobLeaseSeconds"]["type"], "integer")
+        self.assertEqual(scan_fields["scan.jobLeaseSeconds"]["min"], 60)
+        self.assertEqual(config["worker"]["codexTimeoutSeconds"], 3600)
+        self.assertEqual(worker_fields["worker.codexTimeoutSeconds"]["type"], "integer")
+        self.assertEqual(worker_fields["worker.codexTimeoutSeconds"]["min"], 60)
+
+    def test_previous_timeout_defaults_migrate_to_current_defaults(self) -> None:
+        migrated = app.system_config.normalize_config(
+            {"version": 1, "scan": {"jobLeaseSeconds": 3600}, "worker": {"codexTimeoutSeconds": 1800}}
+        )
+        custom = app.system_config.normalize_config(
+            {"version": 1, "scan": {"jobLeaseSeconds": 7200}, "worker": {"codexTimeoutSeconds": 2400}}
+        )
+
+        self.assertEqual(migrated["scan"]["jobLeaseSeconds"], 14400)
+        self.assertEqual(migrated["worker"]["codexTimeoutSeconds"], 3600)
+        self.assertEqual(custom["scan"]["jobLeaseSeconds"], 7200)
+        self.assertEqual(custom["worker"]["codexTimeoutSeconds"], 2400)
 
     def test_alert_email_is_admin_system_config_field_with_redacted_password(self) -> None:
         config = app.system_config.default_config()

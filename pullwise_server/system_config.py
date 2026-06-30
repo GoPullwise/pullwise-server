@@ -18,7 +18,7 @@ DEFAULT_CREEM_API_BASE_URL = "https://api.creem.io"
 DEFAULT_CREEM_TEST_API_BASE_URL = "https://test-api.creem.io"
 
 DEFAULT_CONFIG = {
-    "version": 1,
+    "version": 2,
     "plans": {
         "free": {
             "userReviewLimit": 5,
@@ -42,7 +42,7 @@ DEFAULT_CONFIG = {
     "scan": {
         "maxQueuedScansGlobal": 1000,
         "jobRetryAttempts": 1,
-        "jobLeaseSeconds": 3600,
+        "jobLeaseSeconds": 14400,
         "jobStartupGraceSeconds": 120,
     },
     "worker": {
@@ -54,7 +54,7 @@ DEFAULT_CONFIG = {
         "releaseApiUrl": "https://api.github.com/repos/GoPullwise/pullwise-worker/releases/latest",
         "releaseFetchTimeoutSeconds": 3,
         "releaseCacheSeconds": 300,
-        "codexTimeoutSeconds": 1800,
+        "codexTimeoutSeconds": 3600,
     },
     "billing": {
         "billingTimeoutSeconds": 15,
@@ -621,7 +621,34 @@ def normalize_config(raw: dict) -> dict:
             nested_set(normalized, path, clean_value(value, spec))
         except ValueError:
             continue
+    migrate_legacy_default_timeouts(normalized, raw if isinstance(raw, dict) else {})
     return normalized
+
+
+def config_version_value(raw: dict) -> int:
+    try:
+        return int(raw.get("version") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def legacy_int_setting(raw: dict, path: str) -> int | None:
+    found, value = nested_get(raw, path)
+    if not found or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def migrate_legacy_default_timeouts(normalized: dict, raw: dict) -> None:
+    if config_version_value(raw) >= 2:
+        return
+    if legacy_int_setting(raw, "scan.jobLeaseSeconds") == 3600:
+        normalized["scan"]["jobLeaseSeconds"] = 14400
+    if legacy_int_setting(raw, "worker.codexTimeoutSeconds") == 1800:
+        normalized["worker"]["codexTimeoutSeconds"] = 3600
 
 
 def flatten_paths(value: object, prefix: str = "") -> list[str]:

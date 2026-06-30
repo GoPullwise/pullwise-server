@@ -566,7 +566,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
                     call_number = reserve_calls
                 if call_number == 1:
                     first_reserved.set()
-                    self.assertTrue(release_first.wait(2), "timed out waiting to release first scan request")
+                    release_first.wait(5)
                 elif call_number == 2:
                     second_reserved.set()
             return result
@@ -577,8 +577,10 @@ class ApiKeyRoutesTest(unittest.TestCase):
             first_thread.start()
             self.assertTrue(first_reserved.wait(2), "first scan request did not reach quota reservation")
             second_thread.start()
-            second_reserved.wait(0.25)
-            release_first.set()
+            try:
+                self.assertTrue(second_reserved.wait(2), "second scan request did not reach quota deduplication")
+            finally:
+                release_first.set()
             first_thread.join(2)
             second_thread.join(2)
 

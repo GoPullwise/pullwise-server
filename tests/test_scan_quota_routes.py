@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from contextlib import closing
 from http import HTTPStatus
@@ -330,6 +331,52 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertIsNotNone(job)
         self.assertEqual(job["scan_id"], first.payload["id"])
         self.assertEqual(job["status"], "queued")
+
+    def test_concurrent_same_request_id_creates_only_one_browser_scan(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        first = RouteHarness({"repoId": "123", "requestId": "req_browser_race"}, cookie=cookie)
+        second = RouteHarness({"repoId": "123", "requestId": "req_browser_race"}, cookie=cookie)
+        real_reserve = app.quota.reserve_scan_quota
+        first_reserved = threading.Event()
+        second_reserved = threading.Event()
+        release_first = threading.Event()
+        call_lock = threading.Lock()
+        reserve_calls = 0
+
+        def pausing_reserve(*args, **kwargs):
+            nonlocal reserve_calls
+            result = real_reserve(*args, **kwargs)
+            if kwargs.get("request_id") == "req_browser_race":
+                with call_lock:
+                    reserve_calls += 1
+                    call_number = reserve_calls
+                if call_number == 1:
+                    first_reserved.set()
+                    release_first.wait(5)
+                elif call_number == 2:
+                    second_reserved.set()
+            return result
+
+        with patch.object(app.quota, "reserve_scan_quota", side_effect=pausing_reserve):
+            first_thread = threading.Thread(target=app.PullwiseHandler.route, args=(first, "POST"))
+            second_thread = threading.Thread(target=app.PullwiseHandler.route, args=(second, "POST"))
+            first_thread.start()
+            self.assertTrue(first_reserved.wait(5), "first scan request did not reach quota reservation")
+            second_thread.start()
+            try:
+                self.assertTrue(second_reserved.wait(5), "second scan request did not reach quota deduplication")
+            finally:
+                release_first.set()
+            first_thread.join(5)
+            second_thread.join(5)
+
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertEqual(first.status, HTTPStatus.CREATED)
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertEqual(second.payload["id"], first.payload["id"])
+        self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "req_browser_race"]), 1)
+        self.assertEqual(db.count_user_scan_jobs("usr_a"), 1)
 
     def test_cancel_releases_reserved_quota_and_records_billing_activity(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
