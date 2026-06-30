@@ -233,6 +233,8 @@ def initialize() -> None:
                     worker_id TEXT PRIMARY KEY,
                     name TEXT,
                     token_hash TEXT UNIQUE,
+                    worker_scope TEXT NOT NULL DEFAULT 'shared',
+                    owner_user_id TEXT,
                     version TEXT,
                     provider TEXT,
                     provider_chain TEXT,
@@ -262,6 +264,8 @@ def initialize() -> None:
             for table, column, definition in (
                 ("workers", "name", "TEXT"),
                 ("workers", "token_hash", "TEXT"),
+                ("workers", "worker_scope", "TEXT NOT NULL DEFAULT 'shared'"),
+                ("workers", "owner_user_id", "TEXT"),
                 ("workers", "enabled", "INTEGER NOT NULL DEFAULT 1"),
                 ("workers", "provider_chain", "TEXT"),
                 ("workers", "region", "TEXT"),
@@ -280,6 +284,12 @@ def initialize() -> None:
             ):
                 ensure_column(connection, table, column, definition)
             normalize_workers_schema(connection)
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_workers_scope_owner
+                ON workers(worker_scope, owner_user_id, enabled, deleted_at, last_heartbeat_at)
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS worker_audit_events (
@@ -339,6 +349,8 @@ def initialize() -> None:
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     user_id TEXT,
+                    worker_scope TEXT NOT NULL DEFAULT 'shared',
+                    worker_owner_user_id TEXT,
                     repo_id TEXT,
                     github_repo_id TEXT,
                     installation_id TEXT,
@@ -357,10 +369,18 @@ def initialize() -> None:
             ensure_column(connection, "scan_jobs", "review_output_language", "TEXT")
             ensure_column(connection, "scan_jobs", "provider_chain", "TEXT")
             ensure_column(connection, "scan_jobs", "last_attempt_id", "TEXT")
+            ensure_column(connection, "scan_jobs", "worker_scope", "TEXT NOT NULL DEFAULT 'shared'")
+            ensure_column(connection, "scan_jobs", "worker_owner_user_id", "TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable
                 ON scan_jobs(status, created_at, job_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable_scope
+                ON scan_jobs(status, worker_scope, user_id, created_at, job_id)
                 """
             )
             connection.execute(
@@ -733,6 +753,8 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
         "worker_id",
         "name",
         "token_hash",
+        "worker_scope",
+        "owner_user_id",
         "version",
         "provider",
         "provider_chain",
@@ -773,6 +795,8 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
             worker_id TEXT PRIMARY KEY,
             name TEXT,
             token_hash TEXT UNIQUE,
+            worker_scope TEXT NOT NULL DEFAULT 'shared',
+            owner_user_id TEXT,
             version TEXT,
             provider TEXT,
             provider_chain TEXT,
@@ -806,6 +830,8 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
         for column in copy_columns:
             if column == "enabled":
                 value_expressions.append("COALESCE(enabled, 1)")
+            elif column == "worker_scope":
+                value_expressions.append("COALESCE(NULLIF(worker_scope, ''), 'shared')")
             elif column == "running_jobs":
                 value_expressions.append("CASE WHEN COALESCE(running_jobs, 0) > 0 THEN 1 ELSE 0 END")
             elif column == "status":
@@ -1299,6 +1325,16 @@ def worker_token_hash(token: str) -> str:
 
 
 WORKER_PROVIDER_VALUES = {"codex"}
+WORKER_SCOPE_SHARED = "shared"
+WORKER_SCOPE_PRIVATE = "private"
+WORKER_SCOPE_VALUES = {WORKER_SCOPE_SHARED, WORKER_SCOPE_PRIVATE}
+
+
+def normalize_worker_scope(value: Any, *, default: str = WORKER_SCOPE_SHARED) -> str:
+    scope = str(value or "").strip().lower().replace("-", "_")
+    if scope in WORKER_SCOPE_VALUES:
+        return scope
+    return default if default in WORKER_SCOPE_VALUES else WORKER_SCOPE_SHARED
 
 
 def normalize_provider_list(value: Any) -> list[str]:
@@ -1395,22 +1431,31 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     timestamp = int(record.get("timestamp") or time.time())
     provider = (normalize_provider_list(record.get("provider")) or ["codex"])[0]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
+    worker_scope = normalize_worker_scope(record.get("worker_scope") or record.get("scope"))
+    owner_user_id = str(record.get("owner_user_id") or record.get("user_id") or "").strip()
+    if worker_scope == WORKER_SCOPE_PRIVATE and not owner_user_id:
+        raise ValueError("owner_user_id is required for private workers.")
+    if worker_scope != WORKER_SCOPE_PRIVATE:
+        owner_user_id = ""
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
             connection.execute(
                 """
                 INSERT INTO workers (
-                    worker_id, name, token_hash, provider, provider_chain, enabled, status,
+                    worker_id, name, token_hash, worker_scope, owner_user_id,
+                    provider, provider_chain, enabled, status,
                     running_jobs, version,
                     hostname, region, last_error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, 1, 'offline', 0, ?, NULL, ?, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'offline', 0, ?, NULL, ?, NULL, ?, ?)
                 """,
                 (
                     worker_id,
                     str(record.get("name") or "Worker")[:120],
                     token_hash,
+                    worker_scope,
+                    owner_user_id or None,
                     provider,
                     provider_chain,
                     record.get("version"),
@@ -1424,18 +1469,35 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     return worker
 
 
-def worker_visibility_where_clause(*, include_deleted: bool = False, activated_only: bool = False) -> str:
+def worker_visibility_where_clause(
+    *,
+    include_deleted: bool = False,
+    activated_only: bool = False,
+    worker_scope: str | None = None,
+) -> str:
     filters = []
     if not include_deleted:
         filters.append("deleted_at IS NULL")
     if activated_only:
         filters.append("last_heartbeat_at IS NOT NULL")
+    if worker_scope is not None:
+        scope = normalize_worker_scope(worker_scope)
+        filters.append(f"COALESCE(worker_scope, '{WORKER_SCOPE_SHARED}') = '{scope}'")
     return f"WHERE {' AND '.join(filters)}" if filters else ""
 
 
-def list_workers(*, include_deleted: bool = False, activated_only: bool = False) -> list[dict[str, Any]]:
+def list_workers(
+    *,
+    include_deleted: bool = False,
+    activated_only: bool = False,
+    worker_scope: str | None = None,
+) -> list[dict[str, Any]]:
     ensure_initialized()
-    where = worker_visibility_where_clause(include_deleted=include_deleted, activated_only=activated_only)
+    where = worker_visibility_where_clause(
+        include_deleted=include_deleted,
+        activated_only=activated_only,
+        worker_scope=worker_scope,
+    )
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
@@ -1444,9 +1506,18 @@ def list_workers(*, include_deleted: bool = False, activated_only: bool = False)
         return [dict(row) for row in rows]
 
 
-def count_workers(*, include_deleted: bool = False, activated_only: bool = False) -> int:
+def count_workers(
+    *,
+    include_deleted: bool = False,
+    activated_only: bool = False,
+    worker_scope: str | None = None,
+) -> int:
     ensure_initialized()
-    where = worker_visibility_where_clause(include_deleted=include_deleted, activated_only=activated_only)
+    where = worker_visibility_where_clause(
+        include_deleted=include_deleted,
+        activated_only=activated_only,
+        worker_scope=worker_scope,
+    )
     with _LOCK, closing(connect()) as connection:
         row = connection.execute(f"SELECT COUNT(*) FROM workers {where}").fetchone()
     return max(0, int(row[0] if row else 0))
@@ -1456,11 +1527,16 @@ def list_workers_page(
     *,
     include_deleted: bool = False,
     activated_only: bool = False,
+    worker_scope: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
     ensure_initialized()
-    where = worker_visibility_where_clause(include_deleted=include_deleted, activated_only=activated_only)
+    where = worker_visibility_where_clause(
+        include_deleted=include_deleted,
+        activated_only=activated_only,
+        worker_scope=worker_scope,
+    )
     safe_limit = max(1, min(100, int(limit or 50)))
     safe_offset = max(0, int(offset or 0))
     with _LOCK, closing(connect()) as connection:
@@ -1484,18 +1560,80 @@ def list_workers_page(
     }
 
 
-def get_worker(worker_id: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
+def get_worker(
+    worker_id: str,
+    *,
+    include_deleted: bool = False,
+    worker_scope: str | None = None,
+) -> dict[str, Any] | None:
     ensure_initialized()
     worker_id = str(worker_id or "").strip()
     if not worker_id:
         return None
     where_deleted = "" if include_deleted else "AND deleted_at IS NULL"
+    scope_clause = ""
+    params: list[Any] = [worker_id]
+    if worker_scope is not None:
+        scope = normalize_worker_scope(worker_scope)
+        scope_clause = "AND COALESCE(worker_scope, ?) = ?"
+        params.extend([WORKER_SCOPE_SHARED, scope])
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         return row_to_dict(
             connection.execute(
-                f"SELECT * FROM workers WHERE worker_id = ? {where_deleted}",
-                (worker_id,),
+                f"SELECT * FROM workers WHERE worker_id = ? {where_deleted} {scope_clause}",
+                tuple(params),
+            ).fetchone()
+        )
+
+
+def list_private_workers_for_user(user_id: str, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+    ensure_initialized()
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        return []
+    deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            f"""
+            SELECT *
+            FROM workers
+            WHERE worker_scope = ?
+              AND owner_user_id = ?
+              {deleted_clause}
+            ORDER BY created_at DESC, worker_id ASC
+            """,
+            (WORKER_SCOPE_PRIVATE, user_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_private_worker_for_user(
+    user_id: str,
+    worker_id: str,
+    *,
+    include_deleted: bool = False,
+) -> dict[str, Any] | None:
+    ensure_initialized()
+    user_id = str(user_id or "").strip()
+    worker_id = str(worker_id or "").strip()
+    if not user_id or not worker_id:
+        return None
+    deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                f"""
+                SELECT *
+                FROM workers
+                WHERE worker_scope = ?
+                  AND owner_user_id = ?
+                  AND worker_id = ?
+                  {deleted_clause}
+                """,
+                (WORKER_SCOPE_PRIVATE, user_id, worker_id),
             ).fetchone()
         )
 
@@ -2080,6 +2218,100 @@ def cleanup_operational_records(
     }
 
 
+def cleanup_user_scan_issue_records(
+    *,
+    timestamp: int | None = None,
+    retention_seconds: int = 90 * 24 * 60 * 60,
+) -> dict[str, int]:
+    ensure_initialized()
+    current_time = int(timestamp if timestamp is not None else time.time())
+    cutoff = current_time - max(0, int(retention_seconds))
+    terminal_job_statuses = ("done", "failed", "cancelled", "lost")
+    terminal_scan_statuses = ("done", "failed", "cancelled", "lost")
+    terminal_job_placeholders = ",".join("?" for _ in terminal_job_statuses)
+    terminal_scan_placeholders = ",".join("?" for _ in terminal_scan_statuses)
+    old_scan_ids: set[str] = set()
+    counts = {"issues": 0, "scans": 0, "scan_jobs": 0}
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            job_rows = connection.execute(
+                f"""
+                SELECT scan_id
+                FROM scan_jobs
+                WHERE created_at < ?
+                  AND lower(COALESCE(status, '')) IN ({terminal_job_placeholders})
+                  AND NULLIF(scan_id, '') IS NOT NULL
+                """,
+                (cutoff, *terminal_job_statuses),
+            ).fetchall()
+            old_scan_ids.update(str(row["scan_id"] or "").strip() for row in job_rows)
+
+            scan_rows = connection.execute(
+                f"""
+                SELECT scans.scan_id
+                FROM scans
+                WHERE scans.created_at < ?
+                  AND lower(COALESCE(scans.status, '')) IN ({terminal_scan_placeholders})
+                  AND NULLIF(scans.scan_id, '') IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM scan_jobs retained_job
+                      WHERE retained_job.scan_id = scans.scan_id
+                        AND lower(COALESCE(retained_job.status, '')) NOT IN ({terminal_job_placeholders})
+                      LIMIT 1
+                  )
+                """,
+                (cutoff, *terminal_scan_statuses, *terminal_job_statuses),
+            ).fetchall()
+            old_scan_ids.update(str(row["scan_id"] or "").strip() for row in scan_rows)
+            old_scan_ids.discard("")
+
+            scan_ids = sorted(old_scan_ids)
+            for start in range(0, len(scan_ids), 400):
+                chunk = scan_ids[start : start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                counts["issues"] += connection.execute(
+                    f"DELETE FROM issues WHERE scan_id IN ({placeholders})",
+                    tuple(chunk),
+                ).rowcount
+                counts["scans"] += connection.execute(
+                    f"DELETE FROM scans WHERE scan_id IN ({placeholders})",
+                    tuple(chunk),
+                ).rowcount
+                counts["scan_jobs"] += connection.execute(
+                    f"""
+                    DELETE FROM scan_jobs
+                    WHERE scan_id IN ({placeholders})
+                      AND lower(COALESCE(status, '')) IN ({terminal_job_placeholders})
+                    """,
+                    (*chunk, *terminal_job_statuses),
+                ).rowcount
+
+            counts["issues"] += connection.execute(
+                f"""
+                DELETE FROM issues
+                WHERE created_at < ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM scan_jobs retained_job
+                      WHERE retained_job.scan_id = issues.scan_id
+                        AND lower(COALESCE(retained_job.status, '')) NOT IN ({terminal_job_placeholders})
+                      LIMIT 1
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM scans retained_scan
+                      WHERE retained_scan.scan_id = issues.scan_id
+                        AND lower(COALESCE(retained_scan.status, '')) NOT IN ({terminal_scan_placeholders})
+                      LIMIT 1
+                  )
+                """,
+                (cutoff, *terminal_job_statuses, *terminal_scan_statuses),
+            ).rowcount
+    return {key: max(0, value) for key, value in counts.items()}
+
+
 def scan_payload_for_storage(value: Any) -> Any:
     if value is None or isinstance(value, str | bool | int):
         return value
@@ -2311,6 +2543,12 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("job_id, scan_id, and repo are required")
     timestamp = int(record.get("created_at") or time.time())
     provider_chain = provider_list_json(record.get("provider_chain"))
+    worker_scope = normalize_worker_scope(record.get("worker_scope") or record.get("scope"))
+    worker_owner_user_id = str(
+        record.get("worker_owner_user_id") or record.get("owner_user_id") or record.get("user_id") or ""
+    ).strip()
+    if worker_scope != WORKER_SCOPE_PRIVATE:
+        worker_owner_user_id = ""
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -2320,12 +2558,13 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     job_id, scan_id, repo, branch, "commit", status, attempt,
                     claimed_by_worker_id, claimed_at, started_at, completed_at,
                     timeout_at, error, result_checksum, created_at, updated_at,
-                    user_id, repo_id, github_repo_id, installation_id, clone_url,
+                    user_id, worker_scope, worker_owner_user_id,
+                    repo_id, github_repo_id, installation_id, clone_url,
                     progress_phase, progress, progress_message, logs_summary, max_attempts,
                     review_output_language, provider_chain
                 )
                 VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?,
-                    ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?, ?)
                 ON CONFLICT(scan_id) DO NOTHING
                 """,
                 (
@@ -2338,6 +2577,8 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     timestamp,
                     timestamp,
                     record.get("user_id"),
+                    worker_scope,
+                    worker_owner_user_id or None,
                     record.get("repo_id"),
                     record.get("github_repo_id"),
                     record.get("installation_id"),
@@ -3047,31 +3288,64 @@ def worker_running_scan_job_counts(worker_ids: list[str] | set[str] | tuple[str,
     }
 
 
-def _enabled_worker_count_locked(connection: sqlite3.Connection) -> int:
+def _enabled_worker_count_locked(
+    connection: sqlite3.Connection,
+    *,
+    worker_scope: str | None = WORKER_SCOPE_SHARED,
+    owner_user_id: str | None = None,
+) -> int:
+    filters = ["enabled = 1", "deleted_at IS NULL"]
+    params: list[Any] = []
+    if worker_scope is not None:
+        scope = normalize_worker_scope(worker_scope)
+        filters.append("COALESCE(worker_scope, ?) = ?")
+        params.extend([WORKER_SCOPE_SHARED, scope])
+    owner = str(owner_user_id or "").strip()
+    if owner:
+        filters.append("owner_user_id = ?")
+        params.append(owner)
     row = connection.execute(
-        """
+        f"""
         SELECT COUNT(*) AS worker_count
         FROM workers
-        WHERE enabled = 1
-          AND deleted_at IS NULL
-        """
+        WHERE {' AND '.join(filters)}
+        """,
+        tuple(params),
     ).fetchone()
     return max(0, int(row[0] if row else 0))
 
 
-def count_enabled_workers() -> int:
+def count_enabled_workers(
+    *,
+    worker_scope: str | None = WORKER_SCOPE_SHARED,
+    owner_user_id: str | None = None,
+) -> int:
     ensure_initialized()
     with _LOCK, closing(connect()) as connection:
-        return _enabled_worker_count_locked(connection)
+        return _enabled_worker_count_locked(
+            connection,
+            worker_scope=worker_scope,
+            owner_user_id=owner_user_id,
+        )
 
 
-def _effective_scan_job_max_attempts_locked(connection: sqlite3.Connection, max_attempts: object) -> int:
+def _effective_scan_job_max_attempts_locked(
+    connection: sqlite3.Connection,
+    max_attempts: object,
+    *,
+    worker_scope: str | None = WORKER_SCOPE_SHARED,
+    owner_user_id: str | None = None,
+) -> int:
     try:
         configured = int(max_attempts or 1)
     except (TypeError, ValueError):
         configured = 1
     configured = max(1, configured)
-    worker_count = _enabled_worker_count_locked(connection)
+    worker_count = _enabled_worker_count_locked(
+        connection,
+        worker_scope=worker_scope,
+        owner_user_id=owner_user_id,
+    )
     if worker_count <= 0:
         return configured
     return max(1, min(configured, worker_count))
@@ -3081,8 +3355,15 @@ def scan_job_effective_max_attempts(job: dict[str, Any] | None) -> int:
     ensure_initialized()
     if not job:
         return 1
+    worker_scope = normalize_worker_scope(job.get("worker_scope"))
+    owner_user_id = job.get("worker_owner_user_id") if worker_scope == WORKER_SCOPE_PRIVATE else None
     with _LOCK, closing(connect()) as connection:
-        return _effective_scan_job_max_attempts_locked(connection, job.get("max_attempts"))
+        return _effective_scan_job_max_attempts_locked(
+            connection,
+            job.get("max_attempts"),
+            worker_scope=worker_scope,
+            owner_user_id=owner_user_id,
+        )
 
 
 def _scan_job_attempt_id(job_id: str, attempt: int) -> str:
@@ -3188,7 +3469,14 @@ def scan_job_retry_state(job: dict[str, Any] | None) -> dict[str, int]:
     except (TypeError, ValueError):
         attempt = 0
     with _LOCK, closing(connect()) as connection:
-        effective_max = _effective_scan_job_max_attempts_locked(connection, job.get("max_attempts"))
+        worker_scope = normalize_worker_scope(job.get("worker_scope"))
+        owner_user_id = job.get("worker_owner_user_id") if worker_scope == WORKER_SCOPE_PRIVATE else None
+        effective_max = _effective_scan_job_max_attempts_locked(
+            connection,
+            job.get("max_attempts"),
+            worker_scope=worker_scope,
+            owner_user_id=owner_user_id,
+        )
         attempted_workers = _attempted_worker_count_locked(connection, job_id) if job_id else 0
     return {
         "attempt": attempt,
@@ -3199,15 +3487,23 @@ def scan_job_retry_state(job: dict[str, Any] | None) -> dict[str, int]:
     }
 
 
-def scan_job_status_counts() -> dict[str, int]:
+def scan_job_status_counts(*, worker_scope: str | None = None) -> dict[str, int]:
     ensure_initialized()
+    params: tuple[Any, ...] = ()
+    where = ""
+    if worker_scope is not None:
+        scope = normalize_worker_scope(worker_scope)
+        where = "WHERE COALESCE(worker_scope, ?) = ?"
+        params = (WORKER_SCOPE_SHARED, scope)
     with _LOCK, closing(connect()) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT status, COUNT(*) AS job_count
             FROM scan_jobs
+            {where}
             GROUP BY status
-            """
+            """,
+            params,
         ).fetchall()
     counts = {str(row[0] or "").strip().lower(): max(0, int(row[1] or 0)) for row in rows}
     return {
@@ -3843,10 +4139,15 @@ def claim_next_scan_job(
         connection.execute("BEGIN IMMEDIATE")
         try:
             worker = connection.execute(
-                "SELECT enabled, deleted_at FROM workers WHERE worker_id = ?",
+                "SELECT enabled, deleted_at, worker_scope, owner_user_id FROM workers WHERE worker_id = ?",
                 (worker_id,),
             ).fetchone()
             if worker and (int(worker["enabled"] or 0) == 0 or worker["deleted_at"] is not None):
+                connection.commit()
+                return None
+            worker_scope = normalize_worker_scope(worker["worker_scope"] if worker else WORKER_SCOPE_SHARED)
+            worker_owner_user_id = str((worker["owner_user_id"] if worker else "") or "").strip()
+            if worker_scope == WORKER_SCOPE_PRIVATE and not worker_owner_user_id:
                 connection.commit()
                 return None
             offline_after = max(60, int(worker_heartbeat_timeout_seconds or 120))
@@ -3882,11 +4183,19 @@ def claim_next_scan_job(
                         AND worker_active.status IN ('claimed', 'running', 'uploading_result')
                       LIMIT 1
                   )
+                  AND (
+                      (? = 'private'
+                        AND queued.worker_scope = 'private'
+                        AND queued.user_id = ?)
+                      OR
+                      (? != 'private'
+                        AND COALESCE(NULLIF(queued.worker_scope, ''), 'shared') = 'shared')
+                  )
                 ORDER BY queued.created_at ASC, queued.job_id ASC
                 LIMIT 1
                 """
                 ,
-                (worker_id, worker_id),
+                (worker_id, worker_id, worker_scope, worker_owner_user_id, worker_scope),
             ).fetchone()
             if not row:
                 connection.commit()

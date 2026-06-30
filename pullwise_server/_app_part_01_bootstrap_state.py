@@ -154,6 +154,8 @@ AUDIT_SWARM_EVIDENCE_BLOCK_KINDS = {
 REVIEW_DECISION_EVENT_PROTOCOL_VERSION = "pullwise-review-decision/0.1"
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
 SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "lost", "retrying"}
+DEFAULT_SCAN_ISSUE_RETENTION_SECONDS = 90 * 24 * 60 * 60
+TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "lost"}
 SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
 API_KEY_PREFIX = "pwk_"
@@ -212,7 +214,7 @@ REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
 SCAN_BY_ID: dict[str, dict] = {}
-DEFAULT_WORKER_PACKAGE_VERSION = "0.8.8"
+DEFAULT_WORKER_PACKAGE_VERSION = "0.8.9"
 DEFAULT_WORKER_PACKAGE = (
     "https://github.com/GoPullwise/pullwise-worker/releases/download/"
     f"v{DEFAULT_WORKER_PACKAGE_VERSION}/pullwise_worker-{DEFAULT_WORKER_PACKAGE_VERSION}-py3-none-any.whl"
@@ -661,6 +663,7 @@ def cleanup_server_resources_if_due(*, force: bool = False) -> dict[str, int]:
 
 def cleanup_server_resources(*, timestamp: int | None = None) -> dict[str, int]:
     current_time = int(timestamp if timestamp is not None else now())
+    visible_scan_issue_retention_seconds = scan_issue_retention_seconds()
     state_removed = cleanup_expired_state_records(current_time)
     log_stream_removed = 0
     log_stream_cleanup = globals().get("log_stream_cleanup_expired")
@@ -677,12 +680,29 @@ def cleanup_server_resources(*, timestamp: int | None = None) -> dict[str, int]:
             env_int("PULLWISE_WORKER_AUDIT_RETENTION_SECONDS", 90 * 24 * 60 * 60),
         ),
         scan_job_retention_seconds=max(
-            0,
-            env_int("PULLWISE_SCAN_JOB_RETENTION_SECONDS", 30 * 24 * 60 * 60),
+            visible_scan_issue_retention_seconds,
+            env_int("PULLWISE_SCAN_JOB_RETENTION_SECONDS", visible_scan_issue_retention_seconds),
         ),
         removable_scan_ids=terminal_scan_ids_with_retained_results(),
     )
-    return {**state_removed, "log_stream_sessions": log_stream_removed, **database_removed}
+    retention_removed = db.cleanup_user_scan_issue_records(
+        timestamp=current_time,
+        retention_seconds=visible_scan_issue_retention_seconds,
+    )
+    memory_removed = cleanup_expired_memory_scan_issue_records(
+        current_time,
+        visible_scan_issue_retention_seconds,
+    )
+    for key, value in retention_removed.items():
+        database_removed[key] = database_removed.get(key, 0) + max(0, int(value or 0))
+    return {**state_removed, "log_stream_sessions": log_stream_removed, **database_removed, **memory_removed}
+
+
+def scan_issue_retention_seconds() -> int:
+    return max(
+        0,
+        env_int("PULLWISE_SCAN_ISSUE_RETENTION_SECONDS", DEFAULT_SCAN_ISSUE_RETENTION_SECONDS),
+    )
 
 
 def terminal_scan_ids_with_retained_results() -> set[str]:
@@ -726,6 +746,63 @@ def cleanup_expired_state_records(timestamp: int) -> dict[str, int]:
         "github_states": removed_github_states,
         "pending_github_authorizations": removed_pending_github_authorizations,
     }
+
+
+def retention_record_timestamp(record: dict, fields: tuple[str, ...]) -> int | None:
+    for field in fields:
+        timestamp = pull_request_timestamp(record.get(field))
+        if timestamp is not None:
+            return timestamp
+    return None
+
+
+def cleanup_expired_memory_scan_issue_records(timestamp: int, retention_seconds: int) -> dict[str, int]:
+    cutoff = int(timestamp) - max(0, int(retention_seconds))
+    removed_scans = 0
+    removed_issues = 0
+    with STATE_LOCK:
+        active_scan_ids: set[str] = set()
+        stale_scan_ids: set[str] = set()
+        for scan in SCANS:
+            if not isinstance(scan, dict):
+                continue
+            scan_id = public_issue_text(scan.get("id"))
+            status = public_issue_text(scan.get("status")).lower()
+            if status not in TERMINAL_SCAN_RETENTION_STATUSES:
+                if scan_id:
+                    active_scan_ids.add(scan_id)
+                continue
+            created_at = retention_record_timestamp(
+                scan,
+                ("createdAt", "created_at", "queuedAt", "queued_at"),
+            )
+            if scan_id and created_at is not None and created_at < cutoff:
+                stale_scan_ids.add(scan_id)
+
+        if stale_scan_ids:
+            removed_scans = forget_memory_scans_locked(stale_scan_ids)
+
+        if ISSUES:
+            kept_issues = []
+            for issue in ISSUES:
+                if not isinstance(issue, dict):
+                    kept_issues.append(issue)
+                    continue
+                scan_id = public_issue_text(issue.get("scanId") or issue.get("scan_id"))
+                created_at = retention_record_timestamp(issue, ("createdAt", "created_at"))
+                if scan_id in stale_scan_ids:
+                    removed_issues += 1
+                    continue
+                if created_at is not None and created_at < cutoff and scan_id not in active_scan_ids:
+                    removed_issues += 1
+                    continue
+                kept_issues.append(issue)
+            if removed_issues:
+                ISSUES[:] = kept_issues
+
+        if removed_scans or removed_issues:
+            mark_state_dirty()
+    return {"memory_scans": removed_scans, "memory_issues": removed_issues}
 
 
 def scan_status_from_recovered_job(job: dict) -> str:

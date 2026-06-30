@@ -671,6 +671,116 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(jobs, ["job_old_queued", "job_recent_done"])
         self.assertEqual(results, [])
 
+    def test_cleanup_user_scan_issue_records_prunes_only_old_terminal_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                scans = [
+                    {"id": "sc_old_done", "userId": "usr_1", "repo": "acme/api", "status": "done", "createdAt": 100},
+                    {
+                        "id": "sc_old_queued",
+                        "userId": "usr_1",
+                        "repo": "acme/api",
+                        "status": "queued",
+                        "createdAt": 100,
+                    },
+                    {
+                        "id": "sc_old_running",
+                        "userId": "usr_1",
+                        "repo": "acme/api",
+                        "status": "running",
+                        "createdAt": 100,
+                    },
+                    {
+                        "id": "sc_recent_done",
+                        "userId": "usr_1",
+                        "repo": "acme/api",
+                        "status": "done",
+                        "createdAt": 950,
+                    },
+                ]
+                issues = [
+                    {
+                        "id": "iss_old_done",
+                        "userId": "usr_1",
+                        "scanId": "sc_old_done",
+                        "repo": "acme/api",
+                        "status": "open",
+                        "createdAt": 100,
+                    },
+                    {
+                        "id": "iss_old_queued",
+                        "userId": "usr_1",
+                        "scanId": "sc_old_queued",
+                        "repo": "acme/api",
+                        "status": "open",
+                        "createdAt": 100,
+                    },
+                    {
+                        "id": "iss_old_running",
+                        "userId": "usr_1",
+                        "scanId": "sc_old_running",
+                        "repo": "acme/api",
+                        "status": "open",
+                        "createdAt": 100,
+                    },
+                    {
+                        "id": "iss_recent_done",
+                        "userId": "usr_1",
+                        "scanId": "sc_recent_done",
+                        "repo": "acme/api",
+                        "status": "open",
+                        "createdAt": 950,
+                    },
+                    {
+                        "id": "iss_old_orphan",
+                        "userId": "usr_1",
+                        "repo": "acme/api",
+                        "status": "open",
+                        "createdAt": 100,
+                    },
+                ]
+                for scan in scans:
+                    db.upsert_scan(scan)
+                for issue in issues:
+                    db.upsert_issue(issue)
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.executemany(
+                            """
+                            INSERT INTO scan_jobs (
+                                job_id, scan_id, repo, branch, "commit", status,
+                                created_at, updated_at, completed_at, user_id
+                            )
+                            VALUES (?, ?, 'acme/api', 'main', 'abc', ?, ?, ?, ?, 'usr_1')
+                            """,
+                            [
+                                ("job_old_done", "sc_old_done", "done", 100, 100, 100),
+                                ("job_old_queued", "sc_old_queued", "queued", 100, 100, None),
+                                ("job_old_running", "sc_old_running", "running", 100, 100, None),
+                                ("job_recent_done", "sc_recent_done", "done", 950, 950, 950),
+                            ],
+                        )
+
+                removed = db.cleanup_user_scan_issue_records(timestamp=1000, retention_seconds=500)
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    remaining_scans = [
+                        row[0] for row in connection.execute("SELECT scan_id FROM scans ORDER BY scan_id")
+                    ]
+                    remaining_issues = [
+                        row[0] for row in connection.execute("SELECT issue_id FROM issues ORDER BY issue_id")
+                    ]
+                    remaining_jobs = [
+                        row[0] for row in connection.execute("SELECT scan_id FROM scan_jobs ORDER BY scan_id")
+                    ]
+
+        self.assertEqual(removed, {"issues": 2, "scans": 1, "scan_jobs": 1})
+        self.assertEqual(remaining_scans, ["sc_old_queued", "sc_old_running", "sc_recent_done"])
+        self.assertEqual(remaining_issues, ["iss_old_queued", "iss_old_running", "iss_recent_done"])
+        self.assertEqual(remaining_jobs, ["sc_old_queued", "sc_old_running", "sc_recent_done"])
+
     def test_scan_job_defaults_to_one_retry_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
@@ -912,6 +1022,89 @@ class DatabaseContractsTest(unittest.TestCase):
             app.SESSIONS = previous["SESSIONS"]
             app.GITHUB_STATES = previous["GITHUB_STATES"]
             app.SCANS = previous["SCANS"]
+            app.ISSUES = previous["ISSUES"]
+            app.STATE_LOADED = previous["STATE_LOADED"]
+            app.STATE_DIRTY = previous["STATE_DIRTY"]
+
+    def test_server_resource_cleanup_prunes_expired_memory_scan_issue_records(self) -> None:
+        previous = {
+            "USERS": app.USERS,
+            "SESSIONS": app.SESSIONS,
+            "GITHUB_STATES": app.GITHUB_STATES,
+            "SCANS": app.SCANS,
+            "SCAN_BY_ID": app.SCAN_BY_ID,
+            "ISSUES": app.ISSUES,
+            "STATE_LOADED": app.STATE_LOADED,
+            "STATE_DIRTY": app.STATE_DIRTY,
+        }
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PULLWISE_DB_PATH": db_path,
+                        "PULLWISE_SCAN_ISSUE_RETENTION_SECONDS": "500",
+                        "PULLWISE_SCAN_JOB_RETENTION_SECONDS": "1",
+                    },
+                    clear=False,
+                ):
+                    db.initialize()
+                    app.USERS = {}
+                    app.SESSIONS = {}
+                    app.GITHUB_STATES = {}
+                    app.SCANS = [
+                        {"id": "sc_old_done", "userId": "usr_1", "status": "done", "createdAt": 100},
+                        {"id": "sc_old_queued", "userId": "usr_1", "status": "queued", "createdAt": 100},
+                        {"id": "sc_old_running", "userId": "usr_1", "status": "running", "createdAt": 100},
+                        {"id": "sc_recent_done", "userId": "usr_1", "status": "done", "createdAt": 950},
+                    ]
+                    app.SCAN_BY_ID = {
+                        str(scan["id"]): scan for scan in app.SCANS
+                    }
+                    app.ISSUES = [
+                        {"id": "iss_old_done", "scanId": "sc_old_done", "createdAt": 100},
+                        {"id": "iss_old_queued", "scanId": "sc_old_queued", "createdAt": 100},
+                        {"id": "iss_old_running", "scanId": "sc_old_running", "createdAt": 100},
+                        {"id": "iss_recent_done", "scanId": "sc_recent_done", "createdAt": 950},
+                        {"id": "iss_old_orphan", "createdAt": 100},
+                    ]
+                    app.STATE_LOADED = True
+                    app.STATE_DIRTY = False
+                    with closing(sqlite3.connect(db_path)) as connection:
+                        with connection:
+                            connection.execute(
+                                """
+                                INSERT INTO scan_jobs (
+                                    job_id, scan_id, repo, branch, "commit", status,
+                                    created_at, updated_at, completed_at, user_id
+                                )
+                                VALUES (
+                                    'job_recent_done', 'sc_recent_done', 'acme/api', 'main',
+                                    'abc', 'done', 950, 950, 950, 'usr_1'
+                                )
+                                """
+                            )
+
+                    removed = app.cleanup_server_resources(timestamp=1000)
+                    recent_job = db.get_scan_job_for_scan("sc_recent_done")
+
+            self.assertEqual(removed["memory_scans"], 1)
+            self.assertEqual(removed["memory_issues"], 2)
+            self.assertEqual([scan["id"] for scan in app.SCANS], ["sc_old_queued", "sc_old_running", "sc_recent_done"])
+            self.assertEqual(
+                [issue["id"] for issue in app.ISSUES],
+                ["iss_old_queued", "iss_old_running", "iss_recent_done"],
+            )
+            self.assertNotIn("sc_old_done", app.SCAN_BY_ID)
+            self.assertIsNotNone(recent_job)
+            self.assertTrue(app.STATE_DIRTY)
+        finally:
+            app.USERS = previous["USERS"]
+            app.SESSIONS = previous["SESSIONS"]
+            app.GITHUB_STATES = previous["GITHUB_STATES"]
+            app.SCANS = previous["SCANS"]
+            app.SCAN_BY_ID = previous["SCAN_BY_ID"]
             app.ISSUES = previous["ISSUES"]
             app.STATE_LOADED = previous["STATE_LOADED"]
             app.STATE_DIRTY = previous["STATE_DIRTY"]

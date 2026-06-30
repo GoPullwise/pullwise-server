@@ -154,6 +154,133 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(first.payload["billingUsage"]["period"], first.payload["repoUsage"]["period"])
         self.assertEqual(first.payload["billingUsage"]["resetAt"], first.payload["repoUsage"]["resetAt"])
 
+    def test_active_private_worker_routes_scan_without_reserving_quota(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        worker = db.create_worker(
+            {
+                "worker_id": "wk_private_usr_a",
+                "name": "Private",
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "worker_scope": db.WORKER_SCOPE_PRIVATE,
+                "owner_user_id": "usr_a",
+            }
+        )
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": worker["worker_id"],
+                "version": system_config.worker_min_version() or "0.1.0",
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "running_jobs": 0,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "ready_providers": ["codex"],
+                "timestamp": app.now(),
+            }
+        )
+
+        handler = RouteHarness({"repo": "acme/api", "requestId": "req_private"}, cookie=cookie)
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.payload["quotaState"], "private_worker")
+        self.assertEqual(handler.payload["workerScope"], "private")
+        self.assertTrue(handler.payload["privateWorker"])
+        self.assertEqual(handler.payload["billingUsage"]["reserved"], 0)
+        self.assertEqual(handler.payload["repoUsage"]["reserved"], 0)
+        job = db.get_scan_job_for_scan(handler.payload["id"])
+        self.assertEqual(job["worker_scope"], db.WORKER_SCOPE_PRIVATE)
+        self.assertEqual(job["worker_owner_user_id"], "usr_a")
+        with closing(db.connect()) as connection:
+            ledger_count = connection.execute("SELECT COUNT(*) FROM quota_ledger").fetchone()[0]
+        self.assertEqual(ledger_count, 0)
+
+    def test_private_worker_management_is_owner_scoped(self) -> None:
+        owner_cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        other_cookie = seed_user("usr_b", "ses_b", installation_id="222", repo_id="456")
+
+        create = RouteHarness({"name": "Home lab"}, cookie=owner_cookie, path="/private-workers")
+        app.PullwiseHandler.route(create, "POST")
+
+        self.assertEqual(create.status, HTTPStatus.CREATED)
+        worker_id = create.payload["worker"]["worker_id"]
+        self.assertEqual(create.payload["worker"]["scope"], "private")
+        self.assertEqual(create.payload["worker"]["ownerUserId"], "usr_a")
+        self.assertTrue(create.payload["worker_token"].startswith("pww_"))
+        stored = db.get_worker(worker_id)
+        self.assertEqual(stored["worker_scope"], db.WORKER_SCOPE_PRIVATE)
+        self.assertEqual(stored["owner_user_id"], "usr_a")
+
+        owner_list = RouteHarness(cookie=owner_cookie, path="/private-workers")
+        other_list = RouteHarness(cookie=other_cookie, path="/private-workers")
+        app.PullwiseHandler.route(owner_list, "GET")
+        app.PullwiseHandler.route(other_list, "GET")
+
+        self.assertEqual(owner_list.status, HTTPStatus.OK)
+        self.assertEqual([worker["worker_id"] for worker in owner_list.payload["workers"]], [worker_id])
+        self.assertEqual(other_list.status, HTTPStatus.OK)
+        self.assertEqual(other_list.payload["workers"], [])
+
+        other_update = RouteHarness(
+            {"name": "Not yours"},
+            cookie=other_cookie,
+            path=f"/private-workers/{worker_id}",
+        )
+        app.PullwiseHandler.route(other_update, "PATCH")
+        self.assertEqual(other_update.status, HTTPStatus.NOT_FOUND)
+
+        owner_update = RouteHarness(
+            {"name": "Desk worker", "region": "desk", "version": "0.8.9"},
+            cookie=owner_cookie,
+            path=f"/private-workers/{worker_id}",
+        )
+        app.PullwiseHandler.route(owner_update, "PATCH")
+        self.assertEqual(owner_update.status, HTTPStatus.OK)
+        self.assertEqual(owner_update.payload["worker"]["name"], "Desk worker")
+        self.assertEqual(owner_update.payload["worker"]["region"], "desk")
+        self.assertEqual(owner_update.payload["worker"]["version"], "0.8.9")
+
+        owner_name_update = RouteHarness(
+            {"name": "Renamed desk worker"},
+            cookie=owner_cookie,
+            path=f"/private-workers/{worker_id}",
+        )
+        app.PullwiseHandler.route(owner_name_update, "PATCH")
+        self.assertEqual(owner_name_update.status, HTTPStatus.OK)
+        self.assertEqual(owner_name_update.payload["worker"]["name"], "Renamed desk worker")
+        self.assertEqual(owner_name_update.payload["worker"]["region"], "desk")
+        self.assertEqual(owner_name_update.payload["worker"]["version"], "0.8.9")
+
+        other_rotate = RouteHarness({}, cookie=other_cookie, path=f"/private-workers/{worker_id}/rotate-token")
+        app.PullwiseHandler.route(other_rotate, "POST")
+        self.assertEqual(other_rotate.status, HTTPStatus.NOT_FOUND)
+
+        owner_rotate = RouteHarness({}, cookie=owner_cookie, path=f"/private-workers/{worker_id}/rotate-token")
+        app.PullwiseHandler.route(owner_rotate, "POST")
+        self.assertEqual(owner_rotate.status, HTTPStatus.OK)
+        self.assertTrue(owner_rotate.payload["worker_token"].startswith("pww_"))
+        self.assertNotEqual(owner_rotate.payload["worker_token"], create.payload["worker_token"])
+
+        other_disable = RouteHarness({}, cookie=other_cookie, path=f"/private-workers/{worker_id}/disable")
+        app.PullwiseHandler.route(other_disable, "POST")
+        self.assertEqual(other_disable.status, HTTPStatus.NOT_FOUND)
+
+        owner_disable = RouteHarness({}, cookie=owner_cookie, path=f"/private-workers/{worker_id}/disable")
+        app.PullwiseHandler.route(owner_disable, "POST")
+        self.assertEqual(owner_disable.status, HTTPStatus.OK)
+        self.assertFalse(owner_disable.payload["worker"]["enabled"])
+
+        other_delete = RouteHarness({}, cookie=other_cookie, path=f"/private-workers/{worker_id}")
+        app.PullwiseHandler.route(other_delete, "DELETE")
+        self.assertEqual(other_delete.status, HTTPStatus.NOT_FOUND)
+
+        owner_delete = RouteHarness({}, cookie=owner_cookie, path=f"/private-workers/{worker_id}")
+        app.PullwiseHandler.route(owner_delete, "DELETE")
+        self.assertEqual(owner_delete.status, HTTPStatus.ACCEPTED)
+        self.assertTrue(owner_delete.payload["deleteQueued"])
+        self.assertEqual(owner_delete.payload["worker"]["worker_id"], worker_id)
+
     def test_same_installation_shares_user_quota_across_repos(self) -> None:
         with (
             patch.dict(os.environ, {"PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "user-quota.sqlite3")}, clear=True),

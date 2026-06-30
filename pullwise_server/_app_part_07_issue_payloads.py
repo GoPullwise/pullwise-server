@@ -20,14 +20,22 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
     cached = SCAN_SYSTEM_STATUS_CACHE.get(cache_key)
     if cached and cached.get("databasePath") == current_db_path and pull_request_timestamp(cached.get("expiresAt")) > current_time:
         return cached["payload"]
-    worker_records = annotate_worker_runtime_payloads(db.list_workers(activated_only=True), include_latest_commands=admin)
+    worker_records = annotate_worker_runtime_payloads(
+        db.list_workers(activated_only=True, worker_scope=db.WORKER_SCOPE_SHARED),
+        include_latest_commands=admin,
+    )
     workers = [worker_public_payload(worker, admin=False) for worker in worker_records]
-    job_counts = db.scan_job_status_counts()
+    job_counts = db.scan_job_status_counts(worker_scope=db.WORKER_SCOPE_SHARED)
     queued_jobs = public_scan_count(job_counts.get("queued"))
     running_jobs = public_scan_count(job_counts.get("running"))
     if queued_jobs == 0 and running_jobs == 0 and SCANS:
-        queued_jobs = len([scan for scan in SCANS if scan.get("status") == "queued"])
-        running_jobs = len([scan for scan in SCANS if scan.get("status") == "running"])
+        shared_scans = [
+            scan
+            for scan in SCANS
+            if db.normalize_worker_scope(scan.get("workerScope") or scan.get("worker_scope")) == db.WORKER_SCOPE_SHARED
+        ]
+        queued_jobs = len([scan for scan in shared_scans if scan.get("status") == "queued"])
+        running_jobs = len([scan for scan in shared_scans if scan.get("status") == "running"])
     online = [worker for worker in workers if worker["status"] in {"idle", "busy"}]
     busy_workers = [worker for worker in workers if worker["status"] == "busy"]
     idle_workers = [worker for worker in workers if worker["status"] == "idle"]

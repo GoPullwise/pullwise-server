@@ -489,8 +489,12 @@ def scan_payload(scan: dict) -> dict:
     if isinstance(scan.get("repoUsage"), dict):
         payload["repoUsage"] = safe_quota_usage_payload(scan.get("repoUsage"), default_scope="repository")
     quota_state = public_issue_text(scan.get("quotaState"))
-    if quota_state in {"reserved", "consumed", "released", "refunded"}:
+    if quota_state in {"reserved", "consumed", "released", "refunded", "private_worker"}:
         payload["quotaState"] = quota_state
+    worker_scope = db.normalize_worker_scope(scan.get("workerScope") or scan.get("worker_scope"))
+    if worker_scope == db.WORKER_SCOPE_PRIVATE:
+        payload["workerScope"] = worker_scope
+        payload["privateWorker"] = True
     for key in ("quotaReservedAt", "quotaConsumedAt", "quotaReleasedAt"):
         if pull_request_timestamp(scan.get(key)):
             payload[key] = pull_request_timestamp(scan.get(key)) or 0

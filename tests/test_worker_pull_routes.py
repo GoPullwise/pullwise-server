@@ -913,6 +913,111 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         return worker, worker["worker_token"]
 
+    def create_private_registry_worker(self, worker_id: str, owner_user_id: str) -> tuple[dict, str]:
+        worker = db.create_worker(
+            {
+                "worker_id": worker_id,
+                "name": worker_id,
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "worker_scope": db.WORKER_SCOPE_PRIVATE,
+                "owner_user_id": owner_user_id,
+            }
+        )
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": worker_id,
+                "version": app.system_config.worker_min_version() or "0.1.0",
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "running_jobs": 0,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "ready_providers": ["codex"],
+                "timestamp": app.now(),
+            }
+        )
+        return worker, worker["worker_token"]
+
+    def create_claimable_scan_job(
+        self,
+        *,
+        job_id: str,
+        scan_id: str,
+        user_id: str,
+        worker_scope: str = db.WORKER_SCOPE_SHARED,
+    ) -> dict:
+        return db.create_scan_job(
+            {
+                "job_id": job_id,
+                "scan_id": scan_id,
+                "repo": f"acme/{scan_id}",
+                "branch": "main",
+                "commit": "abc1234",
+                "status": "queued",
+                "created_at": app.now(),
+                "user_id": user_id,
+                "worker_scope": worker_scope,
+                "worker_owner_user_id": user_id if worker_scope == db.WORKER_SCOPE_PRIVATE else "",
+                "max_attempts": 2,
+            }
+        )
+
+    def test_shared_and_private_workers_claim_only_their_queue_scope(self) -> None:
+        private_worker, private_token = self.create_private_registry_worker("wk_private_usr_1", "usr_1")
+        self.create_claimable_scan_job(
+            job_id="job_private",
+            scan_id="sc_private",
+            user_id="usr_1",
+            worker_scope=db.WORKER_SCOPE_PRIVATE,
+        )
+        self.create_claimable_scan_job(
+            job_id="job_shared",
+            scan_id="sc_shared",
+            user_id="usr_2",
+            worker_scope=db.WORKER_SCOPE_SHARED,
+        )
+
+        shared_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
+        app.PullwiseHandler.route(shared_claim, "POST")
+
+        private_claim = RouteHarness(
+            "/worker/jobs/claim",
+            {"worker_id": private_worker["worker_id"]},
+            headers={"Authorization": f"Bearer {private_token}"},
+        )
+        app.PullwiseHandler.route(private_claim, "POST")
+
+        self.assertEqual(shared_claim.status, HTTPStatus.OK)
+        self.assertEqual(shared_claim.payload["job"]["job_id"], "job_shared")
+        self.assertNotIn("privateWorker", shared_claim.payload["job"])
+        self.assertEqual(private_claim.status, HTTPStatus.OK)
+        self.assertEqual(private_claim.payload["job"]["job_id"], "job_private")
+        self.assertEqual(private_claim.payload["job"]["workerScope"], "private")
+        self.assertTrue(private_claim.payload["job"]["privateWorker"])
+
+    def test_private_worker_cannot_claim_other_users_private_jobs(self) -> None:
+        private_worker, private_token = self.create_private_registry_worker("wk_private_usr_1", "usr_1")
+        self.create_claimable_scan_job(
+            job_id="job_other_private",
+            scan_id="sc_other_private",
+            user_id="usr_2",
+            worker_scope=db.WORKER_SCOPE_PRIVATE,
+        )
+
+        claim = RouteHarness(
+            "/worker/jobs/claim",
+            {"worker_id": private_worker["worker_id"]},
+            headers={"Authorization": f"Bearer {private_token}"},
+        )
+        app.PullwiseHandler.route(claim, "POST")
+
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        self.assertIsNone(claim.payload["job"])
+        job = db.get_scan_job("job_other_private")
+        self.assertEqual(job["status"], "queued")
+        self.assertIsNone(job["claimed_by_worker_id"])
+
     def test_worker_auth_rejection_is_logged_without_token_value(self) -> None:
         claim = RouteHarness(
             "/worker/jobs/claim",
