@@ -406,7 +406,7 @@ class SecurityContractsPart02Test(SecurityContractsBase):
             "commit": "pending",
             "status": "done",
             "phase": "",
-            "progress": 0,
+            "progress": 100,
             "issues": {"critical": 0, "high": 3, "medium": 0, "low": 0, "info": 0},
             "verification": {"verified": 0, "static_proof": 0, "potential_risk": 0, "unverified": 0},
             "error": "Provider failed",

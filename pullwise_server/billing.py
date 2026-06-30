@@ -46,6 +46,9 @@ REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS_BY_PLAN = {
         "simpleMaxBatchFiles": 40,
         "simpleMaxBatchBytes": 500_000,
         "maxCandidatesPerUnit": 1,
+        "finderTimeoutSeconds": 3600,
+        "reproTimeoutSeconds": 3600,
+        "simpleScanDeadlineSeconds": 14400,
     },
     "pro": {
         "mode": "standard",
@@ -58,6 +61,9 @@ REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS_BY_PLAN = {
         "simpleMaxBatchFiles": 80,
         "simpleMaxBatchBytes": 1_000_000,
         "maxCandidatesPerUnit": 1,
+        "finderTimeoutSeconds": 3600,
+        "reproTimeoutSeconds": 3600,
+        "simpleScanDeadlineSeconds": 14400,
     },
     "max": {
         "mode": "standard",
@@ -70,6 +76,9 @@ REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS_BY_PLAN = {
         "simpleMaxBatchFiles": 100,
         "simpleMaxBatchBytes": 1_250_000,
         "maxCandidatesPerUnit": 2,
+        "finderTimeoutSeconds": 3600,
+        "reproTimeoutSeconds": 3600,
+        "simpleScanDeadlineSeconds": 14400,
     },
 }
 REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
@@ -238,6 +247,24 @@ def normalize_review_agent_graph_verified_config(value: object, defaults: dict) 
         int(result.get("maxCandidatesPerUnit") or 1),
         minimum=1,
         maximum=4,
+    )
+    result["finderTimeoutSeconds"] = clean_review_agent_config_int(
+        source.get("finderTimeoutSeconds"),
+        int(result.get("finderTimeoutSeconds") or 3600),
+        minimum=60,
+        maximum=3600,
+    )
+    result["reproTimeoutSeconds"] = clean_review_agent_config_int(
+        source.get("reproTimeoutSeconds"),
+        int(result.get("reproTimeoutSeconds") or 3600),
+        minimum=60,
+        maximum=3600,
+    )
+    result["simpleScanDeadlineSeconds"] = clean_review_agent_config_int(
+        source.get("simpleScanDeadlineSeconds") or source.get("scanDeadlineSeconds"),
+        int(result.get("simpleScanDeadlineSeconds") or result.get("scanDeadlineSeconds") or 14400),
+        minimum=0,
+        maximum=21600,
     )
     return result
 

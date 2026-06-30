@@ -5080,8 +5080,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with patch("pullwise_server.app.now", return_value=timestamp):
             app.PullwiseHandler.route(claim, "POST")
         self.assertEqual(claim.status, HTTPStatus.OK)
+        lease_seconds = app.system_config.scan_job_lease_seconds()
         original_timeout_at = db.get_scan_job(job["job_id"])["timeout_at"]
-        self.assertLess(original_timeout_at, timestamp + 3700)
+        self.assertEqual(original_timeout_at, timestamp + lease_seconds)
 
         heartbeat = RouteHarness(
             "/worker/heartbeat",
@@ -5098,7 +5099,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             },
             headers=self.auth,
         )
-        with patch("pullwise_server.app.now", return_value=timestamp + 3700):
+        heartbeat_at = timestamp + lease_seconds + 100
+        with patch("pullwise_server.app.now", return_value=heartbeat_at):
             app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
@@ -5106,8 +5108,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored["status"], "claimed")
         self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
         self.assertGreater(stored["timeout_at"], original_timeout_at)
-        self.assertEqual(stored["timeout_at"], timestamp + 7300)
-        self.assertEqual(db.recover_expired_scan_jobs(timestamp + 3701), [])
+        self.assertEqual(stored["timeout_at"], heartbeat_at + lease_seconds)
+        self.assertEqual(db.recover_expired_scan_jobs(heartbeat_at + 1), [])
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
 
     def test_worker_heartbeat_reports_cancelled_active_job_ids(self) -> None:

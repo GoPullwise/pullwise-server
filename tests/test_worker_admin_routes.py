@@ -1306,6 +1306,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(update, "PATCH")
 
+        defaults = app.billing.default_review_agent_graph_verified_config("pro")
+        self.assertEqual(defaults["finderTimeoutSeconds"], 3600)
+        self.assertEqual(defaults["reproTimeoutSeconds"], 3600)
+        self.assertEqual(defaults["simpleScanDeadlineSeconds"], 14400)
         expected_pro_graph = {
             **app.billing.default_review_agent_graph_verified_config("pro"),
             "maxRepro": 12,
