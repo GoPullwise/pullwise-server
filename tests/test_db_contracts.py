@@ -271,6 +271,32 @@ class DatabaseContractsTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "PULLWISE_STATE_ENCRYPTION_KEY_PATH"):
                     db.load_state()
 
+    def test_save_state_item_encrypts_system_config_alert_smtp_password(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            key_path = self.write_state_key(temp_dir)
+            config = {
+                "alerts": {
+                    "email": {
+                        "smtpHost": "smtp.example.com",
+                        "smtpPassword": "smtp-secret",
+                    }
+                }
+            }
+            with patch.dict(
+                os.environ,
+                {"PULLWISE_DB_PATH": db_path, "PULLWISE_STATE_ENCRYPTION_KEY_PATH": key_path},
+                clear=True,
+            ):
+                db.save_state_item("system_config", config)
+                with closing(sqlite3.connect(db_path)) as connection:
+                    payload = connection.execute("SELECT payload FROM app_state WHERE name = 'system_config'").fetchone()[0]
+                loaded = db.load_state_item("system_config")
+
+        self.assertNotIn("smtp-secret", payload)
+        self.assertIn("pullwise-state-secret-v1", payload)
+        self.assertEqual(loaded, config)
+
     def test_production_save_state_requires_key_before_persisting_github_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

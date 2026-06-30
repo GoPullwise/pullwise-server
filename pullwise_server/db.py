@@ -999,17 +999,23 @@ def encrypted_state_secret(value: object) -> bool:
 
 def iter_state_secret_slots(state: dict[str, Any]):
     users = state.get("users")
-    if not isinstance(users, dict):
-        return
-    for user_id, user in users.items():
-        if not isinstance(user, dict):
-            continue
-        yield user, "githubAccessToken", f"$.users.{user_id}.githubAccessToken"
-        identities = user.get("githubIdentities")
-        if isinstance(identities, list):
-            for index, identity in enumerate(identities):
-                if isinstance(identity, dict):
-                    yield identity, "accessToken", f"$.users.{user_id}.githubIdentities[{index}].accessToken"
+    if isinstance(users, dict):
+        for user_id, user in users.items():
+            if not isinstance(user, dict):
+                continue
+            yield user, "githubAccessToken", f"$.users.{user_id}.githubAccessToken"
+            identities = user.get("githubIdentities")
+            if isinstance(identities, list):
+                for index, identity in enumerate(identities):
+                    if isinstance(identity, dict):
+                        yield identity, "accessToken", f"$.users.{user_id}.githubIdentities[{index}].accessToken"
+
+    system_config = state.get("system_config")
+    if isinstance(system_config, dict):
+        alerts = system_config.get("alerts")
+        email = alerts.get("email") if isinstance(alerts, dict) else None
+        if isinstance(email, dict):
+            yield email, "smtpPassword", "$.system_config.alerts.email.smtpPassword"
 
 
 def state_has_plaintext_secrets(state: dict[str, Any]) -> bool:
@@ -1120,9 +1126,12 @@ def load_state_item(name: str) -> Any | None:
     if not row:
         return None
     try:
-        return json.loads(row[0])
+        payload = json.loads(row[0])
     except (TypeError, json.JSONDecodeError):
         return None
+    state = {str(name): payload}
+    migrate_plaintext_state_secrets(state)
+    return state_for_runtime(state).get(str(name))
 
 
 def delete_state_items(names: list[str] | tuple[str, ...] | set[str]) -> int:
@@ -1145,7 +1154,8 @@ def delete_state_items(names: list[str] | tuple[str, ...] | set[str]) -> int:
 
 def save_state_item(name: str, payload: Any) -> None:
     ensure_initialized()
-    storage_payload = to_jsonable(payload)
+    state_name = str(name)
+    storage_payload = state_for_storage({state_name: payload})[state_name]
     with _LOCK, closing(connect()) as connection:
         with connection:
             connection.execute(
@@ -1156,7 +1166,7 @@ def save_state_item(name: str, payload: Any) -> None:
                     payload = excluded.payload,
                     updated_at = excluded.updated_at
                 """,
-                (name, json.dumps(storage_payload, ensure_ascii=False, allow_nan=False)),
+                (state_name, json.dumps(storage_payload, ensure_ascii=False, allow_nan=False)),
             )
 
 

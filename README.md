@@ -142,32 +142,24 @@ PULLWISE_COOKIE_SECURE=true
 PULLWISE_COOKIE_SAME_SITE=Lax
 PULLWISE_ADMIN_USER_IDS=
 PULLWISE_ADMIN_EMAILS=admin@example.com
-PULLWISE_ALERT_EMAIL_ENABLED=false
-PULLWISE_ALERT_EMAIL_TO=admin@example.com
-PULLWISE_ALERT_EMAIL_FROM=pullwise@example.com
-PULLWISE_ALERT_SMTP_HOST=smtp.example.com
-PULLWISE_ALERT_SMTP_PORT=465
-PULLWISE_ALERT_SMTP_USERNAME=
-PULLWISE_ALERT_SMTP_PASSWORD=
-PULLWISE_ALERT_SMTP_SSL=true
-PULLWISE_ALERT_SMTP_STARTTLS=false
 PULLWISE_WORKER_JOB_TIMEOUT_SECONDS=1800
 ```
 
 Plan quotas, scan queue/retry/lease limits, repository scan limits, rate
-limits, worker control-plane defaults, review calibration settings, and the
-non-secret Creem catalog live in the server database. Edit them through the
-admin app Settings page or `PATCH /admin/system-config`; the server seeds
-hardcoded defaults when the DB has no value.
+limits, worker control-plane defaults, operational alert email settings,
+review calibration settings, and the non-secret Creem catalog live in the
+server database. Edit them through the admin app Settings page or
+`PATCH /admin/system-config`; the server seeds hardcoded defaults when the DB
+has no value.
 
 Server cleanup only prunes operational records: expired sessions/GitHub OAuth state, terminal worker commands/audit rows, and terminal scan job/result duplicates that have already been applied to the user-visible scan state. User scan results in `SCANS`/`ISSUES` are retained.
 
-Operational alert email uses PULLWISE_ALERT_* SMTP settings. A server or worker problem sends once while that same problem remains active; the dedupe key is cleared after a later health/status check observes recovery. If PULLWISE_ALERT_EMAIL_TO is omitted, recipients fall back to PULLWISE_ADMIN_EMAILS.
+Operational alert email is configured from the admin app Settings page. A server or worker problem sends once while that same problem remains active; the dedupe key is cleared after a later health/status check observes recovery. The SMTP password is stored in system configuration and should be protected by the production state encryption key.
 
 Production deployments must provide a separate state encryption key file. The
-server uses it to encrypt GitHub OAuth user tokens before writing `app_state`
-JSON to SQLite. Keep this file outside the project tree and outside migration
-packages:
+server uses it to encrypt GitHub OAuth user tokens and admin-managed SMTP
+passwords before writing `app_state` JSON to SQLite. Keep this file outside the
+project tree and outside migration packages:
 
 ```bash
 sudo install -d -m 750 -o root -g pullwise /etc/pullwise/secrets

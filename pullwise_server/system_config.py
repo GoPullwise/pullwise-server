@@ -69,6 +69,19 @@ DEFAULT_CONFIG = {
         "requests": 600,
         "windowSeconds": 60,
     },
+    "alerts": {
+        "email": {
+            "enabled": False,
+            "to": [],
+            "from": "",
+            "smtpHost": "",
+            "smtpPort": 465,
+            "smtpUsername": "",
+            "smtpPassword": "",
+            "smtpSsl": True,
+            "smtpStarttls": False,
+        },
+    },
 }
 
 
@@ -292,6 +305,73 @@ FIELD_METADATA = [
             },
         ],
     },
+    {
+        "id": "alerts",
+        "title": "Operational alerts",
+        "description": "Admin-managed email notifications for server and worker health problems.",
+        "fields": [
+            {
+                "path": "alerts.email.enabled",
+                "label": "Alert email enabled",
+                "type": "boolean",
+                "description": "Turns operational alert email delivery on or off.",
+            },
+            {
+                "path": "alerts.email.to",
+                "label": "Alert recipients",
+                "type": "stringList",
+                "maxLength": 256,
+                "description": "Comma-separated admin email recipients for server and worker problem notifications.",
+            },
+            {
+                "path": "alerts.email.from",
+                "label": "Alert sender",
+                "type": "string",
+                "maxLength": 256,
+                "description": "Sender address used for alert emails. Leave blank to use the SMTP username or first recipient.",
+            },
+            {
+                "path": "alerts.email.smtpHost",
+                "label": "SMTP host",
+                "type": "string",
+                "maxLength": 256,
+                "description": "SMTP server hostname used to send alert email.",
+            },
+            {
+                "path": "alerts.email.smtpPort",
+                "label": "SMTP port",
+                "type": "integer",
+                "min": 1,
+                "description": "SMTP server port.",
+            },
+            {
+                "path": "alerts.email.smtpUsername",
+                "label": "SMTP username",
+                "type": "string",
+                "maxLength": 256,
+                "description": "Optional SMTP username for authenticated email delivery.",
+            },
+            {
+                "path": "alerts.email.smtpPassword",
+                "label": "SMTP password",
+                "type": "password",
+                "maxLength": 512,
+                "description": "Optional SMTP password. Leave blank to keep the saved password.",
+            },
+            {
+                "path": "alerts.email.smtpSsl",
+                "label": "SMTP SSL",
+                "type": "boolean",
+                "description": "Use implicit SMTP over SSL.",
+            },
+            {
+                "path": "alerts.email.smtpStarttls",
+                "label": "SMTP STARTTLS",
+                "type": "boolean",
+                "description": "Upgrade plain SMTP with STARTTLS when SMTP SSL is disabled.",
+            },
+        ],
+    },
 ]
 
 _CACHE_LOCK = threading.Lock()
@@ -312,6 +392,22 @@ def _field_specs() -> dict[str, dict]:
         for group in FIELD_METADATA
         for field in group["fields"]
     }
+
+
+def _secret_paths() -> tuple[str, ...]:
+    return tuple(path for path, spec in _field_specs().items() if spec.get("type") == "password")
+
+
+def admin_settings_payload(current: dict) -> tuple[dict, dict]:
+    settings = copy.deepcopy(current)
+    secrets: dict[str, dict[str, bool]] = {}
+    for path in _secret_paths():
+        found, value = nested_get(settings, path)
+        if not found:
+            continue
+        secrets[path] = {"hasValue": bool(value)}
+        nested_set(settings, path, "")
+    return settings, secrets
 
 
 def invalidate_cache() -> None:
@@ -340,11 +436,13 @@ def config() -> dict:
 
 
 def admin_payload() -> dict:
+    settings, secrets = admin_settings_payload(config())
     return {
         "source": "database",
-        "settings": config(),
+        "settings": settings,
         "defaults": default_config(),
         "groups": metadata(),
+        "secrets": secrets,
         "cache": {"ttlSeconds": CACHE_TTL_SECONDS, "strategy": "process_ttl_with_write_invalidation"},
     }
 
@@ -502,6 +600,8 @@ def update(payload: dict) -> dict:
     for path, spec in specs.items():
         found, value = nested_get(updates, path)
         if found:
+            if spec.get("type") == "password" and clean_text(value, max_length=int(spec.get("maxLength", 128))) == "":
+                continue
             nested_set(next_config, path, clean_value(value, spec))
 
     normalized = normalize_config(next_config)
@@ -576,6 +676,8 @@ def clean_value(value: object, spec: dict) -> object:
         if text not in options:
             raise ValueError(f"{spec['label']} must be one of: {', '.join(options)}.")
         return text
+    if kind == "password":
+        return clean_text(value, max_length=int(spec.get("maxLength", 128)))
     return clean_text(value, max_length=int(spec.get("maxLength", 128)))
 
 
@@ -715,6 +817,42 @@ def list_setting(path: str) -> list[str]:
     if not found:
         found, value = nested_get(DEFAULT_CONFIG, path)
     return list(value) if isinstance(value, list) else []
+
+
+def alert_email_enabled() -> bool:
+    return bool_setting("alerts.email.enabled")
+
+
+def alert_email_recipients() -> list[str]:
+    return list_setting("alerts.email.to")
+
+
+def alert_email_from() -> str:
+    return text_setting("alerts.email.from")
+
+
+def alert_smtp_host() -> str:
+    return text_setting("alerts.email.smtpHost")
+
+
+def alert_smtp_port() -> int:
+    return max(1, int_setting("alerts.email.smtpPort"))
+
+
+def alert_smtp_username() -> str:
+    return text_setting("alerts.email.smtpUsername")
+
+
+def alert_smtp_password() -> str:
+    return text_setting("alerts.email.smtpPassword")
+
+
+def alert_smtp_ssl() -> bool:
+    return bool_setting("alerts.email.smtpSsl")
+
+
+def alert_smtp_starttls() -> bool:
+    return bool_setting("alerts.email.smtpStarttls")
 
 
 def plan_user_review_limit(plan: object) -> int:

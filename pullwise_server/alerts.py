@@ -1,36 +1,19 @@
 from __future__ import annotations
 
 import logging
-import os
 import smtplib
 import threading
 import time
 from email.message import EmailMessage
 
-from . import db, github_auth
+from . import db, github_auth, system_config
 
 logger = logging.getLogger(__name__)
 
 STATE_KEY = 'alert_notifications'
-_FALSE_VALUES = {'', '0', 'false', 'no', 'off'}
 _SYSTEM_PROBLEM_STATUSES = {'degraded', 'down'}
 _WORKER_PROBLEM_STATUSES = {'degraded', 'offline'}
 _LOCK = threading.Lock()
-
-
-def _env(name, default=''):
-    return os.environ.get(name, default).strip()
-
-
-def _env_flag(name, default='false'):
-    return _env(name, default).lower() not in _FALSE_VALUES
-
-
-def _env_int(name, default):
-    try:
-        return int(_env(name, str(default)))
-    except (TypeError, ValueError):
-        return default
 
 
 def _clean_header(value):
@@ -42,10 +25,9 @@ def _clean_text(value, limit=500):
 
 
 def _recipients():
-    raw = _env('PULLWISE_ALERT_EMAIL_TO') or _env('PULLWISE_ADMIN_EMAILS')
     recipients = []
     seen = set()
-    for item in raw.split(','):
+    for item in system_config.alert_email_recipients():
         email = github_auth.clean_account_email_address(item)
         key = email.lower() if email else ''
         if not key or key in seen:
@@ -57,9 +39,8 @@ def _recipients():
 
 def _sender(recipients):
     sender = (
-        _env('PULLWISE_ALERT_EMAIL_FROM')
-        or _env('PULLWISE_ALERT_SMTP_FROM')
-        or _env('PULLWISE_ALERT_SMTP_USERNAME')
+        system_config.alert_email_from()
+        or system_config.alert_smtp_username()
         or (recipients[0] if recipients else '')
         or 'pullwise@example.invalid'
     )
@@ -67,18 +48,18 @@ def _sender(recipients):
 
 
 def send_alert_email(subject, body):
-    if not _env_flag('PULLWISE_ALERT_EMAIL_ENABLED', 'false'):
+    if not system_config.alert_email_enabled():
         return False
     recipients = _recipients()
-    host = _env('PULLWISE_ALERT_SMTP_HOST')
+    host = system_config.alert_smtp_host()
     if not recipients or not host:
         logger.warning('alert email is enabled but recipient or SMTP host is missing')
         return False
-    username = _env('PULLWISE_ALERT_SMTP_USERNAME')
-    password = _env('PULLWISE_ALERT_SMTP_PASSWORD')
-    use_ssl = _env_flag('PULLWISE_ALERT_SMTP_SSL', 'true')
-    starttls = _env_flag('PULLWISE_ALERT_SMTP_STARTTLS', 'false')
-    port = _env_int('PULLWISE_ALERT_SMTP_PORT', 465 if use_ssl else 587)
+    username = system_config.alert_smtp_username()
+    password = system_config.alert_smtp_password()
+    use_ssl = system_config.alert_smtp_ssl()
+    starttls = system_config.alert_smtp_starttls()
+    port = system_config.alert_smtp_port()
     if username and not password:
         logger.warning('alert email is enabled but SMTP password is missing')
         return False

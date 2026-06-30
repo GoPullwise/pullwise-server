@@ -580,6 +580,37 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(send_alert.call_count, 1)
 
 
+    def test_alert_email_uses_admin_system_config_smtp_settings(self) -> None:
+        config = app.system_config.default_config()
+        config["alerts"]["email"].update(
+            {
+                "enabled": True,
+                "to": ["ops@example.com", "admin@example.com"],
+                "from": "pullwise@example.com",
+                "smtpHost": "smtp.admin.example.com",
+                "smtpPort": 465,
+                "smtpUsername": "mailer",
+                "smtpPassword": "smtp-secret",
+                "smtpSsl": True,
+                "smtpStarttls": False,
+            }
+        )
+        with (
+            patch.object(app.system_config, "config", return_value=config),
+            patch.object(app.alerts.smtplib, "SMTP_SSL") as smtp_ssl,
+        ):
+            smtp = smtp_ssl.return_value.__enter__.return_value
+            attempted = app.alerts.send_alert_email("Pullwise problem", "Worker degraded")
+
+        self.assertTrue(attempted)
+        smtp_ssl.assert_called_once_with("smtp.admin.example.com", 465, timeout=15)
+        smtp.login.assert_called_once_with("mailer", "smtp-secret")
+        message = smtp.send_message.call_args.args[0]
+        self.assertEqual(message["From"], "pullwise@example.com")
+        self.assertEqual(message["To"], "ops@example.com, admin@example.com")
+        self.assertEqual(message["Subject"], "Pullwise problem")
+
+
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
         handler = RouteHarness(
             "/admin/workers",

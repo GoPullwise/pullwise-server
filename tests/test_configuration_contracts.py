@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -65,6 +66,22 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("PULLWISE_SMTP_USERNAME", values)
         self.assertNotIn("PULLWISE_SMTP_PASSWORD", values)
         self.assertNotIn("PULLWISE_SMTP_STARTTLS", values)
+
+    def test_env_example_does_not_include_alert_email_configuration(self) -> None:
+        values = env_example_values()
+
+        for key in (
+            "PULLWISE_ALERT_EMAIL_ENABLED",
+            "PULLWISE_ALERT_EMAIL_TO",
+            "PULLWISE_ALERT_EMAIL_FROM",
+            "PULLWISE_ALERT_SMTP_HOST",
+            "PULLWISE_ALERT_SMTP_PORT",
+            "PULLWISE_ALERT_SMTP_USERNAME",
+            "PULLWISE_ALERT_SMTP_PASSWORD",
+            "PULLWISE_ALERT_SMTP_SSL",
+            "PULLWISE_ALERT_SMTP_STARTTLS",
+        ):
+            self.assertNotIn(key, values)
 
     def test_env_example_does_not_require_cli_api_keys(self) -> None:
         values = env_example_values()
@@ -155,6 +172,59 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(config["worker"]["codexTimeoutSeconds"], 1800)
         self.assertEqual(fields["worker.codexTimeoutSeconds"]["type"], "integer")
         self.assertEqual(fields["worker.codexTimeoutSeconds"]["min"], 60)
+
+    def test_alert_email_is_admin_system_config_field_with_redacted_password(self) -> None:
+        config = app.system_config.default_config()
+        fields = {
+            field["path"]: field
+            for group in app.system_config.metadata()
+            if group["id"] == "alerts"
+            for field in group["fields"]
+        }
+
+        self.assertFalse(config["alerts"]["email"]["enabled"])
+        self.assertEqual(config["alerts"]["email"]["smtpPort"], 465)
+        self.assertEqual(fields["alerts.email.enabled"]["type"], "boolean")
+        self.assertEqual(fields["alerts.email.to"]["type"], "stringList")
+        self.assertEqual(fields["alerts.email.smtpPassword"]["type"], "password")
+
+        config["alerts"]["email"]["smtpPassword"] = "smtp-secret"
+        settings, secrets = app.system_config.admin_settings_payload(config)
+
+        self.assertEqual(settings["alerts"]["email"]["smtpPassword"], "")
+        self.assertEqual(secrets["alerts.email.smtpPassword"], {"hasValue": True})
+
+    def test_system_config_update_keeps_existing_alert_password_when_admin_payload_is_blank(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                app.db.reset_initialization_cache()
+                app.system_config.invalidate_cache()
+                config = app.system_config.default_config()
+                config["alerts"]["email"].update(
+                    {
+                        "enabled": False,
+                        "to": ["ops@example.com"],
+                        "smtpHost": "smtp.example.com",
+                        "smtpUsername": "mailer",
+                        "smtpPassword": "smtp-secret",
+                    }
+                )
+                app.db.save_state_item(app.system_config.STATE_KEY, config)
+                app.system_config.invalidate_cache()
+
+                payload = app.system_config.admin_payload()
+                updated = app.system_config.update({"settings": {"alerts": {"email": {"enabled": True, "smtpPassword": ""}}}})
+                runtime_config = app.system_config.config()
+
+        app.db.reset_initialization_cache()
+        app.system_config.invalidate_cache()
+
+        self.assertEqual(payload["settings"]["alerts"]["email"]["smtpPassword"], "")
+        self.assertEqual(payload["secrets"]["alerts.email.smtpPassword"], {"hasValue": True})
+        self.assertEqual(updated["settings"]["alerts"]["email"]["smtpPassword"], "")
+        self.assertEqual(runtime_config["alerts"]["email"]["smtpPassword"], "smtp-secret")
+        self.assertTrue(runtime_config["alerts"]["email"]["enabled"])
 
     def test_scan_job_retry_attempts_default_to_one_retry(self) -> None:
         config = app.system_config.default_config()
