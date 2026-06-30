@@ -1424,9 +1424,18 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     return worker
 
 
-def list_workers(*, include_deleted: bool = False) -> list[dict[str, Any]]:
+def worker_visibility_where_clause(*, include_deleted: bool = False, activated_only: bool = False) -> str:
+    filters = []
+    if not include_deleted:
+        filters.append("deleted_at IS NULL")
+    if activated_only:
+        filters.append("last_heartbeat_at IS NOT NULL")
+    return f"WHERE {' AND '.join(filters)}" if filters else ""
+
+
+def list_workers(*, include_deleted: bool = False, activated_only: bool = False) -> list[dict[str, Any]]:
     ensure_initialized()
-    where = "" if include_deleted else "WHERE deleted_at IS NULL"
+    where = worker_visibility_where_clause(include_deleted=include_deleted, activated_only=activated_only)
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
@@ -1435,17 +1444,23 @@ def list_workers(*, include_deleted: bool = False) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
 
 
-def count_workers(*, include_deleted: bool = False) -> int:
+def count_workers(*, include_deleted: bool = False, activated_only: bool = False) -> int:
     ensure_initialized()
-    where = "" if include_deleted else "WHERE deleted_at IS NULL"
+    where = worker_visibility_where_clause(include_deleted=include_deleted, activated_only=activated_only)
     with _LOCK, closing(connect()) as connection:
         row = connection.execute(f"SELECT COUNT(*) FROM workers {where}").fetchone()
     return max(0, int(row[0] if row else 0))
 
 
-def list_workers_page(*, include_deleted: bool = False, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+def list_workers_page(
+    *,
+    include_deleted: bool = False,
+    activated_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
     ensure_initialized()
-    where = "" if include_deleted else "WHERE deleted_at IS NULL"
+    where = worker_visibility_where_clause(include_deleted=include_deleted, activated_only=activated_only)
     safe_limit = max(1, min(100, int(limit or 50)))
     safe_offset = max(0, int(offset or 0))
     with _LOCK, closing(connect()) as connection:

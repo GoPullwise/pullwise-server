@@ -110,8 +110,21 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         return handler.payload, handler.payload["worker_token"]
 
     def test_admin_workers_list_is_paginated_and_uses_aggregate_counts(self) -> None:
-        self.create_worker()
-        self.create_worker()
+        first, _first_token = self.create_worker()
+        second, _second_token = self.create_worker()
+        for worker in (first, second):
+            db.upsert_worker_heartbeat(
+                {
+                    "worker_id": worker["worker_id"],
+                    "provider": "codex",
+                    "version": "0.4.18",
+                    "running_jobs": 0,
+                    "doctor_status": "ok",
+                    "codex_ready": 1,
+                    "ready_providers": ["codex"],
+                    "timestamp": app.now(),
+                }
+            )
 
         with (
             patch.object(db, "count_worker_running_scan_jobs", side_effect=AssertionError("worker list should batch counts")),
@@ -125,6 +138,47 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["limit"], 1)
         self.assertTrue(handler.payload["hasMore"])
         self.assertEqual(len(handler.payload["workers"]), 1)
+
+    def test_admin_workers_hide_created_worker_until_first_heartbeat(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        self.assertIsNone(db.get_worker(worker_id)["last_heartbeat_at"])
+
+        hidden = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(hidden, "GET")
+        self.assertEqual(hidden.status, HTTPStatus.OK)
+        self.assertEqual(hidden.payload["workers"], [])
+        self.assertEqual(hidden.payload["total"], 0)
+
+        status = RouteHarness("/admin/status", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(status, "GET")
+        self.assertEqual(status.status, HTTPStatus.OK)
+        self.assertEqual(status.payload["workers"], [])
+        self.assertEqual(status.payload["totalWorkerCount"], 0)
+        self.assertEqual(status.payload["offlineWorkerCount"], 0)
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.4.18",
+                "running_jobs": 0,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "readyProviders": ["codex"],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        visible = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(visible, "GET")
+        self.assertEqual(visible.status, HTTPStatus.OK)
+        self.assertEqual(visible.payload["total"], 1)
+        self.assertEqual(visible.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(visible.payload["workers"][0]["status"], "idle")
 
     def test_admin_access_can_match_verified_github_email_alias(self) -> None:
         app.USERS["usr_admin"].update(

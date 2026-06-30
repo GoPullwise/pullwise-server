@@ -20,7 +20,7 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
     cached = SCAN_SYSTEM_STATUS_CACHE.get(cache_key)
     if cached and cached.get("databasePath") == current_db_path and pull_request_timestamp(cached.get("expiresAt")) > current_time:
         return cached["payload"]
-    worker_records = annotate_worker_runtime_payloads(db.list_workers(), include_latest_commands=admin)
+    worker_records = annotate_worker_runtime_payloads(db.list_workers(activated_only=True), include_latest_commands=admin)
     workers = [worker_public_payload(worker, admin=False) for worker in worker_records]
     job_counts = db.scan_job_status_counts()
     queued_jobs = public_scan_count(job_counts.get("queued"))

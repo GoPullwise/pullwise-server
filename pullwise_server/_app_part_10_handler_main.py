@@ -2101,7 +2101,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(worker_defaults_payload(force_refresh=force_refresh))
         if segments == ["admin", "workers"]:
             limit, offset = pagination_params(params, default_limit=50, max_limit=100)
-            page = db.list_workers_page(limit=limit, offset=offset)
+            page = db.list_workers_page(limit=limit, offset=offset, activated_only=True)
             worker_records = annotate_worker_runtime_payloads(page["items"], include_latest_commands=True)
             workers = [worker_public_payload(worker, admin=True) for worker in worker_records]
             return self.json(
