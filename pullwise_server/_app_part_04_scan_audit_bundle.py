@@ -455,6 +455,9 @@ def scan_payload(scan: dict) -> dict:
     reading_guide = public_result_reading_guide(scan.get("readingGuide"))
     if reading_guide:
         payload["readingGuide"] = reading_guide
+    agent_fix_prompt = scan_agent_fix_prompt(scan)
+    if agent_fix_prompt:
+        payload["agentFixPrompt"] = agent_fix_prompt
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0

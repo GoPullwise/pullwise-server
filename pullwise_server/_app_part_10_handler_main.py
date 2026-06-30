@@ -2888,6 +2888,39 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "apiKey": api_key_public_payload(context["apiKey"]),
                 }
             )
+        if (
+            len(segments) == 5
+            and segments[0] == "repositories"
+            and segments[2] == "scans"
+            and segments[4] == "audit-bundle.zip"
+        ):
+            context = self.require_api_key_context("scans:read")
+            if not context:
+                return
+            repo_context = self.api_repository_context(context, segments[1])
+            if not repo_context:
+                return
+            repository = repo_context[0]
+            scan_id = public_issue_text(segments[3])
+            scans = user_scans_for_read_by_ids({"userId": context["user"]["id"]}, [scan_id])
+            scan = scans[0] if scans else None
+            if not scan or not scan_matches_requested_repository(
+                scan,
+                requested_repo_id=repository["id"],
+                requested_repository=repository["full_name"],
+            ):
+                raise ResourceNotFound("Scan")
+            filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
+            cache_key = audit_bundle_cache_key(scan)
+            return self.binary(
+                get_or_create_scan_audit_bundle_zip_bytes(scan),
+                content_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="pullwise-audit-{filename_scan_id}.zip"',
+                    "ETag": f'"{cache_key}"',
+                    "Cache-Control": "private, max-age=3600",
+                },
+            )
         if len(segments) == 4 and segments[0] == "repositories" and segments[2] == "scans" and segments[3] == "current":
             context = self.require_api_key_context("scans:read")
             if not context:

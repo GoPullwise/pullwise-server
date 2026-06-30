@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import tempfile
 import threading
 import unittest
+import zipfile
 from http import HTTPStatus
 from unittest.mock import patch
 
@@ -27,6 +29,8 @@ class RouteHarness(app.PullwiseHandler):
         self.payload = None
         self.status = None
         self.headers_out = {}
+        self.binary_payload = b""
+        self.content_type = ""
         self.client_address = ("203.0.113.10", 51234)
 
     def read_json(self) -> dict:
@@ -38,6 +42,19 @@ class RouteHarness(app.PullwiseHandler):
     def json(self, payload: dict, status: int = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
         self.payload = payload
         self.status = status
+        self.headers_out = headers or {}
+
+    def binary(
+        self,
+        payload: bytes,
+        status: int = HTTPStatus.OK,
+        *,
+        content_type: str = "application/octet-stream",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.binary_payload = payload
+        self.status = status
+        self.content_type = content_type
         self.headers_out = headers or {}
 
     def error(self, status: int, message: str) -> None:
@@ -288,6 +305,24 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(current.status, HTTPStatus.OK)
         self.assertEqual(current.payload["status"], "done")
         self.assertEqual(current.payload["scan"]["id"], start.payload["id"])
+        prompt = current.payload["scan"]["agentFixPrompt"]
+        bundle_path = f"/api/v1/repositories/{repo['repoId']}/scans/{start.payload['id']}/audit-bundle.zip"
+        self.assertIn(bundle_path, prompt)
+        self.assertIn("Download and unzip the bundle", prompt)
+
+        bundle = RouteHarness(bundle_path, headers=auth)
+        app.PullwiseHandler.route(bundle, "GET")
+        self.assertEqual(bundle.status, HTTPStatus.OK)
+        self.assertEqual(bundle.content_type, "application/zip")
+        self.assertEqual(
+            bundle.headers_out["Content-Disposition"],
+            f'attachment; filename="pullwise-audit-{start.payload["id"]}.zip"',
+        )
+        with zipfile.ZipFile(io.BytesIO(bundle.binary_payload), "r") as archive:
+            self.assertIn("scan/scan.json", archive.namelist())
+            scan_json = json.loads(archive.read("scan/scan.json").decode("utf-8"))
+        self.assertEqual(scan_json["id"], start.payload["id"])
+        self.assertIn("agentFixPrompt", scan_json)
 
     def test_api_key_repository_routes_reject_misbound_github_access(self) -> None:
         _cookie, key = self.create_api_key()
@@ -607,6 +642,10 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(docs.payload["subscriptionPlans"]["href"], "/docs/subscription-plans")
         self.assertIn("/docs/subscription-plans", [item["path"] for item in docs.payload["endpoints"]])
         self.assertIn("/api/v1/repositories/{repoId}/quota", [item["path"] for item in docs.payload["endpoints"]])
+        self.assertIn(
+            "/api/v1/repositories/{repoId}/scans/{scanId}/audit-bundle.zip",
+            [item["path"] for item in docs.payload["endpoints"]],
+        )
         self.assertEqual(overview.status, HTTPStatus.OK)
         self.assertEqual(overview.payload["authorizedRepositories"]["href"], "/repositories")
         self.assertEqual(

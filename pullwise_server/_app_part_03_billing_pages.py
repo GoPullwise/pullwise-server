@@ -548,7 +548,13 @@ def api_docs_payload() -> dict:
                 "method": "GET",
                 "path": "/api/v1/repositories/{repoId}/scans/current",
                 "scope": "scans:read",
-                "description": "Read the latest scan status for the repository. Returns idle when no scan exists.",
+                "description": "Read the latest scan status for the repository. Completed scan payloads include agentFixPrompt for automation.",
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/repositories/{repoId}/scans/{scanId}/audit-bundle.zip",
+                "scope": "scans:read",
+                "description": "Download the audit bundle ZIP referenced by agentFixPrompt for a scan in this repository.",
             },
             {
                 "method": "GET",

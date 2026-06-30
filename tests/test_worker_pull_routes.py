@@ -852,6 +852,48 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn("effectiveAgentConfig", list_payload)
         self.assertNotIn("aiUsage", payload)
         self.assertNotIn("aiUsage", list_payload)
+
+    def test_scan_payload_includes_agent_fix_prompt_with_bundle_url(self) -> None:
+        scan = {
+            "id": "sc_agent_prompt",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "done",
+            "userId": "usr_1",
+            "repoId": "repo_123",
+            "createdAt": app.now(),
+            "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+            "agentReport": {
+                "oneLine": "GraphVerified review completed with 1 confirmed finding.",
+                "issueIndex": [
+                    {
+                        "id": "issue-auth-cache",
+                        "severity": "high",
+                        "title": "Auth cache can return stale permissions",
+                        "primaryFile": "src/auth.py",
+                        "primaryLine": 42,
+                    }
+                ],
+            },
+            "readingGuide": {"forAgentFix": "agentFixPrompt"},
+        }
+
+        with patch.dict(os.environ, {"PULLWISE_API_BASE_URL": "https://api.pullwise.dev"}):
+            payload = app.scan_payload(scan)
+
+        prompt = payload["agentFixPrompt"]
+        self.assertIn("Task: fix the Pullwise scan findings", prompt)
+        self.assertIn("Repository: acme/api", prompt)
+        self.assertIn("Confirmed issues: 1", prompt)
+        self.assertIn("high: Auth cache can return stale permissions", prompt)
+        self.assertIn("src/auth.py:42", prompt)
+        self.assertIn(
+            "https://api.pullwise.dev/api/v1/repositories/repo_123/scans/sc_agent_prompt/audit-bundle.zip",
+            prompt,
+        )
+        self.assertEqual(payload["readingGuide"]["forAgentFix"], "agentFixPrompt")
+
     def create_registry_worker(self, worker_id: str) -> tuple[dict, str]:
         worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})
         db.upsert_worker_heartbeat(
