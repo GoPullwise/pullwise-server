@@ -128,7 +128,7 @@ def public_result_status(value: object) -> str:
 def public_result_reading_guide(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     guide = {}
-    for key in ("forUser", "forAgentQuick", "forAgentDeep", "forDebug"):
+    for key in ("forUser", "forAgentQuick", "forAgentDeep", "forAgentFix", "forDebug"):
         text = public_scan_compact_text(source.get(key), max_length=240)
         if text:
             guide[key] = text
@@ -262,6 +262,154 @@ def public_result_agent_report(value: object) -> dict:
         report["tokensHint"] = tokens_hint
     return report if one_line or issue_index or actions or tokens_hint else {}
 
+def scan_agent_fix_audit_bundle_path(scan: dict) -> str:
+    scan_id = public_issue_text(scan.get("id"))
+    if not scan_id:
+        return ""
+    repo_id = clean_github_access_text(scan.get("repoId"), allow_int=True)
+    if repo_id:
+        return (
+            f"/api/v1/repositories/{quote(repo_id, safe='')}/scans/"
+            f"{quote(scan_id, safe='')}/audit-bundle.zip"
+        )
+    return f"/scans/{quote(scan_id, safe='')}/audit-bundle.zip"
+
+
+def scan_agent_fix_audit_bundle_url(scan: dict) -> str:
+    path = scan_agent_fix_audit_bundle_path(scan)
+    if not path:
+        return ""
+    base_url = public_scan_compact_text(env("PULLWISE_API_BASE_URL", ""), max_length=400).rstrip("/")
+    if base_url.startswith(("https://", "http://")):
+        return f"{base_url}{path}"
+    return path
+
+
+def scan_agent_fix_issue_location(issue: dict) -> str:
+    primary_file = public_scan_compact_text(issue.get("primaryFile"), max_length=300)
+    primary_line = public_scan_count(issue.get("primaryLine"))
+    if primary_file and primary_line:
+        return f"{primary_file}:{primary_line}"
+    return primary_file or (str(primary_line) if primary_line else "")
+
+
+def scan_agent_fix_issue_line(issue: dict) -> str:
+    title = public_scan_compact_text(issue.get("title") or issue.get("id"), max_length=180)
+    severity = public_scan_compact_text(issue.get("severity"), max_length=40)
+    issue_id = public_scan_compact_text(issue.get("id"), max_length=100)
+    location = scan_agent_fix_issue_location(issue)
+    parts = []
+    if severity:
+        parts.append(severity)
+    if title:
+        parts.append(title)
+    line = ": ".join(parts) if parts else issue_id
+    suffix = []
+    if location:
+        suffix.append(location)
+    if issue_id and issue_id not in line:
+        suffix.append(issue_id)
+    return f"- {line} ({'; '.join(suffix)})" if suffix else f"- {line}"
+
+
+def scan_agent_fix_graph_issue_line(item: dict, index: int) -> str:
+    candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+    issue_id = public_scan_compact_text(
+        candidate.get("issue_id") or candidate.get("candidate_id") or f"issue-{index + 1}",
+        max_length=100,
+    )
+    title = public_scan_compact_text(candidate.get("claim") or issue_id, max_length=180)
+    severity = public_scan_compact_text(candidate.get("severity"), max_length=40)
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), list) else []
+    primary = next((entry for entry in evidence if isinstance(entry, dict)), {})
+    primary_file = public_scan_compact_text(primary.get("file") or primary.get("path"), max_length=300)
+    primary_lines = public_scan_compact_text(primary.get("lines") or primary.get("line"), max_length=80)
+    location = f"{primary_file}:{primary_lines}" if primary_file and primary_lines else primary_file
+    parts = []
+    if severity:
+        parts.append(severity)
+    if title:
+        parts.append(title)
+    line = ": ".join(parts) if parts else issue_id
+    suffix = []
+    if location:
+        suffix.append(location)
+    if issue_id and issue_id not in line:
+        suffix.append(issue_id)
+    return f"- {line} ({'; '.join(suffix)})" if suffix else f"- {line}"
+
+
+def scan_agent_fix_issue_lines(agent_report: dict, graph_verified_report: dict) -> list[str]:
+    raw_issues = agent_report.get("issueIndex") if isinstance(agent_report.get("issueIndex"), list) else []
+    issue_lines = []
+    for raw_issue in raw_issues[:5]:
+        if isinstance(raw_issue, dict):
+            line = scan_agent_fix_issue_line(raw_issue)
+            if line and line not in issue_lines:
+                issue_lines.append(line)
+    if issue_lines:
+        return issue_lines
+    final_json = graph_verified_report.get("finalJson") if isinstance(graph_verified_report.get("finalJson"), dict) else {}
+    confirmed = final_json.get("confirmed") if isinstance(final_json.get("confirmed"), list) else []
+    for index, raw_item in enumerate(confirmed[:5]):
+        if isinstance(raw_item, dict):
+            line = scan_agent_fix_graph_issue_line(raw_item, index)
+            if line and line not in issue_lines:
+                issue_lines.append(line)
+    return issue_lines
+
+
+def scan_agent_fix_confirmed_count(scan: dict, agent_report: dict, graph_verified_report: dict) -> int:
+    raw_issues = agent_report.get("issueIndex") if isinstance(agent_report.get("issueIndex"), list) else []
+    if raw_issues:
+        return len(raw_issues)
+    confirmed_count = public_scan_count(graph_verified_report.get("confirmedCount"))
+    if confirmed_count:
+        return confirmed_count
+    counts = public_scan_issue_counts(scan.get("issues"))
+    return sum(public_scan_count(value) for value in counts.values())
+
+
+def scan_agent_fix_prompt(scan: dict) -> str:
+    status = public_scan_status(scan.get("status"))
+    if status not in {"done", "failed"}:
+        return ""
+    scan_id = public_issue_text(scan.get("id"))
+    repo = clean_repository_full_name(scan.get("repo"))
+    bundle_url = scan_agent_fix_audit_bundle_url(scan)
+    if not scan_id or not repo or not bundle_url:
+        return ""
+    branch = clean_github_access_text(scan.get("branch")) or "main"
+    commit = clean_github_access_text(scan.get("commit")) or "pending"
+    agent_report = public_result_agent_report(scan.get("agentReport"))
+    graph_verified_report = public_graph_verified_report(scan.get("graphVerifiedReport"))
+    summary = public_scan_compact_text(agent_report.get("oneLine"), max_length=260)
+    issue_lines = scan_agent_fix_issue_lines(agent_report, graph_verified_report)
+    confirmed_count = scan_agent_fix_confirmed_count(scan, agent_report, graph_verified_report)
+    lines = [
+        "Task: fix the Pullwise scan findings in this repository.",
+        f"Repository: {repo}",
+        f"Branch: {branch}",
+        f"Commit: {commit}",
+        f"Scan ID: {scan_id}",
+        f"Scan status: {status}",
+    ]
+    if summary:
+        lines.append(f"Summary: {summary}")
+    if confirmed_count:
+        lines.append(f"Confirmed issues: {confirmed_count}")
+    if issue_lines:
+        lines.append("Top issues:")
+        lines.extend(issue_lines)
+    lines.extend(
+        [
+            f"Audit bundle ZIP: {bundle_url}",
+            "Download and unzip the bundle, then inspect report.md, graph-verified/final.json, and issues/*.md.",
+            "Apply the smallest correct code/test changes in the repository. Re-run the relevant tests or commands from the bundle before finishing.",
+            "If the ZIP requires auth, use the same Pullwise API key/session that returned this prompt.",
+        ]
+    )
+    return "\n".join(lines)
 
 def scan_payload(scan: dict) -> dict:
     status = public_scan_status(scan.get("status"))
@@ -1055,6 +1203,21 @@ def graph_verified_item_proof_type(repro: dict, verification: dict) -> str:
         return "runtime-command"
     return value
 
+def graph_verified_model_self_certified(repro: dict, verification: dict) -> bool:
+    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
+    values = (
+        verification.get("assurance"),
+        verification.get("proof_origin"),
+        verification.get("proof_label"),
+        repro.get("assurance"),
+        repro.get("proof_label"),
+        proof.get("assurance"),
+        proof.get("label"),
+    )
+    normalized = {public_scan_compact_text(value, max_length=120).lower().replace(" ", "-") for value in values}
+    return bool(normalized.intersection({"model-self-certified", "model-static-proof", "model-certified-static-proof"}))
+
+
 
 def graph_verified_static_steps(judge: dict, repro: dict) -> list[str]:
     proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
@@ -1088,6 +1251,8 @@ def graph_verified_item_has_static_proof(judge: dict, repro: dict, verification:
     if repro.get("graph_path_exercised") is not True:
         return False
     if graph_verified_repro_status(repro) != "static_proof" and graph_verified_item_proof_type(repro, verification) != "static-proof":
+        return False
+    if not graph_verified_model_self_certified(repro, verification):
         return False
     proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
     expected = review._safe_text_lenient(proof.get("expected"))[:4000]
@@ -1388,7 +1553,7 @@ def public_graph_verified_judge(value: object) -> dict:
 def public_graph_verified_repro(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     repro = {}
-    for key in ("candidate_id", "status", "level", "summary", "why_valid", "why_not_reproduced", "safety_notes"):
+    for key in ("candidate_id", "status", "level", "summary", "why_valid", "why_not_reproduced", "safety_notes", "assurance", "proof_label"):
         text = review._safe_text_lenient(source.get(key))[:4000]
         if text:
             repro[key] = text
@@ -1443,7 +1608,7 @@ def public_graph_verified_repro_commands(value: object) -> list[dict]:
 def public_graph_verified_proof(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     proof = {}
-    for key in ("type", "expected", "actual", "log_excerpt"):
+    for key in ("type", "expected", "actual", "log_excerpt", "assurance", "label"):
         text = review._safe_text_lenient(source.get(key))[:4000]
         if text:
             proof[key] = text
@@ -1459,7 +1624,7 @@ def public_graph_verified_proof(value: object) -> dict:
 def public_graph_verified_verification(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     verification = {}
-    for key in ("verdict", "status", "level", "proof_type", "summary", "reason"):
+    for key in ("verdict", "status", "level", "proof_type", "summary", "reason", "assurance", "proof_origin", "proof_label"):
         text = review._safe_text_lenient(source.get(key))[:4000]
         if text:
             verification[key] = text

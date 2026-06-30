@@ -907,8 +907,14 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
     code_evidence = worker_graph_verified_code_evidence(candidate.get("evidence"), job=job)
     locations = worker_graph_verified_locations(code_evidence, job=job)
     primary = locations[0] if locations else {}
+    proof_type = worker_graph_verified_proof_type(repro, verification)
     verification_status = worker_graph_verified_verification_status(judge, repro, verification)
     confidence_level = worker_graph_verified_confidence_level(verification_status, code_evidence)
+    tags = ["graph-verified"]
+    if proof_type == "static-proof":
+        tags.extend(["static-proof", "model-self-certified"])
+    elif proof_type == "runtime-command":
+        tags.append("runtime-reproduced")
     reproduction_path = worker_graph_verified_reproduction_path(candidate, reproduction)
     candidate_id = public_issue_text(candidate.get("candidate_id") or candidate.get("issue_id")) or f"candidate_{index + 1}"
     title = public_issue_text(candidate.get("title")) or review._safe_text_lenient(candidate.get("claim")).split(". ", 1)[0]
@@ -946,6 +952,7 @@ def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, i
         "verificationStatus": verification_status,
         "reportedVerificationStatus": verification_status,
         "confidenceLevel": confidence_level,
+        "tags": tags,
         "judgeEvidence": worker_graph_verified_judge_evidence(judge),
         "reproProof": worker_graph_verified_repro_proof(repro),
         "verificationLevel": public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")),

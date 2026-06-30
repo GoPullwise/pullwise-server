@@ -228,14 +228,21 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
                 "expected": "The handler should return a successful response.",
                 "actual": "The handler returns the error path.",
                 "verification_steps": steps,
+                "assurance": "model-self-certified",
+                "label": "Model-certified static proof",
             },
             "graph_path_exercised": True,
+            "assurance": "model-self-certified",
+            "proof_label": "Model-certified static proof",
         }
         item["verification"] = {
             "status": "confirmed",
             "level": "L1",
             "proof_type": "static-proof",
             "safe_to_show_user": True,
+            "assurance": "model-self-certified",
+            "proof_origin": "model-static-proof",
+            "proof_label": "Model-certified static proof",
         }
 
         report = app.public_graph_verified_report(
@@ -249,10 +256,12 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         confirmed = report["finalJson"]["confirmed"][0]
         self.assertEqual(report["confirmedCount"], 1)
         self.assertEqual(confirmed["repro"]["proof"]["verification_steps"], steps)
+        self.assertEqual(confirmed["verification"]["assurance"], "model-self-certified")
 
         findings = app.worker_graph_verified_findings({"repo": "acme/app"}, report)
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["verificationStatus"], "static_proof")
+        self.assertIn("model-self-certified", findings[0]["tags"])
         self.assertEqual(findings[0]["reproduction"]["steps"], steps)
 
         payload = app.issue_payload(findings[0])
@@ -279,11 +288,32 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         no_line = self.graph_verified_item()
         no_line["candidate"]["evidence"][0].pop("line")
         no_line["candidate"]["evidence"][0].pop("end_line")
+        unlabeled_static = self.graph_verified_item()
+        unlabeled_static["judge"]["level"] = "L1"
+        unlabeled_static["repro"] = {
+            "status": "static_proof",
+            "level": "L1",
+            "summary": "The handler returns the error path.",
+            "commands_run": [],
+            "proof": {
+                "type": "static-proof",
+                "expected": "The handler should return a successful response.",
+                "actual": "The handler returns the error path.",
+                "verification_steps": ["Inspect src/app.py."],
+            },
+            "graph_path_exercised": True,
+        }
+        unlabeled_static["verification"] = {
+            "status": "confirmed",
+            "level": "L1",
+            "proof_type": "static-proof",
+            "safe_to_show_user": True,
+        }
 
         report = {
             "runId": "run_1",
             "mode": "standard",
-            "confirmedCount": 7,
+            "confirmedCount": 8,
             "finalJson": {
                 "confirmed": [
                     unsafe,
@@ -293,6 +323,7 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
                     no_log,
                     no_exit_code,
                     no_line,
+                    unlabeled_static,
                 ]
             },
         }
