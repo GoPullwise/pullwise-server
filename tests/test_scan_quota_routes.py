@@ -289,6 +289,66 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertTrue(owner_delete_again.payload["alreadyQueued"])
         self.assertEqual(owner_delete_again.payload["command"]["id"], uninstall_command_id)
 
+    def test_private_worker_list_includes_codex_quota_report(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        worker = db.create_worker(
+            {
+                "worker_id": "wk_private_quota",
+                "name": "Quota worker",
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "worker_scope": db.WORKER_SCOPE_PRIVATE,
+                "owner_user_id": "usr_a",
+            }
+        )
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": worker["worker_id"],
+                "version": system_config.worker_min_version() or "0.1.0",
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "running_jobs": 0,
+                "doctor_status": "quota_exhausted",
+                "codex_ready": 0,
+                "ready_providers": [],
+                "timestamp": app.now(),
+                "codex_quota": {
+                    "status": "exhausted",
+                    "ready": False,
+                    "reason": "codex_quota_exhausted",
+                    "remainingPercent": 0,
+                    "windows": [
+                        {"windowKind": "five_hour", "remainingPercent": 0, "usedPercent": 100},
+                        {"windowKind": "weekly", "remainingPercent": 50, "usedPercent": 50},
+                    ],
+                },
+            }
+        )
+
+        handler = RouteHarness(cookie=cookie, path="/private-workers")
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(len(handler.payload["workers"]), 1)
+        worker_payload = handler.payload["workers"][0]
+        self.assertEqual(worker_payload["worker_id"], worker["worker_id"])
+        self.assertEqual(worker_payload["readyProviders"], [])
+        self.assertFalse(worker_payload["codex_ready"])
+        self.assertEqual(
+            worker_payload["codexQuota"],
+            {
+                "provider": "codex",
+                "status": "exhausted",
+                "ready": False,
+                "reason": "codex_quota_exhausted",
+                "remainingPercent": 0.0,
+                "windows": [
+                    {"windowKind": "five_hour", "remainingPercent": 0.0, "usedPercent": 100.0},
+                    {"windowKind": "weekly", "remainingPercent": 50.0, "usedPercent": 50.0},
+                ],
+            },
+        )
+
     def test_same_installation_shares_user_quota_across_repos(self) -> None:
         with (
             patch.dict(os.environ, {"PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "user-quota.sqlite3")}, clear=True),
