@@ -2620,7 +2620,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "provider": agent_config["provider"],
                     "model": agent_config["codex"]["model"],
                     "reasoningEffort": agent_config["codex"]["reasoningEffort"],
-                    "graphVerified": agent_config.get("graphVerified"),
+                    "reviewWorker": agent_config.get("reviewWorker"),
                 },
             )
             return self.json(

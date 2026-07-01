@@ -2391,7 +2391,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(owner, "GET")
 
         self.assertEqual(owner.status, HTTPStatus.OK)
-        self.assertEqual(owner.payload["kind"], "pullwise.graph_verified_audit_bundle")
+        self.assertEqual(owner.payload["kind"], "pullwise.review_audit_bundle")
         self.assertEqual(owner.payload["schemaVersion"], 1)
         self.assertEqual(owner.payload["scan"]["id"], "sc_bundle")
         self.assertEqual(owner.payload["preflight"]["verifier"]["runs"][0]["status"], "failed")
@@ -2404,11 +2404,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         artifact_paths = [artifact["path"] for artifact in owner.payload["artifacts"]]
         self.assertIn("scan/scan.json", artifact_paths)
         self.assertIn("preflight/preflight.json", artifact_paths)
-        self.assertIn("graph-verified/final.json", artifact_paths)
+        self.assertNotIn("graph-verified/final.json", artifact_paths)
         self.assertNotIn("repository-graph.json", artifact_paths)
         self.assertNotIn("semantic-graph.json", artifact_paths)
         self.assertNotIn("impact-graph.json", artifact_paths)
-        self.assertNotIn("audit.json", artifact_paths)
+        self.assertIn("audit.json", artifact_paths)
         artifacts = {artifact["path"]: artifact for artifact in owner.payload["artifacts"]}
         self.assertNotIn("verificationAudit", artifacts["scan/scan.json"]["content"])
         self.assertIn('"mode": "static"', artifacts["preflight/preflight.json"]["content"])
@@ -2428,8 +2428,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(owner_zip.binary_payload), "r") as archive:
             self.assertIn("scan/scan.json", archive.namelist())
             self.assertIn("preflight/preflight.json", archive.namelist())
-            self.assertIn("graph-verified/final.json", archive.namelist())
-            self.assertNotIn("audit.json", archive.namelist())
+            self.assertNotIn("graph-verified/final.json", archive.namelist())
+            self.assertIn("audit.json", archive.namelist())
             self.assertNotIn("repository-graph.json", archive.namelist())
 
         other_user = RouteHarness(
@@ -2459,7 +2459,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(owner, "GET")
 
         self.assertEqual(owner.status, HTTPStatus.OK)
-        self.assertEqual(owner.payload["kind"], "pullwise.graph_verified_audit_bundle")
+        self.assertEqual(owner.payload["kind"], "pullwise.review_audit_bundle")
         self.assertNotIn("repositoryGraph", owner.payload)
         self.assertNotIn("semanticGraph", owner.payload)
         self.assertNotIn("impactGraph", owner.payload)
@@ -3238,7 +3238,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS[0]["verificationAudit"] = {"candidateCount": 99}
         bundle = app.scan_audit_bundle_payload(app.SCANS[0])
         paths = {artifact["path"] for artifact in bundle["artifacts"]}
-        self.assertEqual(bundle["kind"], "pullwise.graph_verified_audit_bundle")
+        self.assertEqual(bundle["kind"], "pullwise.review_audit_bundle")
         self.assertNotIn("verificationAudit", bundle)
         self.assertNotIn("repositoryGraph", bundle)
         self.assertNotIn("semanticGraph", bundle)
@@ -3876,8 +3876,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.status, HTTPStatus.OK)
         job = claim.payload["job"]
         self.assertEqual(
-            job["agentConfig"]["graphVerified"],
-            app.billing.default_review_agent_graph_verified_config("free"),
+            job["agentConfig"]["reviewWorker"],
+            app.billing.default_review_agent_review_worker_config("free"),
         )
 
         progress = RouteHarness(

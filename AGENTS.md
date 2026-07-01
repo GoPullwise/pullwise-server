@@ -128,12 +128,29 @@ The server owns subscription plan agent policy.
 - Keep the plan review-agent provider as a single `provider` field in
   worker-facing API responses.
 
-## Graph-Verified Result Semantics
+## Review Worker Protocol Semantics
 
-Worker GraphVerified results are full-repository snapshot reviews. Server
-claim/result APIs, artifacts, and copy should preserve that scope. Preserve
-review-unit coverage metadata in stored artifacts even when the confirmed
-finding list is empty.
+`../worker-design.md` is the source of truth for worker-facing server behavior.
+The server owns the global job queue, leases at most one job to a worker, and
+must not add worker-side queue, prefetch, max-claim, or parallel job controls.
+
+Worker results use `review-worker-protocol/v1`: a stable result envelope plus a
+versioned artifact manifest. Server ingest must validate protocol version,
+worker/job/run/lease binding, execution status, summary, quality gate, required
+artifacts, sha256, and size before accepting a completed result. Store the raw
+envelope and artifacts; do not depend on `report.agent.json` internals for core
+result acceptance.
+
+Completed runs require uploaded `report.human`, `report.agent`, `coverage`,
+`qa`, and `token_budget` artifacts. Failed and cancelled runs should accept a
+valid terminal envelope with available optional diagnostic artifacts. Artifact
+upload must be idempotent by run/artifact, and result submit must be idempotent
+by run/message type.
+
+Quota should be finalized when the worker reaches core semantic review work, not
+for mechanical setup phases. Preserve subscription-plan controlled model,
+timeout, repository limits, and core reasoning effort; non-core phases use the
+same model with medium effort.
 
 ## Public REST API Rate Limits
 

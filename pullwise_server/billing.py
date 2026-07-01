@@ -35,7 +35,7 @@ REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
 REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
 REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
-REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS_BY_PLAN = {
+REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
     "free": {
         "mode": "fast",
         "scanMode": "full-cached",
@@ -156,9 +156,9 @@ def clean_review_agent_provider_required(value: object, *, strict: bool = True) 
     return "codex"
 
 
-def default_review_agent_graph_verified_config(plan: str) -> dict:
+def default_review_agent_review_worker_config(plan: str) -> dict:
     normalized_plan = normalize_plan(plan, default="free")
-    return copy.deepcopy(REVIEW_AGENT_GRAPH_VERIFIED_DEFAULTS_BY_PLAN[normalized_plan])
+    return copy.deepcopy(REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN[normalized_plan])
 
 
 def default_review_agent_plan_config(plan: str) -> dict:
@@ -172,7 +172,7 @@ def default_review_agent_plan_config(plan: str) -> dict:
             "model": REVIEW_CODEX_MODEL_DEFAULT,
             "reasoningEffort": effort,
         },
-        "graphVerified": default_review_agent_graph_verified_config(normalized_plan),
+        "reviewWorker": default_review_agent_review_worker_config(normalized_plan),
     }
 
 
@@ -200,7 +200,7 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
     return result
 
 
-def normalize_review_agent_graph_verified_config(value: object, defaults: dict) -> dict:
+def normalize_review_agent_review_worker_config(value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
     result["mode"] = clean_review_agent_graph_mode(source.get("mode"), str(result.get("mode") or "standard"))
@@ -277,9 +277,9 @@ def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     if "provider" in source:
         result["provider"] = clean_review_agent_provider_required(source.get("provider"), strict=False)
     result["codex"] = normalize_review_agent_provider_config("codex", source.get("codex"), defaults["codex"])
-    result["graphVerified"] = normalize_review_agent_graph_verified_config(
-        source.get("graphVerified"),
-        defaults["graphVerified"],
+    result["reviewWorker"] = normalize_review_agent_review_worker_config(
+        source.get("reviewWorker"),
+        defaults["reviewWorker"],
     )
     return result
 
@@ -325,7 +325,7 @@ def review_agent_config(plan: str) -> dict:
             "model": codex_config["model"],
             "reasoningEffort": codex_config["reasoningEffort"],
         },
-        "graphVerified": copy.deepcopy(configured["graphVerified"]),
+        "reviewWorker": copy.deepcopy(configured["reviewWorker"]),
     }
 
 
@@ -373,10 +373,10 @@ def update_review_agent_config(plan: str, payload: dict) -> dict:
                 payload[provider],
                 current[provider],
             )
-    if "graphVerified" in payload:
-        current["graphVerified"] = normalize_review_agent_graph_verified_config(
-            payload.get("graphVerified"),
-            current.get("graphVerified") or default_review_agent_plan_config(normalized_plan)["graphVerified"],
+    if "reviewWorker" in payload:
+        current["reviewWorker"] = normalize_review_agent_review_worker_config(
+            payload.get("reviewWorker"),
+            current.get("reviewWorker") or default_review_agent_plan_config(normalized_plan)["reviewWorker"],
         )
     state["plans"][normalized_plan] = normalize_review_agent_plan_config(normalized_plan, current)
     db.save_state_item(REVIEW_AGENT_CONFIG_STATE_KEY, state)

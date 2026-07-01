@@ -2268,12 +2268,6 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         include_markdown=True,
         include_debug=True,
     )
-    if not graph_verified_report:
-        graph_verified_report = public_graph_verified_report(
-            {"finalJson": {"confirmed": []}},
-            include_markdown=True,
-            include_debug=True,
-        )
     public_scan = dict(public_scan)
     for key in (
         "auditSwarm",
@@ -2289,7 +2283,7 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
     bundle = {
         "schemaVersion": 1,
         "generatedAt": now(),
-        "kind": "pullwise.graph_verified_audit_bundle",
+        "kind": "pullwise.review_audit_bundle",
         "scan": public_scan,
         "preflight": preflight,
         "verification": public_scan.get("verification") or public_scan_verification_counts(scan),
@@ -2308,7 +2302,8 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
             "All repository links are pinned to the recorded commit when a valid commit SHA is available.",
         ],
     }
-    bundle["graphVerifiedReport"] = graph_verified_report
+    if graph_verified_report:
+        bundle["graphVerifiedReport"] = graph_verified_report
     artifacts = audit_bundle_artifacts(bundle)
     bundle["artifactManifest"] = [
         {key: artifact[key] for key in ("path", "mediaType", "size", "sha256")}
@@ -2490,6 +2485,28 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
     artifacts = [
         audit_bundle_artifact("README.md", "text/markdown", audit_bundle_readme_markdown(bundle)),
         audit_bundle_artifact("report.md", "text/markdown", audit_bundle_report_markdown(bundle)),
+        audit_bundle_artifact(
+            "scan/scan.json",
+            "application/json",
+            json.dumps(
+                bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        ),
+        audit_bundle_artifact(
+            "preflight/preflight.json",
+            "application/json",
+            json.dumps(
+                bundle.get("preflight") if isinstance(bundle.get("preflight"), dict) else {},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        ),
         audit_bundle_artifact("reproduction/commands.txt", "text/plain", audit_bundle_repro_commands_text(bundle)),
         audit_bundle_artifact("environment.json", "application/json", audit_bundle_environment_json(bundle)),
         audit_bundle_artifact("tool-versions.json", "application/json", audit_bundle_tool_versions_json(bundle)),
@@ -2629,14 +2646,14 @@ def audit_bundle_readme_markdown(bundle: dict) -> str:
     scan = bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {}
     return "\n".join(
         [
-            "# Pullwise GraphVerified Audit Bundle",
+            "# Pullwise Review Audit Bundle",
             "",
             f"Repository: {public_issue_text(scan.get('repo')) or 'unknown'}",
             f"Branch: {public_issue_text(scan.get('branch')) or 'main'}",
             f"Commit: {public_issue_text(scan.get('commit')) or 'pending'}",
             f"Generated at: {pull_request_timestamp(bundle.get('generatedAt')) or 0}",
             "",
-            "This bundle contains only GraphVerified scan evidence. Start with report.md, then inspect graph-verified/final.json and issues/*.md.",
+            "Start with report.md, then inspect scan/scan.json and issues/*.md. Legacy GraphVerified artifacts are included only when present.",
             "",
         ]
     )
@@ -2648,7 +2665,7 @@ def audit_bundle_report_markdown(bundle: dict) -> str:
     graph_verified_report = bundle.get("graphVerifiedReport") if isinstance(bundle.get("graphVerifiedReport"), dict) else {}
     issues = bundle.get("issues") if isinstance(bundle.get("issues"), list) else []
     lines = [
-        "# GraphVerified Audit Report",
+        "# Pullwise Review Audit Report",
         "",
         f"Repo: {public_issue_text(scan.get('repo')) or 'unknown'}",
         f"Commit: {public_issue_text(scan.get('commit')) or 'pending'}",
@@ -2656,15 +2673,13 @@ def audit_bundle_report_markdown(bundle: dict) -> str:
         "",
         "## Summary",
         "",
-        f"- Confirmed issues: {public_scan_count(graph_verified_report.get('confirmedCount'))}",
-        f"- Rejected candidates: {public_scan_count(graph_verified_report.get('rejectedCount'))}",
-        f"- Blocked candidates: {public_scan_count(graph_verified_report.get('blockedCount'))}",
+        f"- Issues: {len(issues)}",
         f"- Reproduction commands: {public_scan_count(evidence_summary.get('reproductionCommandCount'))}",
         f"- Evidence items: {public_scan_count(evidence_summary.get('evidenceItemCount'))}",
     ]
     lines.extend(["", "## Issues", ""])
     if not issues:
-        lines.append("No confirmed GraphVerified issues were included in this bundle.")
+        lines.append("No issues were included in this bundle.")
     for issue in issues:
         if not isinstance(issue, dict):
             continue
