@@ -192,7 +192,7 @@ def public_result_agent_issue(value: object) -> dict:
     read_next = public_scan_compact_text_list(source.get("readNext"), limit=8, max_length=500)
     if read_next:
         issue["readNext"] = read_next
-    for key in ("evidencePath", "reproPath", "sourcePath"):
+    for key in ("evidencePath", "sourcePath"):
         text = public_scan_compact_text(source.get(key), max_length=500)
         if text:
             issue[key] = text
@@ -939,7 +939,7 @@ def review_shadow_score_band(event: dict, factors: dict) -> str:
 def public_scan_error_code(value: object) -> str:
     error_code = public_issue_text(value).replace("-", "_").upper()
     return error_code if error_code in {
-        "GRAPH_VERIFIED_COMPLETION_FAILED",
+        "CODEX_REVIEW_COMPLETION_FAILED",
         "REPOSITORY_TOO_LARGE",
         "CODEX_AUTH_REQUIRED",
         "CODEX_AUTH_EXPIRED",
@@ -1521,14 +1521,8 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
     issue_payloads = []
     for issue in scan_issue_records_for_read(scan):
         issue_payloads.append(issue_payload(issue))
-    reproduction_commands = []
     evidence_items = 0
     for issue in issue_payloads:
-        reproduction = issue.get("reproduction") if isinstance(issue.get("reproduction"), dict) else {}
-        for command in reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []:
-            text = public_issue_text(command)
-            if text and text not in reproduction_commands:
-                reproduction_commands.append(text)
         evidence = issue.get("evidence") if isinstance(issue.get("evidence"), list) else []
         evidence_items += len(evidence)
     preflight = public_scan.get("preflight") or {}
@@ -1545,15 +1539,12 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         "evidenceSummary": {
             "issueCount": len(issue_payloads),
             "evidenceItemCount": evidence_items,
-            "reproductionCommandCount": len(reproduction_commands),
             "logArtifactCount": log_artifact_count,
         },
-        "reproductionCommands": reproduction_commands[:50],
         "issues": issue_payloads,
         "limitations": [
             "This bundle is generated from structured scan records stored by Pullwise.",
             "Verifier stdout/stderr is not embedded in this bundle; logPath values only identify worker-local logs.",
-            "Reproduction commands are exported as untrusted text for manual review, not as executable scripts.",
             "All repository links are pinned to the recorded commit when a valid commit SHA is available.",
         ],
     }
@@ -1722,7 +1713,6 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
             )
             + "\n",
         ),
-        audit_bundle_artifact("reproduction/commands.txt", "text/plain", audit_bundle_repro_commands_text(bundle)),
         audit_bundle_artifact("environment.json", "application/json", audit_bundle_environment_json(bundle)),
         audit_bundle_artifact("tool-versions.json", "application/json", audit_bundle_tool_versions_json(bundle)),
     ]
@@ -1866,7 +1856,6 @@ def audit_bundle_report_markdown(bundle: dict) -> str:
         "## Summary",
         "",
         f"- Issues: {len(issues)}",
-        f"- Reproduction commands: {public_scan_count(evidence_summary.get('reproductionCommandCount'))}",
         f"- Evidence items: {public_scan_count(evidence_summary.get('evidenceItemCount'))}",
     ]
     lines.extend(["", "## Issues", ""])
@@ -1878,116 +1867,6 @@ def audit_bundle_report_markdown(bundle: dict) -> str:
         lines.append(f"- [{audit_bundle_issue_title(issue)}](issues/{audit_bundle_safe_artifact_name(public_issue_text(issue.get('id')) or 'issue')}.md)")
     lines.append("")
     return "\n".join(lines)
-
-
-def audit_bundle_dockerfile(bundle: dict) -> str:
-    return "\n".join(
-        [
-            "# Pullwise audit reproduction container.",
-            "# Build from the unzipped audit bundle with: docker build -t pullwise-audit .",
-            "# This scaffold documents the audit environment and does not run captured commands.",
-            "FROM ubuntu:22.04",
-            "",
-            "ENV DEBIAN_FRONTEND=noninteractive",
-            "RUN apt-get update \\",
-            "    && apt-get install -y --no-install-recommends bash ca-certificates git \\",
-            "    && rm -rf /var/lib/apt/lists/*",
-            "",
-            "WORKDIR /audit",
-            "COPY . /audit",
-            "",
-            "# Add project-specific runtimes, databases, or service dependencies here if required.",
-            "CMD [\"sh\", \"-c\", \"printf '%s\\n' 'Pullwise audit bundles do not include executable reproduction scripts.'\"]",
-            "",
-        ]
-    )
-
-
-def audit_bundle_repro_script(bundle: dict) -> str:
-    scan = bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {}
-    repo = clean_repository_full_name(scan.get("repo"))
-    commit = clean_github_access_text(scan.get("commit")) or "pending"
-    repo_url = f"{github_auth.github_web_url().rstrip('/')}/{repo}.git" if repo else ""
-    commands = bundle.get("reproductionCommands") if isinstance(bundle.get("reproductionCommands"), list) else []
-    lines = [
-        "#!/usr/bin/env sh",
-        "set -eu",
-        "",
-        "# Pullwise reproduction helper. Inspect this file before running commands.",
-        "ISSUE_ID=${1:-}",
-        "if [ -n \"$ISSUE_ID\" ]; then",
-        "  SAFE_ISSUE=$(printf '%s' \"$ISSUE_ID\" | sed 's/[^A-Za-z0-9_.-]/_/g; s/^[._]*//; s/[._]*$//')",
-        "  ISSUE_SCRIPT=\"reproduction/commands/${SAFE_ISSUE}.txt\"",
-        "  if [ ! -f \"$ISSUE_SCRIPT\" ]; then",
-        "    echo \"No reproduction script found for issue: $ISSUE_ID\" >&2",
-        "    exit 2",
-        "  fi",
-        "  exec sh \"$ISSUE_SCRIPT\"",
-        "fi",
-        "",
-        f"REPO_URL={shell_single_quote(repo_url)}",
-        f"COMMIT={shell_single_quote(commit)}",
-        "WORKDIR=${PULLWISE_REPO_DIR:-}",
-        "",
-        "if [ -z \"$WORKDIR\" ]; then",
-        "  WORKDIR=\"${PWD}/pullwise-repro\"",
-        "  if [ ! -d \"$WORKDIR/.git\" ]; then",
-        "    git clone \"$REPO_URL\" \"$WORKDIR\"",
-        "  fi",
-        "fi",
-        "",
-        "cd \"$WORKDIR\"",
-        "git checkout \"$COMMIT\"",
-        "",
-        "cat <<'PULLWISE_REPRO_COMMANDS'",
-        "# Reproduction commands captured by Pullwise:",
-    ]
-    if commands:
-        for command in commands[:50]:
-            text = public_issue_text(command)
-            if text:
-                lines.append(text)
-    else:
-        lines.append("# No executable reproduction commands were captured.")
-    lines.extend(
-        [
-            "PULLWISE_REPRO_COMMANDS",
-            "",
-            "echo \"Commands printed only. Review manually before copying into a shell.\"",
-            "exit 0",
-            "",
-        ]
-    )
-    lines.append("")
-    return "\n".join(lines)
-
-
-def audit_bundle_issue_repro_artifacts(bundle: dict) -> list[dict]:
-    artifacts = []
-    scan = bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {}
-    issues = bundle.get("issues") if isinstance(bundle.get("issues"), list) else []
-    for issue in issues:
-        if not isinstance(issue, dict):
-            continue
-        issue_id = public_issue_text(issue.get("id")) or "issue"
-        commands = audit_bundle_issue_reproduction_commands(issue)
-        if not commands:
-            continue
-        safe_issue_id = audit_bundle_safe_artifact_name(issue_id)
-        artifacts.append(
-            audit_bundle_artifact(
-                f"reproduction/commands/{safe_issue_id}.txt",
-                "text/plain",
-                "\n".join(commands) + "\n",
-            )
-        )
-    return artifacts[:20]
-
-
-def audit_bundle_issue_reproduction_commands(issue: dict) -> list[str]:
-    reproduction = issue.get("reproduction") if isinstance(issue.get("reproduction"), dict) else {}
-    commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
-    return [public_issue_text(command) for command in commands[:20] if public_issue_text(command)]
 
 
 def audit_bundle_patch_artifacts(bundle: dict) -> list[dict]:
@@ -2043,61 +1922,6 @@ def audit_bundle_first_location_line(issue: dict) -> int:
             if line:
                 return line
     return 1
-
-
-def audit_bundle_issue_repro_script(scan: dict, issue: dict, commands: list[str]) -> str:
-    repo = clean_repository_full_name(scan.get("repo"))
-    commit = clean_github_access_text(scan.get("commit")) or "pending"
-    repo_url = f"{github_auth.github_web_url().rstrip('/')}/{repo}.git" if repo else ""
-    issue_id = public_issue_text(issue.get("id")) or "issue"
-    title = review._safe_text(issue.get("title"), "Untitled finding")
-    lines = [
-        "#!/usr/bin/env sh",
-        "set -eu",
-        "",
-        f"# Pullwise reproduction helper for {issue_id}: {title}",
-        f"REPO_URL={shell_single_quote(repo_url)}",
-        f"COMMIT={shell_single_quote(commit)}",
-        "WORKDIR=${PULLWISE_REPO_DIR:-}",
-        "",
-        "if [ -z \"$WORKDIR\" ]; then",
-        "  WORKDIR=\"${PWD}/pullwise-repro\"",
-        "  if [ ! -d \"$WORKDIR/.git\" ]; then",
-        "    git clone \"$REPO_URL\" \"$WORKDIR\"",
-        "  fi",
-        "fi",
-        "",
-        "cd \"$WORKDIR\"",
-        "git checkout \"$COMMIT\"",
-        "",
-        "cat <<'PULLWISE_REPRO_COMMANDS'",
-        f"# Reproduction commands captured by Pullwise for {issue_id}:",
-    ]
-    lines.extend(commands)
-    lines.extend(
-        [
-            "PULLWISE_REPRO_COMMANDS",
-            "",
-            "echo \"Commands printed only. Review manually before copying into a shell.\"",
-            "exit 0",
-            "",
-        ]
-    )
-    lines.append("")
-    return "\n".join(lines)
-
-
-def audit_bundle_repro_commands_text(bundle: dict) -> str:
-    commands = bundle.get("reproductionCommands") if isinstance(bundle.get("reproductionCommands"), list) else []
-    if not commands:
-        return "No reproduction commands were captured.\n"
-    lines = [
-        "# Untrusted reproduction commands captured by Pullwise.",
-        "# Review manually before copying any command into a shell.",
-        "",
-    ]
-    lines.extend(public_issue_text(command) for command in commands[:50] if public_issue_text(command))
-    return "\n".join(lines) + "\n"
 
 
 def audit_bundle_environment_json(bundle: dict) -> str:
@@ -2207,17 +2031,6 @@ def audit_bundle_issue_markdown(issue: dict) -> str:
     if audit_bundle_issue_patch_diff(issue):
         issue_id = audit_bundle_safe_artifact_name(public_issue_text(issue.get("id")) or "issue")
         lines.extend(["## Suggested Patch", "", f"See `../patches/{issue_id}.diff`.", ""])
-    reproduction = issue.get("reproduction") if isinstance(issue.get("reproduction"), dict) else {}
-    commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
-    if commands or reproduction:
-        lines.extend(["## Reproduction", ""])
-        if commands:
-            lines.extend(["```sh", *[public_issue_text(command) for command in commands if public_issue_text(command)], "```", ""])
-        for key, label in (("input", "Input"), ("expected", "Expected"), ("actual", "Actual"), ("testFile", "Test file"), ("logPath", "Log path")):
-            value = review._safe_text_lenient(reproduction.get(key))
-            if value:
-                lines.append(f"- {label}: {value}")
-        lines.append("")
     for key, title in (("whyNotFalsePositive", "Why this is not a false positive"), ("limitations", "When this may not apply")):
         items = review._safe_text_list(issue.get(key))
         if items:

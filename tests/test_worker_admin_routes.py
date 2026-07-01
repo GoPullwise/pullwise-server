@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -1629,7 +1629,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.GONE)
-        self.assertIn("Graph-Verified", handler.payload["message"])
+        self.assertIn("Codex full-repository review", handler.payload["message"])
 
         label_denied = RouteHarness(
             "/admin/review-calibration/labels",

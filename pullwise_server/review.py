@@ -92,7 +92,6 @@ def _finalize_finding(
         line = _safe_non_negative_int(finding.get("line"))
         affected_locations = [{"file": file_path, "startLine": line, "endLine": line}]
     evidence = _safe_evidence(finding.get("evidence"), repo_path)
-    reproduction = _safe_reproduction(finding.get("reproduction"), repo_path)
     bad_code = _safe_code_lines(finding.get("badCode"))
     good_code = _safe_code_lines(finding.get("goodCode"))
     auto_fix = _safe_auto_fix(
@@ -117,17 +116,14 @@ def _finalize_finding(
         "summary": _safe_text_lenient(finding.get("summary")),
         "impact": _safe_text_lenient(finding.get("impact")),
         "detectionReasoning": _safe_text_lenient(finding.get("detectionReasoning")),
-        "reproductionPath": _safe_text_lenient(finding.get("reproductionPath")),
         "verificationStatus": _safe_verification_status(
             finding.get("verificationStatus"),
             affected_locations=affected_locations,
             evidence=evidence,
-            reproduction=reproduction,
         ),
         "verificationSummary": _safe_text_lenient(finding.get("verificationSummary")),
         "affectedLocations": affected_locations,
         "evidence": evidence,
-        "reproduction": reproduction,
         "whyNotFalsePositive": _safe_text_list(finding.get("whyNotFalsePositive")),
         "limitations": _safe_text_list(finding.get("limitations")),
         "file": file_path,
@@ -377,63 +373,23 @@ def _safe_evidence(value: object, repo_path: str | None = None) -> list[dict]:
     return evidence[:20]
 
 
-def _safe_reproduction(value: object, repo_path: str | None = None) -> dict:
-    source = value if isinstance(value, dict) else {}
-    test_file = _safe_finding_file(source.get("testFile", source.get("test_file")), repo_path)
-    return {
-        "commands": _safe_text_list(source.get("commands")),
-        "input": _safe_text_lenient(source.get("input")),
-        "expected": _safe_text_lenient(source.get("expected")),
-        "actual": _safe_text_lenient(source.get("actual")),
-        "testFile": test_file,
-        "logPath": _safe_text(source.get("logPath", source.get("log_path"))),
-    }
-
-
 def _safe_verification_status(
     value: object,
     *,
     affected_locations: list[dict],
     evidence: list[dict],
-    reproduction: dict,
 ) -> str:
     status = _safe_text(value).lower()
     if status not in VALID_VERIFICATION_STATUSES:
         status = ""
     has_precise_location = any(location.get("file") and location.get("startLine") for location in affected_locations)
-    has_reproduction_command = bool(reproduction.get("commands"))
-    has_reproduction_output = has_reproduction_command and any(
-        [reproduction.get("actual"), reproduction.get("logPath"), reproduction.get("testFile")]
-    )
-    has_runtime_evidence = has_reproduction_output or any(
-        item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and any(
-            [
-                item.get("command"),
-                item.get("logPath"),
-                item.get("file"),
-                item.get("output"),
-                item.get("exitCode") is not None,
-            ]
-        )
-        for item in evidence
-    )
-    has_raw_runtime_output = has_reproduction_output or any(
-        item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and any([item.get("logPath"), item.get("output")])
-        for item in evidence
-    )
+    has_evidence = bool(evidence)
     has_static_evidence = bool(affected_locations) or any(
         item.get("type") in {"code", "path", "trigger", "documentation", "tool"}
         and any([item.get("file"), item.get("summary"), item.get("command")])
         for item in evidence
     )
-    verified_ready = (
-        has_precise_location
-        and has_reproduction_command
-        and has_runtime_evidence
-        and has_raw_runtime_output
-    )
+    verified_ready = has_precise_location and has_evidence
     if status == "verified" and not verified_ready:
         return "static_proof" if has_static_evidence else "potential_risk"
     if status == "static_proof" and not has_static_evidence:
@@ -445,7 +401,6 @@ def _safe_verification_status(
     if has_static_evidence:
         return "static_proof"
     return "potential_risk"
-
 
 def _safe_code_text(value: object) -> str | None:
     if not isinstance(value, str):

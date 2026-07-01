@@ -245,25 +245,6 @@ def public_issue_affected_locations(issue: dict, *, job: dict | None = None) -> 
     return locations[:10]
 
 
-def public_issue_reproduction(issue: dict, *, job: dict | None = None) -> dict:
-    source = issue.get("reproduction") if isinstance(issue.get("reproduction"), dict) else {}
-    test_file = public_issue_file(source.get("testFile") or source.get("test_file"), issue=issue, job=job)
-    steps = review._safe_text_list(source.get("steps") or source.get("verification_steps"))[:8]
-    payload = {
-        "commands": review._safe_text_list(source.get("commands")),
-        "input": review._safe_text_lenient(source.get("input")),
-        "expected": review._safe_text_lenient(source.get("expected")),
-        "actual": review._safe_text_lenient(source.get("actual")),
-        "testFile": test_file,
-        "logPath": public_issue_text(source.get("logPath") or source.get("log_path")),
-    }
-    if steps:
-        payload["steps"] = steps
-    if source.get("exitCode") is not None or source.get("exit_code") is not None:
-        exit_code = source.get("exitCode") if source.get("exitCode") is not None else source.get("exit_code")
-        payload["exitCode"] = review._safe_non_negative_int(exit_code)
-    return payload
-
 def public_optional_int(value: object) -> int | None:
     if value is None or value == "":
         return None
@@ -347,7 +328,6 @@ def public_issue_verification_status(
     *,
     affected_locations: list[dict] | None = None,
     evidence: list[dict] | None = None,
-    reproduction: dict | None = None,
 ) -> str:
     status = public_issue_text(issue.get("verificationStatus")).lower()
     if status not in ISSUE_VERIFICATION_STATUSES:
@@ -356,33 +336,13 @@ def public_issue_verification_status(
     affected_locations = affected_locations or public_issue_affected_locations(issue)
     has_precise_location = any(location.get("file") and location.get("startLine") for location in affected_locations)
     evidence = evidence or public_issue_evidence(issue, affected_locations=affected_locations)
-    reproduction = reproduction or public_issue_reproduction(issue)
-    has_reproduction_command = bool(reproduction.get("commands"))
-    has_reproduction_output = has_reproduction_command and any(
-        [reproduction.get("actual"), reproduction.get("logPath"), reproduction.get("testFile")]
-    )
-    has_runtime_evidence = has_reproduction_output or any(
-        item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and any([item.get("command"), item.get("logPath"), item.get("file"), item.get("exitCode") is not None])
-        for item in evidence
-    )
-    has_raw_runtime_output = has_reproduction_output or any(
-        item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and bool(item.get("logPath"))
-        for item in evidence
-    )
+    has_evidence = bool(evidence)
     has_static_evidence = bool(affected_locations) or any(
         item.get("type") in {"code", "path", "trigger", "documentation", "tool"}
         and any([item.get("file"), item.get("summary"), item.get("command")])
         for item in evidence
     )
-    verified_ready = (
-        has_fixed_commit
-        and has_precise_location
-        and has_reproduction_command
-        and has_runtime_evidence
-        and has_raw_runtime_output
-    )
+    verified_ready = has_fixed_commit and has_precise_location and has_evidence
     if status == "verified" and not verified_ready:
         return "static_proof" if has_static_evidence else "potential_risk"
     if status == "static_proof" and not has_static_evidence:
@@ -395,18 +355,21 @@ def public_issue_verification_status(
         return "static_proof"
     return "potential_risk"
 
-
 def public_issue_evidence_checklist(
     issue: dict,
     *,
     affected_locations: list[dict],
     evidence: list[dict],
-    reproduction: dict,
 ) -> list[dict]:
     commit = issue_commit(issue)
-    has_runtime = bool(reproduction.get("commands") and reproduction.get("actual")) or any(
+    has_runtime = any(
         item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and bool(item.get("logPath"))
+        and any([item.get("command"), item.get("logPath"), item.get("file"), item.get("exitCode") is not None])
+        for item in evidence
+    )
+    has_raw_runtime = any(
+        item.get("type") in {"runtime_log", "test", "fix_verification"}
+        and bool(item.get("logPath") or item.get("file"))
         for item in evidence
     )
     return [
@@ -416,15 +379,10 @@ def public_issue_evidence_checklist(
             "met": any(location.get("file") and location.get("startLine") for location in affected_locations),
         },
         {"label": "Evidence chain", "met": bool(evidence)},
-        {"label": "Reproduction command", "met": bool(reproduction.get("commands"))},
+        {"label": "Validation evidence", "met": bool(evidence)},
         {"label": "Runtime output", "met": has_runtime},
-        {
-            "label": "Raw log or test",
-            "met": bool(reproduction.get("logPath") or reproduction.get("testFile"))
-            or any(item.get("logPath") for item in evidence),
-        },
+        {"label": "Raw log or test", "met": has_raw_runtime},
     ]
-
 
 def public_issue_confidence_level(verification_status: str, checklist: list[dict]) -> str:
     met = {item.get("label"): bool(item.get("met")) for item in checklist}
@@ -465,7 +423,6 @@ def public_issue_evidence_trace(
     *,
     affected_locations: list[dict],
     evidence: list[dict],
-    reproduction: dict,
 ) -> list[dict]:
     code_items: list[str] = []
     path_items: list[str] = []
@@ -519,23 +476,6 @@ def public_issue_evidence_trace(
     for item in review._safe_text_list(issue.get("whyNotFalsePositive"))[:4]:
         append_public_reasoning_item(path_items, f"Reachability check: {item}")
 
-    reproduction_path = review._safe_text_lenient(issue.get("reproductionPath"))
-    append_public_reasoning_item(trigger_items, reproduction_path)
-    commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
-    if commands:
-        append_public_reasoning_item(trigger_items, f"Command: {public_issue_text(commands[0])}")
-    if reproduction.get("input"):
-        append_public_reasoning_item(trigger_items, f"Input: {review._safe_text_lenient(reproduction.get('input'))}")
-
-    if reproduction.get("actual"):
-        append_public_reasoning_item(runtime_items, f"Observed result: {review._safe_text_lenient(reproduction.get('actual'))}")
-    if reproduction.get("testFile"):
-        test_file = public_issue_file(reproduction.get("testFile"), issue=issue)
-        if test_file:
-            append_public_reasoning_item(runtime_items, f"Test file: {test_file}")
-    if reproduction.get("logPath"):
-        append_public_reasoning_item(runtime_items, f"Log path: {public_issue_text(reproduction.get('logPath'))}")
-
     impact = review._safe_text_lenient(issue.get("impact"))
     if impact:
         append_public_reasoning_item(impact_items, f"Impact: {impact}")
@@ -556,19 +496,17 @@ def public_issue_evidence_trace(
     return [
         public_issue_trace_stage("code", "Code", code_items, "No code location evidence was captured."),
         public_issue_trace_stage("path", "Path", path_items, "No reachability or data-flow evidence was captured."),
-        public_issue_trace_stage("trigger", "Trigger", trigger_items, "No trigger input or reproduction command was captured."),
+        public_issue_trace_stage("trigger", "Trigger", trigger_items, "No trigger evidence was captured."),
         public_issue_trace_stage("runtime", "Runtime", runtime_items, "No runtime output or test evidence was captured."),
         public_issue_trace_stage("impact", "Impact", impact_items, "No impact statement was captured."),
         public_issue_trace_stage("fix", "Fix", fix_items, "No fix or validation evidence was captured."),
     ]
-
 
 def public_issue_reasoning_breakdown(
     issue: dict,
     *,
     affected_locations: list[dict],
     evidence: list[dict],
-    reproduction: dict,
 ) -> dict:
     facts: list[str] = []
     inferences: list[str] = []
@@ -605,19 +543,6 @@ def public_issue_reasoning_breakdown(
         if log_path and item.get("type") in {"runtime_log", "test", "fix_verification"}:
             append_public_reasoning_item(facts, f"Worker log reference recorded at {log_path}.")
 
-    commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
-    if commands:
-        append_public_reasoning_item(facts, f"Reproduction command captured: {public_issue_text(commands[0])}.")
-    for key, label in (("input", "Reproduction input"), ("expected", "Expected result"), ("actual", "Observed result")):
-        value = review._safe_text_lenient(reproduction.get(key))
-        if value:
-            append_public_reasoning_item(facts, f"{label}: {value}")
-    test_file = public_issue_file(reproduction.get("testFile"), issue=issue)
-    if test_file:
-        append_public_reasoning_item(facts, f"Reproduction test file: {test_file}.")
-    if reproduction.get("logPath"):
-        append_public_reasoning_item(facts, f"Reproduction log path: {public_issue_text(reproduction.get('logPath'))}.")
-
     summary = review._safe_text_lenient(issue.get("summary")) or public_issue_text(issue.get("description"))
     append_public_reasoning_item(inferences, summary)
     append_public_reasoning_item(inferences, review._safe_text_lenient(issue.get("detectionReasoning")))
@@ -637,11 +562,6 @@ def public_issue_reasoning_breakdown(
             recommendations,
             "Inspect the suggested patch evidence and validate it before applying changes.",
         )
-    if commands:
-        append_public_reasoning_item(
-            recommendations,
-            "After a fix, rerun the captured reproduction command and compare the expected and observed results.",
-        )
     fix_benefits = review._safe_text_lenient(issue.get("fixBenefits"))
     if fix_benefits:
         append_public_reasoning_item(recommendations, f"Expected fix benefit: {fix_benefits}")
@@ -654,7 +574,6 @@ def public_issue_reasoning_breakdown(
         "inferences": inferences[:8],
         "recommendations": recommendations[:8],
     }
-
 
 def public_issue_audit_metadata(issue: dict, *, job: dict | None = None) -> dict:
     scan = issue_scan(issue)
@@ -679,18 +598,15 @@ def issue_payload(issue: dict) -> dict:
     auto_fixable = auto_fix
     affected_locations = public_issue_affected_locations(issue)
     evidence = public_issue_evidence(issue, affected_locations=affected_locations)
-    reproduction = public_issue_reproduction(issue)
     verification_status = public_issue_verification_status(
         issue,
         affected_locations=affected_locations,
         evidence=evidence,
-        reproduction=reproduction,
     )
     evidence_checklist = public_issue_evidence_checklist(
         issue,
         affected_locations=affected_locations,
         evidence=evidence,
-        reproduction=reproduction,
     )
     confidence_level = public_issue_confidence_level(verification_status, evidence_checklist)
     audit_metadata = public_issue_audit_metadata(issue)
@@ -709,12 +625,10 @@ def issue_payload(issue: dict) -> dict:
         "summary": review._safe_text_lenient(issue.get("summary")) or public_issue_text(issue.get("description")),
         "impact": review._safe_text_lenient(issue.get("impact")),
         "detectionReasoning": review._safe_text_lenient(issue.get("detectionReasoning")),
-        "reproductionPath": review._safe_text_lenient(issue.get("reproductionPath")),
         "verificationStatus": verification_status,
         "verificationSummary": review._safe_text_lenient(issue.get("verificationSummary")),
         "affectedLocations": affected_locations,
         "evidence": evidence,
-        "reproduction": reproduction,
         "whyNotFalsePositive": review._safe_text_list(issue.get("whyNotFalsePositive")),
         "limitations": review._safe_text_list(issue.get("limitations")),
         "evidenceChecklist": evidence_checklist,
@@ -723,13 +637,11 @@ def issue_payload(issue: dict) -> dict:
             issue,
             affected_locations=affected_locations,
             evidence=evidence,
-            reproduction=reproduction,
         ),
         "reasoningBreakdown": public_issue_reasoning_breakdown(
             issue,
             affected_locations=affected_locations,
             evidence=evidence,
-            reproduction=reproduction,
         ),
         "audit": audit_metadata,
         "file": public_issue_file(issue.get("file"), issue=issue),

@@ -38,7 +38,7 @@ class WorkerRetryPolicyTest(unittest.TestCase):
     def test_transient_worker_failure_remains_retryable(self) -> None:
         self.assertTrue(
             app.worker_result_allows_auto_retry(
-                {"error_code": "GRAPH_VERIFIED_COMPLETION_FAILED"},
+                {"error_code": "CODEX_REVIEW_COMPLETION_FAILED"},
                 status="failed",
             )
         )

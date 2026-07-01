@@ -971,7 +971,6 @@ def worker_protocol_finding_source(finding: dict) -> dict:
         "failureScenario": scenario,
         "evidence": evidence_items,
         "affectedLocations": locations or ([primary] if primary else []),
-        "reproduction": finding.get("reproduction") if isinstance(finding.get("reproduction"), dict) else {},
         "whyNotFalsePositive": review._safe_text_list(finding.get("whyNotFalsePositive") or finding.get("false_positive_checks")),
         "limitations": review._safe_text_list(finding.get("limitations")),
         "tags": ["review-worker"],
@@ -998,7 +997,6 @@ def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
     issue["file"] = public_issue_file(issue.get("file"), job=job)
     issue["affectedLocations"] = public_issue_affected_locations(issue, job=job)
     issue["evidence"] = public_issue_evidence(issue, job=job, affected_locations=issue["affectedLocations"])
-    issue["reproduction"] = public_issue_reproduction(issue, job=job)
     reported_verification_status = public_issue_text(issue.get("verificationStatus")).lower()
     if reported_verification_status in ISSUE_VERIFICATION_STATUSES:
         issue["reportedVerificationStatus"] = reported_verification_status
@@ -1006,13 +1004,11 @@ def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
         issue,
         affected_locations=issue["affectedLocations"],
         evidence=issue["evidence"],
-        reproduction=issue["reproduction"],
     )
     issue["evidenceChecklist"] = public_issue_evidence_checklist(
         issue,
         affected_locations=issue["affectedLocations"],
         evidence=issue["evidence"],
-        reproduction=issue["reproduction"],
     )
     issue["confidenceLevel"] = public_issue_confidence_level(
         issue["verificationStatus"],

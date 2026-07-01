@@ -2326,7 +2326,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if segments == ["admin", "subscription-plans", "agent-configs"]:
             return self.json(billing.review_agent_configs_admin_payload())
         if segments == ["admin", "review-calibration"]:
-            return self.error(HTTPStatus.GONE, "Review calibration has been retired; Graph-Verified is the only review path.")
+            return self.error(HTTPStatus.GONE, "Review calibration has been retired; Codex full-repository review is the only worker review path.")
         if segments == ["admin", "workers", "defaults"]:
             force_refresh = public_issue_text(params.get("refresh") or params.get("force")).lower() in {"1", "true", "yes", "on"}
             return self.json(worker_defaults_payload(force_refresh=force_refresh))
@@ -2409,7 +2409,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.json({"ok": True, "session": missing_log_stream_session_payload(segments[2])})
             return self.json({"ok": True, "session": log_stream_session_payload(session_record)})
         if segments == ["admin", "review-calibration", "labels"]:
-            return self.error(HTTPStatus.GONE, "Review calibration labels have been retired; use Graph-Verified review outcomes.")
+            return self.error(HTTPStatus.GONE, "Review calibration labels have been retired; use Codex review worker outcomes.")
         if segments == ["admin", "workers", "releases"]:
             return self.handle_admin_worker_release(session, body)
         if segments == ["admin", "workers"]:
