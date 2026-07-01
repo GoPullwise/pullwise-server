@@ -109,6 +109,88 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         return handler.payload, handler.payload["worker_token"]
 
+    def v1_heartbeat_payload(self, target_worker_id: str, **overrides: object) -> dict:
+        overrides.pop("worker_id", None)
+        payload = {
+            "protocol_version": "review-worker-protocol/v1",
+            "worker_id": target_worker_id,
+            "status": "idle",
+            "active_run_id": None,
+            "concurrency": {
+                "max_active_jobs": 1,
+                "active_jobs": 0,
+                "available_job_slots": 1,
+                "maintains_local_queue": False,
+                "local_queue_depth": 0,
+            },
+            "codex_app_server": {"status": "ready", "transport": "stdio", "active_thread_id": None},
+            "provider": "codex",
+            "version": "0.4.18",
+            "doctor_status": "ok",
+            "codex_ready": True,
+            "readyProviders": ["codex"],
+        }
+        payload.update(overrides)
+        payload["worker_id"] = target_worker_id
+        return payload
+
+    def post_v1_heartbeat(self, target_worker_id: str, token: str, **overrides: object) -> RouteHarness:
+        handler = RouteHarness(
+            f"/v1/workers/{target_worker_id}/heartbeat",
+            self.v1_heartbeat_payload(target_worker_id, **overrides),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(handler, "POST")
+        return handler
+
+    def post_v1_active_heartbeat(
+        self,
+        target_worker_id: str,
+        token: str,
+        run_id: str,
+        **overrides: object,
+    ) -> RouteHarness:
+        active_overrides = {
+            "status": "busy",
+            "active_run_id": run_id,
+            "concurrency": {
+                "max_active_jobs": 1,
+                "active_jobs": 1,
+                "available_job_slots": 0,
+                "maintains_local_queue": False,
+                "local_queue_depth": 0,
+            },
+            "codex_app_server": {"status": "ready", "transport": "stdio", "active_thread_id": "thr_1"},
+            "progress": {
+                "run_id": run_id,
+                "overall_percent": 50,
+                "current_phase": "repo_map",
+                "current_phase_status": "running",
+                "current_phase_percent": 50,
+                "message": "Reviewing.",
+                "counters": {
+                    "source_like_files_total": 1,
+                    "source_like_files_classified": 1,
+                    "bundles_total": 1,
+                    "bundles_packed": 1,
+                    "reviewer_runs_total": 1,
+                    "reviewer_runs_completed": 0,
+                    "intent_tests_total": 0,
+                    "intent_tests_written": 0,
+                    "intent_tests_run": 0,
+                    "validator_candidates_total": 0,
+                    "validator_candidates_completed": 0,
+                    "artifacts_total": 0,
+                    "artifacts_uploaded": 0,
+                },
+                "active_unit": {},
+                "last_event_sequence": 1,
+                "updated_at": "2026-07-01T10:42:00Z",
+            },
+        }
+        active_overrides.update(overrides)
+        return self.post_v1_heartbeat(target_worker_id, token, **active_overrides)
+
     def test_admin_workers_list_is_paginated_and_uses_aggregate_counts(self) -> None:
         first, _first_token = self.create_worker()
         second, _second_token = self.create_worker()
@@ -157,20 +239,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(status.payload["totalWorkerCount"], 0)
         self.assertEqual(status.payload["offlineWorkerCount"], 0)
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "codex",
-                "version": "0.4.18",
-                "running_jobs": 0,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "readyProviders": ["codex"],
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(heartbeat, "POST")
+        heartbeat = self.post_v1_heartbeat(worker_id, token)
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         visible = RouteHarness("/admin/workers", cookie=self.admin_cookie)
@@ -481,7 +550,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_worker_log_stream_is_polled_uploaded_and_paused(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        worker_auth = {"Authorization": f"Bearer {token}"}
         start = RouteHarness(
             "/admin/log-streams",
             {"source": "worker", "worker_id": worker_id},
@@ -546,8 +614,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(start.status, HTTPStatus.CREATED)
         session_id = start.payload["session"]["id"]
 
-        heartbeat = RouteHarness("/worker/heartbeat", {"worker_id": worker_id}, headers=worker_auth)
-        app.PullwiseHandler.route(heartbeat, "POST")
+        heartbeat = self.post_v1_heartbeat(worker_id, token)
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         self.assertEqual(heartbeat.payload["logSession"]["id"], session_id)
@@ -555,7 +622,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_worker_alert_email_is_sent_once_per_active_problem(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        headers = {"Authorization": "Bearer " + token}
         degraded = {
             "worker_id": worker_id,
             "doctor_status": "degraded",
@@ -571,10 +637,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         }
 
         with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
-            first = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(first, "POST")
-            second = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(second, "POST")
+            first = self.post_v1_heartbeat(worker_id, token, **degraded)
+            second = self.post_v1_heartbeat(worker_id, token, **degraded)
 
             self.assertEqual(first.status, HTTPStatus.OK)
             self.assertEqual(second.status, HTTPStatus.OK)
@@ -582,14 +646,12 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             state = db.load_state_item("alert_notifications")
             self.assertIn(f"worker:{worker_id}:degraded", state["active"])
 
-            recovered = RouteHarness("/worker/heartbeat", ready, headers=headers)
-            app.PullwiseHandler.route(recovered, "POST")
+            recovered = self.post_v1_heartbeat(worker_id, token, **ready)
             self.assertEqual(recovered.status, HTTPStatus.OK)
             state = db.load_state_item("alert_notifications")
             self.assertNotIn(f"worker:{worker_id}:degraded", state.get("active", {}))
 
-            repeated = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(repeated, "POST")
+            repeated = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(repeated.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 2)
 
@@ -597,7 +659,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_worker_codex_quota_alert_email_is_sent_once_and_cleared(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        headers = {"Authorization": "Bearer " + token}
         low_quota = {
             "provider": "codex",
             "limitId": "codex",
@@ -643,10 +704,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         }
 
         with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
-            first = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(first, "POST")
-            second = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(second, "POST")
+            first = self.post_v1_heartbeat(worker_id, token, **degraded)
+            second = self.post_v1_heartbeat(worker_id, token, **degraded)
 
             self.assertEqual(first.status, HTTPStatus.OK)
             self.assertEqual(second.status, HTTPStatus.OK)
@@ -659,20 +718,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertIn(f"worker:{worker_id}:codex-quota:low", state["active"])
             self.assertNotIn(f"worker:{worker_id}:degraded", state["active"])
 
-            recovered = RouteHarness("/worker/heartbeat", ready, headers=headers)
-            app.PullwiseHandler.route(recovered, "POST")
+            recovered = self.post_v1_heartbeat(worker_id, token, **ready)
             self.assertEqual(recovered.status, HTTPStatus.OK)
             state = db.load_state_item("alert_notifications")
             self.assertNotIn(f"worker:{worker_id}:codex-quota:low", state.get("active", {}))
 
-            repeated = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(repeated, "POST")
+            repeated = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(repeated.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 2)
     def test_worker_alert_email_failure_is_retried_instead_of_deduped(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        headers = {"Authorization": "Bearer " + token}
         degraded = {
             "worker_id": worker_id,
             "doctor_status": "degraded",
@@ -682,15 +738,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         }
 
         with patch.object(app.alerts, "send_alert_email", side_effect=[False, True]) as send_alert:
-            first = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(first, "POST")
+            first = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(first.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 1)
             state = db.load_state_item("alert_notifications") or {}
             self.assertNotIn(f"worker:{worker_id}:degraded", state.get("active", {}))
 
-            second = RouteHarness("/worker/heartbeat", degraded, headers=headers)
-            app.PullwiseHandler.route(second, "POST")
+            second = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(second.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 2)
             state = db.load_state_item("alert_notifications")
@@ -718,12 +772,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "codex_ready": True,
                 "readyProviders": ["codex"],
             }
-            heartbeat = RouteHarness(
-                "/worker/heartbeat",
-                ready,
-                headers={"Authorization": "Bearer " + token},
-            )
-            app.PullwiseHandler.route(heartbeat, "POST")
+            heartbeat = self.post_v1_heartbeat(worker_id, token, **ready)
             app.SCAN_SYSTEM_STATUS_CACHE.clear()
             recovered = RouteHarness("/status/system")
             app.PullwiseHandler.route(recovered, "GET")
@@ -2352,4 +2401,3 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

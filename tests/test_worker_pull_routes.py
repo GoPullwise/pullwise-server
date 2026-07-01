@@ -4596,7 +4596,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertEqual(app.SCANS[0]["status"], "failed")
-        self.assertEqual(app.SCANS[0]["phase"], "failure_handling")
+        self.assertEqual(app.SCANS[0]["phase"], "report")
         self.assertEqual(app.SCANS[0]["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
         self.assertEqual(app.scan_payload(app.SCANS[0])["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
         self.assertEqual(app.scan_list_payload(app.SCANS[0])["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
@@ -4672,43 +4672,28 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         with patch("pullwise_server.app.now", return_value=timestamp):
-            app.PullwiseHandler.route(claim, "POST")
+            claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
         lease_seconds = app.system_config.scan_job_lease_seconds()
         original_timeout_at = db.get_scan_job(job["job_id"])["timeout_at"]
         self.assertEqual(original_timeout_at, timestamp + lease_seconds)
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": "wk_1",
-                "version": "0.1.0",
-                "provider": "codex",
-                "max_concurrent_jobs": 2,
-                "running_jobs": 1,
-                "free_slots": 1,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "active_job_ids": [job["job_id"]],
-            },
-            headers=self.auth,
-        )
         heartbeat_at = timestamp + lease_seconds + 100
         with patch("pullwise_server.app.now", return_value=heartbeat_at):
-            app.PullwiseHandler.route(heartbeat, "POST")
+            heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         stored = db.get_scan_job(job["job_id"])
-        self.assertEqual(stored["status"], "claimed")
+        self.assertEqual(stored["status"], "running")
         self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
         self.assertGreater(stored["timeout_at"], original_timeout_at)
         self.assertEqual(stored["timeout_at"], heartbeat_at + lease_seconds)
         self.assertEqual(db.recover_expired_scan_jobs(heartbeat_at + 1), [])
-        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
+        self.assertEqual(db.get_scan_job(job["job_id"])["status"], "running")
 
-    def test_worker_heartbeat_reports_cancelled_active_job_ids(self) -> None:
+    def test_worker_v1_heartbeat_reports_cancelled_active_run(self) -> None:
         timestamp = app.now()
         scan = {
             "id": "sc_cancelled_active_heartbeat",
@@ -4725,27 +4710,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         with patch("pullwise_server.app.now", return_value=timestamp):
-            app.PullwiseHandler.route(claim, "POST")
+            claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
         db.cancel_scan_job_for_scan(scan["id"])
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": "wk_1",
-                "version": "0.1.0",
-                "provider": "codex",
-                "running_jobs": 1,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "active_job_ids": [job["job_id"]],
-            },
-            headers=self.auth,
-        )
         with patch("pullwise_server.app.now", return_value=timestamp + 1):
-            app.PullwiseHandler.route(heartbeat, "POST")
+            heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         self.assertEqual(heartbeat.payload["cancelled_job_ids"], [job["job_id"]])
@@ -4768,27 +4740,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [first_scan]
         first_job = app.create_scan_job_for_scan(first_scan)
-        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         with patch("pullwise_server.app.now", return_value=timestamp):
-            app.PullwiseHandler.route(first_claim, "POST")
+            first_claim = self.v1_lease()
         self.assertEqual(first_claim.status, HTTPStatus.OK)
+        first_job = first_claim.payload["job"]
         db.cancel_scan_job_for_scan(first_scan["id"])
 
-        stale_heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": "wk_1",
-                "version": "0.1.0",
-                "provider": "codex",
-                "running_jobs": 1,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "active_job_ids": [first_job["job_id"]],
-            },
-            headers=self.auth,
-        )
         with patch("pullwise_server.app.now", return_value=timestamp + 1):
-            app.PullwiseHandler.route(stale_heartbeat, "POST")
+            stale_heartbeat = self.v1_heartbeat(status="busy", run_id=first_job["run_id"])
         self.assertEqual(stale_heartbeat.status, HTTPStatus.OK)
         self.assertEqual(stale_heartbeat.payload["cancelled_job_ids"], [first_job["job_id"]])
         self.assertEqual(db.get_worker("wk_1")["running_jobs"], 0)
@@ -4808,9 +4767,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS.append(second_scan)
         second_job = app.create_scan_job_for_scan(second_scan)
-        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         with patch("pullwise_server.app.now", return_value=timestamp + 2):
-            app.PullwiseHandler.route(second_claim, "POST")
+            second_claim = self.v1_lease()
 
         self.assertEqual(second_claim.status, HTTPStatus.OK)
         self.assertEqual(second_claim.payload["job"]["job_id"], second_job["job_id"])
@@ -4836,10 +4794,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         with patch("pullwise_server.app.now", return_value=timestamp):
-            app.PullwiseHandler.route(claim, "POST")
+            claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
         connection = db.connect()
         try:
             with connection:
@@ -4851,23 +4809,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             connection.close()
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "claimed")
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": "wk_1",
-                "version": "0.1.0",
-                "provider": "codex",
-                "max_concurrent_jobs": 2,
-                "running_jobs": 0,
-                "free_slots": 2,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "active_job_ids": [],
-            },
-            headers=self.auth,
-        )
         with patch("pullwise_server.app.now", return_value=timestamp + 121):
-            app.PullwiseHandler.route(heartbeat, "POST")
+            heartbeat = self.v1_heartbeat(status="idle")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         stored = db.get_scan_job(job["job_id"])
@@ -4898,10 +4841,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         with patch("pullwise_server.app.now", return_value=timestamp):
-            app.PullwiseHandler.route(claim, "POST")
+            claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
         connection = db.connect()
         try:
             with connection:
@@ -4912,23 +4855,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         finally:
             connection.close()
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": "wk_1",
-                "version": "0.1.0",
-                "provider": "codex",
-                "max_concurrent_jobs": 2,
-                "running_jobs": 0,
-                "free_slots": 2,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "active_job_ids": [],
-            },
-            headers=self.auth,
-        )
         with patch("pullwise_server.app.now", return_value=timestamp + 119):
-            app.PullwiseHandler.route(heartbeat, "POST")
+            heartbeat = self.v1_heartbeat(status="idle")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         stored = db.get_scan_job(job["job_id"])
