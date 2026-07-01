@@ -164,6 +164,42 @@ def worker_v1_lease_validation_error(body: dict) -> str | None:
     return "; ".join(errors[:12]) if errors else None
 
 
+def worker_v1_progress_number(value: object, field_name: str, errors: list[str]) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        errors.append(f"progress.{field_name} must be numeric")
+
+
+def worker_v1_event_validation_error(body: dict, run_id: str, worker_id: str) -> str | None:
+    errors: list[str] = []
+    if public_issue_text(body.get("run_id")) != run_id:
+        errors.append("run_id path and payload must match")
+    if public_issue_text(body.get("worker_id")) != worker_id:
+        errors.append("worker_id must match the claimed worker")
+    try:
+        sequence = int(body.get("sequence"))
+    except (TypeError, ValueError):
+        sequence = 0
+    if sequence <= 0:
+        errors.append("sequence must be a positive integer")
+    if not public_issue_text(body.get("timestamp")):
+        errors.append("timestamp is required")
+    if not public_scan_phase(body.get("phase")):
+        errors.append("phase is required")
+    if not public_issue_text(body.get("severity")):
+        errors.append("severity is required")
+    progress = body.get("progress")
+    if not isinstance(progress, dict):
+        errors.append("progress must be an object")
+        progress = {}
+    worker_v1_progress_number(progress.get("overall_percent"), "overall_percent", errors)
+    worker_v1_progress_number(progress.get("current_phase_percent"), "current_phase_percent", errors)
+    if not public_issue_text(progress.get("status")):
+        errors.append("progress.status is required")
+    if "data" in body and not isinstance(body.get("data"), dict):
+        errors.append("data must be an object when present")
+    return "; ".join(errors[:12]) if errors else None
+
+
 def worker_progress_log_time(body: dict) -> int:
     return (
         pull_request_timestamp(body.get("log_time") or body.get("logTime") or body.get("time"))
@@ -3160,6 +3196,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "event_type is required.")
         if event_type not in REVIEW_RUN_EVENT_TYPES:
             return self.error(HTTPStatus.BAD_REQUEST, "Unsupported review run event_type.")
+        validation_error = worker_v1_event_validation_error(body, run_id, public_issue_text(job.get("claimed_by_worker_id")))
+        if validation_error:
+            return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 event: {validation_error}")
         phase = public_scan_phase(body.get("phase"))
         progress_payload = body.get("progress") if isinstance(body.get("progress"), dict) else {}
         progress_value = public_scan_progress(progress_payload.get("overall_percent"))

@@ -625,6 +625,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "timestamp": "2026-07-01T10:22:00Z",
                 "event_type": "phase_started",
                 "phase": "reviewer_fanout",
+                "severity": "info",
                 "message": "Reviewer fanout started.",
                 "progress": {"overall_percent": 42.0, "current_phase_percent": 0, "status": "running"},
                 "data": {"bundle_count": 3},
@@ -659,6 +660,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "timestamp": "2026-07-01T10:23:00Z",
                 "event_type": "progress_updated",
                 "phase": "reviewer_fanout",
+                "severity": "info",
                 "message": "Duplicate sequence.",
                 "progress": {"overall_percent": 43.0, "current_phase_percent": 10, "status": "running"},
             },
@@ -680,6 +682,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "timestamp": "2026-07-01T10:24:00Z",
                 "event_type": "legacy_graph_generated",
                 "phase": "reviewer_fanout",
+                "severity": "info",
                 "message": "Unsupported event type.",
                 "progress": {"overall_percent": 44.0, "current_phase_percent": 12, "status": "running"},
             },
@@ -689,6 +692,46 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(unsupported_event.status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(len(db.list_review_run_events(run_id)), 1)
+
+        def clone_event(payload: dict) -> dict:
+            return json.loads(json.dumps(payload))
+
+        valid_event = {
+            "protocol_version": "review-worker-protocol/v1",
+            "run_id": run_id,
+            "worker_id": "wk_1",
+            "sequence": 2,
+            "timestamp": "2026-07-01T10:25:00Z",
+            "event_type": "progress_updated",
+            "phase": "reviewer_fanout",
+            "severity": "info",
+            "message": "Invalid supported event shape.",
+            "progress": {"overall_percent": 45.0, "current_phase_percent": 15, "status": "running"},
+            "data": {},
+        }
+        missing_progress = clone_event(valid_event)
+        missing_progress.pop("progress")
+        missing_phase = clone_event(valid_event)
+        missing_phase.pop("phase")
+        worker_mismatch = clone_event(valid_event)
+        worker_mismatch["worker_id"] = "wk_other"
+        missing_severity = clone_event(valid_event)
+        missing_severity.pop("severity")
+        invalid_data = clone_event(valid_event)
+        invalid_data["data"] = []
+        for label, payload in [
+            ("missing_progress", missing_progress),
+            ("missing_phase", missing_phase),
+            ("worker_mismatch", worker_mismatch),
+            ("missing_severity", missing_severity),
+            ("invalid_data", invalid_data),
+        ]:
+            with self.subTest(label=label):
+                invalid_event = RouteHarness(f"/v1/review-runs/{run_id}/events", payload, headers=self.auth)
+                app.PullwiseHandler.route(invalid_event, "POST")
+                self.assertEqual(invalid_event.status, HTTPStatus.BAD_REQUEST)
+                self.assertIn("Invalid review-worker-protocol/v1 event", invalid_event.payload["message"])
+                self.assertEqual(len(db.list_review_run_events(run_id)), 1)
 
         content = b"{}"
         artifact = RouteHarness(

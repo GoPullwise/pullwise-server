@@ -154,8 +154,11 @@ and run events, artifact upload, and terminal result submit under
 `/v1/review-runs/{run_id}/...`. Register must be bearer-token authenticated,
 store the raw registration JSON, and validate stable fields synchronously:
 protocol version, worker identity binding, Linux/POSIX platform, one active job,
-no local queue, and no prefetch. Progress events must be durably inserted into
-the review run event store with a strictly monotonic per-run `sequence` before
+no local queue, and no prefetch. Progress events must validate the v1 envelope
+(`run_id`, claimed `worker_id`, positive `sequence`, `timestamp`, `event_type`,
+`phase`, `severity`, and `progress` with `overall_percent`,
+`current_phase_percent`, and `status`) before they are durably inserted into the
+review run event store with a strictly monotonic per-run `sequence` and before
 they update scan progress. Preserve unknown event payload fields in the stored
 raw JSON. V1 lease requests must validate `review-worker-protocol/v1`, idle
 capacity (`active_jobs = 0`, `available_job_slots = 1`), no local queue, and
