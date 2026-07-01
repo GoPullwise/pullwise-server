@@ -443,6 +443,35 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, expected_error):
                     app.validate_review_worker_protocol_envelope(job, body, status="done")
 
+    def test_review_worker_protocol_accepts_reviewer_output_artifact_kinds(self) -> None:
+        job = {
+            "job_id": "job_1",
+            "run_id": "run_1",
+            "lease_id": "lease_job_1",
+            "claimed_by_worker_id": "wk_1",
+        }
+        manifest = required_completed_manifest() + [
+            manifest_item(
+                artifact_id="art_raw_reviewer_output_security_json",
+                kind="raw_reviewer_output",
+                name="raw-reviewer-security.json",
+                media_type="application/json",
+                schema_id="reviewer-output",
+                required=False,
+            ),
+            manifest_item(
+                artifact_id="art_verified_reviewer_output_security_json",
+                kind="verified_reviewer_output",
+                name="verified-reviewer-security.json",
+                media_type="application/json",
+                schema_id="reviewer-output",
+                required=False,
+            ),
+        ]
+        body = {"reviewWorkerProtocol": v1_envelope(job, manifest, worker_id="wk_1")}
+
+        self.assertEqual(app.validate_review_worker_protocol_envelope(job, body, status="done"), body["reviewWorkerProtocol"])
+
     def test_review_worker_protocol_requires_progress_final(self) -> None:
         job = {
             "job_id": "job_1",
