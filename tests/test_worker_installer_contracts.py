@@ -171,7 +171,7 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn("already exists with home", script)
         self.assertIn('useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"', script)
 
-    def test_installer_bootstraps_ubuntu_2204_python310_and_nodesource(self) -> None:
+    def test_installer_bootstraps_python_without_unverified_nodesource_or_codex_installers(self) -> None:
         script = app.worker_install_script()
 
         self.assertIn("install_ubuntu_packages python3.10 python3.10-venv python3-pip", script)
@@ -180,9 +180,34 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('PYTHON_BIN="$(python3.10 -c', script)
         self.assertIn('PYTHON_BIN="\\${PULLWISE_PYTHON_BIN:-python3.10}"', script)
         self.assertIn('"$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"', script)
-        self.assertIn("https://deb.nodesource.com/node_22.x", script)
         self.assertIn('ensure_command_available "tar" tar tar', script)
-        self.assertIn("Node.js 20+ and npm are still unavailable after NodeSource install.", script)
+        self.assertIn("ensure_node_runtime", script)
+        self.assertIn("Install a trusted, pinned Node.js runtime", script)
+        self.assertIn("Install a trusted, pinned Codex CLI", script)
+        self.assertNotIn("https://deb.nodesource.com/node_22.x", script)
+        self.assertNotIn("ensure_nodesource_nodejs", script)
+        self.assertNotIn("chatgpt.com/codex/install.sh", script)
+        self.assertNotIn("curl -fsSL", script)
+        self.assertNotRegex(script, r"\|\s*(?:sh|bash)\b")
+
+    def test_worker_install_command_verifies_bootstrap_script_before_execution(self) -> None:
+        command = app.worker_install_command(
+            install_url="https://api.pull-wise.com/install-worker.sh",
+            server_url="https://api.pull-wise.com",
+            worker_id="wk_1",
+            worker_name="Worker One",
+            worker_package="https://github.com/GoPullwise/pullwise-worker/releases/download/v1.2.3/pullwise_worker-1.2.3-py3-none-any.whl",
+            provider_chain="codex",
+        )
+        expected_hash = hashlib.sha256(app.worker_install_script().encode("utf-8")).hexdigest()
+
+        self.assertIn(expected_hash, command)
+        self.assertIn('curl -fsSL', command)
+        self.assertIn('-o "$install_script"', command)
+        self.assertIn("sha256sum -c -", command)
+        self.assertIn('bash "$install_script"', command)
+        self.assertNotIn("curl -fsSL 'https://api.pull-wise.com/install-worker.sh' | bash", command)
+        self.assertNotIn("| bash -s --", command)
 
 
 if __name__ == "__main__":

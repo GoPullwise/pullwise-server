@@ -1040,10 +1040,15 @@ def worker_install_command(
     worker_package: str,
     provider_chain: str,
 ) -> str:
+    script_hash = worker_install_script_sha256()
     return (
         "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
         "export PULLWISE_WORKER_TOKEN; "
-        f"curl -fsSL {shell_quote(install_url)} | bash -s -- "
+        "install_script=\"$(mktemp)\"; "
+        "trap 'rm -f \"$install_script\"' EXIT; "
+        f"curl -fsSL {shell_quote(install_url)} -o \"$install_script\"; "
+        f"printf '%s  %s\\n' {shell_quote(script_hash)} \"$install_script\" | sha256sum -c - >/dev/null; "
+        "bash \"$install_script\" "
         f"--server {shell_quote(server_url)} "
         f"--worker-id {shell_quote(worker_id)} "
         f"--worker-name {shell_quote(worker_name)} "
@@ -1057,6 +1062,10 @@ def shell_quote(value: object) -> str:
     if not text:
         return "''"
     return "'" + text.replace("'", "'\"'\"'") + "'"
+
+
+def worker_install_script_sha256() -> str:
+    return hashlib.sha256(worker_install_script().encode("utf-8")).hexdigest()
 
 
 def worker_install_script() -> str:
@@ -1193,21 +1202,13 @@ node20_available() {
   command -v node >/dev/null 2>&1 || return 1
   node --version 2>/dev/null | sed -n 's/^v\([0-9][0-9]*\).*/\1/p' | awk '{ exit ($1 >= 20 ? 0 : 1) }'
 }
-ensure_nodesource_nodejs() {
+ensure_node_runtime() {
   if node20_available && command -v npm >/dev/null 2>&1; then
     return 0
   fi
-  install_ubuntu_packages ca-certificates curl gnupg
-  install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
-  chmod 0644 /etc/apt/keyrings/nodesource.gpg
-  printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main' >/etc/apt/sources.list.d/nodesource.list
-  DEBIAN_FRONTEND=noninteractive "$(apt_get_bin)" update
-  DEBIAN_FRONTEND=noninteractive "$(apt_get_bin)" install -y --no-install-recommends nodejs
-  node20_available && command -v npm >/dev/null 2>&1 || {
-    echo "Node.js 20+ and npm are still unavailable after NodeSource install." >&2
-    exit 1
-  }
+  echo "Node.js 20+ and npm are required for the Codex provider." >&2
+  echo "Install a trusted, pinned Node.js runtime before running this installer." >&2
+  exit 1
 }
 
 ensure_command_available "sha256sum" sha256sum coreutils
@@ -1417,7 +1418,6 @@ ensure_scoped_command_path() {
 }
 ensure_python_runtime
 ensure_command_available "git" git git
-ensure_command_available "curl" curl curl ca-certificates
 ensure_command_available "getent" getent libc-bin
 ensure_command_available "install" install coreutils
 ensure_command_available "runuser" runuser util-linux
@@ -1426,7 +1426,7 @@ ensure_command_available "tar" tar tar
 ensure_command_available "useradd" useradd passwd
 ensure_command_available "userdel" userdel passwd
 if provider_chain_has codex; then
-  ensure_nodesource_nodejs
+  ensure_node_runtime
 fi
 
 ROLLBACK_ENABLED=1
@@ -1451,11 +1451,9 @@ if provider_chain_has codex; then
   if [ -n "$CODEX_COMMAND" ]; then
     ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
   elif ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")"; then
-    run_as_service_user sh -lc 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
-    CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")" || {
-      echo "Codex installer completed, but codex is not executable for $SERVICE_USER." >&2
-      exit 1
-    }
+    echo "Codex CLI is required but was not found under $DATA_DIR/.local/bin/codex or $DATA_DIR/.codex/bin/codex." >&2
+    echo "Install a trusted, pinned Codex CLI into the worker home before running this installer, or set PULLWISE_CODEX_COMMAND to that scoped executable." >&2
+    exit 1
   fi
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi

@@ -1110,7 +1110,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         redirect_to = safe_redirect_to(params.get("redirectTo"), "dashboard")
         redirect_response = params.get("response") == "redirect"
         if not github_auth.oauth_configured():
-            if not local_github_mocks_enabled():
+            if not local_github_mocks_enabled(self):
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured. Set PULLWISE_GITHUB_CLIENT_ID and PULLWISE_GITHUB_CLIENT_SECRET.")
             callback = f"{api_base_url(self)}/auth/github/callback?{urlencode({'redirectTo': redirect_to})}"
             if redirect_response:
@@ -1131,7 +1131,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_github_callback(self, params: dict) -> None:
         if not github_auth.oauth_configured():
-            if not local_github_mocks_enabled():
+            if not local_github_mocks_enabled(self):
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub OAuth is not configured.")
             user = get_or_create_github_user()
             session = create_session(user)
@@ -1384,7 +1384,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         add_installation = str(params.get("add") or "").lower() in {"1", "true", "yes", "on"}
         redirect_to = safe_redirect_to(params.get("redirectTo"), "repos")
         if not github_auth.app_install_configured():
-            if not local_github_mocks_enabled():
+            if not local_github_mocks_enabled(self):
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub App installation is not configured. Set PULLWISE_GITHUB_APP_SLUG or PULLWISE_GITHUB_APP_INSTALL_URL.")
             callback = f"{api_base_url(self)}/integrations/github/callback?{urlencode({'scope': scope, 'redirectTo': redirect_to})}"
             return self.json({"url": callback, "mode": "local"})
@@ -1477,7 +1477,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_github_repository_callback(self, params: dict) -> None:
         if not github_auth.app_install_configured():
-            if not local_github_mocks_enabled():
+            if not local_github_mocks_enabled(self):
                 return self.error(HTTPStatus.NOT_IMPLEMENTED, "GitHub App installation is not configured.")
             session = self.current_or_demo_session()
             scope = params.get("scope") or "all"
@@ -3372,7 +3372,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raise ResourceNotFound(label)
 
     def read_json(self) -> dict:
-        return decode_json_body(self.read_raw_body(), self.headers.get("Content-Encoding", ""))
+        return decode_json_body(
+            self.read_raw_body(),
+            self.headers.get("Content-Encoding", ""),
+            max_decompressed_bytes=self.request_decompressed_body_limit(),
+        )
+
+    def request_decompressed_body_limit(self) -> int:
+        if self.current_session() or worker_token_record(self) or self.current_api_key_context():
+            return max_decompressed_body_bytes()
+        return max_unauthenticated_decompressed_body_bytes()
 
     def read_raw_body(self) -> bytes:
         length = self.request_content_length()

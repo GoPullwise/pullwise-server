@@ -386,6 +386,11 @@ def max_decompressed_body_bytes() -> int:
     return max(max_body_bytes(), env_int("PULLWISE_MAX_DECOMPRESSED_BODY_BYTES", 50 * 1024 * 1024))
 
 
+def max_unauthenticated_decompressed_body_bytes() -> int:
+    configured = env_int("PULLWISE_MAX_UNAUTHENTICATED_DECOMPRESSED_BODY_BYTES", max_body_bytes())
+    return min(max_decompressed_body_bytes(), max(0, configured))
+
+
 def decompress_gzip_body(raw_bytes: bytes, *, max_bytes: int) -> bytes:
     limit = max(0, int(max_bytes or 0))
     try:
@@ -398,12 +403,13 @@ def decompress_gzip_body(raw_bytes: bytes, *, max_bytes: int) -> bytes:
     return decompressed
 
 
-def decode_json_body(raw_bytes: bytes, content_encoding: str = "") -> dict:
+def decode_json_body(raw_bytes: bytes, content_encoding: str = "", *, max_decompressed_bytes: int | None = None) -> dict:
     if not raw_bytes:
         return {}
     encoding = str(content_encoding or "").strip().lower()
     if encoding == "gzip":
-        raw_bytes = decompress_gzip_body(raw_bytes, max_bytes=max_decompressed_body_bytes())
+        limit = max_decompressed_body_bytes() if max_decompressed_bytes is None else max_decompressed_bytes
+        raw_bytes = decompress_gzip_body(raw_bytes, max_bytes=limit)
     elif encoding and encoding not in {"identity"}:
         raise ValueError("Unsupported Content-Encoding.")
     try:
@@ -530,8 +536,45 @@ def request_id_from_handler(handler: BaseHTTPRequestHandler) -> str:
     return public_issue_text(first_header_value(handler, "X-Request-Id") or first_header_value(handler, "X-Correlation-Id"))
 
 
-def local_github_mocks_enabled() -> bool:
-    return env_flag("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS")
+def local_mock_loopback_host(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = urlparse(value if "://" in value else f"http://{value}")
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").strip("[]").lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def local_mock_origin_list_is_loopback(raw: str) -> bool:
+    for item in raw.split(","):
+        origin = item.strip()
+        if not origin:
+            continue
+        if origin == "*" or not local_mock_loopback_host(origin):
+            return False
+    return True
+
+
+def local_github_mocks_enabled(handler: BaseHTTPRequestHandler | None = None) -> bool:
+    if not env_flag("PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS"):
+        return False
+    mode = env("PULLWISE_MODE", "local").strip().lower()
+    if mode not in {"", "local", "dev", "development", "test"}:
+        return False
+    if not local_mock_loopback_host(env("PULLWISE_APP_URL", "http://localhost:5173")):
+        return False
+    for name in ("PULLWISE_API_BASE_URL", "PULLWISE_ADMIN_APP_URL"):
+        configured = os.environ.get(name, "").strip()
+        if configured and not local_mock_loopback_host(configured):
+            return False
+    configured_origins = os.environ.get("PULLWISE_ALLOWED_ORIGINS", "").strip()
+    if configured_origins and not local_mock_origin_list_is_loopback(configured_origins):
+        return False
+    if handler is not None and not local_mock_loopback_host(request_header(handler, "Host") or ""):
+        return False
+    return True
 
 
 def persisted_state_dict(state: object, name: str) -> dict:

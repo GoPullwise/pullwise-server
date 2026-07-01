@@ -413,15 +413,16 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(record["redirectTo"], "https://admin.pull-wise.com/workers")
     def test_local_github_login_authorize_redirect_mode_returns_callback_redirect(self) -> None:
         handler = RouteHarness(
-            "/auth/github/authorize?response=redirect&redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers"
+            "/auth/github/authorize?response=redirect&redirectTo=http%3A%2F%2Flocalhost%3A5173%2Fworkers",
+            headers={"Host": "localhost:8080"},
         )
 
         with patch.dict(
             os.environ,
             {
-                "PULLWISE_APP_URL": "https://admin.pull-wise.com",
-                "PULLWISE_ALLOWED_ORIGINS": "https://admin.pull-wise.com",
-                "PULLWISE_API_BASE_URL": "https://api.pull-wise.com",
+                "PULLWISE_APP_URL": "http://localhost:5173",
+                "PULLWISE_ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173",
+                "PULLWISE_API_BASE_URL": "http://localhost:8080",
                 "PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS": "true",
             },
             clear=True,
@@ -431,8 +432,29 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(handler.status, HTTPStatus.FOUND)
         self.assertEqual(
             handler.location,
-            "https://api.pull-wise.com/auth/github/callback?redirectTo=https%3A%2F%2Fadmin.pull-wise.com%2Fworkers",
+            "http://localhost:8080/auth/github/callback?redirectTo=http%3A%2F%2Flocalhost%3A5173%2Fworkers",
         )
+
+    def test_local_github_mock_callback_rejects_public_host_even_when_flag_is_set(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/callback?redirectTo=https%3A%2F%2Fapp.pullwise.dev%2Fdashboard",
+            headers={"Host": "api.pull-wise.com"},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_APP_URL": "https://app.pullwise.dev",
+                "PULLWISE_ALLOWED_ORIGINS": "https://app.pullwise.dev",
+                "PULLWISE_API_BASE_URL": "https://api.pull-wise.com",
+                "PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS": "true",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.NOT_IMPLEMENTED)
+        self.assertEqual(app.SESSIONS, {})
     def test_github_login_authorize_prefers_configured_callback_url_over_proxy_headers(self) -> None:
         handler = RouteHarness(
             "/auth/github/authorize?redirectTo=https%3A%2F%2Fpullwise-admin.danuberiverferryman.workers.dev%2Flogin",
