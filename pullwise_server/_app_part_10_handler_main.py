@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import time
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -10,6 +11,34 @@ from ._app_imports import import_compat_globals as _import_compat_globals
 
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
+
+WORKER_PROTOCOL_VERSION = "review-worker-protocol/v1"
+REVIEW_RUN_EVENT_TYPES = {
+    "run_started",
+    "phase_started",
+    "progress_updated",
+    "phase_completed",
+    "phase_failed",
+    "phase_retrying",
+    "phase_degraded",
+    "codex_app_server_started",
+    "codex_app_server_failed",
+    "codex_thread_started",
+    "codex_turn_started",
+    "codex_turn_completed",
+    "codex_turn_failed",
+    "approval_declined",
+    "artifact_created",
+    "artifact_uploaded",
+    "qa_passed",
+    "qa_failed",
+    "run_cancel_requested",
+    "run_cancelled",
+    "run_completed",
+    "run_failed",
+    "run_partial_completed",
+}
+
 
 def worker_progress_log_time(body: dict) -> int:
     return (
@@ -45,6 +74,33 @@ def scan_progress_log_key(entry: dict) -> tuple:
         public_issue_text(entry.get("message")),
         public_issue_text(entry.get("logsSummary") or entry.get("logs_summary")),
     )
+
+
+def protocol_iso_time(timestamp: int | float | None = None) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(timestamp if timestamp is not None else time.time())))
+
+
+def scan_job_run_id(job: dict) -> str:
+    job_id = public_issue_text(job.get("job_id"))
+    return public_issue_text(job.get("run_id")) or (f"run_{job_id}" if job_id else "")
+
+
+def scan_job_lease_id(job: dict) -> str:
+    job_id = public_issue_text(job.get("job_id"))
+    return public_issue_text(job.get("lease_id")) or (f"lease_{job_id}" if job_id else "")
+
+
+def scan_job_for_run_id(run_id: object) -> dict | None:
+    normalized = clean_github_access_text(run_id) or ""
+    if not normalized.startswith("run_"):
+        return None
+    job_id = normalized[len("run_") :]
+    if not job_id:
+        return None
+    job = db.get_scan_job(job_id)
+    if not job or scan_job_run_id(job) != normalized:
+        return None
+    return job
 
 
 def append_scan_progress_log(scan: dict, entry: dict) -> list[dict]:
@@ -122,6 +178,40 @@ def worker_artifact_upload_payload(body: dict) -> dict:
     return payload
 
 
+def review_artifact_binary_payload(row: dict) -> tuple[bytes, str, dict[str, str]] | None:
+    try:
+        payload = json.loads(row.get("payload_json") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    artifact = payload.get("artifact") if isinstance(payload.get("artifact"), dict) else {}
+    content_b64_value = payload.get("content_base64") if payload.get("content_base64") is not None else payload.get("contentBase64")
+    content_b64 = public_issue_text(content_b64_value)
+    if not content_b64:
+        return None
+    try:
+        content = base64.b64decode(content_b64.encode("ascii"), validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    media_type = public_issue_text(row.get("media_type")) or public_issue_text(artifact.get("media_type") or artifact.get("mediaType"))
+    if not media_type:
+        media_type = "application/octet-stream"
+    artifact_id = public_issue_text(row.get("artifact_id") or artifact.get("artifact_id") or artifact.get("artifactId"))
+    name = public_issue_text(row.get("name") or artifact.get("name")) or artifact_id or "artifact"
+    filename = audit_bundle_safe_artifact_name(name) or "artifact"
+    headers = {
+        "Cache-Control": "private, max-age=3600",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+    if artifact_id:
+        headers["X-Pullwise-Artifact-Id"] = artifact_id
+    sha256 = public_issue_text(row.get("sha256") or payload.get("sha256") or artifact.get("sha256")).lower()
+    if sha256:
+        headers["ETag"] = f'"{sha256}"'
+    return content, media_type, headers
+
+
 class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
@@ -134,14 +224,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return False
         segments = segments if segments is not None else [unquote(part) for part in path.split("/") if part]
         applies_to_public_rest_api = external_api_segments(segments) is not None
-        applies_to_unauthenticated_worker_probe = path.startswith("/worker/") and not worker_token_record(self)
+        applies_to_unauthenticated_worker_probe = (
+            (path.startswith("/worker/") or path.startswith("/v1/workers/") or path.startswith("/v1/review-runs/"))
+            and not worker_token_record(self)
+        )
         if not applies_to_public_rest_api and not applies_to_unauthenticated_worker_probe:
             self._rate_limit_headers = {}
             return False
         if self.admin_rate_limit_exempt(method, path):
             self._rate_limit_headers = {}
             return False
-        if path.startswith("/worker/") and worker_token_record(self):
+        if (path.startswith("/worker/") or path.startswith("/v1/workers/") or path.startswith("/v1/review-runs/")) and worker_token_record(self):
             self._rate_limit_headers = {}
             return False
         limit = rate_limit_requests()
@@ -302,6 +395,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(system_config.public_docs_payload())
         if path in {"/api-docs", "/api/docs"}:
             return self.json(api_docs_payload())
+        if len(segments) == 5 and segments[0] == "v1" and segments[1] == "review-runs" and segments[3] == "artifacts":
+            return self.handle_review_run_artifact_get(segments[2], segments[4])
         api_segments = external_api_segments(segments)
         if api_segments is not None:
             return self.handle_external_api_get(api_segments, params)
@@ -444,6 +539,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/webhooks/creem":
             return self.handle_creem_webhook()
         body = self.read_json()
+        if segments and segments[0] == "v1" and len(segments) >= 2 and segments[1] in {"workers", "review-runs"}:
+            return self.handle_worker_v1_post(segments, body)
         api_segments = external_api_segments(segments)
         if api_segments is not None:
             return self.handle_external_api_post(api_segments, body)
@@ -2764,6 +2861,326 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_worker_log_stream_lines(segments[2], body, worker_record)
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
+    def handle_worker_v1_post(self, segments: list[str], body: dict) -> None:
+        worker_record = self.require_worker()
+        if not worker_record:
+            return
+        if not isinstance(body, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if len(segments) == 3 and segments[:2] == ["v1", "workers"] and segments[2] == "register":
+            return self.handle_worker_v1_register(body, worker_record)
+        if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "heartbeat":
+            worker_id = clean_github_access_text(segments[2]) or ""
+            return self.handle_worker_heartbeat({**body, "worker_id": worker_id}, worker_record)
+        if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "agent-configs":
+            worker_id = clean_github_access_text(segments[2]) or ""
+            return self.handle_worker_agent_configs({**body, "worker_id": worker_id}, worker_record)
+        if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "lease":
+            worker_id = clean_github_access_text(segments[2]) or ""
+            return self.handle_worker_v1_lease(worker_id, {**body, "worker_id": worker_id}, worker_record)
+        if len(segments) == 4 and segments[:2] == ["v1", "review-runs"] and segments[3] == "events":
+            return self.handle_worker_run_event(segments[2], body, worker_record)
+        if len(segments) == 4 and segments[:2] == ["v1", "review-runs"] and segments[3] == "artifacts":
+            return self.handle_worker_run_artifact_upload(segments[2], body, worker_record)
+        if len(segments) == 4 and segments[:2] == ["v1", "review-runs"] and segments[3] == "result":
+            return self.handle_worker_run_result(segments[2], body, worker_record)
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
+    def handle_worker_v1_lease(self, worker_id: str, body: dict, worker_record: dict) -> None:
+        if not worker_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        allowed, worker_status = worker_can_claim(worker_record)
+        if not allowed:
+            return self.error(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                f"Worker is not ready to claim jobs: {worker_status}.",
+            )
+        ready_providers = worker_record_ready_providers(worker_record)
+        if not ready_providers:
+            return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
+        try:
+            recovered_jobs = db.recover_expired_scan_jobs(
+                now(),
+                worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
+            )
+            if recovered_jobs:
+                with STATE_LOCK:
+                    apply_recovered_scan_jobs_locked(recovered_jobs)
+            job = db.claim_next_scan_job(
+                worker_id,
+                lease_seconds=system_config.scan_job_lease_seconds(),
+                worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
+                ready_providers=ready_providers,
+                recover_before_claim=False,
+            )
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if not job:
+            return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
+        try:
+            payload = scan_job_payload(job, include_clone_token=True)
+        except github_auth.GitHubError as exc:
+            db.requeue_interrupted_scan_job(
+                str(job.get("scan_id") or ""),
+                reason="clone_token_unavailable",
+                timestamp=now(),
+            )
+            return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+        with STATE_LOCK:
+            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+            if scan and scan.get("status") == "queued":
+                scan.update(
+                    {
+                        "status": "running",
+                        "claimedAt": job.get("claimed_at"),
+                        "claimedByWorkerId": worker_id,
+                        "progress": 0,
+                        "phase": "prepare_workspace",
+                        "jobId": job.get("job_id"),
+                        "runId": payload.get("run_id"),
+                        "retry": scan_retry_summary_for_job(job),
+                    }
+                )
+                db.upsert_scan(scan)
+                mark_state_dirty()
+            scan_logging.log_event(
+                "worker_job_claimed",
+                scanId=job.get("scan_id"),
+                repo=job.get("repo"),
+                repoId=job.get("repo_id"),
+                githubRepoId=job.get("github_repo_id"),
+                branch=job.get("branch"),
+                commit=job.get("commit"),
+                workerId=worker_id,
+                jobId=job.get("job_id"),
+                attempt=job.get("attempt"),
+                protocol="review-worker-protocol/v1",
+            )
+        lease = {
+            "job_id": payload["job_id"],
+            "run_id": payload["run_id"],
+            "lease_id": payload["lease_id"],
+            "lease_expires_at": protocol_iso_time(pull_request_timestamp(job.get("timeout_at"))) if pull_request_timestamp(job.get("timeout_at")) else None,
+        }
+        db.upsert_review_run_claimed(job, protocol_version=WORKER_PROTOCOL_VERSION)
+        return self.json({"lease": lease, "job": payload})
+
+    def handle_worker_v1_register(self, body: dict, worker_record: dict) -> None:
+        if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
+            return self.error(HTTPStatus.BAD_REQUEST, "Unsupported worker protocol version.")
+        worker = body.get("worker") if isinstance(body.get("worker"), dict) else {}
+        if not worker:
+            return self.error(HTTPStatus.BAD_REQUEST, "worker is required.")
+        worker_id = clean_github_access_text(worker.get("worker_id")) or ""
+        if not worker_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "worker.worker_id is required.")
+        if not self.authenticated_worker_id_matches(worker_record, worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        concurrency = worker.get("concurrency") if isinstance(worker.get("concurrency"), dict) else {}
+        capabilities = worker.get("capabilities") if isinstance(worker.get("capabilities"), dict) else {}
+        max_active_jobs_value = concurrency.get("max_active_jobs")
+        if max_active_jobs_value is None:
+            max_active_jobs_value = capabilities.get("max_active_jobs")
+        if max_active_jobs_value is None:
+            max_active_jobs_value = 1
+        max_active_jobs = public_scan_count(max_active_jobs_value)
+        if max_active_jobs != 1:
+            return self.error(HTTPStatus.BAD_REQUEST, "Worker protocol allows exactly one active job.")
+        if concurrency.get("maintains_local_queue") is True or concurrency.get("prefetch_jobs") is True:
+            return self.error(HTTPStatus.BAD_REQUEST, "Worker protocol does not allow local queues or prefetch.")
+        platform = worker.get("platform") if isinstance(worker.get("platform"), dict) else {}
+        platform_os = public_issue_text(platform.get("os")).lower()
+        if platform_os and platform_os not in {"linux", "posix"}:
+            return self.error(HTTPStatus.BAD_REQUEST, "Worker runtime platform must be Linux/POSIX.")
+        try:
+            registered = db.register_worker_protocol({**body, "timestamp": now()})
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        return self.json(
+            {
+                "accepted": True,
+                "worker": {
+                    "worker_id": public_issue_text(registered.get("worker_id")),
+                    "protocol_version": public_issue_text(registered.get("protocol_version")),
+                    "worker_version": public_issue_text(registered.get("version")),
+                },
+                "heartbeat_interval_seconds": 15,
+                "max_job_lease_seconds": system_config.scan_job_lease_seconds(),
+                "accepted_protocol_versions": [WORKER_PROTOCOL_VERSION],
+                "token_delivery": "preissued",
+            }
+        )
+
+    def handle_worker_run_event(self, run_id: str, body: dict, worker_record: dict) -> None:
+        run_id = clean_github_access_text(run_id) or ""
+        if not run_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "run_id is required.")
+        if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
+            return self.error(HTTPStatus.BAD_REQUEST, "Unsupported worker protocol version.")
+        if public_issue_text(body.get("run_id")) not in {"", run_id}:
+            return self.error(HTTPStatus.BAD_REQUEST, "run_id path and payload do not match.")
+        job = scan_job_for_run_id(run_id)
+        if not job:
+            return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
+        if not self.authenticated_worker_id_matches(worker_record, public_issue_text(job.get("claimed_by_worker_id"))):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
+        if public_issue_text(job.get("status")) not in {"claimed", "running", "uploading_result"}:
+            return self.error(HTTPStatus.CONFLICT, "Run is no longer accepting progress events.")
+        event_type = public_issue_text(body.get("event_type"))
+        if not event_type:
+            return self.error(HTTPStatus.BAD_REQUEST, "event_type is required.")
+        if event_type not in REVIEW_RUN_EVENT_TYPES:
+            return self.error(HTTPStatus.BAD_REQUEST, "Unsupported review run event_type.")
+        phase = public_scan_phase(body.get("phase"))
+        progress_payload = body.get("progress") if isinstance(body.get("progress"), dict) else {}
+        progress_value = public_scan_progress(progress_payload.get("overall_percent"))
+        progress_message = public_issue_text(body.get("message"))
+        progress_log_time = worker_progress_log_time({"time": body.get("timestamp")})
+        logs_summary = public_issue_text(event_type)
+        try:
+            stored_event = db.store_review_run_event(
+                {
+                    "run_id": run_id,
+                    "job_id": public_issue_text(job.get("job_id")),
+                    "worker_id": public_issue_text(worker_record.get("worker_id")),
+                    "sequence": body.get("sequence"),
+                    "event_type": event_type,
+                    "phase": phase,
+                    "severity": public_issue_text(body.get("severity")),
+                    "status": public_issue_text(progress_payload.get("status")),
+                    "progress": progress_value,
+                    "timestamp": public_issue_text(body.get("timestamp")),
+                    "payload": body,
+                    "created_at": now(),
+                }
+            )
+            db.update_review_run_progress(
+                {
+                    "run_id": run_id,
+                    "job_id": public_issue_text(job.get("job_id")),
+                    "worker_id": public_issue_text(worker_record.get("worker_id")),
+                    "sequence": body.get("sequence"),
+                    "event_type": event_type,
+                    "phase": phase,
+                    "severity": public_issue_text(body.get("severity")),
+                    "status": public_issue_text(progress_payload.get("status")),
+                    "progress": progress_value,
+                    "timestamp": public_issue_text(body.get("timestamp")),
+                    "created_at": now(),
+                }
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if "monotonic" in message or "already exists" in message:
+                return self.error(HTTPStatus.CONFLICT, message)
+            return self.error(HTTPStatus.BAD_REQUEST, message)
+        job = db.update_scan_job_progress(
+            public_issue_text(job.get("job_id")),
+            {
+                "phase": phase,
+                "progress": progress_value,
+                "message": progress_message,
+                "started_at": pull_request_timestamp(body.get("timestamp")) or progress_log_time,
+                "timeout_at": now() + system_config.scan_job_lease_seconds(),
+                "logs_summary": logs_summary,
+            },
+        )
+        if not job:
+            return self.error(HTTPStatus.CONFLICT, "Run is no longer accepting progress events.")
+        if event_type in {"phase_started", "progress_updated", "phase_completed"} and worker_progress_phase_should_finalize_quota(phase):
+            finalize_scan_quota_for_job(job, trigger=f"phase_{phase}")
+        progress_entry = scan_progress_log_entry(
+            phase=phase,
+            progress=progress_value,
+            message=progress_message,
+            logs_summary=logs_summary,
+            log_time=progress_log_time,
+        )
+        with STATE_LOCK:
+            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+            if scan and scan.get("status") == "running":
+                update = {
+                    "phase": phase,
+                    "progress": progress_value,
+                    "progressMessage": progress_message,
+                    "logsSummary": logs_summary,
+                    "updatedAt": progress_log_time,
+                    "runId": run_id,
+                }
+                progress_logs = append_scan_progress_log(scan, progress_entry)
+                if progress_logs:
+                    update["progressLogs"] = progress_logs
+                scan.update(update)
+                db.upsert_scan(scan)
+                mark_state_dirty()
+        scan_logging.log_event(
+            "review_run_event",
+            scanId=job.get("scan_id"),
+            repo=job.get("repo"),
+            workerId=worker_record.get("worker_id"),
+            jobId=job.get("job_id"),
+            runId=run_id,
+            eventType=event_type,
+            phase=phase,
+            progress=progress_value,
+        )
+        return self.json(
+            {
+                "ack": True,
+                "run_id": run_id,
+                "sequence": public_scan_count(stored_event.get("sequence")),
+                "server_time": protocol_iso_time(now()),
+            }
+        )
+
+    def handle_review_run_artifact_get(self, run_id: str, artifact_id: str) -> None:
+        session = self.current_session()
+        if not session:
+            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing review artifacts.")
+        normalized_run_id = clean_github_access_text(run_id) or ""
+        normalized_artifact_id = public_issue_text(artifact_id)
+        if not normalized_run_id or not normalized_artifact_id:
+            return self.error(HTTPStatus.NOT_FOUND, "Review artifact not found.")
+        job = scan_job_for_run_id(normalized_run_id)
+        if not job:
+            return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
+        scan_id = public_issue_text(job.get("scan_id"))
+        if not scan_id or not user_scan_for_read(session, scan_id):
+            return self.error(HTTPStatus.NOT_FOUND, "Review artifact not found.")
+        artifact = db.get_review_run_artifact(normalized_run_id, normalized_artifact_id)
+        if not artifact:
+            return self.error(HTTPStatus.NOT_FOUND, "Review artifact not found.")
+        binary_payload = review_artifact_binary_payload(artifact)
+        if binary_payload is None:
+            return self.error(HTTPStatus.CONFLICT, "Stored review artifact content is unavailable.")
+        content, media_type, headers = binary_payload
+        return self.binary(content, content_type=media_type, headers=headers)
+
+    def handle_worker_run_artifact_upload(self, run_id: str, body: dict, worker_record: dict) -> None:
+        if public_issue_text(body.get("run_id") or body.get("runId")) not in {"", clean_github_access_text(run_id) or ""}:
+            return self.error(HTTPStatus.BAD_REQUEST, "run_id path and payload do not match.")
+        job = scan_job_for_run_id(run_id)
+        if not job:
+            return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
+        artifact = body.get("artifact") if isinstance(body.get("artifact"), dict) else {}
+        artifact_id = public_issue_text(artifact.get("artifact_id") or body.get("artifact_id") or body.get("artifactId"))
+        if not artifact_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "artifact_id is required.")
+        return self.handle_worker_job_artifact_upload(
+            public_issue_text(job.get("job_id")),
+            artifact_id,
+            {**body, "run_id": run_id},
+            worker_record,
+        )
+
+    def handle_worker_run_result(self, run_id: str, body: dict, worker_record: dict) -> None:
+        job = scan_job_for_run_id(run_id)
+        if not job:
+            return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
+        return self.handle_worker_job_result(public_issue_text(job.get("job_id")), body, worker_record)
+
     def authenticated_worker_id_matches(self, worker_record: dict, worker_id: str) -> bool:
         authenticated_worker_id = public_issue_text(worker_record.get("worker_id"))
         return bool(authenticated_worker_id and worker_id and authenticated_worker_id == worker_id)
@@ -2816,6 +3233,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        protocol_version = public_issue_text(body.get("protocol_version"))
+        concurrency = body.get("concurrency") if isinstance(body.get("concurrency"), dict) else {}
+        codex_app_server = body.get("codex_app_server") if isinstance(body.get("codex_app_server"), dict) else {}
         last_error = clean_scan_error(body.get("last_error"))
         heartbeat_region = public_issue_text(body.get("region")) if "region" in body else ""
         heartbeat_timestamp = now()
@@ -2833,32 +3253,42 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         raw_active_job_ids = body.get("active_job_ids") if "active_job_ids" in body else body.get("activeJobIds")
         active_job_ids = []
         active_job_ids_provided = isinstance(raw_active_job_ids, list)
+        active_job_from_run = None
         if active_job_ids_provided:
             for value in raw_active_job_ids[:100]:
                 job_id = clean_github_access_text(value)
                 if job_id and job_id not in active_job_ids:
                     active_job_ids.append(job_id)
+        elif protocol_version == "review-worker-protocol/v1" and "active_run_id" in body:
+            active_job_ids_provided = True
+            active_run_id = clean_github_access_text(body.get("active_run_id"))
+            active_job_from_run = scan_job_for_run_id(active_run_id) if active_run_id else None
+            if active_job_from_run and clean_github_access_text(active_job_from_run.get("claimed_by_worker_id")) == worker_id:
+                active_job_ids.append(public_issue_text(active_job_from_run.get("job_id")))
         cancelled_job_ids = []
         active_job_ids_accepting_updates = active_job_ids
         if active_job_ids:
             cancelled_job_ids = db.worker_job_ids_no_longer_accepting_updates(worker_id, active_job_ids)
             active_job_ids_accepting_updates = db.worker_job_ids_accepting_updates(worker_id, active_job_ids)
-        running_jobs = public_scan_count(body.get("running_jobs"))
+        running_jobs = public_scan_count(concurrency.get("active_jobs")) if concurrency else public_scan_count(body.get("running_jobs"))
         if active_job_ids_provided:
             running_jobs = 1 if running_jobs and active_job_ids_accepting_updates else 0
+        codex_ready = body.get("codex_ready")
+        if codex_ready is None and codex_app_server:
+            codex_ready = public_issue_text(codex_app_server.get("status")) == "ready"
         try:
             record = db.upsert_worker_heartbeat(
                 {
                     "worker_id": worker_id,
-                    "version": public_issue_text(body.get("version")),
+                    "version": public_issue_text(body.get("version")) or public_issue_text(worker_record.get("version")),
                     "provider": public_issue_text(body.get("provider")) or "codex",
                     "provider_chain": body.get("providerChain") or body.get("provider_chain"),
                     "running_jobs": running_jobs,
                     "hostname": public_issue_text(body.get("hostname")),
                     "region": heartbeat_region or None,
                     "last_error": last_error,
-                    "doctor_status": public_issue_text(body.get("doctor_status")),
-                    "codex_ready": 1 if body.get("codex_ready") is True else 0 if body.get("codex_ready") is False else None,
+                    "doctor_status": public_issue_text(body.get("doctor_status") or body.get("status")),
+                    "codex_ready": 1 if codex_ready is True else 0 if codex_ready is False else None,
                     "ready_providers": body.get("readyProviders") if "readyProviders" in body else body.get("ready_providers"),
                     "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
                     "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
@@ -2887,11 +3317,75 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 lease_seconds=system_config.scan_job_lease_seconds(),
                 timestamp=heartbeat_timestamp,
             )
+        progress_snapshot = body.get("progress") if isinstance(body.get("progress"), dict) else {}
+        if progress_snapshot and active_job_ids_accepting_updates:
+            progress_job = active_job_from_run or db.get_scan_job(active_job_ids_accepting_updates[0])
+            if progress_job:
+                progress_run_id = public_issue_text(progress_snapshot.get("run_id") or body.get("active_run_id")) or scan_job_run_id(progress_job)
+                phase = public_scan_phase(progress_snapshot.get("current_phase") or progress_snapshot.get("phase"))
+                progress_value = public_scan_progress(progress_snapshot.get("overall_percent"))
+                progress_status = public_issue_text(progress_snapshot.get("current_phase_status") or progress_snapshot.get("status"))
+                progress_message = public_issue_text(progress_snapshot.get("message"))
+                db.update_review_run_progress(
+                    {
+                        "run_id": progress_run_id,
+                        "job_id": public_issue_text(progress_job.get("job_id")),
+                        "worker_id": worker_id,
+                        "sequence": progress_snapshot.get("last_event_sequence"),
+                        "event_type": "progress_updated",
+                        "phase": phase,
+                        "severity": "info",
+                        "status": progress_status,
+                        "progress": progress_value,
+                        "timestamp": public_issue_text(progress_snapshot.get("updated_at")),
+                        "created_at": heartbeat_timestamp,
+                    }
+                )
+                updated_job = db.update_scan_job_progress(
+                    public_issue_text(progress_job.get("job_id")),
+                    {
+                        "phase": phase,
+                        "progress": progress_value,
+                        "message": progress_message,
+                        "started_at": heartbeat_timestamp,
+                        "timeout_at": heartbeat_timestamp + system_config.scan_job_lease_seconds(),
+                        "logs_summary": "heartbeat",
+                    },
+                )
+                with STATE_LOCK:
+                    scan = next((item for item in SCANS if item.get("id") == progress_job.get("scan_id")), None)
+                    if scan and updated_job:
+                        scan.update(
+                            {
+                                "phase": phase,
+                                "progress": progress_value,
+                                "progressMessage": progress_message,
+                                "logsSummary": "heartbeat",
+                                "updatedAt": heartbeat_timestamp,
+                                "runId": progress_run_id,
+                            }
+                        )
+                        db.upsert_scan(scan)
+                        mark_state_dirty()
         alerts.sync_worker_alert(worker_public_payload(record, admin=True))
         command = db.get_next_worker_command(worker_id)
+        commands = []
+        for job_id in cancelled_job_ids:
+            job = db.get_scan_job(job_id)
+            if job:
+                commands.append(
+                    {
+                        "type": "cancel_run",
+                        "run_id": scan_job_run_id(job),
+                        "reason": "server_cancelled",
+                    }
+                )
         return self.json(
             {
+                "ack": True,
                 "ok": True,
+                "server_time": protocol_iso_time(heartbeat_timestamp),
+                "commands": commands,
                 "worker": {
                     "worker_id": record.get("worker_id"),
                     "status": record.get("status"),
@@ -3137,6 +3631,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if result.get("conflict"):
             return self.json({"message": "Result checksum conflicts with an existing attempt result."}, HTTPStatus.CONFLICT)
+        if result.get("accepted") and not result.get("duplicate"):
+            try:
+                result["reviewRun"] = db.finalize_review_run_result(job, body, status=public_issue_text(body.get("status")).lower())
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         scan_logging.log_event(
             "worker_job_result",
             scanId=job.get("scan_id"),

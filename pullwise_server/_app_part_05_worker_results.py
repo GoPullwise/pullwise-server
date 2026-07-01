@@ -8,6 +8,17 @@ from ._app_imports import import_compat_globals as _import_compat_globals
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
 
+REQUIRED_COMPLETED_REVIEW_ARTIFACT_KINDS = {
+    "report.human",
+    "report.agent",
+    "coverage",
+    "qa",
+    "token_budget",
+}
+REQUIRED_TERMINAL_REVIEW_ARTIFACT_KINDS = {"qa", "worker_log"}
+REQUIRED_TERMINAL_REVIEW_ARTIFACT_ALTERNATIVES = {"error_report", "report.agent"}
+
+
 def create_scan_job_for_scan(scan: dict) -> dict:
     user_id = str(scan.get("userId") or "").strip()
     user = USERS.get(user_id) if user_id else None
@@ -120,6 +131,74 @@ def worker_plan_for_job(job: dict, scan: dict | None = None) -> str:
 
 def worker_agent_config_for_job(job: dict, scan: dict | None = None) -> dict:
     return billing.review_agent_config(worker_plan_for_job(job, scan))
+
+
+def review_job_repository_payload(job: dict) -> dict:
+    repo = clean_repository_full_name(job.get("repo"))
+    owner, separator, name = repo.partition("/")
+    payload = {
+        "provider": "github",
+        "owner": owner if separator else "",
+        "name": name if separator else repo,
+        "full_name": repo,
+        "clone_url": trusted_github_web_url(job.get("clone_url")),
+        "commit_sha": clean_github_access_text(job.get("commit")) or "pending",
+        "branch": clean_github_access_text(job.get("branch")) or "main",
+        "repo_id": clean_github_access_text(job.get("repo_id"), allow_int=True),
+        "github_repo_id": clean_github_access_text(job.get("github_repo_id"), allow_int=True),
+        "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
+    }
+    return {key: value for key, value in payload.items() if value not in {"", None}}
+
+
+def review_job_model_profile(agent_config: dict) -> dict:
+    codex = agent_config.get("codex") if isinstance(agent_config.get("codex"), dict) else {}
+    effort = public_issue_text(codex.get("reasoningEffort")) or "medium"
+    return {
+        "default_model": public_issue_text(codex.get("model")),
+        "core_effort": effort,
+        "reviewer_effort": effort,
+        "validator_effort": effort,
+        "reporter_effort": effort,
+        "intent_test_effort": effort,
+        "non_core_effort": "medium",
+    }
+
+
+def review_job_intent_policy(agent_config: dict) -> dict:
+    review_worker = agent_config.get("reviewWorker") if isinstance(agent_config.get("reviewWorker"), dict) else {}
+    configured = review_worker.get("intentTestValidation") if isinstance(review_worker.get("intentTestValidation"), dict) else {}
+    return {
+        "enabled": configured.get("enabled", True) is not False,
+        "max_tests_per_run": public_scan_count(configured.get("maxTestsPerRun")) or 20,
+        "max_tests_per_bundle": public_scan_count(configured.get("maxTestsPerBundle")) or 2,
+        "max_test_run_seconds_per_test": public_scan_count(configured.get("maxTestRunSecondsPerTest")) or 60,
+        "max_total_test_run_seconds": public_scan_count(configured.get("maxTotalTestRunSeconds")) or 900,
+        "only_tiers": configured.get("onlyTiers") or ["P0", "P1"],
+    }
+
+
+def review_job_review_request_payload(agent_config: dict, repository_limits: dict, language: dict) -> dict:
+    review_worker = agent_config.get("reviewWorker") if isinstance(agent_config.get("reviewWorker"), dict) else {}
+    max_wall_time_seconds = public_scan_count(review_worker.get("scanDeadlineSeconds")) or 0
+    return {
+        "mode": "full_repo",
+        "profile": "standard",
+        "focus": ["security", "correctness", "test_gap"],
+        "output_language": language["code"],
+        "budget": {
+            "max_estimated_input_tokens": public_scan_count(repository_limits.get("maxEstimatedInputTokens")) or 800000,
+            "max_wall_time_seconds": max_wall_time_seconds,
+        },
+        "policy": {
+            "allow_source_modification": False,
+            "allow_dependency_install": False,
+            "allow_network": False,
+            "helper_scripts_standard_library_only": True,
+            "turn_timeout_seconds": public_scan_count(review_worker.get("turnTimeoutSeconds")) or 0,
+            "intent_test_validation": review_job_intent_policy(agent_config),
+        },
+    }
 
 
 def quota_request_id_for_scan(scan: dict | None) -> str | None:
@@ -258,6 +337,10 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
     payload = {
         "job_id": public_issue_text(job.get("job_id")),
+        "job_type": "repo_review.full_scan",
+        "priority": public_issue_text(job.get("priority")) or "normal",
+        "run_id": public_issue_text(job.get("run_id")) or f"run_{public_issue_text(job.get('job_id'))}",
+        "lease_id": public_issue_text(job.get("lease_id")) or f"lease_{public_issue_text(job.get('job_id'))}",
         "scan_id": public_issue_text(job.get("scan_id")),
         "repo": clean_repository_full_name(job.get("repo")),
         "branch": clean_github_access_text(job.get("branch")) or "main",
@@ -294,6 +377,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     language = review_output_language_payload(job.get("review_output_language"))
     payload["review_output_language"] = language["code"]
     payload["review_output_language_label"] = language["label"]
+    payload["repository"] = review_job_repository_payload(job)
+    payload["model_profile"] = review_job_model_profile(agent_config)
+    payload["review_request"] = review_job_review_request_payload(agent_config, repository_limits, language)
     if include_clone_token:
         payload["clone_token"] = installation_clone_token_payload(job)
     return payload
@@ -367,6 +453,8 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
     envelope_job = envelope.get("job") if isinstance(envelope.get("job"), dict) else {}
     envelope_worker = envelope.get("worker") if isinstance(envelope.get("worker"), dict) else {}
     execution = envelope.get("execution") if isinstance(envelope.get("execution"), dict) else {}
+    progress_final = envelope.get("progress_final") if isinstance(envelope.get("progress_final"), dict) else {}
+    summary = envelope.get("summary") if isinstance(envelope.get("summary"), dict) else {}
     quality_gate = envelope.get("quality_gate") if isinstance(envelope.get("quality_gate"), dict) else {}
     manifest = envelope.get("artifact_manifest") if isinstance(envelope.get("artifact_manifest"), list) else None
     expected_job_id = public_issue_text(job.get("job_id"))
@@ -391,10 +479,14 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
     if manifest is None:
         errors.append("artifact_manifest")
     else:
+        manifest_kinds = set()
         for index, item in enumerate(manifest):
             if not isinstance(item, dict):
                 errors.append(f"artifact_manifest[{index}]")
                 continue
+            kind = public_issue_text(item.get("kind"))
+            if kind:
+                manifest_kinds.add(kind)
             for field in ("artifact_id", "kind", "name", "media_type", "schema_id", "schema_version", "sha256"):
                 if not public_issue_text(item.get(field)):
                     errors.append(f"artifact_manifest[{index}].{field}")
@@ -405,8 +497,43 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
             storage = item.get("storage") if isinstance(item.get("storage"), dict) else {}
             if public_issue_text(storage.get("type")) != "server_artifact" or not public_issue_text(storage.get("url")):
                 errors.append(f"artifact_manifest[{index}].storage")
+        if execution_status == "completed":
+            missing_required_kinds = sorted(REQUIRED_COMPLETED_REVIEW_ARTIFACT_KINDS - manifest_kinds)
+            if missing_required_kinds:
+                errors.append("artifact_manifest.required_completed_kinds:" + ",".join(missing_required_kinds))
+        elif execution_status in {"failed", "cancelled", "partial_completed"}:
+            missing_terminal_kinds = sorted(REQUIRED_TERMINAL_REVIEW_ARTIFACT_KINDS - manifest_kinds)
+            if missing_terminal_kinds:
+                errors.append("artifact_manifest.required_terminal_kinds:" + ",".join(missing_terminal_kinds))
+            if not (REQUIRED_TERMINAL_REVIEW_ARTIFACT_ALTERNATIVES & manifest_kinds):
+                errors.append("artifact_manifest.required_terminal_report:error_report_or_report.agent")
     if not public_issue_text(quality_gate.get("status")):
         errors.append("quality_gate.status")
+    if not summary:
+        errors.append("summary")
+    else:
+        if not public_issue_text(summary.get("overall_risk")):
+            errors.append("summary.overall_risk")
+        if not public_issue_text(summary.get("result_status")):
+            errors.append("summary.result_status")
+        if not isinstance(summary.get("finding_counts"), dict):
+            errors.append("summary.finding_counts")
+        if not isinstance(summary.get("coverage"), dict):
+            errors.append("summary.coverage")
+        if not isinstance(summary.get("top_findings"), list):
+            errors.append("summary.top_findings")
+    if not progress_final:
+        errors.append("progress_final")
+    else:
+        try:
+            overall_percent = float(progress_final.get("overall_percent"))
+        except (TypeError, ValueError):
+            errors.append("progress_final.overall_percent")
+        else:
+            if overall_percent < 0 or overall_percent > 100:
+                errors.append("progress_final.overall_percent")
+        if not public_issue_text(progress_final.get("status")):
+            errors.append("progress_final.status")
     if errors:
         raise ValueError("Invalid review-worker-protocol/v1 envelope: " + ", ".join(errors[:12]))
     return envelope
@@ -416,10 +543,11 @@ def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: 
     envelope = validate_review_worker_protocol_envelope(job, body, status=status)
     if not envelope:
         return
-    attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId")) or expected_worker_attempt_id(job)
+    envelope_job = envelope.get("job") if isinstance(envelope.get("job"), dict) else {}
+    run_id = public_issue_text(envelope_job.get("run_id") or job.get("run_id")) or f"run_{public_issue_text(job.get('job_id'))}"
     uploaded = {
         public_issue_text(item.get("artifact_id")): item
-        for item in db.list_review_run_artifacts(public_issue_text(job.get("job_id")), attempt_id)
+        for item in db.list_review_run_artifact_records(run_id)
         if isinstance(item, dict) and public_issue_text(item.get("artifact_id"))
     }
     manifest = envelope.get("artifact_manifest") if isinstance(envelope.get("artifact_manifest"), list) else []
@@ -970,6 +1098,7 @@ def worker_protocol_finding_source(finding: dict) -> dict:
         "recommendation": recommendation,
         "failureScenario": scenario,
         "evidence": evidence_items,
+        "reproduction": finding.get("reproduction") if isinstance(finding.get("reproduction"), dict) else {},
         "affectedLocations": locations or ([primary] if primary else []),
         "whyNotFalsePositive": review._safe_text_list(finding.get("whyNotFalsePositive") or finding.get("false_positive_checks")),
         "limitations": review._safe_text_list(finding.get("limitations")),

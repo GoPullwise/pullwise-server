@@ -121,8 +121,12 @@ The server owns subscription plan agent policy.
 
 - Free/pro/max review agent configs are the source of truth for the plan
   provider, model names, reasoning effort/variant, and repository limits.
-- Worker claim payloads must include per-job `agentConfig` and
+- Worker claim payloads must include canonical v1 `model_profile` and
+  `review_request.policy` derived from server plan/business logic, plus
   `repositoryLimits`; workers should not infer those from local defaults.
+- `agentConfig` may be included as server-derived backing data for admin/doctor
+  consistency, but v1 workers should prefer `model_profile` and
+  `review_request.policy` when driving review execution.
 - The worker agent-config endpoint used by `doctor` must expose the same plan
   configs that job claims use.
 - Keep the plan review-agent provider as a single `provider` field in
@@ -130,27 +134,70 @@ The server owns subscription plan agent policy.
 
 ## Review Worker Protocol Semantics
 
-`../worker-design.md` is the source of truth for worker-facing server behavior.
-The server owns the global job queue, leases at most one job to a worker, and
-must not add worker-side queue, prefetch, max-claim, or parallel job controls.
+`../codex_full_repo_review_worker_spec_v1_2_FULL_SELF_CONTAINED.md` is the
+source of truth for worker-facing server behavior. The server owns the global
+job queue, leases at most one job to a worker, and must not add worker-side
+queue, prefetch, max-claim, or parallel job controls.
 
 Worker results use `review-worker-protocol/v1`: a stable result envelope plus a
 versioned artifact manifest. Server ingest must validate protocol version,
 worker/job/run/lease binding, execution status, summary, quality gate, required
-artifacts, sha256, and size before accepting a completed result. Store the raw
-envelope and artifacts; do not depend on `report.agent.json` internals for core
-result acceptance.
+artifacts, sha256, and size before accepting a completed result. The stable
+summary must include `overall_risk`, `result_status`, `finding_counts`,
+`coverage`, and `top_findings`; do not accept top-findings-only summaries as v1
+terminal results. Store the raw envelope and artifacts; do not depend on
+`report.agent.json` internals for core result acceptance.
+
+Expose the worker-facing v1 review routes explicitly: register under
+`/v1/workers/register`, lease and heartbeat under `/v1/workers/{worker_id}/...`,
+and run events, artifact upload, and terminal result submit under
+`/v1/review-runs/{run_id}/...`. Register must be bearer-token authenticated,
+store the raw registration JSON, and validate stable fields synchronously:
+protocol version, worker identity binding, Linux/POSIX platform, one active job,
+no local queue, and no prefetch. Progress events must be durably inserted into
+the review run event store with a strictly monotonic per-run `sequence` before
+they update scan progress. Preserve unknown event payload fields in the stored
+raw JSON. V1 heartbeats must accept the fixed heartbeat shape
+`protocol_version`, `status`, `active_run_id`, `concurrency`,
+`codex_app_server`, and optional `progress`; resolve `active_run_id` to the
+server-owned job for lease renewal, cancellation, and progress snapshots instead
+of requiring worker-side queue state. Progress snapshots shown to the product
+should be derived from accepted v1 run events, v1 heartbeat progress, and stored
+scan state, not from legacy graph/report internals. Existing `/worker/...`
+lifecycle routes are operator plumbing and must not become the source of new
+review protocol behavior.
+
+Each leased v1 run must also have a first-class `review_runs` row. Create or
+refresh it when a lease is issued, update its progress from accepted run events,
+and finalize it from the terminal result envelope by storing summary,
+quality-gate, usage, progress, error, and raw envelope JSON. Web/admin terminal
+views should read server-owned run state and artifact metadata instead of
+parsing retired worker report shapes. Detailed scan payloads should expose this
+as a `reviewRun` object with public terminal state and artifact metadata, never
+raw artifact upload content or raw result envelopes.
 
 Completed runs require uploaded `report.human`, `report.agent`, `coverage`,
 `qa`, and `token_budget` artifacts. Failed and cancelled runs should accept a
-valid terminal envelope with available optional diagnostic artifacts. Artifact
-upload must be idempotent by run/artifact, and result submit must be idempotent
-by run/message type.
+valid terminal envelope only when it includes `qa`, `worker_log`, and either
+`error_report` or partial `report.agent` diagnostics. Artifact upload must be
+idempotent by run/artifact, and result submit must be idempotent by run/message
+type. V1 artifact uploads must write first-class
+`review_artifacts` rows keyed by `run_id + artifact_id`, preserving artifact
+metadata, `storage_url`, storage metadata, optional small JSON `inline_json`,
+sha256, size, and raw upload payload. The storage URL must resolve through an
+owner-authenticated server GET route so web clients can read terminal run
+artifacts without parsing worker internals. Do not store new v1 artifact uploads
+as legacy `job_result_artifacts` compatibility entries.
 
 Quota should be finalized when the worker reaches core semantic review work, not
 for mechanical setup phases. Preserve subscription-plan controlled model,
 timeout, repository limits, and core reasoning effort; non-core phases use the
 same model with medium effort.
+
+Worker progress and reports should include the v1.2 intent-test validation
+stages. Intent-test artifacts are evidence for high-value P0/P1 candidates, not
+a separate bug source, and generated test failures must not be treated as
+confirmed findings without validator confirmation.
 
 ## Public REST API Rate Limits
 

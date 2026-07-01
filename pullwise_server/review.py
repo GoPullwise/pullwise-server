@@ -120,6 +120,7 @@ def _finalize_finding(
             finding.get("verificationStatus"),
             affected_locations=affected_locations,
             evidence=evidence,
+            reproduction=_safe_reproduction(finding.get("reproduction")),
         ),
         "verificationSummary": _safe_text_lenient(finding.get("verificationSummary")),
         "affectedLocations": affected_locations,
@@ -373,23 +374,77 @@ def _safe_evidence(value: object, repo_path: str | None = None) -> list[dict]:
     return evidence[:20]
 
 
+def _safe_reproduction(value: object) -> dict:
+    raw = value if isinstance(value, dict) else {}
+    commands = _safe_text_list(raw.get("commands"))
+    command = _safe_text(raw.get("command"))
+    if command and command not in commands:
+        commands.append(command)
+    reproduction: dict[str, object] = {}
+    if commands:
+        reproduction["commands"] = commands[:5]
+    for source_key, target_key in (
+        ("input", "input"),
+        ("expected", "expected"),
+        ("actual", "actual"),
+        ("testFile", "testFile"),
+        ("test_file", "testFile"),
+        ("logPath", "logPath"),
+        ("log_path", "logPath"),
+    ):
+        text = _safe_text_lenient(raw.get(source_key))
+        if text and target_key not in reproduction:
+            reproduction[target_key] = text[:2000]
+    return reproduction
+
+
+def _runtime_evidence_state(*, evidence: list[dict], reproduction: dict) -> dict:
+    has_reproduction_command = bool(reproduction.get("commands"))
+    has_reproduction_output = any(
+        bool(reproduction.get(key)) for key in ("actual", "expected", "input", "testFile", "logPath")
+    )
+    has_raw_output = any(
+        item.get("type") in {"runtime_log", "test", "fix_verification"} and bool(item.get("output"))
+        for item in evidence
+    )
+    has_raw_runtime = bool(reproduction.get("testFile") or reproduction.get("logPath")) or any(
+        item.get("type") in {"runtime_log", "test", "fix_verification"}
+        and bool(item.get("logPath") or item.get("file"))
+        for item in evidence
+    )
+    has_runtime_output = has_reproduction_command and (has_raw_output or has_reproduction_output or has_raw_runtime)
+    return {
+        "has_reproduction_command": has_reproduction_command,
+        "has_runtime_output": has_runtime_output,
+        "has_raw_runtime": has_raw_runtime,
+    }
+
+
 def _safe_verification_status(
     value: object,
     *,
     affected_locations: list[dict],
     evidence: list[dict],
+    reproduction: dict | None = None,
 ) -> str:
     status = _safe_text(value).lower()
     if status not in VALID_VERIFICATION_STATUSES:
         status = ""
     has_precise_location = any(location.get("file") and location.get("startLine") for location in affected_locations)
     has_evidence = bool(evidence)
+    runtime_state = _runtime_evidence_state(evidence=evidence, reproduction=reproduction or {})
     has_static_evidence = bool(affected_locations) or any(
         item.get("type") in {"code", "path", "trigger", "documentation", "tool"}
         and any([item.get("file"), item.get("summary"), item.get("command")])
         for item in evidence
     )
-    verified_ready = has_precise_location and has_evidence
+    verified_ready = (
+        has_precise_location
+        and has_evidence
+        and runtime_state["has_reproduction_command"]
+        and runtime_state["has_runtime_output"]
+        and runtime_state["has_raw_runtime"]
+    )
     if status == "verified" and not verified_ready:
         return "static_proof" if has_static_evidence else "potential_risk"
     if status == "static_proof" and not has_static_evidence:

@@ -283,12 +283,28 @@ the selected worker wheel so same-version rebuilds are not skipped by pip. The C
 pinned by default as `@openai/codex@0.135.0`; override it with
 `PULLWISE_CODEX_PACKAGE` or `--codex-package` when rolling out a new CLI.
 
-Worker endpoints (authenticated via bearer token):
+Worker review protocol endpoints (authenticated via bearer token):
 
-- `POST /worker/heartbeat` — report running jobs, health, and fixed single-job capacity
-- `POST /worker/jobs/claim` — atomically claim queued jobs
-- `POST /worker/jobs/{id}/progress` — report scan phase and progress
-- `POST /worker/jobs/{id}/result` — upload completed scan results
+- `POST /v1/workers/register` — validate and store worker v1 capability/isolation metadata for a preissued worker token
+- `POST /v1/workers/{worker_id}/heartbeat` — report active job, health, and fixed single-job capacity
+- `POST /v1/workers/{worker_id}/lease` — atomically lease one queued job when the worker is idle, including canonical `repository`, `model_profile`, and `review_request` policy
+- `POST /v1/review-runs/{run_id}/events` — durably store monotonic phase/progress events and renew the active lease
+- `POST /v1/review-runs/{run_id}/artifacts` — upload versioned run artifacts
+- `GET /v1/review-runs/{run_id}/artifacts/{artifact_id}` — read stored artifacts for the owning scan user
+- `POST /v1/review-runs/{run_id}/result` — submit the terminal v1 result envelope
+
+The server keeps first-class protocol records for each leased v1 run:
+`review_runs` is created at lease time, updated from accepted progress events,
+and finalized from the terminal result envelope with the run summary, quality
+gate, and raw protocol envelope. Uploaded artifacts are stored as
+`review_artifacts` keyed by `run_id + artifact_id`; their storage URLs return
+the uploaded bytes through an owner-authenticated GET route. Small JSON artifacts
+also keep decoded `inline_json` for server-side display/indexing. Detailed scan
+payloads include a public `reviewRun` block with terminal run state, parsed
+summary/quality/progress/error data, and artifact metadata.
+
+Legacy `/worker/...` endpoints remain only for existing lifecycle/admin plumbing
+and compatibility tests; new review behavior should use the v1 routes above.
 
 Jobs that timeout (no heartbeat or progress) are automatically re-queued up
 to the database-backed scan job max-attempts setting, then marked failed.
@@ -659,7 +675,8 @@ and repository monthly scan limits through the admin Settings page.
 Subscription plan agent CLI/model/reasoning policy is stored in the server
 database. The server seeds Free, Pro, and Max defaults into `app_state` on first
 read, admins edit them through `/admin/subscription-plans/agent-configs`, and
-each claimed scan job carries the resolved `agentConfig` to the worker.
+each claimed scan job carries canonical `model_profile` and
+`review_request.policy` derived from the resolved plan config to the worker.
 
 Creem:
 

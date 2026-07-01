@@ -367,6 +367,79 @@ def scan_agent_fix_prompt(scan: dict) -> str:
     )
     return "\n".join(lines)
 
+
+def public_review_run_json(value: object) -> dict:
+    if isinstance(value, dict):
+        return db.to_jsonable(value)
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def public_review_run_artifact_payload(row: dict) -> dict:
+    storage = public_review_run_json(row.get("storage_json"))
+    storage_url = public_issue_text(row.get("storage_url"))
+    if not storage and storage_url:
+        storage = {"type": "server_artifact", "url": storage_url}
+    inline_json = public_review_run_json(row.get("inline_json"))
+    payload = {
+        "artifactId": public_issue_text(row.get("artifact_id")),
+        "runId": public_issue_text(row.get("run_id")),
+        "kind": public_issue_text(row.get("kind")),
+        "name": public_issue_text(row.get("name")),
+        "mediaType": public_issue_text(row.get("media_type")),
+        "schemaId": public_issue_text(row.get("schema_id")),
+        "schemaVersion": public_issue_text(row.get("schema_version")),
+        "required": bool(row.get("required")),
+        "sha256": public_issue_text(row.get("sha256")),
+        "sizeBytes": public_scan_count(row.get("size_bytes")),
+        "storage": storage,
+        "createdAt": pull_request_timestamp(row.get("created_at")) or 0,
+        "updatedAt": pull_request_timestamp(row.get("updated_at")) or 0,
+    }
+    if inline_json:
+        payload["inlineJson"] = inline_json
+    return {key: value for key, value in payload.items() if value not in ("", None) and value != {}}
+
+
+def public_review_run_payload(scan: dict) -> dict:
+    run_id = public_issue_text(scan.get("runId") or scan.get("run_id"))
+    job_id = public_issue_text(scan.get("jobId") or scan.get("job_id"))
+    run = db.get_review_run(run_id) if run_id else None
+    if run is None and job_id:
+        run = db.get_latest_review_run_for_job(job_id)
+    if not run:
+        return {}
+    resolved_run_id = public_issue_text(run.get("run_id"))
+    artifacts = [public_review_run_artifact_payload(row) for row in db.list_review_run_artifact_records(resolved_run_id)]
+    payload = {
+        "runId": resolved_run_id,
+        "jobId": public_issue_text(run.get("job_id")),
+        "workerId": public_issue_text(run.get("worker_id")),
+        "status": public_issue_text(run.get("status")),
+        "resultStatus": public_issue_text(run.get("result_status")),
+        "protocolVersion": public_issue_text(run.get("protocol_version")),
+        "workerVersion": public_issue_text(run.get("worker_version")),
+        "engine": {"type": public_issue_text(run.get("engine_type"))} if public_issue_text(run.get("engine_type")) else {},
+        "codexThreadId": public_issue_text(run.get("codex_thread_id")),
+        "startedAt": pull_request_timestamp(run.get("started_at")) or 0,
+        "completedAt": pull_request_timestamp(run.get("completed_at")) or 0,
+        "durationMs": public_scan_count(run.get("duration_ms")),
+        "summary": public_review_run_json(run.get("summary_json")),
+        "qualityGate": public_review_run_json(run.get("quality_gate_json")),
+        "usage": public_review_run_json(run.get("usage_json")),
+        "progress": public_review_run_json(run.get("progress_json")),
+        "error": public_review_run_json(run.get("error_json")),
+        "artifactCount": len(artifacts),
+        "artifacts": artifacts,
+    }
+    return {key: value for key, value in payload.items() if value not in ("", None) and value != {} and value != []}
+
+
 def scan_payload(scan: dict) -> dict:
     status = public_scan_status(scan.get("status"))
     payload = {
@@ -403,6 +476,9 @@ def scan_payload(scan: dict) -> dict:
     agent_report = public_result_agent_report(scan.get("agentReport"))
     if agent_report:
         payload["agentReport"] = agent_report
+    review_run = public_review_run_payload(scan)
+    if review_run:
+        payload["reviewRun"] = review_run
     reading_guide = public_result_reading_guide(scan.get("readingGuide"))
     if reading_guide:
         payload["readingGuide"] = reading_guide

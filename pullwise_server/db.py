@@ -251,6 +251,13 @@ def initialize() -> None:
                     doctor_checked_at INTEGER,
                     machine_metrics TEXT,
                     machine_metrics_history TEXT,
+                    protocol_version TEXT,
+                    worker_group TEXT,
+                    worker_capabilities TEXT,
+                    worker_isolation TEXT,
+                    worker_platform TEXT,
+                    registration_json TEXT,
+                    registered_at INTEGER,
                     status TEXT NOT NULL DEFAULT 'online',
                     first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     last_heartbeat_at INTEGER,
@@ -283,6 +290,13 @@ def initialize() -> None:
                 ("workers", "doctor_checked_at", "INTEGER"),
                 ("workers", "machine_metrics", "TEXT"),
                 ("workers", "machine_metrics_history", "TEXT"),
+                ("workers", "protocol_version", "TEXT"),
+                ("workers", "worker_group", "TEXT"),
+                ("workers", "worker_capabilities", "TEXT"),
+                ("workers", "worker_isolation", "TEXT"),
+                ("workers", "worker_platform", "TEXT"),
+                ("workers", "registration_json", "TEXT"),
+                ("workers", "registered_at", "INTEGER"),
             ):
                 ensure_column(connection, table, column, definition)
             normalize_workers_schema(connection)
@@ -512,6 +526,144 @@ def initialize() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_job_result_artifacts_job_attempt
                 ON job_result_artifacts(job_id, attempt_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS review_runs (
+                    run_id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL,
+                    worker_id TEXT,
+                    status TEXT NOT NULL,
+                    overall_risk TEXT,
+                    result_status TEXT,
+                    started_at INTEGER,
+                    completed_at INTEGER,
+                    duration_ms INTEGER,
+                    protocol_version TEXT,
+                    worker_version TEXT,
+                    engine_type TEXT,
+                    codex_thread_id TEXT,
+                    summary_json TEXT,
+                    quality_gate_json TEXT,
+                    usage_json TEXT,
+                    progress_json TEXT,
+                    error_json TEXT,
+                    raw_result_envelope_json TEXT,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                )
+                """
+            )
+            for table, column, definition in (
+                ("review_runs", "overall_risk", "TEXT"),
+                ("review_runs", "result_status", "TEXT"),
+                ("review_runs", "started_at", "INTEGER"),
+                ("review_runs", "completed_at", "INTEGER"),
+                ("review_runs", "duration_ms", "INTEGER"),
+                ("review_runs", "protocol_version", "TEXT"),
+                ("review_runs", "worker_version", "TEXT"),
+                ("review_runs", "engine_type", "TEXT"),
+                ("review_runs", "codex_thread_id", "TEXT"),
+                ("review_runs", "summary_json", "TEXT"),
+                ("review_runs", "quality_gate_json", "TEXT"),
+                ("review_runs", "usage_json", "TEXT"),
+                ("review_runs", "progress_json", "TEXT"),
+                ("review_runs", "error_json", "TEXT"),
+                ("review_runs", "raw_result_envelope_json", "TEXT"),
+            ):
+                ensure_column(connection, table, column, definition)
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_runs_job
+                ON review_runs(job_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_runs_worker_status
+                ON review_runs(worker_id, status, updated_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS review_run_events (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    job_id TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    phase TEXT,
+                    severity TEXT,
+                    status TEXT,
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    event_timestamp TEXT,
+                    payload TEXT NOT NULL,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    UNIQUE(run_id, sequence)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_run_events_run_sequence
+                ON review_run_events(run_id, sequence)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_run_events_job_created
+                ON review_run_events(job_id, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS review_artifacts (
+                    id TEXT PRIMARY KEY,
+                    artifact_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    job_id TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    name TEXT,
+                    media_type TEXT,
+                    schema_id TEXT,
+                    schema_version TEXT,
+                    required INTEGER NOT NULL DEFAULT 0,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    storage_url TEXT NOT NULL DEFAULT '',
+                    storage_json TEXT,
+                    inline_json TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                    UNIQUE(run_id, artifact_id)
+                )
+                """
+            )
+            for table, column, definition in (
+                ("review_artifacts", "job_id", "TEXT NOT NULL DEFAULT ''"),
+                ("review_artifacts", "attempt_id", "TEXT NOT NULL DEFAULT ''"),
+                ("review_artifacts", "required", "INTEGER NOT NULL DEFAULT 0"),
+                ("review_artifacts", "storage_url", "TEXT NOT NULL DEFAULT ''"),
+                ("review_artifacts", "storage_json", "TEXT"),
+                ("review_artifacts", "inline_json", "TEXT"),
+                ("review_artifacts", "payload_json", "TEXT"),
+                ("review_artifacts", "updated_at", "INTEGER"),
+            ):
+                ensure_column(connection, table, column, definition)
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_artifacts_run
+                ON review_artifacts(run_id, kind, artifact_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_artifacts_job_attempt
+                ON review_artifacts(job_id, attempt_id)
                 """
             )
             connection.execute(
@@ -1997,6 +2149,393 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
             if row.get("enabled") == 0:
                 row["status"] = "disabled"
             return row
+
+
+def register_worker_protocol(record: dict[str, Any]) -> dict[str, Any]:
+    ensure_initialized()
+    worker = record.get("worker") if isinstance(record.get("worker"), dict) else {}
+    worker_id = str(worker.get("worker_id") or record.get("worker_id") or "").strip()
+    if not worker_id:
+        raise ValueError("worker_id is required")
+    protocol_version = str(record.get("protocol_version") or "").strip()
+    if not protocol_version:
+        raise ValueError("protocol_version is required")
+    timestamp = int(record.get("timestamp") or time.time())
+    capabilities = worker.get("capabilities") if isinstance(worker.get("capabilities"), dict) else {}
+    isolation = worker.get("isolation") if isinstance(worker.get("isolation"), dict) else {}
+    platform = worker.get("platform") if isinstance(worker.get("platform"), dict) else {}
+    registration_text = json.dumps(to_jsonable(record), ensure_ascii=False, sort_keys=True)
+    capabilities_text = json.dumps(to_jsonable(capabilities), ensure_ascii=False, sort_keys=True)
+    isolation_text = json.dumps(to_jsonable(isolation), ensure_ascii=False, sort_keys=True)
+    platform_text = json.dumps(to_jsonable(platform), ensure_ascii=False, sort_keys=True)
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                UPDATE workers
+                SET
+                    version = COALESCE(NULLIF(?, ''), version),
+                    hostname = COALESCE(NULLIF(?, ''), hostname),
+                    protocol_version = ?,
+                    worker_group = COALESCE(NULLIF(?, ''), worker_group),
+                    worker_capabilities = ?,
+                    worker_isolation = ?,
+                    worker_platform = ?,
+                    registration_json = ?,
+                    registered_at = COALESCE(registered_at, ?),
+                    updated_at = ?
+                WHERE worker_id = ?
+                """,
+                (
+                    str(worker.get("worker_version") or "")[:120],
+                    str(worker.get("hostname") or "")[:255],
+                    protocol_version,
+                    str(worker.get("worker_group") or "")[:120],
+                    capabilities_text,
+                    isolation_text,
+                    platform_text,
+                    registration_text,
+                    timestamp,
+                    timestamp,
+                    worker_id,
+                ),
+            )
+            row = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone())
+            if not row:
+                raise ValueError("worker not found")
+            return row
+
+
+def protocol_timestamp(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return int(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return int(parsed.timestamp())
+
+
+def run_json_text(value: object) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(to_jsonable(value), ensure_ascii=False, sort_keys=True)
+
+
+def upsert_review_run_claimed(job: dict[str, Any], *, protocol_version: str = "review-worker-protocol/v1") -> dict[str, Any]:
+    ensure_initialized()
+    job_id = str(job.get("job_id") or "").strip()
+    run_id = str(job.get("run_id") or (f"run_{job_id}" if job_id else "")).strip()
+    if not run_id or not job_id:
+        raise ValueError("run_id and job_id are required")
+    timestamp = int(time.time())
+    worker_id = str(job.get("claimed_by_worker_id") or "").strip()
+    started_at = protocol_timestamp(job.get("claimed_at")) or timestamp
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO review_runs (
+                    run_id, job_id, worker_id, status, started_at,
+                    protocol_version, progress_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 'leased', ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
+                    status = CASE
+                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed') THEN review_runs.status
+                        ELSE excluded.status
+                    END,
+                    started_at = COALESCE(review_runs.started_at, excluded.started_at),
+                    protocol_version = COALESCE(excluded.protocol_version, review_runs.protocol_version),
+                    progress_json = COALESCE(review_runs.progress_json, excluded.progress_json),
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    run_id,
+                    job_id,
+                    worker_id,
+                    started_at,
+                    protocol_version,
+                    run_json_text({"status": "leased", "overall_percent": 0}),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
+
+
+def update_review_run_progress(event: dict[str, Any]) -> dict[str, Any]:
+    ensure_initialized()
+    run_id = str(event.get("run_id") or "").strip()
+    job_id = str(event.get("job_id") or "").strip()
+    worker_id = str(event.get("worker_id") or "").strip()
+    if not run_id or not job_id:
+        raise ValueError("run_id and job_id are required")
+    timestamp = int(event.get("created_at") or time.time())
+    event_type = str(event.get("event_type") or "").strip()
+    progress_payload = {
+        "sequence": event.get("sequence"),
+        "event_type": event_type,
+        "phase": event.get("phase"),
+        "severity": event.get("severity"),
+        "status": event.get("status"),
+        "overall_percent": max(0, min(100, int(event.get("progress") or 0))),
+        "timestamp": event.get("timestamp"),
+    }
+    terminal_status = {
+        "run_completed": "completed",
+        "run_failed": "failed",
+        "run_cancelled": "cancelled",
+        "run_partial_completed": "partial_completed",
+    }.get(event_type)
+    status = terminal_status or "running"
+    completed_at = timestamp if terminal_status else None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO review_runs (
+                    run_id, job_id, worker_id, status, completed_at,
+                    progress_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
+                    status = excluded.status,
+                    completed_at = COALESCE(excluded.completed_at, review_runs.completed_at),
+                    progress_json = excluded.progress_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    run_id,
+                    job_id,
+                    worker_id,
+                    status,
+                    completed_at,
+                    run_json_text(progress_payload),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
+
+
+def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, status: str) -> dict[str, Any]:
+    ensure_initialized()
+    envelope = body.get("reviewWorkerProtocol") if isinstance(body.get("reviewWorkerProtocol"), dict) else body.get("review_worker_protocol")
+    if not isinstance(envelope, dict):
+        raise ValueError("reviewWorkerProtocol is required")
+    envelope_job = envelope.get("job") if isinstance(envelope.get("job"), dict) else {}
+    envelope_worker = envelope.get("worker") if isinstance(envelope.get("worker"), dict) else {}
+    execution = envelope.get("execution") if isinstance(envelope.get("execution"), dict) else {}
+    summary = envelope.get("summary") if isinstance(envelope.get("summary"), dict) else {}
+    quality_gate = envelope.get("quality_gate") if isinstance(envelope.get("quality_gate"), dict) else {}
+    progress_final = envelope.get("progress_final") if isinstance(envelope.get("progress_final"), dict) else None
+    if progress_final is None:
+        progress_final = execution.get("progress_final") if isinstance(execution.get("progress_final"), dict) else None
+    error = envelope.get("error") if isinstance(envelope.get("error"), dict) else None
+    worker_engine = envelope_worker.get("engine") if isinstance(envelope_worker.get("engine"), dict) else {}
+    run_id = str(envelope_job.get("run_id") or job.get("run_id") or f"run_{job.get('job_id')}").strip()
+    job_id = str(envelope_job.get("job_id") or job.get("job_id") or "").strip()
+    if not run_id or not job_id:
+        raise ValueError("run_id and job_id are required")
+    timestamp = int(time.time())
+    execution_status = str(execution.get("status") or "").strip() or ("completed" if status == "done" else "failed")
+    started_at = protocol_timestamp(execution.get("started_at")) or protocol_timestamp(job.get("started_at")) or protocol_timestamp(job.get("claimed_at"))
+    completed_at = protocol_timestamp(execution.get("completed_at")) or protocol_timestamp(job.get("completed_at")) or timestamp
+    try:
+        duration_ms = int(execution.get("duration_ms")) if execution.get("duration_ms") is not None else None
+    except (TypeError, ValueError):
+        duration_ms = None
+    if duration_ms is None and started_at and completed_at:
+        duration_ms = max(0, int((completed_at - started_at) * 1000))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO review_runs (
+                    run_id, job_id, worker_id, status, result_status,
+                    started_at, completed_at, duration_ms, protocol_version,
+                    worker_version, engine_type, codex_thread_id, summary_json,
+                    quality_gate_json, usage_json, progress_json, error_json,
+                    raw_result_envelope_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
+                    status = excluded.status,
+                    result_status = excluded.result_status,
+                    started_at = COALESCE(review_runs.started_at, excluded.started_at),
+                    completed_at = excluded.completed_at,
+                    duration_ms = excluded.duration_ms,
+                    protocol_version = excluded.protocol_version,
+                    worker_version = excluded.worker_version,
+                    engine_type = excluded.engine_type,
+                    codex_thread_id = excluded.codex_thread_id,
+                    summary_json = excluded.summary_json,
+                    quality_gate_json = excluded.quality_gate_json,
+                    usage_json = excluded.usage_json,
+                    progress_json = COALESCE(excluded.progress_json, review_runs.progress_json),
+                    error_json = excluded.error_json,
+                    raw_result_envelope_json = excluded.raw_result_envelope_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    run_id,
+                    job_id,
+                    str(envelope_worker.get("worker_id") or job.get("claimed_by_worker_id") or "").strip(),
+                    execution_status,
+                    status,
+                    started_at,
+                    completed_at,
+                    duration_ms,
+                    str(envelope.get("protocol_version") or "").strip(),
+                    str(envelope_worker.get("worker_version") or "").strip(),
+                    str(worker_engine.get("type") or "").strip(),
+                    str(worker_engine.get("codex_thread_id") or "").strip(),
+                    run_json_text(summary),
+                    run_json_text(quality_gate),
+                    run_json_text(envelope.get("usage") if isinstance(envelope.get("usage"), dict) else None),
+                    run_json_text(progress_final),
+                    run_json_text(error),
+                    run_json_text(envelope),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
+
+
+def get_review_run(run_id: str) -> dict[str, Any] | None:
+    ensure_initialized()
+    normalized = str(run_id or "").strip()
+    if not normalized:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (normalized,)).fetchone())
+
+
+def get_latest_review_run_for_job(job_id: str) -> dict[str, Any] | None:
+    ensure_initialized()
+    normalized = str(job_id or "").strip()
+    if not normalized:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        return row_to_dict(
+            connection.execute(
+                """
+                SELECT * FROM review_runs
+                WHERE job_id = ?
+                ORDER BY updated_at DESC, started_at DESC, run_id DESC
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+        )
+
+
+def store_review_run_event(event: dict[str, Any]) -> dict[str, Any]:
+    ensure_initialized()
+    run_id = str(event.get("run_id") or "").strip()
+    job_id = str(event.get("job_id") or "").strip()
+    worker_id = str(event.get("worker_id") or "").strip()
+    if not run_id:
+        raise ValueError("run_id is required")
+    if not job_id:
+        raise ValueError("job_id is required")
+    if not worker_id:
+        raise ValueError("worker_id is required")
+    try:
+        sequence = int(event.get("sequence"))
+    except (TypeError, ValueError):
+        raise ValueError("event sequence is required")
+    if sequence <= 0:
+        raise ValueError("event sequence must be positive")
+    event_type = str(event.get("event_type") or "").strip()
+    if not event_type:
+        raise ValueError("event_type is required")
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else event
+    payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
+    created_at = int(event.get("created_at") or time.time())
+    event_id = stable_id("rve", f"{run_id}:{sequence}")
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            latest = connection.execute(
+                "SELECT MAX(sequence) AS latest_sequence FROM review_run_events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            latest_sequence = int(latest["latest_sequence"]) if latest and latest["latest_sequence"] is not None else 0
+            if sequence <= latest_sequence:
+                raise ValueError("event sequence must be monotonic")
+            connection.execute(
+                """
+                INSERT INTO review_run_events (
+                    id, run_id, job_id, worker_id, sequence, event_type, phase,
+                    severity, status, progress, event_timestamp, payload, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    run_id,
+                    job_id,
+                    worker_id,
+                    sequence,
+                    event_type,
+                    event.get("phase"),
+                    event.get("severity"),
+                    event.get("status"),
+                    max(0, min(100, int(event.get("progress") or 0))),
+                    event.get("timestamp"),
+                    payload_text,
+                    created_at,
+                ),
+            )
+            return row_to_dict(connection.execute("SELECT * FROM review_run_events WHERE id = ?", (event_id,)).fetchone()) or {}
+
+
+def list_review_run_events(run_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    ensure_initialized()
+    normalized = str(run_id or "").strip()
+    if not normalized:
+        return []
+    safe_limit = max(1, min(1000, int(limit or 200)))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT * FROM review_run_events
+            WHERE run_id = ?
+            ORDER BY sequence ASC
+            LIMIT ?
+            """,
+            (normalized, safe_limit),
+        ).fetchall()
+        return [row_to_dict(row) or {} for row in rows]
 
 
 def record_worker_audit_event(record: dict[str, Any]) -> dict[str, Any]:
@@ -4731,6 +5270,20 @@ def _store_scan_job_result_artifact_locked(
     )
 
 
+def review_artifact_inline_json(payload: dict[str, Any], media_type: str, size_bytes: int) -> str | None:
+    if size_bytes > 256 * 1024 or "json" not in str(media_type or "").lower():
+        return None
+    content_b64_value = payload.get("content_base64") if payload.get("content_base64") is not None else payload.get("contentBase64")
+    if content_b64_value is None:
+        return None
+    try:
+        content = base64.b64decode(str(content_b64_value).encode("ascii"), validate=True)
+        decoded = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, binascii.Error, json.JSONDecodeError):
+        return None
+    return json.dumps(to_jsonable(decoded), ensure_ascii=False, sort_keys=True)
+
+
 def store_review_run_artifact(
     *,
     job_id: str,
@@ -4747,7 +5300,39 @@ def store_review_run_artifact(
         raise ValueError("job_id, attempt_id, and artifact_id are required")
     payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
     current_time = int(timestamp if timestamp is not None else time.time())
-    kind = f"review_artifact:{artifact_id}"
+    run_id = str(payload.get("run_id") or f"run_{job_id}").strip()
+    artifact = payload.get("artifact") if isinstance(payload.get("artifact"), dict) else {}
+    kind = str(artifact.get("kind") or payload.get("kind") or artifact_id).strip()
+    if not kind:
+        raise ValueError("artifact.kind is required")
+    name = str(artifact.get("name") or payload.get("name") or "").strip()
+    media_type = str(artifact.get("media_type") or artifact.get("mediaType") or payload.get("media_type") or payload.get("mediaType") or "").strip()
+    schema_id = str(artifact.get("schema_id") or artifact.get("schemaId") or payload.get("schema_id") or payload.get("schemaId") or "").strip()
+    schema_version = str(artifact.get("schema_version") or artifact.get("schemaVersion") or payload.get("schema_version") or payload.get("schemaVersion") or "").strip()
+    sha256 = str(payload.get("sha256") or artifact.get("sha256") or "").strip().lower()
+    try:
+        size_bytes = int(
+            payload.get("size_bytes")
+            if payload.get("size_bytes") is not None
+            else artifact.get("size_bytes")
+            if artifact.get("size_bytes") is not None
+            else payload.get("sizeBytes")
+            if payload.get("sizeBytes") is not None
+            else artifact.get("sizeBytes")
+        )
+    except (TypeError, ValueError):
+        size_bytes = 0
+    required = 1 if artifact.get("required") is True or payload.get("required") is True else 0
+    storage_url = f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"
+    storage_json = json.dumps(
+        {
+            "type": "server_artifact",
+            "url": storage_url,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    inline_json = review_artifact_inline_json(payload, media_type, size_bytes)
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -4760,21 +5345,58 @@ def store_review_run_artifact(
             if str(job["status"] or "") not in {"claimed", "running", "uploading_result"}:
                 return {"accepted": False, "conflict": True, "reason": "job_not_accepting_artifacts"}
             existing = connection.execute(
-                "SELECT payload FROM job_result_artifacts WHERE job_id = ? AND attempt_id = ? AND kind = ?",
-                (job_id, attempt_id, kind),
+                "SELECT payload_json FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
+                (run_id, artifact_id),
             ).fetchone()
             if existing:
-                if str(existing["payload"] or "") == payload_text:
-                    return {"accepted": True, "duplicate": True, "artifactId": artifact_id}
+                if str(existing["payload_json"] or "") == payload_text:
+                    return {
+                        "accepted": True,
+                        "duplicate": True,
+                        "artifactId": artifact_id,
+                        "runId": run_id,
+                        "storage": json.loads(storage_json),
+                    }
                 return {"accepted": False, "conflict": True, "reason": "artifact_payload_conflict"}
             connection.execute(
                 """
-                INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO review_artifacts (
+                    id, artifact_id, run_id, job_id, attempt_id, kind, name,
+                    media_type, schema_id, schema_version, required, sha256,
+                    size_bytes, storage_url, storage_json, inline_json,
+                    payload_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (stable_id("art", f"{job_id}:{attempt_id}:{artifact_id}"), job_id, attempt_id, kind, payload_text, current_time),
+                (
+                    stable_id("art", f"{run_id}:{artifact_id}"),
+                    artifact_id,
+                    run_id,
+                    job_id,
+                    attempt_id,
+                    kind,
+                    name,
+                    media_type,
+                    schema_id,
+                    schema_version,
+                    required,
+                    sha256,
+                    size_bytes,
+                    storage_url,
+                    storage_json,
+                    inline_json,
+                    payload_text,
+                    current_time,
+                    current_time,
+                ),
             )
-    return {"accepted": True, "duplicate": False, "artifactId": artifact_id}
+    return {
+        "accepted": True,
+        "duplicate": False,
+        "artifactId": artifact_id,
+        "runId": run_id,
+        "storage": json.loads(storage_json),
+    }
 
 
 def list_review_run_artifacts(job_id: str, attempt_id: str) -> list[dict[str, Any]]:
@@ -4783,21 +5405,61 @@ def list_review_run_artifacts(job_id: str, attempt_id: str) -> list[dict[str, An
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             """
-            SELECT kind, payload FROM job_result_artifacts
-            WHERE job_id = ? AND attempt_id = ? AND kind LIKE 'review_artifact:%'
-            ORDER BY kind
+            SELECT * FROM review_artifacts
+            WHERE job_id = ? AND attempt_id = ?
+            ORDER BY artifact_id
             """,
             (str(job_id or "").strip(), str(attempt_id or "").strip()),
         ).fetchall()
     artifacts = []
     for row in rows:
         try:
-            payload = json.loads(row["payload"])
+            payload = json.loads(row["payload_json"])
         except (TypeError, json.JSONDecodeError):
-            continue
+            payload = {}
         if isinstance(payload, dict):
             artifacts.append(payload)
     return artifacts
+
+
+def list_review_run_artifact_records(run_id: str) -> list[dict[str, Any]]:
+    ensure_initialized()
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT
+                artifact_id, run_id, job_id, attempt_id, kind, name, media_type,
+                schema_id, schema_version, required, sha256, size_bytes,
+                storage_url, storage_json, inline_json, created_at, updated_at
+            FROM review_artifacts
+            WHERE run_id = ?
+            ORDER BY required DESC, kind, artifact_id
+            """,
+            (normalized_run_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_review_run_artifact(run_id: str, artifact_id: str) -> dict[str, Any] | None:
+    ensure_initialized()
+    normalized_run_id = str(run_id or "").strip()
+    normalized_artifact_id = str(artifact_id or "").strip()
+    if not normalized_run_id or not normalized_artifact_id:
+        return None
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT * FROM review_artifacts
+            WHERE run_id = ? AND artifact_id = ?
+            """,
+            (normalized_run_id, normalized_artifact_id),
+        ).fetchone()
+        return row_to_dict(row)
 
 def record_scan_job_result(
     job_id: str,
@@ -5524,4 +6186,3 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
-

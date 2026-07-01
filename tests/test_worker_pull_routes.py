@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -133,6 +135,9 @@ def current_review_worker_job_for_test() -> dict:
         for name in ("remaining_job", "second_job", "claimed_job", "claimed", "job", "first_job"):
             value = caller.f_locals.get(name)
             if isinstance(value, dict) and value.get("job_id"):
+                stored = db.get_scan_job(str(value.get("job_id")))
+                if stored:
+                    return {**value, **stored}
                 return value
         caller = caller.f_back
     connection = app.db.connect()
@@ -165,6 +170,108 @@ def audit_issue_card(title: str, **overrides: object) -> dict:
     card.update(overrides)
     return card
 
+
+def protocol_artifact_item(
+    run_id: str,
+    artifact_id: str,
+    kind: str,
+    name: str,
+    media_type: str,
+    schema_id: str,
+    *,
+    required: bool = True,
+) -> dict:
+    content = f"{kind}:{name}\n".encode("utf-8")
+    return {
+        "artifact_id": artifact_id,
+        "kind": kind,
+        "name": name,
+        "media_type": media_type,
+        "schema_id": schema_id,
+        "schema_version": "v1",
+        "required": required,
+        "storage": {"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"},
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "size_bytes": len(content),
+    }
+
+
+def protocol_artifact_manifest(run_id: str, execution_status: str) -> list[dict]:
+    if execution_status == "completed":
+        return [
+            protocol_artifact_item(run_id, "art_report_human", "report.human", "report.md", "text/markdown", "human-markdown-report"),
+            protocol_artifact_item(run_id, "art_report_agent", "report.agent", "report.agent.json", "application/json", "codex-full-repo-review"),
+            protocol_artifact_item(run_id, "art_coverage", "coverage", "coverage.json", "application/json", "coverage"),
+            protocol_artifact_item(run_id, "art_qa", "qa", "qa.json", "application/json", "qa-gate"),
+            protocol_artifact_item(run_id, "art_token_budget", "token_budget", "token-budget.json", "application/json", "token-budget"),
+        ]
+    return [
+        protocol_artifact_item(run_id, "art_worker_log", "worker_log", "worker.log.jsonl", "application/jsonl", "worker-log"),
+        protocol_artifact_item(run_id, "art_qa", "qa", "qa.json", "application/json", "qa-gate"),
+        protocol_artifact_item(run_id, "art_error_report", "error_report", "error-report.json", "application/json", "error-report"),
+    ]
+
+
+def upload_protocol_artifacts_for_test(job: dict, manifest: list[dict]) -> None:
+    job_id = str(job.get("job_id") or "").strip()
+    worker_id = str(job.get("claimed_by_worker_id") or "wk_1").strip()
+    run_id = str(job.get("run_id") or f"run_{job_id}").strip()
+    if not job_id or not worker_id:
+        return
+    attempt_id = f"{worker_id}-{int(job.get('attempt') or 1)}"
+    for item in manifest:
+        existing = db.get_review_run_artifact(run_id, item["artifact_id"])
+        if existing:
+            item["sha256"] = existing["sha256"]
+            item["size_bytes"] = existing["size_bytes"]
+            if existing.get("storage_json"):
+                item["storage"] = json.loads(existing["storage_json"])
+            continue
+        db.store_review_run_artifact(
+            job_id=job_id,
+            attempt_id=attempt_id,
+            artifact_id=item["artifact_id"],
+            payload={
+                "run_id": run_id,
+                "artifact_id": item["artifact_id"],
+                "sha256": item["sha256"],
+                "size_bytes": item["size_bytes"],
+                "artifact": dict(item),
+            },
+        )
+
+
+def protocol_summary(findings: list[dict], execution_status: str) -> dict:
+    def count(severity: str) -> int:
+        return sum(1 for finding in findings if str(finding.get("severity") or "").lower() == severity)
+
+    return {
+        "overall_risk": "unknown",
+        "result_status": "complete" if execution_status == "completed" else "incomplete",
+        "finding_counts": {
+            "confirmed_critical": count("critical"),
+            "confirmed_high": count("high"),
+            "confirmed_medium": count("medium"),
+            "confirmed_low": count("low"),
+            "plausible": 0,
+            "weak_appendix": 0,
+            "disproven": 0,
+            "suppressed": 0,
+        },
+        "coverage": {
+            "source_like_files_total": 0,
+            "deep_reviewed_files": 0,
+            "standard_reviewed_files": 0,
+            "light_reviewed_files": 0,
+            "inventory_only_files": 0,
+            "skipped_files": 0,
+            "intent_tests_planned": 0,
+            "intent_tests_run": 0,
+        },
+        "top_findings": findings,
+    }
+
+
 def audit_result_fields(
     issue_cards: list[dict],
     verification_results: list[dict] | None = None,
@@ -176,6 +283,8 @@ def audit_result_fields(
     run_id = str(job.get("run_id") or f"run_{job_id}")
     lease_id = str(job.get("lease_id") or f"lease_{job_id}")
     worker_id = str(job.get("claimed_by_worker_id") or "wk_1")
+    manifest = protocol_artifact_manifest(run_id, execution_status)
+    upload_protocol_artifacts_for_test(job, manifest)
     results = verification_results or []
     results_by_issue: dict[str, list[dict]] = {}
     for result in results:
@@ -201,9 +310,15 @@ def audit_result_fields(
                 "engine": {"type": "codex_app_server", "app_server_transport": "stdio"},
             },
             "execution": {"status": execution_status, "review_mode": "full_repo"},
+            "progress_final": {
+                "overall_percent": 100.0 if execution_status == "completed" else 41.5,
+                "current_phase": "submit_result_envelope" if execution_status == "completed" else "failure_handling",
+                "status": "completed" if execution_status == "completed" else execution_status,
+                "message": "terminal progress",
+            },
             "quality_gate": {"status": "pass" if execution_status == "completed" else "fail", "errors": [], "warnings": []},
-            "artifact_manifest": [],
-            "summary": {"top_findings": findings},
+            "artifact_manifest": manifest,
+            "summary": protocol_summary(findings, execution_status),
         }
     }
 
@@ -315,6 +430,412 @@ class WorkerPullRoutesTest(unittest.TestCase):
             prompt,
         )
         self.assertEqual(payload["readingGuide"]["forAgentFix"], "agentFixPrompt")
+
+    def test_v1_worker_protocol_routes_lease_events_artifacts_and_result(self) -> None:
+        scan = {
+            "id": "sc_v1_protocol",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.USERS = {
+            "usr_1": {"id": "usr_1", "name": "Owner", "providers": []},
+            "usr_2": {"id": "usr_2", "name": "Other", "providers": []},
+        }
+        app.SESSIONS = {
+            "ses_owner": {"id": "ses_owner", "userId": "usr_1", "createdAt": app.now(), "expiresAt": app.now() + 3600},
+            "ses_other": {"id": "ses_other", "userId": "usr_2", "createdAt": app.now(), "expiresAt": app.now() + 3600},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        register = RouteHarness(
+            "/v1/workers/register",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker": {
+                    "worker_id": "wk_1",
+                    "worker_group": "default",
+                    "worker_version": "0.1.0",
+                    "hostname": "worker-host",
+                    "concurrency": {
+                        "max_active_jobs": 1,
+                        "maintains_local_queue": False,
+                        "prefetch_jobs": False,
+                    },
+                    "platform": {"os": "linux", "arch": "x86_64"},
+                    "capabilities": {
+                        "codex_app_server": True,
+                        "full_repo_scan": True,
+                        "progress_events": True,
+                        "cancellation": True,
+                        "intent_test_validation": True,
+                        "max_active_jobs": 1,
+                    },
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(register, "POST")
+
+        self.assertEqual(register.status, HTTPStatus.OK)
+        self.assertTrue(register.payload["accepted"])
+        self.assertEqual(register.payload["accepted_protocol_versions"], ["review-worker-protocol/v1"])
+        self.assertEqual(register.payload["worker"]["worker_id"], "wk_1")
+        self.assertEqual(register.payload["token_delivery"], "preissued")
+        self.assertNotIn("worker_token", register.payload)
+        stored_worker = db.get_worker("wk_1")
+        self.assertEqual(stored_worker["protocol_version"], "review-worker-protocol/v1")
+        self.assertEqual(stored_worker["worker_group"], "default")
+        self.assertEqual(json.loads(stored_worker["registration_json"])["worker"]["worker_id"], "wk_1")
+        self.assertTrue(json.loads(stored_worker["worker_capabilities"])["progress_events"])
+
+        lease = RouteHarness(
+            "/v1/workers/wk_1/lease",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker_id": "wk_1",
+                "capacity": {
+                    "available_job_slots": 1,
+                    "active_jobs": 0,
+                    "maintains_local_queue": False,
+                    "local_queue_depth": 0,
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        claimed = lease.payload["job"]
+        run_id = lease.payload["lease"]["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        self.assertEqual(claimed["job_type"], "repo_review.full_scan")
+        self.assertEqual(claimed["priority"], "normal")
+        self.assertEqual(claimed["repository"]["provider"], "github")
+        self.assertEqual(claimed["repository"]["owner"], "acme")
+        self.assertEqual(claimed["repository"]["name"], "api")
+        self.assertEqual(claimed["repository"]["commit_sha"], "abc1234")
+        self.assertEqual(claimed["model_profile"]["default_model"], claimed["agentConfig"]["codex"]["model"])
+        self.assertEqual(claimed["model_profile"]["core_effort"], claimed["agentConfig"]["codex"]["reasoningEffort"])
+        self.assertEqual(claimed["model_profile"]["non_core_effort"], "medium")
+        self.assertEqual(claimed["review_request"]["mode"], "full_repo")
+        self.assertEqual(claimed["review_request"]["profile"], "standard")
+        self.assertFalse(claimed["review_request"]["policy"]["allow_source_modification"])
+        self.assertFalse(claimed["review_request"]["policy"]["allow_dependency_install"])
+        self.assertFalse(claimed["review_request"]["policy"]["allow_network"])
+        self.assertTrue(claimed["review_request"]["policy"]["helper_scripts_standard_library_only"])
+        self.assertEqual(
+            claimed["review_request"]["policy"]["turn_timeout_seconds"],
+            claimed["agentConfig"]["reviewWorker"]["turnTimeoutSeconds"],
+        )
+        self.assertEqual(
+            claimed["review_request"]["budget"]["max_wall_time_seconds"],
+            claimed["agentConfig"]["reviewWorker"]["scanDeadlineSeconds"],
+        )
+        self.assertEqual(
+            claimed["review_request"]["policy"]["intent_test_validation"]["max_tests_per_run"],
+            20,
+        )
+        self.assertEqual(claimed["run_id"], run_id)
+        self.assertEqual(claimed["lease_id"], lease.payload["lease"]["lease_id"])
+        claimed_run = db.get_review_run(run_id)
+        self.assertEqual(claimed_run["job_id"], claimed["job_id"])
+        self.assertEqual(claimed_run["worker_id"], "wk_1")
+        self.assertEqual(claimed_run["status"], "leased")
+        self.assertEqual(claimed_run["protocol_version"], "review-worker-protocol/v1")
+
+        heartbeat = RouteHarness(
+            "/v1/workers/wk_1/heartbeat",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker_id": "wk_1",
+                "status": "busy",
+                "active_run_id": run_id,
+                "concurrency": {
+                    "max_active_jobs": 1,
+                    "active_jobs": 1,
+                    "available_job_slots": 0,
+                    "maintains_local_queue": False,
+                    "local_queue_depth": 0,
+                },
+                "codex_app_server": {"status": "ready", "transport": "stdio", "active_thread_id": "thr_1"},
+                "progress": {
+                    "run_id": run_id,
+                    "overall_percent": 12.5,
+                    "current_phase": "repo_map",
+                    "current_phase_status": "running",
+                    "current_phase_percent": 50.0,
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertTrue(heartbeat.payload["ack"])
+        self.assertEqual(heartbeat.payload["commands"], [])
+        self.assertEqual(db.get_worker("wk_1")["running_jobs"], 1)
+        progress_after_heartbeat = json.loads(db.get_review_run(run_id)["progress_json"])
+        self.assertEqual(progress_after_heartbeat["event_type"], "progress_updated")
+        self.assertEqual(progress_after_heartbeat["phase"], "repo_map")
+        self.assertEqual(progress_after_heartbeat["overall_percent"], 12)
+        self.assertEqual(scan["progress"], 12.5)
+        self.assertEqual(scan["phase"], "repo_map")
+
+        event = RouteHarness(
+            f"/v1/review-runs/{run_id}/events",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "run_id": run_id,
+                "worker_id": "wk_1",
+                "sequence": 1,
+                "timestamp": "2026-07-01T10:22:00Z",
+                "event_type": "phase_started",
+                "phase": "reviewer_fanout",
+                "message": "Reviewer fanout started.",
+                "progress": {"overall_percent": 42.0, "current_phase_percent": 0, "status": "running"},
+                "data": {"bundle_count": 3},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(event, "POST")
+
+        self.assertEqual(event.status, HTTPStatus.OK)
+        self.assertTrue(event.payload["ack"])
+        self.assertEqual(event.payload["sequence"], 1)
+        self.assertEqual(app.SCANS[0]["phase"], "reviewer_fanout")
+        self.assertEqual(app.SCANS[0]["progress"], 42)
+        self.assertEqual(app.SCANS[0]["progressLogs"][0]["logsSummary"], "phase_started")
+        stored_events = db.list_review_run_events(run_id)
+        self.assertEqual(len(stored_events), 1)
+        self.assertEqual(stored_events[0]["sequence"], 1)
+        self.assertEqual(stored_events[0]["event_type"], "phase_started")
+        self.assertEqual(json.loads(stored_events[0]["payload"])["data"]["bundle_count"], 3)
+        event_run = db.get_review_run(run_id)
+        self.assertEqual(event_run["status"], "running")
+        self.assertEqual(json.loads(event_run["progress_json"])["sequence"], 1)
+        self.assertEqual(json.loads(event_run["progress_json"])["phase"], "reviewer_fanout")
+
+        duplicate_event = RouteHarness(
+            f"/v1/review-runs/{run_id}/events",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "run_id": run_id,
+                "worker_id": "wk_1",
+                "sequence": 1,
+                "timestamp": "2026-07-01T10:23:00Z",
+                "event_type": "progress_updated",
+                "phase": "reviewer_fanout",
+                "message": "Duplicate sequence.",
+                "progress": {"overall_percent": 43.0, "current_phase_percent": 10, "status": "running"},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(duplicate_event, "POST")
+
+        self.assertEqual(duplicate_event.status, HTTPStatus.CONFLICT)
+        self.assertIn("monotonic", duplicate_event.payload["message"])
+        self.assertEqual(len(db.list_review_run_events(run_id)), 1)
+
+        unsupported_event = RouteHarness(
+            f"/v1/review-runs/{run_id}/events",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "run_id": run_id,
+                "worker_id": "wk_1",
+                "sequence": 2,
+                "timestamp": "2026-07-01T10:24:00Z",
+                "event_type": "legacy_graph_generated",
+                "phase": "reviewer_fanout",
+                "message": "Unsupported event type.",
+                "progress": {"overall_percent": 44.0, "current_phase_percent": 12, "status": "running"},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(unsupported_event, "POST")
+
+        self.assertEqual(unsupported_event.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(len(db.list_review_run_events(run_id)), 1)
+
+        content = b"{}"
+        artifact = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": {
+                    "artifact_id": "art_report_agent",
+                    "kind": "report.agent",
+                    "name": "report.agent.json",
+                    "media_type": "application/json",
+                    "schema_id": "codex-full-repo-review",
+                    "schema_version": "v1",
+                    "sha256": __import__("hashlib").sha256(content).hexdigest(),
+                    "size_bytes": len(content),
+                    "required": False,
+                },
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(artifact, "POST")
+
+        self.assertEqual(artifact.status, HTTPStatus.OK)
+        self.assertTrue(artifact.payload["accepted"])
+        self.assertEqual(artifact.payload["storage"]["url"], f"/v1/review-runs/{run_id}/artifacts/art_report_agent")
+        stored_artifact = db.get_review_run_artifact(run_id, "art_report_agent")
+        self.assertEqual(stored_artifact["artifact_id"], "art_report_agent")
+        self.assertEqual(stored_artifact["run_id"], run_id)
+        self.assertEqual(stored_artifact["kind"], "report.agent")
+        self.assertEqual(stored_artifact["sha256"], __import__("hashlib").sha256(content).hexdigest())
+        self.assertEqual(stored_artifact["size_bytes"], len(content))
+        self.assertEqual(stored_artifact["storage_url"], f"/v1/review-runs/{run_id}/artifacts/art_report_agent")
+        self.assertEqual(json.loads(stored_artifact["storage_json"])["url"], f"/v1/review-runs/{run_id}/artifacts/art_report_agent")
+        self.assertEqual(json.loads(stored_artifact["inline_json"]), {})
+        listed_artifacts = db.list_review_run_artifacts(claimed["job_id"], attempt_id)
+        self.assertEqual(listed_artifacts[0]["artifact_id"], "art_report_agent")
+        self.assertEqual(listed_artifacts[0]["run_id"], run_id)
+        with db.connect() as connection:
+            legacy_artifacts = connection.execute(
+                "SELECT COUNT(*) FROM job_result_artifacts WHERE kind LIKE 'review_artifact:%'"
+            ).fetchone()[0]
+        self.assertEqual(legacy_artifacts, 0)
+
+        duplicate_artifact = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": {
+                    "artifact_id": "art_report_agent",
+                    "kind": "report.agent",
+                    "name": "report.agent.json",
+                    "media_type": "application/json",
+                    "schema_id": "codex-full-repo-review",
+                    "schema_version": "v1",
+                    "sha256": __import__("hashlib").sha256(content).hexdigest(),
+                    "size_bytes": len(content),
+                    "required": False,
+                },
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(duplicate_artifact, "POST")
+
+        self.assertEqual(duplicate_artifact.status, HTTPStatus.OK)
+        self.assertTrue(duplicate_artifact.payload["duplicate"])
+
+        artifact_url = f"/v1/review-runs/{run_id}/artifacts/art_report_agent"
+        download = RouteHarness(artifact_url, headers={"Cookie": "pw_session=ses_owner"})
+        app.PullwiseHandler.route(download, "GET")
+
+        self.assertEqual(download.status, HTTPStatus.OK)
+        self.assertEqual(download.binary_payload, content)
+        self.assertEqual(download.content_type, "application/json")
+        self.assertEqual(download.headers_out["X-Pullwise-Artifact-Id"], "art_report_agent")
+        self.assertEqual(download.headers_out["ETag"], f'"{__import__("hashlib").sha256(content).hexdigest()}"')
+        self.assertIn("report.agent.json", download.headers_out["Content-Disposition"])
+
+        unauthenticated_download = RouteHarness(artifact_url)
+        app.PullwiseHandler.route(unauthenticated_download, "GET")
+        self.assertEqual(unauthenticated_download.status, HTTPStatus.UNAUTHORIZED)
+
+        other_user_download = RouteHarness(artifact_url, headers={"Cookie": "pw_session=ses_other"})
+        app.PullwiseHandler.route(other_user_download, "GET")
+        self.assertEqual(other_user_download.status, HTTPStatus.NOT_FOUND)
+
+        result = RouteHarness(
+            f"/v1/review-runs/{run_id}/result",
+            {
+                "status": "done",
+                "attempt_id": attempt_id,
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertTrue(result.payload["accepted"])
+        self.assertEqual(result.payload["reviewRun"]["run_id"], run_id)
+        self.assertEqual(result.payload["reviewRun"]["status"], "completed")
+        self.assertEqual(result.payload["reviewRun"]["result_status"], "done")
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "done")
+        finished_run = db.get_review_run(run_id)
+        self.assertEqual(finished_run["status"], "completed")
+        self.assertEqual(finished_run["engine_type"], "codex_app_server")
+        self.assertEqual(json.loads(finished_run["summary_json"])["top_findings"], [])
+        self.assertEqual(json.loads(finished_run["quality_gate_json"])["status"], "pass")
+        self.assertEqual(json.loads(finished_run["raw_result_envelope_json"])["message_type"], "review_run_result")
+
+        scan_detail = RouteHarness(f"/scans/{scan['id']}", headers={"Cookie": "pw_session=ses_owner"})
+        app.PullwiseHandler.route(scan_detail, "GET")
+
+        self.assertEqual(scan_detail.status, HTTPStatus.OK)
+        review_run_payload = scan_detail.payload["reviewRun"]
+        self.assertEqual(review_run_payload["runId"], run_id)
+        self.assertEqual(review_run_payload["jobId"], claimed["job_id"])
+        self.assertEqual(review_run_payload["status"], "completed")
+        self.assertEqual(review_run_payload["resultStatus"], "done")
+        self.assertEqual(review_run_payload["summary"]["top_findings"], [])
+        self.assertEqual(review_run_payload["qualityGate"]["status"], "pass")
+        self.assertEqual(review_run_payload["artifactCount"], 5)
+        artifacts_by_id = {item["artifactId"]: item for item in review_run_payload["artifacts"]}
+        self.assertEqual(artifacts_by_id["art_report_agent"]["storage"]["url"], artifact_url)
+        self.assertNotIn("content_base64", json.dumps(artifacts_by_id["art_report_agent"]))
+
+    def test_v1_worker_register_rejects_mismatch_prefetch_and_non_linux(self) -> None:
+        mismatched = RouteHarness(
+            "/v1/workers/register",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker": {
+                    "worker_id": "wk_other",
+                    "concurrency": {"max_active_jobs": 1, "maintains_local_queue": False, "prefetch_jobs": False},
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(mismatched, "POST")
+        self.assertEqual(mismatched.status, HTTPStatus.FORBIDDEN)
+
+        prefetch = RouteHarness(
+            "/v1/workers/register",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker": {
+                    "worker_id": "wk_1",
+                    "concurrency": {"max_active_jobs": 1, "maintains_local_queue": False, "prefetch_jobs": True},
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(prefetch, "POST")
+        self.assertEqual(prefetch.status, HTTPStatus.BAD_REQUEST)
+
+        non_linux = RouteHarness(
+            "/v1/workers/register",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker": {
+                    "worker_id": "wk_1",
+                    "concurrency": {"max_active_jobs": 1, "maintains_local_queue": False, "prefetch_jobs": False},
+                    "platform": {"os": "windows", "arch": "x86_64"},
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(non_linux, "POST")
+        self.assertEqual(non_linux.status, HTTPStatus.BAD_REQUEST)
 
     def create_registry_worker(self, worker_id: str) -> tuple[dict, str]:
         worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})

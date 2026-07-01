@@ -27,6 +27,75 @@ def legacy_result_fields(title: str) -> dict:
     }
 
 
+def completed_protocol_manifest(run_id: str) -> list[dict]:
+    items = [
+        ("art_report_human", "report.human", "report.md", "text/markdown", "human-markdown-report"),
+        ("art_report_agent", "report.agent", "report.agent.json", "application/json", "codex-full-repo-review"),
+        ("art_coverage", "coverage", "coverage.json", "application/json", "coverage"),
+        ("art_qa", "qa", "qa.json", "application/json", "qa-gate"),
+        ("art_token_budget", "token_budget", "token-budget.json", "application/json", "token-budget"),
+    ]
+    return [
+        {
+            "artifact_id": artifact_id,
+            "kind": kind,
+            "name": name,
+            "media_type": media_type,
+            "schema_id": schema_id,
+            "schema_version": "v1",
+            "required": True,
+            "storage": {"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"},
+            "sha256": "abc",
+            "size_bytes": 3,
+        }
+        for artifact_id, kind, name, media_type, schema_id in items
+    ]
+
+
+def store_completed_protocol_artifacts(job: dict, attempt_id: str, manifest: list[dict]) -> None:
+    for item in manifest:
+        db.store_review_run_artifact(
+            job_id=job["job_id"],
+            attempt_id=attempt_id,
+            artifact_id=item["artifact_id"],
+            payload={
+                "run_id": job.get("run_id") or f"run_{job['job_id']}",
+                "artifact_id": item["artifact_id"],
+                "sha256": item["sha256"],
+                "size_bytes": item["size_bytes"],
+            },
+        )
+
+
+def completed_protocol_summary(top_findings: list[dict] | None = None) -> dict:
+    findings = top_findings or []
+    return {
+        "overall_risk": "unknown",
+        "result_status": "complete",
+        "finding_counts": {
+            "confirmed_critical": 0,
+            "confirmed_high": 0,
+            "confirmed_medium": 0,
+            "confirmed_low": 0,
+            "plausible": 0,
+            "weak_appendix": 0,
+            "disproven": 0,
+            "suppressed": 0,
+        },
+        "coverage": {
+            "source_like_files_total": 0,
+            "deep_reviewed_files": 0,
+            "standard_reviewed_files": 0,
+            "light_reviewed_files": 0,
+            "inventory_only_files": 0,
+            "skipped_files": 0,
+            "intent_tests_planned": 0,
+            "intent_tests_run": 0,
+        },
+        "top_findings": findings,
+    }
+
+
 class ScanRecoveryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -423,14 +492,17 @@ class ScanRecoveryTest(unittest.TestCase):
             }
         )
         claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=timestamp)
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        manifest = completed_protocol_manifest("run_job_done_in_db")
+        store_completed_protocol_artifacts(job, attempt_id, manifest)
         db.record_scan_job_result(
             job["job_id"],
-            attempt_id=f"wk_1-{claimed['attempt']}",
+            attempt_id=attempt_id,
             status="done",
             result_checksum="checksum-done",
             payload={
                 "status": "done",
-                "attempt_id": f"wk_1-{claimed['attempt']}",
+                "attempt_id": attempt_id,
                 "result_checksum": "checksum-done",
                 "reviewWorkerProtocol": {
                     "protocol_version": "review-worker-protocol/v1",
@@ -442,9 +514,15 @@ class ScanRecoveryTest(unittest.TestCase):
                     },
                     "worker": {"worker_id": "wk_1"},
                     "execution": {"status": "completed"},
+                    "progress_final": {
+                        "overall_percent": 100.0,
+                        "current_phase": "submit_result_envelope",
+                        "status": "completed",
+                        "message": "terminal progress",
+                    },
                     "quality_gate": {"status": "pass"},
-                    "summary": {
-                        "top_findings": [
+                    "summary": completed_protocol_summary(
+                        [
                             {
                                 "id": "issue-recovered",
                                 "title": "Recovered finding",
@@ -454,8 +532,8 @@ class ScanRecoveryTest(unittest.TestCase):
                                 "recommendation": "Fix the recovered issue.",
                             }
                         ]
-                    },
-                    "artifact_manifest": [],
+                    ),
+                    "artifact_manifest": manifest,
                 },                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
                 "duration_ms": 123,
             },

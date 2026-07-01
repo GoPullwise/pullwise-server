@@ -255,6 +255,77 @@ def public_optional_int(value: object) -> int | None:
     return candidate
 
 
+def public_issue_reproduction(issue: dict) -> dict:
+    raw = issue.get("reproduction") if isinstance(issue.get("reproduction"), dict) else {}
+    commands = review._safe_text_list(raw.get("commands"))
+    command = public_issue_text(raw.get("command"))
+    if command and command not in commands:
+        commands.append(command)
+    payload: dict[str, object] = {}
+    if commands:
+        payload["commands"] = commands[:5]
+    for source_key, target_key in (
+        ("input", "input"),
+        ("expected", "expected"),
+        ("actual", "actual"),
+        ("testFile", "testFile"),
+        ("test_file", "testFile"),
+        ("logPath", "logPath"),
+        ("log_path", "logPath"),
+    ):
+        value = review._safe_text_lenient(raw.get(source_key))
+        if value and target_key not in payload:
+            payload[target_key] = value[:2000]
+    return payload
+
+
+def public_issue_reproduction_payload(issue: dict) -> dict:
+    reproduction = public_issue_reproduction(issue)
+    commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
+    return {
+        "commands": commands,
+        "input": public_issue_text(reproduction.get("input")),
+        "expected": public_issue_text(reproduction.get("expected")),
+        "actual": public_issue_text(reproduction.get("actual")),
+        "testFile": public_issue_text(reproduction.get("testFile")),
+        "logPath": public_issue_text(reproduction.get("logPath")),
+    }
+
+
+def public_issue_runtime_evidence_state(issue: dict, evidence: list[dict]) -> dict:
+    reproduction = public_issue_reproduction(issue)
+    has_reproduction_command = bool(reproduction.get("commands"))
+    has_reproduction_output = any(
+        bool(reproduction.get(key)) for key in ("actual", "expected", "input", "testFile", "logPath")
+    )
+    raw_evidence = issue.get("evidence") if isinstance(issue.get("evidence"), list) else []
+    has_raw_output = False
+    for item in raw_evidence:
+        if not isinstance(item, dict):
+            continue
+        evidence_type = public_issue_text(item.get("type")).lower()
+        if evidence_type not in {"runtime_log", "test", "fix_verification"}:
+            continue
+        if review._safe_text_lenient(item.get("output")):
+            has_raw_output = True
+            break
+        if review._safe_text_lenient(item.get("actual")):
+            has_raw_output = True
+            break
+    has_raw_runtime = bool(reproduction.get("testFile") or reproduction.get("logPath")) or any(
+        item.get("type") in {"runtime_log", "test", "fix_verification"}
+        and bool(item.get("logPath") or item.get("file"))
+        for item in evidence
+    )
+    has_runtime_output = has_reproduction_command and (has_raw_output or has_reproduction_output or has_raw_runtime)
+    return {
+        "has_reproduction_command": has_reproduction_command,
+        "has_runtime_output": has_runtime_output,
+        "has_raw_runtime": has_raw_runtime,
+        "reproduction": reproduction,
+    }
+
+
 def public_issue_evidence(
     issue: dict,
     *,
@@ -306,6 +377,30 @@ def public_issue_evidence(
             record["url"] = source_url or github_url
         evidence.append(record)
 
+    reproduction = public_issue_reproduction(issue)
+    has_runtime_evidence = any(item.get("type") in {"runtime_log", "test", "fix_verification"} for item in evidence)
+    if reproduction and not has_runtime_evidence:
+        commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
+        test_file = public_issue_file(reproduction.get("testFile"), issue=issue, job=job)
+        log_path = public_issue_text(reproduction.get("logPath"))
+        summary = (
+            review._safe_text_lenient(reproduction.get("actual"))
+            or review._safe_text_lenient(reproduction.get("expected"))
+            or review._safe_text_lenient(reproduction.get("input"))
+            or "Reproduction details were provided by the worker."
+        )
+        record = {"type": "test" if test_file else "runtime_log", "label": "Reproduction", "summary": summary}
+        if commands:
+            record["command"] = str(commands[0])
+        if test_file:
+            record["file"] = test_file
+        if log_path:
+            record["logPath"] = log_path
+        if reproduction.get("actual"):
+            record["outputRedacted"] = True
+        if any([record.get("command"), record.get("file"), record.get("logPath"), summary]):
+            evidence.append(record)
+
     has_code_location = any(item.get("type") == "code" and item.get("file") for item in evidence)
     if affected_locations and not has_code_location:
         location = affected_locations[0]
@@ -337,12 +432,20 @@ def public_issue_verification_status(
     has_precise_location = any(location.get("file") and location.get("startLine") for location in affected_locations)
     evidence = evidence or public_issue_evidence(issue, affected_locations=affected_locations)
     has_evidence = bool(evidence)
+    runtime_state = public_issue_runtime_evidence_state(issue, evidence)
     has_static_evidence = bool(affected_locations) or any(
         item.get("type") in {"code", "path", "trigger", "documentation", "tool"}
         and any([item.get("file"), item.get("summary"), item.get("command")])
         for item in evidence
     )
-    verified_ready = has_fixed_commit and has_precise_location and has_evidence
+    verified_ready = (
+        has_fixed_commit
+        and has_precise_location
+        and has_evidence
+        and runtime_state["has_reproduction_command"]
+        and runtime_state["has_runtime_output"]
+        and runtime_state["has_raw_runtime"]
+    )
     if status == "verified" and not verified_ready:
         return "static_proof" if has_static_evidence else "potential_risk"
     if status == "static_proof" and not has_static_evidence:
@@ -362,16 +465,7 @@ def public_issue_evidence_checklist(
     evidence: list[dict],
 ) -> list[dict]:
     commit = issue_commit(issue)
-    has_runtime = any(
-        item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and any([item.get("command"), item.get("logPath"), item.get("file"), item.get("exitCode") is not None])
-        for item in evidence
-    )
-    has_raw_runtime = any(
-        item.get("type") in {"runtime_log", "test", "fix_verification"}
-        and bool(item.get("logPath") or item.get("file"))
-        for item in evidence
-    )
+    runtime_state = public_issue_runtime_evidence_state(issue, evidence)
     return [
         {"label": "Fixed commit", "met": bool(GIT_COMMIT_SHA_RE.fullmatch(commit or ""))},
         {
@@ -379,9 +473,9 @@ def public_issue_evidence_checklist(
             "met": any(location.get("file") and location.get("startLine") for location in affected_locations),
         },
         {"label": "Evidence chain", "met": bool(evidence)},
-        {"label": "Validation evidence", "met": bool(evidence)},
-        {"label": "Runtime output", "met": has_runtime},
-        {"label": "Raw log or test", "met": has_raw_runtime},
+        {"label": "Reproduction command", "met": runtime_state["has_reproduction_command"]},
+        {"label": "Runtime output", "met": runtime_state["has_runtime_output"]},
+        {"label": "Raw log or test", "met": runtime_state["has_raw_runtime"]},
     ]
 
 def public_issue_confidence_level(verification_status: str, checklist: list[dict]) -> str:
@@ -473,6 +567,19 @@ def public_issue_evidence_trace(
             if command:
                 append_public_reasoning_item(fix_items, f"Fix verification command: {command}")
 
+    reproduction = public_issue_reproduction(issue)
+    commands = reproduction.get("commands") if isinstance(reproduction.get("commands"), list) else []
+    if commands:
+        append_public_reasoning_item(trigger_items, f"Reproduction command: {commands[0]}")
+    if reproduction.get("input"):
+        append_public_reasoning_item(trigger_items, f"Reproduction input: {reproduction['input']}")
+    if reproduction.get("actual"):
+        append_public_reasoning_item(runtime_items, f"Observed output: {reproduction['actual']}")
+    if reproduction.get("logPath"):
+        append_public_reasoning_item(runtime_items, f"Worker log: {reproduction['logPath']}")
+    if reproduction.get("testFile"):
+        append_public_reasoning_item(runtime_items, f"Test file: {reproduction['testFile']}")
+
     for item in review._safe_text_list(issue.get("whyNotFalsePositive"))[:4]:
         append_public_reasoning_item(path_items, f"Reachability check: {item}")
 
@@ -496,7 +603,7 @@ def public_issue_evidence_trace(
     return [
         public_issue_trace_stage("code", "Code", code_items, "No code location evidence was captured."),
         public_issue_trace_stage("path", "Path", path_items, "No reachability or data-flow evidence was captured."),
-        public_issue_trace_stage("trigger", "Trigger", trigger_items, "No trigger evidence was captured."),
+        public_issue_trace_stage("trigger", "Trigger", trigger_items, "No trigger input or reproduction command was captured."),
         public_issue_trace_stage("runtime", "Runtime", runtime_items, "No runtime output or test evidence was captured."),
         public_issue_trace_stage("impact", "Impact", impact_items, "No impact statement was captured."),
         public_issue_trace_stage("fix", "Fix", fix_items, "No fix or validation evidence was captured."),
@@ -625,6 +732,7 @@ def issue_payload(issue: dict) -> dict:
         "summary": review._safe_text_lenient(issue.get("summary")) or public_issue_text(issue.get("description")),
         "impact": review._safe_text_lenient(issue.get("impact")),
         "detectionReasoning": review._safe_text_lenient(issue.get("detectionReasoning")),
+        "reproductionPath": public_issue_text(issue.get("reproductionPath") or issue.get("reproduction_path")),
         "verificationStatus": verification_status,
         "verificationSummary": review._safe_text_lenient(issue.get("verificationSummary")),
         "affectedLocations": affected_locations,
@@ -662,6 +770,7 @@ def issue_payload(issue: dict) -> dict:
         "references": review._safe_references(issue.get("references")),
         "createdAt": pull_request_timestamp(issue.get("createdAt")) or 0,
     }
+    payload["reproduction"] = public_issue_reproduction_payload(issue)
     updated_at = pull_request_timestamp(issue.get("updatedAt"))
     if updated_at is not None:
         payload["updatedAt"] = updated_at
