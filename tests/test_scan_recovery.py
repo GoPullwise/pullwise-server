@@ -516,8 +516,31 @@ class ScanRecoveryTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": f"wk_1-{claimed['attempt']}",
                 "result_checksum": "checksum-done",
-                **graph_verified_result_fields("Recovered finding"),
-                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+                "reviewWorkerProtocol": {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "message_type": "review_run_result",
+                    "job": {
+                        "job_id": job["job_id"],
+                        "run_id": "run_job_done_in_db",
+                        "lease_id": "lease_job_done_in_db",
+                    },
+                    "worker": {"worker_id": "wk_1"},
+                    "execution": {"status": "completed"},
+                    "quality_gate": {"status": "pass"},
+                    "summary": {
+                        "top_findings": [
+                            {
+                                "id": "issue-recovered",
+                                "title": "Recovered finding",
+                                "severity": "high",
+                                "location": {"file": "src/app.py", "line": 12},
+                                "description": "Recovered completed worker result.",
+                                "recommendation": "Fix the recovered issue.",
+                            }
+                        ]
+                    },
+                    "artifact_manifest": [],
+                },                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
                 "duration_ms": 123,
             },
         )

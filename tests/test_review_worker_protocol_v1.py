@@ -257,8 +257,9 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         prepared = app.prepare_worker_job_result_state(job, body, status="done", checksum="abc")
 
         self.assertEqual(prepared["review_worker_protocol"], envelope)
-        self.assertEqual(prepared["graph_verified_report"], {})
-        self.assertEqual(prepared["normalized_findings"], [])
+        self.assertNotIn("graph_verified_report", prepared)
+        self.assertEqual(len(prepared["normalized_findings"]), 1)
+        self.assertEqual(prepared["normalized_findings"][0]["title"], "Important issue")
         self.assertEqual(app.worker_result_issue_count(body), 1)
     def test_public_review_worker_protocol_accepts_only_v1_envelope(self) -> None:
         envelope = {

@@ -477,12 +477,7 @@ def worker_result_checksum(body: dict) -> str:
             else body.get("reviewDecisionEvents")
             if isinstance(body.get("reviewDecisionEvents"), list)
             else []
-        ),
-        "graphVerifiedReport": public_graph_verified_report(
-            body.get("graphVerifiedReport"),
-            include_markdown=True,
-            include_debug=True,
-        ),
+        ),
         "reviewWorkerProtocol": review_worker_protocol_envelope(body),
     }
     data = json.dumps(db.to_jsonable(digest_payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -536,20 +531,13 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         job_for_findings["commit"] = resolved_commit
     validate_review_worker_protocol_artifacts(job, body, status=status)
     review_worker_protocol = review_worker_protocol_envelope(body)
-    graph_verified_report = public_graph_verified_report(
-        body.get("graphVerifiedReport"),
-        include_markdown=True,
-        include_debug=True,
-    )
-    if not graph_verified_report and not review_worker_protocol:
+    if not review_worker_protocol:
         raise ValueError("Worker result must include reviewWorkerProtocol.")
-    normalized_findings = []
-    if graph_verified_report:
-        normalized_findings = worker_graph_verified_findings(
-            job_for_findings,
-            graph_verified_report,
-            reserved_ids=worker_issue_reserved_ids(job_for_findings),
-        )
+    normalized_findings = worker_protocol_findings(
+        job_for_findings,
+        review_worker_protocol,
+        reserved_ids=worker_issue_reserved_ids(job_for_findings),
+    )
     deterministic_findings = body.get("deterministicFindings")
     if isinstance(deterministic_findings, list):
         reserved_ids = {finding.get("id") for finding in normalized_findings if isinstance(finding, dict)}
@@ -572,7 +560,6 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         "checksum": checksum,
         "preflight": preflight,
         "resolved_commit": resolved_commit,
-        "graph_verified_report": graph_verified_report,
         "normalized_findings": normalized_findings,
         "summary": summary,
         "effective_agent_config": effective_agent_config,
@@ -598,12 +585,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
     human_report = public_result_human_report(prepared.get("human_report"))
     agent_report = public_result_agent_report(prepared.get("agent_report"))
     reading_guide = public_result_reading_guide(prepared.get("reading_guide"))
-    error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
-    graph_verified_report = public_graph_verified_report(
-        prepared.get("graph_verified_report"),
-        include_markdown=True,
-        include_debug=True,
-    )
+    error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
     review_worker_protocol = public_review_worker_protocol(prepared.get("review_worker_protocol"))
     completed_at = pull_request_timestamp(prepared.get("completed_at")) or now()
     scan = memory_scan_by_id(job.get("scan_id"))
@@ -655,10 +637,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["readingGuide"] = reading_guide
         else:
             scan.pop("readingGuide", None)
-        if graph_verified_report:
-            scan["graphVerifiedReport"] = graph_verified_report
-        else:
-            scan.pop("graphVerifiedReport", None)
+        scan.pop("graphVerifiedReport", None)
         if review_worker_protocol:
             scan["reviewWorkerProtocol"] = review_worker_protocol
         else:
@@ -752,13 +731,8 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     last_attempt_id = clean_github_access_text(job.get("last_attempt_id"))
     if attempt_id != expected_attempt_id and attempt_id != last_attempt_id:
         return {"accepted": False, "conflict": True}
-    graph_verified_report = public_graph_verified_report(
-        body.get("graphVerifiedReport"),
-        include_markdown=True,
-        include_debug=True,
-    )
     review_worker_protocol = review_worker_protocol_envelope(body)
-    if not graph_verified_report and not review_worker_protocol:
+    if not review_worker_protocol:
         raise ValueError("Worker result must include reviewWorkerProtocol.")
     checksum = worker_result_checksum(body)
     record_result = db.record_scan_job_result(
@@ -833,9 +807,6 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
 def worker_result_issue_count(body: dict) -> int:
     if not isinstance(body, dict):
         return 0
-    report = public_graph_verified_report(body.get("graphVerifiedReport"))
-    if report:
-        return public_scan_count(report.get("confirmedCount"))
     envelope = review_worker_protocol_envelope(body)
     summary = envelope.get("summary") if isinstance(envelope.get("summary"), dict) else {}
     top_findings = summary.get("top_findings") if isinstance(summary.get("top_findings"), list) else []
@@ -983,327 +954,48 @@ def unique_issue_id(base_id: object, used_ids: set[str]) -> str:
         suffix += 1
 
 
-def worker_graph_verified_findings(job: dict, report: dict, *, reserved_ids: set[str] | None = None) -> list[dict]:
-    final_json = report.get("finalJson") if isinstance(report.get("finalJson"), dict) else {}
-    confirmed = final_json.get("confirmed") if isinstance(final_json.get("confirmed"), list) else []
+def worker_protocol_findings(job: dict, envelope: dict, *, reserved_ids: set[str] | None = None) -> list[dict]:
+    summary = envelope.get("summary") if isinstance(envelope.get("summary"), dict) else {}
+    top_findings = summary.get("top_findings") if isinstance(summary.get("top_findings"), list) else []
     used_issue_ids = set(reserved_ids or set())
-    findings = []
-    for index, item in enumerate(confirmed):
+    findings: list[dict] = []
+    for item in top_findings:
         if not isinstance(item, dict):
             continue
-        issue = worker_graph_verified_item_to_finding(job, report, item, index)
-        if not issue:
-            continue
+        issue = worker_finding_payload(job, worker_protocol_finding_source(item), len(findings))
         issue["id"] = unique_issue_id(issue.get("id"), used_issue_ids)
         findings.append(issue)
     return findings
 
 
-def worker_graph_verified_proof_type(repro: dict, verification: dict) -> str:
-    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
-    raw = public_issue_text(proof.get("type") or repro.get("proof_type") or verification.get("proof_type")).lower()
-    value = raw.replace("_", "-").strip()
-    if value in {
-        "static",
-        "static-proof",
-        "code-proof",
-        "config-proof",
-        "lifecycle-proof",
-        "security-proof",
-        "documentation-proof",
-        "workflow-proof",
-    }:
-        return "static-proof"
-    if value in {"runtime", "runtime-command", "failing-test", "failing_test"}:
-        return "runtime-command"
-    return value
-
-
-def worker_graph_verified_verification_status(judge: dict, repro: dict, verification: dict) -> str:
-    if worker_graph_verified_proof_type(repro, verification) == "static-proof":
-        return "static_proof"
-    level = public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")).upper()
-    repro_status = public_issue_text(repro.get("status")).lower().replace("-", "_")
-    if repro_status == "reproduced" and level in {"L2", "L3"} and graph_verified_item_has_repro_log_and_exit_code(judge, repro):
-        return "verified"
-    return "static_proof"
-
-
-def worker_graph_verified_confidence_level(verification_status: str, code_evidence: list[dict]) -> str:
-    if verification_status == "verified":
-        return "high"
-    if verification_status == "static_proof" and code_evidence:
-        return "high"
-    return "medium"
-
-
-def worker_graph_verified_reproduction_path(candidate: dict, reproduction: dict) -> str:
-    candidate_path = review._safe_text_lenient(candidate.get("minimal_repro_idea") or candidate.get("reproduction_idea"))
-    if candidate_path:
-        return candidate_path
-    steps = reproduction.get("steps") if isinstance(reproduction.get("steps"), list) else []
-    if steps:
-        return review._safe_text_lenient("Static proof: " + " ".join(str(item) for item in steps[:3]))
-    return ""
-
-
-def worker_graph_verified_item_to_finding(job: dict, report: dict, item: dict, index: int) -> dict:
-    if not graph_verified_report_item_is_public(item):
-        return {}
-    public_item = public_graph_verified_confirmed_item(item)
-    candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
-    judge = item.get("judge") if isinstance(item.get("judge"), dict) else {}
-    repro = item.get("repro") if isinstance(item.get("repro"), dict) else {}
-    verification = item.get("verification") if isinstance(item.get("verification"), dict) else {}
-    graph_evidence = candidate.get("graph_evidence") if isinstance(candidate.get("graph_evidence"), dict) else {}
-    reproduction = worker_graph_verified_reproduction(candidate, judge, repro)
-    code_evidence = worker_graph_verified_code_evidence(candidate.get("evidence"), job=job)
-    locations = worker_graph_verified_locations(code_evidence, job=job)
-    primary = locations[0] if locations else {}
-    proof_type = worker_graph_verified_proof_type(repro, verification)
-    verification_status = worker_graph_verified_verification_status(judge, repro, verification)
-    confidence_level = worker_graph_verified_confidence_level(verification_status, code_evidence)
-    tags = ["graph-verified"]
-    if proof_type == "static-proof":
-        tags.extend(["static-proof", "model-self-certified"])
-    elif proof_type == "runtime-command":
-        tags.append("runtime-reproduced")
-    reproduction_path = worker_graph_verified_reproduction_path(candidate, reproduction)
-    candidate_id = public_issue_text(candidate.get("candidate_id") or candidate.get("issue_id")) or f"candidate_{index + 1}"
-    title = public_issue_text(candidate.get("title")) or review._safe_text_lenient(candidate.get("claim")).split(". ", 1)[0]
-    if not title:
-        title = f"Graph-verified finding {index + 1}"
-    limitations = []
-    limitations.extend(review._safe_text_list(judge.get("limitations")))
-    limitations.extend(review._safe_text_list(repro.get("limitations")))
-    finding = {
-        "id": public_issue_text(candidate.get("issue_id")) or candidate_id,
-        "userId": public_issue_text(job.get("user_id")),
-        "scanId": public_issue_text(job.get("scan_id")),
-        "jobId": public_issue_text(job.get("job_id")),
-        "repo": clean_repository_full_name(job.get("repo")),
-        "branch": clean_github_access_text(job.get("branch")) or "main",
-        "commit": clean_github_access_text(job.get("commit")) or "pending",
-        "status": "open",
-        "createdAt": now(),
-        "graphVerified": True,
-        "candidateId": candidate_id,
-        "dedupeKey": public_issue_text(candidate.get("dedupe_key")),
-        "severity": worker_graph_verified_severity(candidate.get("severity")),
-        "category": review._safe_category(candidate.get("category")) or "Quality",
-        "title": title[:240],
-        "summary": review._safe_text_lenient(candidate.get("claim") or judge.get("reason") or repro.get("summary")),
-        "graphEvidence": graph_evidence,
-        "codeEvidence": code_evidence,
-        "triggerCondition": review._safe_text_lenient(candidate.get("trigger_condition")),
-        "expectedBehavior": review._safe_text_lenient(candidate.get("expected_behavior")),
-        "observedBehavior": (
-            review._safe_text_lenient(worker_graph_verified_observed_behavior(candidate, judge, repro))
-        ),
-        "reproduction": reproduction,
-        "reproductionPath": reproduction_path,
-        "verificationStatus": verification_status,
-        "reportedVerificationStatus": verification_status,
-        "confidenceLevel": confidence_level,
-        "tags": tags,
-        "judgeEvidence": worker_graph_verified_judge_evidence(judge),
-        "reproProof": worker_graph_verified_repro_proof(repro),
-        "verificationLevel": public_issue_text(judge.get("level") or repro.get("level") or verification.get("level")),
-        "safeToShowUser": True,
-        "whyThisMatters": worker_graph_verified_why_this_matters(candidate, code_evidence),
-        "suggestedFixDirection": review._safe_text_lenient(candidate.get("fix_direction") or candidate.get("suggested_fix")),
-        "limitations": list(dict.fromkeys(item for item in limitations if item))[:8],
-        "affectedLocations": locations,
-        "file": public_issue_text(primary.get("file")),
-        "line": public_scan_count(primary.get("startLine")),
-        "graphVerifiedReport": {
-            "runId": public_issue_text(report.get("runId")),
-            "mode": public_issue_text(report.get("mode")),
-            "head": public_issue_text(report.get("head")),
-        },
-    }
-    if public_item:
-        finding["graphVerifiedItem"] = public_item
-    return {key: value for key, value in finding.items() if value not in ("", [], {})}
-
-
-def worker_graph_verified_code_evidence(value: object, *, job: dict | None = None) -> list[dict]:
-    raw_items = value if isinstance(value, list) else []
-    evidence = []
-    for raw_item in raw_items:
-        if not isinstance(raw_item, dict):
-            continue
-        file_path = public_issue_file(raw_item.get("file") or raw_item.get("path"), job=job)
-        lines = graph_verified_evidence_line_text(raw_item)
-        why = review._safe_text_lenient(raw_item.get("why_it_matters") or raw_item.get("summary"))
-        item = {}
-        if file_path:
-            item["file"] = file_path
-        if lines:
-            item["lines"] = lines
-        if why:
-            item["why_it_matters"] = why
-        if item:
-            evidence.append(item)
-        if len(evidence) >= 20:
-            break
-    return evidence
-
-
-def worker_graph_verified_locations(evidence: list[dict], *, job: dict | None = None) -> list[dict]:
-    locations = []
-    seen = set()
-    for item in evidence:
-        if not isinstance(item, dict):
-            continue
-        file_path = public_issue_file(item.get("file"), job=job)
-        if not file_path:
-            continue
-        start_line, end_line = worker_graph_verified_line_range(item)
-        key = (file_path, start_line, end_line)
-        if key in seen:
-            continue
-        seen.add(key)
-        locations.append({"file": file_path, "startLine": start_line, "endLine": end_line})
-    return locations[:10]
-
-def worker_graph_verified_reproduction(candidate: dict, judge: dict, repro: dict) -> dict:
-    commands = []
-    exit_code = None
-    raw_commands = repro.get("commands_run") if isinstance(repro.get("commands_run"), list) else []
-    for item in raw_commands:
-        if isinstance(item, dict):
-            command = public_issue_text(item.get("cmd") or item.get("command"))
-            if command:
-                commands.append(command)
-            if exit_code is None and graph_verified_command_has_exit_code(item):
-                try:
-                    exit_code = int(item.get("exit_code") if "exit_code" in item else item.get("exitCode"))
-                except (TypeError, ValueError):
-                    exit_code = None
-        else:
-            command = public_issue_text(item)
-            if command:
-                commands.append(command)
-    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
-    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
-    if not commands and public_issue_text(evidence_summary.get("command")):
-        commands.append(public_issue_text(evidence_summary.get("command")))
-    log_path = ""
-    for item in raw_commands:
-        if isinstance(item, dict):
-            log_path = public_issue_text(item.get("log_path") or item.get("logPath"))
-            if log_path:
-                break
-    log_path = log_path or public_issue_text(evidence_summary.get("log_path"))
-    steps = review._safe_text_list(
-        proof.get("verification_steps") or proof.get("verificationSteps") or repro.get("verification_steps")
-    )[:8]
-    reproduction = {
-        "commands": list(dict.fromkeys(commands))[:5],
-        "steps": steps,
-        "input": review._safe_text_lenient(candidate.get("trigger_condition")),
-        "expected": review._safe_text_lenient(proof.get("expected") or candidate.get("expected_behavior")),
-        "actual": review._safe_text_lenient(
-            proof.get("actual")
-            or evidence_summary.get("observable")
-            or repro.get("summary")
-            or candidate.get("actual_behavior_hypothesis")
-        ),
-        "logPath": log_path,
-    }
-    if exit_code is not None:
-        reproduction["exitCode"] = exit_code
-    return reproduction
-
-def worker_graph_verified_judge_evidence(judge: dict) -> dict:
-    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
-    payload = {
-        "status": public_issue_text(judge.get("status")),
-        "level": public_issue_text(judge.get("level")),
-        "safeToShowUser": judge.get("safe_to_show_user") is True,
-        "reason": review._safe_text_lenient(judge.get("reason")),
-        "command": public_issue_text(evidence_summary.get("command")),
-        "logPath": public_issue_text(evidence_summary.get("log_path")),
-        "observable": review._safe_text_lenient(evidence_summary.get("observable")),
-    }
-    if "safe_to_show_user" not in judge:
-        payload.pop("safeToShowUser", None)
-    return {key: value for key, value in payload.items() if value not in ("", [], {})}
-
-
-def worker_graph_verified_repro_proof(repro: dict) -> dict:
-    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
-    proof_type = public_issue_text(proof.get("type"))
-    if not proof_type and public_issue_text(repro.get("status")).lower().replace("-", "_") == "static_proof":
-        proof_type = "static-proof"
-    payload = {
-        "type": proof_type,
-        "expected": review._safe_text_lenient(proof.get("expected")),
-        "actual": review._safe_text_lenient(proof.get("actual")),
-        "logExcerpt": review._safe_text_lenient(proof.get("log_excerpt")),
-        "verificationSteps": review._safe_text_list(
-            proof.get("verification_steps") or proof.get("verificationSteps") or repro.get("verification_steps")
-        )[:8],
-        "graphPathExercised": repro.get("graph_path_exercised") is True,
-    }
-    if "graph_path_exercised" not in repro:
-        payload.pop("graphPathExercised", None)
-    return {key: value for key, value in payload.items() if value not in ("", [], {})}
-
-def worker_graph_verified_observed_behavior(candidate: dict, judge: dict, repro: dict) -> str:
-    proof = repro.get("proof") if isinstance(repro.get("proof"), dict) else {}
-    evidence_summary = judge.get("evidence_summary") if isinstance(judge.get("evidence_summary"), dict) else {}
-    return (
-        proof.get("actual")
-        or evidence_summary.get("observable")
-        or repro.get("summary")
-        or candidate.get("actual_behavior_hypothesis")
-        or ""
+def worker_protocol_finding_source(finding: dict) -> dict:
+    location = finding.get("location") if isinstance(finding.get("location"), dict) else {}
+    locations = finding.get("locations") if isinstance(finding.get("locations"), list) else []
+    primary = location or next((item for item in locations if isinstance(item, dict)), {})
+    file_path = public_issue_file(primary.get("file") or primary.get("path") or finding.get("file"))
+    line = public_scan_count(primary.get("line") or primary.get("startLine") or primary.get("start_line") or finding.get("line"))
+    evidence_items = finding.get("evidence") if isinstance(finding.get("evidence"), list) else []
+    recommendation = review._safe_text_lenient(
+        finding.get("recommendation") or finding.get("fix") or finding.get("remediation")
     )
-
-
-def worker_graph_verified_why_this_matters(candidate: dict, code_evidence: list[dict]) -> str:
-    for item in code_evidence:
-        text = review._safe_text_lenient(item.get("why_it_matters"))
-        if text:
-            return text
-    return review._safe_text_lenient(candidate.get("impact") or candidate.get("why_this_matters"))
-
-
-def worker_graph_verified_severity(value: object) -> str:
-    severity = public_issue_text(value).lower()
-    return severity if severity in {"critical", "high", "medium", "low", "info"} else "info"
-
-
-def worker_graph_verified_line_range(source: dict) -> tuple[int, int]:
-    if not isinstance(source, dict):
-        return (0, 0)
-    lines = public_issue_text(source.get("lines"))
-    if lines:
-        numbers = [int(item) for item in re.findall(r"\d+", lines)[:2]]
-        if numbers:
-            start = numbers[0]
-            end = numbers[1] if len(numbers) > 1 and numbers[1] >= start else start
-            return start, end
-    start = review._safe_non_negative_int(
-        source.get("startLine")
-        or source.get("start_line")
-        or source.get("lineStart")
-        or source.get("line_start")
-        or source.get("line")
+    scenario = review._safe_text_lenient(
+        finding.get("failure_scenario") or finding.get("scenario") or finding.get("impact") or finding.get("description")
     )
-    end = review._safe_non_negative_int(
-        source.get("endLine")
-        or source.get("end_line")
-        or source.get("lineEnd")
-        or source.get("line_end")
-    )
-    if not end or end < start:
-        end = start
-    return start, end
-
-
+    return {
+        "id": public_issue_text(finding.get("id") or finding.get("issue_id")),
+        "title": public_issue_text(finding.get("title") or finding.get("summary")),
+        "severity": review._safe_severity(finding.get("severity")),
+        "status": public_issue_status(finding.get("status") or "open"),
+        "file": file_path,
+        "line": line,
+        "description": review._safe_text_lenient(finding.get("description") or scenario),
+        "recommendation": recommendation,
+        "failureScenario": scenario,
+        "evidence": evidence_items,
+        "affectedLocations": locations or ([primary] if primary else []),
+        "tags": ["review-worker"],
+    }
+
 def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
     source = finding if isinstance(finding, dict) else {}
     scan_id = public_issue_text(job.get("scan_id"))
