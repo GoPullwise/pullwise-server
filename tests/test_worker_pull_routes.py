@@ -306,6 +306,27 @@ def v1_worker_heartbeat_payload(*, status: str = "idle", run_id: str | None = No
     return payload
 
 
+def v1_worker_lease_payload() -> dict:
+    return {
+        "protocol_version": "review-worker-protocol/v1",
+        "worker_id": "wk_1",
+        "capacity": {
+            "available_job_slots": 1,
+            "active_jobs": 0,
+            "maintains_local_queue": False,
+            "local_queue_depth": 0,
+        },
+        "capabilities": {
+            "full_repo_scan": True,
+            "codex_app_server": True,
+            "isolated_codex_home": True,
+            "progress_events": True,
+            "cancellation": True,
+            "intent_test_validation": True,
+        },
+    }
+
+
 def audit_result_fields(
     issue_cards: list[dict],
     verification_results: list[dict] | None = None,
@@ -533,16 +554,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         lease = RouteHarness(
             "/v1/workers/wk_1/lease",
-            {
-                "protocol_version": "review-worker-protocol/v1",
-                "worker_id": "wk_1",
-                "capacity": {
-                    "available_job_slots": 1,
-                    "active_jobs": 0,
-                    "maintains_local_queue": False,
-                    "local_queue_depth": 0,
-                },
-            },
+            v1_worker_lease_payload(),
             headers=self.auth,
         )
         app.PullwiseHandler.route(lease, "POST")
@@ -850,6 +862,70 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(non_linux, "POST")
         self.assertEqual(non_linux.status, HTTPStatus.BAD_REQUEST)
+
+    def test_v1_worker_heartbeat_rejects_malformed_fixed_protocol_shape(self) -> None:
+        def clone(payload: dict) -> dict:
+            return json.loads(json.dumps(payload))
+
+        missing_concurrency = clone(v1_worker_heartbeat_payload())
+        missing_concurrency.pop("concurrency")
+
+        idle_with_active_run = clone(v1_worker_heartbeat_payload())
+        idle_with_active_run["active_run_id"] = "run_busy"
+
+        busy_with_available_slot = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_available_slot["concurrency"]["available_job_slots"] = 1
+
+        busy_without_sequence = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_without_sequence["progress"].pop("last_event_sequence")
+
+        busy_progress_mismatch = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_progress_mismatch["progress"]["run_id"] = "run_other"
+
+        cases = [
+            ("missing_concurrency", missing_concurrency),
+            ("idle_with_active_run", idle_with_active_run),
+            ("busy_with_available_slot", busy_with_available_slot),
+            ("busy_without_sequence", busy_without_sequence),
+            ("busy_progress_mismatch", busy_progress_mismatch),
+        ]
+        for label, payload in cases:
+            with self.subTest(label=label):
+                heartbeat = RouteHarness("/v1/workers/wk_1/heartbeat", payload, headers=self.auth)
+                app.PullwiseHandler.route(heartbeat, "POST")
+                self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
+                self.assertIn("Invalid review-worker-protocol/v1 heartbeat", heartbeat.payload["message"])
+
+    def test_v1_worker_lease_rejects_non_idle_or_incomplete_capacity(self) -> None:
+        def clone(payload: dict) -> dict:
+            return json.loads(json.dumps(payload))
+
+        missing_capacity = clone(v1_worker_lease_payload())
+        missing_capacity.pop("capacity")
+
+        busy_capacity = clone(v1_worker_lease_payload())
+        busy_capacity["capacity"]["active_jobs"] = 1
+        busy_capacity["capacity"]["available_job_slots"] = 0
+
+        local_queue = clone(v1_worker_lease_payload())
+        local_queue["capacity"]["maintains_local_queue"] = True
+        local_queue["capacity"]["local_queue_depth"] = 1
+
+        missing_capability = clone(v1_worker_lease_payload())
+        missing_capability["capabilities"].pop("codex_app_server")
+
+        cases = [
+            ("missing_capacity", missing_capacity),
+            ("busy_capacity", busy_capacity),
+            ("local_queue", local_queue),
+            ("missing_capability", missing_capability),
+        ]
+        for label, payload in cases:
+            with self.subTest(label=label):
+                lease = RouteHarness("/v1/workers/wk_1/lease", payload, headers=self.auth)
+                app.PullwiseHandler.route(lease, "POST")
+                self.assertEqual(lease.status, HTTPStatus.BAD_REQUEST)
+                self.assertIn("Invalid review-worker-protocol/v1 lease request", lease.payload["message"])
 
     def create_registry_worker(self, worker_id: str) -> tuple[dict, str]:
         worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})

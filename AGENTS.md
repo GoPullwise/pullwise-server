@@ -157,13 +157,20 @@ protocol version, worker identity binding, Linux/POSIX platform, one active job,
 no local queue, and no prefetch. Progress events must be durably inserted into
 the review run event store with a strictly monotonic per-run `sequence` before
 they update scan progress. Preserve unknown event payload fields in the stored
-raw JSON. V1 heartbeats must accept the fixed heartbeat shape
+raw JSON. V1 lease requests must validate `review-worker-protocol/v1`, idle
+capacity (`active_jobs = 0`, `available_job_slots = 1`), no local queue, and
+the required v1 capabilities before claiming any job. V1 heartbeats must validate
+the fixed heartbeat shape and reject
+malformed v1 payloads:
 `protocol_version`, `status`, `active_run_id`, `concurrency`,
-`codex_app_server`, and optional `progress`; resolve `active_run_id` to the
-server-owned job for lease renewal, cancellation, and progress snapshots instead
-of requiring worker-side queue state. Progress snapshots shown to the product
-should be derived from accepted v1 run events, v1 heartbeat progress, and stored
-scan state, not from legacy graph/report internals. Existing `/worker/...`
+`codex_app_server`, and active-run `progress`. Idle heartbeats must report
+`active_jobs = 0` and `available_job_slots = 1`; active heartbeats must report
+`active_jobs = 1`, `available_job_slots = 0`, a non-null `active_run_id`, and a
+progress snapshot whose `run_id` matches the active run. Resolve `active_run_id`
+to the server-owned job for lease renewal, cancellation, and progress snapshots
+instead of requiring worker-side queue state. Progress snapshots shown to the
+product should be derived from accepted v1 run events, v1 heartbeat progress,
+and stored scan state, not from legacy graph/report internals. Existing `/worker/...`
 lifecycle routes are operator plumbing and must not become the source of new
 review protocol behavior.
 

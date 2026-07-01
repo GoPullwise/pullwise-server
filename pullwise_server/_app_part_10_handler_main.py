@@ -115,6 +115,55 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
     return "; ".join(errors[:12]) if errors else None
 
 
+def worker_v1_lease_integer(value: object, field_name: str, errors: list[str]) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        errors.append(f"capacity.{field_name} must be an integer")
+        return 0
+    if value < 0:
+        errors.append(f"capacity.{field_name} must be non-negative")
+        return 0
+    return value
+
+
+def worker_v1_lease_validation_error(body: dict) -> str | None:
+    errors: list[str] = []
+    if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
+        errors.append("protocol_version must be review-worker-protocol/v1")
+
+    capacity = body.get("capacity")
+    if not isinstance(capacity, dict):
+        errors.append("capacity must be an object")
+        capacity = {}
+    available_job_slots = worker_v1_lease_integer(capacity.get("available_job_slots"), "available_job_slots", errors)
+    active_jobs = worker_v1_lease_integer(capacity.get("active_jobs"), "active_jobs", errors)
+    local_queue_depth = worker_v1_lease_integer(capacity.get("local_queue_depth"), "local_queue_depth", errors)
+    if available_job_slots != 1:
+        errors.append("capacity.available_job_slots must be 1")
+    if active_jobs != 0:
+        errors.append("capacity.active_jobs must be 0")
+    if capacity.get("maintains_local_queue") is not False:
+        errors.append("capacity.maintains_local_queue must be false")
+    if local_queue_depth != 0:
+        errors.append("capacity.local_queue_depth must be 0")
+
+    capabilities = body.get("capabilities")
+    if not isinstance(capabilities, dict):
+        errors.append("capabilities must be an object")
+        capabilities = {}
+    for field_name in (
+        "full_repo_scan",
+        "codex_app_server",
+        "isolated_codex_home",
+        "progress_events",
+        "cancellation",
+        "intent_test_validation",
+    ):
+        if capabilities.get(field_name) is not True:
+            errors.append(f"capabilities.{field_name} must be true")
+
+    return "; ".join(errors[:12]) if errors else None
+
+
 def worker_progress_log_time(body: dict) -> int:
     return (
         pull_request_timestamp(body.get("log_time") or body.get("logTime") or body.get("time"))
@@ -2966,6 +3015,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+        validation_error = worker_v1_lease_validation_error(body)
+        if validation_error:
+            return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 lease request: {validation_error}")
         allowed, worker_status = worker_can_claim(worker_record)
         if not allowed:
             return self.error(
