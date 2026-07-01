@@ -157,6 +157,22 @@ def refresh_scan_quota_usage_locked(scan: dict, user: dict | None, repository: d
     if repository:
         scan["repoUsage"] = quota.quota_payload_for_repository(repository, user)
 
+WORKER_QUOTA_CONSUMING_PHASES = frozenset(
+    {
+        "repo_map",
+        "risk_routing",
+        "reviewer_fanout",
+        "clustering_and_voting",
+        "validator_disproof",
+        "final_report_json",
+        "ai",
+    }
+)
+
+
+def worker_progress_phase_should_finalize_quota(phase: object) -> bool:
+    return public_scan_phase(phase) in WORKER_QUOTA_CONSUMING_PHASES
+
 
 def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") -> dict:
     scan_id = public_issue_text(job.get("scan_id"))
@@ -340,12 +356,73 @@ def public_review_worker_protocol(value: object) -> dict:
         return {}
     if public_issue_text(value.get("protocol_version")) != "review-worker-protocol/v1":
         return {}
+    if public_issue_text(value.get("message_type")) not in {"", "review_run_result"}:
+        return {}
     payload = db.to_jsonable(value)
     return payload if isinstance(payload, dict) else {}
 
 
-def validate_review_worker_protocol_artifacts(job: dict, body: dict) -> None:
-    envelope = public_review_worker_protocol(body.get("reviewWorkerProtocol") or body.get("review_worker_protocol"))
+def review_worker_protocol_envelope(body: dict) -> dict:
+    if not isinstance(body, dict):
+        return {}
+    return public_review_worker_protocol(body.get("reviewWorkerProtocol") or body.get("review_worker_protocol"))
+
+
+def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: str = "") -> dict:
+    envelope = review_worker_protocol_envelope(body)
+    if not envelope:
+        return {}
+    errors = []
+    envelope_job = envelope.get("job") if isinstance(envelope.get("job"), dict) else {}
+    envelope_worker = envelope.get("worker") if isinstance(envelope.get("worker"), dict) else {}
+    execution = envelope.get("execution") if isinstance(envelope.get("execution"), dict) else {}
+    quality_gate = envelope.get("quality_gate") if isinstance(envelope.get("quality_gate"), dict) else {}
+    manifest = envelope.get("artifact_manifest") if isinstance(envelope.get("artifact_manifest"), list) else None
+    expected_job_id = public_issue_text(job.get("job_id"))
+    expected_run_id = public_issue_text(job.get("run_id")) or f"run_{expected_job_id}"
+    expected_lease_id = public_issue_text(job.get("lease_id")) or f"lease_{expected_job_id}"
+    expected_worker_id = public_issue_text(job.get("claimed_by_worker_id"))
+    if public_issue_text(envelope_job.get("job_id")) != expected_job_id:
+        errors.append("job.job_id")
+    if public_issue_text(envelope_job.get("run_id")) != expected_run_id:
+        errors.append("job.run_id")
+    if public_issue_text(envelope_job.get("lease_id")) != expected_lease_id:
+        errors.append("job.lease_id")
+    if expected_worker_id and public_issue_text(envelope_worker.get("worker_id")) != expected_worker_id:
+        errors.append("worker.worker_id")
+    execution_status = public_issue_text(execution.get("status"))
+    if execution_status not in {"completed", "failed", "cancelled", "partial_completed"}:
+        errors.append("execution.status")
+    if public_issue_text(status).lower() == "done" and execution_status != "completed":
+        errors.append("execution.status")
+    if public_issue_text(status).lower() == "failed" and execution_status == "completed":
+        errors.append("execution.status")
+    if manifest is None:
+        errors.append("artifact_manifest")
+    else:
+        for index, item in enumerate(manifest):
+            if not isinstance(item, dict):
+                errors.append(f"artifact_manifest[{index}]")
+                continue
+            for field in ("artifact_id", "kind", "name", "media_type", "schema_id", "schema_version", "sha256"):
+                if not public_issue_text(item.get(field)):
+                    errors.append(f"artifact_manifest[{index}].{field}")
+            if item.get("required") not in {True, False}:
+                errors.append(f"artifact_manifest[{index}].required")
+            if not isinstance(item.get("size_bytes"), int) or item.get("size_bytes") < 0:
+                errors.append(f"artifact_manifest[{index}].size_bytes")
+            storage = item.get("storage") if isinstance(item.get("storage"), dict) else {}
+            if public_issue_text(storage.get("type")) != "server_artifact" or not public_issue_text(storage.get("url")):
+                errors.append(f"artifact_manifest[{index}].storage")
+    if not public_issue_text(quality_gate.get("status")):
+        errors.append("quality_gate.status")
+    if errors:
+        raise ValueError("Invalid review-worker-protocol/v1 envelope: " + ", ".join(errors[:12]))
+    return envelope
+
+
+def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: str = "") -> None:
+    envelope = validate_review_worker_protocol_envelope(job, body, status=status)
     if not envelope:
         return
     attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId")) or expected_worker_attempt_id(job)
@@ -378,6 +455,7 @@ def validate_review_worker_protocol_artifacts(job: dict, body: dict) -> None:
     if mismatched:
         raise ValueError("Uploaded review artifacts do not match result manifest: " + ", ".join(mismatched[:10]))
 
+
 def worker_result_error_code(body: dict) -> str:
     if not isinstance(body, dict):
         return ""
@@ -405,6 +483,7 @@ def worker_result_checksum(body: dict) -> str:
             include_markdown=True,
             include_debug=True,
         ),
+        "reviewWorkerProtocol": review_worker_protocol_envelope(body),
     }
     data = json.dumps(db.to_jsonable(digest_payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(data).hexdigest()
@@ -455,19 +534,22 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
     job_for_findings = dict(job)
     if resolved_commit:
         job_for_findings["commit"] = resolved_commit
-    validate_review_worker_protocol_artifacts(job, body)
+    validate_review_worker_protocol_artifacts(job, body, status=status)
+    review_worker_protocol = review_worker_protocol_envelope(body)
     graph_verified_report = public_graph_verified_report(
         body.get("graphVerifiedReport"),
         include_markdown=True,
         include_debug=True,
     )
-    if not graph_verified_report:
-        raise ValueError("GraphVerified worker result must include graphVerifiedReport.")
-    normalized_findings = worker_graph_verified_findings(
-        job_for_findings,
-        graph_verified_report,
-        reserved_ids=worker_issue_reserved_ids(job_for_findings),
-    )
+    if not graph_verified_report and not review_worker_protocol:
+        raise ValueError("Worker result must include reviewWorkerProtocol.")
+    normalized_findings = []
+    if graph_verified_report:
+        normalized_findings = worker_graph_verified_findings(
+            job_for_findings,
+            graph_verified_report,
+            reserved_ids=worker_issue_reserved_ids(job_for_findings),
+        )
     deterministic_findings = body.get("deterministicFindings")
     if isinstance(deterministic_findings, list):
         reserved_ids = {finding.get("id") for finding in normalized_findings if isinstance(finding, dict)}
@@ -501,7 +583,7 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         "completed_at": completed_at,
         "duration_ms": public_scan_count(body.get("duration_ms")),
         "error": clean_scan_error(body.get("error")) if status == "failed" else "",
-        "review_worker_protocol": public_review_worker_protocol(body.get("reviewWorkerProtocol") or body.get("review_worker_protocol")),
+        "review_worker_protocol": review_worker_protocol,
     }
 
 
@@ -573,7 +655,10 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["readingGuide"] = reading_guide
         else:
             scan.pop("readingGuide", None)
-        scan["graphVerifiedReport"] = graph_verified_report
+        if graph_verified_report:
+            scan["graphVerifiedReport"] = graph_verified_report
+        else:
+            scan.pop("graphVerifiedReport", None)
         if review_worker_protocol:
             scan["reviewWorkerProtocol"] = review_worker_protocol
         else:
@@ -672,8 +757,9 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         include_markdown=True,
         include_debug=True,
     )
-    if not graph_verified_report:
-        raise ValueError("GraphVerified worker result must include graphVerifiedReport.")
+    review_worker_protocol = review_worker_protocol_envelope(body)
+    if not graph_verified_report and not review_worker_protocol:
+        raise ValueError("Worker result must include reviewWorkerProtocol.")
     checksum = worker_result_checksum(body)
     record_result = db.record_scan_job_result(
         str(job["job_id"]),
@@ -745,14 +831,21 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
 
 
 def worker_result_issue_count(body: dict) -> int:
-    report = public_graph_verified_report(body.get("graphVerifiedReport")) if isinstance(body, dict) else {}
-    return public_scan_count(report.get("confirmedCount"))
+    if not isinstance(body, dict):
+        return 0
+    report = public_graph_verified_report(body.get("graphVerifiedReport"))
+    if report:
+        return public_scan_count(report.get("confirmedCount"))
+    envelope = review_worker_protocol_envelope(body)
+    summary = envelope.get("summary") if isinstance(envelope.get("summary"), dict) else {}
+    top_findings = summary.get("top_findings") if isinstance(summary.get("top_findings"), list) else []
+    return len(top_findings)
 
 
 def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -> bool:
     if status == "done":
         return True
-    if public_scan_phase(job.get("progress_phase")) in {"ai", "report"}:
+    if worker_progress_phase_should_finalize_quota(job.get("progress_phase")):
         return True
     return False
 

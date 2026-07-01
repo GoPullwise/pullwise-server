@@ -3041,7 +3041,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         if not job:
             return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
-        if phase in {"ai", "report"}:
+        if worker_progress_phase_should_finalize_quota(phase):
             finalize_scan_quota_for_job(job, trigger=f"phase_{phase}")
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)

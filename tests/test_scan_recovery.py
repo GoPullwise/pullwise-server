@@ -583,9 +583,8 @@ class ScanRecoveryTest(unittest.TestCase):
 
         self.assertEqual(recovered, 1)
         self.assertEqual(app.SCANS[0]["status"], "failed")
-        self.assertEqual(app.SCANS[0]["errorCode"], "GRAPH_VERIFIED_REPORT_MISSING")
-        self.assertEqual(app.SCANS[0]["graphVerifiedReport"]["blockedCount"], 1)
-        self.assertEqual(app.SCANS[0]["graphVerifiedReport"]["finalJson"]["confirmed"], [])
+        self.assertEqual(app.SCANS[0]["errorCode"], "WORKER_PROTOCOL_MISSING")
+        self.assertNotIn("graphVerifiedReport", app.SCANS[0])
         self.assertEqual(app.ISSUES, [])
 
     def test_recover_interrupted_scans_reconciles_terminal_jobs_without_results(self) -> None:

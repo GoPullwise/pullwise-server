@@ -157,7 +157,35 @@ SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
 SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "lost", "retrying"}
 DEFAULT_SCAN_ISSUE_RETENTION_SECONDS = 90 * 24 * 60 * 60
 TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "lost"}
-SCAN_PHASES = {"clone", "index", "secrets", "deps", "ai", "report"}
+SCAN_PHASES = {
+    "clone",
+    "index",
+    "secrets",
+    "deps",
+    "ai",
+    "report",
+    "prepare_workspace",
+    "start_codex_app_server",
+    "initialize_codex_connection",
+    "bootstrap_helper_scripts",
+    "inventory_repository",
+    "token_budget",
+    "repo_map",
+    "risk_routing",
+    "bundle_planning",
+    "bundle_packing",
+    "reviewer_fanout",
+    "reviewer_json_validation",
+    "location_validation",
+    "clustering_and_voting",
+    "validator_disproof",
+    "final_report_json",
+    "render_markdown_report",
+    "qa_gate",
+    "hash_artifacts",
+    "upload_artifacts",
+    "submit_result_envelope",
+}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
 API_KEY_PREFIX = "pwk_"
 API_KEY_ALLOWED_SCOPES = {"repositories:read", "scans:read", "scans:write", "quota:read"}
@@ -1000,11 +1028,11 @@ def recover_interrupted_scans() -> int:
     return recovered
 
 
-def graph_verified_report_required_error(exc: Exception) -> bool:
-    return "GraphVerified worker result must include graphVerifiedReport" in str(exc)
+def worker_protocol_required_error(exc: Exception) -> bool:
+    return "Worker result must include reviewWorkerProtocol" in str(exc)
 
 
-def reject_non_graph_verified_completed_result_locked(row: dict, *, checksum: str) -> bool:
+def reject_missing_worker_protocol_completed_result_locked(row: dict, *, checksum: str) -> bool:
     scan_id = public_issue_text(row.get("scan_id"))
     scan = next((item for item in SCANS if public_issue_text(item.get("id")) == scan_id), None)
     if not scan:
@@ -1012,7 +1040,7 @@ def reject_non_graph_verified_completed_result_locked(row: dict, *, checksum: st
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)
     completed_at = pull_request_timestamp(row.get("completed_at")) or now()
     job_id = public_issue_text(row.get("job_id"))
-    message = "Worker result is missing GraphVerified report; legacy result was rejected."
+    message = "Worker result is missing reviewWorkerProtocol; result was rejected."
     scan.update(
         {
             "status": "failed",
@@ -1020,27 +1048,15 @@ def reject_non_graph_verified_completed_result_locked(row: dict, *, checksum: st
             "progress": public_scan_progress(scan.get("progress")),
             "completedAt": completed_at,
             "error": message,
-            "errorCode": "GRAPH_VERIFIED_REPORT_MISSING",
+            "errorCode": "WORKER_PROTOCOL_MISSING",
             "resultChecksum": public_issue_text(checksum),
-            "graphVerifiedReport": public_graph_verified_report(
-                {
-                    "version": "graph-verified-code-review/1",
-                    "runId": f"rejected-{job_id or scan_id}",
-                    "mode": "standard",
-                    "confirmedCount": 0,
-                    "rejectedCount": 0,
-                    "blockedCount": 1,
-                    "finalJson": {"confirmed": []},
-                },
-                include_markdown=True,
-                include_debug=True,
-            ),
         }
     )
     for key in (
         "auditSwarm",
         "completionAudit",
         "convergenceState",
+        "graphVerifiedReport",
         "impactGraph",
         "repositoryGraph",
         "semanticGraph",
@@ -1076,9 +1092,9 @@ def reconcile_completed_scan_job_results_locked() -> int:
         try:
             changed = apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum)
         except ValueError as exc:
-            if not graph_verified_report_required_error(exc):
+            if not worker_protocol_required_error(exc):
                 raise
-            changed = reject_non_graph_verified_completed_result_locked(row, checksum=checksum)
+            changed = reject_missing_worker_protocol_completed_result_locked(row, checksum=checksum)
         if changed:
             reconciled += 1
         rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
@@ -1094,7 +1110,7 @@ def reconcile_completed_scan_job_results_locked() -> int:
 def reconcile_terminal_scan_quota_locked(scan: dict, job: dict, *, status: str, reason: str = "") -> None:
     normalized_status = public_issue_text(status).lower()
     if normalized_status == "done" or (
-        normalized_status == "failed" and public_scan_phase(job.get("progress_phase")) in {"ai", "report"}
+        normalized_status == "failed" and worker_progress_phase_should_finalize_quota(job.get("progress_phase"))
     ):
         trigger = public_issue_text(reason) or f"terminal_{normalized_status}"
         finalize_scan_quota_for_job(job, trigger=trigger)
@@ -1233,9 +1249,9 @@ def reconcile_scan_job_state_locked(
                         checksum=checksum,
                     )
                 except ValueError as exc:
-                    if not graph_verified_report_required_error(exc):
+                    if not worker_protocol_required_error(exc):
                         raise
-                    changed = reject_non_graph_verified_completed_result_locked(result, checksum=checksum)
+                    changed = reject_missing_worker_protocol_completed_result_locked(result, checksum=checksum)
                 rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
                 if changed:
                     return True
