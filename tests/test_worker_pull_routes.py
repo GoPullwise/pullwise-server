@@ -734,24 +734,28 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 self.assertEqual(len(db.list_review_run_events(run_id)), 1)
 
         content = b"{}"
+        artifact_payload = {
+            "protocol_version": "review-worker-protocol/v1",
+            "attempt_id": attempt_id,
+            "run_id": run_id,
+            "artifact": {
+                "artifact_id": "art_report_agent",
+                "kind": "report.agent",
+                "name": "report.agent.json",
+                "media_type": "application/json",
+                "schema_id": "codex-full-repo-review",
+                "schema_version": "v1",
+                "encoding": "utf-8",
+                "compression": "none",
+                "sha256": __import__("hashlib").sha256(content).hexdigest(),
+                "size_bytes": len(content),
+                "required": False,
+            },
+            "content_base64": base64.b64encode(content).decode("ascii"),
+        }
         artifact = RouteHarness(
             f"/v1/review-runs/{run_id}/artifacts",
-            {
-                "attempt_id": attempt_id,
-                "run_id": run_id,
-                "artifact": {
-                    "artifact_id": "art_report_agent",
-                    "kind": "report.agent",
-                    "name": "report.agent.json",
-                    "media_type": "application/json",
-                    "schema_id": "codex-full-repo-review",
-                    "schema_version": "v1",
-                    "sha256": __import__("hashlib").sha256(content).hexdigest(),
-                    "size_bytes": len(content),
-                    "required": False,
-                },
-                "content_base64": base64.b64encode(content).decode("ascii"),
-            },
+            artifact_payload,
             headers=self.auth,
         )
         app.PullwiseHandler.route(artifact, "POST")
@@ -777,24 +781,32 @@ class WorkerPullRoutesTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(legacy_artifacts, 0)
 
+        def clone_artifact_payload(payload: dict) -> dict:
+            return json.loads(json.dumps(payload))
+
+        missing_protocol = clone_artifact_payload(artifact_payload)
+        missing_protocol.pop("protocol_version")
+        unsupported_kind = clone_artifact_payload(artifact_payload)
+        unsupported_kind["artifact"]["kind"] = "legacy_graph"
+        missing_encoding = clone_artifact_payload(artifact_payload)
+        missing_encoding["artifact"].pop("encoding")
+        invalid_sha = clone_artifact_payload(artifact_payload)
+        invalid_sha["artifact"]["sha256"] = "not-a-sha"
+        for label, payload in [
+            ("missing_protocol", missing_protocol),
+            ("unsupported_kind", unsupported_kind),
+            ("missing_encoding", missing_encoding),
+            ("invalid_sha", invalid_sha),
+        ]:
+            with self.subTest(label=label):
+                invalid_artifact = RouteHarness(f"/v1/review-runs/{run_id}/artifacts", payload, headers=self.auth)
+                app.PullwiseHandler.route(invalid_artifact, "POST")
+                self.assertEqual(invalid_artifact.status, HTTPStatus.BAD_REQUEST)
+                self.assertIn("Invalid review-worker-protocol/v1 artifact upload", invalid_artifact.payload["message"])
+
         duplicate_artifact = RouteHarness(
             f"/v1/review-runs/{run_id}/artifacts",
-            {
-                "attempt_id": attempt_id,
-                "run_id": run_id,
-                "artifact": {
-                    "artifact_id": "art_report_agent",
-                    "kind": "report.agent",
-                    "name": "report.agent.json",
-                    "media_type": "application/json",
-                    "schema_id": "codex-full-repo-review",
-                    "schema_version": "v1",
-                    "sha256": __import__("hashlib").sha256(content).hexdigest(),
-                    "size_bytes": len(content),
-                    "required": False,
-                },
-                "content_base64": base64.b64encode(content).decode("ascii"),
-            },
+            clone_artifact_payload(artifact_payload),
             headers=self.auth,
         )
         app.PullwiseHandler.route(duplicate_artifact, "POST")

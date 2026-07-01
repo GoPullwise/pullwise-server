@@ -14,6 +14,31 @@ del _import_compat_globals, _previous_app_part
 
 WORKER_PROTOCOL_VERSION = "review-worker-protocol/v1"
 WORKER_V1_ACTIVE_HEARTBEAT_STATUSES = {"busy", "leased", "cancelling", "finishing", "failure_handling"}
+WORKER_REVIEW_ARTIFACT_KINDS = {
+    "report.human",
+    "report.agent",
+    "coverage",
+    "qa",
+    "token_budget",
+    "repo_inventory",
+    "repo_map",
+    "risk_routing",
+    "bundle_plan",
+    "cluster_result",
+    "validation_result",
+    "raw_reviewer_output",
+    "verified_reviewer_output",
+    "codex_event_log",
+    "worker_log",
+    "progress_log",
+    "error_report",
+    "intent_map",
+    "intent_test_plan",
+    "intent_test_source",
+    "intent_test_result",
+    "intent_test_output",
+    "disposable_test_patch",
+}
 REVIEW_RUN_EVENT_TYPES = {
     "run_started",
     "phase_started",
@@ -197,6 +222,42 @@ def worker_v1_event_validation_error(body: dict, run_id: str, worker_id: str) ->
         errors.append("progress.status is required")
     if "data" in body and not isinstance(body.get("data"), dict):
         errors.append("data must be an object when present")
+    return "; ".join(errors[:12]) if errors else None
+
+
+def worker_v1_artifact_upload_validation_error(body: dict) -> str | None:
+    errors: list[str] = []
+    if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
+        errors.append("protocol_version must be review-worker-protocol/v1")
+    artifact = body.get("artifact")
+    if not isinstance(artifact, dict):
+        errors.append("artifact must be an object")
+        artifact = {}
+    artifact_id = public_issue_text(artifact.get("artifact_id"))
+    if not artifact_id:
+        errors.append("artifact.artifact_id is required")
+    kind = public_issue_text(artifact.get("kind"))
+    if kind not in WORKER_REVIEW_ARTIFACT_KINDS:
+        errors.append("artifact.kind is unsupported")
+    for field_name in ("name", "media_type", "schema_id"):
+        if not public_issue_text(artifact.get(field_name)):
+            errors.append(f"artifact.{field_name} is required")
+    if public_issue_text(artifact.get("schema_version")) != "v1":
+        errors.append("artifact.schema_version must be v1")
+    if public_issue_text(artifact.get("encoding")) != "utf-8":
+        errors.append("artifact.encoding must be utf-8")
+    if public_issue_text(artifact.get("compression")) != "none":
+        errors.append("artifact.compression must be none")
+    sha256 = public_issue_text(artifact.get("sha256")).lower()
+    if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
+        errors.append("artifact.sha256 must be a 64-character lowercase hex digest")
+    size_bytes = artifact.get("size_bytes")
+    if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
+        errors.append("artifact.size_bytes must be a non-negative integer")
+    if "required" in artifact and not isinstance(artifact.get("required"), bool):
+        errors.append("artifact.required must be boolean when present")
+    if "content_base64" not in body:
+        errors.append("content_base64 is required")
     return "; ".join(errors[:12]) if errors else None
 
 
@@ -3327,6 +3388,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_worker_run_artifact_upload(self, run_id: str, body: dict, worker_record: dict) -> None:
         if public_issue_text(body.get("run_id") or body.get("runId")) not in {"", clean_github_access_text(run_id) or ""}:
             return self.error(HTTPStatus.BAD_REQUEST, "run_id path and payload do not match.")
+        validation_error = worker_v1_artifact_upload_validation_error(body)
+        if validation_error:
+            return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 artifact upload: {validation_error}")
         job = scan_job_for_run_id(run_id)
         if not job:
             return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")

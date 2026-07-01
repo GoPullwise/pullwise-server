@@ -15,6 +15,31 @@ REQUIRED_COMPLETED_REVIEW_ARTIFACT_KINDS = {
     "qa",
     "token_budget",
 }
+WORKER_REVIEW_ARTIFACT_KINDS = {
+    "report.human",
+    "report.agent",
+    "coverage",
+    "qa",
+    "token_budget",
+    "repo_inventory",
+    "repo_map",
+    "risk_routing",
+    "bundle_plan",
+    "cluster_result",
+    "validation_result",
+    "raw_reviewer_output",
+    "verified_reviewer_output",
+    "codex_event_log",
+    "worker_log",
+    "progress_log",
+    "error_report",
+    "intent_map",
+    "intent_test_plan",
+    "intent_test_source",
+    "intent_test_result",
+    "intent_test_output",
+    "disposable_test_patch",
+}
 REQUIRED_TERMINAL_REVIEW_ARTIFACT_KINDS = {"qa", "worker_log"}
 REQUIRED_TERMINAL_REVIEW_ARTIFACT_ALTERNATIVES = {"error_report", "report.agent"}
 
@@ -487,15 +512,28 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
             kind = public_issue_text(item.get("kind"))
             if kind:
                 manifest_kinds.add(kind)
-            for field in ("artifact_id", "kind", "name", "media_type", "schema_id", "schema_version", "sha256"):
+            artifact_id = public_issue_text(item.get("artifact_id"))
+            for field in ("artifact_id", "kind", "name", "media_type", "schema_id", "schema_version", "encoding", "compression", "sha256"):
                 if not public_issue_text(item.get(field)):
                     errors.append(f"artifact_manifest[{index}].{field}")
+            if kind and kind not in WORKER_REVIEW_ARTIFACT_KINDS:
+                errors.append(f"artifact_manifest[{index}].kind")
+            if public_issue_text(item.get("schema_version")) != "v1":
+                errors.append(f"artifact_manifest[{index}].schema_version")
+            if public_issue_text(item.get("encoding")) != "utf-8":
+                errors.append(f"artifact_manifest[{index}].encoding")
+            if public_issue_text(item.get("compression")) != "none":
+                errors.append(f"artifact_manifest[{index}].compression")
+            sha256 = public_issue_text(item.get("sha256")).lower()
+            if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
+                errors.append(f"artifact_manifest[{index}].sha256")
             if item.get("required") not in {True, False}:
                 errors.append(f"artifact_manifest[{index}].required")
             if not isinstance(item.get("size_bytes"), int) or item.get("size_bytes") < 0:
                 errors.append(f"artifact_manifest[{index}].size_bytes")
             storage = item.get("storage") if isinstance(item.get("storage"), dict) else {}
-            if public_issue_text(storage.get("type")) != "server_artifact" or not public_issue_text(storage.get("url")):
+            expected_storage_url = f"/v1/review-runs/{expected_run_id}/artifacts/{artifact_id}" if artifact_id else ""
+            if public_issue_text(storage.get("type")) != "server_artifact" or public_issue_text(storage.get("url")) != expected_storage_url:
                 errors.append(f"artifact_manifest[{index}].storage")
         if execution_status == "completed":
             missing_required_kinds = sorted(REQUIRED_COMPLETED_REVIEW_ARTIFACT_KINDS - manifest_kinds)

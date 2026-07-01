@@ -162,7 +162,11 @@ review run event store with a strictly monotonic per-run `sequence` and before
 they update scan progress. Preserve unknown event payload fields in the stored
 raw JSON. V1 lease requests must validate `review-worker-protocol/v1`, idle
 capacity (`active_jobs = 0`, `available_job_slots = 1`), no local queue, and
-the required v1 capabilities before claiming any job. V1 heartbeats must validate
+the required v1 capabilities before claiming any job. V1 artifact uploads must
+validate `review-worker-protocol/v1`, supported artifact `kind`, `name`,
+`media_type`, `schema_id`, `schema_version = v1`, `encoding = utf-8`,
+`compression = none`, `sha256`, `size_bytes`, and `content_base64` before
+storage; idempotency stays `run_id + artifact_id`. V1 heartbeats must validate
 the fixed heartbeat shape and reject
 malformed v1 payloads:
 `protocol_version`, `status`, `active_run_id`, `concurrency`,
