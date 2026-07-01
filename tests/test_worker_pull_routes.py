@@ -1140,6 +1140,55 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 self.assertEqual(lease.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("Invalid review-worker-protocol/v1 lease request", lease.payload["message"])
 
+    def test_v1_worker_lease_blocks_idle_worker_when_codex_quota_is_not_ready(self) -> None:
+        user = {"id": "usr_quota_blocked", "name": "Owner", "providers": []}
+        app.USERS = {user["id"]: user}
+        scan = {
+            "id": "sc_quota_blocked",
+            "repo": "acme/quota-blocked",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        heartbeat_payload = v1_worker_heartbeat_payload(status="idle")
+        heartbeat_payload["codex_ready"] = False
+        heartbeat_payload["ready_providers"] = []
+        heartbeat_payload["codex_app_server"]["status"] = "needs_attention"
+        heartbeat_payload["codex_quota"] = {
+            "provider": "codex",
+            "status": "exhausted",
+            "ready": False,
+            "reason": "codex_quota_exhausted",
+            "remainingPercent": 0,
+            "windows": [
+                {"windowKind": "five_hour", "label": "5 hour", "usedPercent": 100, "remainingPercent": 0, "windowDurationMins": 300},
+                {"windowKind": "weekly", "label": "weekly", "usedPercent": 50, "remainingPercent": 50, "windowDurationMins": 10080},
+            ],
+        }
+
+        heartbeat = RouteHarness("/v1/workers/wk_1/heartbeat", heartbeat_payload, headers=self.auth)
+        app.PullwiseHandler.route(heartbeat, "POST")
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(lease.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertIn("degraded", lease.payload["message"])
+        self.assertIsNone(db.get_scan_job(job["job_id"]).get("claimed_by_worker_id"))
+        stored_worker = db.get_worker("wk_1")
+        self.assertEqual(stored_worker["codex_ready"], 0)
+        self.assertEqual(app.worker_record_ready_providers(stored_worker), [])
+        stored_quota = json.loads(stored_worker["codex_quota"])
+        self.assertEqual([window["windowKind"] for window in stored_quota["windows"]], ["five_hour", "weekly"])
+
     def create_registry_worker(self, worker_id: str) -> tuple[dict, str]:
         worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})
         db.upsert_worker_heartbeat(
