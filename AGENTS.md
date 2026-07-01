@@ -197,6 +197,11 @@ counter set from the v1.2 spec (`source_like_files_*`, `bundles_*`,
 `reviewer_runs_*`, `intent_tests_*`, `validator_candidates_*`, and
 `artifacts_*`), and an `active_unit` object; malformed snapshots should be
 rejected instead of accepted as partial progress.
+V1 heartbeats may also carry Codex app-server quota telemetry as `codex_quota`.
+Persist the sanitized quota payload, expose it through worker/admin status, and
+do not remove it while refactoring readiness, lease eligibility, or worker
+details. Quota exhaustion should make the worker unable to claim jobs without
+breaking the required idle heartbeat concurrency shape.
 
 Each leased v1 run must also have a first-class `review_runs` row. Create or
 refresh it when a lease is issued, update its progress from accepted run events,
