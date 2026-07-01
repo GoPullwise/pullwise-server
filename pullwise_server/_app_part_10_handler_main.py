@@ -13,6 +13,7 @@ _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
 
 WORKER_PROTOCOL_VERSION = "review-worker-protocol/v1"
+WORKER_V1_ACTIVE_HEARTBEAT_STATUSES = {"busy", "leased", "cancelling", "finishing", "failure_handling"}
 REVIEW_RUN_EVENT_TYPES = {
     "run_started",
     "phase_started",
@@ -38,6 +39,80 @@ REVIEW_RUN_EVENT_TYPES = {
     "run_failed",
     "run_partial_completed",
 }
+
+
+def worker_v1_heartbeat_integer(value: object, field_name: str, errors: list[str]) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        errors.append(f"concurrency.{field_name} must be an integer")
+        return 0
+    if value < 0:
+        errors.append(f"concurrency.{field_name} must be non-negative")
+        return 0
+    return value
+
+
+def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
+    errors: list[str] = []
+    if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
+        errors.append("protocol_version must be review-worker-protocol/v1")
+
+    status = public_issue_text(body.get("status"))
+    if status not in {"idle", *WORKER_V1_ACTIVE_HEARTBEAT_STATUSES}:
+        errors.append("status must be idle or an active worker state")
+
+    concurrency = body.get("concurrency")
+    if not isinstance(concurrency, dict):
+        errors.append("concurrency must be an object")
+        concurrency = {}
+    max_active_jobs = worker_v1_heartbeat_integer(concurrency.get("max_active_jobs"), "max_active_jobs", errors)
+    active_jobs = worker_v1_heartbeat_integer(concurrency.get("active_jobs"), "active_jobs", errors)
+    available_job_slots = worker_v1_heartbeat_integer(concurrency.get("available_job_slots"), "available_job_slots", errors)
+    local_queue_depth = worker_v1_heartbeat_integer(concurrency.get("local_queue_depth"), "local_queue_depth", errors)
+    if max_active_jobs != 1:
+        errors.append("concurrency.max_active_jobs must be 1")
+    if concurrency.get("maintains_local_queue") is not False:
+        errors.append("concurrency.maintains_local_queue must be false")
+    if local_queue_depth != 0:
+        errors.append("concurrency.local_queue_depth must be 0")
+
+    active_run_id = clean_github_access_text(body.get("active_run_id")) if body.get("active_run_id") is not None else ""
+    if status == "idle":
+        if active_run_id:
+            errors.append("idle heartbeat active_run_id must be null")
+        if active_jobs != 0:
+            errors.append("idle heartbeat concurrency.active_jobs must be 0")
+        if available_job_slots != 1:
+            errors.append("idle heartbeat concurrency.available_job_slots must be 1")
+    elif status in WORKER_V1_ACTIVE_HEARTBEAT_STATUSES:
+        if not active_run_id:
+            errors.append("active heartbeat active_run_id is required")
+        if active_jobs != 1:
+            errors.append("active heartbeat concurrency.active_jobs must be 1")
+        if available_job_slots != 0:
+            errors.append("active heartbeat concurrency.available_job_slots must be 0")
+        progress = body.get("progress")
+        if not isinstance(progress, dict):
+            errors.append("active heartbeat progress must be an object")
+            progress = {}
+        progress_run_id = clean_github_access_text(progress.get("run_id") or progress.get("runId"))
+        if not progress_run_id:
+            errors.append("active heartbeat progress.run_id is required")
+        elif active_run_id and progress_run_id != active_run_id:
+            errors.append("active heartbeat progress.run_id must match active_run_id")
+        for field_name in ("overall_percent", "current_phase", "current_phase_status", "current_phase_percent", "last_event_sequence", "updated_at"):
+            if field_name not in progress:
+                errors.append(f"active heartbeat progress.{field_name} is required")
+
+    codex_app_server = body.get("codex_app_server")
+    if not isinstance(codex_app_server, dict):
+        errors.append("codex_app_server must be an object")
+        codex_app_server = {}
+    if not public_issue_text(codex_app_server.get("status")):
+        errors.append("codex_app_server.status is required")
+    if public_issue_text(codex_app_server.get("transport")) not in {"stdio", "unix"}:
+        errors.append("codex_app_server.transport must be stdio or unix")
+
+    return "; ".join(errors[:12]) if errors else None
 
 
 def worker_progress_log_time(body: dict) -> int:
@@ -2871,7 +2946,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_worker_v1_register(body, worker_record)
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "heartbeat":
             worker_id = clean_github_access_text(segments[2]) or ""
-            return self.handle_worker_heartbeat({**body, "worker_id": worker_id}, worker_record)
+            return self.handle_worker_heartbeat({**body, "worker_id": worker_id, "_review_worker_v1_endpoint": True}, worker_record)
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "agent-configs":
             worker_id = clean_github_access_text(segments[2]) or ""
             return self.handle_worker_agent_configs({**body, "worker_id": worker_id}, worker_record)
@@ -3234,6 +3309,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
         protocol_version = public_issue_text(body.get("protocol_version"))
+        if body.get("_review_worker_v1_endpoint") is True:
+            validation_error = worker_v1_heartbeat_validation_error(body)
+            if validation_error:
+                return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 heartbeat: {validation_error}")
         concurrency = body.get("concurrency") if isinstance(body.get("concurrency"), dict) else {}
         codex_app_server = body.get("codex_app_server") if isinstance(body.get("codex_app_server"), dict) else {}
         last_error = clean_scan_error(body.get("last_error"))

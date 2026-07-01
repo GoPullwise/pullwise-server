@@ -272,6 +272,40 @@ def protocol_summary(findings: list[dict], execution_status: str) -> dict:
     }
 
 
+def v1_worker_heartbeat_payload(*, status: str = "idle", run_id: str | None = None) -> dict:
+    active = status != "idle"
+    payload = {
+        "protocol_version": "review-worker-protocol/v1",
+        "worker_id": "wk_1",
+        "status": status,
+        "active_run_id": run_id if active else None,
+        "concurrency": {
+            "max_active_jobs": 1,
+            "active_jobs": 1 if active else 0,
+            "available_job_slots": 0 if active else 1,
+            "maintains_local_queue": False,
+            "local_queue_depth": 0,
+        },
+        "codex_app_server": {
+            "status": "ready",
+            "transport": "stdio",
+            "active_thread_id": "thr_1" if active else None,
+        },
+    }
+    if active:
+        payload["progress"] = {
+            "run_id": run_id,
+            "overall_percent": 12.5,
+            "current_phase": "repo_map",
+            "current_phase_status": "running",
+            "current_phase_percent": 50.0,
+            "message": "Mapping repository.",
+            "last_event_sequence": 4,
+            "updated_at": "2026-07-01T10:42:00Z",
+        }
+    return payload
+
+
 def audit_result_fields(
     issue_cards: list[dict],
     verification_results: list[dict] | None = None,
@@ -554,27 +588,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         heartbeat = RouteHarness(
             "/v1/workers/wk_1/heartbeat",
-            {
-                "protocol_version": "review-worker-protocol/v1",
-                "worker_id": "wk_1",
-                "status": "busy",
-                "active_run_id": run_id,
-                "concurrency": {
-                    "max_active_jobs": 1,
-                    "active_jobs": 1,
-                    "available_job_slots": 0,
-                    "maintains_local_queue": False,
-                    "local_queue_depth": 0,
-                },
-                "codex_app_server": {"status": "ready", "transport": "stdio", "active_thread_id": "thr_1"},
-                "progress": {
-                    "run_id": run_id,
-                    "overall_percent": 12.5,
-                    "current_phase": "repo_map",
-                    "current_phase_status": "running",
-                    "current_phase_percent": 50.0,
-                },
-            },
+            v1_worker_heartbeat_payload(status="busy", run_id=run_id),
             headers=self.auth,
         )
         app.PullwiseHandler.route(heartbeat, "POST")
