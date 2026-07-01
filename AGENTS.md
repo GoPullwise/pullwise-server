@@ -214,6 +214,10 @@ sha256, size, and raw upload payload. The storage URL must resolve through an
 owner-authenticated server GET route so web clients can read terminal run
 artifacts without parsing worker internals. Do not store new v1 artifact uploads
 as legacy `job_result_artifacts` compatibility entries.
+For `failed`, `cancelled`, and `partial_completed` terminal envelopes, the
+server may accept missing required artifact uploads only when the v1 envelope
+records `extensions.worker_internal.artifact_upload_error`; completed results
+must never use that exception.
 
 Quota should be finalized when the worker reaches core semantic review work, not
 for mechanical setup phases. Preserve subscription-plan controlled model,

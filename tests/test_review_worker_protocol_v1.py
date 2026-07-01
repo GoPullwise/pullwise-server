@@ -305,6 +305,65 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             app.validate_review_worker_protocol_artifacts(claimed, body, status="done")
             app.db.reset_initialization_cache()
 
+    def test_review_worker_protocol_allows_terminal_upload_error_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "test.sqlite3")},
+            clear=False,
+        ):
+            app.db.reset_initialization_cache()
+            app.db.create_scan_job(
+                {
+                    "job_id": "job_terminal_upload_error_v1",
+                    "scan_id": "scan_terminal_upload_error_v1",
+                    "repo": "acme/api",
+                    "branch": "main",
+                    "commit": "pending",
+                    "status": "queued",
+                    "created_at": app.now(),
+                    "user_id": "usr_1",
+                }
+            )
+            claimed = app.db.claim_next_scan_job("wk_1")
+            manifest = required_terminal_manifest()
+            envelope = v1_envelope(claimed, manifest, status="failed", worker_id="wk_1")
+            body = {"attempt_id": f"wk_1-{claimed['attempt']}", "reviewWorkerProtocol": envelope}
+
+            with self.assertRaisesRegex(ValueError, "not uploaded"):
+                app.validate_review_worker_protocol_artifacts(claimed, body, status="failed")
+
+            envelope["extensions"] = {"worker_internal": {"artifact_upload_error": "server unavailable"}}
+            app.validate_review_worker_protocol_artifacts(claimed, body, status="failed")
+            app.db.reset_initialization_cache()
+
+    def test_review_worker_protocol_still_requires_completed_uploads_with_upload_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "test.sqlite3")},
+            clear=False,
+        ):
+            app.db.reset_initialization_cache()
+            app.db.create_scan_job(
+                {
+                    "job_id": "job_completed_upload_error_v1",
+                    "scan_id": "scan_completed_upload_error_v1",
+                    "repo": "acme/api",
+                    "branch": "main",
+                    "commit": "pending",
+                    "status": "queued",
+                    "created_at": app.now(),
+                    "user_id": "usr_1",
+                }
+            )
+            claimed = app.db.claim_next_scan_job("wk_1")
+            envelope = v1_envelope(claimed, required_completed_manifest(), worker_id="wk_1")
+            envelope["extensions"] = {"worker_internal": {"artifact_upload_error": "server unavailable"}}
+            body = {"attempt_id": f"wk_1-{claimed['attempt']}", "reviewWorkerProtocol": envelope}
+
+            with self.assertRaisesRegex(ValueError, "not uploaded"):
+                app.validate_review_worker_protocol_artifacts(claimed, body, status="done")
+            app.db.reset_initialization_cache()
+
     def test_review_worker_protocol_requires_completed_artifact_kinds(self) -> None:
         job = {
             "job_id": "job_1",

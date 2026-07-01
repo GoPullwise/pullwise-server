@@ -598,6 +598,12 @@ def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: 
         if isinstance(item, dict) and public_issue_text(item.get("artifact_id"))
     }
     manifest = envelope.get("artifact_manifest") if isinstance(envelope.get("artifact_manifest"), list) else []
+    execution = envelope.get("execution") if isinstance(envelope.get("execution"), dict) else {}
+    execution_status = public_issue_text(execution.get("status"))
+    extensions = envelope.get("extensions") if isinstance(envelope.get("extensions"), dict) else {}
+    worker_internal = extensions.get("worker_internal") if isinstance(extensions.get("worker_internal"), dict) else {}
+    upload_error_recorded = bool(public_issue_text(worker_internal.get("artifact_upload_error")))
+    allow_missing_uploads = execution_status in {"failed", "cancelled", "partial_completed"} and upload_error_recorded
     missing = []
     mismatched = []
     for item in manifest:
@@ -616,7 +622,7 @@ def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: 
             continue
         if public_scan_count(stored.get("size_bytes")) != public_scan_count(item.get("size_bytes")):
             mismatched.append(artifact_id)
-    if missing:
+    if missing and not allow_missing_uploads:
         raise ValueError("Required review artifacts were not uploaded before result submit: " + ", ".join(missing[:10]))
     if mismatched:
         raise ValueError("Uploaded review artifacts do not match result manifest: " + ", ".join(mismatched[:10]))
