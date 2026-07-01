@@ -3122,7 +3122,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "heartbeat":
             worker_id = clean_github_access_text(segments[2]) or ""
             return self.handle_worker_v1_heartbeat(
-                {**body, "worker_id": worker_id, "_review_worker_v1_endpoint": True},
+                {**body, "worker_id": worker_id},
                 worker_record,
             )
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "agent-configs":
@@ -3496,10 +3496,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
         protocol_version = public_issue_text(body.get("protocol_version"))
-        if body.get("_review_worker_v1_endpoint") is True:
-            validation_error = worker_v1_heartbeat_validation_error(body)
-            if validation_error:
-                return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 heartbeat: {validation_error}")
+        validation_error = worker_v1_heartbeat_validation_error(body)
+        if validation_error:
+            return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 heartbeat: {validation_error}")
         concurrency = body.get("concurrency") if isinstance(body.get("concurrency"), dict) else {}
         codex_app_server = body.get("codex_app_server") if isinstance(body.get("codex_app_server"), dict) else {}
         last_error = clean_scan_error(body.get("last_error"))
@@ -3516,17 +3515,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 decoded_worker_json_payload(worker_record.get("machine_metrics_history"), list),
                 machine_metrics,
             )
-        raw_active_job_ids = body.get("active_job_ids") if "active_job_ids" in body else body.get("activeJobIds")
         active_job_ids = []
-        active_job_ids_provided = isinstance(raw_active_job_ids, list)
         active_job_from_run = None
+        active_job_ids_provided = protocol_version == "review-worker-protocol/v1" and "active_run_id" in body
         if active_job_ids_provided:
-            for value in raw_active_job_ids[:100]:
-                job_id = clean_github_access_text(value)
-                if job_id and job_id not in active_job_ids:
-                    active_job_ids.append(job_id)
-        elif protocol_version == "review-worker-protocol/v1" and "active_run_id" in body:
-            active_job_ids_provided = True
             active_run_id = clean_github_access_text(body.get("active_run_id"))
             active_job_from_run = scan_job_for_run_id(active_run_id) if active_run_id else None
             if active_job_from_run and clean_github_access_text(active_job_from_run.get("claimed_by_worker_id")) == worker_id:
@@ -3536,7 +3528,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if active_job_ids:
             cancelled_job_ids = db.worker_job_ids_no_longer_accepting_updates(worker_id, active_job_ids)
             active_job_ids_accepting_updates = db.worker_job_ids_accepting_updates(worker_id, active_job_ids)
-        running_jobs = public_scan_count(concurrency.get("active_jobs")) if concurrency else public_scan_count(body.get("running_jobs"))
+        running_jobs = public_scan_count(concurrency.get("active_jobs")) if concurrency else 0
         if active_job_ids_provided:
             running_jobs = 1 if running_jobs and active_job_ids_accepting_updates else 0
         codex_ready = body.get("codex_ready")

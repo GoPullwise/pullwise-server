@@ -12,34 +12,38 @@ Pullwise separates worker visibility from worker control:
 
 ## Public Read-Only Status
 
-`GET /status/system` is the public status surface. It may include a `workers`
-array, but each worker entry is limited to operational status fields:
+`GET /status/system` is the public status surface. It exposes aggregate worker
+counts and scan queue health, not per-worker records:
 
-- `worker_id`: shortened identifier only
-- `name`
-- `status`
-- `provider`
-- `region`
-- `version`
-- `running_jobs`
-- `max_concurrent_jobs`: fixed public status field that is always `1`; it is not an admin setting
-- `free_slots`
-- `last_heartbeat_at`
+- `onlineWorkerCount`
+- `offlineWorkerCount`
+- `busyWorkerCount`
+- `idleWorkerCount`
+- `degradedWorkerCount`
+- `totalWorkerCount`
+- `queuedJobs`
+- `runningJobs`
+- `scanSystemStatus`
 
 The public status payload must not include:
 
+- per-worker ids, names, hostnames, regions, or versions
 - `hostname`
 - `last_error`
 - `doctor_status`
 - `codex_ready`
 - `systemd_active`
+- `running_jobs`
+- `free_slots`
+- `max_concurrent_jobs`
 - `token_hash`
 - `worker_token`
 - worker audit events
 - install commands, local paths, internal logs, or host-specific diagnostics
 
-The web status page should render this public worker list for ordinary visitors.
-Admin users may see richer worker details through admin-only APIs.
+The web status page should render only aggregate public worker health for
+ordinary visitors. Admin users may see richer worker details through admin-only
+APIs.
 
 ## Admin Registry Control
 
@@ -73,11 +77,17 @@ pull-based command queue:
 
 1. An admin creates a worker command through an admin-only endpoint.
 2. The server persists the command with desired action, target worker id, actor, request id, status, attempts, and timestamps.
-3. The worker receives pending commands during heartbeat or a dedicated command poll endpoint.
+3. The worker watcher receives pending commands through `/worker/commands/poll`.
 4. The worker validates that the command applies to its own authenticated worker id.
 5. The worker executes the action locally with its existing least-privilege service account.
 6. The worker reports progress, final status, output summary, and error details back to the server.
 7. The server records the result and exposes it only to admins.
+
+Review execution does not use this control plane. Review workers use
+`review-worker-protocol/v1` under `/v1/workers/...` and `/v1/review-runs/...`.
+Do not reintroduce `/worker/heartbeat`, `/worker/agent-configs`, or
+`/worker/jobs/...` for review heartbeat, lease, progress, artifact, or result
+traffic.
 
 `stop` commands disable job claiming but keep the worker in the registry.
 `DELETE /admin/workers/{id}` creates an `uninstall` command instead of only

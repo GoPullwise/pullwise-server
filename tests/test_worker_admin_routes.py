@@ -550,6 +550,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_worker_log_stream_is_polled_uploaded_and_paused(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
+        worker_auth = {"Authorization": f"Bearer {token}"}
         start = RouteHarness(
             "/admin/log-streams",
             {"source": "worker", "worker_id": worker_id},

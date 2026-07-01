@@ -152,8 +152,8 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 },
                 clear=True,
             ):
-                first = HandlerHarness("/worker/heartbeat", {"worker_id": "wk_1"})
-                second = HandlerHarness("/worker/heartbeat", {"worker_id": "wk_1"})
+                first = HandlerHarness("/v1/workers/wk_1/heartbeat", {"worker_id": "wk_1"})
+                second = HandlerHarness("/v1/workers/wk_1/heartbeat", {"worker_id": "wk_1"})
 
                 app.PullwiseHandler.route(first, "POST")
                 app.PullwiseHandler.route(second, "POST")
@@ -164,7 +164,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
 
     def test_authenticated_worker_routes_keep_worker_rate_limit_exemption(self) -> None:
         handler = HandlerHarness(
-            "/worker/heartbeat",
+            "/v1/workers/wk_1/heartbeat",
             headers={"Authorization": "Bearer worker-token"},
         )
 
@@ -173,7 +173,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
             patch.object(app.db, "get_enabled_worker_token", return_value={"worker_id": "wk_1"}),
             patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
         ):
-            limited = handler.apply_rate_limit("POST", "/worker/heartbeat")
+            limited = handler.apply_rate_limit("POST", "/v1/workers/wk_1/heartbeat")
 
         self.assertFalse(limited)
         record_rate_limit_hit.assert_not_called()
