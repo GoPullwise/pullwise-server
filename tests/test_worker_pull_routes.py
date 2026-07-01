@@ -1641,6 +1641,42 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertGreater(repository_limits["maxFiles"], 0)
         self.assertGreater(repository_limits["maxBytes"], 0)
 
+    def test_scan_job_payload_uses_subscription_plan_worker_config_and_limits(self) -> None:
+        app.USERS = {
+            "usr_max": {
+                "id": "usr_max",
+                "name": "Max Owner",
+                "providers": [],
+                "billing": {"status": "active", "plan": "max"},
+            }
+        }
+        scan = {
+            "id": "sc_plan_limits",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc123",
+            "status": "queued",
+            "userId": "usr_max",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        payload = app.scan_job_payload(job)
+        expected_limits = app.system_config.repository_scan_limits("max")
+        expected_worker = app.billing.review_agent_config("max")["reviewWorker"]
+
+        self.assertEqual(payload["repositoryLimits"]["maxFiles"], expected_limits["maxFiles"])
+        self.assertEqual(payload["repositoryLimits"]["maxBytes"], expected_limits["maxBytes"])
+        self.assertEqual(payload["model_profile"]["core_effort"], "xhigh")
+        self.assertEqual(payload["model_profile"]["validator_effort"], "xhigh")
+        self.assertEqual(payload["model_profile"]["non_core_effort"], "medium")
+        self.assertEqual(payload["review_request"]["policy"]["turn_timeout_seconds"], expected_worker["turnTimeoutSeconds"])
+        self.assertEqual(payload["review_request"]["budget"]["max_wall_time_seconds"], expected_worker["scanDeadlineSeconds"])
+
     def test_claim_payload_caps_enforce_mode_until_shadow_gate_passes(self) -> None:
         scan = {
             "id": "sc_enforce_gate",
