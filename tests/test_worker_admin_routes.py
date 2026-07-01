@@ -888,22 +888,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             },
         }
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "codex",
-                "version": "0.4.18",
-                "max_concurrent_jobs": 4,
-                "running_jobs": 1,
-                "free_slots": 3,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "machine_metrics": machine_metrics,
-            },
-            headers=worker_auth,
-        )
-        app.PullwiseHandler.route(heartbeat, "POST")
+        heartbeat = self.post_v1_heartbeat(worker_id, token, machine_metrics=machine_metrics)
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
@@ -922,7 +907,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_worker_heartbeat_persists_codex_quota_for_admin_detail(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        worker_auth = {"Authorization": f"Bearer {token}"}
         codex_quota = {
             "provider": "codex",
             "limitId": "codex",
@@ -949,21 +933,14 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             "secret": "do-not-store",
         }
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "codex",
-                "version": "0.4.18",
-                "running_jobs": 0,
-                "doctor_status": "degraded",
-                "codex_ready": False,
-                "readyProviders": [],
-                "codexQuota": codex_quota,
-            },
-            headers=worker_auth,
+        heartbeat = self.post_v1_heartbeat(
+            worker_id,
+            token,
+            doctor_status="degraded",
+            codex_ready=False,
+            readyProviders=[],
+            codexQuota=codex_quota,
         )
-        app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         worker = db.get_worker(worker_id)
@@ -1063,22 +1040,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             {"phase": "ai", "progress": 50, "message": "reviewing", "started_at": timestamp + 10},
         )
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "codex",
-                "version": "0.4.18",
-                "max_concurrent_jobs": 2,
-                "running_jobs": 2,
-                "free_slots": 0,
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "active_job_ids": [claimed["job_id"]],
-            },
-            headers={"Authorization": f"Bearer {token}"},
+        heartbeat = self.post_v1_active_heartbeat(
+            worker_id,
+            token,
+            str(claimed.get("run_id") or f"run_{claimed['job_id']}"),
         )
-        app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
@@ -1100,23 +1066,31 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_ready_worker_running_jobs_are_not_degraded_by_doctor_warning(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "codex",
-                "version": "0.4.18",
-                "max_concurrent_jobs": 1,
-                "running_jobs": 1,
-                "free_slots": 0,
-                "last_error": "previous transient claim error",
-                "doctor_status": "degraded",
-                "codex_ready": True,
-                "readyProviders": ["codex"],
-            },
-            headers={"Authorization": f"Bearer {token}"},
+        scan = {
+            "id": "sc_ready_busy",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_job(worker_id)
+        heartbeat = self.post_v1_active_heartbeat(
+            worker_id,
+            token,
+            str(claimed.get("run_id") or f"run_{claimed['job_id']}"),
+            last_error="previous transient claim error",
+            doctor_status="degraded",
+            codex_ready=True,
+            readyProviders=["codex"],
         )
-        app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         worker = db.get_worker(worker_id)
@@ -1126,23 +1100,31 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_running_worker_with_deferred_codex_readiness_is_busy(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "codex",
-                "version": "0.4.18",
-                "max_concurrent_jobs": 4,
-                "running_jobs": 4,
-                "free_slots": 0,
-                "last_error": "worker not ready: codex_ready: ready check deferred while codex is running",
-                "doctor_status": "degraded",
-                "codex_ready": False,
-                "readyProviders": [],
-            },
-            headers={"Authorization": f"Bearer {token}"},
+        scan = {
+            "id": "sc_deferred_busy",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_job(worker_id)
+        heartbeat = self.post_v1_active_heartbeat(
+            worker_id,
+            token,
+            str(claimed.get("run_id") or f"run_{claimed['job_id']}"),
+            last_error="worker not ready: codex_ready: ready check deferred while codex is running",
+            doctor_status="degraded",
+            codex_ready=False,
+            readyProviders=[],
         )
-        app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         worker = db.get_worker(worker_id)
@@ -1719,15 +1701,19 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(disable.payload["worker"]["status"], "disabled")
 
         disabled_heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
+            f"/v1/workers/{worker_id}/heartbeat",
+            self.v1_heartbeat_payload(worker_id),
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(disabled_heartbeat, "POST")
         self.assertEqual(disabled_heartbeat.status, HTTPStatus.UNAUTHORIZED)
         self.assertEqual(db.get_worker(worker_id)["region"], "eu")
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
+        claim = RouteHarness(
+            f"/v1/workers/{worker_id}/lease",
+            {"protocol_version": "review-worker-protocol/v1", "worker_id": worker_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
         app.PullwiseHandler.route(claim, "POST")
         self.assertEqual(claim.status, HTTPStatus.UNAUTHORIZED)
 
@@ -1746,16 +1732,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("--worker-token", rotate.payload["install_commands"]["standard"])
         self.assertNotIn(new_token, rotate.payload["install_commands"]["standard"])
 
-        old_token_claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
+        old_token_claim = RouteHarness(
+            f"/v1/workers/{worker_id}/lease",
+            {"protocol_version": "review-worker-protocol/v1", "worker_id": worker_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
         app.PullwiseHandler.route(old_token_claim, "POST")
         self.assertEqual(old_token_claim.status, HTTPStatus.UNAUTHORIZED)
 
-        new_token_heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
-            headers={"Authorization": f"Bearer {new_token}"},
-        )
-        app.PullwiseHandler.route(new_token_heartbeat, "POST")
+        new_token_heartbeat = self.post_v1_heartbeat(worker_id, new_token)
         self.assertEqual(new_token_heartbeat.status, HTTPStatus.OK)
         self.assertEqual(new_token_heartbeat.payload["worker"]["worker_id"], worker_id)
         self.assertEqual(db.get_worker(worker_id)["region"], "eu")
@@ -1804,8 +1789,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(poll.payload["command"]["command"], "uninstall")
 
         heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
+            f"/v1/workers/{worker_id}/heartbeat",
+            self.v1_heartbeat_payload(worker_id),
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(heartbeat, "POST")
@@ -1815,12 +1800,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
 
-        initial_heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(initial_heartbeat, "POST")
+        initial_heartbeat = self.post_v1_heartbeat(worker_id, token)
         self.assertEqual(initial_heartbeat.status, HTTPStatus.OK)
         stop = RouteHarness(
             f"/admin/workers/{worker_id}/commands",
@@ -1856,8 +1836,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIsNone(poll_stop.payload["logSession"])
 
         heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
+            f"/v1/workers/{worker_id}/heartbeat",
+            self.v1_heartbeat_payload(worker_id),
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(heartbeat, "POST")
@@ -1950,19 +1930,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "max_concurrent_jobs": 4,
-                "running_jobs": 0,
-                "free_slots": 4,
-                "doctor_status": "degraded",
-                "codex_ready": False,
-            },
-            headers={"Authorization": f"Bearer {token}"},
+        heartbeat = self.post_v1_heartbeat(
+            worker_id,
+            token,
+            doctor_status="degraded",
+            codex_ready=False,
+            readyProviders=[],
         )
-        app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "degraded")
 
@@ -2020,8 +1994,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin_workers.payload["workers"], [])
 
         claim = RouteHarness(
-            "/worker/jobs/claim",
-            {"worker_id": worker_id},
+            f"/v1/workers/{worker_id}/lease",
+            {"protocol_version": "review-worker-protocol/v1", "worker_id": worker_id},
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(claim, "POST")
@@ -2060,26 +2034,35 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_heartbeat_status_public_and_admin_status_payloads(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "provider": "codex",
-                "version": "0.1.0",
-                "max_concurrent_jobs": 4,
-                "running_jobs": 2,
-                "free_slots": 2,
-                "hostname": "secret-host",
-                "region": "us-east",
-                "last_error": "",
-                "doctor_status": "ok",
-                "codex_ready": True,
-                "systemd_active": True,
-                "doctor_checked_at": app.now(),
-            },
-            headers={"Authorization": f"Bearer {token}"},
+        scan = {
+            "id": "sc_status_active",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_job(worker_id)
+        heartbeat = self.post_v1_active_heartbeat(
+            worker_id,
+            token,
+            str(claimed.get("run_id") or f"run_{claimed['job_id']}"),
+            version="0.1.0",
+            hostname="secret-host",
+            region="us-east",
+            last_error="",
+            doctor_status="ok",
+            codex_ready=True,
+            systemd_active=True,
+            doctor_checked_at=app.now(),
         )
-        app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         worker = db.get_worker(worker_id)
@@ -2124,7 +2107,20 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         with patch("pullwise_server.app.now", return_value=app.now() + 1000):
             self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "offline")
 
-        app.SCANS = [{"id": "sc_queued", "status": "queued"}, {"id": "sc_running", "status": "running"}]
+        queued_scan = {
+            "id": "sc_queued",
+            "repo": "acme/queued",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [queued_scan]
+        app.create_scan_job_for_scan(queued_scan)
         public = RouteHarness("/status/system")
         app.PullwiseHandler.route(public, "GET")
         self.assertEqual(public.status, HTTPStatus.OK)
@@ -2162,27 +2158,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         payload_two, token_two = self.create_worker()
         worker_two_id = payload_two["worker_id"]
 
-        for worker_id, token, running in (
-            (worker_one_id, token_one, 1),
-            (worker_two_id, token_two, 0),
-        ):
-            heartbeat = RouteHarness(
-                "/worker/heartbeat",
-                {
-                    "worker_id": worker_id,
-                    "provider": "codex",
-                    "version": "0.1.0",
-                    "max_concurrent_jobs": 99,
-                    "running_jobs": running,
-                    "free_slots": 99,
-                    "doctor_status": "ok",
-                    "codex_ready": True,
-                },
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            app.PullwiseHandler.route(heartbeat, "POST")
-            self.assertEqual(heartbeat.status, HTTPStatus.OK)
-
         scan = {
             "id": "sc_busy_worker",
             "repo": "acme/busy",
@@ -2197,7 +2172,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
-        db.claim_next_scan_job(worker_one_id)
+        claimed = db.claim_next_scan_job(worker_one_id)
+
+        first_heartbeat = self.post_v1_active_heartbeat(
+            worker_one_id,
+            token_one,
+            str(claimed.get("run_id") or f"run_{claimed['job_id']}"),
+            version="0.1.0",
+        )
+        self.assertEqual(first_heartbeat.status, HTTPStatus.OK)
+        second_heartbeat = self.post_v1_heartbeat(worker_two_id, token_two, version="0.1.0")
+        self.assertEqual(second_heartbeat.status, HTTPStatus.OK)
 
         public = RouteHarness("/status/system")
         app.PullwiseHandler.route(public, "GET")
@@ -2296,7 +2281,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin_command.status, HTTPStatus.NOT_FOUND)
         self.assertEqual(admin_delete.status, HTTPStatus.NOT_FOUND)
 
-    def test_worker_capacity_inputs_are_ignored_for_admin_writes_and_heartbeat(self) -> None:
+    def test_worker_capacity_inputs_are_ignored_for_admin_writes_and_v1_heartbeat(self) -> None:
         create = RouteHarness(
             "/admin/workers",
             {"name": "Too large", "provider": "codex", "max_concurrent_jobs": 99},
@@ -2321,32 +2306,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("max_concurrent_jobs", update.payload["worker"])
         self.assertNotIn("free_slots", update.payload["worker"])
 
-        heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {"worker_id": worker_id, "max_concurrent_jobs": 99, "running_jobs": 99, "free_slots": 99},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(heartbeat, "POST")
+        heartbeat = self.post_v1_heartbeat(worker_id, token)
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         stored = db.get_worker(worker_id)
-        self.assertEqual(stored["running_jobs"], 1)
+        self.assertEqual(stored["running_jobs"], 0)
         self.assertNotIn("max_concurrent_jobs", stored)
         self.assertNotIn("free_slots", stored)
         self.assertEqual(stored["last_error"], "")
 
-        heartbeat_with_error = RouteHarness(
-            "/worker/heartbeat",
-            {
-                "worker_id": worker_id,
-                "max_concurrent_jobs": 99,
-                "running_jobs": 1,
-                "free_slots": 1,
-                "last_error": "disk pressure",
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        app.PullwiseHandler.route(heartbeat_with_error, "POST")
+        heartbeat_with_error = self.post_v1_heartbeat(worker_id, token, last_error="disk pressure")
 
         self.assertEqual(heartbeat_with_error.status, HTTPStatus.OK)
         stored = db.get_worker(worker_id)
