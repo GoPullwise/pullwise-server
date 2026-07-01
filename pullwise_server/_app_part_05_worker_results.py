@@ -335,6 +335,49 @@ def installation_clone_token_payload(job: dict) -> dict | None:
     }
 
 
+def public_review_worker_protocol(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    if public_issue_text(value.get("protocol_version")) != "review-worker-protocol/v1":
+        return {}
+    payload = db.to_jsonable(value)
+    return payload if isinstance(payload, dict) else {}
+
+
+def validate_review_worker_protocol_artifacts(job: dict, body: dict) -> None:
+    envelope = public_review_worker_protocol(body.get("reviewWorkerProtocol") or body.get("review_worker_protocol"))
+    if not envelope:
+        return
+    attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId")) or expected_worker_attempt_id(job)
+    uploaded = {
+        public_issue_text(item.get("artifact_id")): item
+        for item in db.list_review_run_artifacts(public_issue_text(job.get("job_id")), attempt_id)
+        if isinstance(item, dict) and public_issue_text(item.get("artifact_id"))
+    }
+    manifest = envelope.get("artifact_manifest") if isinstance(envelope.get("artifact_manifest"), list) else []
+    missing = []
+    mismatched = []
+    for item in manifest:
+        if not isinstance(item, dict) or item.get("required") is not True:
+            continue
+        artifact_id = public_issue_text(item.get("artifact_id"))
+        if not artifact_id:
+            missing.append("<missing artifact_id>")
+            continue
+        stored = uploaded.get(artifact_id)
+        if not stored:
+            missing.append(artifact_id)
+            continue
+        if public_issue_text(stored.get("sha256")).lower() != public_issue_text(item.get("sha256")).lower():
+            mismatched.append(artifact_id)
+            continue
+        if public_scan_count(stored.get("size_bytes")) != public_scan_count(item.get("size_bytes")):
+            mismatched.append(artifact_id)
+    if missing:
+        raise ValueError("Required review artifacts were not uploaded before result submit: " + ", ".join(missing[:10]))
+    if mismatched:
+        raise ValueError("Uploaded review artifacts do not match result manifest: " + ", ".join(mismatched[:10]))
+
 def worker_result_error_code(body: dict) -> str:
     if not isinstance(body, dict):
         return ""
@@ -412,6 +455,7 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
     job_for_findings = dict(job)
     if resolved_commit:
         job_for_findings["commit"] = resolved_commit
+    validate_review_worker_protocol_artifacts(job, body)
     graph_verified_report = public_graph_verified_report(
         body.get("graphVerifiedReport"),
         include_markdown=True,
@@ -457,6 +501,7 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         "completed_at": completed_at,
         "duration_ms": public_scan_count(body.get("duration_ms")),
         "error": clean_scan_error(body.get("error")) if status == "failed" else "",
+        "review_worker_protocol": public_review_worker_protocol(body.get("reviewWorkerProtocol") or body.get("review_worker_protocol")),
     }
 
 
@@ -477,6 +522,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
         include_markdown=True,
         include_debug=True,
     )
+    review_worker_protocol = public_review_worker_protocol(prepared.get("review_worker_protocol"))
     completed_at = pull_request_timestamp(prepared.get("completed_at")) or now()
     scan = memory_scan_by_id(job.get("scan_id"))
     changed = False
@@ -528,6 +574,10 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
         else:
             scan.pop("readingGuide", None)
         scan["graphVerifiedReport"] = graph_verified_report
+        if review_worker_protocol:
+            scan["reviewWorkerProtocol"] = review_worker_protocol
+        else:
+            scan.pop("reviewWorkerProtocol", None)
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status == "done":
             before_issues = json.dumps(

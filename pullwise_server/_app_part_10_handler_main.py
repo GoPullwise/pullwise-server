@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 from . import _app_part_09_billing_cookie_security as _previous_app_part
@@ -81,6 +84,42 @@ def api_key_response_headers() -> dict[str, str]:
         "Pragma": "no-cache",
         "Vary": "Cookie, Authorization, X-Pullwise-Api-Key",
     }
+
+
+def worker_artifact_upload_payload(body: dict) -> dict:
+    artifact = body.get("artifact") if isinstance(body.get("artifact"), dict) else {}
+    artifact_id = public_issue_text(artifact.get("artifact_id") or body.get("artifact_id") or body.get("artifactId"))
+    if not artifact_id:
+        raise ValueError("artifact_id is required.")
+    content_b64_value = body.get("content_base64") if body.get("content_base64") is not None else body.get("contentBase64")
+    if content_b64_value is None:
+        raise ValueError("content_base64 is required.")
+    content_b64 = public_issue_text(content_b64_value)
+    try:
+        content = base64.b64decode(content_b64.encode("ascii"), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("content_base64 must be valid base64.") from exc
+    expected_sha = public_issue_text(artifact.get("sha256") or body.get("sha256")).lower()
+    actual_sha = hashlib.sha256(content).hexdigest()
+    if expected_sha and expected_sha != actual_sha:
+        raise ValueError("artifact sha256 does not match content.")
+    expected_size_value = artifact.get("size_bytes")
+    if expected_size_value is None:
+        expected_size_value = body.get("size_bytes") if body.get("size_bytes") is not None else body.get("sizeBytes")
+    if expected_size_value is not None:
+        expected_size = public_scan_count(expected_size_value)
+        if expected_size != len(content):
+            raise ValueError("artifact size_bytes does not match content.")
+    payload = {
+        "artifact_id": artifact_id,
+        "artifact": db.to_jsonable(artifact),
+        "content_base64": content_b64,
+        "sha256": actual_sha,
+        "size_bytes": len(content),
+    }
+    if body.get("run_id") or body.get("runId"):
+        payload["run_id"] = public_issue_text(body.get("run_id") or body.get("runId"))
+    return payload
 
 
 class PullwiseHandler(BaseHTTPRequestHandler):
@@ -2719,6 +2758,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_worker_job_claim(body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "progress":
             return self.handle_worker_job_progress(segments[2], body, worker_record)
+        if len(segments) == 5 and segments[:2] == ["worker", "jobs"] and segments[3] == "artifacts":
+            return self.handle_worker_job_artifact_upload(segments[2], segments[4], body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "result":
             return self.handle_worker_job_result(segments[2], body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status":
@@ -3036,6 +3077,39 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             message=progress_message,
         )
         return self.json({"ok": True, "job": scan_job_payload(job)})
+
+    def handle_worker_job_artifact_upload(self, job_id: str, artifact_id: str, body: dict, worker_record: dict) -> None:
+        job_id = clean_github_access_text(job_id) or ""
+        artifact_id = clean_github_access_text(artifact_id) or ""
+        if not job_id or not artifact_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "job_id and artifact_id are required.")
+        job = db.get_scan_job(job_id)
+        if not job:
+            return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
+        claimed_worker_id = public_issue_text(job.get("claimed_by_worker_id"))
+        body_attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId")) or expected_worker_attempt_id(job)
+        if not self.authenticated_worker_id_matches(worker_record, claimed_worker_id):
+            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
+        if public_issue_text(job.get("status")) not in {"claimed", "running", "uploading_result"}:
+            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting artifacts.")
+        if body_attempt_id != expected_worker_attempt_id(job):
+            return self.error(HTTPStatus.CONFLICT, "Artifact attempt_id does not match current job attempt.")
+        try:
+            payload = worker_artifact_upload_payload(body)
+        except ValueError as exc:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if payload.get("artifact_id") != artifact_id:
+            return self.error(HTTPStatus.BAD_REQUEST, "artifact_id path and payload do not match.")
+        result = db.store_review_run_artifact(
+            job_id=job_id,
+            attempt_id=body_attempt_id,
+            artifact_id=artifact_id,
+            payload=payload,
+            timestamp=now(),
+        )
+        if result.get("conflict"):
+            return self.json({"message": result.get("reason") or "Artifact upload conflicts with an existing artifact."}, HTTPStatus.CONFLICT)
+        return self.json({"ok": True, **result})
 
     def handle_worker_job_result(self, job_id: str, body: dict, worker_record: dict) -> None:
         job_id = clean_github_access_text(job_id) or ""

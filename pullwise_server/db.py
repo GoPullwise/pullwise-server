@@ -4628,6 +4628,74 @@ def _store_scan_job_result_artifact_locked(
     )
 
 
+def store_review_run_artifact(
+    *,
+    job_id: str,
+    attempt_id: str,
+    artifact_id: str,
+    payload: dict[str, Any],
+    timestamp: int | None = None,
+) -> dict[str, Any]:
+    ensure_initialized()
+    job_id = str(job_id or "").strip()
+    attempt_id = str(attempt_id or "").strip()
+    artifact_id = str(artifact_id or "").strip()
+    if not job_id or not attempt_id or not artifact_id:
+        raise ValueError("job_id, attempt_id, and artifact_id are required")
+    payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
+    current_time = int(timestamp if timestamp is not None else time.time())
+    kind = f"review_artifact:{artifact_id}"
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            job = connection.execute(
+                "SELECT status FROM scan_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            if not job:
+                return {"accepted": False, "conflict": True, "reason": "job_not_found"}
+            if str(job["status"] or "") not in {"claimed", "running", "uploading_result"}:
+                return {"accepted": False, "conflict": True, "reason": "job_not_accepting_artifacts"}
+            existing = connection.execute(
+                "SELECT payload FROM job_result_artifacts WHERE job_id = ? AND attempt_id = ? AND kind = ?",
+                (job_id, attempt_id, kind),
+            ).fetchone()
+            if existing:
+                if str(existing["payload"] or "") == payload_text:
+                    return {"accepted": True, "duplicate": True, "artifactId": artifact_id}
+                return {"accepted": False, "conflict": True, "reason": "artifact_payload_conflict"}
+            connection.execute(
+                """
+                INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (stable_id("art", f"{job_id}:{attempt_id}:{artifact_id}"), job_id, attempt_id, kind, payload_text, current_time),
+            )
+    return {"accepted": True, "duplicate": False, "artifactId": artifact_id}
+
+
+def list_review_run_artifacts(job_id: str, attempt_id: str) -> list[dict[str, Any]]:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT kind, payload FROM job_result_artifacts
+            WHERE job_id = ? AND attempt_id = ? AND kind LIKE 'review_artifact:%'
+            ORDER BY kind
+            """,
+            (str(job_id or "").strip(), str(attempt_id or "").strip()),
+        ).fetchall()
+    artifacts = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            artifacts.append(payload)
+    return artifacts
+
 def record_scan_job_result(
     job_id: str,
     *,
