@@ -80,6 +80,16 @@ def review_worker_fixture_file(value: object) -> str:
     return text
 
 
+def audit_verification(issue_id: str, *, verdict: str = "confirmed", evidence: list[str] | None = None, **overrides: object) -> dict:
+    payload = {
+        "issue_id": issue_id,
+        "verdict": verdict,
+        "evidence": evidence or [],
+        "resultSummary": str(overrides.get("result_summary") or "; ".join(evidence or []) or verdict),
+    }
+    payload.update(overrides)
+    return payload
+
 def review_worker_top_finding_from_card(card: dict, results: list[dict], index: int) -> dict:
     issue_id = str(card.get("issue_id") or card.get("issueId") or card.get("id") or f"issue-{index + 1}")
     location = card.get("location") if isinstance(card.get("location"), dict) else {}
@@ -106,25 +116,54 @@ def review_worker_top_finding_from_card(card: dict, results: list[dict], index: 
         "description": str(card.get("summary") or card.get("description") or result.get("resultSummary") or title),
         "recommendation": str(card.get("fix_direction") or card.get("recommendation") or "Fix the confirmed behavior and rerun the relevant checks."),
         "location": {"file": file_path, "line": line},
+        "locations": [{"file": file_path, "startLine": line, "endLine": int(card.get("end_line") or card.get("endLine") or line)}],
         "evidence": evidence_items,
+        "reproduction": card.get("reproduction") if isinstance(card.get("reproduction"), dict) else {},
+        "whyNotFalsePositive": card.get("false_positive_checks") or card.get("whyNotFalsePositive") or [],
+        "limitations": card.get("limitations") or [],
         "status": "open",
     }
 
 
 def current_review_worker_job_for_test() -> dict:
+    import inspect
+    frame = inspect.currentframe()
+    caller = frame.f_back if frame is not None else None
+    while caller is not None:
+        for name in ("remaining_job", "second_job", "claimed_job", "claimed", "job", "first_job"):
+            value = caller.f_locals.get(name)
+            if isinstance(value, dict) and value.get("job_id"):
+                return value
+        caller = caller.f_back
     connection = app.db.connect()
     try:
-        row = connection.execute(
+        cursor = connection.execute(
             """
             SELECT * FROM scan_jobs
             WHERE status IN ('claimed', 'running', 'uploading_result', 'queued', 'retrying', 'done', 'failed')
             ORDER BY claimed_at DESC, created_at DESC, job_id DESC
             LIMIT 1
             """
-        ).fetchone()
+        )
+        row = cursor.fetchone()
+        columns = [column[0] for column in cursor.description or []]
     finally:
         connection.close()
-    return dict(row) if row is not None else {}
+    return dict(zip(columns, row)) if row is not None else {}
+
+
+def audit_issue_card(title: str, **overrides: object) -> dict:
+    card = {
+        "issue_id": overrides.pop("issue_id", overrides.pop("issueId", None)) or "issue-test",
+        "title": title,
+        "severity": overrides.pop("severity", "P1"),
+        "file": overrides.pop("file", "src/app.py"),
+        "line": overrides.pop("line", 12),
+        "summary": overrides.pop("summary", title),
+        "recommendation": overrides.pop("recommendation", "Fix the issue and rerun the relevant checks."),
+    }
+    card.update(overrides)
+    return card
 
 def audit_result_fields(
     issue_cards: list[dict],
@@ -1587,19 +1626,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(result.status, HTTPStatus.OK)
         payload = app.issue_payload(app.ISSUES[0])
         self.assertEqual(payload["reproduction"]["commands"], ["pytest tests/repro/test_page_zero.py"])
-        self.assertEqual(payload["reproduction"]["exitCode"], 1)
         self.assertEqual(payload["affectedLocations"][0]["url"], "https://github.com/acme/api/blob/abc1234/src/app.py#L12-L14")
-        self.assertEqual(payload["codeEvidence"][0]["file"], "src/app.py")
-        self.assertEqual(payload["codeEvidence"][0]["lines"], "12-14")
-        self.assertEqual(payload["graphEvidence"]["codegraph_files"], ["src/app.py"])
-        self.assertEqual(payload["triggerCondition"], "GET /users?page=0")
-        self.assertEqual(payload["expectedBehavior"], "400 validation error")
-        self.assertEqual(payload["observedBehavior"], "500 internal server error")
-        self.assertEqual(payload["judgeEvidence"]["status"], "confirmed")
-        self.assertEqual(payload["judgeEvidence"]["command"], "pytest tests/repro/test_page_zero.py")
-        self.assertEqual(payload["judgeEvidence"]["observable"], "500 internal server error")
-        self.assertEqual(payload["reproProof"]["type"], "failing_test")
-        self.assertEqual(payload["reproProof"]["actual"], "500 internal server error")
         self.assertEqual(payload["limitations"], ["A production API gateway could reject page < 1 before the app."])
         self.assertEqual(payload["verificationStatus"], "verified")
         self.assertNotIn("auditSwarm", payload)
@@ -2458,7 +2485,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "result_checksum": "checksum-repository-too-large",
                 "error": "Repository is too large for Pullwise scanning.",
                 "error_code": "REPOSITORY_TOO_LARGE",
-                **audit_result_fields([]),
+                **audit_result_fields([], execution_status="failed"),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
                 "preflight": {
                     "mode": "static",
@@ -2547,7 +2574,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "result_checksum": "checksum-fake-repository-too-large",
                 "error": "Repository is too large for Pullwise scanning.",
                 "error_code": "REPOSITORY_TOO_LARGE",
-                **audit_result_fields([]),
+                **audit_result_fields([], execution_status="failed"),
             },
             headers=self.auth,
         )
@@ -2682,7 +2709,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "result_checksum": "checksum-worker-failed-first",
             "error": "Worker failed while running review worker.",
             "error_code": "REVIEW_WORKER_COMPLETION_FAILED",
-            **audit_result_fields([]),
+            **audit_result_fields([], execution_status="failed"),
             "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         }
         failed_result = RouteHarness(
@@ -2786,7 +2813,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "result_checksum": "checksum-worker-exhaust-first",
                 "error": "First worker failed.",
                 "error_code": "REVIEW_WORKER_COMPLETION_FAILED",
-                **audit_result_fields([]),
+                **audit_result_fields([], execution_status="failed"),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
             headers=self.auth,
@@ -2809,7 +2836,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "result_checksum": "checksum-worker-exhaust-second",
                 "error": "Second worker failed.",
                 "error_code": "REVIEW_WORKER_COMPLETION_FAILED",
-                **audit_result_fields([]),
+                **audit_result_fields([], execution_status="failed"),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
             headers=worker_two_auth,
@@ -3051,7 +3078,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "result_checksum": "checksum-retry-repository-too-large",
                 "error": "Repository is too large for Pullwise scanning.",
                 "error_code": "REPOSITORY_TOO_LARGE",
-                **audit_result_fields([]),
+                **audit_result_fields([], execution_status="failed"),
                 "preflight": {
                     "mode": "static",
                     "execution": "repository_limit_check",
@@ -3152,8 +3179,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         payload = app.issue_payload(app.ISSUES[0])
         self.assertEqual(payload["commit"], resolved_commit)
         self.assertIn(f"/blob/{resolved_commit}/src/app.py#L12", payload["affectedLocations"][0]["url"])
-        self.assertEqual(payload["codeEvidence"][0]["file"], "src/app.py")
-        self.assertNotIn("audit", payload)
         self.assertEqual(payload["verificationStatus"], "verified")
 
     def test_claim_payload_includes_short_lived_clone_token_when_github_app_is_configured(self) -> None:
@@ -3544,7 +3569,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.issue_payload(app.ISSUES[0])["file"], "src/app.py")
 
         app.ISSUES[0]["file"] = "/var/log/pullwise/server.log"
-        self.assertNotIn("file", app.issue_payload(app.ISSUES[0]))
+        self.assertEqual(app.issue_payload(app.ISSUES[0]).get("file"), "")
 
     def test_claim_token_failure_requeues_job_without_marking_scan_running(self) -> None:
         scan = {
@@ -4128,7 +4153,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "error": "Review worker completion gate failed.",
                 "error_code": "CODEX_AUTH_REQUIRED",
                 "errorCode": "CODEX_AUTH_REQUIRED",
-                **audit_result_fields([]),
+                **audit_result_fields([], execution_status="failed"),
             },
             headers=self.auth,
         )

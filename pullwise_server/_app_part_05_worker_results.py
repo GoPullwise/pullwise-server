@@ -476,7 +476,7 @@ def worker_result_checksum(body: dict) -> str:
             else body.get("reviewDecisionEvents")
             if isinstance(body.get("reviewDecisionEvents"), list)
             else []
-        ),
+        ),
         "reviewWorkerProtocol": review_worker_protocol_envelope(body),
     }
     data = json.dumps(db.to_jsonable(digest_payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -584,7 +584,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
     human_report = public_result_human_report(prepared.get("human_report"))
     agent_report = public_result_agent_report(prepared.get("agent_report"))
     reading_guide = public_result_reading_guide(prepared.get("reading_guide"))
-    error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
+    error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
     review_worker_protocol = public_review_worker_protocol(prepared.get("review_worker_protocol"))
     completed_at = pull_request_timestamp(prepared.get("completed_at")) or now()
     scan = memory_scan_by_id(job.get("scan_id"))
@@ -990,9 +990,12 @@ def worker_protocol_finding_source(finding: dict) -> dict:
         "failureScenario": scenario,
         "evidence": evidence_items,
         "affectedLocations": locations or ([primary] if primary else []),
+        "reproduction": finding.get("reproduction") if isinstance(finding.get("reproduction"), dict) else {},
+        "whyNotFalsePositive": review._safe_text_list(finding.get("whyNotFalsePositive") or finding.get("false_positive_checks")),
+        "limitations": review._safe_text_list(finding.get("limitations")),
         "tags": ["review-worker"],
     }
-
+
 def worker_finding_payload(job: dict, finding: object, index: int) -> dict:
     source = finding if isinstance(finding, dict) else {}
     scan_id = public_issue_text(job.get("scan_id"))
