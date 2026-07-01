@@ -698,7 +698,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "worker_id": "wk_1",
                 "sequence": 2,
                 "timestamp": "2026-07-01T10:24:00Z",
-                "event_type": "legacy_graph_generated",
+                "event_type": "unsupported_v1_event",
                 "phase": "reviewer_fanout",
                 "severity": "info",
                 "message": "Unsupported event type.",
@@ -825,7 +825,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         missing_protocol = clone_artifact_payload(artifact_payload)
         missing_protocol.pop("protocol_version")
         unsupported_kind = clone_artifact_payload(artifact_payload)
-        unsupported_kind["artifact"]["kind"] = "legacy_graph"
+        unsupported_kind["artifact"]["kind"] = "unsupported_worker_artifact"
         missing_encoding = clone_artifact_payload(artifact_payload)
         missing_encoding["artifact"].pop("encoding")
         invalid_sha = clone_artifact_payload(artifact_payload)

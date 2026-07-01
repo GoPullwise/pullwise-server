@@ -184,21 +184,21 @@ progress snapshot whose `run_id` matches the active run. Resolve `active_run_id`
 to the server-owned job for lease renewal, cancellation, and progress snapshots
 instead of requiring worker-side queue state. Progress snapshots shown to the
 product should be derived from accepted v1 run events, v1 heartbeat progress,
-and stored scan state, not from legacy graph/report internals. Existing `/worker/...`
+and stored scan state, not from raw worker-only artifact internals. Existing `/worker/...`
 lifecycle routes are operator plumbing and must not become the source of new
 review protocol behavior.
 Active v1 heartbeat `progress` snapshots must include `message`, the full
 counter set from the v1.2 spec (`source_like_files_*`, `bundles_*`,
 `reviewer_runs_*`, `intent_tests_*`, `validator_candidates_*`, and
 `artifacts_*`), and an `active_unit` object; malformed snapshots should be
-rejected instead of accepted as partial legacy progress.
+rejected instead of accepted as partial progress.
 
 Each leased v1 run must also have a first-class `review_runs` row. Create or
 refresh it when a lease is issued, update its progress from accepted run events,
 and finalize it from the terminal result envelope by storing summary,
 quality-gate, usage, progress, error, and raw envelope JSON. Web/admin terminal
 views should read server-owned run state and artifact metadata instead of
-parsing retired worker report shapes. Detailed scan payloads should expose this
+parsing raw worker artifact internals. Detailed scan payloads should expose this
 as a `reviewRun` object with public terminal state and artifact metadata, never
 raw artifact upload content or raw result envelopes.
 

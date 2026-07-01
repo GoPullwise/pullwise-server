@@ -431,7 +431,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         }
         cases = [
             ("size_bytes", manifest_item(size_bytes="3"), "size_bytes"),
-            ("unsupported_kind", manifest_item(kind="legacy_graph"), "kind"),
+            ("unsupported_kind", manifest_item(kind="unsupported_worker_artifact"), "kind"),
             ("missing_encoding", manifest_item(encoding=""), "encoding"),
             ("bad_compression", manifest_item(compression="gzip"), "compression"),
             ("bad_sha256", manifest_item(sha256="abc"), "sha256"),
