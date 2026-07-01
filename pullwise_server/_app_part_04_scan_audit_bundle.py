@@ -763,7 +763,7 @@ def public_scan_display_progress(status_value: object, progress_value: object) -
     progress = public_scan_progress(progress_value)
     if status == "done":
         return 100
-    if status in {"failed", "cancelled", "lost"}:
+    if status in {"failed", "cancelled", "partial_completed", "lost"}:
         return min(progress, INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
     return progress
 

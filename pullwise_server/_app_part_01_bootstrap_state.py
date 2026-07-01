@@ -153,10 +153,10 @@ AUDIT_SWARM_EVIDENCE_BLOCK_KINDS = {
     "risk",
 }
 REVIEW_DECISION_EVENT_PROTOCOL_VERSION = "pullwise-review-decision/0.1"
-SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
-SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "lost", "retrying"}
+SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled", "partial_completed"}
+SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "partial_completed", "lost", "retrying"}
 DEFAULT_SCAN_ISSUE_RETENTION_SECONDS = 90 * 24 * 60 * 60
-TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "lost"}
+TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "partial_completed", "lost"}
 SCAN_PHASES = {
     "clone",
     "index",

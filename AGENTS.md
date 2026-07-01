@@ -149,6 +149,11 @@ stable summary must include `overall_risk`, `result_status`, `finding_counts`,
 `coverage`, and `top_findings`; do not accept top-findings-only summaries as
 v1 terminal results. Store the raw envelope and artifacts; do not depend on
 `report.agent.json` internals for core result acceptance.
+V1 terminal result status must preserve `completed`/`done`, `failed`,
+`cancelled`, and `partial_completed` distinctly through job result rows,
+`review_runs`, scan state, public scan payloads, and artifact/result retrieval;
+do not collapse cancelled or partial results back to legacy `failed` or
+`queued` states.
 
 Expose the worker-facing v1 review routes explicitly: register under
 `/v1/workers/register`, lease and heartbeat under `/v1/workers/{worker_id}/...`,
@@ -182,6 +187,11 @@ product should be derived from accepted v1 run events, v1 heartbeat progress,
 and stored scan state, not from legacy graph/report internals. Existing `/worker/...`
 lifecycle routes are operator plumbing and must not become the source of new
 review protocol behavior.
+Active v1 heartbeat `progress` snapshots must include `message`, the full
+counter set from the v1.2 spec (`source_like_files_*`, `bundles_*`,
+`reviewer_runs_*`, `intent_tests_*`, `validator_candidates_*`, and
+`artifacts_*`), and an `active_unit` object; malformed snapshots should be
+rejected instead of accepted as partial legacy progress.
 
 Each leased v1 run must also have a first-class `review_runs` row. Create or
 refresh it when a lease is issued, update its progress from accepted run events,

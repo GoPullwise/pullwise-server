@@ -14,6 +14,21 @@ del _import_compat_globals, _previous_app_part
 
 WORKER_PROTOCOL_VERSION = "review-worker-protocol/v1"
 WORKER_V1_ACTIVE_HEARTBEAT_STATUSES = {"busy", "leased", "cancelling", "finishing", "failure_handling"}
+WORKER_V1_PROGRESS_COUNTER_KEYS = (
+    "source_like_files_total",
+    "source_like_files_classified",
+    "bundles_total",
+    "bundles_packed",
+    "reviewer_runs_total",
+    "reviewer_runs_completed",
+    "intent_tests_total",
+    "intent_tests_written",
+    "intent_tests_run",
+    "validator_candidates_total",
+    "validator_candidates_completed",
+    "artifacts_total",
+    "artifacts_uploaded",
+)
 WORKER_REVIEW_ARTIFACT_KINDS = {
     "report.human",
     "report.agent",
@@ -76,6 +91,14 @@ def worker_v1_heartbeat_integer(value: object, field_name: str, errors: list[str
     return value
 
 
+def worker_v1_progress_counter(value: object, field_name: str, errors: list[str]) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        errors.append(f"active heartbeat progress.counters.{field_name} must be an integer")
+        return
+    if value < 0:
+        errors.append(f"active heartbeat progress.counters.{field_name} must be non-negative")
+
+
 def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
     errors: list[str] = []
     if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
@@ -124,9 +147,20 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
             errors.append("active heartbeat progress.run_id is required")
         elif active_run_id and progress_run_id != active_run_id:
             errors.append("active heartbeat progress.run_id must match active_run_id")
-        for field_name in ("overall_percent", "current_phase", "current_phase_status", "current_phase_percent", "last_event_sequence", "updated_at"):
+        for field_name in ("overall_percent", "current_phase", "current_phase_status", "current_phase_percent", "message", "last_event_sequence", "updated_at"):
             if field_name not in progress:
                 errors.append(f"active heartbeat progress.{field_name} is required")
+        counters = progress.get("counters")
+        if not isinstance(counters, dict):
+            errors.append("active heartbeat progress.counters must be an object")
+            counters = {}
+        for counter_key in WORKER_V1_PROGRESS_COUNTER_KEYS:
+            if counter_key not in counters:
+                errors.append(f"active heartbeat progress.counters.{counter_key} is required")
+            else:
+                worker_v1_progress_counter(counters.get(counter_key), counter_key, errors)
+        if not isinstance(progress.get("active_unit"), dict):
+            errors.append("active heartbeat progress.active_unit must be an object")
 
     codex_app_server = body.get("codex_app_server")
     if not isinstance(codex_app_server, dict):

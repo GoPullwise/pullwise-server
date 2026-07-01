@@ -302,6 +302,22 @@ def v1_worker_heartbeat_payload(*, status: str = "idle", run_id: str | None = No
             "current_phase_status": "running",
             "current_phase_percent": 50.0,
             "message": "Mapping repository.",
+            "counters": {
+                "source_like_files_total": 10,
+                "source_like_files_classified": 10,
+                "bundles_total": 2,
+                "bundles_packed": 2,
+                "reviewer_runs_total": 4,
+                "reviewer_runs_completed": 1,
+                "intent_tests_total": 0,
+                "intent_tests_written": 0,
+                "intent_tests_run": 0,
+                "validator_candidates_total": 0,
+                "validator_candidates_completed": 0,
+                "artifacts_total": 0,
+                "artifacts_uploaded": 0,
+            },
+            "active_unit": {},
             "last_event_sequence": 4,
             "updated_at": "2026-07-01T10:42:00Z",
         }
@@ -922,6 +938,60 @@ class WorkerPullRoutesTest(unittest.TestCase):
             stored_result = connection.execute("SELECT status FROM job_results WHERE job_id = ?", (claimed["job_id"],)).fetchone()
         self.assertEqual(stored_result[0], "cancelled")
 
+    def test_v1_worker_result_accepts_partial_completed_terminal_status(self) -> None:
+        scan = {
+            "id": "sc_v1_partial_result",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 100,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {"ses_owner": {"id": "ses_owner", "userId": "usr_1", "createdAt": app.now(), "expiresAt": app.now() + 3600}}
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        app.PullwiseHandler.route(lease, "POST")
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        claimed = lease.payload["job"]
+        run_id = lease.payload["lease"]["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+
+        result = RouteHarness(
+            f"/v1/review-runs/{run_id}/result",
+            {
+                "status": "partial_completed",
+                "attempt_id": attempt_id,
+                "error": "partial result after qa repair failed",
+                **audit_result_fields([], execution_status="partial_completed"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertTrue(result.payload["accepted"])
+        self.assertEqual(result.payload["reviewRun"]["status"], "partial_completed")
+        self.assertEqual(result.payload["reviewRun"]["result_status"], "partial_completed")
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "partial_completed")
+        self.assertEqual(app.SCANS[0]["status"], "partial_completed")
+        scan_detail = RouteHarness(f"/scans/{scan['id']}", headers={"Cookie": "pw_session=ses_owner"})
+        app.PullwiseHandler.route(scan_detail, "GET")
+        self.assertEqual(scan_detail.status, HTTPStatus.OK)
+        self.assertEqual(scan_detail.payload["status"], "partial_completed")
+        self.assertLess(scan_detail.payload["progress"], 100)
+        self.assertEqual(scan_detail.payload["reviewRun"]["status"], "partial_completed")
+        with db.connect() as connection:
+            stored_result = connection.execute("SELECT status FROM job_results WHERE job_id = ?", (claimed["job_id"],)).fetchone()
+        self.assertEqual(stored_result[0], "partial_completed")
+
     def test_v1_worker_register_rejects_mismatch_prefetch_and_non_linux(self) -> None:
         mismatched = RouteHarness(
             "/v1/workers/register",
@@ -982,6 +1052,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
         busy_without_sequence = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
         busy_without_sequence["progress"].pop("last_event_sequence")
 
+        busy_without_counters = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_without_counters["progress"].pop("counters")
+
+        busy_with_bad_counter = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_bad_counter["progress"]["counters"]["reviewer_runs_total"] = -1
+
+        busy_without_active_unit = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_without_active_unit["progress"].pop("active_unit")
+
         busy_progress_mismatch = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
         busy_progress_mismatch["progress"]["run_id"] = "run_other"
 
@@ -990,6 +1069,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
             ("idle_with_active_run", idle_with_active_run),
             ("busy_with_available_slot", busy_with_available_slot),
             ("busy_without_sequence", busy_without_sequence),
+            ("busy_without_counters", busy_without_counters),
+            ("busy_with_bad_counter", busy_with_bad_counter),
+            ("busy_without_active_unit", busy_without_active_unit),
             ("busy_progress_mismatch", busy_progress_mismatch),
         ]
         for label, payload in cases:

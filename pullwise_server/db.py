@@ -2859,7 +2859,7 @@ def cleanup_operational_records(
                     job_deleted = connection.execute(
                         f"""
                         DELETE FROM scan_jobs
-                        WHERE status IN ('done', 'failed', 'cancelled', 'lost')
+                        WHERE status IN ('done', 'failed', 'cancelled', 'partial_completed', 'lost')
                           AND COALESCE(completed_at, updated_at, created_at) < ?
                           AND scan_id IN ({placeholders})
                         """,
@@ -2880,8 +2880,8 @@ def cleanup_user_scan_issue_records(
     ensure_initialized()
     current_time = int(timestamp if timestamp is not None else time.time())
     cutoff = current_time - max(0, int(retention_seconds))
-    terminal_job_statuses = ("done", "failed", "cancelled", "lost")
-    terminal_scan_statuses = ("done", "failed", "cancelled", "lost")
+    terminal_job_statuses = ("done", "failed", "cancelled", "partial_completed", "lost")
+    terminal_scan_statuses = ("done", "failed", "cancelled", "partial_completed", "lost")
     terminal_job_placeholders = ",".join("?" for _ in terminal_job_statuses)
     terminal_scan_placeholders = ",".join("?" for _ in terminal_scan_statuses)
     old_scan_ids: set[str] = set()
@@ -4272,7 +4272,7 @@ def list_completed_scan_job_results(
             JOIN job_results jr ON jr.job_id = sj.job_id
             LEFT JOIN job_result_artifacts jra
               ON jra.id = jr.payload_artifact_id
-            WHERE sj.status IN ('done', 'failed')
+            WHERE sj.status IN ('done', 'failed', 'cancelled', 'partial_completed')
               AND jr.attempt_id = sj.last_attempt_id
               {cursor_clause}
             ORDER BY jr.created_at ASC, sj.job_id ASC
@@ -4311,7 +4311,7 @@ def get_completed_scan_job_result(job_id: str) -> dict[str, Any] | None:
             LEFT JOIN job_result_artifacts jra
               ON jra.id = jr.payload_artifact_id
             WHERE sj.job_id = ?
-              AND sj.status IN ('done', 'failed')
+              AND sj.status IN ('done', 'failed', 'cancelled', 'partial_completed')
               AND jr.attempt_id = sj.last_attempt_id
             """,
             (job_id,),
@@ -4351,7 +4351,7 @@ def list_completed_scan_job_results_for_job_ids(job_ids: list[str] | set[str] | 
                     LEFT JOIN job_result_artifacts jra
                       ON jra.id = jr.payload_artifact_id
                     WHERE sj.job_id IN ({placeholders})
-                      AND sj.status IN ('done', 'failed')
+                      AND sj.status IN ('done', 'failed', 'cancelled', 'partial_completed')
                       AND jr.attempt_id = sj.last_attempt_id
                     """,
                     tuple(chunk),
