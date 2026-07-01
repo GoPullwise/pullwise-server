@@ -751,6 +751,26 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 self.assertIn("Invalid review-worker-protocol/v1 event", invalid_event.payload["message"])
                 self.assertEqual(len(db.list_review_run_events(run_id)), 1)
 
+        partial_event_payload = clone_event(valid_event)
+        partial_event_payload.update(
+            {
+                "event_type": "run_partial_completed",
+                "phase": "qa_gate",
+                "message": "Partial result available.",
+                "progress": {"overall_percent": 99.0, "current_phase_percent": 100, "status": "partial_completed"},
+                "data": {"reason": "qa gate failed after artifacts were produced"},
+            }
+        )
+        partial_event = RouteHarness(f"/v1/review-runs/{run_id}/events", partial_event_payload, headers=self.auth)
+        app.PullwiseHandler.route(partial_event, "POST")
+
+        self.assertEqual(partial_event.status, HTTPStatus.OK)
+        self.assertTrue(partial_event.payload["ack"])
+        self.assertEqual(len(db.list_review_run_events(run_id)), 2)
+        partial_run = db.get_review_run(run_id)
+        self.assertEqual(partial_run["status"], "partial_completed")
+        self.assertEqual(json.loads(partial_run["progress_json"])["status"], "partial_completed")
+
         content = b"{}"
         artifact_payload = {
             "protocol_version": "review-worker-protocol/v1",
@@ -3354,6 +3374,108 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(retry["maxAttempts"], 3)
         self.assertEqual(retry["retryAttempts"], 2)
+
+    def test_v1_worker_core_progress_consumes_reserved_scan_quota(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {"usr_1": user}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "11902",
+                "full_name": "acme/v1-reserved",
+                "owner_login": "acme",
+                "default_branch": "main",
+            }
+        )
+        quota_result = app.quota.reserve_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_v1_reserved_core",
+            request_id="req_v1_reserved_core",
+        )
+        scan = {
+            "id": "sc_v1_reserved_core",
+            "repo": repository["full_name"],
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_v1_reserved_core",
+            "quotaBucketIds": quota_result["bucketIds"],
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+            "quotaState": "reserved",
+            "quotaReservedAt": app.now(),
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        app.PullwiseHandler.route(lease, "POST")
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+        run_id = job["run_id"]
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
+
+        setup_event = RouteHarness(
+            f"/v1/review-runs/{run_id}/events",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "run_id": run_id,
+                "worker_id": "wk_1",
+                "sequence": 1,
+                "timestamp": "2026-07-01T10:20:00Z",
+                "event_type": "phase_started",
+                "phase": "prepare_workspace",
+                "severity": "info",
+                "message": "Preparing workspace.",
+                "progress": {"overall_percent": 1.0, "current_phase_percent": 0, "status": "running"},
+                "data": {},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(setup_event, "POST")
+        self.assertEqual(setup_event.status, HTTPStatus.OK)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
+
+        core_event = RouteHarness(
+            f"/v1/review-runs/{run_id}/events",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "run_id": run_id,
+                "worker_id": "wk_1",
+                "sequence": 2,
+                "timestamp": "2026-07-01T10:21:00Z",
+                "event_type": "phase_started",
+                "phase": "repo_map",
+                "severity": "info",
+                "message": "Repository map started.",
+                "progress": {"overall_percent": 20.0, "current_phase_percent": 0, "status": "running"},
+                "data": {},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(core_event, "POST")
+
+        self.assertEqual(core_event.status, HTTPStatus.OK)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
+        payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(payload["quotaState"], "consumed")
+        self.assertEqual(payload["quotaConsumeTrigger"], "phase_repo_map")
+        self.assertEqual(payload["billingUsage"]["used"], 1)
+        self.assertEqual(payload["billingUsage"]["reserved"], 0)
 
     def test_worker_ai_progress_consumes_reserved_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
