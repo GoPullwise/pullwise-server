@@ -232,7 +232,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "size_bytes"):
             app.validate_review_worker_protocol_envelope(job, body, status="done")
 
-    def test_prepare_worker_result_accepts_v1_without_graph_verified_report(self) -> None:
+    def test_prepare_worker_result_accepts_v1_protocol(self) -> None:
         job = {
             "job_id": "job_1",
             "scan_id": "scan_1",
@@ -257,7 +257,6 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         prepared = app.prepare_worker_job_result_state(job, body, status="done", checksum="abc")
 
         self.assertEqual(prepared["review_worker_protocol"], envelope)
-        self.assertNotIn("graph_verified_report", prepared)
         self.assertEqual(len(prepared["normalized_findings"]), 1)
         self.assertEqual(prepared["normalized_findings"][0]["title"], "Important issue")
         self.assertEqual(app.worker_result_issue_count(body), 1)

@@ -3142,10 +3142,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if result.get("conflict"):
             return self.json({"message": "Result checksum conflicts with an existing attempt result."}, HTTPStatus.CONFLICT)
-        graph_report = body.get("graphVerifiedReport") if isinstance(body.get("graphVerifiedReport"), dict) else {}
-        graph_summary = graph_report.get("summary") if isinstance(graph_report.get("summary"), dict) else {}
-        graph_finder = graph_summary.get("finder") if isinstance(graph_summary.get("finder"), dict) else {}
-        graph_candidates = graph_summary.get("candidates") if isinstance(graph_summary.get("candidates"), dict) else {}
         scan_logging.log_event(
             "worker_job_result",
             scanId=job.get("scan_id"),
@@ -3160,13 +3156,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             status=body.get("status"),
             errorCode=worker_result_error_code(body),
             error=clean_scan_error(body.get("error")),
-            graphVerifiedRunId=graph_report.get("runId"),
-            graphVerifiedMode=graph_report.get("mode"),
-            graphVerifiedBlockedCount=graph_report.get("blockedCount"),
-            graphVerifiedFinderTasks=graph_finder.get("tasks"),
-            graphVerifiedFinderBlocked=graph_finder.get("blocked"),
-            graphVerifiedFinderCandidates=graph_finder.get("candidates"),
-            graphVerifiedValidCandidates=graph_candidates.get("valid"),
             duplicate=result.get("duplicate"),
             issueCount=result.get("issueCount"),
         )

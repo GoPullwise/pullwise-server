@@ -958,7 +958,7 @@ class DatabaseContractsTest(unittest.TestCase):
                     [
                         {
                             'event_id': 'ev_retry_preserve_evidence',
-                            'protocol': 'graph-verified-code-review/1',
+                            'protocol': 'review-worker-protocol/v1',
                             'candidate_observation_key': 'obs_retry_preserve_evidence',
                             'scan_id': 'sc_retry_preserve_evidence',
                             'job_id': 'job_retry_preserve_evidence',
@@ -1055,13 +1055,13 @@ class DatabaseContractsTest(unittest.TestCase):
                 payload = {
                     "status": "done",
                     "summary": {"high": 1},
-                    "graphVerifiedReport": {
-                        "version": "graph-verified-code-review/1",
+                    "reviewWorkerProtocol": {
+                        "version": "review-worker-protocol/v1",
                         "runId": "run_artifact",
                         "scanMode": "full-strict",
                         "confirmedCount": 1,
                         "finalJson": {"confirmed": [{"candidate": {"issue_id": "iss_1"}}]},
-                        "debugMarkdown": "x" * 1000,
+                        "debugText": "x" * 1000,
                     },
                 }
                 result = db.record_scan_job_result(
@@ -1086,9 +1086,8 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(artifact_count, 1)
         self.assertIsNotNone(row[1])
         self.assertIn("artifactId", row[0])
-        self.assertIn("full-strict", row[0])
-        self.assertNotIn("debugMarkdown", row[0])
-        self.assertEqual(restored["result_payload"]["graphVerifiedReport"]["debugMarkdown"], "x" * 1000)
+        self.assertNotIn("debugText", row[0])
+        self.assertEqual(restored["result_payload"]["reviewWorkerProtocol"]["debugText"], "x" * 1000)
 
     def test_record_scan_job_result_rolls_back_when_artifact_write_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1111,13 +1110,13 @@ class DatabaseContractsTest(unittest.TestCase):
                 payload = {
                     "status": "done",
                     "summary": {"high": 1},
-                    "graphVerifiedReport": {
-                        "version": "graph-verified-code-review/1",
+                    "reviewWorkerProtocol": {
+                        "version": "review-worker-protocol/v1",
                         "runId": "run_artifact_failure",
                         "scanMode": "full-strict",
                         "confirmedCount": 1,
                         "finalJson": {"confirmed": [{"candidate": {"issue_id": "iss_1"}}]},
-                        "debugMarkdown": "x" * 1000,
+                        "debugText": "x" * 1000,
                     },
                 }
 

@@ -10,90 +10,6 @@ from unittest.mock import patch
 from pullwise_server import app, db
 
 
-def graph_verified_result_fields(title: str) -> dict:
-    return {
-        "graphVerifiedReport": {
-            "version": "graph-verified-code-review/1",
-            "runId": "gv_recovery_run",
-            "mode": "standard",
-            "head": "HEAD",
-            "confirmedCount": 1,
-            "rejectedCount": 0,
-            "blockedCount": 0,
-            "finalJson": {
-                "confirmed": [
-                    {
-                        "candidate": {
-                            "candidate_id": "issue-recovered",
-                            "dedupe_key": "quality|src/app.py|recovered",
-                            "category": "correctness",
-                            "severity": "high",
-                            "confidence": "high",
-                            "claim": title,
-                            "graph_evidence": {
-                                "slice_id": "slice-recovered",
-                                "codegraph_files": ["src/app.py"],
-                                "path_summary": ["src/app.py:12", "candidate -> repro -> judge"],
-                            },
-                            "evidence": [
-                                {
-                                    "file": "src/app.py",
-                                    "lines": "12",
-                                    "why_it_matters": "Recovered completed worker result.",
-                                }
-                            ],
-                            "trigger_condition": "Run the local reproduction.",
-                            "expected_behavior": "The app handles the path.",
-                            "actual_behavior_hypothesis": title,
-                            "minimal_repro_idea": "pytest tests/recovered.py",
-                            "repro_likelihood": "high",
-                        },
-                        "repro": {
-                            "candidate_id": "issue-recovered",
-                            "status": "reproduced",
-                            "level": "L2",
-                            "summary": title,
-                            "commands_run": [
-                                {
-                                    "cmd": "pytest tests/recovered.py",
-                                    "cwd": ".",
-                                    "exit_code": 1,
-                                    "log_path": "logs/recovered.log",
-                                }
-                            ],
-                            "files_written": [],
-                            "proof": {
-                                "type": "failing_test",
-                                "expected": "The app handles the path.",
-                                "actual": title,
-                                "log_excerpt": title,
-                            },
-                            "graph_path_exercised": True,
-                            "why_valid": "The recovered result has graph evidence and local repro.",
-                            "why_not_reproduced": "",
-                            "safety_notes": "Local test fixture.",
-                        },
-                        "judge": {
-                            "candidate_id": "issue-recovered",
-                            "status": "confirmed",
-                            "level": "L2",
-                            "safe_to_show_user": True,
-                            "reason": "Recovered completed worker result.",
-                            "evidence_summary": {
-                                "command": "pytest tests/recovered.py",
-                                "log_path": "logs/recovered.log",
-                                "observable": title,
-                            },
-                            "limitations": [],
-                        },
-                        "verification": {"status": "confirmed", "level": "L2", "safe_to_show_user": True},
-                    }
-                ]
-            },
-        },
-    }
-
-
 def legacy_result_fields(title: str) -> dict:
     return {
         "audit_protocol": "audit-swarm/0.1",
@@ -607,7 +523,6 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(recovered, 1)
         self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertEqual(app.SCANS[0]["errorCode"], "WORKER_PROTOCOL_MISSING")
-        self.assertNotIn("graphVerifiedReport", app.SCANS[0])
         self.assertEqual(app.ISSUES, [])
 
     def test_recover_interrupted_scans_reconciles_terminal_jobs_without_results(self) -> None:

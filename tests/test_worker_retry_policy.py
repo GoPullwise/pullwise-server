@@ -46,66 +46,6 @@ class WorkerRetryPolicyTest(unittest.TestCase):
     def test_success_is_never_sent_to_failure_retry_policy(self) -> None:
         self.assertFalse(app.worker_result_allows_auto_retry({}, status="done"))
 
-    def test_simple_worker_runtime_item_passes_existing_public_gate(self) -> None:
-        item = {
-            "candidate": {
-                "candidate_id": "cand-1",
-                "issue_id": "cand-1",
-                "claim": "The handler returns the wrong value.",
-                "evidence": [
-                    {
-                        "file": "src/handler.py",
-                        "lines": "1-2",
-                        "why_it_matters": "This is the returned value.",
-                    }
-                ],
-                "graph_evidence": {
-                    "slice_id": "unit-0001",
-                    "codegraph_files": ["src/handler.py"],
-                    "path_summary": ["caller -> src/handler.py"],
-                },
-            },
-            "verification": {
-                "status": "confirmed",
-                "verdict": "confirmed",
-                "level": "L2",
-                "safe_to_show_user": True,
-                "reason": "Repeated runtime proof is stable.",
-            },
-            "repro": {
-                "status": "reproduced",
-                "level": "L2",
-                "commands_run": [
-                    {
-                        "cmd": "python3 .codereview/repro/check.py",
-                        "exit_code": 0,
-                        "log_path": "workers/verification/cand-1/events.jsonl",
-                    }
-                ],
-                "graph_path_exercised": True,
-            },
-            "judge": {
-                "status": "confirmed",
-                "level": "L2",
-                "safe_to_show_user": True,
-                "evidence_summary": {
-                    "command": "python3 .codereview/repro/check.py",
-                    "log_path": "workers/verification/cand-1/events.jsonl",
-                    "observable": "OBSERVED_VALUE:false",
-                },
-            },
-        }
-        report = app.public_graph_verified_report(
-            {
-                "version": "graph-verified-code-review/1",
-                "runId": "run-1",
-                "mode": "standard",
-                "finalJson": {"confirmed": [item]},
-            }
-        )
-        self.assertEqual(report["confirmedCount"], 1)
-        self.assertEqual(report["finalJson"]["confirmed"][0]["repro"]["status"], "reproduced")
-
 
 if __name__ == "__main__":
     unittest.main()

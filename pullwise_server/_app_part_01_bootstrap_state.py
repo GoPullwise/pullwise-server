@@ -1056,7 +1056,6 @@ def reject_missing_worker_protocol_completed_result_locked(row: dict, *, checksu
         "auditSwarm",
         "completionAudit",
         "convergenceState",
-        "graphVerifiedReport",
         "impactGraph",
         "repositoryGraph",
         "semanticGraph",

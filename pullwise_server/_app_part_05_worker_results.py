@@ -70,7 +70,6 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
         "effectiveAgentConfig",
         "error",
         "errorCode",
-        "graphVerifiedReport",
         "impactGraph",
         "jobTrace",
         "preflight",
@@ -637,7 +636,6 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["readingGuide"] = reading_guide
         else:
             scan.pop("readingGuide", None)
-        scan.pop("graphVerifiedReport", None)
         if review_worker_protocol:
             scan["reviewWorkerProtocol"] = review_worker_protocol
         else:
@@ -710,7 +708,6 @@ def apply_worker_job_retry_to_state_locked(job: dict, body: dict, *, checksum: s
         "durationMs",
         "error",
         "errorCode",
-        "graphVerifiedReport",
         "resultChecksum",
         "startedAt",
     ):

@@ -299,17 +299,20 @@ class ApiKeyRoutesTest(unittest.TestCase):
                 "status": "done",
                 "attempt_id": f"wk_api-{claimed['attempt']}",
                 "result_checksum": "checksum-api-stale-done",
-                "graphVerifiedReport": {
-                    "version": "graph-verified-code-review/1",
-                    "runId": "run_api_stale_done",
-                    "mode": "standard",
-                    "head": "abc123",
-                    "confirmedCount": 0,
-                    "rejectedCount": 0,
-                    "blockedCount": 0,
-                    "finalJson": {"confirmed": []},
-                },
-                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "reviewWorkerProtocol": {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "message_type": "review_run_result",
+                    "job": {
+                        "job_id": job["job_id"],
+                        "run_id": claimed.get("run_id") or f"run_{job['job_id']}",
+                        "lease_id": claimed.get("lease_id") or f"lease_{job['job_id']}",
+                    },
+                    "worker": {"worker_id": "wk_api"},
+                    "execution": {"status": "completed"},
+                    "quality_gate": {"status": "pass"},
+                    "artifact_manifest": [],
+                    "summary": {"top_findings": []},
+                },                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
         )
         app.SCANS[0].update({"status": "running", "phase": "ai", "progress": 80})

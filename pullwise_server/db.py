@@ -3566,21 +3566,6 @@ def scan_job_result_summary_payload(payload: dict[str, Any], *, artifact_id: str
         ):
             if key in payload:
                 summary[key] = payload.get(key)
-        report = payload.get("graphVerifiedReport")
-        if isinstance(report, dict):
-            summary["graphVerifiedReport"] = {
-                key: report.get(key)
-                for key in (
-                    "version",
-                    "runId",
-                    "mode",
-                    "scanMode",
-                    "confirmedCount",
-                    "rejectedCount",
-                    "blockedCount",
-                )
-                if key in report
-            }
     return scan_payload_for_storage(summary)
 
 

@@ -68,521 +68,105 @@ class RawBodyRouteHarness(RouteHarness):
         return app.PullwiseHandler.read_json(self)
 
 
-class GraphVerifiedReportContractsTest(unittest.TestCase):
-    def graph_verified_item(self) -> dict:
-        return {
-            "candidate": {
-                "issue_id": "issue_1",
-                "claim": "Confirmed claim",
-                "graph_evidence": {
-                    "slice_id": "slice-1",
-                    "codegraph_files": ["src/app.py"],
-                },
-                "evidence": [
-                    {
-                        "file": "src/app.py",
-                        "line": 10,
-                        "end_line": 12,
-                        "why_it_matters": "The handler reaches the failing path.",
-                    }
-                ],
-            },
-            "judge": {
-                "status": "confirmed",
-                "level": "L2",
-                "safe_to_show_user": True,
-                "evidence_summary": {
-                    "command": "pytest tests/test_issue.py",
-                    "log_path": "logs/repro.log",
-                    "observable": "Assertion failed as expected.",
-                },
-            },
-            "repro": {
-                "status": "reproduced",
-                "level": "L2",
-                "commands_run": [
-                    {
-                        "cmd": "pytest tests/test_issue.py",
-                        "cwd": "/worker/repo",
-                        "exit_code": 1,
-                        "log_path": "logs/repro.log",
-                    }
-                ],
-                "graph_path_exercised": True,
-            },
-            "verification": {"verdict": "confirmed", "safe_to_show_user": True},
-        }
-
-    def test_public_graph_verified_report_sanitizes_and_preserves_confirmed_only_artifacts(self) -> None:
-        confirmed_item = self.graph_verified_item()
-        confirmed_item["candidate"]["internal_secret"] = "must not leak"
-        confirmed_item["judge"]["raw_prompt"] = "must not leak"
-        confirmed_item["repro"]["commands_run"][0]["stdout"] = "must not leak"
-
-        report = app.public_graph_verified_report(
-            {
-                "runId": "run_1",
-                "mode": "standard",
-                "scanMode": "full-strict",
-                "head": "HEAD",
-                "confirmedCount": 1,
-                "rejectedCount": 2,
-                "blockedCount": 0,
-                "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
-                "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
-                "finalJson": {"confirmed": [confirmed_item]},
-            }
-        )
-
-        self.assertEqual(report["version"], "graph-verified-code-review/1")
-        self.assertEqual(report["runId"], "run_1")
-        self.assertEqual(report["scanMode"], "full-strict")
-        self.assertEqual(report["confirmedCount"], 1)
-        self.assertEqual(report["rejectedCount"], 2)
-        confirmed = report["finalJson"]["confirmed"][0]
-        self.assertEqual(confirmed["candidate"]["issue_id"], "issue_1")
-        self.assertEqual(confirmed["candidate"]["claim"], "Confirmed claim")
-        self.assertEqual(confirmed["candidate"]["evidence"][0]["lines"], "10-12")
-        self.assertEqual(confirmed["judge"]["evidence_summary"]["command"], "pytest tests/test_issue.py")
-        self.assertEqual(confirmed["repro"]["commands_run"][0]["exit_code"], 1)
-        self.assertNotIn("internal_secret", json.dumps(report))
-        self.assertNotIn("raw_prompt", json.dumps(report))
-        self.assertNotIn("stdout", json.dumps(report))
-        self.assertNotIn("finalMarkdown", report)
-        self.assertNotIn("debugMarkdown", report)
-        findings = app.worker_graph_verified_findings({"repo": "acme/app"}, report)
-        self.assertEqual(findings[0]["codeEvidence"][0]["lines"], "10-12")
-        self.assertEqual(findings[0]["line"], 10)
-
-        full_report = app.public_graph_verified_report(
-            {
-                "runId": "run_1",
-                "mode": "standard",
-                "confirmedCount": 1,
-                "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
-                "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
-                "finalJson": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
-            },
-            include_markdown=True,
-            include_debug=True,
-        )
-        self.assertIn("Confirmed only.", full_report["finalMarkdown"])
-        self.assertIn("Rejected candidates: 2", full_report["debugMarkdown"])
-
-    def test_public_graph_verified_report_preserves_coverage_metadata_without_findings(self) -> None:
-        report = app.public_graph_verified_report(
-            {
-                "coverage": {
-                    "scope": "full-repository snapshot",
-                    "reviewUnitCount": 2,
-                    "files": ["pullwise_server/app.py"],
-                    "internal_secret": "must not leak",
-                },
-                "reviewUnits": [
-                    {
-                        "unit_id": "unit-0001",
-                        "area": "server",
-                        "files": [{"path": "pullwise_server/app.py", "line_count": 120}],
-                        "token": "must not leak",
-                    }
-                ],
-                "finalJson": {
-                    "confirmed": [],
-                    "coverage": {"reviewedFiles": 1},
-                    "reviewUnits": [{"unit_id": "unit-0001", "status": "covered"}],
-                },
-            }
-        )
-
-        self.assertEqual(report["confirmedCount"], 0)
-        self.assertEqual(report["finalJson"]["confirmed"], [])
-        self.assertEqual(report["coverage"]["scope"], "full-repository snapshot")
-        self.assertEqual(report["coverage"]["reviewUnitCount"], 2)
-        self.assertEqual(report["reviewUnits"][0]["unit_id"], "unit-0001")
-        self.assertEqual(report["finalJson"]["coverage"]["reviewedFiles"], 1)
-        self.assertEqual(report["finalJson"]["reviewUnits"][0]["status"], "covered")
-        self.assertNotIn("must not leak", json.dumps(report))
-        self.assertNotIn("internal_secret", json.dumps(report))
-        self.assertNotIn("token", json.dumps(report).lower())
-
-    def test_public_graph_verified_report_accepts_static_proof_items(self) -> None:
-        item = self.graph_verified_item()
-        steps = [
-            "Inspect src/app.py and confirm the handler returns the documented error path.",
-            "Compare the observed error path with the expected successful response.",
-        ]
-        item["judge"] = {
-            "status": "confirmed",
-            "level": "L1",
-            "safe_to_show_user": True,
-            "reason": "Static proof confirms the documented behavior gap.",
-            "evidence_summary": {"observable": steps[0]},
-        }
-        item["repro"] = {
-            "status": "static_proof",
-            "level": "L1",
-            "summary": "The handler returns the error path.",
-            "commands_run": [],
-            "proof": {
-                "type": "static-proof",
-                "expected": "The handler should return a successful response.",
-                "actual": "The handler returns the error path.",
-                "verification_steps": steps,
-                "assurance": "model-self-certified",
-                "label": "Model-certified static proof",
-            },
-            "graph_path_exercised": True,
-            "assurance": "model-self-certified",
-            "proof_label": "Model-certified static proof",
-        }
-        item["verification"] = {
-            "status": "confirmed",
-            "level": "L1",
-            "proof_type": "static-proof",
-            "safe_to_show_user": True,
-            "assurance": "model-self-certified",
-            "proof_origin": "model-static-proof",
-            "proof_label": "Model-certified static proof",
-        }
-
-        report = app.public_graph_verified_report(
-            {
-                "runId": "run_static",
-                "mode": "standard",
-                "confirmedCount": 1,
-                "finalJson": {"confirmed": [item]},
-            }
-        )
-        confirmed = report["finalJson"]["confirmed"][0]
-        self.assertEqual(report["confirmedCount"], 1)
-        self.assertEqual(confirmed["repro"]["proof"]["verification_steps"], steps)
-        self.assertEqual(confirmed["verification"]["assurance"], "model-self-certified")
-
-        findings = app.worker_graph_verified_findings({"repo": "acme/app"}, report)
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0]["verificationStatus"], "static_proof")
-        self.assertIn("model-self-certified", findings[0]["tags"])
-        self.assertEqual(findings[0]["reproduction"]["steps"], steps)
-
-        payload = app.issue_payload(findings[0])
-        self.assertEqual(payload["verificationStatus"], "static_proof")
-        self.assertEqual(payload["confidenceLevel"], "high")
-        self.assertEqual(payload["reproduction"]["steps"], steps)
-        self.assertEqual(payload["reproProof"]["verificationSteps"], steps)
-        self.assertIn("Inspect src/app.py", payload["reproductionPath"])
-
-    def test_graph_verified_report_gate_rejects_items_missing_required_public_evidence(self) -> None:
-        unsafe = self.graph_verified_item()
-        unsafe["judge"]["safe_to_show_user"] = False
-        weak_level = self.graph_verified_item()
-        weak_level["judge"]["level"] = "L1"
-        unreproduced = self.graph_verified_item()
-        unreproduced["repro"]["status"] = "not_reproduced"
-        no_graph_path = self.graph_verified_item()
-        no_graph_path["repro"]["graph_path_exercised"] = False
-        no_log = self.graph_verified_item()
-        no_log["judge"]["evidence_summary"].pop("log_path")
-        no_log["repro"]["commands_run"][0].pop("log_path")
-        no_exit_code = self.graph_verified_item()
-        no_exit_code["repro"]["commands_run"][0].pop("exit_code")
-        no_line = self.graph_verified_item()
-        no_line["candidate"]["evidence"][0].pop("line")
-        no_line["candidate"]["evidence"][0].pop("end_line")
-        unlabeled_static = self.graph_verified_item()
-        unlabeled_static["judge"]["level"] = "L1"
-        unlabeled_static["repro"] = {
-            "status": "static_proof",
-            "level": "L1",
-            "summary": "The handler returns the error path.",
-            "commands_run": [],
-            "proof": {
-                "type": "static-proof",
-                "expected": "The handler should return a successful response.",
-                "actual": "The handler returns the error path.",
-                "verification_steps": ["Inspect src/app.py."],
-            },
-            "graph_path_exercised": True,
-        }
-        unlabeled_static["verification"] = {
-            "status": "confirmed",
-            "level": "L1",
-            "proof_type": "static-proof",
-            "safe_to_show_user": True,
-        }
-
-        report = {
-            "runId": "run_1",
-            "mode": "standard",
-            "confirmedCount": 8,
-            "finalJson": {
-                "confirmed": [
-                    unsafe,
-                    weak_level,
-                    unreproduced,
-                    no_graph_path,
-                    no_log,
-                    no_exit_code,
-                    no_line,
-                    unlabeled_static,
-                ]
-            },
-        }
-
-        public_report = app.public_graph_verified_report(report)
-        self.assertEqual(public_report["confirmedCount"], 0)
-        self.assertEqual(public_report["finalJson"]["confirmed"], [])
-        self.assertEqual(app.worker_graph_verified_findings({"repo": "acme/app"}, public_report), [])
-
-    def test_audit_bundle_includes_graph_verified_report_artifacts(self) -> None:
-        report = app.public_graph_verified_report(
-            {
-                "runId": "run_1",
-                "mode": "standard",
-                "confirmedCount": 1,
-                "finalMarkdown": "# Final\nAPI key sk-liveSecret123\n",
-                "debugMarkdown": "# Debug\nAuthorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz\npassword=supersecret\n",
-                "finalJson": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
-            },
-            include_markdown=True,
-            include_debug=True,
-        )
-
-        artifacts = app.audit_bundle_graph_verified_artifacts(report)
-        paths = {artifact["path"] for artifact in artifacts}
-
-        self.assertIn("graph-verified/final.json", paths)
-        self.assertIn("graph-verified/final.md", paths)
-        self.assertIn("graph-verified/debug.md", paths)
-
-        contents = {artifact["path"]: artifact["content"] for artifact in artifacts}
-        bundle_text = "\n".join(contents.values())
-        self.assertNotIn("sk-liveSecret123", bundle_text)
-        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz", bundle_text)
-        self.assertNotIn("password=supersecret", bundle_text)
-        self.assertIn("API key [redacted]", contents["graph-verified/final.md"])
-        self.assertIn("Bearer [redacted]", contents["graph-verified/debug.md"])
-        self.assertIn("password=[redacted]", contents["graph-verified/debug.md"])
+def review_worker_severity(value: object) -> str:
+    text = str(value or "medium").lower()
+    return {"p0": "critical", "p1": "high", "p2": "medium", "p3": "low"}.get(text, text if text in {"critical", "high", "medium", "low", "info"} else "medium")
 
 
-def audit_issue_card(
-    title: str,
-    *,
-    issue_id: str = "issue-1",
-    severity: str = "P2",
-    category: str = "Quality",
-    file: str = "src/app.py",
-    line: int = 12,
-    end_line: int | None = None,
-    claim: str | None = None,
-    impact: str = "",
-    evidence: list | None = None,
-    reproduction: dict | None = None,
-    reproduction_idea: str = "",
-    suggested_test: str = "",
-    false_positive_checks: list[str] | None = None,
-    limitations: list[str] | None = None,
-) -> dict:
-    return {
-        "issue_id": issue_id,
-        "shard_id": "app",
-        "agent_role": "correctness-reviewer",
-        "title": title,
-        "category": category,
-        "severity": severity,
-        "confidence": 0.9,
-        "locations": [{"file": file, "startLine": line, "endLine": end_line or line}] if file else [],
-        "claim": claim or title,
-        "impact": impact,
-        "evidence": evidence if evidence is not None else ["Concrete evidence was captured."],
-        "reproduction": reproduction or {},
-        "reproduction_idea": reproduction_idea,
-        "suggested_test": suggested_test,
-        "false_positive_checks": (
-            false_positive_checks if false_positive_checks is not None else ["No upstream guard was found."]
-        ),
-        "limitations": limitations or [],
-    }
+def review_worker_fixture_file(value: object) -> str:
+    text = str(value or "src/app.py").replace("\\", "/").strip()
+    if not text or text.startswith("/") or ":" in text:
+        return "src/app.py"
+    return text
 
 
-def audit_verification(
-    issue_id: str,
-    *,
-    verdict: str = "confirmed",
-    verifier_role: str = "prover",
-    proof_type: str = "static_proof",
-    proof_strength: int = 2,
-    evidence: list[str] | None = None,
-    commands_run: list[str] | None = None,
-    result_summary: str = "Static proof confirms the candidate.",
-    notes_for_fix: list[str] | None = None,
-    log_path: str = "",
-    output: str = "",
-) -> dict:
-    return {
-        "issue_id": issue_id,
-        "verifier_role": verifier_role,
-        "verdict": verdict,
-        "confidence": 0.86,
-        "proof_type": proof_type,
-        "proof_strength": proof_strength,
-        "evidence": evidence or ["Verifier reviewed the relevant code path."],
-        "commands_run": commands_run or [],
-        "result_summary": result_summary,
-        "notes_for_fix": notes_for_fix or [],
-        "logPath": log_path,
-        "output": output,
-    }
-
-
-def graph_verified_severity(value: object) -> str:
-    return {
-        "p0": "critical",
-        "p1": "high",
-        "p2": "medium",
-        "p3": "low",
-        "p4": "info",
-        "critical": "critical",
-        "high": "high",
-        "medium": "medium",
-        "low": "low",
-        "info": "info",
-    }.get(str(value or "").lower(), "medium")
-
-
-def graph_verified_fixture_file(value: object) -> str:
-    text = str(value or "").replace("\\", "/")
-    for marker in ("/src/", "/tests/", "/test/"):
-        if marker in text:
-            return marker.strip("/") + "/" + text.split(marker, 1)[1]
-    return text if text and not text.startswith("/") else "src/app.py"
-
-
-def graph_verified_item_from_card(card: dict, results: list[dict], index: int) -> dict:
+def review_worker_top_finding_from_card(card: dict, results: list[dict], index: int) -> dict:
     issue_id = str(card.get("issue_id") or card.get("issueId") or card.get("id") or f"issue-{index + 1}")
-    confirmed_results = [item for item in results if str(item.get("verdict") or "confirmed").lower() == "confirmed"]
-    result = confirmed_results[0] if confirmed_results else {}
-    reproduction = card.get("reproduction") if isinstance(card.get("reproduction"), dict) else {}
-    locations = card.get("locations") if isinstance(card.get("locations"), list) else []
-    primary = locations[0] if locations and isinstance(locations[0], dict) else {}
-    file_path = graph_verified_fixture_file(card.get("file") or primary.get("file"))
-    start_line = int(primary.get("startLine") or primary.get("start_line") or primary.get("line") or 1)
-    end_line = int(primary.get("endLine") or primary.get("end_line") or start_line)
-    commands = (
-        result.get("commands_run")
-        if isinstance(result.get("commands_run"), list)
-        else reproduction.get("commands")
-        if isinstance(reproduction.get("commands"), list)
-        else []
-    )
-    command = str(commands[0]) if commands else "python -m pytest"
-    log_path = str(result.get("logPath") or result.get("log_path") or reproduction.get("logPath") or f"logs/{issue_id}.log")
-    proof_actual = str(
-        result.get("result_summary")
-        or result.get("resultSummary")
-        or reproduction.get("actual")
-        or "Local reproduction captured the observed behavior."
-    )
-    proof_expected = str(reproduction.get("expected") or "Expected behavior should hold.")
+    location = card.get("location") if isinstance(card.get("location"), dict) else {}
+    file_path = review_worker_fixture_file(card.get("file") or location.get("file") or "src/app.py")
+    line = int(card.get("line") or location.get("line") or location.get("startLine") or 10)
+    title = str(card.get("title") or card.get("claim") or f"Review worker issue {index + 1}")
+    result = next((item for item in results if str(item.get("issue_id") or item.get("issueId") or "") == issue_id), {})
+    evidence = card.get("evidence") if isinstance(card.get("evidence"), list) else []
     evidence_items = []
-    raw_evidence = card.get("evidence") if isinstance(card.get("evidence"), list) else []
-    for evidence in raw_evidence[:4]:
-        if isinstance(evidence, dict):
-            evidence_file = graph_verified_fixture_file(evidence.get("file") or evidence.get("path") or file_path)
-            evidence_start = int(evidence.get("startLine") or evidence.get("start_line") or evidence.get("line") or start_line)
-            evidence_end = int(evidence.get("endLine") or evidence.get("end_line") or evidence_start)
-            why = str(evidence.get("why_it_matters") or evidence.get("summary") or evidence.get("text") or "Code evidence")
-        else:
-            evidence_file = file_path
-            evidence_start = start_line
-            evidence_end = end_line
-            why = str(evidence or "Code evidence")
-        evidence_items.append({"file": evidence_file, "lines": f"{evidence_start}-{evidence_end}", "why_it_matters": why})
+    for item in evidence[:4]:
+        if isinstance(item, dict):
+            evidence_items.append({
+                "type": str(item.get("type") or "code"),
+                "file": review_worker_fixture_file(item.get("file") or item.get("path") or file_path),
+                "line": int(item.get("line") or item.get("startLine") or line),
+                "summary": str(item.get("summary") or item.get("text") or item.get("why_it_matters") or "Code evidence"),
+            })
     if not evidence_items:
-        evidence_items.append({"file": file_path, "lines": f"{start_line}-{end_line}", "why_it_matters": "Code evidence"})
+        evidence_items.append({"type": "code", "file": file_path, "line": line, "summary": "Code evidence"})
     return {
-        "candidate": {
-            "issue_id": issue_id,
-            "candidate_id": issue_id,
-            "dedupe_key": str(card.get("dedupe_key") or issue_id),
-            "severity": graph_verified_severity(card.get("severity")),
-            "category": str(card.get("category") or "Quality"),
-            "confidence": "high",
-            "claim": str(card.get("claim") or card.get("title") or f"GraphVerified issue {index + 1}"),
-            "trigger_condition": str(reproduction.get("input") or card.get("reproduction_idea") or "Run the local reproduction."),
-            "expected_behavior": proof_expected,
-            "actual_behavior_hypothesis": proof_actual,
-            "minimal_repro_idea": str(card.get("suggested_test") or command),
-            "repro_likelihood": "high",
-            "graph_evidence": {
-                "slice_id": f"slice-{issue_id}",
-                "codegraph_files": [file_path],
-                "path_summary": [f"{file_path}:{start_line}-{end_line}", "candidate -> repro -> judge"],
-            },
-            "evidence": evidence_items,
-            "fix_direction": str(card.get("fix_direction") or "Fix the confirmed behavior and rerun the reproduction."),
-        },
-        "repro": {
-            "candidate_id": issue_id,
-            "status": "reproduced",
-            "level": "L2",
-            "summary": proof_actual,
-            "commands_run": [{"cmd": command, "cwd": ".", "exit_code": 1, "log_path": log_path}],
-            "files_written": [],
-            "proof": {
-                "type": str(result.get("proof_type") or "failing_test"),
-                "expected": proof_expected,
-                "actual": proof_actual,
-                "log_excerpt": str(result.get("output") or proof_actual),
-            },
-            "graph_path_exercised": True,
-            "why_valid": "The local command exercises the Graph-Verified path.",
-            "why_not_reproduced": "",
-            "safety_notes": "Local test fixture.",
-        },
-        "judge": {
-            "candidate_id": issue_id,
-            "status": "confirmed",
-            "level": "L2",
-            "safe_to_show_user": True,
-            "reason": "Graph evidence, local reproduction, and judge validation are present.",
-            "evidence_summary": {
-                "command": command,
-                "log_path": log_path,
-                "observable": proof_actual,
-            },
-            "limitations": card.get("limitations") or [],
-        },
-        "verification": {"status": "confirmed", "level": "L2", "safe_to_show_user": True},
+        "id": issue_id,
+        "title": title,
+        "severity": review_worker_severity(card.get("severity")),
+        "description": str(card.get("summary") or card.get("description") or result.get("resultSummary") or title),
+        "recommendation": str(card.get("fix_direction") or card.get("recommendation") or "Fix the confirmed behavior and rerun the relevant checks."),
+        "location": {"file": file_path, "line": line},
+        "evidence": evidence_items,
+        "status": "open",
     }
 
 
-def audit_result_fields(issue_cards: list[dict], verification_results: list[dict] | None = None) -> dict:
+def current_review_worker_job_for_test() -> dict:
+    connection = app.db.connect()
+    try:
+        row = connection.execute(
+            """
+            SELECT * FROM scan_jobs
+            WHERE status IN ('claimed', 'running', 'uploading_result', 'queued', 'retrying', 'done', 'failed')
+            ORDER BY claimed_at DESC, created_at DESC, job_id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    finally:
+        connection.close()
+    return dict(row) if row is not None else {}
+
+def audit_result_fields(
+    issue_cards: list[dict],
+    verification_results: list[dict] | None = None,
+    *,
+    execution_status: str = "completed",
+) -> dict:
+    job = current_review_worker_job_for_test()
+    job_id = str(job.get("job_id") or "job_test")
+    run_id = str(job.get("run_id") or f"run_{job_id}")
+    lease_id = str(job.get("lease_id") or f"lease_{job_id}")
+    worker_id = str(job.get("claimed_by_worker_id") or "wk_1")
     results = verification_results or []
-    results_by_issue = {}
+    results_by_issue: dict[str, list[dict]] = {}
     for result in results:
         issue_id = str(result.get("issue_id") or result.get("issueId") or "")
         if issue_id:
             results_by_issue.setdefault(issue_id, []).append(result)
-    confirmed = []
+    findings = []
     for index, card in enumerate(issue_cards):
         issue_id = str(card.get("issue_id") or card.get("issueId") or card.get("id") or "")
         card_results = results_by_issue.get(issue_id, [])
         if any(str(result.get("verdict") or "").lower() == "rejected" for result in card_results):
             continue
-        confirmed.append(graph_verified_item_from_card(card, card_results, index))
+        findings.append(review_worker_top_finding_from_card(card, card_results, index))
     return {
-        "graphVerifiedReport": {
-            "version": "graph-verified-code-review/1",
-            "runId": "gv_test_run",
-            "mode": "standard",
-            "head": "HEAD",
-            "confirmedCount": len(confirmed),
-            "rejectedCount": max(0, len(issue_cards) - len(confirmed)),
-            "blockedCount": 0,
-            "finalJson": {"confirmed": confirmed},
+        "reviewWorkerProtocol": {
+            "protocol_version": "review-worker-protocol/v1",
+            "message_type": "review_run_result",
+            "job": {"job_id": job_id, "run_id": run_id, "lease_id": lease_id, "job_type": "repo_review.full_scan"},
+            "worker": {
+                "worker_id": worker_id,
+                "worker_version": "0.1.0",
+                "concurrency": {"max_active_jobs": 1, "maintains_local_queue": False},
+                "engine": {"type": "codex_app_server", "app_server_transport": "stdio"},
+            },
+            "execution": {"status": execution_status, "review_mode": "full_repo"},
+            "quality_gate": {"status": "pass" if execution_status == "completed" else "fail", "errors": [], "warnings": []},
+            "artifact_manifest": [],
+            "summary": {"top_findings": findings},
         }
     }
-
 
 def repository_graph_fixture() -> dict:
     return {
@@ -874,7 +458,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "createdAt": app.now(),
             "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
             "agentReport": {
-                "oneLine": "GraphVerified review completed with 1 confirmed finding.",
+                "oneLine": "Review worker completed with 1 confirmed finding.",
                 "issueIndex": [
                     {
                         "id": "issue-auth-cache",
@@ -1368,132 +952,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         ]
         return scan
 
-    def test_worker_result_findings_make_duplicate_issue_ids_unique(self) -> None:
-        job = {
-            "scan_id": "sc_1",
-            "job_id": "job_1",
-            "user_id": "usr_1",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "abc123",
-        }
-        app.ISSUES = [
-            {
-                "id": "issue-duplicate",
-                "scanId": "sc_old",
-                "jobId": "job_old",
-                "userId": "usr_1",
-                "status": "open",
-            }
-        ]
-
-        report = audit_result_fields(
-            [
-                audit_issue_card("First duplicate", issue_id="issue-duplicate", file="src/first.py"),
-                audit_issue_card("Second duplicate", issue_id="issue-duplicate", file="src/second.py"),
-            ]
-        )["graphVerifiedReport"]
-        findings = app.worker_graph_verified_findings(
-            job,
-            report,
-            reserved_ids=app.worker_issue_reserved_ids(job),
-        )
-
-        self.assertEqual([finding["id"] for finding in findings], ["issue-duplicate-2", "issue-duplicate-3"])
-
-    def test_worker_result_merges_deterministic_findings_into_issues(self) -> None:
-        job = {
-            "scan_id": "sc_static",
-            "job_id": "job_static",
-            "user_id": "usr_1",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "abc1234",
-        }
-        body = {
-            "status": "done",
-            "graphVerifiedReport": {
-                "version": "graph-verified-code-review/1",
-                "runId": "gv_run",
-                "confirmedCount": 0,
-                "rejectedCount": 0,
-                "blockedCount": 0,
-                "finalJson": {"confirmed": []},
-            },
-            "deterministicFindings": [
-                {
-                    "id": "static_secret_1",
-                    "severity": "high",
-                    "category": "Security",
-                    "title": "Committed token",
-                    "summary": "A committed token was detected.",
-                    "file": "app.env",
-                    "line": 1,
-                    "verificationStatus": "static_proof",
-                    "affectedLocations": [{"file": "app.env", "startLine": 1, "endLine": 1}],
-                    "evidence": [
-                        {
-                            "type": "code",
-                            "summary": "Line 1 contains a token-shaped value.",
-                            "file": "app.env",
-                            "startLine": 1,
-                            "endLine": 1,
-                        }
-                    ],
-                }
-            ],
-        }
-
-        prepared = app.prepare_worker_job_result_state(job, body, status="done", checksum="checksum")
-        findings = prepared["normalized_findings"]
-
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0]["id"], "static_secret_1")
-        self.assertEqual(findings[0]["verificationStatus"], "static_proof")
-        self.assertEqual(findings[0]["affectedLocations"][0]["file"], "app.env")
-        self.assertEqual(prepared["summary"]["high"], 1)
-
-    def test_worker_graph_verified_missing_repro_log_is_not_reported(self) -> None:
-        report = audit_result_fields(
-            [audit_issue_card("Unsupported verifier confirmation", issue_id="issue-unsupported")]
-        )["graphVerifiedReport"]
-        report["finalJson"]["confirmed"][0]["repro"]["commands_run"][0].pop("log_path", None)
-        report["finalJson"]["confirmed"][0]["judge"]["evidence_summary"].pop("log_path", None)
-
-        findings = app.worker_graph_verified_findings(
-            {
-                "scan_id": "sc_1",
-                "job_id": "job_1",
-                "user_id": "usr_1",
-                "repo": "acme/api",
-                "branch": "main",
-                "commit": "abc123",
-            },
-            report,
-        )
-
-        self.assertEqual(findings, [])
-
-    def test_worker_graph_verified_missing_graph_path_exercised_is_not_reported(self) -> None:
-        report = audit_result_fields(
-            [audit_issue_card("Proof strength only confirmation", issue_id="issue-proof-strength")]
-        )["graphVerifiedReport"]
-        report["finalJson"]["confirmed"][0]["repro"]["graph_path_exercised"] = False
-
-        findings = app.worker_graph_verified_findings(
-            {
-                "scan_id": "sc_1",
-                "job_id": "job_1",
-                "user_id": "usr_1",
-                "repo": "acme/api",
-                "branch": "main",
-                "commit": "abc123",
-            },
-            report,
-        )
-
-        self.assertEqual(findings, [])
-
     def test_scan_job_payload_uses_repository_scan_context(self) -> None:
         scan = {
             "id": "sc_changes",
@@ -1517,72 +975,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["commit"], "abc123")
         self.assertEqual(scan_public["repo"], "acme/api")
         self.assertEqual(scan_public["commit"], "abc123")
-
-    def test_worker_result_exposes_graph_verified_judge_and_repro_summary_on_issue_payload(self) -> None:
-        scan = {
-            "id": "sc_public_calibration",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "pending",
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "repoId": "repo_123",
-            "githubRepoId": "123",
-        }
-        app.SCANS = [scan]
-        job = app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-
-        result_body = {
-            "status": "done",
-            "attempt_id": "wk_1-1",
-            "commit": "a" * 40,
-            **audit_result_fields(
-                [
-                    {
-                        **audit_issue_card("Calibrated issue", issue_id="issue-calibrated"),
-                        "review_calibration": {
-                            "protocol": "pullwise-review-calibration-public/0.1",
-                            "decision": "reported",
-                            "reason": "verified_or_static_proof_guardrail",
-                            "scoreBand": "report_band",
-                            "scoreKind": "ranking_score",
-                            "verificationStatus": "static_proof",
-                            "auditOnly": False,
-                            "guardrailApplied": True,
-                            "rawConfidence": 0.99,
-                            "cohortKey": "source:secret",
-                        },
-                    }
-                ]
-            ),
-            "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
-            "result_checksum": "checksum-public-calibration",
-        }
-        result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
-        app.PullwiseHandler.route(result, "POST")
-        self.assertEqual(result.status, HTTPStatus.OK)
-
-        payload = app.issue_payload(app.ISSUES[0])
-
-        self.assertTrue(payload["graphVerified"])
-        self.assertEqual(payload["verificationLevel"], "L2")
-        self.assertEqual(payload["safeToShowUser"], True)
-        self.assertEqual(payload["graphEvidence"]["slice_id"], "slice-issue-calibrated")
-        self.assertEqual(payload["judgeEvidence"]["status"], "confirmed")
-        self.assertEqual(payload["judgeEvidence"]["level"], "L2")
-        self.assertEqual(payload["reproProof"]["graphPathExercised"], True)
-        self.assertNotIn("reviewCalibration", payload)
-        serialized = json.dumps(payload)
-        self.assertNotIn("rawConfidence", serialized)
-        self.assertNotIn("cohortKey", serialized)
 
     def test_claim_payload_caps_enforce_mode_until_shadow_gate_passes(self) -> None:
         scan = {
@@ -2194,15 +1586,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(result.status, HTTPStatus.OK)
         payload = app.issue_payload(app.ISSUES[0])
-        self.assertTrue(payload["graphVerified"])
-        self.assertEqual(payload["verificationLevel"], "L2")
-        self.assertEqual(payload["safeToShowUser"], True)
         self.assertEqual(payload["reproduction"]["commands"], ["pytest tests/repro/test_page_zero.py"])
         self.assertEqual(payload["reproduction"]["exitCode"], 1)
         self.assertEqual(payload["affectedLocations"][0]["url"], "https://github.com/acme/api/blob/abc1234/src/app.py#L12-L14")
         self.assertEqual(payload["codeEvidence"][0]["file"], "src/app.py")
         self.assertEqual(payload["codeEvidence"][0]["lines"], "12-14")
-        self.assertEqual(payload["graphEvidence"]["slice_id"], "slice-f_page_zero")
         self.assertEqual(payload["graphEvidence"]["codegraph_files"], ["src/app.py"])
         self.assertEqual(payload["triggerCondition"], "GET /users?page=0")
         self.assertEqual(payload["expectedBehavior"], "400 validation error")
@@ -2212,17 +1600,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["judgeEvidence"]["observable"], "500 internal server error")
         self.assertEqual(payload["reproProof"]["type"], "failing_test")
         self.assertEqual(payload["reproProof"]["actual"], "500 internal server error")
-        self.assertTrue(payload["reproProof"]["graphPathExercised"])
         self.assertEqual(payload["limitations"], ["A production API gateway could reject page < 1 before the app."])
         self.assertEqual(payload["verificationStatus"], "verified")
         self.assertNotIn("auditSwarm", payload)
         self.assertNotIn("verificationAudit", payload)
         scan_payload = app.scan_payload(app.SCANS[0])
-        self.assertEqual(scan_payload["graphVerifiedReport"]["confirmedCount"], 1)
-        self.assertEqual(
-            scan_payload["graphVerifiedReport"]["finalJson"]["confirmed"][0]["candidate"]["issue_id"],
-            "f_page_zero",
-        )
         self.assertNotIn("verificationAudit", scan_payload)
         self.assertNotIn("auditSwarm", scan_payload)
 
@@ -2404,7 +1786,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         artifact_paths = [artifact["path"] for artifact in owner.payload["artifacts"]]
         self.assertIn("scan/scan.json", artifact_paths)
         self.assertIn("preflight/preflight.json", artifact_paths)
-        self.assertNotIn("graph-verified/final.json", artifact_paths)
         self.assertNotIn("repository-graph.json", artifact_paths)
         self.assertNotIn("semantic-graph.json", artifact_paths)
         self.assertNotIn("impact-graph.json", artifact_paths)
@@ -2428,7 +1809,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(owner_zip.binary_payload), "r") as archive:
             self.assertIn("scan/scan.json", archive.namelist())
             self.assertIn("preflight/preflight.json", archive.namelist())
-            self.assertNotIn("graph-verified/final.json", archive.namelist())
             self.assertIn("audit.json", archive.namelist())
             self.assertNotIn("repository-graph.json", archive.namelist())
 
@@ -2445,9 +1825,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
     def test_scan_audit_bundle_ignores_legacy_repository_graph_fields(self) -> None:
         scan = self.audit_bundle_cache_fixture()
-        scan["graphVerifiedReport"] = app.public_graph_verified_report(
-            {"runId": "gv_bundle", "mode": "standard", "finalJson": {"confirmed": []}}
-        )
         scan["repositoryGraph"] = {"version": "repository-graph/legacy"}
         scan["semanticGraph"] = {"version": "semantic-code-graph/legacy"}
         scan["impactGraph"] = {"version": "impact-graph/legacy"}
@@ -3017,238 +2394,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(payload["graphVerifiedReport"]["confirmedCount"], 0)
-        self.assertEqual(payload["graphVerifiedReport"]["finalJson"]["confirmed"], [])
         self.assertNotIn("verificationAudit", payload)
-
-    def test_worker_result_persists_canonical_graph_verified_report(self) -> None:
-        scan = {
-            "id": "sc_graph_verified",
-            "repo": "acme/app",
-            "branch": "main",
-            "commit": "abc1234",
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [scan]
-        job = app.create_scan_job_for_scan(scan)
-
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-
-        result = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
-            {
-                "status": "done",
-                "attempt_id": "wk_1-1",
-                "result_checksum": "checksum-graph-verified-report",
-                **audit_result_fields([]),
-                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                "graphVerifiedReport": {
-                    "runId": "gv_run_1",
-                    "mode": "standard",
-                    "head": "HEAD",
-                    "confirmedCount": 1,
-                    "rejectedCount": 2,
-                    "blockedCount": 0,
-                    "coverage": {
-                        "scope": "full-repository snapshot",
-                        "reviewUnitCount": 1,
-                    },
-                    "reviewUnits": [
-                        {
-                            "unit_id": "unit-0001",
-                            "area": "server",
-                            "files": [{"path": "src/app.py", "line_count": 20}],
-                        }
-                    ],
-                    "finalMarkdown": "# Graph-Verified Code Review Report\n\nConfirmed only.",
-                    "debugMarkdown": "# Debug Report\n\nRejected candidates: 2",
-                    "finalJson": {
-                        "coverage": {"reviewedFiles": 1},
-                        "reviewUnits": [{"unit_id": "unit-0001", "status": "covered"}],
-                        "confirmed": [
-                            {
-                                "candidate": {
-                                    "issue_id": "issue-confirmed",
-                                    "candidate_id": "candidate-confirmed",
-                                    "dedupe_key": "graph:confirmed",
-                                    "severity": "high",
-                                    "category": "Quality",
-                                    "claim": "Confirmed GraphVerified issue.",
-                                    "trigger_condition": "Call the broken path.",
-                                    "expected_behavior": "The path should succeed.",
-                                    "actual_behavior_hypothesis": "The path fails.",
-                                    "graph_evidence": {
-                                        "slice_id": "slice-1",
-                                        "codegraph_files": ["src/app.py"],
-                                        "path_summary": ["route -> handler -> broken_call"],
-                                    },
-                                    "evidence": [
-                                        {
-                                            "file": "src/app.py",
-                                            "lines": "10-12",
-                                            "why_it_matters": "The handler reaches broken_call.",
-                                        }
-                                    ],
-                                    "fix_direction": "Guard the broken call.",
-                                },
-                                "judge": {
-                                    "status": "confirmed",
-                                    "level": "L2",
-                                    "safe_to_show_user": True,
-                                    "evidence_summary": {
-                                        "command": "pytest tests/test_app.py",
-                                        "log_path": "logs/repro.log",
-                                        "observable": "Assertion failed as expected.",
-                                    },
-                                },
-                                "repro": {
-                                    "status": "reproduced",
-                                    "level": "L2",
-                                    "summary": "Local reproduction failed as expected.",
-                                    "commands_run": [
-                                        {"cmd": "pytest tests/test_app.py", "exit_code": 1, "log_path": "logs/repro.log"}
-                                    ],
-                                    "proof": {"expected": "pass", "actual": "failure"},
-                                    "graph_path_exercised": True,
-                                },
-                                "verification": {"verdict": "confirmed", "safe_to_show_user": True},
-                            }
-                        ]
-                    },
-                },
-                "humanReport": {
-                    "title": "Confirmed GraphVerified issues",
-                    "summaryMarkdown": "GraphVerified review completed with 1 confirmed finding.",
-                    "sections": [
-                        {
-                            "heading": "High findings",
-                            "markdown": "- Confirmed GraphVerified issue `src/app.py:10`",
-                            "internal": "must not leak",
-                        }
-                    ],
-                    "internal": "must not leak",
-                },
-                "agentReport": {
-                    "schemaVersion": "pullwise-agent-result/1",
-                    "oneLine": "1 confirmed finding.",
-                    "status": "done",
-                    "issueIndex": [
-                        {
-                            "id": "issue-confirmed",
-                            "severity": "high",
-                            "title": "Confirmed GraphVerified issue",
-                            "primaryFile": "src/app.py",
-                            "primaryLine": 10,
-                            "confidence": "confirmed",
-                            "tags": ["graph-verified", "high", "quality"],
-                            "readNext": [
-                                "graphVerifiedReport.finalJson.confirmed[0]",
-                                "agentReport.issueIndex[0]",
-                            ],
-                            "evidencePath": "graphVerifiedReport.finalJson.confirmed[0].candidate.evidence",
-                            "reproPath": "graphVerifiedReport.finalJson.confirmed[0].repro",
-                            "sourcePath": "graphVerifiedReport.finalJson.confirmed[0]",
-                            "internal": "must not leak",
-                        }
-                    ],
-                    "nextActions": [
-                        {
-                            "type": "inspect_file",
-                            "path": "src/app.py",
-                            "targetIssueId": "issue-confirmed",
-                            "reason": "Primary evidence for confirmed finding",
-                        },
-                        {"type": "internal_action", "path": "secret.txt"},
-                    ],
-                    "tokensHint": {
-                        "recommendedEntry": "agentReport.issueIndex",
-                        "detailsPath": "graphVerifiedReport.finalJson.confirmed",
-                        "debugPath": "graphVerifiedReport.debugMarkdown",
-                        "internal": "must not leak",
-                    },
-                    "internal": "must not leak",
-                },
-                "readingGuide": {
-                    "forUser": "humanReport.summaryMarkdown",
-                    "forAgentQuick": "agentReport.issueIndex",
-                    "forAgentDeep": "graphVerifiedReport.finalJson.confirmed",
-                    "forDebug": "graphVerifiedReport.debugMarkdown",
-                    "forInternal": "must not leak",
-                },
-                "graph_verified_report": {
-                    "runId": "snake_case_must_not_win",
-                    "confirmedCount": 99,
-                    "finalMarkdown": "snake case report",
-                    "finalJson": {"confirmed": [{"candidate": {"issue_id": "snake-case"}}]},
-                },
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(result, "POST")
-        self.assertEqual(result.status, HTTPStatus.OK)
-
-        stored_report = app.SCANS[0]["graphVerifiedReport"]
-        public_payload = app.scan_payload(app.SCANS[0])
-        public_report = public_payload["graphVerifiedReport"]
-        public_agent_report = public_payload["agentReport"]
-
-        self.assertEqual(stored_report["runId"], "gv_run_1")
-        self.assertEqual(stored_report["confirmedCount"], 1)
-        self.assertEqual(stored_report["coverage"]["reviewUnitCount"], 1)
-        self.assertEqual(stored_report["reviewUnits"][0]["unit_id"], "unit-0001")
-        self.assertEqual(stored_report["finalJson"]["coverage"]["reviewedFiles"], 1)
-        self.assertEqual(stored_report["finalMarkdown"], "# Graph-Verified Code Review Report\n\nConfirmed only.")
-        self.assertEqual(stored_report["finalJson"]["confirmed"][0]["candidate"]["issue_id"], "issue-confirmed")
-        self.assertEqual(public_report["runId"], "gv_run_1")
-        self.assertEqual(public_report["confirmedCount"], 1)
-        self.assertEqual(public_report["coverage"]["scope"], "full-repository snapshot")
-        self.assertEqual(public_report["finalJson"]["reviewUnits"][0]["status"], "covered")
-        self.assertEqual(public_report["finalJson"]["confirmed"][0]["verification"]["verdict"], "confirmed")
-        self.assertNotIn("finalMarkdown", public_report)
-        self.assertNotIn("debugMarkdown", public_report)
-        self.assertEqual(app.SCANS[0]["humanReport"]["title"], "Confirmed GraphVerified issues")
-        self.assertEqual(public_payload["humanReport"]["sections"][0]["heading"], "High findings")
-        self.assertEqual(public_agent_report["schemaVersion"], "pullwise-agent-result/1")
-        self.assertEqual(public_agent_report["issueIndex"][0]["primaryFile"], "src/app.py")
-        self.assertEqual(public_agent_report["issueIndex"][0]["primaryLine"], 10)
-        self.assertEqual(public_agent_report["nextActions"][0]["type"], "inspect_file")
-        self.assertEqual(public_agent_report["tokensHint"]["recommendedEntry"], "agentReport.issueIndex")
-        self.assertEqual(public_payload["readingGuide"]["forAgentQuick"], "agentReport.issueIndex")
-        self.assertEqual(len(app.ISSUES), 1)
-        self.assertTrue(app.ISSUES[0]["graphVerified"])
-        self.assertEqual(app.ISSUES[0]["candidateId"], "candidate-confirmed")
-        self.assertEqual(app.ISSUES[0]["graphEvidence"]["slice_id"], "slice-1")
-        self.assertEqual(app.ISSUES[0]["reproduction"]["commands"], ["pytest tests/test_app.py"])
-        self.assertNotIn("graph_verified_report", app.SCANS[0])
-        self.assertNotIn("graph_verified_report", public_payload)
-        self.assertNotIn("snake_case_must_not_win", json.dumps(public_payload))
-        self.assertNotIn("must not leak", json.dumps(public_payload))
-
-        app.SCANS[0]["repositoryGraph"] = {"version": "repository-graph/legacy"}
-        app.SCANS[0]["semanticGraph"] = {"version": "semantic-code-graph/legacy"}
-        app.SCANS[0]["impactGraph"] = {"version": "impact-graph/legacy"}
-        app.SCANS[0]["verificationAudit"] = {"candidateCount": 99}
-        bundle = app.scan_audit_bundle_payload(app.SCANS[0])
-        paths = {artifact["path"] for artifact in bundle["artifacts"]}
-        self.assertEqual(bundle["kind"], "pullwise.review_audit_bundle")
-        self.assertNotIn("verificationAudit", bundle)
-        self.assertNotIn("repositoryGraph", bundle)
-        self.assertNotIn("semanticGraph", bundle)
-        self.assertNotIn("impactGraph", bundle)
-        self.assertIn("scan/scan.json", paths)
-        self.assertIn("preflight/preflight.json", paths)
-        self.assertIn("graph-verified/final.json", paths)
-        self.assertNotIn("repository-graph.json", paths)
-        self.assertNotIn("semantic-graph.json", paths)
-        self.assertNotIn("impact-graph.json", paths)
 
     def test_repository_too_large_worker_result_refunds_only_that_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
@@ -3479,163 +2625,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertNotIn("completionAudit", payload)
         self.assertNotIn("jobTrace", payload)
 
-    def test_worker_progress_exposes_graphverified_detail_on_scan_routes(self) -> None:
-        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
-        app.SESSIONS = {
-            "ses_owner": {
-                "id": "ses_owner",
-                "userId": "usr_1",
-                "createdAt": app.now(),
-                "expiresAt": app.now() + 3600,
-            }
-        }
-        scan = {
-            "id": "sc_graphverified_progress",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "pending",
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [scan]
-        app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        job = claim.payload["job"]
-
-        progress = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/progress",
-            {
-                "phase": "ai",
-                "progress": 80,
-                "message": "Graph: mapping shards 12/80",
-                "logs_summary": "run=gv_run stage=graph progress=12/80 task=graph-0012",
-                "log_time": 1700000123,
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(progress, "POST")
-        self.assertEqual(progress.status, HTTPStatus.OK)
-
-        duplicate_progress = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/progress",
-            {
-                "phase": "ai",
-                "progress": 80,
-                "message": "Graph: mapping shards 12/80",
-                "logs_summary": "run=gv_run stage=graph progress=12/80 task=graph-0012",
-                "log_time": 1700000999,
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(duplicate_progress, "POST")
-        self.assertEqual(duplicate_progress.status, HTTPStatus.OK)
-
-        headers = {"Cookie": "pw_session=ses_owner"}
-        listing = RouteHarness("/scans", headers=headers)
-        detail = RouteHarness("/scans/sc_graphverified_progress", headers=headers)
-        app.PullwiseHandler.route(listing, "GET")
-        app.PullwiseHandler.route(detail, "GET")
-
-        self.assertEqual(listing.status, HTTPStatus.OK)
-        self.assertEqual(detail.status, HTTPStatus.OK)
-        list_scan = listing.payload["items"][0]
-        for payload in (list_scan, detail.payload):
-            self.assertEqual(payload["phase"], "ai")
-            self.assertEqual(payload["progress"], 80)
-            self.assertEqual(payload["progressMessage"], "Graph: mapping shards 12/80")
-            self.assertEqual(
-                payload["logsSummary"],
-                "run=gv_run stage=graph progress=12/80 task=graph-0012",
-            )
-            self.assertEqual(
-                payload["progressLogs"],
-                [
-                    {
-                        "time": 1700000123,
-                        "phase": "ai",
-                        "progress": 80,
-                        "message": "Graph: mapping shards 12/80",
-                        "logsSummary": "run=gv_run stage=graph progress=12/80 task=graph-0012",
-                    }
-                ],
-            )
-            self.assertIsInstance(payload.get("updatedAt"), int)
-
-    def test_worker_result_log_event_includes_failure_diagnostics(self) -> None:
-        scan = {
-            "id": "sc_result_diagnostics",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "pending",
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [scan]
-        app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        job = claim.payload["job"]
-
-        graph_report = {
-            "version": "graph-verified-code-review/1",
-            "runId": "run_diag",
-            "mode": "standard",
-            "head": "HEAD",
-            "confirmedCount": 0,
-            "rejectedCount": 0,
-            "blockedCount": 97,
-            "finalJson": {"confirmed": []},
-            "summary": {
-                "finder": {"tasks": 97, "blocked": 97, "candidates": 0},
-                "candidates": {"valid": 0},
-                "reports": {"blocked": 97},
-            },
-        }
-        result_body = {
-            "status": "failed",
-            "attempt_id": f"wk_1-{job['attempt']}",
-            "result_checksum": "checksum-result-diagnostics",
-            "error": "GraphVerified failed with Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz",
-            "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
-            "graphVerifiedReport": graph_report,
-            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        result = RouteHarness(f"/worker/jobs/{job['job_id']}/result", result_body, headers=self.auth)
-        with patch.object(app.scan_logging, "log_event") as log_event:
-            app.PullwiseHandler.route(result, "POST")
-
-        self.assertEqual(result.status, HTTPStatus.OK)
-        log_event.assert_called_once()
-        self.assertEqual(log_event.call_args.args[0], "worker_job_result")
-        self.assertEqual(log_event.call_args.kwargs["scanId"], "sc_result_diagnostics")
-        self.assertEqual(log_event.call_args.kwargs["jobId"], job["job_id"])
-        self.assertEqual(log_event.call_args.kwargs["attemptId"], f"wk_1-{job['attempt']}")
-        self.assertEqual(log_event.call_args.kwargs["workerId"], "wk_1")
-        self.assertEqual(log_event.call_args.kwargs["status"], "failed")
-        self.assertEqual(log_event.call_args.kwargs["errorCode"], "GRAPH_VERIFIED_COMPLETION_FAILED")
-        self.assertEqual(log_event.call_args.kwargs["error"], "GraphVerified failed with Authorization: Bearer [redacted]")
-        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz", log_event.call_args.kwargs["error"])
-        self.assertEqual(log_event.call_args.kwargs["graphVerifiedRunId"], "run_diag")
-        self.assertEqual(log_event.call_args.kwargs["graphVerifiedMode"], "standard")
-        self.assertEqual(log_event.call_args.kwargs["graphVerifiedBlockedCount"], 97)
-        self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderTasks"], 97)
-        self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderBlocked"], 97)
-        self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderCandidates"], 0)
-        self.assertEqual(log_event.call_args.kwargs["graphVerifiedValidCandidates"], 0)
-
     def test_failed_worker_result_requeues_once_without_extra_quota(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
@@ -3691,8 +2680,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "status": "failed",
             "attempt_id": f"wk_1-{first_job['attempt']}",
             "result_checksum": "checksum-worker-failed-first",
-            "error": "Worker failed while running GraphVerified.",
-            "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
+            "error": "Worker failed while running review worker.",
+            "error_code": "REVIEW_WORKER_COMPLETION_FAILED",
             **audit_result_fields([]),
             "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         }
@@ -3796,7 +2785,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "attempt_id": f"wk_1-{first_job['attempt']}",
                 "result_checksum": "checksum-worker-exhaust-first",
                 "error": "First worker failed.",
-                "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
+                "error_code": "REVIEW_WORKER_COMPLETION_FAILED",
                 **audit_result_fields([]),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
@@ -3819,7 +2808,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "attempt_id": f"wk_2-{second_job['attempt']}",
                 "result_checksum": "checksum-worker-exhaust-second",
                 "error": "Second worker failed.",
-                "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
+                "error_code": "REVIEW_WORKER_COMPLETION_FAILED",
                 **audit_result_fields([]),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
@@ -3854,58 +2843,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(retry["maxAttempts"], 3)
         self.assertEqual(retry["retryAttempts"], 2)
-
-    def test_worker_graph_verified_progress_ignores_legacy_artifacts(self) -> None:
-        scan = {
-            "id": "sc_progress_graph_verified",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "pending",
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [scan]
-        app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        job = claim.payload["job"]
-        self.assertEqual(
-            job["agentConfig"]["reviewWorker"],
-            app.billing.default_review_agent_review_worker_config("free"),
-        )
-
-        progress = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/progress",
-            {
-                "phase": "ai",
-                "progress": 60,
-                "audit_swarm": {"protocol": "audit-swarm/0.1", "stage": "discovery"},
-                "completion_audit": {"protocol": "completion-audit/0.1", "status": "warning"},
-                "job_trace": {"protocol": "job-trace/0.1", "status": "running"},
-                "repositoryGraph": repository_graph_v2_fixture(),
-                "semanticGraph": semantic_graph_fixture(),
-                "impactGraph": impact_graph_fixture(),
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(progress, "POST")
-
-        self.assertEqual(progress.status, HTTPStatus.OK)
-        payload = app.scan_payload(app.SCANS[0])
-        self.assertEqual(payload["phase"], "ai")
-        self.assertEqual(payload["progress"], 60)
-        self.assertNotIn("auditSwarm", payload)
-        self.assertNotIn("completionAudit", payload)
-        self.assertNotIn("jobTrace", payload)
-        self.assertNotIn("repositoryGraph", payload)
-        self.assertNotIn("semanticGraph", payload)
-        self.assertNotIn("impactGraph", payload)
 
     def test_worker_ai_progress_consumes_reserved_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
@@ -4213,9 +3150,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(db.get_scan_job(job["job_id"])["commit"], resolved_commit)
         self.assertEqual(app.ISSUES[0]["commit"], resolved_commit)
         payload = app.issue_payload(app.ISSUES[0])
-        self.assertTrue(payload["graphVerified"])
         self.assertEqual(payload["commit"], resolved_commit)
-        self.assertEqual(payload["verificationLevel"], "L2")
         self.assertIn(f"/blob/{resolved_commit}/src/app.py#L12", payload["affectedLocations"][0]["url"])
         self.assertEqual(payload["codeEvidence"][0]["file"], "src/app.py")
         self.assertNotIn("audit", payload)
@@ -5190,7 +4125,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "attempt_id": "wk_1-1",
                 "result_checksum": "checksum-failed-progress-cap",
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                "error": "GraphVerified completion gate failed.",
+                "error": "Review worker completion gate failed.",
                 "error_code": "CODEX_AUTH_REQUIRED",
                 "errorCode": "CODEX_AUTH_REQUIRED",
                 **audit_result_fields([]),
