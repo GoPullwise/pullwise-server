@@ -1279,6 +1279,93 @@ class WorkerPullRoutesTest(unittest.TestCase):
             }
         )
 
+    def v1_lease(
+        self,
+        worker_id: str = "wk_1",
+        *,
+        headers: dict | None = None,
+        payload: dict | None = None,
+    ) -> RouteHarness:
+        lease_payload = v1_worker_lease_payload()
+        lease_payload["worker_id"] = worker_id
+        if payload:
+            lease_payload.update(payload)
+        handler = RouteHarness(f"/v1/workers/{worker_id}/lease", lease_payload, headers=headers or self.auth)
+        app.PullwiseHandler.route(handler, "POST")
+        return handler
+
+    def v1_heartbeat(
+        self,
+        worker_id: str = "wk_1",
+        *,
+        status: str = "idle",
+        run_id: str | None = None,
+        headers: dict | None = None,
+        payload: dict | None = None,
+    ) -> RouteHarness:
+        heartbeat_payload = v1_worker_heartbeat_payload(status=status, run_id=run_id)
+        heartbeat_payload["worker_id"] = worker_id
+        if payload:
+            heartbeat_payload.update(payload)
+        handler = RouteHarness(f"/v1/workers/{worker_id}/heartbeat", heartbeat_payload, headers=headers or self.auth)
+        app.PullwiseHandler.route(handler, "POST")
+        return handler
+
+    def v1_result(
+        self,
+        job: dict,
+        payload: dict,
+        *,
+        headers: dict | None = None,
+        raw_body: bytes | None = None,
+        harness: type[RouteHarness] = RouteHarness,
+    ) -> RouteHarness:
+        run_id = str(job.get("run_id") or f"run_{job.get('job_id')}")
+        handler = harness(
+            f"/v1/review-runs/{run_id}/result",
+            payload,
+            headers=headers or self.auth,
+            raw_body=raw_body,
+        )
+        app.PullwiseHandler.route(handler, "POST")
+        return handler
+
+    def v1_event(
+        self,
+        job: dict,
+        *,
+        phase: str = "repo_map",
+        progress: float = 55,
+        message: str = "Repository map: classifying source files",
+        event_type: str = "progress_updated",
+        sequence: int = 1,
+        worker_id: str = "wk_1",
+        headers: dict | None = None,
+        data: dict | None = None,
+    ) -> RouteHarness:
+        run_id = str(job.get("run_id") or f"run_{job.get('job_id')}")
+        payload = {
+            "protocol_version": "review-worker-protocol/v1",
+            "run_id": run_id,
+            "worker_id": worker_id,
+            "sequence": sequence,
+            "timestamp": "2026-07-01T10:22:00Z",
+            "event_type": event_type,
+            "phase": phase,
+            "severity": "info",
+            "message": message,
+            "progress": {
+                "overall_percent": progress,
+                "current_phase_percent": progress,
+                "status": "running",
+            },
+        }
+        if data is not None:
+            payload["data"] = data
+        handler = RouteHarness(f"/v1/review-runs/{run_id}/events", payload, headers=headers or self.auth)
+        app.PullwiseHandler.route(handler, "POST")
+        return handler
+
     def test_shared_and_private_workers_claim_only_their_queue_scope(self) -> None:
         private_worker, private_token = self.create_private_registry_worker("wk_private_usr_1", "usr_1")
         self.create_claimable_scan_job(
@@ -1294,15 +1381,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
             worker_scope=db.WORKER_SCOPE_SHARED,
         )
 
-        shared_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(shared_claim, "POST")
-
-        private_claim = RouteHarness(
-            "/worker/jobs/claim",
-            {"worker_id": private_worker["worker_id"]},
+        shared_claim = self.v1_lease("wk_1")
+        private_claim = self.v1_lease(
+            private_worker["worker_id"],
             headers={"Authorization": f"Bearer {private_token}"},
         )
-        app.PullwiseHandler.route(private_claim, "POST")
 
         self.assertEqual(shared_claim.status, HTTPStatus.OK)
         self.assertEqual(shared_claim.payload["job"]["job_id"], "job_shared")
@@ -1321,12 +1404,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
             worker_scope=db.WORKER_SCOPE_PRIVATE,
         )
 
-        claim = RouteHarness(
-            "/worker/jobs/claim",
-            {"worker_id": private_worker["worker_id"]},
+        claim = self.v1_lease(
+            private_worker["worker_id"],
             headers={"Authorization": f"Bearer {private_token}"},
         )
-        app.PullwiseHandler.route(claim, "POST")
 
         self.assertEqual(claim.status, HTTPStatus.OK)
         self.assertIsNone(claim.payload["job"])
@@ -1336,8 +1417,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
     def test_worker_auth_rejection_is_logged_without_token_value(self) -> None:
         claim = RouteHarness(
-            "/worker/jobs/claim",
-            {"worker_id": "wk_1"},
+            "/v1/workers/wk_1/lease",
+            v1_worker_lease_payload(),
             headers={"Authorization": "Bearer invalid-worker-token"},
         )
         with self.assertLogs(app.logger, level="WARNING") as logs:
@@ -1345,7 +1426,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(claim.status, HTTPStatus.UNAUTHORIZED)
         output = "\n".join(logs.output)
-        self.assertIn("Rejected worker request path=/worker/jobs/claim", output)
+        self.assertIn("Rejected worker request path=/v1/workers/wk_1/lease", output)
         self.assertIn("bearer_present=True", output)
         self.assertNotIn("invalid-worker-token", output)
 
@@ -1355,8 +1436,16 @@ class WorkerPullRoutesTest(unittest.TestCase):
         headers = {"Authorization": f"Bearer {token}"}
 
         requests = [
-            RouteHarness("/worker/heartbeat", {"worker_id": worker["worker_id"]}, headers=headers),
-            RouteHarness("/worker/agent-configs", {"worker_id": worker["worker_id"]}, headers=headers),
+            RouteHarness(
+                f"/v1/workers/{worker['worker_id']}/heartbeat",
+                v1_worker_heartbeat_payload(),
+                headers=headers,
+            ),
+            RouteHarness(
+                f"/v1/workers/{worker['worker_id']}/agent-configs",
+                {"worker_id": worker["worker_id"]},
+                headers=headers,
+            ),
             RouteHarness("/worker/commands/poll", {"worker_id": worker["worker_id"]}, headers=headers),
             RouteHarness(
                 "/worker/log-streams/log_disabled_control_plane/lines",
@@ -1378,6 +1467,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(deleted_poll, "POST")
         self.assertEqual(deleted_poll.status, HTTPStatus.UNAUTHORIZED)
+
     def test_worker_result_route_accepts_gzip_json_body(self) -> None:
         scan = {
             "id": "sc_gzip_result",
@@ -1394,9 +1484,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
         result_body = {
             "status": "done",
             "attempt_id": "wk_1-1",
@@ -1405,13 +1495,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         }
         raw_body = gzip.compress(json.dumps(result_body).encode("utf-8"))
-        result = RawBodyRouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
+        result = self.v1_result(
+            job,
+            result_body,
+            harness=RawBodyRouteHarness,
             raw_body=raw_body,
             headers={**self.auth, "Content-Encoding": "gzip", "Content-Length": str(len(raw_body))},
         )
-
-        app.PullwiseHandler.route(result, "POST")
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertTrue(result.payload["accepted"])
@@ -1767,8 +1857,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.create_scan_job_for_scan(scan)
 
         with patch.dict(os.environ, {"PULLWISE_REVIEW_CALIBRATION_MODE": "enforce"}, clear=False):
-            claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-            app.PullwiseHandler.route(claim, "POST")
+            claim = self.v1_lease()
 
         self.assertEqual(claim.status, HTTPStatus.OK)
         self.assertNotIn("review_calibration_context", claim.payload["job"])
@@ -1791,9 +1880,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
 
         def event(issue_id: str, observation_key: str, verdict: str) -> dict:
             return {
@@ -1814,8 +1903,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "scoring_protocol": "pullwise-review-score/0.1",
             }
 
-        result = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
+        result = self.v1_result(
+            job,
             {
                 "status": "done",
                 "attempt_id": "wk_1-1",
@@ -1836,9 +1925,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 ],
                 "summary": {"critical": 0, "high": 1, "medium": 1, "low": 0, "info": 0},
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(result, "POST")
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertEqual(result.payload["reviewDecisionEvents"], {"inserted": 2, "duplicates": 0})
@@ -1997,8 +2084,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS.append(next_scan)
         app.create_scan_job_for_scan(next_scan)
-        next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(next_claim, "POST")
+        next_claim = self.v1_lease()
 
         self.assertEqual(next_claim.status, HTTPStatus.OK)
         self.assertNotIn("review_calibration_context", next_claim.payload["job"])
@@ -2212,12 +2298,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
 
-        first = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
+        first = self.v1_result(
+            job,
             {
                 "status": "done",
                 "attempt_id": "wk_1-1",
@@ -2227,15 +2313,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 ),
                 "summary": {"critical": 1, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(first, "POST")
         self.assertEqual(first.status, HTTPStatus.OK)
         self.assertEqual([issue["id"] for issue in app.ISSUES], ["issue-first"])
         self.assertEqual(app.SCANS[0]["issues"]["high"], 1)
 
-        duplicate = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
+        duplicate = self.v1_result(
+            job,
             {
                 "status": "done",
                 "attempt_id": "wk_1-1",
@@ -2245,9 +2329,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 ),
                 "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(duplicate, "POST")
 
         self.assertEqual(duplicate.status, HTTPStatus.CONFLICT)
         self.assertIn("checksum conflicts", duplicate.payload["message"])
@@ -2272,12 +2354,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
 
-        result = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
+        result = self.v1_result(
+            job,
             {
                 "status": "done",
                 "attempt_id": "wk_1-1",
@@ -2330,9 +2412,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     ],
                 ),
                 "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0}            },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(result, "POST")
 
         self.assertEqual(result.status, HTTPStatus.OK)
         payload = app.issue_payload(app.ISSUES[0])
@@ -2901,12 +2981,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
 
-        result = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
+        result = self.v1_result(
+            job,
             {
                 "status": "done",
                 "attempt_id": "wk_1-1",
@@ -2992,9 +3072,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "limitations": ["No dependency installation was executed."],
                 },
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(result, "POST")
 
         self.assertEqual(result.status, HTTPStatus.OK)
         payload = app.scan_payload(app.SCANS[0])
@@ -3108,14 +3186,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 4)
 
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
         claimed_job = claim.payload["job"]
         self.assertEqual(claimed_job["scan_id"], "sc_repo_limit_0")
 
-        result = RouteHarness(
-            f"/worker/jobs/{claimed_job['job_id']}/result",
+        result = self.v1_result(
+            claimed_job,
             {
                 "status": "failed",
                 "attempt_id": f"wk_1-{claimed_job['attempt']}",
@@ -3134,9 +3211,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     "repositoryLimitReasons": ["file_count", "total_bytes"],
                 },
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(result, "POST")
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertEqual(result.payload["quotaRollback"]["ledgerRows"], 2)
@@ -3198,13 +3273,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
         claimed_job = claim.payload["job"]
 
-        result = RouteHarness(
-            f"/worker/jobs/{claimed_job['job_id']}/result",
+        result = self.v1_result(
+            claimed_job,
             {
                 "status": "failed",
                 "attempt_id": f"wk_1-{claimed_job['attempt']}",
@@ -3213,9 +3287,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "error_code": "REPOSITORY_TOO_LARGE",
                 **audit_result_fields([], execution_status="failed"),
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(result, "POST")
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertNotIn("quotaRollback", result.payload)
@@ -3239,37 +3311,33 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
+        claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
         job = claim.payload["job"]
 
-        progress = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/progress",
-            {
-                "phase": "repo_map",
-                "progress": 55,
-                "message": "Repository map: classifying source files",
-                "logs_summary": "phase=repo_map files=42 reviewed=18",
-            },
-            headers=self.auth,
-        )
         with patch.object(app.scan_logging, "log_event") as log_event:
-            app.PullwiseHandler.route(progress, "POST")
+            progress = self.v1_event(
+                job,
+                phase="repo_map",
+                progress=55,
+                message="Repository map: classifying source files",
+            )
 
         self.assertEqual(progress.status, HTTPStatus.OK)
         log_event.assert_called_once()
-        self.assertEqual(log_event.call_args.args[0], "worker_job_progress")
+        self.assertEqual(log_event.call_args.args[0], "review_run_event")
         self.assertEqual(log_event.call_args.kwargs["scanId"], "sc_progress_phase")
         self.assertEqual(log_event.call_args.kwargs["workerId"], "wk_1")
         self.assertEqual(log_event.call_args.kwargs["jobId"], job["job_id"])
+        self.assertEqual(log_event.call_args.kwargs["runId"], job["run_id"])
+        self.assertEqual(log_event.call_args.kwargs["eventType"], "progress_updated")
         self.assertEqual(log_event.call_args.kwargs["phase"], "repo_map")
         self.assertEqual(log_event.call_args.kwargs["progress"], 55)
-        self.assertEqual(log_event.call_args.kwargs["message"], "Repository map: classifying source files")
         payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(payload["progressMessage"], "Repository map: classifying source files")
-        self.assertEqual(payload["logsSummary"], "phase=repo_map files=42 reviewed=18")
+        self.assertEqual(payload["logsSummary"], "progress_updated")
         self.assertIsInstance(payload.get("updatedAt"), int)
+
     def test_failed_worker_result_requeues_once_without_extra_quota(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
@@ -3316,8 +3384,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
 
-        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(first_claim, "POST")
+        first_claim = self.v1_lease()
         self.assertEqual(first_claim.status, HTTPStatus.OK)
         first_job = first_claim.payload["job"]
 
@@ -3330,12 +3397,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             **audit_result_fields([], execution_status="failed"),
             "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         }
-        failed_result = RouteHarness(
-            f"/worker/jobs/{first_job['job_id']}/result",
-            first_failure_body,
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(failed_result, "POST")
+        failed_result = self.v1_result(first_job, first_failure_body)
         self.assertEqual(failed_result.status, HTTPStatus.OK)
         self.assertTrue(failed_result.payload["retryQueued"])
         stored_after_failure = db.get_scan_job(first_job["job_id"])
@@ -3347,43 +3409,31 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["retry"]["remainingAttempts"], 1)
         self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
 
-        duplicate_failed_result = RouteHarness(
-            f"/worker/jobs/{first_job['job_id']}/result",
-            first_failure_body,
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(duplicate_failed_result, "POST")
+        duplicate_failed_result = self.v1_result(first_job, first_failure_body)
         self.assertEqual(duplicate_failed_result.status, HTTPStatus.OK)
         self.assertTrue(duplicate_failed_result.payload["duplicate"])
         self.assertFalse(duplicate_failed_result.payload.get("retryQueued", False))
         self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "queued")
         self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
 
-        same_worker_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(same_worker_claim, "POST")
+        same_worker_claim = self.v1_lease()
         self.assertEqual(same_worker_claim.status, HTTPStatus.OK)
         second_job = same_worker_claim.payload["job"]
         self.assertEqual(second_job["job_id"], first_job["job_id"])
         self.assertEqual(second_job["attempt"], 2)
         self.assertEqual(second_job["retry"]["maxAttempts"], 2)
 
-        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
-        app.PullwiseHandler.route(second_claim, "POST")
+        second_claim = self.v1_lease("wk_2", headers=worker_two_auth)
         self.assertEqual(second_claim.status, HTTPStatus.OK)
         self.assertIsNone(second_claim.payload["job"])
 
-        late_duplicate_failed_result = RouteHarness(
-            f"/worker/jobs/{first_job['job_id']}/result",
-            first_failure_body,
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(late_duplicate_failed_result, "POST")
+        late_duplicate_failed_result = self.v1_result(first_job, first_failure_body)
         self.assertEqual(late_duplicate_failed_result.status, HTTPStatus.OK)
         self.assertTrue(late_duplicate_failed_result.payload["duplicate"])
         self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "claimed")
 
-        done_result = RouteHarness(
-            f"/worker/jobs/{second_job['job_id']}/result",
+        done_result = self.v1_result(
+            second_job,
             {
                 "status": "done",
                 "attempt_id": f"wk_1-{second_job['attempt']}",
@@ -3391,9 +3441,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 **audit_result_fields([]),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(done_result, "POST")
         self.assertEqual(done_result.status, HTTPStatus.OK)
         self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "done")
         self.assertEqual(app.SCANS[0]["status"], "done")
@@ -3418,13 +3466,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
 
-        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(first_claim, "POST")
+        first_claim = self.v1_lease()
         self.assertEqual(first_claim.status, HTTPStatus.OK)
         first_job = first_claim.payload["job"]
 
-        first_failed_result = RouteHarness(
-            f"/worker/jobs/{first_job['job_id']}/result",
+        first_failed_result = self.v1_result(
+            first_job,
             {
                 "status": "failed",
                 "attempt_id": f"wk_1-{first_job['attempt']}",
@@ -3434,20 +3481,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 **audit_result_fields([], execution_status="failed"),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
-            headers=self.auth,
         )
-        app.PullwiseHandler.route(first_failed_result, "POST")
         self.assertEqual(first_failed_result.status, HTTPStatus.OK)
         self.assertTrue(first_failed_result.payload["retryQueued"])
 
-        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
-        app.PullwiseHandler.route(second_claim, "POST")
+        second_claim = self.v1_lease("wk_2", headers=worker_two_auth)
         self.assertEqual(second_claim.status, HTTPStatus.OK)
         second_job = second_claim.payload["job"]
         self.assertEqual(second_job["attempt"], 2)
 
-        second_failed_result = RouteHarness(
-            f"/worker/jobs/{second_job['job_id']}/result",
+        second_failed_result = self.v1_result(
+            second_job,
             {
                 "status": "failed",
                 "attempt_id": f"wk_2-{second_job['attempt']}",
@@ -3459,7 +3503,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
             },
             headers=worker_two_auth,
         )
-        app.PullwiseHandler.route(second_failed_result, "POST")
         self.assertEqual(second_failed_result.status, HTTPStatus.OK)
         self.assertFalse(second_failed_result.payload.get("retryQueued", False))
         stored = db.get_scan_job(first_job["job_id"])
