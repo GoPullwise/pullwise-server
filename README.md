@@ -303,8 +303,8 @@ also keep decoded `inline_json` for server-side display/indexing. Detailed scan
 payloads include a public `reviewRun` block with terminal run state, parsed
 summary/quality/progress/error data, and artifact metadata.
 
-Legacy `/worker/...` endpoints remain only for existing lifecycle/admin plumbing
-and compatibility tests; new review behavior should use the v1 routes above.
+`/worker/...` endpoints remain only for operator lifecycle/admin plumbing; new
+review behavior must use the v1 routes above.
 
 Jobs that timeout (no heartbeat or progress) are automatically re-queued up
 to the database-backed scan job max-attempts setting, then marked failed.

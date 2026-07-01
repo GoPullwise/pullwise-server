@@ -164,7 +164,7 @@ FIELD_METADATA = [
     {
         "id": "worker",
         "title": "Worker control plane",
-        "description": "Worker compatibility, heartbeat, and release defaults used by admin worker management.",
+        "description": "Worker heartbeat, lifecycle, and release defaults used by admin worker management.",
         "fields": [
             {
                 "path": "worker.heartbeatTimeoutSeconds",

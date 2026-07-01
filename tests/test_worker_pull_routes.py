@@ -1600,6 +1600,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["commit"], "abc123")
         self.assertEqual(scan_public["repo"], "acme/api")
         self.assertEqual(scan_public["commit"], "abc123")
+        agent_config = payload["agentConfig"]
+        codex_config = agent_config["codex"]
+        review_worker_config = agent_config["reviewWorker"]
+        repository_limits = payload["repositoryLimits"]
+        self.assertEqual(payload["model_profile"]["default_model"], codex_config["model"])
+        self.assertEqual(payload["model_profile"]["core_effort"], codex_config["reasoningEffort"])
+        self.assertEqual(payload["model_profile"]["non_core_effort"], "medium")
+        self.assertEqual(payload["review_request"]["budget"]["max_wall_time_seconds"], review_worker_config["scanDeadlineSeconds"])
+        self.assertGreater(payload["review_request"]["budget"]["max_estimated_input_tokens"], 0)
+        self.assertEqual(payload["review_request"]["policy"]["turn_timeout_seconds"], review_worker_config["turnTimeoutSeconds"])
+        self.assertGreater(repository_limits["maxFiles"], 0)
+        self.assertGreater(repository_limits["maxBytes"], 0)
 
     def test_claim_payload_caps_enforce_mode_until_shadow_gate_passes(self) -> None:
         scan = {

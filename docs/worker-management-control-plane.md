@@ -22,7 +22,7 @@ array, but each worker entry is limited to operational status fields:
 - `region`
 - `version`
 - `running_jobs`
-- `max_concurrent_jobs`: compatibility field that is always `1`; it is not an admin setting
+- `max_concurrent_jobs`: fixed public status field that is always `1`; it is not an admin setting
 - `free_slots`
 - `last_heartbeat_at`
 
@@ -89,9 +89,7 @@ host-local watcher service per worker instance. The watcher polls lifecycle
 commands without mutating heartbeat state, stops the paired worker service,
 writes an uninstall marker, reports command status, and removes the worker
 service unit, watcher unit, wrapper binary, logrotate file, `/etc`
-configuration directory, instance home, and instance log directory. Older units
-without the watcher may rely on the running worker or the legacy finalizer path,
-which is less reliable when the worker is already stopped or degraded. A locally
+configuration directory, instance home, and instance log directory. A locally
 run `pullwise-worker uninstall` calls
 `DELETE /worker/registry` before removing the local service when a worker token
 is configured.
