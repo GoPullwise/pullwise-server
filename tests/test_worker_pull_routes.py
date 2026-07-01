@@ -438,6 +438,27 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         self.auth = {"Authorization": "Bearer worker-secret"}
 
+    def test_legacy_worker_review_routes_are_removed(self) -> None:
+        legacy_routes = [
+            ("/worker/heartbeat", {"worker_id": "wk_1", "status": "idle"}),
+            ("/worker/agent-configs", {"worker_id": "wk_1"}),
+            ("/worker/jobs/claim", {"worker_id": "wk_1"}),
+            ("/worker/jobs/job_1/progress", {"worker_id": "wk_1", "progress": 10}),
+            (
+                "/worker/jobs/job_1/artifacts/art_1",
+                {"worker_id": "wk_1", "content_base64": base64.b64encode(b"{}").decode("ascii")},
+            ),
+            ("/worker/jobs/job_1/result", {"worker_id": "wk_1", "status": "done"}),
+        ]
+
+        for path, payload in legacy_routes:
+            with self.subTest(path=path):
+                handler = RouteHarness(path, payload, headers=self.auth)
+                app.PullwiseHandler.route(handler, "POST")
+
+                self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+                self.assertEqual(handler.payload["message"], "Route not found")
+
     def test_scan_payload_omits_ai_usage_even_when_scan_has_legacy_usage(self) -> None:
         scan = {
             "id": "sc_ai_usage_legacy",

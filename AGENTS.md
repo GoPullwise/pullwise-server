@@ -62,18 +62,20 @@ the server scheduler's point of view.
   shape and reject legacy `running_jobs` / `active_job_ids` fields. Use
   `active_run_id`, `concurrency`, `codex_app_server`, and active-run
   `progress` for v1 workers.
-- Do not trust heartbeat `running_jobs` alone for worker slot accounting when
-  handling non-v1 lifecycle compatibility traffic where `active_job_ids` is
-  present. Reconcile reported active job ids against `scan_jobs` and count only
-  jobs still accepting worker updates: `claimed`, `running`, or
-  `uploading_result`.
+- Review workers must use `/v1/workers/...` and `/v1/review-runs/...` for
+  registration, heartbeat, lease, progress, artifact upload, and result
+  submission. Do not accept `/worker/heartbeat`, `/worker/agent-configs`, or
+  `/worker/jobs/...` as review-protocol compatibility routes.
+- `/worker/commands/...` and `/worker/log-streams/...` are lifecycle-control
+  plumbing only and must not carry review job claim, progress, artifact, or
+  result semantics.
 - A job in `cancelled`, `done`, `failed`, or `lost` must not keep the worker
   busy, must not receive lease renewal, and must not block the same worker from
-  claiming the next queued job, even if a stale heartbeat still reports that job
-  as active.
+  claiming the next queued job.
 - Keep regression coverage for this path. The important scenario is: worker
-  claims a job, the scan/job is cancelled, the worker heartbeat reports the old
-  job in `active_job_ids`, and the same worker can still claim a new queued job.
+  claims a job through v1 lease, the scan/job is cancelled, the worker's next v1
+  heartbeat no longer has an active run, and the same worker can still lease a
+  new queued job.
 
 ## Worker Install Secrets And Identity
 
@@ -190,8 +192,8 @@ to the server-owned job for lease renewal, cancellation, and progress snapshots
 instead of requiring worker-side queue state. Progress snapshots shown to the
 product should be derived from accepted v1 run events, v1 heartbeat progress,
 and stored scan state, not from raw worker-only artifact internals. Existing `/worker/...`
-lifecycle routes are operator plumbing and must not become the source of new
-review protocol behavior.
+lifecycle routes are operator plumbing; do not reintroduce `/worker/jobs/...`,
+`/worker/heartbeat`, or `/worker/agent-configs` for review protocol behavior.
 Active v1 heartbeat `progress` snapshots must include `message`, the full
 counter set from the v1.2 spec (`source_like_files_*`, `bundles_*`,
 `reviewer_runs_*`, `intent_tests_*`, `validator_candidates_*`, and

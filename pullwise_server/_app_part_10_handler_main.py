@@ -3084,6 +3084,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return bool(command and public_issue_text(command.get("status")).lower() in db.WORKER_COMMAND_ACTIVE_STATUSES)
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
+        if segments == ["worker", "heartbeat"] or segments == ["worker", "agent-configs"] or (
+            len(segments) >= 3 and segments[:2] == ["worker", "jobs"]
+        ):
+            return self.error(HTTPStatus.NOT_FOUND, "Route not found")
         command_control_route = (
             segments == ["worker", "commands", "poll"]
             or (len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status")
@@ -3099,20 +3103,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
             if not self.disabled_worker_command_route_allowed(segments, worker_id):
                 return self.error(HTTPStatus.UNAUTHORIZED, "A valid worker token is required.")
-        if segments == ["worker", "heartbeat"]:
-            return self.handle_worker_heartbeat(body, worker_record)
         if segments == ["worker", "commands", "poll"]:
             return self.handle_worker_command_poll(body, worker_record)
-        if segments == ["worker", "agent-configs"]:
-            return self.handle_worker_agent_configs(body, worker_record)
-        if segments == ["worker", "jobs", "claim"]:
-            return self.handle_worker_job_claim(body, worker_record)
-        if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "progress":
-            return self.handle_worker_job_progress(segments[2], body, worker_record)
-        if len(segments) == 5 and segments[:2] == ["worker", "jobs"] and segments[3] == "artifacts":
-            return self.handle_worker_job_artifact_upload(segments[2], segments[4], body, worker_record)
-        if len(segments) == 4 and segments[:2] == ["worker", "jobs"] and segments[3] == "result":
-            return self.handle_worker_job_result(segments[2], body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status":
             return self.handle_worker_command_status(segments[2], body, worker_record)
         if len(segments) == 4 and segments[:2] == ["worker", "log-streams"] and segments[3] == "lines":
