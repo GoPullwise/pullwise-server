@@ -170,7 +170,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
-            patch.object(app.db, "get_worker_by_token", return_value={"worker_id": "wk_1"}),
+            patch.object(app.db, "get_enabled_worker_token", return_value={"worker_id": "wk_1"}),
             patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
         ):
             limited = handler.apply_rate_limit("POST", "/worker/heartbeat")

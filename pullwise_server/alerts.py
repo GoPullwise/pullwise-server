@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import smtplib
@@ -130,12 +130,119 @@ def _system_alert(payload):
     }
 
 
+
+def _quota_float(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _format_percent(value):
+    number = _quota_float(value)
+    if number is None:
+        return 'unknown'
+    return f'{number:g}%'
+
+
+def _format_unix_time(value):
+    try:
+        timestamp = int(value)
+    except (TypeError, ValueError):
+        return 'unknown'
+    if timestamp <= 0:
+        return 'unknown'
+    return time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(timestamp))
+
+
+def _worker_quota_payload(worker):
+    quota = worker.get('codexQuota') if isinstance(worker.get('codexQuota'), dict) else None
+    if quota is None and isinstance(worker.get('codex_quota'), dict):
+        quota = worker.get('codex_quota')
+    return quota if isinstance(quota, dict) else {}
+
+
+def _quota_problem(quota):
+    if not isinstance(quota, dict):
+        return False, '', []
+    status = _clean_text(quota.get('status'), 40).lower()
+    threshold = _quota_float(quota.get('thresholdPercent'))
+    if threshold is None:
+        threshold = 5.0
+    windows = [item for item in quota.get('windows') or [] if isinstance(item, dict)]
+    blocked = []
+    for window in windows:
+        remaining = _quota_float(window.get('remainingPercent'))
+        if remaining is not None and remaining <= threshold:
+            blocked.append(window)
+    if status in {'low', 'exhausted'} or blocked:
+        return True, status if status in {'low', 'exhausted'} else 'low', blocked
+    return False, status, blocked
+
+
+def _worker_quota_alert(worker):
+    quota = _worker_quota_payload(worker)
+    problem, status, blocked = _quota_problem(quota)
+    if not problem:
+        return {}
+    worker_id = _clean_text(worker.get('worker_id') or worker.get('id'), 128)
+    if not worker_id:
+        return {}
+    name = _clean_text(worker.get('name') or worker_id, 120)
+    threshold = _format_percent(quota.get('thresholdPercent') if quota.get('thresholdPercent') is not None else 5)
+    reset_credits = quota.get('rateLimitResetCredits') if isinstance(quota.get('rateLimitResetCredits'), dict) else {}
+    available_resets = reset_credits.get('availableCount') if reset_credits else None
+    subject = f'Pullwise worker Codex quota {status}: {name}'
+    lines = [
+        'Pullwise worker Codex quota warning detected.',
+        f'Worker: {name} ({worker_id})',
+        f'Status: {status}',
+        f'Plan: {_clean_text(quota.get("planType"), 80) or "unknown"}',
+        f'Threshold: {threshold} remaining',
+        f'Rate limit reached type: {_clean_text(quota.get("rateLimitReachedType"), 120) or "none"}',
+        f'Reset credits: {available_resets if available_resets is not None else "unknown"}',
+        f'Checked at: {_format_unix_time(quota.get("checkedAt"))}',
+    ]
+    windows = [item for item in quota.get('windows') or [] if isinstance(item, dict)]
+    if windows:
+        lines.append('Quota windows:')
+        for window in windows:
+            label = _clean_text(window.get('label') or window.get('windowKind') or window.get('name'), 80) or 'window'
+            lines.append(
+                f'- {label}: used {_format_percent(window.get("usedPercent"))}, '
+                f'remaining {_format_percent(window.get("remainingPercent"))}, '
+                f'resets {_format_unix_time(window.get("resetsAt"))}'
+            )
+    if blocked:
+        blocked_labels = [
+            _clean_text(window.get('label') or window.get('windowKind') or window.get('name'), 80) or 'window'
+            for window in blocked
+        ]
+        lines.append(f'Blocked windows: {", ".join(blocked_labels)}')
+    last_error = _clean_text(quota.get('lastError') or worker.get('last_error'))
+    if last_error:
+        lines.append(f'Last error: {last_error}')
+    return {
+        f'worker:{worker_id}:codex-quota:{status}': {
+            'subject': subject,
+            'body': '\n'.join(lines),
+            'kind': 'worker_codex_quota',
+            'status': status,
+        }
+    }
+
 def _worker_alert(worker):
     worker_id = _clean_text(worker.get('worker_id') or worker.get('id'), 128)
     if not worker_id:
         return {}
     status = _clean_text(worker.get('status')).lower()
     if status not in _WORKER_PROBLEM_STATUSES:
+        return {}
+    quota_problem, _quota_status, _blocked_windows = _quota_problem(_worker_quota_payload(worker))
+    if status == 'degraded' and quota_problem:
         return {}
     name = _clean_text(worker.get('name') or worker_id, 120)
     provider = _clean_text(worker.get('provider'))
@@ -164,6 +271,12 @@ def _worker_alert(worker):
         }
     }
 
+
+
+def _worker_alerts(worker):
+    alerts = _worker_alert(worker)
+    alerts.update(_worker_quota_alert(worker))
+    return alerts
 
 def _sync_alerts(alerts, clear_prefixes):
     with _LOCK:
@@ -195,7 +308,7 @@ def sync_scan_system_alerts(payload, workers):
     try:
         alerts = _system_alert(payload if isinstance(payload, dict) else {})
         for worker in workers or []:
-            alerts.update(_worker_alert(worker if isinstance(worker, dict) else {}))
+            alerts.update(_worker_alerts(worker if isinstance(worker, dict) else {}))
         _sync_alerts(alerts, ['server:scan-system:', 'worker:'])
     except Exception as exc:
         logger.exception('scan system alert sync failed: %s', exc)
@@ -208,9 +321,10 @@ def sync_worker_alert(worker):
         worker_id = _clean_text(worker.get('worker_id') or worker.get('id'), 128)
         if not worker_id:
             return
-        _sync_alerts(_worker_alert(worker), [f'worker:{worker_id}:'])
+        _sync_alerts(_worker_alerts(worker), [f'worker:{worker_id}:'])
     except Exception as exc:
         logger.exception('worker alert sync failed: %s', exc)
 
 
 __all__ = ['send_alert_email', 'sync_scan_system_alerts', 'sync_worker_alert']
+

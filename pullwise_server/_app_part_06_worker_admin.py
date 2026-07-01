@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -169,6 +169,13 @@ def worker_machine_metrics_payload(worker: dict) -> dict | None:
     return payload
 
 
+
+def worker_codex_quota_payload(worker: dict) -> dict | None:
+    quota = decoded_worker_json_payload(worker.get("codex_quota"), dict)
+    if not isinstance(quota, dict) and isinstance(worker.get("codexQuota"), dict):
+        quota = dict(worker["codexQuota"])
+    return quota if isinstance(quota, dict) else None
+
 def annotate_worker_runtime_payloads(workers: list[dict], *, include_latest_commands: bool = False) -> list[dict]:
     worker_ids = [public_issue_text(worker.get("worker_id")) for worker in workers if public_issue_text(worker.get("worker_id"))]
     running_counts = db.worker_running_scan_job_counts(worker_ids)
@@ -224,6 +231,9 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         payload["last_error"] = clean_scan_error(worker.get("last_error"))
         payload["doctor_status"] = public_issue_text(worker.get("doctor_status"))
         payload["codex_ready"] = bool(worker.get("codex_ready")) if worker.get("codex_ready") is not None else None
+        codex_quota = worker_codex_quota_payload(worker)
+        if codex_quota:
+            payload["codexQuota"] = codex_quota
         payload["systemd_active"] = bool(worker.get("systemd_active")) if worker.get("systemd_active") is not None else None
         payload["doctor_checked_at"] = pull_request_timestamp(worker.get("doctor_checked_at"))
         payload["test"] = worker_test_payload(worker)
@@ -1688,3 +1698,4 @@ def worker_test_payload(worker: dict) -> dict:
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}
+

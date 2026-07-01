@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -594,6 +594,81 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(send_alert.call_count, 2)
 
 
+    def test_worker_codex_quota_alert_email_is_sent_once_and_cleared(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        headers = {"Authorization": "Bearer " + token}
+        low_quota = {
+            "provider": "codex",
+            "limitId": "codex",
+            "planType": "pro",
+            "status": "low",
+            "ready": False,
+            "thresholdPercent": 5,
+            "remainingPercent": 4,
+            "checkedAt": 1782900000,
+            "rateLimitResetCredits": {"availableCount": 1},
+            "windows": [
+                {"windowKind": "five_hour", "label": "5 hour", "usedPercent": 96, "remainingPercent": 4, "windowDurationMins": 300, "resetsAt": 1782918371},
+                {"windowKind": "weekly", "label": "weekly", "usedPercent": 22, "remainingPercent": 78, "windowDurationMins": 10080, "resetsAt": 1783419385},
+            ],
+            "blockedWindows": [
+                {"windowKind": "five_hour", "label": "5 hour", "usedPercent": 96, "remainingPercent": 4, "windowDurationMins": 300, "resetsAt": 1782918371}
+            ],
+        }
+        degraded = {
+            "worker_id": worker_id,
+            "doctor_status": "degraded",
+            "codex_ready": False,
+            "readyProviders": [],
+            "last_error": "codex quota low",
+            "codexQuota": low_quota,
+        }
+        ready = {
+            "worker_id": worker_id,
+            "doctor_status": "ok",
+            "codex_ready": True,
+            "readyProviders": ["codex"],
+            "codexQuota": {
+                **low_quota,
+                "status": "ok",
+                "ready": True,
+                "remainingPercent": 78,
+                "windows": [
+                    {"windowKind": "five_hour", "label": "5 hour", "usedPercent": 8, "remainingPercent": 92, "windowDurationMins": 300, "resetsAt": 1782918371},
+                    {"windowKind": "weekly", "label": "weekly", "usedPercent": 22, "remainingPercent": 78, "windowDurationMins": 10080, "resetsAt": 1783419385},
+                ],
+                "blockedWindows": [],
+            },
+        }
+
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            first = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(first, "POST")
+            second = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(second, "POST")
+
+            self.assertEqual(first.status, HTTPStatus.OK)
+            self.assertEqual(second.status, HTTPStatus.OK)
+            self.assertEqual(send_alert.call_count, 1)
+            subject, body = send_alert.call_args.args
+            self.assertIn("Codex quota low", subject)
+            self.assertIn("5 hour", body)
+            self.assertIn("Reset credits: 1", body)
+            state = db.load_state_item("alert_notifications")
+            self.assertIn(f"worker:{worker_id}:codex-quota:low", state["active"])
+            self.assertNotIn(f"worker:{worker_id}:degraded", state["active"])
+
+            recovered = RouteHarness("/worker/heartbeat", ready, headers=headers)
+            app.PullwiseHandler.route(recovered, "POST")
+            self.assertEqual(recovered.status, HTTPStatus.OK)
+            state = db.load_state_item("alert_notifications")
+            self.assertNotIn(f"worker:{worker_id}:codex-quota:low", state.get("active", {}))
+
+            repeated = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(repeated, "POST")
+            self.assertEqual(repeated.status, HTTPStatus.OK)
+            self.assertEqual(send_alert.call_count, 2)
     def test_worker_alert_email_failure_is_retried_instead_of_deduped(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -795,6 +870,71 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(metrics["history"][0]["storage"]["usedPercent"], 40.0)
         self.assertNotIn("usagePercent", json.dumps(metrics))
 
+    def test_worker_heartbeat_persists_codex_quota_for_admin_detail(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        worker_auth = {"Authorization": f"Bearer {token}"}
+        codex_quota = {
+            "provider": "codex",
+            "limitId": "codex",
+            "limitName": None,
+            "planType": "pro",
+            "status": "low",
+            "ready": False,
+            "reason": "codex_quota_low",
+            "thresholdPercent": 5,
+            "usedPercent": 96,
+            "remainingPercent": 4,
+            "checkedAt": 1782900000,
+            "nextCheckAt": 1782900300,
+            "rateLimitReachedType": None,
+            "rateLimitResetCredits": {"availableCount": 1},
+            "credits": {"hasCredits": False, "unlimited": False, "balance": "0"},
+            "windows": [
+                {"name": "primary", "windowKind": "five_hour", "label": "5 hour", "usedPercent": 96, "remainingPercent": 4, "windowDurationMins": 300, "resetsAt": 1782918371},
+                {"name": "secondary", "windowKind": "weekly", "label": "weekly", "usedPercent": 22, "remainingPercent": 78, "windowDurationMins": 10080, "resetsAt": 1783419385},
+            ],
+            "blockedWindows": [
+                {"name": "primary", "windowKind": "five_hour", "label": "5 hour", "usedPercent": 96, "remainingPercent": 4, "windowDurationMins": 300, "resetsAt": 1782918371}
+            ],
+            "secret": "do-not-store",
+        }
+
+        heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.4.18",
+                "running_jobs": 0,
+                "doctor_status": "degraded",
+                "codex_ready": False,
+                "readyProviders": [],
+                "codexQuota": codex_quota,
+            },
+            headers=worker_auth,
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        worker = db.get_worker(worker_id)
+        self.assertEqual(app.computed_worker_status(worker), "degraded")
+        stored_quota = json.loads(worker["codex_quota"])
+        self.assertEqual(stored_quota["planType"], "pro")
+        self.assertEqual(stored_quota["windows"][0]["windowKind"], "five_hour")
+        self.assertNotIn("secret", stored_quota)
+
+        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(detail, "GET")
+
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        quota = detail.payload["worker"]["codexQuota"]
+        self.assertEqual(quota["status"], "low")
+        self.assertFalse(quota["ready"])
+        self.assertEqual(quota["planType"], "pro")
+        self.assertEqual(quota["rateLimitResetCredits"]["availableCount"], 1)
+        self.assertEqual([window["windowKind"] for window in quota["windows"]], ["five_hour", "weekly"])
+        self.assertEqual(detail.payload["worker"]["readyProviders"], [])
     def test_admin_worker_activity_uses_latest_activity_timestamp(self) -> None:
         payload, _token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -2212,3 +2352,4 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

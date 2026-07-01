@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import binascii
@@ -246,6 +246,7 @@ def initialize() -> None:
                     doctor_status TEXT,
                     codex_ready INTEGER,
                     ready_providers TEXT,
+                    codex_quota TEXT,
                     systemd_active INTEGER,
                     doctor_checked_at INTEGER,
                     machine_metrics TEXT,
@@ -277,6 +278,7 @@ def initialize() -> None:
                 ("workers", "doctor_status", "TEXT"),
                 ("workers", "codex_ready", "INTEGER"),
                 ("workers", "ready_providers", "TEXT"),
+                ("workers", "codex_quota", "TEXT"),
                 ("workers", "systemd_active", "INTEGER"),
                 ("workers", "doctor_checked_at", "INTEGER"),
                 ("workers", "machine_metrics", "TEXT"),
@@ -766,6 +768,7 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
         "doctor_status",
         "codex_ready",
         "ready_providers",
+        "codex_quota",
         "systemd_active",
         "doctor_checked_at",
         "machine_metrics",
@@ -808,6 +811,7 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
             doctor_status TEXT,
             codex_ready INTEGER,
             ready_providers TEXT,
+            codex_quota TEXT,
             systemd_active INTEGER,
             doctor_checked_at INTEGER,
             machine_metrics TEXT,
@@ -1386,6 +1390,117 @@ def heartbeat_ready_providers_json(record: dict[str, Any]) -> str | None:
     return json.dumps(providers, sort_keys=True)
 
 
+
+def worker_quota_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return max(0.0, min(100.0, number))
+
+
+def worker_quota_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def worker_quota_text(value: Any, limit: int = 200) -> str | None:
+    text = str(value or "").replace("\x00", "").strip()
+    return text[:limit] if text else None
+
+
+def worker_quota_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "ready"}:
+            return True
+        if lowered in {"0", "false", "no", "not_ready"}:
+            return False
+    return None
+
+
+def worker_codex_quota_window(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    payload: dict[str, Any] = {}
+    for key, limit in (("name", 80), ("windowKind", 80), ("label", 120)):
+        text = worker_quota_text(value.get(key), limit)
+        if text:
+            payload[key] = text
+    for key in ("usedPercent", "remainingPercent"):
+        number = worker_quota_float(value.get(key))
+        if number is not None:
+            payload[key] = round(number, 3)
+    for key in ("windowDurationMins", "resetsAt"):
+        number = worker_quota_int(value.get(key))
+        if number is not None:
+            payload[key] = number
+    return payload if payload else None
+
+
+def worker_codex_quota_json(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    payload: dict[str, Any] = {"provider": "codex"}
+    for key, limit in (
+        ("limitId", 80),
+        ("limitName", 120),
+        ("planType", 80),
+        ("status", 40),
+        ("reason", 120),
+        ("rateLimitReachedType", 120),
+        ("lastError", 500),
+    ):
+        text = worker_quota_text(value.get(key), limit)
+        if text:
+            payload[key] = text
+    ready = worker_quota_bool(value.get("ready"))
+    if ready is not None:
+        payload["ready"] = ready
+    for key in ("checkedAt", "nextCheckAt"):
+        number = worker_quota_int(value.get(key))
+        if number is not None:
+            payload[key] = number
+    for key in ("thresholdPercent", "usedPercent", "remainingPercent"):
+        number = worker_quota_float(value.get(key))
+        if number is not None:
+            payload[key] = round(number, 3)
+    windows = [window for item in value.get("windows") or [] if (window := worker_codex_quota_window(item))]
+    if windows:
+        payload["windows"] = windows[:4]
+    blocked_windows = [window for item in value.get("blockedWindows") or [] if (window := worker_codex_quota_window(item))]
+    if blocked_windows:
+        payload["blockedWindows"] = blocked_windows[:4]
+    reset_credits = value.get("rateLimitResetCredits") if isinstance(value.get("rateLimitResetCredits"), dict) else {}
+    available_count = worker_quota_int(reset_credits.get("availableCount")) if reset_credits else None
+    if available_count is not None:
+        payload["rateLimitResetCredits"] = {"availableCount": available_count}
+    credits = value.get("credits") if isinstance(value.get("credits"), dict) else {}
+    if credits:
+        credits_payload: dict[str, Any] = {}
+        for key in ("hasCredits", "unlimited"):
+            flag = worker_quota_bool(credits.get(key))
+            if flag is not None:
+                credits_payload[key] = flag
+        balance = worker_quota_text(credits.get("balance"), 80)
+        if balance is not None:
+            credits_payload["balance"] = balance
+        if credits_payload:
+            payload["credits"] = credits_payload
+    return json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
+
 WORKER_LIFECYCLE_COMMANDS = {"stop", "uninstall"}
 WORKER_COMMAND_ACTIVE_STATUSES = {"pending", "running"}
 WORKER_COMMAND_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
@@ -1809,6 +1924,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     provider = str(record.get("provider") or "codex")[:60]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
     ready_providers = heartbeat_ready_providers_json(record)
+    codex_quota_text = worker_codex_quota_json(record.get("codex_quota"))
     machine_metrics = record.get("machine_metrics")
     machine_metrics_history = record.get("machine_metrics_history")
     machine_metrics_text = (
@@ -1830,9 +1946,9 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     worker_id, name, version, provider, provider_chain, enabled, running_jobs,
                     hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
                     created_at, updated_at, doctor_status, codex_ready, ready_providers,
-                    systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
+                    codex_quota, systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
                 )
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     version = excluded.version,
                     provider = excluded.provider,
@@ -1844,6 +1960,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     doctor_status = COALESCE(excluded.doctor_status, workers.doctor_status),
                     codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
                     ready_providers = COALESCE(excluded.ready_providers, workers.ready_providers),
+                    codex_quota = COALESCE(excluded.codex_quota, workers.codex_quota),
                     systemd_active = COALESCE(excluded.systemd_active, workers.systemd_active),
                     doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
                     machine_metrics = COALESCE(excluded.machine_metrics, workers.machine_metrics),
@@ -1869,6 +1986,7 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("doctor_status"),
                     record.get("codex_ready"),
                     ready_providers,
+                    codex_quota_text,
                     record.get("systemd_active"),
                     record.get("doctor_checked_at"),
                     machine_metrics_text,
@@ -5406,3 +5524,4 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
+

@@ -2864,6 +2864,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
                     "machine_metrics": machine_metrics,
                     "machine_metrics_history": machine_metrics_history,
+                    "codex_quota": body.get("codexQuota") if "codexQuota" in body else body.get("codex_quota"),
                     "timestamp": heartbeat_timestamp,
                 }
             )
