@@ -1052,16 +1052,7 @@ def reject_missing_worker_protocol_completed_result_locked(row: dict, *, checksu
             "resultChecksum": public_issue_text(checksum),
         }
     )
-    for key in (
-        "auditSwarm",
-        "completionAudit",
-        "convergenceState",
-        "impactGraph",
-        "repositoryGraph",
-        "semanticGraph",
-        "verificationAudit",
-    ):
-        scan.pop(key, None)
+
     changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
     if changed:
         db.upsert_scan(scan)

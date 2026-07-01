@@ -60,18 +60,13 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
     if commit:
         scan["commit"] = commit
     for key in (
-        "auditSwarm",
         "claimedAt",
         "claimedByWorkerId",
         "completedAt",
-        "completionAudit",
-        "convergenceState",
         "durationMs",
         "effectiveAgentConfig",
         "error",
         "errorCode",
-        "impactGraph",
-        "jobTrace",
         "preflight",
         "quotaConsumedAt",
         "quotaConsumeTrigger",
@@ -82,12 +77,9 @@ def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None 
         "quotaState",
         "recoveredAt",
         "recoveryReason",
-        "repositoryGraph",
         "resultChecksum",
-        "semanticGraph",
         "startedAt",
         "updatedAt",
-        "verificationAudit",
     ):
         scan.pop(key, None)
     db.upsert_scan(scan)
@@ -609,17 +601,6 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan.pop("errorCode", None)
         if resolved_commit:
             scan["commit"] = resolved_commit
-        for key in (
-            "auditSwarm",
-            "completionAudit",
-            "convergenceState",
-            "impactGraph",
-            "jobTrace",
-            "repositoryGraph",
-            "semanticGraph",
-            "verificationAudit",
-        ):
-            scan.pop(key, None)
         if preflight:
             scan["preflight"] = preflight
         if effective_agent_config:

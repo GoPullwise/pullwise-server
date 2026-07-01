@@ -1397,15 +1397,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("provider", update.payload["message"])
 
-    def test_admin_plan_agent_config_updates_review_worker_timeouts(self) -> None:
+    def test_admin_plan_agent_config_updates_review_worker_policy(self) -> None:
         update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",
             {
                 "provider": "codex",
                 "reviewWorker": {
-                    "maxRepro": 12,
-                    "minScoreForRepro": 7,
-                    "requireRedGreen": True,
+                    "reviewerMaxTurnsPerScan": 4,
+                    "turnTimeoutSeconds": 1800,
+                    "scanDeadlineSeconds": 12000,
                 },
             },
             cookie=self.admin_cookie,
@@ -1413,19 +1413,19 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(update, "PATCH")
 
         defaults = app.billing.default_review_agent_review_worker_config("pro")
-        self.assertEqual(defaults["finderTimeoutSeconds"], 3600)
-        self.assertEqual(defaults["reproTimeoutSeconds"], 3600)
-        self.assertEqual(defaults["simpleScanDeadlineSeconds"], 14400)
-        expected_pro_graph = {
+        self.assertEqual(defaults["reviewerMaxTurnsPerScan"], 2)
+        self.assertEqual(defaults["turnTimeoutSeconds"], 3600)
+        self.assertEqual(defaults["scanDeadlineSeconds"], 14400)
+        expected_pro_policy = {
             **app.billing.default_review_agent_review_worker_config("pro"),
-            "maxRepro": 12,
-            "minScoreForRepro": 7,
-            "requireRedGreen": True,
+            "reviewerMaxTurnsPerScan": 4,
+            "turnTimeoutSeconds": 1800,
+            "scanDeadlineSeconds": 12000,
         }
         self.assertEqual(update.status, HTTPStatus.OK)
         self.assertEqual(
             update.payload["agentConfig"]["reviewWorker"],
-            expected_pro_graph,
+            expected_pro_policy,
         )
 
         admin = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
@@ -1434,13 +1434,12 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin.status, HTTPStatus.OK)
         self.assertEqual(
             admin.payload["agentConfigs"]["pro"]["reviewWorker"],
-            expected_pro_graph,
+            expected_pro_policy,
         )
         self.assertEqual(
             admin.payload["agentConfigs"]["free"]["reviewWorker"],
             app.billing.default_review_agent_review_worker_config("free"),
         )
-
     def test_plan_agent_config_reads_repair_invalid_persisted_provider(self) -> None:
         db.save_state_item(
             app.billing.REVIEW_AGENT_CONFIG_STATE_KEY,

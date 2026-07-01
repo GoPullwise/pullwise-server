@@ -38,48 +38,36 @@ REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
 REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
     "free": {
         "mode": "fast",
-        "scanMode": "full-cached",
-        "maxRepro": 4,
-        "minScoreForRepro": 8,
-        "requireRedGreen": False,
-        "finderMaxTurnsPerScan": 1,
-        "simpleMaxDiscoveryTurns": 10,
-        "simpleMaxBatchFiles": 40,
-        "simpleMaxBatchBytes": 500_000,
-        "maxCandidatesPerUnit": 1,
-        "finderTimeoutSeconds": 3600,
-        "reproTimeoutSeconds": 3600,
-        "simpleScanDeadlineSeconds": 14400,
+        "scanMode": "full-repo",
+        "reviewerMaxTurnsPerScan": 1,
+        "maxDiscoveryTurns": 10,
+        "maxBundleFiles": 40,
+        "maxBundleBytes": 500_000,
+        "maxCandidatesPerBundle": 1,
+        "turnTimeoutSeconds": 3600,
+        "scanDeadlineSeconds": 14400,
     },
     "pro": {
         "mode": "standard",
-        "scanMode": "full-cached",
-        "maxRepro": 8,
-        "minScoreForRepro": 8,
-        "requireRedGreen": False,
-        "finderMaxTurnsPerScan": 2,
-        "simpleMaxDiscoveryTurns": 20,
-        "simpleMaxBatchFiles": 80,
-        "simpleMaxBatchBytes": 1_000_000,
-        "maxCandidatesPerUnit": 1,
-        "finderTimeoutSeconds": 3600,
-        "reproTimeoutSeconds": 3600,
-        "simpleScanDeadlineSeconds": 14400,
+        "scanMode": "full-repo",
+        "reviewerMaxTurnsPerScan": 2,
+        "maxDiscoveryTurns": 20,
+        "maxBundleFiles": 80,
+        "maxBundleBytes": 1_000_000,
+        "maxCandidatesPerBundle": 1,
+        "turnTimeoutSeconds": 3600,
+        "scanDeadlineSeconds": 14400,
     },
     "max": {
         "mode": "standard",
-        "scanMode": "full-cached",
-        "maxRepro": 12,
-        "minScoreForRepro": 8,
-        "requireRedGreen": False,
-        "finderMaxTurnsPerScan": 3,
-        "simpleMaxDiscoveryTurns": 32,
-        "simpleMaxBatchFiles": 100,
-        "simpleMaxBatchBytes": 1_250_000,
-        "maxCandidatesPerUnit": 2,
-        "finderTimeoutSeconds": 3600,
-        "reproTimeoutSeconds": 3600,
-        "simpleScanDeadlineSeconds": 14400,
+        "scanMode": "full-repo",
+        "reviewerMaxTurnsPerScan": 3,
+        "maxDiscoveryTurns": 32,
+        "maxBundleFiles": 100,
+        "maxBundleBytes": 1_250_000,
+        "maxCandidatesPerBundle": 2,
+        "turnTimeoutSeconds": 3600,
+        "scanDeadlineSeconds": 14400,
     },
 }
 REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
@@ -137,14 +125,14 @@ def clean_review_agent_config_int(value: object, default: int, *, minimum: int, 
     return max(minimum, min(maximum, number))
 
 
-def clean_review_agent_graph_mode(value: object, default: str) -> str:
+def clean_review_agent_worker_mode(value: object, default: str) -> str:
     mode = clean_review_agent_config_text(value).lower()
     return mode if mode in {"fast", "standard", "deep"} else default
 
 
-def clean_review_agent_graph_scan_mode(value: object, default: str) -> str:
+def clean_review_agent_scan_mode(value: object, default: str) -> str:
     mode = clean_review_agent_config_text(value).lower()
-    return mode if mode in {"full-cached", "full-strict"} else default
+    return mode if mode in {"full-repo", "full-strict"} else default
 
 
 def clean_review_agent_provider_required(value: object, *, strict: bool = True) -> str:
@@ -203,72 +191,51 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
 def normalize_review_agent_review_worker_config(value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
-    result["mode"] = clean_review_agent_graph_mode(source.get("mode"), str(result.get("mode") or "standard"))
-    result["scanMode"] = clean_review_agent_graph_scan_mode(source.get("scanMode"), str(result.get("scanMode") or "full-cached"))
-    result["maxRepro"] = clean_review_agent_config_int(
-        source.get("maxRepro"),
-        int(result.get("maxRepro") or 0),
-        minimum=0,
-        maximum=100,
-    )
-    result["minScoreForRepro"] = clean_review_agent_config_int(
-        source.get("minScoreForRepro"),
-        int(result.get("minScoreForRepro") or 8),
-        minimum=0,
-        maximum=50,
-    )
-    if "requireRedGreen" in source:
-        result["requireRedGreen"] = source.get("requireRedGreen") is True
-    result["finderMaxTurnsPerScan"] = clean_review_agent_config_int(
-        source.get("finderMaxTurnsPerScan"),
-        int(result.get("finderMaxTurnsPerScan") or 3),
+    result["mode"] = clean_review_agent_worker_mode(source.get("mode"), str(result.get("mode") or "standard"))
+    result["scanMode"] = clean_review_agent_scan_mode(source.get("scanMode"), str(result.get("scanMode") or "full-repo"))
+    result["reviewerMaxTurnsPerScan"] = clean_review_agent_config_int(
+        source.get("reviewerMaxTurnsPerScan"),
+        int(result.get("reviewerMaxTurnsPerScan") or 3),
         minimum=1,
         maximum=16,
     )
-    result["simpleMaxDiscoveryTurns"] = clean_review_agent_config_int(
-        source.get("simpleMaxDiscoveryTurns"),
-        int(result.get("simpleMaxDiscoveryTurns") or 20),
+    result["maxDiscoveryTurns"] = clean_review_agent_config_int(
+        source.get("maxDiscoveryTurns"),
+        int(result.get("maxDiscoveryTurns") or 20),
         minimum=1,
         maximum=64,
     )
-    result["simpleMaxBatchFiles"] = clean_review_agent_config_int(
-        source.get("simpleMaxBatchFiles"),
-        int(result.get("simpleMaxBatchFiles") or 80),
+    result["maxBundleFiles"] = clean_review_agent_config_int(
+        source.get("maxBundleFiles"),
+        int(result.get("maxBundleFiles") or 80),
         minimum=10,
         maximum=400,
     )
-    result["simpleMaxBatchBytes"] = clean_review_agent_config_int(
-        source.get("simpleMaxBatchBytes"),
-        int(result.get("simpleMaxBatchBytes") or 1_000_000),
+    result["maxBundleBytes"] = clean_review_agent_config_int(
+        source.get("maxBundleBytes"),
+        int(result.get("maxBundleBytes") or 1_000_000),
         minimum=100_000,
         maximum=5_000_000,
     )
-    result["maxCandidatesPerUnit"] = clean_review_agent_config_int(
-        source.get("maxCandidatesPerUnit"),
-        int(result.get("maxCandidatesPerUnit") or 1),
+    result["maxCandidatesPerBundle"] = clean_review_agent_config_int(
+        source.get("maxCandidatesPerBundle"),
+        int(result.get("maxCandidatesPerBundle") or 1),
         minimum=1,
         maximum=4,
     )
-    result["finderTimeoutSeconds"] = clean_review_agent_config_int(
-        source.get("finderTimeoutSeconds"),
-        int(result.get("finderTimeoutSeconds") or 3600),
+    result["turnTimeoutSeconds"] = clean_review_agent_config_int(
+        source.get("turnTimeoutSeconds"),
+        int(result.get("turnTimeoutSeconds") or 3600),
         minimum=60,
         maximum=3600,
     )
-    result["reproTimeoutSeconds"] = clean_review_agent_config_int(
-        source.get("reproTimeoutSeconds"),
-        int(result.get("reproTimeoutSeconds") or 3600),
-        minimum=60,
-        maximum=3600,
-    )
-    result["simpleScanDeadlineSeconds"] = clean_review_agent_config_int(
-        source.get("simpleScanDeadlineSeconds") or source.get("scanDeadlineSeconds"),
-        int(result.get("simpleScanDeadlineSeconds") or result.get("scanDeadlineSeconds") or 14400),
+    result["scanDeadlineSeconds"] = clean_review_agent_config_int(
+        source.get("scanDeadlineSeconds"),
+        int(result.get("scanDeadlineSeconds") or 14400),
         minimum=0,
         maximum=21600,
     )
     return result
-
 
 def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     defaults = default_review_agent_plan_config(plan)

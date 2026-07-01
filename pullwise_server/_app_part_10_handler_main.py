@@ -377,10 +377,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not scan:
                 raise ResourceNotFound("Scan")
             return self.json(scan_audit_bundle_payload(scan))
-        if len(segments) == 3 and segments[0] == "scans" and segments[2] == "impact-graph":
-            return self.error(HTTPStatus.GONE, "The legacy impact graph API has been removed.")
-        if len(segments) == 4 and segments[0] == "scans" and segments[2] == "impact-graph" and segments[3] == "focus":
-            return self.error(HTTPStatus.GONE, "The legacy impact graph API has been removed.")
         if len(segments) == 2 and segments[0] == "scans":
             session = self.current_session()
             if not session:
@@ -3058,8 +3054,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 if progress_logs:
                     update["progressLogs"] = progress_logs
                 scan.update(update)
-                for key in ("auditSwarm", "completionAudit", "impactGraph", "jobTrace", "repositoryGraph", "semanticGraph"):
-                    scan.pop(key, None)
                 db.upsert_scan(scan)
                 mark_state_dirty()
         scan_logging.log_event(

@@ -769,144 +769,6 @@ def redact_sensitive_text(value: object, *, max_length: int | None = None) -> st
     redacted = SENSITIVE_TEXT_RE.sub(replacement, text)
     return redacted[:max_length] if max_length is not None else redacted
 
-def public_scan_completion_audit_checks(value: object) -> list[dict]:
-    raw_items = value if isinstance(value, list) else []
-    checks = []
-    seen = set()
-    for item in raw_items:
-        if isinstance(item, dict):
-            check = {
-                "label": public_scan_compact_text(
-                    item.get("label") or item.get("title") or item.get("name") or item.get("key"),
-                    max_length=120,
-                ),
-                "status": public_scan_compact_status(item.get("status") or item.get("verdict"), max_length=40),
-                "summary": public_scan_compact_text(
-                    item.get("summary") or item.get("detail") or item.get("message"),
-                    max_length=280,
-                ),
-            }
-            check = {key: field for key, field in check.items() if field}
-        else:
-            label = public_scan_compact_text(item, max_length=120)
-            check = {"label": label} if label else {}
-        if not check:
-            continue
-        dedupe_key = json.dumps(check, ensure_ascii=False, sort_keys=True)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        checks.append(check)
-        if len(checks) >= 12:
-            break
-    return checks
-
-
-def public_scan_completion_audit(value: object) -> dict:
-    source = value if isinstance(value, dict) else {}
-    retry_recommended = source.get("retryRecommended")
-    if retry_recommended is None:
-        retry_recommended = source.get("retry_recommended")
-    payload = {
-        "protocol": public_scan_compact_text(source.get("protocol"), max_length=80),
-        "status": public_scan_compact_status(source.get("status"), max_length=40),
-        "blockers": public_scan_compact_text_list(source.get("blockers"), limit=8, max_length=240),
-        "warnings": public_scan_compact_text_list(source.get("warnings"), limit=10, max_length=240),
-        "checks": public_scan_completion_audit_checks(source.get("checks")),
-        "retryRecommended": bool(retry_recommended),
-        "retryReason": public_scan_compact_text(
-            source.get("retryReason") or source.get("retry_reason"),
-            max_length=280,
-        ),
-        "summary": public_scan_compact_text(source.get("summary"), max_length=800),
-    }
-    return {key: field for key, field in payload.items() if field not in ("", [], {}, False)}
-
-
-def public_scan_job_trace_rejected_reasons(value: object) -> list[dict]:
-    raw_items = value if isinstance(value, list) else []
-    reasons = []
-    seen = set()
-    for item in raw_items:
-        if isinstance(item, dict):
-            reason = public_scan_compact_text(
-                item.get("reason") or item.get("code") or item.get("label"),
-                max_length=120,
-            )
-            payload = {"reason": reason} if reason else {}
-            count = public_scan_count(item.get("count"))
-            if count:
-                payload["count"] = count
-        else:
-            reason = public_scan_compact_text(item, max_length=120)
-            payload = {"reason": reason} if reason else {}
-        if not payload:
-            continue
-        dedupe_key = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        reasons.append(payload)
-        if len(reasons) >= 10:
-            break
-    return reasons
-
-
-def public_scan_job_trace_checkpoints(value: object) -> list[dict]:
-    raw_items = value if isinstance(value, list) else []
-    checkpoints = []
-    seen = set()
-    for item in raw_items:
-        if isinstance(item, dict):
-            checkpoint = {
-                "key": public_scan_compact_text(
-                    item.get("key") or item.get("id") or item.get("label") or item.get("name") or item.get("stage"),
-                    max_length=80,
-                ),
-                "status": public_scan_compact_status(item.get("status"), max_length=40),
-                "summary": public_scan_compact_text(
-                    item.get("summary") or item.get("message") or item.get("detail"),
-                    max_length=280,
-                ),
-                "attempt": public_scan_count(item.get("attempt")),
-                "durationMs": public_scan_count(item.get("durationMs") or item.get("duration_ms")),
-            }
-            checkpoint = {key: field for key, field in checkpoint.items() if field not in ("", 0)}
-        else:
-            key = public_scan_compact_text(item, max_length=80)
-            checkpoint = {"key": key} if key else {}
-        if not checkpoint:
-            continue
-        dedupe_key = json.dumps(checkpoint, ensure_ascii=False, sort_keys=True)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        checkpoints.append(checkpoint)
-        if len(checkpoints) >= 20:
-            break
-    return checkpoints
-
-
-def public_scan_job_trace(value: object) -> dict:
-    source = value if isinstance(value, dict) else {}
-    payload = {
-        "protocol": public_scan_compact_text(source.get("protocol"), max_length=80),
-        "checkpoints": public_scan_job_trace_checkpoints(source.get("checkpoints")),
-        "summaries": public_scan_compact_text_list(source.get("summaries"), limit=12, max_length=280),
-        "candidateFindingsBeforeFilter": public_scan_count(
-            source.get("candidateFindingsBeforeFilter") or source.get("candidate_findings_before_filter")
-        ),
-        "rejectedReasons": public_scan_job_trace_rejected_reasons(
-            source.get("rejectedReasons") or source.get("rejected_reasons")
-        ),
-        "nextRetryHint": public_scan_compact_text(
-            source.get("nextRetryHint") or source.get("next_retry_hint"),
-            max_length=280,
-        ),
-    }
-    return {key: field for key, field in payload.items() if field not in ("", [], {}, 0)}
-
-
 def public_confidence(value: object) -> float:
     if isinstance(value, bool):
         return 0.0
@@ -1668,20 +1530,10 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
             if text and text not in reproduction_commands:
                 reproduction_commands.append(text)
         evidence = issue.get("evidence") if isinstance(issue.get("evidence"), list) else []
-        code_evidence = issue.get("codeEvidence") if isinstance(issue.get("codeEvidence"), list) else []
-        evidence_items += len(evidence) + len(code_evidence)
+        evidence_items += len(evidence)
     preflight = public_scan.get("preflight") or {}
     public_scan = dict(public_scan)
-    for key in (
-        "auditSwarm",
-        "completionAudit",
-        "impactGraph",
-        "jobTrace",
-        "repositoryGraph",
-        "semanticGraph",
-        "verificationAudit",
-    ):
-        public_scan.pop(key, None)
+
     log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
     bundle = {
         "schemaVersion": 1,

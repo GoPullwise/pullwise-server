@@ -207,216 +207,6 @@ def audit_result_fields(
         }
     }
 
-def repository_graph_fixture() -> dict:
-    return {
-        "version": "repository-graph/0.1",
-        "generatedAt": app.now(),
-        "repo": "acme/api",
-        "branch": "main",
-        "commit": "abc123",
-        "summary": "API graph",
-        "stats": {"nodes": 3, "edges": 2, "files": 3, "languages": ["Python"], "truncated": False},
-        "nodes": [
-            {
-                "id": "file:src/app.py",
-                "label": "app.py",
-                "type": "entrypoint",
-                "path": "src/app.py",
-                "importance": 0.9,
-                "tags": ["backend"],
-                "raw": "secret",
-            },
-            {"id": "dir:src", "label": "src", "type": "module", "path": "src"},
-            {"id": "bad\nid", "label": "bad", "type": "unknown", "path": "C:\\worker\\repo\\bad.py"},
-        ],
-        "edges": [
-            {"id": "e1", "source": "file:src/app.py", "target": "dir:src", "type": "imports", "weight": 2},
-            {"id": "e2", "source": "bad\nid", "target": "x", "type": "unknown"},
-        ],
-        "architectureSummary": {
-            "entrypoints": ["src/app.py"],
-            "modules": ["src"],
-            "reviewHints": ["Review request handlers."],
-            "promptText": "Repository architecture: src/app.py handles requests.",
-        },
-        "absolutePath": "C:\\worker\\repo",
-    }
-
-
-def semantic_graph_fixture() -> dict:
-    return {
-        "version": "semantic-code-graph/0.1",
-        "summary": "API semantic graph",
-        "stats": {
-            "files": 1,
-            "symbols": 3,
-            "relationships": 1,
-            "routes": 1,
-            "source": "static",
-            "truncated": False,
-        },
-        "nodes": [
-            {
-                "id": "symbol:src/app.py:GET_/health",
-                "label": "GET /health",
-                "type": "route",
-                "path": "src/app.py",
-                "line": 5,
-                "signature": "GET /health",
-                "importance": 0.95,
-                "tags": ["route"],
-            },
-            {
-                "id": "symbol:src/app.py:health",
-                "label": "health",
-                "type": "function",
-                "path": "src/app.py",
-                "line": 6,
-                "signature": "health()",
-            },
-            {
-                "id": "symbol:bad",
-                "label": "bad",
-                "type": "function",
-                "path": "C:\\worker\\repo\\bad.py",
-            },
-        ],
-        "edges": [
-            {
-                "id": "handles:symbol:src/app.py:GET_/health->symbol:src/app.py:health",
-                "source": "symbol:src/app.py:GET_/health",
-                "target": "symbol:src/app.py:health",
-                "type": "handles",
-                "weight": 1,
-            },
-            {"id": "bad", "source": "symbol:bad", "target": "missing", "type": "calls"},
-        ],
-        "reviewHints": ["Start with API routes."],
-    }
-
-
-def impact_graph_fixture() -> dict:
-    return {
-        "version": "impact-graph/0.1",
-        "mode": "repository",
-        "summary": "Impact graph: 1 target, 1 test link, 1 doc link, 1 config link.",
-        "stats": {
-            "targets": 1,
-            "testedTargets": 1,
-            "documentedTargets": 1,
-            "configuredTargets": 1,
-            "testsEdges": 1,
-            "documentsEdges": 1,
-            "configuresEdges": 1,
-            "repositoryFiles": 1,
-            "truncated": False,
-        },
-        "repositoryFiles": ["src/app.py", "C:\\worker\\repo\\secret.py"],
-        "targets": [
-            {
-                "id": "file:src/app.py",
-                "path": "src/app.py",
-                "label": "app.py",
-                "type": "file",
-                "risk": 0.74,
-                "relations": {
-                    "tests": [
-                        {
-                            "id": "file:tests/test_app.py",
-                            "path": "tests/test_app.py",
-                            "label": "test_app.py",
-                            "type": "test",
-                            "confidence": 0.95,
-                            "evidenceKind": "import",
-                            "evidence": [
-                                {
-                                    "kind": "import",
-                                    "file": "tests/test_app.py",
-                                    "line": 3,
-                                    "text": "from src.app import app\nwith newline",
-                                }
-                            ],
-                        }
-                    ],
-                    "documents": [{"id": "file:docs/api.md", "path": "docs/api.md", "type": "doc"}],
-                    "configures": [{"id": "file:package.json", "path": "package.json", "type": "config"}],
-                    "importedBy": [{"id": "file:src/server.py", "path": "src/server.py", "type": "file"}],
-                    "symbols": [
-                        {
-                            "id": "symbol:src/app.py:health",
-                            "path": "src/app.py",
-                            "label": "health",
-                            "type": "function",
-                            "line": 6,
-                        }
-                    ],
-                },
-                "gaps": ["no_direct_docs"],
-            },
-            {"id": "file:bad", "path": "C:\\worker\\repo\\bad.py", "label": "bad", "type": "file"},
-        ],
-        "coverage": {
-            "sourceFilesWithoutTests": ["src/untested.py"],
-            "sourceFilesWithoutDocs": ["src/app.py"],
-            "testsWithoutTargets": ["tests/orphan_test.py"],
-            "docsWithoutTargets": ["docs/orphan.md"],
-        },
-        "promptText": "Impact context:\n- src/app.py -> tests: tests/test_app.py\n- C:\\worker\\repo\\secret.py leaked",
-    }
-
-
-def repository_graph_v2_fixture() -> dict:
-    payload = repository_graph_fixture()
-    payload["version"] = "repository-graph/0.2"
-    payload["nodes"] = [
-        *payload["nodes"][:2],
-        {"id": "file:tests/test_app.py", "label": "test_app.py", "type": "test", "path": "tests/test_app.py"},
-        {"id": "file:docs/api.md", "label": "api.md", "type": "doc", "path": "docs/api.md"},
-        {"id": "file:package.json", "label": "package.json", "type": "config", "path": "package.json"},
-    ]
-    payload["edges"] = [
-        *payload["edges"][:1],
-        {
-            "id": "tests:file:tests/test_app.py->file:src/app.py",
-            "source": "file:tests/test_app.py",
-            "target": "file:src/app.py",
-            "type": "tests",
-            "weight": 1,
-            "confidence": 0.946,
-            "evidence": [
-                {
-                    "kind": "import",
-                    "file": "tests/test_app.py",
-                    "line": 3,
-                    "text": "from src.app import app",
-                },
-                {
-                    "kind": "absolute",
-                    "file": "C:\\worker\\repo\\secret.py",
-                    "line": 4,
-                    "text": "secret\nline",
-                },
-            ],
-        },
-        {
-            "id": "documents:file:docs/api.md->file:src/app.py",
-            "source": "file:docs/api.md",
-            "target": "file:src/app.py",
-            "type": "documents",
-            "confidence": 0.85,
-        },
-        {
-            "id": "configures:file:package.json->dir:src",
-            "source": "file:package.json",
-            "target": "dir:src",
-            "type": "configures",
-            "confidence": 0.75,
-        },
-    ]
-    payload["impactGraph"] = impact_graph_fixture()
-    return payload
-
-
 class WorkerPullRoutesTest(unittest.TestCase):
     def setUp(self) -> None:
         start_fast_sqlite_connections(self)
@@ -1597,28 +1387,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                         )
                     ],
                 ),
-                "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
-                "verification_audit": {
-                    "candidateCount": 2,
-                    "reportedCount": 1,
-                    "rejectedCount": 1,
-                    "verifiedCount": 1,
-                    "rejectedReasons": [{"reason": "missing_evidence", "count": 1}],
-                    "rejectedSamples": [
-                        {
-                            "reason": "missing_evidence",
-                            "title": "Only a vague model guess",
-                            "severity": "low",
-                            "category": "Quality",
-                            "file": "src/guess.py",
-                            "line": 9,
-                            "verificationStatus": "unverified",
-                            "summary": "This unconfirmed text should not be exposed.",
-                        }
-                    ],
-                    "summary": "2 candidates evaluated; 1 reported; 1 rejected before reporting.",
-                },
-            },
+                "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0}            },
             headers=self.auth,
         )
         app.PullwiseHandler.route(result, "POST")
@@ -1629,11 +1398,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["affectedLocations"][0]["url"], "https://github.com/acme/api/blob/abc1234/src/app.py#L12-L14")
         self.assertEqual(payload["limitations"], ["A production API gateway could reject page < 1 before the app."])
         self.assertEqual(payload["verificationStatus"], "verified")
-        self.assertNotIn("auditSwarm", payload)
-        self.assertNotIn("verificationAudit", payload)
         scan_payload = app.scan_payload(app.SCANS[0])
-        self.assertNotIn("verificationAudit", scan_payload)
-        self.assertNotIn("auditSwarm", scan_payload)
 
     def test_scan_audit_bundle_route_returns_owner_scoped_evidence(self) -> None:
         timestamp = app.now()
@@ -1711,19 +1476,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                             }
                         ],
                     },
-                },
-                "verificationAudit": {
-                    "candidateCount": 3,
-                    "reportedCount": 1,
-                    "rejectedCount": 2,
-                    "verifiedCount": 1,
-                    "rejectedReasons": [{"reason": "missing_evidence", "count": 2}],
-                    "rejectedSamples": [
-                        {"reason": "missing_evidence", "title": "Only a vague model guess", "severity": "low"}
-                    ],
-                    "summary": "3 candidates evaluated; 1 reported; 2 rejected before reporting.",
-                },
-            }
+                }            }
         ]
         app.ISSUES = [
             {
@@ -1806,19 +1559,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(owner.payload["preflight"]["verifier"]["runs"][0]["status"], "failed")
         self.assertTrue(owner.payload["preflight"]["verifier"]["runs"][0]["outputRedacted"])
         self.assertNotIn("output", owner.payload["preflight"]["verifier"]["runs"][0])
-        self.assertNotIn("verificationAudit", owner.payload)
-        self.assertNotIn("repositoryGraph", owner.payload)
-        self.assertNotIn("semanticGraph", owner.payload)
-        self.assertNotIn("impactGraph", owner.payload)
         artifact_paths = [artifact["path"] for artifact in owner.payload["artifacts"]]
         self.assertIn("scan/scan.json", artifact_paths)
         self.assertIn("preflight/preflight.json", artifact_paths)
-        self.assertNotIn("repository-graph.json", artifact_paths)
-        self.assertNotIn("semantic-graph.json", artifact_paths)
-        self.assertNotIn("impact-graph.json", artifact_paths)
         self.assertIn("audit.json", artifact_paths)
         artifacts = {artifact["path"]: artifact for artifact in owner.payload["artifacts"]}
-        self.assertNotIn("verificationAudit", artifacts["scan/scan.json"]["content"])
         self.assertIn('"mode": "static"', artifacts["preflight/preflight.json"]["content"])
 
         owner_zip = RouteHarness(
@@ -1837,7 +1582,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
             self.assertIn("scan/scan.json", archive.namelist())
             self.assertIn("preflight/preflight.json", archive.namelist())
             self.assertIn("audit.json", archive.namelist())
-            self.assertNotIn("repository-graph.json", archive.namelist())
 
         other_user = RouteHarness(
             "/scans/sc_bundle/audit-bundle",
@@ -1849,52 +1593,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         anonymous = RouteHarness("/scans/sc_bundle/audit-bundle")
         app.PullwiseHandler.route(anonymous, "GET")
         self.assertEqual(anonymous.status, HTTPStatus.UNAUTHORIZED)
-
-    def test_scan_audit_bundle_ignores_legacy_repository_graph_fields(self) -> None:
-        scan = self.audit_bundle_cache_fixture()
-        scan["repositoryGraph"] = {"version": "repository-graph/legacy"}
-        scan["semanticGraph"] = {"version": "semantic-code-graph/legacy"}
-        scan["impactGraph"] = {"version": "impact-graph/legacy"}
-
-        owner = RouteHarness(
-            "/scans/sc_cache/audit-bundle",
-            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
-        )
-        app.PullwiseHandler.route(owner, "GET")
-
-        self.assertEqual(owner.status, HTTPStatus.OK)
-        self.assertEqual(owner.payload["kind"], "pullwise.review_audit_bundle")
-        self.assertNotIn("repositoryGraph", owner.payload)
-        self.assertNotIn("semanticGraph", owner.payload)
-        self.assertNotIn("impactGraph", owner.payload)
-        archive = app.scan_audit_bundle_zip_bytes(scan)
-        with zipfile.ZipFile(io.BytesIO(archive), "r") as bundle:
-            names = bundle.namelist()
-        self.assertNotIn("repository-graph.json", names)
-        self.assertNotIn("semantic-graph.json", names)
-        self.assertNotIn("impact-graph.json", names)
-        self.assertNotIn("impact-summary.md", names)
-
-    def test_scan_impact_graph_routes_are_gone(self) -> None:
-        scan = self.audit_bundle_cache_fixture()
-        scan["repositoryGraph"] = {"version": "repository-graph/legacy"}
-        scan["impactGraph"] = {"version": "impact-graph/legacy"}
-
-        owner = RouteHarness(
-            "/scans/sc_cache/impact-graph",
-            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
-        )
-        app.PullwiseHandler.route(owner, "GET")
-
-        self.assertEqual(owner.status, HTTPStatus.GONE)
-
-        focus = RouteHarness(
-            "/scans/sc_cache/impact-graph/focus?path=src/app.py",
-            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
-        )
-        app.PullwiseHandler.route(focus, "GET")
-
-        self.assertEqual(focus.status, HTTPStatus.GONE)
 
     def test_scan_audit_bundle_zip_route_reuses_cached_archive(self) -> None:
         self.audit_bundle_cache_fixture()
@@ -2042,7 +1740,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.ISSUES = [issue]
         scan_payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(scan_payload["verification"]["static_proof"], 1)
-        self.assertNotIn("verificationAudit", scan_payload)
 
     def test_issue_payload_downgrades_verified_runtime_without_fixed_commit(self) -> None:
         app.SCANS = [
@@ -2099,7 +1796,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         scan_payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(scan_payload["verification"]["verified"], 0)
         self.assertEqual(scan_payload["verification"]["static_proof"], 1)
-        self.assertNotIn("verificationAudit", scan_payload)
 
     def test_issue_payload_downgrades_verified_runtime_without_reproduction_command(self) -> None:
         issue = {
@@ -2421,7 +2117,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 }
             ],
         )
-        self.assertNotIn("verificationAudit", payload)
 
     def test_repository_too_large_worker_result_refunds_only_that_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
@@ -2586,9 +2281,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 1)
         self.assertNotIn("quotaRefunded", app.scan_payload(app.SCANS[0]))
 
-    def test_worker_progress_ignores_completion_audit_and_job_trace(self) -> None:
+    def test_worker_progress_records_phase_message_and_log_summary(self) -> None:
         scan = {
-            "id": "sc_progress_audit",
+            "id": "sc_progress_phase",
             "repo": "acme/api",
             "branch": "main",
             "commit": "pending",
@@ -2610,26 +2305,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         progress = RouteHarness(
             f"/worker/jobs/{job['job_id']}/progress",
             {
-                "phase": "ai",
+                "phase": "repo_map",
                 "progress": 55,
-                "message": "Graph: mapping shards 3/12",
-                "logs_summary": "stage=graph progress=3/12 task=graph-0003",
-                "completion_audit": {
-                    "protocol": "completion-audit/0.1",
-                    "status": "warning",
-                    "retry_recommended": True,
-                    "retry_reason": "Worker detected partial output.",
-                    "checks": [{"label": "artifact", "status": "warning", "summary": "Missing optional bundle."}],
-                    "raw": "drop me",
-                },
-                "job_trace": {
-                    "protocol": "job-trace/0.1",
-                    "candidate_findings_before_filter": 7,
-                    "checkpoints": [{"key": "review", "status": "running", "duration_ms": 123}],
-                    "rejected_reasons": [{"reason": "duplicate", "count": 2}],
-                    "next_retry_hint": "retry with a clean workspace",
-                    "raw": "drop me",
-                },
+                "message": "Repository map: classifying source files",
+                "logs_summary": "phase=repo_map files=42 reviewed=18",
             },
             headers=self.auth,
         )
@@ -2639,19 +2318,16 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(progress.status, HTTPStatus.OK)
         log_event.assert_called_once()
         self.assertEqual(log_event.call_args.args[0], "worker_job_progress")
-        self.assertEqual(log_event.call_args.kwargs["scanId"], "sc_progress_audit")
+        self.assertEqual(log_event.call_args.kwargs["scanId"], "sc_progress_phase")
         self.assertEqual(log_event.call_args.kwargs["workerId"], "wk_1")
         self.assertEqual(log_event.call_args.kwargs["jobId"], job["job_id"])
-        self.assertEqual(log_event.call_args.kwargs["phase"], "ai")
+        self.assertEqual(log_event.call_args.kwargs["phase"], "repo_map")
         self.assertEqual(log_event.call_args.kwargs["progress"], 55)
-        self.assertEqual(log_event.call_args.kwargs["message"], "Graph: mapping shards 3/12")
+        self.assertEqual(log_event.call_args.kwargs["message"], "Repository map: classifying source files")
         payload = app.scan_payload(app.SCANS[0])
-        self.assertEqual(payload["progressMessage"], "Graph: mapping shards 3/12")
-        self.assertEqual(payload["logsSummary"], "stage=graph progress=3/12 task=graph-0003")
+        self.assertEqual(payload["progressMessage"], "Repository map: classifying source files")
+        self.assertEqual(payload["logsSummary"], "phase=repo_map files=42 reviewed=18")
         self.assertIsInstance(payload.get("updatedAt"), int)
-        self.assertNotIn("completionAudit", payload)
-        self.assertNotIn("jobTrace", payload)
-
     def test_failed_worker_result_requeues_once_without_extra_quota(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
@@ -3232,291 +2908,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claim.status, HTTPStatus.OK)
         self.assertEqual(claim.payload["job"]["review_output_language"], "ja")
         self.assertEqual(claim.payload["job"]["review_output_language_label"], "Japanese")
-
-    def test_claim_payload_ignores_previous_convergence_context_across_workers(self) -> None:
-        _worker_two, worker_two_token = self.create_registry_worker("wk_2")
-        worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
-        first_commit = "a" * 40
-        second_commit = "b" * 40
-        first_scan = {
-            "id": "sc_converge_first",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": first_commit,
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [first_scan]
-        first_job = app.create_scan_job_for_scan(first_scan)
-        first_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(first_claim, "POST")
-        self.assertEqual(first_claim.status, HTTPStatus.OK)
-
-        first_result = RouteHarness(
-            f"/worker/jobs/{first_job['job_id']}/result",
-            {
-                "status": "done",
-                "attempt_id": "wk_1-1",
-                "result_checksum": "checksum-converge-first",
-                **audit_result_fields(
-                    [
-                        audit_issue_card(
-                            "Old bug",
-                            issue_id="issue-old",
-                            severity="P1",
-                            file="src/app.py",
-                            line=12,
-                        )
-                    ]
-                ),
-                "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
-                "convergence_state": {
-                    "protocol": "pullwise-convergence/0.1",
-                    "scope_key": "repo:acme/api|branch:main",
-                    "head_sha": first_commit,
-                    "open_findings": [
-                        {
-                            "fingerprint": "fp-old",
-                            "issue_id": "issue-old",
-                            "title": "Old bug",
-                            "file": "src/app.py",
-                            "line": 12,
-                            "confidence": 0.93,
-                            "source": "correctness-reviewer",
-                            "status": "open",
-                        }
-                    ],
-                    "resolved_fingerprints": [],
-                    "source_stats": {
-                        "correctness-reviewer": {"reported": 1, "confirmed": 1, "resolved": 0, "rejected": 0}
-                    },
-                },
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(first_result, "POST")
-        self.assertEqual(first_result.status, HTTPStatus.OK)
-        self.assertNotIn("convergenceState", app.SCANS[0])
-
-        second_scan = {
-            "id": "sc_converge_second",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": second_commit,
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now() + 1,
-            "queuedAt": app.now() + 1,
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS.append(second_scan)
-        app.create_scan_job_for_scan(second_scan)
-
-        second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
-        app.PullwiseHandler.route(second_claim, "POST")
-
-        self.assertEqual(second_claim.status, HTTPStatus.OK)
-        self.assertNotIn("convergence_context", second_claim.payload["job"])
-
-    def test_claim_payload_ignores_stored_convergence_context_by_canonical_scope(self) -> None:
-        _worker_two, worker_two_token = self.create_registry_worker("wk_2")
-        worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
-        first_commit = "a" * 40
-        second_commit = "b" * 40
-        first_scan = {
-            "id": "sc_converge_case_first",
-            "repo": "Acme/API",
-            "branch": "Main",
-            "commit": first_commit,
-            "status": "done",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "completedAt": app.now(),
-            "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
-            "convergenceState": {
-                "protocol": "pullwise-convergence/0.1",
-                "scopeKey": "repo:acme/api|branch:main",
-                "headSha": first_commit,
-                "openFindings": [
-                    {
-                        "fingerprint": "fp-case",
-                        "issue_id": "issue-case",
-                        "title": "Case-stable bug",
-                        "file": "src/app.py",
-                        "line": 12,
-                        "confidence": 0.93,
-                        "source": "correctness-reviewer",
-                        "status": "open",
-                    }
-                ],
-                "resolvedFingerprints": [],
-                "sourceStats": {
-                    "correctness-reviewer": {"reported": 1, "confirmed": 1, "resolved": 0, "rejected": 0}
-                },
-            },
-        }
-        second_scan = {
-            "id": "sc_converge_case_second",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": second_commit,
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now() + 1,
-            "queuedAt": app.now() + 1,
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [first_scan, second_scan]
-        app.create_scan_job_for_scan(second_scan)
-
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
-        app.PullwiseHandler.route(claim, "POST")
-
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        self.assertNotIn("convergence_context", claim.payload["job"])
-
-    def test_worker_result_ignores_convergence_state_for_different_scope(self) -> None:
-        first_commit = "a" * 40
-        scan = {
-            "id": "sc_wrong_scope",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": first_commit,
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [scan]
-        job = app.create_scan_job_for_scan(scan)
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
-        self.assertEqual(claim.status, HTTPStatus.OK)
-
-        result = RouteHarness(
-            f"/worker/jobs/{job['job_id']}/result",
-            {
-                "status": "done",
-                "attempt_id": "wk_1-1",
-                "result_checksum": "checksum-wrong-scope",
-                **audit_result_fields([]),
-                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                "convergence_state": {
-                    "protocol": "pullwise-convergence/0.1",
-                    "scope_key": "repo:acme/other|branch:main",
-                    "head_sha": first_commit,
-                    "open_findings": [
-                        {
-                            "fingerprint": "fp-other",
-                            "title": "Other repo bug",
-                            "file": "src/app.py",
-                            "status": "open",
-                        }
-                    ],
-                    "resolved_fingerprints": [],
-                    "source_stats": {},
-                },
-            },
-            headers=self.auth,
-        )
-        app.PullwiseHandler.route(result, "POST")
-
-        self.assertEqual(result.status, HTTPStatus.OK)
-        self.assertNotIn("convergenceState", app.SCANS[0])
-
-        next_scan = {
-            "id": "sc_wrong_scope_next",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "b" * 40,
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now() + 1,
-            "queuedAt": app.now() + 1,
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS.append(next_scan)
-        app.create_scan_job_for_scan(next_scan)
-        next_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(next_claim, "POST")
-
-        self.assertEqual(next_claim.status, HTTPStatus.OK)
-        self.assertNotIn("convergence_context", next_claim.payload["job"])
-
-    def test_claim_payload_does_not_resurrect_stale_convergence_context(self) -> None:
-        old_done = {
-            "id": "sc_old_convergence",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "a" * 40,
-            "status": "done",
-            "userId": "usr_1",
-            "createdAt": app.now(),
-            "completedAt": app.now(),
-            "issues": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
-            "convergenceState": {
-                "protocol": "pullwise-convergence/0.1",
-                "scopeKey": "repo:acme/api|branch:main",
-                "headSha": "a" * 40,
-                "openFindings": [
-                    {
-                        "fingerprint": "fp-stale",
-                        "issue_id": "issue-stale",
-                        "title": "Stale bug",
-                        "file": "src/app.py",
-                        "status": "open",
-                    }
-                ],
-                "resolvedFingerprints": [],
-                "sourceStats": {},
-            },
-        }
-        newer_done_without_state = {
-            "id": "sc_new_without_state",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "b" * 40,
-            "status": "done",
-            "userId": "usr_1",
-            "createdAt": app.now() + 1,
-            "completedAt": app.now() + 1,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        queued = {
-            "id": "sc_after_missing_state",
-            "repo": "acme/api",
-            "branch": "main",
-            "commit": "c" * 40,
-            "status": "queued",
-            "userId": "usr_1",
-            "createdAt": app.now() + 2,
-            "queuedAt": app.now() + 2,
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-        }
-        app.SCANS = [old_done, newer_done_without_state, queued]
-        app.create_scan_job_for_scan(queued)
-
-        claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
-        app.PullwiseHandler.route(claim, "POST")
-
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        self.assertNotIn("convergence_context", claim.payload["job"])
 
     def test_worker_result_normalizes_checkout_absolute_issue_file_path(self) -> None:
         scan = {

@@ -58,14 +58,10 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(handler.payload["scans"], handler.payload["items"])
 
     def test_scans_route_paginates_before_building_lightweight_history_payloads(self) -> None:
-        heavy_graph = {
-            "version": "repository-graph/0.1",
-            "nodes": [{"id": "file:src/app.py", "label": "app.py", "type": "file", "path": "src/app.py"}],
-            "edges": [],
-            "impactGraph": {
-                "version": "impact-graph/0.1",
-                "targets": [{"id": "file:src/app.py", "path": "src/app.py"}],
-            },
+        large_protocol = {
+            "protocol_version": "review-worker-protocol/v1",
+            "message_type": "review_run_result",
+            "summary": {"top_findings": [{"id": "RR-001", "title": "Large report item"}]},
         }
         app.SCANS = [
             {
@@ -76,10 +72,9 @@ class SecurityContractsPart01Test(SecurityContractsBase):
                 "branch": "main",
                 "commit": f"abc{index}",
                 "createdAt": 300 - index,
-                "repositoryGraph": heavy_graph,
-                "semanticGraph": {"version": "semantic-code-graph/0.1", "nodes": [], "edges": []},
-                "impactGraph": heavy_graph["impactGraph"],
-                "auditSwarm": {"summary": "large audit payload", "issueCards": []},
+                "reviewWorkerProtocol": large_protocol,
+                "humanReport": {"markdown": "# Large report"},
+                "agentReport": {"findings": [{"id": "RR-001", "title": "Large report item"}]},
                 "preflight": {"summary": "large preflight payload"},
             }
             for index in range(3)
@@ -97,14 +92,12 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         scan = handler.payload["items"][0]
         self.assertEqual(scan["repo"], "owner/repo")
         for heavy_key in (
-            "repositoryGraph",
-            "semanticGraph",
-            "impactGraph",
-            "auditSwarm",
+            "reviewWorkerProtocol",
+            "humanReport",
+            "agentReport",
             "preflight",
-            ):
+        ):
             self.assertNotIn(heavy_key, scan)
-
     def test_scans_route_indexes_issue_verification_once_for_history_page(self) -> None:
         app.SCANS = [
             {
@@ -159,7 +152,6 @@ class SecurityContractsPart01Test(SecurityContractsBase):
         self.assertEqual(status.call_count, 6)
         for scan in handler.payload["items"]:
             self.assertEqual(scan["verification"]["static_proof"], 3)
-            self.assertNotIn("verificationAudit", scan)
 
     def test_scans_route_prefetches_scan_jobs_for_history_read(self) -> None:
         app.SCANS = [
