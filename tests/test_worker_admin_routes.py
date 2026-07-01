@@ -1484,8 +1484,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(disabled_heartbeat, "POST")
-        self.assertEqual(disabled_heartbeat.status, HTTPStatus.OK)
-        self.assertEqual(disabled_heartbeat.payload["worker"]["status"], "disabled")
+        self.assertEqual(disabled_heartbeat.status, HTTPStatus.UNAUTHORIZED)
         self.assertEqual(db.get_worker(worker_id)["region"], "eu")
 
         claim = RouteHarness("/worker/jobs/claim", {"worker_id": worker_id}, headers={"Authorization": f"Bearer {token}"})
@@ -1570,8 +1569,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(heartbeat, "POST")
-        self.assertEqual(heartbeat.status, HTTPStatus.OK)
-        self.assertEqual(heartbeat.payload["command"]["id"], command["id"])
+        self.assertEqual(heartbeat.status, HTTPStatus.UNAUTHORIZED)
 
     def test_admin_can_queue_worker_stop_and_uninstall_commands(self) -> None:
         payload, token = self.create_worker()
@@ -1599,15 +1597,24 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(duplicate, "POST")
         self.assertEqual(duplicate.status, HTTPStatus.CONFLICT)
 
+        poll_stop = RouteHarness(
+            "/worker/commands/poll",
+            {"worker_id": worker_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(poll_stop, "POST")
+        self.assertEqual(poll_stop.status, HTTPStatus.OK)
+        self.assertEqual(poll_stop.payload["worker"]["status"], "disabled")
+        self.assertEqual(poll_stop.payload["command"]["id"], stop_command["id"])
+        self.assertIsNone(poll_stop.payload["logSession"])
+
         heartbeat = RouteHarness(
             "/worker/heartbeat",
             {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
             headers={"Authorization": f"Bearer {token}"},
         )
         app.PullwiseHandler.route(heartbeat, "POST")
-        self.assertEqual(heartbeat.status, HTTPStatus.OK)
-        self.assertEqual(heartbeat.payload["worker"]["status"], "disabled")
-        self.assertEqual(heartbeat.payload["command"]["id"], stop_command["id"])
+        self.assertEqual(heartbeat.status, HTTPStatus.UNAUTHORIZED)
 
         running = RouteHarness(
             f"/worker/commands/{stop_command['id']}/status",
@@ -1664,14 +1671,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertTrue(duplicate_delete.payload["alreadyQueued"])
         self.assertEqual(duplicate_delete.payload["command"]["id"], uninstall_command["id"])
 
-        deleted_heartbeat = RouteHarness(
-            "/worker/heartbeat",
-            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
+        uninstall_poll = RouteHarness(
+            "/worker/commands/poll",
+            {"worker_id": worker_id},
             headers={"Authorization": f"Bearer {token}"},
         )
-        app.PullwiseHandler.route(deleted_heartbeat, "POST")
-        self.assertEqual(deleted_heartbeat.status, HTTPStatus.OK)
-        self.assertEqual(deleted_heartbeat.payload["command"]["id"], uninstall_command["id"])
+        app.PullwiseHandler.route(uninstall_poll, "POST")
+        self.assertEqual(uninstall_poll.status, HTTPStatus.OK)
+        self.assertEqual(uninstall_poll.payload["command"]["id"], uninstall_command["id"])
+        self.assertIsNone(uninstall_poll.payload["logSession"])
 
         uninstall_done = RouteHarness(
             f"/worker/commands/{uninstall_command['id']}/status",
@@ -1682,6 +1690,14 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(uninstall_done.status, HTTPStatus.OK)
         self.assertIsNone(db.get_worker(worker_id))
         self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+
+        deleted_poll = RouteHarness(
+            "/worker/commands/poll",
+            {"worker_id": worker_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(deleted_poll, "POST")
+        self.assertEqual(deleted_poll.status, HTTPStatus.UNAUTHORIZED)
 
     def test_uninstall_command_keeps_degraded_worker_visible_until_cleanup_finishes(self) -> None:
         payload, token = self.create_worker()

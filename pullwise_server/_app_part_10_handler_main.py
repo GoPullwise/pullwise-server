@@ -2685,19 +2685,34 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return None
         return record
 
+    def worker_record_disabled(self, worker_record: dict) -> bool:
+        return int(worker_record.get("enabled") or 0) != 1 or worker_record.get("deleted_at") is not None
+
+    def disabled_worker_command_route_allowed(self, segments: list[str], worker_id: str) -> bool:
+        if segments == ["worker", "commands", "poll"]:
+            command = db.get_next_worker_command(worker_id)
+        elif len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status":
+            command = db.get_worker_command(clean_github_access_text(segments[2]) or "", worker_id=worker_id)
+        else:
+            command = None
+        return bool(command and public_issue_text(command.get("status")).lower() in db.WORKER_COMMAND_ACTIVE_STATUSES)
+
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
-        allow_disabled = (
-            segments in (["worker", "heartbeat"], ["worker", "commands", "poll"])
-            or segments == ["worker", "agent-configs"]
+        command_control_route = (
+            segments == ["worker", "commands", "poll"]
             or (len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status")
-            or (len(segments) == 4 and segments[:2] == ["worker", "log-streams"] and segments[3] == "lines")
         )
-        allow_deleted = allow_disabled
-        worker_record = self.require_worker(allow_disabled=allow_disabled, include_deleted=allow_deleted)
+        worker_record = self.require_worker(allow_disabled=command_control_route, include_deleted=False)
         if not worker_record:
             return
         if not isinstance(body, dict):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
+        if command_control_route and self.worker_record_disabled(worker_record):
+            worker_id = clean_github_access_text(body.get("worker_id")) or ""
+            if not self.authenticated_worker_id_matches(worker_record, worker_id):
+                return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
+            if not self.disabled_worker_command_route_allowed(segments, worker_id):
+                return self.error(HTTPStatus.UNAUTHORIZED, "A valid worker token is required.")
         if segments == ["worker", "heartbeat"]:
             return self.handle_worker_heartbeat(body, worker_record)
         if segments == ["worker", "commands", "poll"]:
@@ -2743,7 +2758,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "running_jobs": running_jobs,
                 },
                 "command": worker_command_payload(command),
-                "logSession": worker_log_stream_poll_payload(worker_id),
+                "logSession": None if self.worker_record_disabled(worker_record) else worker_log_stream_poll_payload(worker_id),
             }
         )
 
@@ -2849,7 +2864,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "last_heartbeat_at": record.get("last_heartbeat_at"),
                 },
                 "command": worker_command_payload(command),
-                "logSession": worker_log_stream_poll_payload(worker_id),
+                "logSession": None if self.worker_record_disabled(worker_record) else worker_log_stream_poll_payload(worker_id),
                 "cancelled_job_ids": cancelled_job_ids,
                 "cancelledJobIds": cancelled_job_ids,
             }

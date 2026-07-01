@@ -275,6 +275,12 @@ class ConfigurationContractsTest(unittest.TestCase):
             self.assertEqual(app.system_config.scan_job_retry_attempts(), 1)
             self.assertEqual(app.system_config.scan_job_max_attempts(), 2)
 
+    def test_worker_allowed_providers_filters_unsupported_values(self) -> None:
+        with patch.object(app.system_config, "list_setting", return_value=["unsupported", " CODEX "]):
+            self.assertEqual(app.system_config.worker_allowed_providers(), {"codex"})
+        with patch.object(app.system_config, "list_setting", return_value=["unsupported"]):
+            self.assertEqual(app.system_config.worker_allowed_providers(), {"codex"})
+
     def test_global_repository_checkout_limits_do_not_migrate_to_plan_limits(self) -> None:
         config = app.system_config.default_config()
         for plan in app.system_config.PLAN_IDS:

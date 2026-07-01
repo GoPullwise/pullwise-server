@@ -12,6 +12,7 @@ from . import db
 STATE_KEY = "system_config"
 CACHE_TTL_SECONDS = 2.0
 PLAN_IDS = ("free", "pro", "max")
+SUPPORTED_WORKER_PROVIDERS = {"codex"}
 PAID_PLAN_IDS = ("pro", "max")
 CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
 DEFAULT_CREEM_API_BASE_URL = "https://api.creem.io"
@@ -945,8 +946,12 @@ def worker_min_version() -> str:
 
 
 def worker_allowed_providers() -> set[str]:
-    providers = {item.strip() for item in list_setting("worker.allowedProviders") if item.strip()}
-    return providers or {"codex"}
+    providers = {
+        item.strip().lower()
+        for item in list_setting("worker.allowedProviders")
+        if item.strip().lower() in SUPPORTED_WORKER_PROVIDERS
+    }
+    return providers or set(DEFAULT_CONFIG["worker"]["allowedProviders"])
 
 
 def worker_default_version() -> str:

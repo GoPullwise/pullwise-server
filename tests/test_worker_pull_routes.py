@@ -1033,30 +1033,35 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn("bearer_present=True", output)
         self.assertNotIn("invalid-worker-token", output)
 
-    def test_worker_agent_configs_accepts_disabled_worker_token_without_impersonation(self) -> None:
-        worker, token = self.create_registry_worker("wk_disabled_agent_configs")
+    def test_disabled_or_deleted_worker_token_cannot_access_control_plane_without_active_command(self) -> None:
+        worker, token = self.create_registry_worker("wk_disabled_control_plane")
         db.set_worker_enabled(worker["worker_id"], False)
         headers = {"Authorization": f"Bearer {token}"}
 
-        agent_configs = RouteHarness(
-            "/worker/agent-configs",
-            {"worker_id": worker["worker_id"]},
-            headers=headers,
+        requests = [
+            RouteHarness("/worker/heartbeat", {"worker_id": worker["worker_id"]}, headers=headers),
+            RouteHarness("/worker/agent-configs", {"worker_id": worker["worker_id"]}, headers=headers),
+            RouteHarness("/worker/commands/poll", {"worker_id": worker["worker_id"]}, headers=headers),
+            RouteHarness(
+                "/worker/log-streams/log_disabled_control_plane/lines",
+                {"worker_id": worker["worker_id"], "lines": []},
+                headers=headers,
+            ),
+        ]
+
+        for request in requests:
+            app.PullwiseHandler.route(request, "POST")
+            self.assertEqual(request.status, HTTPStatus.UNAUTHORIZED)
+
+        deleted_worker, deleted_token = self.create_registry_worker("wk_deleted_control_plane")
+        db.soft_delete_worker(deleted_worker["worker_id"])
+        deleted_poll = RouteHarness(
+            "/worker/commands/poll",
+            {"worker_id": deleted_worker["worker_id"]},
+            headers={"Authorization": f"Bearer {deleted_token}"},
         )
-        app.PullwiseHandler.route(agent_configs, "POST")
-
-        self.assertEqual(agent_configs.status, HTTPStatus.OK)
-        self.assertIn("agentConfigs", agent_configs.payload)
-
-        impersonation = RouteHarness(
-            "/worker/agent-configs",
-            {"worker_id": "wk_other"},
-            headers=headers,
-        )
-        app.PullwiseHandler.route(impersonation, "POST")
-
-        self.assertEqual(impersonation.status, HTTPStatus.FORBIDDEN)
-
+        app.PullwiseHandler.route(deleted_poll, "POST")
+        self.assertEqual(deleted_poll.status, HTTPStatus.UNAUTHORIZED)
     def test_worker_result_route_accepts_gzip_json_body(self) -> None:
         scan = {
             "id": "sc_gzip_result",
