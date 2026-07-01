@@ -876,6 +876,52 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(artifacts_by_id["art_report_agent"]["storage"]["url"], artifact_url)
         self.assertNotIn("content_base64", json.dumps(artifacts_by_id["art_report_agent"]))
 
+    def test_v1_worker_result_accepts_cancelled_terminal_status(self) -> None:
+        scan = {
+            "id": "sc_v1_cancelled_result",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        app.PullwiseHandler.route(lease, "POST")
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        claimed = lease.payload["job"]
+        run_id = lease.payload["lease"]["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+
+        result = RouteHarness(
+            f"/v1/review-runs/{run_id}/result",
+            {
+                "status": "cancelled",
+                "attempt_id": attempt_id,
+                "error": "cancel requested: user_requested",
+                **audit_result_fields([], execution_status="cancelled"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(result, "POST")
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertTrue(result.payload["accepted"])
+        self.assertEqual(result.payload["reviewRun"]["status"], "cancelled")
+        self.assertEqual(result.payload["reviewRun"]["result_status"], "cancelled")
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "cancelled")
+        self.assertEqual(app.SCANS[0]["status"], "cancelled")
+        with db.connect() as connection:
+            stored_result = connection.execute("SELECT status FROM job_results WHERE job_id = ?", (claimed["job_id"],)).fetchone()
+        self.assertEqual(stored_result[0], "cancelled")
+
     def test_v1_worker_register_rejects_mismatch_prefetch_and_non_linux(self) -> None:
         mismatched = RouteHarness(
             "/v1/workers/register",

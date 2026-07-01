@@ -497,9 +497,14 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
     execution_status = public_issue_text(execution.get("status"))
     if execution_status not in {"completed", "failed", "cancelled", "partial_completed"}:
         errors.append("execution.status")
-    if public_issue_text(status).lower() == "done" and execution_status != "completed":
+    wrapper_status = public_issue_text(status).lower()
+    if wrapper_status == "done" and execution_status != "completed":
         errors.append("execution.status")
-    if public_issue_text(status).lower() == "failed" and execution_status == "completed":
+    if wrapper_status == "failed" and execution_status == "completed":
+        errors.append("execution.status")
+    if wrapper_status == "cancelled" and execution_status != "cancelled":
+        errors.append("execution.status")
+    if wrapper_status == "partial_completed" and execution_status != "partial_completed":
         errors.append("execution.status")
     if manifest is None:
         errors.append("artifact_manifest")
@@ -730,7 +735,7 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         "error_code": error_code,
         "completed_at": completed_at,
         "duration_ms": public_scan_count(body.get("duration_ms")),
-        "error": clean_scan_error(body.get("error")) if status == "failed" else "",
+        "error": clean_scan_error(body.get("error")) if status in {"failed", "cancelled", "partial_completed"} else "",
         "review_worker_protocol": review_worker_protocol,
     }
 
@@ -761,7 +766,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
                 "completedAt": completed_at,
                 "durationMs": public_scan_count(prepared.get("duration_ms")),
                 "issues": summary,
-                "error": clean_scan_error(prepared.get("error")) if status == "failed" else "",
+                "error": clean_scan_error(prepared.get("error")) if status in {"failed", "cancelled", "partial_completed"} else "",
                 "resultChecksum": checksum,
             }
         )
@@ -872,8 +877,8 @@ def apply_worker_job_retry_to_state_locked(job: dict, body: dict, *, checksum: s
 
 def apply_worker_job_result(job: dict, body: dict) -> dict:
     status = public_issue_text(body.get("status")).lower()
-    if status not in {"done", "failed"}:
-        raise ValueError("status must be done or failed")
+    if status not in {"done", "failed", "cancelled", "partial_completed"}:
+        raise ValueError("status must be done, failed, cancelled, or partial_completed")
     expected_attempt_id = expected_worker_attempt_id(job)
     attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId")) or expected_attempt_id
     last_attempt_id = clean_github_access_text(job.get("last_attempt_id"))

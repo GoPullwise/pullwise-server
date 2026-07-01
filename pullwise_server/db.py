@@ -5477,8 +5477,8 @@ def record_scan_job_result(
     result_checksum = str(result_checksum or "").strip()
     if not job_id or not attempt_id or not result_checksum:
         raise ValueError("job_id, attempt_id, and result_checksum are required")
-    if status not in {"done", "failed"}:
-        raise ValueError("status must be done or failed")
+    if status not in {"done", "failed", "cancelled", "partial_completed"}:
+        raise ValueError("status must be done, failed, cancelled, or partial_completed")
     current_time = int(time.time())
     artifact_id = scan_job_result_artifact_id(job_id, attempt_id)
     artifact_payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
