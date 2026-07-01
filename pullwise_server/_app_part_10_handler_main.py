@@ -95,18 +95,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return False
         segments = segments if segments is not None else [unquote(part) for part in path.split("/") if part]
         applies_to_public_rest_api = external_api_segments(segments) is not None
-        applies_to_unauthenticated_worker_probe = path.startswith("/worker/") and not worker_token_record(
-            self,
-            allow_disabled=True,
-            include_deleted=True,
-        )
+        applies_to_unauthenticated_worker_probe = path.startswith("/worker/") and not worker_token_record(self)
         if not applies_to_public_rest_api and not applies_to_unauthenticated_worker_probe:
             self._rate_limit_headers = {}
             return False
         if self.admin_rate_limit_exempt(method, path):
             self._rate_limit_headers = {}
             return False
-        if path.startswith("/worker/") and worker_token_record(self, allow_disabled=True, include_deleted=True):
+        if path.startswith("/worker/") and worker_token_record(self):
             self._rate_limit_headers = {}
             return False
         limit = rate_limit_requests()
@@ -1073,7 +1069,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_delete(self, segments: list[str]) -> None:
         if segments == ["worker", "registry"]:
-            worker_record = self.require_worker(allow_disabled=True, include_deleted=True)
+            worker_record = self.require_worker()
             if not worker_record:
                 return
             worker_id = public_issue_text(worker_record.get("worker_id"))

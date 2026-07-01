@@ -795,6 +795,32 @@ def public_scan_compact_text_list(value: object, *, limit: int = 8, max_length: 
     return items
 
 
+SENSITIVE_TEXT_RE = re.compile(
+    r"(?i)(x-access-token:)[^\s@]+|"
+    r"(Bearer\s+)[A-Za-z0-9._~+/=-]+|"
+    r"\b(pw[a-z]_[A-Za-z0-9._~+/=-]+)\b|"
+    r"\b(sk-[A-Za-z0-9._~+/=-]+)\b|"
+    r"\b(gh[a-z]_[A-Za-z0-9_]{12,})\b|"
+    r"\b(github_pat_[A-Za-z0-9_]+)\b|"
+    r"((?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|passwd|pwd)\s*[:=]\s*)[^\s'\"`]+"
+)
+
+
+def redact_sensitive_text(value: object, *, max_length: int | None = None) -> str:
+    text = review._safe_text_lenient(value)
+    if not text:
+        return ""
+
+    def replacement(match: re.Match) -> str:
+        for group_index in (1, 2, 7):
+            prefix = match.group(group_index)
+            if prefix:
+                return f"{prefix}[redacted]"
+        return "[redacted]"
+
+    redacted = SENSITIVE_TEXT_RE.sub(replacement, text)
+    return redacted[:max_length] if max_length is not None else redacted
+
 GRAPH_VERIFIED_METADATA_BLOCKED_KEY_PARTS = (
     "auth",
     "credential",
@@ -1398,11 +1424,11 @@ def public_graph_verified_report(
         if metadata is not None:
             payload[metadata_key] = metadata
     if include_markdown:
-        final_markdown = review._safe_text_lenient(source.get("finalMarkdown"))[:120000]
+        final_markdown = redact_sensitive_text(source.get("finalMarkdown"), max_length=120000)
         if final_markdown:
             payload["finalMarkdown"] = final_markdown
     if include_debug:
-        debug_markdown = review._safe_text_lenient(source.get("debugMarkdown"))[:120000]
+        debug_markdown = redact_sensitive_text(source.get("debugMarkdown"), max_length=120000)
         if debug_markdown:
             payload["debugMarkdown"] = debug_markdown
     if not any(
@@ -2515,10 +2541,10 @@ def audit_bundle_graph_verified_artifacts(report: dict) -> list[dict]:
             json.dumps(final_json, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         )
     ]
-    final_markdown = review._safe_text_lenient(report.get("finalMarkdown"))
+    final_markdown = redact_sensitive_text(report.get("finalMarkdown"))
     if final_markdown:
         artifacts.append(audit_bundle_artifact("graph-verified/final.md", "text/markdown", final_markdown + "\n"))
-    debug_markdown = review._safe_text_lenient(report.get("debugMarkdown"))
+    debug_markdown = redact_sensitive_text(report.get("debugMarkdown"))
     if debug_markdown:
         artifacts.append(audit_bundle_artifact("graph-verified/debug.md", "text/markdown", debug_markdown + "\n"))
     return artifacts

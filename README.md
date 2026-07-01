@@ -487,8 +487,11 @@ PULLWISE_WATCH_INTERVAL_SECONDS=60 ./git-watch.sh
 
 By default the watcher runs `./launcher.sh setup`,
 `.venv/bin/python -m unittest discover -s tests`, `./launcher.sh restart`, and
-`./launcher.sh health`. Enable production-only steps when the process has the
-right permissions:
+`./launcher.sh health`. Command override variables such as
+`PULLWISE_WATCH_RESTART_COMMAND` are split into argv and executed directly;
+shell syntax such as pipes, redirects, and command separators is not evaluated.
+Put complex logic in a script and point the override at that script. Enable
+production-only steps when the process has the right permissions:
 
 ```bash
 PULLWISE_WATCH_RUN_SYNC_ENV=true PULLWISE_WATCH_RUN_DOCTOR=true ./git-watch.sh

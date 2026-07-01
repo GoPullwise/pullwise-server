@@ -594,6 +594,33 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(send_alert.call_count, 2)
 
 
+    def test_worker_alert_email_failure_is_retried_instead_of_deduped(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        headers = {"Authorization": "Bearer " + token}
+        degraded = {
+            "worker_id": worker_id,
+            "doctor_status": "degraded",
+            "codex_ready": False,
+            "readyProviders": [],
+            "last_error": "codex_quota_exhausted: credits exhausted",
+        }
+
+        with patch.object(app.alerts, "send_alert_email", side_effect=[False, True]) as send_alert:
+            first = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(first, "POST")
+            self.assertEqual(first.status, HTTPStatus.OK)
+            self.assertEqual(send_alert.call_count, 1)
+            state = db.load_state_item("alert_notifications") or {}
+            self.assertNotIn(f"worker:{worker_id}:degraded", state.get("active", {}))
+
+            second = RouteHarness("/worker/heartbeat", degraded, headers=headers)
+            app.PullwiseHandler.route(second, "POST")
+            self.assertEqual(second.status, HTTPStatus.OK)
+            self.assertEqual(send_alert.call_count, 2)
+            state = db.load_state_item("alert_notifications")
+            self.assertIn(f"worker:{worker_id}:degraded", state["active"])
+
     def test_scan_system_alert_email_is_sent_once_per_active_problem(self) -> None:
         with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
             first = RouteHarness("/status/system")
@@ -664,6 +691,31 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(message["To"], "ops@example.com, admin@example.com")
         self.assertEqual(message["Subject"], "Pullwise problem")
 
+
+    def test_alert_email_returns_false_when_smtp_delivery_fails(self) -> None:
+        config = app.system_config.default_config()
+        config["alerts"]["email"].update(
+            {
+                "enabled": True,
+                "to": ["ops@example.com"],
+                "from": "pullwise@example.com",
+                "smtpHost": "smtp.admin.example.com",
+                "smtpPort": 465,
+                "smtpUsername": "mailer",
+                "smtpPassword": "smtp-secret",
+                "smtpSsl": True,
+                "smtpStarttls": False,
+            }
+        )
+        with (
+            patch.object(app.system_config, "config", return_value=config),
+            patch.object(app.alerts.smtplib, "SMTP_SSL") as smtp_ssl,
+        ):
+            smtp = smtp_ssl.return_value.__enter__.return_value
+            smtp.send_message.side_effect = OSError("smtp down")
+            attempted = app.alerts.send_alert_email("Pullwise problem", "Worker degraded")
+
+        self.assertFalse(attempted)
 
     def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
         handler = RouteHarness(
@@ -1575,6 +1627,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
 
+        initial_heartbeat = RouteHarness(
+            "/worker/heartbeat",
+            {"worker_id": worker_id, "max_concurrent_jobs": 4, "running_jobs": 0, "free_slots": 4},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(initial_heartbeat, "POST")
+        self.assertEqual(initial_heartbeat.status, HTTPStatus.OK)
         stop = RouteHarness(
             f"/admin/workers/{worker_id}/commands",
             {"command": "stop"},
@@ -1782,6 +1841,33 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         actions = [event["action"] for event in db.list_worker_audit_events(worker_id, limit=10)]
         self.assertIn("worker_self_unregister", actions)
+
+    def test_disabled_or_deleted_worker_token_cannot_unregister_from_registry(self) -> None:
+        disabled_payload, disabled_token = self.create_worker()
+        disabled_worker_id = disabled_payload["worker_id"]
+        db.set_worker_enabled(disabled_worker_id, False)
+
+        disabled_unregister = RouteHarness(
+            "/worker/registry",
+            headers={"Authorization": f"Bearer {disabled_token}"},
+        )
+        app.PullwiseHandler.route(disabled_unregister, "DELETE")
+
+        self.assertEqual(disabled_unregister.status, HTTPStatus.UNAUTHORIZED)
+        self.assertIsNone(db.get_worker(disabled_worker_id, include_deleted=True)["deleted_at"])
+
+        deleted_payload, deleted_token = self.create_worker()
+        deleted_worker_id = deleted_payload["worker_id"]
+        db.soft_delete_worker(deleted_worker_id)
+
+        deleted_unregister = RouteHarness(
+            "/worker/registry",
+            headers={"Authorization": f"Bearer {deleted_token}"},
+        )
+        app.PullwiseHandler.route(deleted_unregister, "DELETE")
+
+        self.assertEqual(deleted_unregister.status, HTTPStatus.UNAUTHORIZED)
+        self.assertIsNotNone(db.get_worker(deleted_worker_id, include_deleted=True)["deleted_at"])
 
     def test_heartbeat_status_public_and_admin_status_payloads(self) -> None:
         payload, token = self.create_worker()

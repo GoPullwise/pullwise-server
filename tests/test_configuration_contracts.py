@@ -230,7 +230,10 @@ class ConfigurationContractsTest(unittest.TestCase):
     def test_system_config_update_keeps_existing_alert_password_when_admin_payload_is_blank(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+            key_path = os.path.join(temp_dir, "state-encryption-key")
+            with open(key_path, "w", encoding="ascii") as key_file:
+                key_file.write("01" * 32)
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path, "PULLWISE_STATE_ENCRYPTION_KEY_PATH": key_path}, clear=False):
                 app.db.reset_initialization_cache()
                 app.system_config.invalidate_cache()
                 config = app.system_config.default_config()

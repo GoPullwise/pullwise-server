@@ -80,9 +80,10 @@ def send_alert_email(subject, body):
             smtp.send_message(message)
     except Exception as exc:
         logger.exception('alert email delivery failed: %s', exc)
+        return False
     else:
         logger.info('alert email sent to %s', ', '.join(recipients))
-    return True
+        return True
 
 
 def _load_active():

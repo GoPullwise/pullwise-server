@@ -963,10 +963,7 @@ def state_encryption_key_path() -> str:
 
 
 def state_encryption_required() -> bool:
-    mode = os.environ.get("PULLWISE_MODE", "").strip().lower()
-    if mode == "production":
-        return True
-    return STATE_ENCRYPTION_KEY_PATH_ENV in os.environ and bool(state_encryption_key_path())
+    return True
 
 
 def parse_state_encryption_key(raw: bytes) -> bytes:

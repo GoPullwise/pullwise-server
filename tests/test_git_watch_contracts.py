@@ -45,6 +45,14 @@ def write_executable(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+class GitWatchStaticContractsTest(unittest.TestCase):
+    def test_configured_commands_are_not_evaluated_by_shell(self) -> None:
+        script = (project_root() / "git-watch.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn('sh -c "$command_text"', script)
+        self.assertIn('"${COMMAND_ARGV[@]}"', script)
+
+
 @unittest.skipIf(os.name == "nt", "git-watch shell contracts run on POSIX CI")
 class GitWatchContractsTest(unittest.TestCase):
     def symlink_tool(self, root: Path, name: str) -> None:
@@ -137,12 +145,28 @@ GIT
             root = Path(tmp)
             app = self.create_remote_and_clone(root)
             deploy_log = app / ".pullwise" / "deploy.log"
+            failing_tests = root / "fail-tests.sh"
+            restart_script = root / "restart.sh"
+            write_executable(
+                failing_tests,
+                """
+                #!/usr/bin/env sh
+                exit 23
+                """,
+            )
+            write_executable(
+                restart_script,
+                f"""
+                #!/usr/bin/env sh
+                printf restart >> "{deploy_log}"
+                """,
+            )
 
             failed = self.run_watcher(
                 app,
                 {
                     "PULLWISE_WATCH_RUN_TESTS": "true",
-                    "PULLWISE_WATCH_TEST_COMMAND": "exit 23",
+                    "PULLWISE_WATCH_TEST_COMMAND": str(failing_tests),
                 },
             )
 
@@ -152,7 +176,7 @@ GIT
             succeeded = self.run_watcher(
                 app,
                 {
-                    "PULLWISE_WATCH_RESTART_COMMAND": f"printf restart >> {deploy_log}",
+                    "PULLWISE_WATCH_RESTART_COMMAND": str(restart_script),
                 },
             )
 
@@ -166,8 +190,16 @@ GIT
             root = Path(tmp)
             app = self.create_remote_and_clone(root)
             deploy_log = app / ".pullwise" / "deploy.log"
+            restart_script = root / "restart.sh"
             health_script = root / "health.sh"
             health_count = root / "health-count"
+            write_executable(
+                restart_script,
+                f"""
+                #!/usr/bin/env sh
+                printf restart >> "{deploy_log}"
+                """,
+            )
             write_executable(
                 health_script,
                 f"""
@@ -188,7 +220,7 @@ GIT
             result = self.run_watcher(
                 app,
                 {
-                    "PULLWISE_WATCH_RESTART_COMMAND": f"printf restart >> {deploy_log}",
+                    "PULLWISE_WATCH_RESTART_COMMAND": str(restart_script),
                     "PULLWISE_WATCH_RUN_HEALTH": "true",
                     "PULLWISE_WATCH_HEALTH_COMMAND": str(health_script),
                     "PULLWISE_WATCH_HEALTH_RETRIES": "3",
@@ -201,6 +233,33 @@ GIT
             self.assertEqual(health_count.read_text(encoding="utf-8"), "3")
             deployed_head = (app / ".pullwise" / "git-watch.deployed-head").read_text(encoding="utf-8").strip()
             self.assertEqual(deployed_head, run_git(["rev-parse", "HEAD"], app).stdout.strip())
+
+    def test_configured_command_metacharacters_are_literal_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = self.create_remote_and_clone(root)
+            arg_log = app / ".pullwise" / "restart-args.log"
+            marker = root / "unexpected-marker"
+            recorder = root / "record-args.sh"
+            write_executable(
+                recorder,
+                """
+                #!/usr/bin/env sh
+                printf '%s\n' "$@" > "$PULLWISE_ARG_LOG"
+                """,
+            )
+
+            result = self.run_watcher(
+                app,
+                {
+                    "PULLWISE_WATCH_RESTART_COMMAND": f"{recorder} ; touch {marker}",
+                    "PULLWISE_ARG_LOG": str(arg_log),
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(marker.exists())
+            self.assertEqual(arg_log.read_text(encoding="utf-8"), f";\ntouch\n{marker}\n")
 
     def test_installs_missing_git_on_ubuntu_2204_before_polling(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -187,11 +187,86 @@ ensure_host_dependencies() {
   ensure_command_available "sed" sed sed || return 1
 }
 
+COMMAND_ARGV=()
+
+parse_command_argv() {
+  local command_text="$1"
+  COMMAND_ARGV=()
+  local token=""
+  local quote=""
+  local char
+  local have_token=0
+  local i
+  local len=${#command_text}
+
+  for ((i = 0; i < len; i++)); do
+    char="${command_text:i:1}"
+    if [ -n "$quote" ]; then
+      if [ "$char" = "$quote" ]; then
+        quote=""
+        have_token=1
+      elif [ "$char" = "\\" ]; then
+        i=$((i + 1))
+        if [ "$i" -ge "$len" ]; then
+          log "ERROR: command has trailing escape: $command_text" >&2
+          return 1
+        fi
+        token="${token}${command_text:i:1}"
+        have_token=1
+      else
+        token="${token}${char}"
+        have_token=1
+      fi
+      continue
+    fi
+
+    case "$char" in
+      "'"|'"')
+        quote="$char"
+        have_token=1
+        ;;
+      "\\")
+        i=$((i + 1))
+        if [ "$i" -ge "$len" ]; then
+          log "ERROR: command has trailing escape: $command_text" >&2
+          return 1
+        fi
+        token="${token}${command_text:i:1}"
+        have_token=1
+        ;;
+      " "|$'\t'|$'\n'|$'\r')
+        if [ "$have_token" -eq 1 ]; then
+          COMMAND_ARGV+=("$token")
+          token=""
+          have_token=0
+        fi
+        ;;
+      *)
+        token="${token}${char}"
+        have_token=1
+        ;;
+    esac
+  done
+
+  if [ -n "$quote" ]; then
+    log "ERROR: command has unterminated quote: $command_text" >&2
+    return 1
+  fi
+  if [ "$have_token" -eq 1 ]; then
+    COMMAND_ARGV+=("$token")
+  fi
+  if [ "${#COMMAND_ARGV[@]}" -eq 0 ]; then
+    log "ERROR: command is empty" >&2
+    return 1
+  fi
+}
+
 run_command() {
-  label=$1
-  command_text=$2
+  local label=$1
+  local command_text=$2
+  parse_command_argv "$command_text" || return 1
   log "running $label: $command_text"
-  sh -c "$command_text"
+  "${COMMAND_ARGV[@]}"
 }
 
 run_health_command() {

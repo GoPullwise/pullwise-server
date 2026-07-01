@@ -339,8 +339,8 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
                 "runId": "run_1",
                 "mode": "standard",
                 "confirmedCount": 1,
-                "finalMarkdown": "# Final\n",
-                "debugMarkdown": "# Debug\n",
+                "finalMarkdown": "# Final\nAPI key sk-liveSecret123\n",
+                "debugMarkdown": "# Debug\nAuthorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz\npassword=supersecret\n",
                 "finalJson": {"confirmed": [{"candidate": {"issue_id": "issue_1"}}]},
             },
             include_markdown=True,
@@ -353,6 +353,15 @@ class GraphVerifiedReportContractsTest(unittest.TestCase):
         self.assertIn("graph-verified/final.json", paths)
         self.assertIn("graph-verified/final.md", paths)
         self.assertIn("graph-verified/debug.md", paths)
+
+        contents = {artifact["path"]: artifact["content"] for artifact in artifacts}
+        bundle_text = "\n".join(contents.values())
+        self.assertNotIn("sk-liveSecret123", bundle_text)
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz", bundle_text)
+        self.assertNotIn("password=supersecret", bundle_text)
+        self.assertIn("API key [redacted]", contents["graph-verified/final.md"])
+        self.assertIn("Bearer [redacted]", contents["graph-verified/debug.md"])
+        self.assertIn("password=[redacted]", contents["graph-verified/debug.md"])
 
 
 def audit_issue_card(
@@ -3599,7 +3608,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "status": "failed",
             "attempt_id": f"wk_1-{job['attempt']}",
             "result_checksum": "checksum-result-diagnostics",
-            "error": "GraphVerified finder pipeline blocked every finder task before producing candidates",
+            "error": "GraphVerified failed with Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz",
             "error_code": "GRAPH_VERIFIED_COMPLETION_FAILED",
             "graphVerifiedReport": graph_report,
             "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
@@ -3617,7 +3626,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(log_event.call_args.kwargs["workerId"], "wk_1")
         self.assertEqual(log_event.call_args.kwargs["status"], "failed")
         self.assertEqual(log_event.call_args.kwargs["errorCode"], "GRAPH_VERIFIED_COMPLETION_FAILED")
-        self.assertEqual(log_event.call_args.kwargs["error"], result_body["error"])
+        self.assertEqual(log_event.call_args.kwargs["error"], "GraphVerified failed with Authorization: Bearer [redacted]")
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz", log_event.call_args.kwargs["error"])
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedRunId"], "run_diag")
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedMode"], "standard")
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedBlockedCount"], 97)
@@ -3626,7 +3636,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedFinderCandidates"], 0)
         self.assertEqual(log_event.call_args.kwargs["graphVerifiedValidCandidates"], 0)
 
-    def test_failed_worker_result_requeues_once_for_different_worker_without_extra_quota(self) -> None:
+    def test_failed_worker_result_requeues_once_without_extra_quota(self) -> None:
         _worker_two, worker_two_token = self.create_registry_worker("wk_2")
         worker_two_auth = {"Authorization": f"Bearer {worker_two_token}"}
         user = {"id": "usr_retry_worker", "name": "Owner", "providers": []}
@@ -3718,15 +3728,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
         same_worker_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_1"}, headers=self.auth)
         app.PullwiseHandler.route(same_worker_claim, "POST")
         self.assertEqual(same_worker_claim.status, HTTPStatus.OK)
-        self.assertIsNone(same_worker_claim.payload["job"])
+        second_job = same_worker_claim.payload["job"]
+        self.assertEqual(second_job["job_id"], first_job["job_id"])
+        self.assertEqual(second_job["attempt"], 2)
+        self.assertEqual(second_job["retry"]["maxAttempts"], 2)
 
         second_claim = RouteHarness("/worker/jobs/claim", {"worker_id": "wk_2"}, headers=worker_two_auth)
         app.PullwiseHandler.route(second_claim, "POST")
         self.assertEqual(second_claim.status, HTTPStatus.OK)
-        second_job = second_claim.payload["job"]
-        self.assertEqual(second_job["job_id"], first_job["job_id"])
-        self.assertEqual(second_job["attempt"], 2)
-        self.assertEqual(second_job["retry"]["maxAttempts"], 2)
+        self.assertIsNone(second_claim.payload["job"])
 
         late_duplicate_failed_result = RouteHarness(
             f"/worker/jobs/{first_job['job_id']}/result",
@@ -3742,12 +3752,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
             f"/worker/jobs/{second_job['job_id']}/result",
             {
                 "status": "done",
-                "attempt_id": f"wk_2-{second_job['attempt']}",
+                "attempt_id": f"wk_1-{second_job['attempt']}",
                 "result_checksum": "checksum-worker-retry-done",
                 **audit_result_fields([]),
                 "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             },
-            headers=worker_two_auth,
+            headers=self.auth,
         )
         app.PullwiseHandler.route(done_result, "POST")
         self.assertEqual(done_result.status, HTTPStatus.OK)

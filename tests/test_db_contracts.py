@@ -297,6 +297,18 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertIn("pullwise-state-secret-v1", payload)
         self.assertEqual(loaded, config)
 
+    def test_save_state_requires_key_before_persisting_github_tokens_without_production_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "PULLWISE_STATE_ENCRYPTION_KEY_PATH"):
+                    db.save_state({"users": {"usr_1": {"id": "usr_1", "githubAccessToken": "gho_user_token"}}})
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    rows = connection.execute("SELECT payload FROM app_state WHERE name = 'users'").fetchall()
+
+        self.assertEqual(rows, [])
+
     def test_production_save_state_requires_key_before_persisting_github_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

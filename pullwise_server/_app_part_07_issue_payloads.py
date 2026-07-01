@@ -76,7 +76,8 @@ def clean_scan_error(value: object) -> str:
     if not isinstance(value, str):
         return ""
     lines = value.replace("\x00", "").splitlines()
-    return (lines[0] if lines else "").strip()[:500]
+    first_line = (lines[0] if lines else "").strip()
+    return redact_sensitive_text(first_line, max_length=500)
 
 
 def public_issue_file(value: object, *, issue: dict | None = None, job: dict | None = None) -> str:
