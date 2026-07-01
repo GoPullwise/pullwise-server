@@ -3121,10 +3121,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_worker_v1_register(body, worker_record)
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "heartbeat":
             worker_id = clean_github_access_text(segments[2]) or ""
-            return self.handle_worker_heartbeat({**body, "worker_id": worker_id, "_review_worker_v1_endpoint": True}, worker_record)
+            return self.handle_worker_v1_heartbeat(
+                {**body, "worker_id": worker_id, "_review_worker_v1_endpoint": True},
+                worker_record,
+            )
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "agent-configs":
             worker_id = clean_github_access_text(segments[2]) or ""
-            return self.handle_worker_agent_configs({**body, "worker_id": worker_id}, worker_record)
+            return self.handle_worker_v1_agent_configs({**body, "worker_id": worker_id}, worker_record)
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "lease":
             worker_id = clean_github_access_text(segments[2]) or ""
             return self.handle_worker_v1_lease(worker_id, {**body, "worker_id": worker_id}, worker_record)
@@ -3427,7 +3430,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         artifact_id = public_issue_text(artifact.get("artifact_id") or body.get("artifact_id") or body.get("artifactId"))
         if not artifact_id:
             return self.error(HTTPStatus.BAD_REQUEST, "artifact_id is required.")
-        return self.handle_worker_job_artifact_upload(
+        return self.handle_worker_v1_job_artifact_upload(
             public_issue_text(job.get("job_id")),
             artifact_id,
             {**body, "run_id": run_id},
@@ -3438,13 +3441,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         job = scan_job_for_run_id(run_id)
         if not job:
             return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
-        return self.handle_worker_job_result(public_issue_text(job.get("job_id")), body, worker_record)
+        return self.handle_worker_v1_job_result(public_issue_text(job.get("job_id")), body, worker_record)
 
     def authenticated_worker_id_matches(self, worker_record: dict, worker_id: str) -> bool:
         authenticated_worker_id = public_issue_text(worker_record.get("worker_id"))
         return bool(authenticated_worker_id and worker_id and authenticated_worker_id == worker_id)
 
-    def handle_worker_agent_configs(self, body: dict, worker_record: dict) -> None:
+    def handle_worker_v1_agent_configs(self, body: dict, worker_record: dict) -> None:
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
@@ -3488,7 +3491,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Log stream not found.")
         return self.json({"ok": True, **result})
 
-    def handle_worker_heartbeat(self, body: dict, worker_record: dict) -> None:
+    def handle_worker_v1_heartbeat(self, body: dict, worker_record: dict) -> None:
         worker_id = clean_github_access_text(body.get("worker_id")) or ""
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
@@ -3686,151 +3689,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Worker command not found.")
         return self.json({"ok": True, "command": worker_command_payload(command)})
 
-    def handle_worker_job_claim(self, body: dict, worker_record: dict) -> None:
-        worker_id = clean_github_access_text(body.get("worker_id")) or ""
-        if not worker_id:
-            return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
-        if not self.authenticated_worker_id_matches(worker_record, worker_id):
-            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
-        allowed, worker_status = worker_can_claim(worker_record)
-        if not allowed:
-            return self.error(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                f"Worker is not ready to claim jobs: {worker_status}.",
-            )
-        ready_providers = worker_record_ready_providers(worker_record)
-        if not ready_providers:
-            return self.json({"job": None, "jobs": []})
-        try:
-            recovered_jobs = db.recover_expired_scan_jobs(
-                now(),
-                worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
-            )
-            if recovered_jobs:
-                with STATE_LOCK:
-                    apply_recovered_scan_jobs_locked(recovered_jobs)
-            job = db.claim_next_scan_job(
-                worker_id,
-                lease_seconds=system_config.scan_job_lease_seconds(),
-                worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
-                ready_providers=ready_providers,
-                recover_before_claim=False,
-            )
-        except ValueError as exc:
-            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-        if not job:
-            return self.json({"job": None, "jobs": []})
-        try:
-            payload = scan_job_payload(job, include_clone_token=True)
-        except github_auth.GitHubError as exc:
-            db.requeue_interrupted_scan_job(
-                str(job.get("scan_id") or ""),
-                reason="clone_token_unavailable",
-                timestamp=now(),
-            )
-            return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
-        with STATE_LOCK:
-            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
-            if scan and scan.get("status") == "queued":
-                scan.update(
-                    {
-                        "status": "running",
-                        "claimedAt": job.get("claimed_at"),
-                        "claimedByWorkerId": worker_id,
-                        "progress": 0,
-                        "phase": "clone",
-                        "jobId": job.get("job_id"),
-                        "retry": scan_retry_summary_for_job(job),
-                    }
-                )
-                db.upsert_scan(scan)
-                mark_state_dirty()
-            scan_logging.log_event(
-                "worker_job_claimed",
-                scanId=job.get("scan_id"),
-                repo=job.get("repo"),
-                repoId=job.get("repo_id"),
-                githubRepoId=job.get("github_repo_id"),
-                branch=job.get("branch"),
-                commit=job.get("commit"),
-                workerId=worker_id,
-                jobId=job.get("job_id"),
-                attempt=job.get("attempt"),
-            )
-        return self.json({"job": payload, "jobs": [payload]})
-
-    def handle_worker_job_progress(self, job_id: str, body: dict, worker_record: dict) -> None:
-        job_id = clean_github_access_text(job_id) or ""
-        if not job_id:
-            return self.error(HTTPStatus.BAD_REQUEST, "job_id is required.")
-        current_job = db.get_scan_job(job_id)
-        if not current_job:
-            return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
-        if not self.authenticated_worker_id_matches(worker_record, public_issue_text(current_job.get("claimed_by_worker_id"))):
-            return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
-        if public_issue_text(current_job.get("status")) not in {"claimed", "running"}:
-            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
-        phase = public_scan_phase(body.get("phase"))
-        progress_value = public_scan_progress(body.get("progress"))
-        progress_message = public_issue_text(body.get("message"))
-        logs_summary = public_issue_text(body.get("logs_summary"))
-        progress_log_time = worker_progress_log_time(body)
-        progress_entry = scan_progress_log_entry(
-            phase=phase,
-            progress=progress_value,
-            message=progress_message,
-            logs_summary=logs_summary,
-            log_time=progress_log_time,
-        )
-        job = db.update_scan_job_progress(
-            job_id,
-            {
-                "phase": phase,
-                "progress": progress_value,
-                "message": progress_message,
-                "started_at": pull_request_timestamp(body.get("started_at")) or progress_log_time,
-                "timeout_at": now() + system_config.scan_job_lease_seconds(),
-                "logs_summary": logs_summary,
-            },
-        )
-        if not job:
-            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting progress updates.")
-        if worker_progress_phase_should_finalize_quota(phase):
-            finalize_scan_quota_for_job(job, trigger=f"phase_{phase}")
-        with STATE_LOCK:
-            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
-            if scan and scan.get("status") == "running":
-                update = {
-                    "phase": phase,
-                    "progress": progress_value,
-                    "progressMessage": progress_message,
-                    "logsSummary": logs_summary,
-                    "startedAt": job.get("started_at"),
-                    "updatedAt": progress_log_time,
-                }
-                progress_logs = append_scan_progress_log(scan, progress_entry)
-                if progress_logs:
-                    update["progressLogs"] = progress_logs
-                scan.update(update)
-                db.upsert_scan(scan)
-                mark_state_dirty()
-        scan_logging.log_event(
-            "worker_job_progress",
-            scanId=job.get("scan_id"),
-            repo=job.get("repo"),
-            repoId=job.get("repo_id"),
-            githubRepoId=job.get("github_repo_id"),
-            branch=job.get("branch"),
-            commit=job.get("commit"),
-            workerId=worker_record.get("worker_id"),
-            jobId=job.get("job_id"),
-            phase=phase,
-            progress=progress_value,
-            message=progress_message,
-        )
-        return self.json({"ok": True, "job": scan_job_payload(job)})
-
-    def handle_worker_job_artifact_upload(self, job_id: str, artifact_id: str, body: dict, worker_record: dict) -> None:
+    def handle_worker_v1_job_artifact_upload(self, job_id: str, artifact_id: str, body: dict, worker_record: dict) -> None:
         job_id = clean_github_access_text(job_id) or ""
         artifact_id = clean_github_access_text(artifact_id) or ""
         if not job_id or not artifact_id:
@@ -3863,7 +3722,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json({"message": result.get("reason") or "Artifact upload conflicts with an existing artifact."}, HTTPStatus.CONFLICT)
         return self.json({"ok": True, **result})
 
-    def handle_worker_job_result(self, job_id: str, body: dict, worker_record: dict) -> None:
+    def handle_worker_v1_job_result(self, job_id: str, body: dict, worker_record: dict) -> None:
         job_id = clean_github_access_text(job_id) or ""
         if not job_id:
             return self.error(HTTPStatus.BAD_REQUEST, "job_id is required.")
