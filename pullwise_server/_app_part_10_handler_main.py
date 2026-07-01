@@ -103,6 +103,9 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
     errors: list[str] = []
     if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
         errors.append("protocol_version must be review-worker-protocol/v1")
+    for legacy_field in ("running_jobs", "runningJobs", "active_job_ids", "activeJobIds"):
+        if legacy_field in body:
+            errors.append(f"{legacy_field} is not allowed in review-worker-protocol/v1 heartbeat")
 
     status = public_issue_text(body.get("status"))
     if status not in {"idle", *WORKER_V1_ACTIVE_HEARTBEAT_STATUSES}:

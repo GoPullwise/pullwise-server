@@ -1084,6 +1084,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         busy_progress_mismatch = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
         busy_progress_mismatch["progress"]["run_id"] = "run_other"
 
+        legacy_running_jobs = clone(v1_worker_heartbeat_payload())
+        legacy_running_jobs["running_jobs"] = 0
+
+        legacy_active_job_ids = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        legacy_active_job_ids["active_job_ids"] = ["job_1"]
+
         cases = [
             ("missing_concurrency", missing_concurrency),
             ("idle_with_active_run", idle_with_active_run),
@@ -1093,6 +1099,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             ("busy_with_bad_counter", busy_with_bad_counter),
             ("busy_without_active_unit", busy_without_active_unit),
             ("busy_progress_mismatch", busy_progress_mismatch),
+            ("legacy_running_jobs", legacy_running_jobs),
+            ("legacy_active_job_ids", legacy_active_job_ids),
         ]
         for label, payload in cases:
             with self.subTest(label=label):
@@ -3477,7 +3485,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["billingUsage"]["used"], 1)
         self.assertEqual(payload["billingUsage"]["reserved"], 0)
 
-    def test_worker_ai_progress_consumes_reserved_scan_quota(self) -> None:
+    def test_worker_repo_map_progress_consumes_reserved_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
         app.USERS = {"usr_1": user}
         repository = db.upsert_repository(
@@ -3530,7 +3538,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         progress = RouteHarness(
             f"/worker/jobs/{job['job_id']}/progress",
-            {"phase": "ai", "progress": 50},
+            {"phase": "repo_map", "progress": 50},
             headers=self.auth,
         )
         app.PullwiseHandler.route(progress, "POST")

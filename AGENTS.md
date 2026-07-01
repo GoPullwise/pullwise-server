@@ -58,10 +58,15 @@ agent CLI processes concurrently.
 Cancelled jobs must release the worker's single execution slot immediately from
 the server scheduler's point of view.
 
+- The v1 heartbeat endpoint must use the fixed `review-worker-protocol/v1`
+  shape and reject legacy `running_jobs` / `active_job_ids` fields. Use
+  `active_run_id`, `concurrency`, `codex_app_server`, and active-run
+  `progress` for v1 workers.
 - Do not trust heartbeat `running_jobs` alone for worker slot accounting when
-  `active_job_ids` is present. Reconcile reported active job ids against
-  `scan_jobs` and count only jobs still accepting worker updates:
-  `claimed`, `running`, or `uploading_result`.
+  handling non-v1 lifecycle compatibility traffic where `active_job_ids` is
+  present. Reconcile reported active job ids against `scan_jobs` and count only
+  jobs still accepting worker updates: `claimed`, `running`, or
+  `uploading_result`.
 - A job in `cancelled`, `done`, `failed`, or `lost` must not keep the worker
   busy, must not receive lease renewal, and must not block the same worker from
   claiming the next queued job, even if a stale heartbeat still reports that job
@@ -257,8 +262,13 @@ quota to workspace quota.
   `user` and `repository`.
 - Repository quota is scoped by repository, with forks sharing quota with their
   source repository when the source id is known.
-- A scan consumes both account and repository quota before queueing. Keep
-  idempotency and rollback paths aligned with both bucket ids.
+- A scan reserves both account and repository quota before queueing. Reserved
+  quota becomes consumed only after a v1.2 core review phase starts, currently
+  `repo_map`, `risk_routing`, `reviewer_fanout`, `clustering_and_voting`,
+  `validator_disproof`, or `final_report_json`; do not use the legacy `ai`
+  phase as a quota-consumption trigger. Release the reservation when a worker
+  never reaches a billable core review phase. Keep idempotency and rollback
+  paths aligned with both bucket ids.
 - UI/API copy should say account, user, repository, or repo; avoid introducing
   workspace unless referring to a local checkout/worktree in the generic
   filesystem sense.

@@ -154,7 +154,6 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             "clustering_and_voting",
             "validator_disproof",
             "final_report_json",
-            "ai",
         }
         non_consuming = {
             "prepare_workspace",
@@ -170,6 +169,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             "upload_artifacts",
             "submit_result_envelope",
             "report",
+            "ai",
         }
 
         self.assertTrue(all(app.worker_progress_phase_should_finalize_quota(phase) for phase in consuming))

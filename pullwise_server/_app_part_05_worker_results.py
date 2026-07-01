@@ -260,7 +260,6 @@ WORKER_QUOTA_CONSUMING_PHASES = frozenset(
         "clustering_and_voting",
         "validator_disproof",
         "final_report_json",
-        "ai",
     }
 )
 

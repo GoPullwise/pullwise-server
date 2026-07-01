@@ -846,18 +846,18 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(usage["used"], 0)
         self.assertEqual(usage["reserved"], 0)
 
-    def test_recover_interrupted_scans_consumes_reserved_quota_for_failed_job_after_ai_started(self) -> None:
+    def test_recover_interrupted_scans_consumes_reserved_quota_for_failed_job_after_core_review_started(self) -> None:
         timestamp = app.now()
         user, repository, scan = self.seed_reserved_scan(
-            scan_id="sc_reserved_ai_failed",
-            request_id="req_reserved_ai_failed",
+            scan_id="sc_reserved_core_failed",
+            request_id="req_reserved_core_failed",
             status="running",
-            phase="ai",
+            phase="repo_map",
             timestamp=timestamp,
         )
         job = db.create_scan_job(
             {
-                "job_id": "job_reserved_ai_failed",
+                "job_id": "job_reserved_core_failed",
                 "scan_id": scan["id"],
                 "repo": repository["full_name"],
                 "branch": "main",
@@ -876,7 +876,7 @@ class ScanRecoveryTest(unittest.TestCase):
                 connection.execute(
                     """
                     UPDATE scan_jobs
-                    SET progress_phase = 'ai',
+                    SET progress_phase = 'repo_map',
                         progress = 60,
                         completed_at = ?,
                         error = 'timed_out'
