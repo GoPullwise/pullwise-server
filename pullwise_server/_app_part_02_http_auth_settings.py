@@ -72,7 +72,7 @@ def api_base_url(handler: BaseHTTPRequestHandler) -> str:
     configured = os.environ.get("PULLWISE_API_BASE_URL")
     if configured:
         return configured.rstrip("/")
-    if env_flag("PULLWISE_TRUST_PROXY_HEADERS"):
+    if proxy_headers_trusted(handler):
         forwarded = forwarded_api_base_url(handler)
         if forwarded:
             return forwarded
@@ -107,6 +107,54 @@ def trusted_host_header(handler: BaseHTTPRequestHandler) -> str | None:
 def is_local_host(host: str) -> bool:
     name = host.rsplit(":", 1)[0].lower()
     return name in {"localhost", "127.0.0.1"}
+
+
+DEFAULT_TRUSTED_PROXY_CIDRS = ("127.0.0.0/8", "::1/128")
+
+
+def direct_client_ip(handler: BaseHTTPRequestHandler) -> str:
+    address = getattr(handler, "client_address", None)
+    if isinstance(address, tuple | list) and address:
+        candidate = str(address[0]).strip()
+        if candidate and not any(char in candidate for char in "\r\n"):
+            return candidate[:128]
+    return "unknown"
+
+
+def trusted_proxy_networks() -> list:
+    configured = env("PULLWISE_TRUSTED_PROXY_CIDRS", "")
+    if not configured.strip():
+        configured = env("PULLWISE_TRUSTED_PROXY_IPS", "")
+    cidrs = [item.strip() for item in configured.split(",") if item.strip()]
+    if not cidrs:
+        cidrs = list(DEFAULT_TRUSTED_PROXY_CIDRS)
+    networks = []
+    for cidr in cidrs:
+        try:
+            networks.append(ipaddress.ip_network(cidr, strict=False))
+        except ValueError:
+            logger.warning("Ignoring invalid trusted proxy CIDR %r", cidr)
+    return networks
+
+
+def proxy_headers_trusted(handler: BaseHTTPRequestHandler) -> bool:
+    if not env_flag("PULLWISE_TRUST_PROXY_HEADERS"):
+        return False
+    try:
+        peer = ipaddress.ip_address(direct_client_ip(handler))
+    except ValueError:
+        return False
+    return any(peer in network for network in trusted_proxy_networks())
+
+
+def forwarded_client_ip(handler: BaseHTTPRequestHandler) -> str:
+    candidate = first_header_value(handler, "X-Forwarded-For") or ""
+    if not candidate or any(char in candidate for char in "\r\n"):
+        return ""
+    try:
+        return ipaddress.ip_address(candidate).compressed
+    except ValueError:
+        return ""
 
 
 def forwarded_api_base_url(handler: BaseHTTPRequestHandler) -> str | None:

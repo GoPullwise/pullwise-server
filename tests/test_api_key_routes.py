@@ -186,6 +186,25 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(list_after_revoke.status, HTTPStatus.OK)
         self.assertEqual(list_after_revoke.payload["items"], [])
 
+    def test_api_key_list_and_plaintext_create_responses_are_not_cacheable(self) -> None:
+        cookie = seed_session()
+        create = RouteHarness("/api-keys", {"name": "Automation"}, cookie=cookie)
+        app.PullwiseHandler.route(create, "POST")
+
+        list_handler = RouteHarness("/api-keys", cookie=cookie)
+        app.PullwiseHandler.route(list_handler, "GET")
+
+        for handler in (create, list_handler):
+            self.assertEqual(handler.headers_out["Cache-Control"], "no-store")
+            self.assertEqual(handler.headers_out["Pragma"], "no-cache")
+            self.assertIn("Cookie", handler.headers_out["Vary"])
+            self.assertIn("Authorization", handler.headers_out["Vary"])
+            self.assertIn("X-Pullwise-Api-Key", handler.headers_out["Vary"])
+        self.assertEqual(create.status, HTTPStatus.CREATED)
+        self.assertTrue(create.payload["key"].startswith("pwk_"))
+        self.assertEqual(list_handler.status, HTTPStatus.OK)
+        self.assertNotIn("key", list_handler.payload["items"][0])
+
     def test_invalid_requested_api_key_scopes_are_rejected(self) -> None:
         cookie = seed_session()
         handler = RouteHarness("/api-keys", {"name": "Bad automation", "scopes": ["admin:all"]}, cookie=cookie)

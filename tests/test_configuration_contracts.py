@@ -96,6 +96,17 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
         self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
 
+    def test_production_mode_enables_api_rate_limit_when_not_configured(self) -> None:
+        with patch.dict(os.environ, {"PULLWISE_MODE": "production"}, clear=True):
+            self.assertTrue(app.rate_limit_enabled())
+
+        with patch.dict(
+            os.environ,
+            {"PULLWISE_MODE": "production", "PULLWISE_RATE_LIMIT_ENABLED": "false"},
+            clear=True,
+        ):
+            self.assertFalse(app.rate_limit_enabled())
+
     def test_main_uses_default_port_for_invalid_port_env(self) -> None:
         class ServerStub:
             def __init__(self) -> None:

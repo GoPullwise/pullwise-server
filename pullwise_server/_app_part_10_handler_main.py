@@ -75,6 +75,14 @@ def memory_issue_for_status_update(session: dict, issue_id: str, body: dict) -> 
     return None
 
 
+def api_key_response_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+        "Vary": "Cookie, Authorization, X-Pullwise-Api-Key",
+    }
+
+
 class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
@@ -115,7 +123,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to apply API rate limit.")
             self._rate_limit_headers = {}
-            return False
+            self.json(
+                {"message": "API rate limit is temporarily unavailable. Try again later."},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                headers={"Cache-Control": "no-store"},
+            )
+            return True
         headers = {
             "X-RateLimit-Limit": str(rate["limit"]),
             "X-RateLimit-Remaining": str(rate["remaining"]),
@@ -153,16 +166,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return f"ip:{self.client_ip_address()}"
 
     def client_ip_address(self) -> str:
-        if env_flag("PULLWISE_TRUST_PROXY_HEADERS"):
-            forwarded = first_header_value(self, "X-Forwarded-For")
+        if proxy_headers_trusted(self):
+            forwarded = forwarded_client_ip(self)
             if forwarded:
-                candidate = forwarded.split(",", 1)[0].strip()
-                if candidate and not any(char in candidate for char in "\r\n"):
-                    return candidate[:128]
-        address = getattr(self, "client_address", None)
-        if isinstance(address, tuple | list) and address:
-            return str(address[0])[:128]
-        return "unknown"
+                return forwarded
+        return direct_client_ip(self)
 
     def do_OPTIONS(self) -> None:
         try:
@@ -1992,7 +2000,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing API keys.")
         user = USERS[session["userId"]]
         keys = [api_key_public_payload(item) for item in db.list_api_keys_for_user(user["id"])]
-        return self.json({"items": keys, "apiKeys": keys})
+        return self.json({"items": keys, "apiKeys": keys}, headers=api_key_response_headers())
 
     def handle_api_keys_post(self, body: dict) -> None:
         session = self.current_session()
@@ -2015,7 +2023,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "scopes": scopes,
             }
         )
-        return self.json(api_key_public_payload(record, token=token), HTTPStatus.CREATED)
+        return self.json(api_key_public_payload(record, token=token), HTTPStatus.CREATED, headers=api_key_response_headers())
 
     def handle_api_key_delete(self, key_id: str) -> None:
         session = self.current_session()

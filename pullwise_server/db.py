@@ -2588,6 +2588,10 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     provider_chain,
                 ),
             )
+            connection.execute("DELETE FROM scan_job_attempts WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM job_result_artifacts WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM job_results WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM review_decision_events WHERE job_id = ?", (job_id,))
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()) or {}
 
 
@@ -2900,10 +2904,6 @@ def retry_scan_job(scan_id: str, *, timestamp: int | None = None, max_attempts: 
                 return None
             job_id = str(existing["job_id"] or "")
             configured_max_attempts = max(1, int(max_attempts or existing["max_attempts"] or 1))
-            connection.execute("DELETE FROM scan_job_attempts WHERE job_id = ?", (job_id,))
-            connection.execute("DELETE FROM job_result_artifacts WHERE job_id = ?", (job_id,))
-            connection.execute("DELETE FROM job_results WHERE job_id = ?", (job_id,))
-            connection.execute("DELETE FROM review_decision_events WHERE job_id = ?", (job_id,))
             cursor = connection.execute(
                 """
                 UPDATE scan_jobs
@@ -2931,6 +2931,10 @@ def retry_scan_job(scan_id: str, *, timestamp: int | None = None, max_attempts: 
             )
             if cursor.rowcount != 1:
                 return None
+            connection.execute("DELETE FROM scan_job_attempts WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM job_result_artifacts WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM job_results WHERE job_id = ?", (job_id,))
+            connection.execute("DELETE FROM review_decision_events WHERE job_id = ?", (job_id,))
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
 
 
@@ -3378,6 +3382,27 @@ def _record_scan_job_attempt_locked(
     worker_id: str,
     claimed_at: int,
 ) -> None:
+    existing_worker_attempt = connection.execute(
+        "SELECT attempt FROM scan_job_attempts WHERE job_id = ? AND worker_id = ?",
+        (job_id, worker_id),
+    ).fetchone()
+    if existing_worker_attempt is not None:
+        connection.execute(
+            """
+            UPDATE scan_job_attempts
+            SET id = ?,
+                attempt = ?,
+                status = 'claimed',
+                claimed_at = ?,
+                completed_at = NULL,
+                error = NULL,
+                updated_at = ?
+            WHERE job_id = ?
+              AND worker_id = ?
+            """,
+            (_scan_job_attempt_id(job_id, attempt), attempt, claimed_at, claimed_at, job_id, worker_id),
+        )
+        return
     connection.execute(
         """
         INSERT INTO scan_job_attempts (
@@ -4169,13 +4194,7 @@ def claim_next_scan_job(
                 FROM scan_jobs queued
                 WHERE queued.status = 'queued'
                   AND queued.attempt < queued.max_attempts
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM scan_job_attempts attempted
-                      WHERE attempted.job_id = queued.job_id
-                        AND attempted.worker_id = ?
-                      LIMIT 1
-                  )
+
                   AND NOT EXISTS (
                       SELECT 1
                       FROM scan_jobs worker_active
@@ -4195,7 +4214,7 @@ def claim_next_scan_job(
                 LIMIT 1
                 """
                 ,
-                (worker_id, worker_id, worker_scope, worker_owner_user_id, worker_scope),
+                (worker_id, worker_scope, worker_owner_user_id, worker_scope),
             ).fetchone()
             if not row:
                 connection.commit()
@@ -4580,17 +4599,36 @@ def _store_scan_job_result_artifact(
 ) -> None:
     with closing(connect()) as connection:
         with connection:
-            connection.execute(
-                """
-                INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
-                VALUES (?, ?, ?, 'worker_result_payload', ?, ?)
-                ON CONFLICT(job_id, attempt_id, kind) DO UPDATE SET
-                    id = excluded.id,
-                    payload = excluded.payload,
-                    created_at = excluded.created_at
-                """,
-                (artifact_id, job_id, attempt_id, payload_text, timestamp),
+            _store_scan_job_result_artifact_locked(
+                connection,
+                artifact_id=artifact_id,
+                job_id=job_id,
+                attempt_id=attempt_id,
+                payload_text=payload_text,
+                timestamp=timestamp,
             )
+
+
+def _store_scan_job_result_artifact_locked(
+    connection: sqlite3.Connection,
+    *,
+    artifact_id: str,
+    job_id: str,
+    attempt_id: str,
+    payload_text: str,
+    timestamp: int,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO job_result_artifacts (id, job_id, attempt_id, kind, payload, created_at)
+        VALUES (?, ?, ?, 'worker_result_payload', ?, ?)
+        ON CONFLICT(job_id, attempt_id, kind) DO UPDATE SET
+            id = excluded.id,
+            payload = excluded.payload,
+            created_at = excluded.created_at
+        """,
+        (artifact_id, job_id, attempt_id, payload_text, timestamp),
+    )
 
 
 def record_scan_job_result(
@@ -4673,6 +4711,14 @@ def record_scan_job_result(
                     summary_payload_text,
                     artifact_id,
                 ),
+            )
+            _store_scan_job_result_artifact_locked(
+                connection,
+                artifact_id=artifact_id,
+                job_id=job_id,
+                attempt_id=attempt_id,
+                payload_text=artifact_payload_text,
+                timestamp=current_time,
             )
             connection.execute(
                 """
@@ -4763,14 +4809,6 @@ def record_scan_job_result(
         except Exception:
             connection.rollback()
             raise
-    if result and result.get("accepted") and not result.get("duplicate"):
-        _store_scan_job_result_artifact(
-            artifact_id=artifact_id,
-            job_id=job_id,
-            attempt_id=attempt_id,
-            payload_text=artifact_payload_text,
-            timestamp=current_time,
-        )
     return result or {"accepted": False, "duplicate": False, "conflict": True}
 
 

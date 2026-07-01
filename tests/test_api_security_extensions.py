@@ -210,7 +210,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
             self.assertEqual(poll.status, HTTPStatus.OK)
             self.assertEqual(poll.payload["command"]["id"], command["id"])
 
-    def test_rate_limit_storage_failures_do_not_block_api_requests(self) -> None:
+    def test_rate_limit_storage_failures_block_api_requests(self) -> None:
         handler = HandlerHarness("/api/v1/repositories")
 
         with (
@@ -220,10 +220,39 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         ):
             app.PullwiseHandler.route(handler, "GET")
 
-        self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
-        self.assertEqual(handler.payload["message"], "A valid Pullwise API key is required.")
-        self.assertEqual(handler.headers_out, {})
+        self.assertEqual(handler.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertIn("rate limit", handler.payload["message"].lower())
+        self.assertEqual(handler.headers_out, {"Cache-Control": "no-store"})
         log_exception.assert_called_once()
+
+    def test_untrusted_forwarded_for_does_not_change_rate_limit_subject(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_DB_PATH": db_path,
+                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                    "PULLWISE_RATE_LIMIT_REQUESTS": "5",
+                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
+                    "PULLWISE_TRUST_PROXY_HEADERS": "true",
+                    "PULLWISE_TRUSTED_PROXY_CIDRS": "127.0.0.1/32",
+                },
+                clear=True,
+            ):
+                handler = HandlerHarness(
+                    "/api/v1/repositories",
+                    headers={"X-Forwarded-For": "198.51.100.77"},
+                )
+                app.PullwiseHandler.route(handler, "GET")
+
+            with closing(sqlite3.connect(db_path)) as connection:
+                rows = connection.execute(
+                    "SELECT subject, request_count FROM api_rate_limits"
+                ).fetchall()
+
+        self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+        self.assertEqual(rows, [("ip:203.0.113.10", 1)])
 
     def test_samesite_none_cookie_post_rejects_untrusted_origin_before_sign_out(self) -> None:
         handler = HandlerHarness(

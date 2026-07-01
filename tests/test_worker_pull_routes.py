@@ -1859,6 +1859,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertNotEqual(first, second)
 
+    def test_worker_result_checksum_ignores_worker_supplied_checksum(self) -> None:
+        base = {
+            "status": "done",
+            **audit_result_fields([]),
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        first = app.worker_result_checksum({**base, "result_checksum": "same-worker-result", "duration_ms": 1})
+        second = app.worker_result_checksum({**base, "result_checksum": "same-worker-result", "duration_ms": 2})
+
+        self.assertNotEqual(first, "same-worker-result")
+        self.assertNotEqual(first, second)
+
     def test_review_outcome_label_priority_keeps_pipeline_and_weak_signals_separate(self) -> None:
         self.assertEqual(app.effective_review_outcome_label("missing_observation"), {})
 
@@ -2007,7 +2019,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(evaluation["proposedAuditOnlyCount"], 1)
         self.assertEqual(evaluation["verifiedSuppressionCount"], 1)
 
-    def test_duplicate_worker_result_with_same_checksum_does_not_reapply_body(self) -> None:
+    def test_worker_supplied_checksum_cannot_mask_different_result_body(self) -> None:
         scan = {
             "id": "sc_duplicate_body",
             "repo": "acme/api",
@@ -2060,8 +2072,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(duplicate, "POST")
 
-        self.assertEqual(duplicate.status, HTTPStatus.OK)
-        self.assertTrue(duplicate.payload["duplicate"])
+        self.assertEqual(duplicate.status, HTTPStatus.CONFLICT)
+        self.assertIn("checksum conflicts", duplicate.payload["message"])
         self.assertEqual([issue["id"] for issue in app.ISSUES], ["issue-first"])
         self.assertEqual(app.SCANS[0]["issues"]["high"], 1)
         self.assertEqual(app.SCANS[0]["issues"]["medium"], 0)

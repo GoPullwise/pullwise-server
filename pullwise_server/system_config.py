@@ -977,6 +977,8 @@ def rate_limit_enabled() -> bool:
     configured = env_bool("PULLWISE_RATE_LIMIT_ENABLED")
     if configured is not None:
         return configured
+    if os.environ.get("PULLWISE_MODE", "").strip().lower() == "production":
+        return True
     return bool_setting("rateLimit.enabled")
 
 

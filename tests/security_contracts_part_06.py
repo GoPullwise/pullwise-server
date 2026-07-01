@@ -809,12 +809,27 @@ class SecurityContractsPart06Test(SecurityContractsBase):
                 "X-Forwarded-Prefix": "/api",
             },
         )
+        handler.client_address = ("127.0.0.1", 51234)
 
         with patch.dict(os.environ, {"PULLWISE_TRUST_PROXY_HEADERS": "true"}, clear=True):
             self.assertEqual(
                 app.api_base_url(handler),
                 "https://pullwise-admin.danuberiverferryman.workers.dev/api",
             )
+
+    def test_api_base_url_ignores_proxy_headers_from_untrusted_peer(self) -> None:
+        handler = RouteHarness(
+            "/auth/github/authorize",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "evil.example",
+                "X-Forwarded-Prefix": "/api",
+            },
+        )
+        handler.client_address = ("203.0.113.10", 51234)
+
+        with patch.dict(os.environ, {"PULLWISE_TRUST_PROXY_HEADERS": "true"}, clear=True):
+            self.assertEqual(app.api_base_url(handler), "http://localhost:8080")
     def test_root_relative_redirect_rejects_control_characters(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_APP_URL": "https://app.pullwise.dev"}, clear=True):
             self.assertEqual(

@@ -342,9 +342,6 @@ def worker_result_error_code(body: dict) -> str:
 
 
 def worker_result_checksum(body: dict) -> str:
-    provided = clean_github_access_text(body.get("result_checksum"))
-    if provided:
-        return provided
     digest_payload = {
         "status": body.get("status"),
         "resolved_commit": worker_result_resolved_commit(body=body),
