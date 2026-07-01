@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -21,21 +22,26 @@ def completed_protocol_manifest(run_id: str) -> list[dict]:
         ("art_qa", "qa", "qa.json", "application/json", "qa-gate"),
         ("art_token_budget", "token_budget", "token-budget.json", "application/json", "token-budget"),
     ]
-    return [
-        {
-            "artifact_id": artifact_id,
-            "kind": kind,
-            "name": name,
-            "media_type": media_type,
-            "schema_id": schema_id,
-            "schema_version": "v1",
-            "required": True,
-            "storage": {"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"},
-            "sha256": "abc",
-            "size_bytes": 3,
-        }
-        for artifact_id, kind, name, media_type, schema_id in items
-    ]
+    manifest = []
+    for artifact_id, kind, name, media_type, schema_id in items:
+        content = f"{kind}:{name}\n".encode("utf-8")
+        manifest.append(
+            {
+                "artifact_id": artifact_id,
+                "kind": kind,
+                "name": name,
+                "media_type": media_type,
+                "schema_id": schema_id,
+                "schema_version": "v1",
+                "encoding": "utf-8",
+                "compression": "none",
+                "required": True,
+                "storage": {"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"},
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "size_bytes": len(content),
+            }
+        )
+    return manifest
 
 
 def store_completed_protocol_artifacts(job: dict, attempt_id: str, manifest: list[dict]) -> None:

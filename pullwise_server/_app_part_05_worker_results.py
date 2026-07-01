@@ -532,8 +532,12 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
             if not isinstance(item.get("size_bytes"), int) or item.get("size_bytes") < 0:
                 errors.append(f"artifact_manifest[{index}].size_bytes")
             storage = item.get("storage") if isinstance(item.get("storage"), dict) else {}
-            expected_storage_url = f"/v1/review-runs/{expected_run_id}/artifacts/{artifact_id}" if artifact_id else ""
-            if public_issue_text(storage.get("type")) != "server_artifact" or public_issue_text(storage.get("url")) != expected_storage_url:
+            storage_url = public_issue_text(storage.get("url"))
+            if (
+                public_issue_text(storage.get("type")) != "server_artifact"
+                or not storage_url.startswith("/v1/review-runs/")
+                or (artifact_id and not storage_url.endswith(f"/artifacts/{artifact_id}"))
+            ):
                 errors.append(f"artifact_manifest[{index}].storage")
         if execution_status == "completed":
             missing_required_kinds = sorted(REQUIRED_COMPLETED_REVIEW_ARTIFACT_KINDS - manifest_kinds)

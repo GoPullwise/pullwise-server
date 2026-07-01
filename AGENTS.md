@@ -142,10 +142,12 @@ queue, prefetch, max-claim, or parallel job controls.
 Worker results use `review-worker-protocol/v1`: a stable result envelope plus a
 versioned artifact manifest. Server ingest must validate protocol version,
 worker/job/run/lease binding, execution status, summary, quality gate, required
-artifacts, sha256, and size before accepting a completed result. The stable
-summary must include `overall_risk`, `result_status`, `finding_counts`,
-`coverage`, and `top_findings`; do not accept top-findings-only summaries as v1
-terminal results. Store the raw envelope and artifacts; do not depend on
+artifacts, supported artifact kinds, `schema_version = v1`, `encoding = utf-8`,
+`compression = none`, valid SHA-256, non-negative size, and v1
+`server_artifact` storage URL shape before accepting a completed result. The
+stable summary must include `overall_risk`, `result_status`, `finding_counts`,
+`coverage`, and `top_findings`; do not accept top-findings-only summaries as
+v1 terminal results. Store the raw envelope and artifacts; do not depend on
 `report.agent.json` internals for core result acceptance.
 
 Expose the worker-facing v1 review routes explicitly: register under

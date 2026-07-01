@@ -65,6 +65,7 @@ def v1_envelope(job: dict, manifest: list[dict], *, status: str = "completed", w
 
 
 def manifest_item(**overrides: object) -> dict:
+    storage_overridden = "storage" in overrides
     item = {
         "artifact_id": "art_report_human",
         "kind": "report.human",
@@ -72,12 +73,15 @@ def manifest_item(**overrides: object) -> dict:
         "media_type": "text/markdown",
         "schema_id": "human-markdown-report",
         "schema_version": "v1",
+        "encoding": "utf-8",
+        "compression": "none",
         "required": True,
-        "storage": {"type": "server_artifact", "url": "/v1/review-runs/run_1/artifacts/art_report_human"},
-        "sha256": "abc",
+        "sha256": hashlib.sha256(b"abc").hexdigest(),
         "size_bytes": 3,
     }
     item.update(overrides)
+    if not storage_overridden:
+        item["storage"] = {"type": "server_artifact", "url": f"/v1/review-runs/run_1/artifacts/{item['artifact_id']}"}
     return item
 
 
@@ -366,10 +370,19 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             "lease_id": "lease_job_1",
             "claimed_by_worker_id": "wk_1",
         }
-        body = {"reviewWorkerProtocol": v1_envelope(job, [manifest_item(size_bytes="3")], worker_id="wk_1")}
-
-        with self.assertRaisesRegex(ValueError, "size_bytes"):
-            app.validate_review_worker_protocol_envelope(job, body, status="done")
+        cases = [
+            ("size_bytes", manifest_item(size_bytes="3"), "size_bytes"),
+            ("unsupported_kind", manifest_item(kind="legacy_graph"), "kind"),
+            ("missing_encoding", manifest_item(encoding=""), "encoding"),
+            ("bad_compression", manifest_item(compression="gzip"), "compression"),
+            ("bad_sha256", manifest_item(sha256="abc"), "sha256"),
+            ("bad_storage", manifest_item(storage={"type": "server_artifact", "url": "/legacy/art_report_human"}), "storage"),
+        ]
+        for label, item, expected_error in cases:
+            with self.subTest(label=label):
+                body = {"reviewWorkerProtocol": v1_envelope(job, [item], worker_id="wk_1")}
+                with self.assertRaisesRegex(ValueError, expected_error):
+                    app.validate_review_worker_protocol_envelope(job, body, status="done")
 
     def test_review_worker_protocol_requires_progress_final(self) -> None:
         job = {

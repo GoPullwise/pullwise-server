@@ -189,6 +189,8 @@ def protocol_artifact_item(
         "media_type": media_type,
         "schema_id": schema_id,
         "schema_version": "v1",
+        "encoding": "utf-8",
+        "compression": "none",
         "required": required,
         "storage": {"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"},
         "sha256": hashlib.sha256(content).hexdigest(),
