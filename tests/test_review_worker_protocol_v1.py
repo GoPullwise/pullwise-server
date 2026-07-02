@@ -264,6 +264,85 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         self.assertTrue(conflict["conflict"])
         self.assertEqual(stored, [payload])
 
+    def test_store_review_run_artifact_allows_explicit_log_replace_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "test.sqlite3")},
+            clear=False,
+        ):
+            app.db.reset_initialization_cache()
+            job = app.db.create_scan_job(
+                {
+                    "job_id": "job_log_replace_v1",
+                    "scan_id": "scan_log_replace_v1",
+                    "repo": "acme/api",
+                    "branch": "main",
+                    "commit": "pending",
+                    "status": "queued",
+                    "created_at": app.now(),
+                    "user_id": "usr_1",
+                }
+            )
+            claimed = app.db.claim_next_scan_job("wk_1")
+            attempt_id = f"wk_1-{claimed['attempt']}"
+            run_id = claimed.get("run_id") or f"run_{claimed['job_id']}"
+            first_content = b"old log"
+            second_content = b"new log"
+            first_payload = {
+                "run_id": run_id,
+                "artifact": manifest_item(
+                    artifact_id="art_progress_log",
+                    kind="progress_log",
+                    name="progress.log.jsonl",
+                    media_type="application/jsonl",
+                    schema_id="progress-log",
+                    sha256=hashlib.sha256(first_content).hexdigest(),
+                    size_bytes=len(first_content),
+                    required=False,
+                    storage={"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/art_progress_log"},
+                ),
+                "content_base64": base64.b64encode(first_content).decode("ascii"),
+            }
+            second_payload = {
+                **first_payload,
+                "artifact": {**first_payload["artifact"], "sha256": hashlib.sha256(second_content).hexdigest(), "size_bytes": len(second_content)},
+                "content_base64": base64.b64encode(second_content).decode("ascii"),
+            }
+
+            first = app.db.store_review_run_artifact(
+                job_id=job["job_id"],
+                attempt_id=attempt_id,
+                artifact_id="art_progress_log",
+                payload=first_payload,
+            )
+            replaced = app.db.store_review_run_artifact(
+                job_id=job["job_id"],
+                attempt_id=attempt_id,
+                artifact_id="art_progress_log",
+                payload=second_payload,
+                replace_existing=True,
+            )
+            report_conflict = app.db.store_review_run_artifact(
+                job_id=job["job_id"],
+                attempt_id=attempt_id,
+                artifact_id="art_report_human",
+                payload={"artifact": manifest_item(), "content_base64": base64.b64encode(b"abc").decode("ascii")},
+            )
+            report_conflict = app.db.store_review_run_artifact(
+                job_id=job["job_id"],
+                attempt_id=attempt_id,
+                artifact_id="art_report_human",
+                payload={"artifact": manifest_item(sha256=hashlib.sha256(b"def").hexdigest(), size_bytes=3), "content_base64": base64.b64encode(b"def").decode("ascii")},
+                replace_existing=True,
+            )
+            stored = app.db.get_review_run_artifact(run_id, "art_progress_log")
+
+        self.assertTrue(first["accepted"])
+        self.assertTrue(replaced["accepted"])
+        self.assertTrue(replaced["replaced"])
+        self.assertEqual(stored["sha256"], hashlib.sha256(second_content).hexdigest())
+        self.assertTrue(report_conflict["conflict"])
+        self.assertEqual(report_conflict["reason"], "artifact_payload_conflict")
     def test_review_worker_protocol_requires_uploaded_required_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
             os.environ,

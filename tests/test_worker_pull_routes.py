@@ -933,6 +933,91 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(artifacts_by_id["art_report_agent"]["storage"]["url"], artifact_url)
         self.assertNotIn("content_base64", json.dumps(artifacts_by_id["art_report_agent"]))
 
+    def test_terminal_final_log_artifact_upload_replaces_existing_log_only(self) -> None:
+        self.create_claimable_scan_job(job_id="job_terminal_log_replace", scan_id="sc_terminal_log_replace", user_id="usr_1")
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+
+        old_content = b"old progress\n"
+        log_item = protocol_artifact_item(
+            run_id,
+            "art_progress_log",
+            "progress_log",
+            "progress.log.jsonl",
+            "application/jsonl",
+            "progress-log",
+            required=False,
+        )
+        log_item["sha256"] = hashlib.sha256(old_content).hexdigest()
+        log_item["size_bytes"] = len(old_content)
+        initial_log = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": dict(log_item),
+                "content_base64": base64.b64encode(old_content).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(initial_log, "POST")
+        self.assertEqual(initial_log.status, HTTPStatus.OK)
+        self.assertTrue(initial_log.payload["accepted"])
+
+        result = self.v1_result(
+            claimed,
+            {
+                "status": "done",
+                "attempt_id": attempt_id,
+                **audit_result_fields([]),
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+        )
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "done")
+
+        report_content = b"late report"
+        report_item = protocol_artifact_item(run_id, "art_late_report", "report.human", "late-report.md", "text/markdown", "human-markdown-report")
+        report_item["sha256"] = hashlib.sha256(report_content).hexdigest()
+        report_item["size_bytes"] = len(report_content)
+        late_report = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": report_item,
+                "content_base64": base64.b64encode(report_content).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(late_report, "POST")
+        self.assertEqual(late_report.status, HTTPStatus.CONFLICT)
+
+        new_content = b"new progress with run_completed\n"
+        log_item["sha256"] = hashlib.sha256(new_content).hexdigest()
+        log_item["size_bytes"] = len(new_content)
+        final_log = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": dict(log_item),
+                "content_base64": base64.b64encode(new_content).decode("ascii"),
+                "final_log_upload": True,
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(final_log, "POST")
+        self.assertEqual(final_log.status, HTTPStatus.OK)
+        self.assertTrue(final_log.payload["replaced"])
+        stored = db.get_review_run_artifact(run_id, "art_progress_log")
+        self.assertEqual(stored["sha256"], hashlib.sha256(new_content).hexdigest())
     def test_v1_worker_result_accepts_cancelled_terminal_status(self) -> None:
         scan = {
             "id": "sc_v1_cancelled_result",
@@ -1172,6 +1257,15 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 self.assertEqual(lease.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("Invalid review-worker-protocol/v1 lease request", lease.payload["message"])
 
+    def test_v1_worker_lease_with_unavailable_intent_validation_gets_no_job(self) -> None:
+        payload = v1_worker_lease_payload()
+        payload["capabilities"]["intent_test_validation"] = False
+        lease = RouteHarness("/v1/workers/wk_1/lease", payload, headers=self.auth)
+        app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        self.assertIsNone(lease.payload["job"])
+        self.assertEqual(lease.payload["reason"], "intent_test_validation_unavailable")
     def test_v1_worker_lease_blocks_idle_worker_when_codex_quota_is_not_ready(self) -> None:
         user = {"id": "usr_quota_blocked", "name": "Owner", "providers": []}
         app.USERS = {user["id"]: user}

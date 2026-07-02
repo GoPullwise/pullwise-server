@@ -5317,6 +5317,9 @@ def review_artifact_inline_json(payload: dict[str, Any], media_type: str, size_b
     return json.dumps(to_jsonable(decoded), ensure_ascii=False, sort_keys=True)
 
 
+REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log"}
+
+
 def store_review_run_artifact(
     *,
     job_id: str,
@@ -5324,6 +5327,7 @@ def store_review_run_artifact(
     artifact_id: str,
     payload: dict[str, Any],
     timestamp: int | None = None,
+    replace_existing: bool = False,
 ) -> dict[str, Any]:
     ensure_initialized()
     job_id = str(job_id or "").strip()
@@ -5356,6 +5360,7 @@ def store_review_run_artifact(
     except (TypeError, ValueError):
         size_bytes = 0
     required = 1 if artifact.get("required") is True or payload.get("required") is True else 0
+    replaceable_log_artifact = bool(replace_existing and kind in REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS)
     storage_url = f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"
     storage_json = json.dumps(
         {
@@ -5375,10 +5380,10 @@ def store_review_run_artifact(
             ).fetchone()
             if not job:
                 return {"accepted": False, "conflict": True, "reason": "job_not_found"}
-            if str(job["status"] or "") not in {"claimed", "running", "uploading_result"}:
+            if str(job["status"] or "") not in {"claimed", "running", "uploading_result"} and not replaceable_log_artifact:
                 return {"accepted": False, "conflict": True, "reason": "job_not_accepting_artifacts"}
             existing = connection.execute(
-                "SELECT payload_json FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
+                "SELECT payload_json, job_id, attempt_id, kind FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
                 (run_id, artifact_id),
             ).fetchone()
             if existing:
@@ -5386,6 +5391,46 @@ def store_review_run_artifact(
                     return {
                         "accepted": True,
                         "duplicate": True,
+                        "artifactId": artifact_id,
+                        "runId": run_id,
+                        "storage": json.loads(storage_json),
+                    }
+                if (
+                    replaceable_log_artifact
+                    and str(existing["kind"] or "") in REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS
+                    and str(existing["job_id"] or "") == job_id
+                    and str(existing["attempt_id"] or "") == attempt_id
+                ):
+                    connection.execute(
+                        """
+                        UPDATE review_artifacts
+                        SET kind = ?, name = ?, media_type = ?, schema_id = ?, schema_version = ?,
+                            required = ?, sha256 = ?, size_bytes = ?, storage_url = ?, storage_json = ?,
+                            inline_json = ?, payload_json = ?, updated_at = ?
+                        WHERE run_id = ? AND artifact_id = ?
+                        """,
+                        (
+                            kind,
+                            name,
+                            media_type,
+                            schema_id,
+                            schema_version,
+                            required,
+                            sha256,
+                            size_bytes,
+                            storage_url,
+                            storage_json,
+                            inline_json,
+                            payload_text,
+                            current_time,
+                            run_id,
+                            artifact_id,
+                        ),
+                    )
+                    return {
+                        "accepted": True,
+                        "duplicate": False,
+                        "replaced": True,
                         "artifactId": artifact_id,
                         "runId": run_id,
                         "storage": json.loads(storage_json),

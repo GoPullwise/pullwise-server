@@ -175,6 +175,7 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         script = app.worker_install_script()
 
         self.assertIn("install_ubuntu_packages python3.10 python3.10-venv python3-pip", script)
+        self.assertIn('ensure_command_available "bwrap" bwrap bubblewrap', script)
         self.assertIn("Pullwise worker requires Python 3.10 or newer.", script)
         self.assertNotIn("Pullwise worker requires Python 3.9", script)
         self.assertIn('PYTHON_BIN="$(python3.10 -c', script)

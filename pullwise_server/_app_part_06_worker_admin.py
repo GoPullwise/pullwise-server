@@ -1254,6 +1254,7 @@ PY
   PYTHON_BIN="$(python3.10 -c 'import sys; print(sys.executable)')"
 }
 ensure_command_available "sha256sum" sha256sum coreutils
+ensure_command_available "bwrap" bwrap bubblewrap
 safe_worker_id() {
   local raw safe digest prefix
   raw="$1"

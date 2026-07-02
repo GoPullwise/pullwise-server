@@ -29,6 +29,7 @@ WORKER_V1_PROGRESS_COUNTER_KEYS = (
     "artifacts_total",
     "artifacts_uploaded",
 )
+REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log"}
 WORKER_REVIEW_ARTIFACT_KINDS = {
     "report.human",
     "report.agent",
@@ -218,7 +219,6 @@ def worker_v1_lease_validation_error(body: dict) -> str | None:
         "isolated_codex_home",
         "progress_events",
         "cancellation",
-        "intent_test_validation",
     ):
         if capabilities.get(field_name) is not True:
             errors.append(f"capabilities.{field_name} must be true")
@@ -3195,6 +3195,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         validation_error = worker_v1_lease_validation_error(body)
         if validation_error:
             return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 lease request: {validation_error}")
+        capabilities = body.get("capabilities") if isinstance(body.get("capabilities"), dict) else {}
+        if capabilities.get("intent_test_validation") is not True:
+            return self.json({"lease": None, "retry_after_seconds": 60, "job": None, "reason": "intent_test_validation_unavailable"})
         allowed, worker_status = worker_can_claim(worker_record)
         if not allowed:
             return self.error(
@@ -3743,24 +3746,35 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
         claimed_worker_id = public_issue_text(job.get("claimed_by_worker_id"))
         body_attempt_id = clean_github_access_text(body.get("attempt_id") or body.get("attemptId")) or expected_worker_attempt_id(job)
-        if not self.authenticated_worker_id_matches(worker_record, claimed_worker_id):
+        last_attempt_id = clean_github_access_text(job.get("last_attempt_id"))
+        allowed_worker_id = claimed_worker_id
+        if not allowed_worker_id and last_attempt_id and body_attempt_id == last_attempt_id:
+            allowed_worker_id = worker_id_from_attempt_id(body_attempt_id)
+        if not self.authenticated_worker_id_matches(worker_record, allowed_worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
-        if public_issue_text(job.get("status")) not in {"claimed", "running", "uploading_result"}:
-            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting artifacts.")
-        if body_attempt_id != expected_worker_attempt_id(job):
-            return self.error(HTTPStatus.CONFLICT, "Artifact attempt_id does not match current job attempt.")
         try:
             payload = worker_artifact_upload_payload(body)
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if payload.get("artifact_id") != artifact_id:
             return self.error(HTTPStatus.BAD_REQUEST, "artifact_id path and payload do not match.")
+        artifact = payload.get("artifact") if isinstance(payload.get("artifact"), dict) else {}
+        artifact_kind = public_issue_text(artifact.get("kind") or payload.get("kind"))
+        final_log_upload = body.get("final_log_upload") is True and artifact_kind in REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS
+        expected_attempt_id = expected_worker_attempt_id(job)
+        if body_attempt_id != expected_attempt_id and body_attempt_id != last_attempt_id:
+            return self.error(HTTPStatus.CONFLICT, "Artifact attempt_id does not match current job attempt.")
+        job_status = public_issue_text(job.get("status"))
+        if job_status not in {"claimed", "running", "uploading_result"}:
+            if not (final_log_upload and last_attempt_id and body_attempt_id == last_attempt_id and job_status in {"done", "failed", "cancelled", "partial_completed", "lost"}):
+                return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting artifacts.")
         result = db.store_review_run_artifact(
             job_id=job_id,
             attempt_id=body_attempt_id,
             artifact_id=artifact_id,
             payload=payload,
             timestamp=now(),
+            replace_existing=final_log_upload,
         )
         if result.get("conflict"):
             return self.json({"message": result.get("reason") or "Artifact upload conflicts with an existing artifact."}, HTTPStatus.CONFLICT)
