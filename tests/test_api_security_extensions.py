@@ -178,6 +178,21 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.assertFalse(limited)
         record_rate_limit_hit.assert_not_called()
 
+    def test_review_run_artifact_get_is_not_public_api_rate_limited(self) -> None:
+        handler = HandlerHarness("/v1/review-runs/run_1/artifacts/art_report")
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
+            patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
+        ):
+            limited = handler.apply_rate_limit(
+                "GET",
+                "/v1/review-runs/run_1/artifacts/art_report",
+                ["v1", "review-runs", "run_1", "artifacts", "art_report"],
+            )
+
+        self.assertFalse(limited)
+        record_rate_limit_hit.assert_not_called()
     def test_deleted_worker_command_poll_keeps_worker_rate_limit_exemption(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

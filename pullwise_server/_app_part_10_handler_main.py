@@ -483,7 +483,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         segments = segments if segments is not None else [unquote(part) for part in path.split("/") if part]
         applies_to_public_rest_api = external_api_segments(segments) is not None
         applies_to_unauthenticated_worker_probe = (
-            (path.startswith("/worker/") or path.startswith("/v1/workers/") or path.startswith("/v1/review-runs/"))
+            (
+                path.startswith("/worker/")
+                or path.startswith("/v1/workers/")
+                or (method != "GET" and path.startswith("/v1/review-runs/"))
+            )
             and not worker_token_record(self)
         )
         if not applies_to_public_rest_api and not applies_to_unauthenticated_worker_probe:
@@ -492,7 +496,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if self.admin_rate_limit_exempt(method, path):
             self._rate_limit_headers = {}
             return False
-        if (path.startswith("/worker/") or path.startswith("/v1/workers/") or path.startswith("/v1/review-runs/")) and worker_token_record(self):
+        if (
+                path.startswith("/worker/")
+                or path.startswith("/v1/workers/")
+                or (method != "GET" and path.startswith("/v1/review-runs/"))
+            ) and worker_token_record(self):
             self._rate_limit_headers = {}
             return False
         limit = rate_limit_requests()
@@ -3521,7 +3529,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if active_job_ids_provided:
             active_run_id = clean_github_access_text(body.get("active_run_id"))
             active_job_from_run = scan_job_for_run_id(active_run_id) if active_run_id else None
-            if active_job_from_run and clean_github_access_text(active_job_from_run.get("claimed_by_worker_id")) == worker_id:
+            if active_run_id and not active_job_from_run:
+                return self.error(HTTPStatus.BAD_REQUEST, "Heartbeat active_run_id is not leased by this server.")
+            if active_job_from_run and clean_github_access_text(active_job_from_run.get("claimed_by_worker_id")) != worker_id:
+                return self.error(HTTPStatus.BAD_REQUEST, "Heartbeat active_run_id is leased to another worker.")
+            if active_job_from_run:
                 active_job_ids.append(public_issue_text(active_job_from_run.get("job_id")))
         cancelled_job_ids = []
         active_job_ids_accepting_updates = active_job_ids

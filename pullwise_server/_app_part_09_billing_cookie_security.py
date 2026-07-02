@@ -373,8 +373,12 @@ def cookie_secure_enabled() -> bool:
 
 def external_api_segments(segments: list[str]) -> list[str] | None:
     if len(segments) >= 2 and segments[0] == "v1":
+        if segments[1] in {"workers", "review-runs"}:
+            return None
         return segments[1:]
     if len(segments) >= 3 and segments[0] == "api" and segments[1] == "v1":
+        if segments[2] in {"workers", "review-runs"}:
+            return None
         return segments[2:]
     return None
 

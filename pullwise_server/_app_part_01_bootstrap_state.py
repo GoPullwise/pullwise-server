@@ -1076,7 +1076,7 @@ def reconcile_completed_scan_job_results_locked() -> int:
     for row in rows:
         payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
         status = public_issue_text(row.get("result_status") or row.get("status")).lower()
-        if status not in {"done", "failed"}:
+        if status not in {"done", "failed", "partial_completed"}:
             continue
         checksum = clean_github_access_text(row.get("result_result_checksum") or row.get("result_checksum"))
         try:
@@ -1100,12 +1100,12 @@ def reconcile_completed_scan_job_results_locked() -> int:
 def reconcile_terminal_scan_quota_locked(scan: dict, job: dict, *, status: str, reason: str = "") -> None:
     normalized_status = public_issue_text(status).lower()
     if normalized_status == "done" or (
-        normalized_status == "failed" and worker_progress_phase_should_finalize_quota(job.get("progress_phase"))
+        normalized_status in {"failed", "partial_completed"} and worker_progress_phase_should_finalize_quota(job.get("progress_phase"))
     ):
         trigger = public_issue_text(reason) or f"terminal_{normalized_status}"
         finalize_scan_quota_for_job(job, trigger=trigger)
         return
-    if normalized_status in {"failed", "cancelled"}:
+    if normalized_status in {"failed", "cancelled", "partial_completed"}:
         release_scan_quota_reservation_for_scan(scan, reason=public_issue_text(reason) or f"scan_{normalized_status}")
 
 
@@ -1124,7 +1124,7 @@ def reconcile_terminal_reserved_scan_quota_locked(scan: dict) -> bool:
     if public_issue_text(scan.get("quotaState")) != "reserved":
         return False
     status = public_issue_text(scan.get("status")).lower()
-    if status not in {"done", "failed", "cancelled"}:
+    if status not in {"done", "failed", "cancelled", "partial_completed"}:
         return False
     scan_id = public_issue_text(scan.get("id"))
     job_id = public_issue_text(scan.get("jobId"))
@@ -1143,7 +1143,7 @@ def reconcile_terminal_reserved_scan_quota_locked(scan: dict) -> bool:
 
 def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
     status = public_issue_text(job.get("status")).lower()
-    if status not in {"done", "failed", "cancelled"}:
+    if status not in {"done", "failed", "cancelled", "partial_completed"}:
         return False
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
@@ -1157,7 +1157,7 @@ def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
         update["phase"] = "report"
         update["progress"] = 100
         update["error"] = ""
-    elif status == "failed":
+    elif status in {"failed", "partial_completed"}:
         update["phase"] = "report"
     else:
         update["phase"] = None
@@ -1178,7 +1178,7 @@ def scan_status_from_job_status(status: object) -> str:
         return "queued"
     if normalized == "lost":
         return "failed"
-    return normalized if normalized in {"queued", "done", "failed", "cancelled"} else ""
+    return normalized if normalized in {"queued", "done", "failed", "cancelled", "partial_completed"} else ""
 
 
 def scan_retry_summary_for_job(job: dict | None, *, reason: str = "") -> dict:
@@ -1221,7 +1221,7 @@ def reconcile_scan_job_state_locked(
     status = scan_status_from_job_status(job.get("status"))
     if not status:
         return False
-    if status in {"done", "failed"}:
+    if status in {"done", "failed", "partial_completed"}:
         job_id = public_issue_text(job.get("job_id"))
         result = result_lookup.get(job_id) if result_lookup is not None else None
         if result is None:
@@ -1230,7 +1230,7 @@ def reconcile_scan_job_state_locked(
             payload = result.get("result_payload") if isinstance(result.get("result_payload"), dict) else {}
             result_status = public_issue_text(result.get("result_status") or result.get("status")).lower()
             checksum = clean_github_access_text(result.get("result_result_checksum") or result.get("result_checksum"))
-            if result_status in {"done", "failed"}:
+            if result_status in {"done", "failed", "partial_completed"}:
                 try:
                     changed = apply_worker_job_result_to_state_locked(
                         result,

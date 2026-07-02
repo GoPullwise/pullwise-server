@@ -802,7 +802,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
         else:
             scan.pop("reviewWorkerProtocol", None)
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
-        if status == "done":
+        if status in {"done", "partial_completed"}:
             before_issues = json.dumps(
                 db.to_jsonable([issue for issue in ISSUES if issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id")]),
                 sort_keys=True,
@@ -972,7 +972,7 @@ def worker_result_issue_count(body: dict) -> int:
 
 
 def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -> bool:
-    if status == "done":
+    if status in {"done", "partial_completed"}:
         return True
     if worker_progress_phase_should_finalize_quota(job.get("progress_phase")):
         return True

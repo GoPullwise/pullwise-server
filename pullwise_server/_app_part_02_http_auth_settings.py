@@ -1004,7 +1004,7 @@ def user_scans_for_read(session: dict | None) -> list[dict]:
                 job_lookup[("job", job_id)] = job
             if scan_id:
                 job_lookup[("scan", scan_id)] = job
-            if job_id and scan_status_from_job_status(job.get("status")) in {"done", "failed"}:
+            if job_id and scan_status_from_job_status(job.get("status")) in {"done", "failed", "cancelled", "partial_completed"}:
                 terminal_job_ids.append(job_id)
         result_lookup = {
             public_issue_text(result.get("job_id")): result
@@ -1127,7 +1127,7 @@ def hydrate_scan_jobs_for_read(jobs: list[dict]) -> list[dict]:
         public_issue_text(job.get("job_id"))
         for job in jobs
         if public_issue_text(job.get("job_id"))
-        and scan_status_from_job_status(job.get("status")) in {"done", "failed"}
+        and scan_status_from_job_status(job.get("status")) in {"done", "failed", "cancelled", "partial_completed"}
         and (
             public_issue_text(job.get("scan_id")) in indexed_memory_scans
             or public_issue_text(job.get("scan_id")) not in snapshot_lookup

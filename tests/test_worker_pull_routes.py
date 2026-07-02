@@ -1130,6 +1130,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("Invalid review-worker-protocol/v1 heartbeat", heartbeat.payload["message"])
 
+    def test_v1_worker_heartbeat_rejects_unknown_active_run_id(self) -> None:
+        heartbeat = RouteHarness(
+            "/v1/workers/wk_1/heartbeat",
+            v1_worker_heartbeat_payload(status="busy", run_id="run_unknown"),
+            headers=self.auth,
+        )
+
+        app.PullwiseHandler.route(heartbeat, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("active_run_id", heartbeat.payload["message"])
     def test_v1_worker_lease_rejects_non_idle_or_incomplete_capacity(self) -> None:
         def clone(payload: dict) -> dict:
             return json.loads(json.dumps(payload))
