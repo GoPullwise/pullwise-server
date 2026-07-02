@@ -171,23 +171,25 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn("already exists with home", script)
         self.assertIn('useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"', script)
 
-    def test_installer_bootstraps_python_without_unverified_nodesource_or_codex_installers(self) -> None:
+    def test_installer_bootstraps_python_and_official_scoped_codex_installer(self) -> None:
         script = app.worker_install_script()
 
         self.assertIn("install_ubuntu_packages python3.10 python3.10-venv python3-pip", script)
         self.assertIn("Pullwise worker requires Python 3.10 or newer.", script)
         self.assertNotIn("Pullwise worker requires Python 3.9", script)
         self.assertIn('PYTHON_BIN="$(python3.10 -c', script)
-        self.assertIn('PYTHON_BIN="\\${PULLWISE_PYTHON_BIN:-python3.10}"', script)
+        self.assertIn('PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"', script)
         self.assertIn('"$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"', script)
         self.assertIn('ensure_command_available "tar" tar tar', script)
-        self.assertIn("ensure_node_runtime", script)
-        self.assertIn("Install a trusted, pinned Node.js runtime", script)
-        self.assertIn("Install a trusted, pinned Codex CLI", script)
+        self.assertIn('ensure_command_available "curl" curl curl', script)
+        self.assertIn('CODEX_RELEASE="${PULLWISE_CODEX_RELEASE:-latest}"', script)
+        self.assertIn('CODEX_INSTALLER_URL="${PULLWISE_CODEX_INSTALLER_URL:-https://chatgpt.com/codex/install.sh}"', script)
+        self.assertIn('curl -fsSL "$CODEX_INSTALLER_URL" -o "$installer_path"', script)
+        self.assertIn('CODEX_INSTALL_DIR="$codex_install_dir" CODEX_NON_INTERACTIVE=1 "$installer_path" --release "$release"', script)
+        self.assertIn('write_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"', script)
         self.assertNotIn("https://deb.nodesource.com/node_22.x", script)
         self.assertNotIn("ensure_nodesource_nodejs", script)
-        self.assertNotIn("chatgpt.com/codex/install.sh", script)
-        self.assertNotIn("curl -fsSL", script)
+        self.assertNotIn("@openai/codex", script)
         self.assertNotRegex(script, r"\|\s*(?:sh|bash)\b")
 
     def test_worker_install_command_verifies_bootstrap_script_before_execution(self) -> None:
@@ -198,6 +200,7 @@ class WorkerInstallerContractsTest(unittest.TestCase):
             worker_name="Worker One",
             worker_package="https://github.com/GoPullwise/pullwise-worker/releases/download/v1.2.3/pullwise_worker-1.2.3-py3-none-any.whl",
             provider_chain="codex",
+            codex_release="0.13.0",
         )
         expected_hash = hashlib.sha256(app.worker_install_script().encode("utf-8")).hexdigest()
 
@@ -206,6 +209,7 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('-o "$install_script"', command)
         self.assertIn("sha256sum -c -", command)
         self.assertIn('bash "$install_script"', command)
+        self.assertIn("--codex-release '0.13.0'", command)
         self.assertNotIn("curl -fsSL 'https://api.pull-wise.com/install-worker.sh' | bash", command)
         self.assertNotIn("| bash -s --", command)
 

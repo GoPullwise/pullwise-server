@@ -279,9 +279,10 @@ matching the worker `version` provided at admin creation time. The default
 worker version, default package, and release lookup URL are database-backed
 system config. Override the full package URL with `PULLWISE_WORKER_PACKAGE` or
 `--package` during controlled upgrades. Re-running the installer force-reinstalls
-the selected worker wheel so same-version rebuilds are not skipped by pip. The Codex CLI bootstrap package is
-pinned by default as `@openai/codex@0.135.0`; override it with
-`PULLWISE_CODEX_PACKAGE` or `--codex-package` when rolling out a new CLI.
+the selected worker wheel so same-version rebuilds are not skipped by pip. For
+Codex providers, the installer bootstraps the instance-scoped Codex CLI with
+OpenAI's official standalone installer. `PULLWISE_CODEX_RELEASE` or
+`--codex-release` selects the release; the default is `latest`.
 
 Worker review protocol endpoints (authenticated via bearer token):
 

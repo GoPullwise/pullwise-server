@@ -2468,6 +2468,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         if segments == ["private-workers"]:
             try:
+                codex_install_options = worker_codex_install_options(body)
                 worker = db.create_worker(
                     {
                         "name": public_issue_text(body.get("name")) or "Private worker",
@@ -2488,7 +2489,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 worker_id=worker.get("worker_id"),
                 changed_fields={"scope": "private", "ownerUserId": session["userId"]},
             )
-            return self.json(worker_create_payload(worker), HTTPStatus.CREATED)
+            return self.json(worker_create_payload(worker, codex_install_options=codex_install_options), HTTPStatus.CREATED)
         if len(segments) == 3 and segments[0] == "private-workers":
             worker_id = segments[1]
             action = segments[2]
@@ -2828,6 +2829,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 body.get("providerChain"),
                 strict=("providerChain" in body),
             )
+            codex_install_options = worker_codex_install_options(body) if "codex" in provider_chain else None
         except ValueError as exc:
             self.audit_worker_action(session, "create_worker", success=False, error=str(exc))
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
@@ -2852,7 +2854,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "region": worker.get("region"),
             },
         )
-        return self.json(worker_create_payload(worker), HTTPStatus.CREATED)
+        return self.json(worker_create_payload(worker, codex_install_options=codex_install_options), HTTPStatus.CREATED)
 
     def handle_admin_worker_release(self, session: dict, body: dict) -> None:
         raw_version = body.get("version")

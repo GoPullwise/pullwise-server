@@ -200,7 +200,11 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         owner_cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
         other_cookie = seed_user("usr_b", "ses_b", installation_id="222", repo_id="456")
 
-        create = RouteHarness({"name": "Home lab"}, cookie=owner_cookie, path="/private-workers")
+        create = RouteHarness(
+            {"name": "Home lab", "codexUseLatest": False, "codexVersion": "0.13.0"},
+            cookie=owner_cookie,
+            path="/private-workers",
+        )
         app.PullwiseHandler.route(create, "POST")
 
         self.assertEqual(create.status, HTTPStatus.CREATED)
@@ -208,6 +212,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(create.payload["worker"]["scope"], "private")
         self.assertEqual(create.payload["worker"]["ownerUserId"], "usr_a")
         self.assertTrue(create.payload["worker_token"].startswith("pww_"))
+        self.assertEqual(create.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "0.13.0")
+        self.assertIn("--codex-release '0.13.0'", create.payload["install_commands"]["standard"])
         stored = db.get_worker(worker_id)
         self.assertEqual(stored["worker_scope"], db.WORKER_SCOPE_PRIVATE)
         self.assertEqual(stored["owner_user_id"], "usr_a")

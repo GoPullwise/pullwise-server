@@ -914,6 +914,8 @@ def default_worker_package(version: object = None) -> str:
 
 
 WORKER_INSTALL_PROVIDERS = ("codex",)
+CODEX_CLI_INSTALLER_URL = "https://chatgpt.com/codex/install.sh"
+CODEX_CLI_RELEASE_RE = re.compile(r"^(?:latest|(?:(?:rust-)?v)?[0-9]+\.[0-9]+\.[0-9]+(?:-(?:alpha|beta)(?:\.[0-9]+)?)?)$")
 
 
 def default_worker_provider_chain() -> list[str]:
@@ -950,7 +952,36 @@ def worker_provider_chain_text(value: object = None, *, strict: bool = False) ->
     return ",".join(worker_provider_chain(value, strict=strict))
 
 
-def worker_create_payload(worker: dict) -> dict:
+def request_bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = public_issue_text(value).lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def worker_codex_install_options(body: object = None) -> dict:
+    source = body if isinstance(body, dict) else {}
+    use_latest = request_bool(
+        source.get("codexUseLatest", source.get("codex_use_latest")),
+        default=True,
+    )
+    if use_latest:
+        return {"release": "latest", "use_latest": True}
+    release = public_issue_text(source.get("codexVersion") or source.get("codex_version"))
+    if not release:
+        raise ValueError("codexVersion is required when codexUseLatest is false.")
+    if not CODEX_CLI_RELEASE_RE.fullmatch(release):
+        raise ValueError("codexVersion must be latest or x.y.z[-alpha[.N]|-beta[.N]].")
+    return {"release": release, "use_latest": False}
+
+
+def worker_create_payload(worker: dict, *, codex_install_options: dict | None = None) -> dict:
     public = worker_public_payload(worker, admin=True)
     token = public_issue_text(worker.get("worker_token"))
     server_url = (
@@ -973,6 +1004,8 @@ def worker_create_payload(worker: dict) -> dict:
     safe_worker_id = worker_safe_service_id(public["worker_id"])
     service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"
     service_log_dir = f"/var/log/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/log/pullwise-worker"
+    codex_options = codex_install_options or worker_codex_install_options()
+    codex_release = public_issue_text(codex_options.get("release")) or "latest"
     install_command = worker_install_command(
         install_url=install_url,
         server_url=server_url,
@@ -980,6 +1013,7 @@ def worker_create_payload(worker: dict) -> dict:
         worker_name=public.get("name") or public["worker_id"],
         worker_package=worker_package,
         provider_chain=provider_chain_text,
+        codex_release=codex_release,
     )
     local_install_command = worker_install_command(
         install_url=local_install_url,
@@ -988,6 +1022,7 @@ def worker_create_payload(worker: dict) -> dict:
         worker_name=public.get("name") or public["worker_id"],
         worker_package=worker_package,
         provider_chain=provider_chain_text,
+        codex_release=codex_release,
     )
     suggested_env = {
         "PULLWISE_SERVER_URL": server_url,
@@ -1014,7 +1049,10 @@ def worker_create_payload(worker: dict) -> dict:
     if "codex" in provider_chain:
         suggested_env.update(
             {
-                "PULLWISE_CODEX_COMMAND": f"{service_home}/.codex/bin/codex",
+                "PULLWISE_CODEX_COMMAND": f"{service_home}/.local/bin/codex",
+                "PULLWISE_CODEX_RELEASE": codex_release,
+                "PULLWISE_CODEX_USE_LATEST": "1" if codex_options.get("use_latest", True) else "0",
+                "PULLWISE_CODEX_INSTALLER_URL": CODEX_CLI_INSTALLER_URL,
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
                 "PULLWISE_CODEX_TIMEOUT_SECONDS": codex_timeout_seconds,
@@ -1049,8 +1087,10 @@ def worker_install_command(
     worker_name: str,
     worker_package: str,
     provider_chain: str,
+    codex_release: str = "latest",
 ) -> str:
     script_hash = worker_install_script_sha256()
+    codex_release_text = public_issue_text(codex_release) or "latest"
     return (
         "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
         "export PULLWISE_WORKER_TOKEN; "
@@ -1063,7 +1103,8 @@ def worker_install_command(
         f"--worker-id {shell_quote(worker_id)} "
         f"--worker-name {shell_quote(worker_name)} "
         f"--package {shell_quote(worker_package)} "
-        f"--provider-chain {shell_quote(provider_chain)}"
+        f"--provider-chain {shell_quote(provider_chain)} "
+        f"--codex-release {shell_quote(codex_release_text)}"
     )
 
 
@@ -1091,6 +1132,8 @@ PROVIDER="codex"
 PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
 CODEX_COMMAND="${PULLWISE_CODEX_COMMAND:-}"
+CODEX_RELEASE="${PULLWISE_CODEX_RELEASE:-latest}"
+CODEX_INSTALLER_URL="${PULLWISE_CODEX_INSTALLER_URL:-__CODEX_CLI_INSTALLER_URL__}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -1102,6 +1145,8 @@ while [ "$#" -gt 0 ]; do
     --provider) PROVIDER="${2:-codex}"; shift 2 ;;
     --provider-chain) PROVIDER_CHAIN="${2:-}"; shift 2 ;;
     --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
+    --codex-release|--codex-version) CODEX_RELEASE="${2:-}"; shift 2 ;;
+    --codex-latest) CODEX_RELEASE="latest"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -1208,19 +1253,6 @@ if sys.version_info < (3, 10):
 PY
   PYTHON_BIN="$(python3.10 -c 'import sys; print(sys.executable)')"
 }
-node20_available() {
-  command -v node >/dev/null 2>&1 || return 1
-  node --version 2>/dev/null | sed -n 's/^v\([0-9][0-9]*\).*/\1/p' | awk '{ exit ($1 >= 20 ? 0 : 1) }'
-}
-ensure_node_runtime() {
-  if node20_available && command -v npm >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Node.js 20+ and npm are required for the Codex provider." >&2
-  echo "Install a trusted, pinned Node.js runtime before running this installer." >&2
-  exit 1
-}
-
 ensure_command_available "sha256sum" sha256sum coreutils
 safe_worker_id() {
   local raw safe digest prefix
@@ -1426,8 +1458,54 @@ ensure_scoped_command_path() {
       ;;
   esac
 }
+validate_codex_release() {
+  local release="${1:-latest}"
+  case "$release" in
+    rust-v*) release="${release#rust-v}" ;;
+    v*) release="${release#v}" ;;
+  esac
+  if [ "$release" = "latest" ]; then
+    return 0
+  fi
+  if ! printf '%s\n' "$release" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)(\.[0-9]+)?)?$'; then
+    echo "Invalid Codex release version: ${1:-}. Expected latest or x.y.z[-alpha[.N]|-beta[.N]]." >&2
+    exit 2
+  fi
+}
+ensure_codex_cli() {
+  local release="${CODEX_RELEASE:-latest}"
+  local installer_path codex_install_dir
+  validate_codex_release "$release"
+  if [ -z "$CODEX_COMMAND" ]; then
+    CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex" || true)"
+  fi
+  if [ -z "$CODEX_COMMAND" ]; then
+    CODEX_COMMAND="$DATA_DIR/.local/bin/codex"
+  fi
+  ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
+  if [ "${CODEX_COMMAND##*/}" != "codex" ]; then
+    echo "Codex command path must end with /codex so the official installer can create it: $CODEX_COMMAND" >&2
+    exit 1
+  fi
+  codex_install_dir="${CODEX_COMMAND%/*}"
+  install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$codex_install_dir"
+  installer_path="$(mktemp)"
+  trap 'rm -f "$installer_path"' RETURN
+  curl -fsSL "$CODEX_INSTALLER_URL" -o "$installer_path"
+  chmod 0755 "$installer_path"
+  echo "Installing Codex CLI release $release into $codex_install_dir"
+  if ! run_as_service_user env CODEX_RELEASE="$release" CODEX_INSTALL_DIR="$codex_install_dir" CODEX_NON_INTERACTIVE=1 "$installer_path" --release "$release"; then
+    echo "Codex CLI install failed." >&2
+    exit 1
+  fi
+  [ -x "$CODEX_COMMAND" ] || {
+    echo "Codex CLI install completed but $CODEX_COMMAND was not created." >&2
+    exit 1
+  }
+}
 ensure_python_runtime
 ensure_command_available "git" git git
+ensure_command_available "curl" curl curl
 ensure_command_available "getent" getent libc-bin
 ensure_command_available "install" install coreutils
 ensure_command_available "runuser" runuser util-linux
@@ -1435,10 +1513,6 @@ ensure_command_available "systemctl" systemctl systemd
 ensure_command_available "tar" tar tar
 ensure_command_available "useradd" useradd passwd
 ensure_command_available "userdel" userdel passwd
-if provider_chain_has codex; then
-  ensure_node_runtime
-fi
-
 ROLLBACK_ENABLED=1
 if id "$SERVICE_USER" >/dev/null 2>&1; then
   existing_home="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
@@ -1458,13 +1532,7 @@ if [ ! -f "$CODEX_HOME/config.toml" ]; then
 fi
 
 if provider_chain_has codex; then
-  if [ -n "$CODEX_COMMAND" ]; then
-    ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
-  elif ! CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex")"; then
-    echo "Codex CLI is required but was not found under $DATA_DIR/.local/bin/codex or $DATA_DIR/.codex/bin/codex." >&2
-    echo "Install a trusted, pinned Codex CLI into the worker home before running this installer, or set PULLWISE_CODEX_COMMAND to that scoped executable." >&2
-    exit 1
-  fi
+  ensure_codex_cli
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi
 
@@ -1522,6 +1590,8 @@ write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
 if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
+  write_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"
+  write_env_value PULLWISE_CODEX_INSTALLER_URL "$CODEX_INSTALLER_URL"
   write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
@@ -1678,6 +1748,7 @@ echo "Worker home: $DATA_DIR"
 """
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
+        .replace("__CODEX_CLI_INSTALLER_URL__", CODEX_CLI_INSTALLER_URL)
         .replace("__PULLWISE_CODEX_TIMEOUT_SECONDS__", str(system_config.worker_codex_timeout_seconds()))
         .replace("\r\n", "\n")
     )

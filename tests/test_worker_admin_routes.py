@@ -1191,8 +1191,30 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_TIMEOUT_SECONDS"], "900")
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "latest")
+        self.assertIn("--codex-release 'latest'", handler.payload["install_commands"]["standard"])
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS"], "1800")
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_TURNS"], "8")
+
+    def test_admin_worker_create_can_pin_codex_cli_release(self) -> None:
+        handler = RouteHarness(
+            "/admin/workers",
+            {
+                "name": "Pinned Codex worker",
+                "provider": "codex",
+                "providerChain": ["codex"],
+                "codexUseLatest": False,
+                "codexVersion": "0.13.0",
+            },
+            cookie=self.admin_cookie,
+        )
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "0.13.0")
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_USE_LATEST"], "0")
+        self.assertIn("--codex-release '0.13.0'", handler.payload["install_commands"]["standard"])
 
     def test_install_worker_script_writes_configured_codex_timeout_env(self) -> None:
         with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):
