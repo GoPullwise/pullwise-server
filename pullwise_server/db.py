@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import base64
 import binascii
@@ -840,6 +840,25 @@ def ensure_column(connection: sqlite3.Connection, table: str, column: str, defin
 def reconcile_worker_uninstall_deletes(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
+        UPDATE worker_commands
+        SET status = 'succeeded',
+            completed_at = COALESCE(completed_at, updated_at, created_at, strftime('%s', 'now')),
+            updated_at = COALESCE(updated_at, created_at, strftime('%s', 'now'))
+        WHERE command = 'uninstall'
+          AND status IN ('pending', 'running')
+          AND EXISTS (
+              SELECT 1
+              FROM workers
+              WHERE workers.worker_id = worker_commands.worker_id
+                AND workers.deleted_at IS NULL
+                AND workers.token_last_used_at IS NULL
+                AND workers.last_heartbeat_at IS NULL
+                AND workers.registered_at IS NULL
+          )
+        """
+    )
+    connection.execute(
+        """
         UPDATE workers
         SET enabled = 0,
             disabled_at = COALESCE(
@@ -925,6 +944,13 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
         "doctor_checked_at",
         "machine_metrics",
         "machine_metrics_history",
+        "protocol_version",
+        "worker_group",
+        "worker_capabilities",
+        "worker_isolation",
+        "worker_platform",
+        "registration_json",
+        "registered_at",
         "status",
         "first_seen_at",
         "last_heartbeat_at",
@@ -968,6 +994,13 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
             doctor_checked_at INTEGER,
             machine_metrics TEXT,
             machine_metrics_history TEXT,
+            protocol_version TEXT,
+            worker_group TEXT,
+            worker_capabilities TEXT,
+            worker_isolation TEXT,
+            worker_platform TEXT,
+            registration_json TEXT,
+            registered_at INTEGER,
             status TEXT NOT NULL DEFAULT 'online',
             first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
             last_heartbeat_at INTEGER,

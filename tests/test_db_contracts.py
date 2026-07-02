@@ -551,6 +551,18 @@ class DatabaseContractsTest(unittest.TestCase):
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
                 db.initialize()
                 db.create_worker({"worker_id": "wk_legacy_uninstall", "name": "Legacy uninstall worker"})
+                db.upsert_worker_heartbeat(
+                    {
+                        "worker_id": "wk_legacy_uninstall",
+                        "provider": "codex",
+                        "version": "0.4.18",
+                        "running_jobs": 0,
+                        "doctor_status": "ok",
+                        "codex_ready": 1,
+                        "ready_providers": ["codex"],
+                        "timestamp": 120,
+                    }
+                )
                 with closing(sqlite3.connect(db_path)) as connection:
                     with connection:
                         connection.execute(
@@ -570,6 +582,37 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(worker["enabled"], 0)
         self.assertEqual(worker["disabled_at"], 123)
         self.assertIsNone(worker["deleted_at"])
+
+    def test_initialize_soft_deletes_uncontacted_pending_uninstall_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                db.initialize()
+                db.create_worker({"worker_id": "wk_uncontacted_uninstall", "name": "Uncontacted uninstall worker"})
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            INSERT INTO worker_commands (
+                                id, worker_id, command, status, created_at, updated_at
+                            )
+                            VALUES ('cmd_uncontacted_uninstall', 'wk_uncontacted_uninstall', 'uninstall', 'pending', 123, 123)
+                            """
+                        )
+
+                db.initialize()
+
+                self.assertIsNone(db.get_worker("wk_uncontacted_uninstall"))
+                deleted = db.get_worker("wk_uncontacted_uninstall", include_deleted=True)
+                command = db.get_worker_command(
+                    "cmd_uncontacted_uninstall", worker_id="wk_uncontacted_uninstall"
+                )
+
+        self.assertIsNotNone(deleted)
+        self.assertEqual(deleted["enabled"], 0)
+        self.assertEqual(deleted["deleted_at"], 123)
+        self.assertEqual(command["status"], "succeeded")
+        self.assertEqual(command["completed_at"], 123)
 
     def test_initialize_soft_deletes_legacy_succeeded_uninstall_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
