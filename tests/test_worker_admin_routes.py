@@ -1788,6 +1788,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
     def test_admin_delete_worker_queues_uninstall_without_server_host_cleanup(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
+        heartbeat = self.post_v1_heartbeat(worker_id, token)
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         with patch.object(app.subprocess, "run", side_effect=AssertionError("admin delete must not run host cleanup")):
             delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
@@ -1818,6 +1820,44 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.UNAUTHORIZED)
+
+    def test_admin_delete_worker_without_host_contact_completes_registry_cleanup(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+        worker = db.get_worker(worker_id)
+        self.assertIsNone(worker["token_last_used_at"])
+        self.assertIsNone(worker["last_heartbeat_at"])
+        self.assertIsNone(worker["registered_at"])
+
+        with patch.object(app.subprocess, "run", side_effect=AssertionError("admin delete must not run host cleanup")):
+            delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(delete, "DELETE")
+
+        self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
+        self.assertTrue(delete.payload["deleted"])
+        self.assertTrue(delete.payload["deleteQueued"])
+        self.assertEqual(delete.payload["cleanup_status"], "succeeded")
+        command = delete.payload["command"]
+        self.assertEqual(command["command"], "uninstall")
+        self.assertEqual(command["status"], "succeeded")
+        self.assertIsNone(db.get_worker(worker_id))
+        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+
+    def test_admin_delete_retries_stuck_uninstall_for_worker_without_host_contact(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+        stale_command = db.create_worker_command({"worker_id": worker_id, "command": "uninstall", "created_at": 123})
+        self.assertIsNotNone(stale_command)
+
+        delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(delete, "DELETE")
+
+        self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
+        self.assertTrue(delete.payload["deleted"])
+        self.assertTrue(delete.payload["alreadyQueued"])
+        self.assertEqual(delete.payload["command"]["id"], stale_command["id"])
+        self.assertEqual(delete.payload["command"]["status"], "succeeded")
+        self.assertIsNone(db.get_worker(worker_id))
 
     def test_admin_can_queue_worker_stop_and_uninstall_commands(self) -> None:
         payload, token = self.create_worker()

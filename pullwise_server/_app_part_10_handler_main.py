@@ -2540,7 +2540,35 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         return self.json({"worker": worker_public_payload(updated or worker, admin=True)})
 
-    def create_or_reuse_worker_uninstall_command(self, session: dict, worker_id: str, *, action_name: str) -> tuple[dict | None, bool]:
+    def worker_host_lifecycle_contact_seen(self, worker: dict | None) -> bool:
+        if not isinstance(worker, dict):
+            return False
+        return any(
+            pull_request_timestamp(worker.get(field))
+            for field in ("token_last_used_at", "last_heartbeat_at", "registered_at")
+        )
+
+    def complete_worker_uninstall_without_host_cleanup(self, command: dict | None) -> dict | None:
+        if not command:
+            return command
+        completed = db.update_worker_command_status(
+            {
+                "id": command.get("id"),
+                "worker_id": command.get("worker_id"),
+                "status": "succeeded",
+                "timestamp": now(),
+            }
+        )
+        return completed or command
+
+    def create_or_reuse_worker_uninstall_command(
+        self,
+        session: dict,
+        worker_id: str,
+        *,
+        action_name: str,
+        complete_without_host_cleanup: bool = False,
+    ) -> tuple[dict | None, bool]:
         try:
             command = db.create_worker_command(
                 {
@@ -2551,12 +2579,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "created_at": now(),
                 }
             )
+            if complete_without_host_cleanup:
+                command = self.complete_worker_uninstall_without_host_cleanup(command)
             return command, False
         except ValueError as exc:
             active = db.get_next_worker_command(worker_id)
             active_command = public_issue_text(active.get("command") if active else "").lower()
             active_status = public_issue_text(active.get("status") if active else "").lower()
             if active_command == "uninstall" and active_status in {"pending", "running"}:
+                if complete_without_host_cleanup:
+                    active = self.complete_worker_uninstall_without_host_cleanup(active)
                 return active, True
             self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
             self.error(HTTPStatus.CONFLICT, str(exc))
@@ -3019,13 +3051,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return
         if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
             worker_id = clean_github_access_text(segments[2]) or ""
-            if not db.get_worker(worker_id, worker_scope=db.WORKER_SCOPE_SHARED):
+            existing_worker = db.get_worker(worker_id, worker_scope=db.WORKER_SCOPE_SHARED)
+            if not existing_worker:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
+            complete_without_host_cleanup = not self.worker_host_lifecycle_contact_seen(existing_worker)
             worker_command, reused_command = self.create_or_reuse_worker_uninstall_command(
                 session,
                 worker_id,
                 action_name="delete_worker",
+                complete_without_host_cleanup=complete_without_host_cleanup,
             )
             if worker_command is None:
                 return
@@ -3036,7 +3071,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not worker:
                 self.audit_worker_action(session, "delete_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
-            if not reused_command:
+            if not reused_command or complete_without_host_cleanup:
                 self.audit_worker_action(
                     session,
                     "delete_worker",
@@ -3045,18 +3080,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "deleteQueued": True,
                         "command": "uninstall",
                         "commandId": worker_command.get("id"),
+                        **({"cleanupStatus": "succeeded", "cleanupWithoutHostContact": True} if complete_without_host_cleanup else {}),
                     },
                 )
-            return self.json(
-                {
-                    "worker": worker_public_payload(worker, admin=True),
-                    "command": worker_command_payload(worker_command, admin=True),
-                    "deleteQueued": True,
-                    "deleted": bool(worker.get("deleted_at")),
-                    "alreadyQueued": reused_command,
-                },
-                HTTPStatus.ACCEPTED,
-            )
+            response = {
+                "worker": worker_public_payload(worker, admin=True),
+                "command": worker_command_payload(worker_command, admin=True),
+                "deleteQueued": True,
+                "deleted": bool(worker.get("deleted_at")),
+                "alreadyQueued": reused_command,
+            }
+            if complete_without_host_cleanup:
+                response["cleanup_status"] = "succeeded"
+                response["cleanupStatus"] = "succeeded"
+            return self.json(response, HTTPStatus.ACCEPTED)
         if len(segments) == 3 and segments[:2] == ["admin", "users"]:
             user_id = clean_github_access_text(segments[2]) or ""
             try:
