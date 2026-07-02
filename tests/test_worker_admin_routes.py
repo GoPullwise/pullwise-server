@@ -727,7 +727,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             repeated = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(repeated.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 2)
-    def test_worker_alert_email_failure_is_retried_instead_of_deduped(self) -> None:
+    def test_worker_alert_email_failure_is_deduped_until_recovery(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
         degraded = {
@@ -742,14 +742,29 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             first = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(first.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 1)
-            state = db.load_state_item("alert_notifications") or {}
-            self.assertNotIn(f"worker:{worker_id}:degraded", state.get("active", {}))
+            state = db.load_state_item("alert_notifications")
+            alert_state = state["active"][f"worker:{worker_id}:degraded"]
+            self.assertFalse(alert_state["emailDelivered"])
 
             second = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(second.status, HTTPStatus.OK)
+            self.assertEqual(send_alert.call_count, 1)
+
+            ready = {
+                "worker_id": worker_id,
+                "doctor_status": "ok",
+                "codex_ready": True,
+                "readyProviders": ["codex"],
+            }
+            recovered = self.post_v1_heartbeat(worker_id, token, **ready)
+            self.assertEqual(recovered.status, HTTPStatus.OK)
+
+            repeated = self.post_v1_heartbeat(worker_id, token, **degraded)
+            self.assertEqual(repeated.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 2)
             state = db.load_state_item("alert_notifications")
-            self.assertIn(f"worker:{worker_id}:degraded", state["active"])
+            alert_state = state["active"][f"worker:{worker_id}:degraded"]
+            self.assertTrue(alert_state["emailDelivered"])
 
     def test_scan_system_alert_email_is_sent_once_per_active_problem(self) -> None:
         with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:

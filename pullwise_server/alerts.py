@@ -290,15 +290,17 @@ def _sync_alerts(alerts, clear_prefixes):
         for key, alert in alerts.items():
             if key in active:
                 continue
-            attempted = send_alert_email(alert.get('subject'), alert.get('body'))
-            if not attempted:
-                continue
-            active[key] = {
-                'sentAt': current_time,
+            email_delivered = send_alert_email(alert.get('subject'), alert.get('body'))
+            entry = {
+                'attemptedAt': current_time,
                 'subject': _clean_text(alert.get('subject'), 300),
                 'kind': _clean_text(alert.get('kind'), 60),
                 'status': _clean_text(alert.get('status'), 60),
+                'emailDelivered': bool(email_delivered),
             }
+            if email_delivered:
+                entry['sentAt'] = current_time
+            active[key] = entry
             changed = True
         if changed:
             _save_active(active)
