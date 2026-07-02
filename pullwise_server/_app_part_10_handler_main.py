@@ -2541,6 +2541,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json({"worker": worker_public_payload(updated or worker, admin=True)})
 
     def worker_host_lifecycle_contact_seen(self, worker: dict | None) -> bool:
+        # No token use means neither the worker nor its host watcher ever reached the server.
         if not isinstance(worker, dict):
             return False
         return any(
