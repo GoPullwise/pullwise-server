@@ -43,6 +43,9 @@ class WorkerRetryPolicyTest(unittest.TestCase):
             )
         )
 
+    def test_scan_status_mapper_preserves_partial_completed(self) -> None:
+        self.assertEqual(app.scan_status_from_job_status("partial_completed"), "partial_completed")
+
     def test_success_is_never_sent_to_failure_retry_policy(self) -> None:
         self.assertFalse(app.worker_result_allows_auto_retry({}, status="done"))
 
