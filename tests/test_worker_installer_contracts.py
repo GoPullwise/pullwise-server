@@ -67,6 +67,11 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$WORKER_ID"', script)
         self.assertIn('CODEX_HOME="$WORKER_RUNTIME_ROOT/codex-home"', script)
         self.assertIn('CODEX_SQLITE_HOME="$WORKER_RUNTIME_ROOT/codex-sqlite"', script)
+        self.assertIn('SERVICE_TOOL_PATH="$WORKER_RUNTIME_ROOT/.local/bin:$WORKER_RUNTIME_ROOT/.codex/bin:$CODEX_HOME/bin:$SERVICE_PATH"', script)
+        self.assertIn('CODEX_COMMAND="$(scoped_command_path "$WORKER_RUNTIME_ROOT/.local/bin/codex" "$CODEX_HOME/bin/codex" || true)"', script)
+        self.assertIn('CODEX_COMMAND="$WORKER_RUNTIME_ROOT/.local/bin/codex"', script)
+        self.assertIn('useradd --system --home "$WORKER_RUNTIME_ROOT" --shell /usr/sbin/nologin "$SERVICE_USER"', script)
+        self.assertIn('WorkingDirectory=$WORKER_RUNTIME_ROOT', script)
         self.assertIn('CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME"', script)
         self.assertIn('CODEX_SQLITE_HOME=%q', script)
         self.assertIn('"$CODEX_SQLITE_HOME"', script)
@@ -74,6 +79,7 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('write_env_value PULLWISE_CODEX_HOME "$CODEX_HOME"', script)
         self.assertIn('write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"', script)
         self.assertIn('write_env_value PULLWISE_WORKER_ROOT "$WORKER_RUNTIME_ROOT"', script)
+        self.assertIn('write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"', script)
         self.assertIn('export CODEX_HOME="\\${PULLWISE_CODEX_HOME:-\\$WORKER_ROOT/codex-home}"', script)
         self.assertIn('export CODEX_SQLITE_HOME="\\${PULLWISE_CODEX_SQLITE_HOME:-\\$WORKER_ROOT/codex-sqlite}"', script)
         self.assertIn("Environment=CODEX_HOME=$CODEX_HOME", script)
@@ -173,9 +179,9 @@ class WorkerInstallerContractsTest(unittest.TestCase):
 
         self.assertIn('if id "$SERVICE_USER" >/dev/null 2>&1; then', script)
         self.assertIn('existing_home="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"', script)
-        self.assertIn('if [ "$existing_home" != "$DATA_DIR" ]; then', script)
+        self.assertIn('if [ "$existing_home" != "$WORKER_RUNTIME_ROOT" ] && [ "$existing_home" != "$DATA_DIR" ]; then', script)
         self.assertIn("already exists with home", script)
-        self.assertIn('useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"', script)
+        self.assertIn('useradd --system --home "$WORKER_RUNTIME_ROOT" --shell /usr/sbin/nologin "$SERVICE_USER"', script)
 
     def test_installer_bootstraps_python_and_official_scoped_codex_installer(self) -> None:
         script = app.worker_install_script()

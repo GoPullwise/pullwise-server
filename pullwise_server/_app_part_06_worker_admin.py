@@ -1032,6 +1032,7 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
         "PULLWISE_PROVIDER": provider_chain[0],
         "PULLWISE_PROVIDER_CHAIN": provider_chain_text,
         "PULLWISE_CHECKOUT_ROOT": f"{service_home}/checkouts",
+        "PULLWISE_WORKER_ROOT": f"{service_home}/workers/{public['worker_id']}",
         "PULLWISE_LOG_DIR": service_log_dir,
         "PULLWISE_WORKER_PACKAGE": worker_package,
         "PULLWISE_SERVICE_HOME": service_home,
@@ -1049,7 +1050,9 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     if "codex" in provider_chain:
         suggested_env.update(
             {
-                "PULLWISE_CODEX_COMMAND": f"{service_home}/.local/bin/codex",
+                "PULLWISE_CODEX_COMMAND": f"{service_home}/workers/{public['worker_id']}/.local/bin/codex",
+                "PULLWISE_CODEX_HOME": f"{service_home}/workers/{public['worker_id']}/codex-home",
+                "PULLWISE_CODEX_SQLITE_HOME": f"{service_home}/workers/{public['worker_id']}/codex-sqlite",
                 "PULLWISE_CODEX_RELEASE": codex_release,
                 "PULLWISE_CODEX_USE_LATEST": "1" if codex_options.get("use_latest", True) else "0",
                 "PULLWISE_CODEX_INSTALLER_URL": CODEX_CLI_INSTALLER_URL,
@@ -1405,9 +1408,9 @@ if [ -z "$PROVIDER_CHAIN" ]; then
   exit 2
 fi
 PROVIDER="${PROVIDER_CHAIN%%,*}"
-SERVICE_TOOL_PATH="$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$SERVICE_PATH"
 CODEX_HOME="$WORKER_RUNTIME_ROOT/codex-home"
 CODEX_SQLITE_HOME="$WORKER_RUNTIME_ROOT/codex-sqlite"
+SERVICE_TOOL_PATH="$WORKER_RUNTIME_ROOT/.local/bin:$WORKER_RUNTIME_ROOT/.codex/bin:$CODEX_HOME/bin:$SERVICE_PATH"
 XDG_CONFIG_HOME="$WORKER_RUNTIME_ROOT/.config"
 XDG_CACHE_HOME="$WORKER_RUNTIME_ROOT/.cache"
 XDG_DATA_HOME="$WORKER_RUNTIME_ROOT/.local/share"
@@ -1479,10 +1482,10 @@ ensure_codex_cli() {
   local installer_path codex_install_dir
   validate_codex_release "$release"
   if [ -z "$CODEX_COMMAND" ]; then
-    CODEX_COMMAND="$(scoped_command_path "$DATA_DIR/.local/bin/codex" "$DATA_DIR/.codex/bin/codex" || true)"
+    CODEX_COMMAND="$(scoped_command_path "$WORKER_RUNTIME_ROOT/.local/bin/codex" "$CODEX_HOME/bin/codex" || true)"
   fi
   if [ -z "$CODEX_COMMAND" ]; then
-    CODEX_COMMAND="$DATA_DIR/.local/bin/codex"
+    CODEX_COMMAND="$WORKER_RUNTIME_ROOT/.local/bin/codex"
   fi
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
   if [ "${CODEX_COMMAND##*/}" != "codex" ]; then
@@ -1518,17 +1521,17 @@ ensure_command_available "userdel" userdel passwd
 ROLLBACK_ENABLED=1
 if id "$SERVICE_USER" >/dev/null 2>&1; then
   existing_home="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
-  if [ "$existing_home" != "$DATA_DIR" ]; then
-    echo "service user $SERVICE_USER already exists with home $existing_home; expected $DATA_DIR" >&2
+  if [ "$existing_home" != "$WORKER_RUNTIME_ROOT" ] && [ "$existing_home" != "$DATA_DIR" ]; then
+    echo "service user $SERVICE_USER already exists with home $existing_home; expected $WORKER_RUNTIME_ROOT" >&2
     exit 1
   fi
 else
-  useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+  useradd --system --home "$WORKER_RUNTIME_ROOT" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
 install -d -m 0755 -o root -g root "$BASE_DATA_DIR" "$BASE_LOG_DIR"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$WORKER_RUNTIME_ROOT" "$LOG_DIR" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin" "$DATA_DIR/.codex/bin"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$WORKER_RUNTIME_ROOT/.local" "$WORKER_RUNTIME_ROOT/.local/bin" "$WORKER_RUNTIME_ROOT/.codex" "$WORKER_RUNTIME_ROOT/.codex/bin" "$CODEX_HOME/bin"
 if [ ! -f "$CODEX_HOME/config.toml" ]; then
   install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"
 fi
@@ -1657,7 +1660,7 @@ export XDG_CONFIG_HOME="\$WORKER_ROOT/.config"
 export XDG_CACHE_HOME="\$WORKER_ROOT/.cache"
 export XDG_DATA_HOME="\$WORKER_ROOT/.local/share"
 SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-export PATH="\$SERVICE_HOME/.local/bin:\$SERVICE_HOME/.codex/bin:\$SERVICE_PATH"
+export PATH="\$WORKER_ROOT/.local/bin:\$WORKER_ROOT/.codex/bin:\$CODEX_HOME/bin:\$SERVICE_PATH"
 PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
@@ -1675,7 +1678,7 @@ StartLimitBurst=5
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
-WorkingDirectory=$DATA_DIR
+WorkingDirectory=$WORKER_RUNTIME_ROOT
 EnvironmentFile=$ENV_FILE
 Environment=PATH=$SERVICE_TOOL_PATH
 Environment=HOME=$WORKER_RUNTIME_ROOT

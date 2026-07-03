@@ -1205,6 +1205,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
+        worker_root = handler.payload["suggested_env"]["PULLWISE_WORKER_ROOT"]
+        self.assertTrue(worker_root.endswith(f"/workers/{handler.payload['worker_id']}"))
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_COMMAND"], f"{worker_root}/.local/bin/codex")
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_HOME"], f"{worker_root}/codex-home")
+        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_SQLITE_HOME"], f"{worker_root}/codex-sqlite")
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_TIMEOUT_SECONDS"], "900")
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "latest")
         self.assertIn("--codex-release 'latest'", handler.payload["install_commands"]["standard"])

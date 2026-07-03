@@ -15,20 +15,20 @@ or another worker instance's auth state.
 
 - Generated install commands and suggested env must point provider commands at
   the target worker home, for example:
-  - `$DATA_DIR/.local/bin/codex`
-  - `$DATA_DIR/.codex/bin/codex`
+  - `$WORKER_RUNTIME_ROOT/.local/bin/codex`
+  - `$CODEX_HOME/bin/codex`
 - The installer, saved auth commands, and systemd unit must use the same
   instance-scoped environment:
-  - `HOME=$DATA_DIR`
-  - `USERPROFILE=$DATA_DIR`
-  - `CODEX_HOME=$DATA_DIR/.codex`
-  - `XDG_CONFIG_HOME=$DATA_DIR/.config`
-  - `XDG_CACHE_HOME=$DATA_DIR/.cache`
-  - `XDG_DATA_HOME=$DATA_DIR/.local/share`
-  - `PATH` with this worker's `$DATA_DIR/.local/bin`, `$DATA_DIR/.codex/bin`,
+  - `HOME=$WORKER_RUNTIME_ROOT`
+  - `USERPROFILE=$WORKER_RUNTIME_ROOT`
+  - `CODEX_HOME=$WORKER_RUNTIME_ROOT/codex-home`
+  - `XDG_CONFIG_HOME=$WORKER_RUNTIME_ROOT/.config`
+  - `XDG_CACHE_HOME=$WORKER_RUNTIME_ROOT/.cache`
+  - `XDG_DATA_HOME=$WORKER_RUNTIME_ROOT/.local/share`
+  - `PATH` with this worker's `$WORKER_RUNTIME_ROOT/.local/bin`, `$WORKER_RUNTIME_ROOT/.codex/bin`, `$CODEX_HOME/bin`,
     before the base service path
 - The installer should create the per-worker config/cache/auth directories under
-  `$DATA_DIR`.
+  `$WORKER_RUNTIME_ROOT`.
 - The installer-time readiness output and a later `doctor` run with no
   intervening manual action must agree. `doctor` must not appear ready because
   it sees root/global auth or another worker's provider config.
