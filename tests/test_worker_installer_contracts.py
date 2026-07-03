@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+import tempfile
 import unittest
 
 from pullwise_server import app
@@ -51,6 +52,36 @@ def instance_metadata(script: str, worker_id: str) -> dict[str, str]:
         "data_dir": data_dir,
         "log_dir": log_dir,
     }
+
+
+def ubuntu_dependency_support_helper(script: str) -> str:
+    start = script.index("read_os_value() {")
+    end = script.index("auto_install_enabled() {")
+    return (
+        script[start:end]
+        + '\nPULLWISE_WORKER_OS_RELEASE_FILE="$1"\n'
+        + "if is_ubuntu_2204_or_newer; then printf supported; else printf unsupported; fi\n"
+    )
+
+
+def ubuntu_dependency_support(script: str, os_release: str) -> str:
+    bash = shutil.which("bash")
+    if not bash:
+        raise unittest.SkipTest("bash is required for installer contract tests.")
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8") as os_file:
+        os_file.write(os_release)
+        os_file.flush()
+        result = subprocess.run(
+            [bash, "-c", ubuntu_dependency_support_helper(script), "_", os_file.name],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr + result.stdout)
+    return result.stdout.strip()
 
 
 class WorkerInstallerContractsTest(unittest.TestCase):
@@ -213,12 +244,16 @@ class WorkerInstallerContractsTest(unittest.TestCase):
     def test_installer_bootstraps_python_and_official_scoped_codex_installer(self) -> None:
         script = app.worker_install_script()
 
-        self.assertIn("install_ubuntu_packages python3.10 python3.10-venv python3-pip", script)
+        self.assertIn("install_ubuntu_packages python3 python3-venv python3-pip", script)
+        self.assertIn("is_ubuntu_2204_or_newer", script)
+        self.assertIn("Ubuntu 22.04 or newer Linux hosts", script)
+        self.assertNotIn("Automatic installation is supported on Ubuntu 22.04 hosts", script)
         self.assertIn('ensure_command_available "bwrap" bwrap bubblewrap', script)
-        self.assertIn("Pullwise worker requires Python 3.10 or newer.", script)
+        self.assertIn("Python 3.10 or newer with pip is still unavailable", script)
         self.assertNotIn("Pullwise worker requires Python 3.9", script)
-        self.assertIn('PYTHON_BIN="$(python3.10 -c', script)
-        self.assertIn('PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"', script)
+        self.assertIn('for candidate in "${PULLWISE_PYTHON_BIN:-}" python3.10 python3', script)
+        self.assertIn('PYTHON_BIN="$("$candidate" -c', script)
+        self.assertIn('PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"', script)
         self.assertIn('"$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"', script)
         self.assertIn('ensure_command_available "tar" tar tar', script)
         self.assertIn('ensure_command_available "curl" curl curl', script)
@@ -231,6 +266,22 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertNotIn("ensure_nodesource_nodejs", script)
         self.assertNotIn("@openai/codex", script)
         self.assertNotRegex(script, r"\|\s*(?:sh|bash)\b")
+
+    def test_dependency_auto_install_supports_ubuntu_2204_or_newer(self) -> None:
+        script = app.worker_install_script()
+
+        self.assertEqual(
+            "unsupported",
+            ubuntu_dependency_support(script, 'ID="ubuntu"\nVERSION_ID="20.04"\n'),
+        )
+        self.assertEqual(
+            "supported",
+            ubuntu_dependency_support(script, 'ID="ubuntu"\nVERSION_ID="22.04"\n'),
+        )
+        self.assertEqual(
+            "supported",
+            ubuntu_dependency_support(script, 'ID="ubuntu"\nVERSION_ID="24.04"\n'),
+        )
 
     def test_worker_install_command_verifies_bootstrap_script_before_execution(self) -> None:
         command = app.worker_install_command(

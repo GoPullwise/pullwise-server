@@ -1187,8 +1187,20 @@ read_os_value() {
     esac
   done < "$os_file"
 }
-is_ubuntu_2204() {
-  [ "$(read_os_value ID)" = "ubuntu" ] && [ "$(read_os_value VERSION_ID)" = "22.04" ]
+is_ubuntu_2204_or_newer() {
+  [ "$(read_os_value ID)" = "ubuntu" ] || return 1
+  local version major minor
+  version="$(read_os_value VERSION_ID)"
+  major="${version%%.*}"
+  if [ "$version" = "$major" ]; then
+    minor=0
+  else
+    minor="${version#*.}"
+    minor="${minor%%.*}"
+  fi
+  case "$major" in ""|*[!0-9]*) return 1 ;; esac
+  case "$minor" in ""|*[!0-9]*) return 1 ;; esac
+  [ $((10#$major)) -gt 22 ] || { [ $((10#$major)) -eq 22 ] && [ $((10#$minor)) -ge 4 ]; }
 }
 auto_install_enabled() {
   case "${PULLWISE_WORKER_AUTO_INSTALL_DEPS:-1}" in
@@ -1210,14 +1222,14 @@ install_ubuntu_packages() {
     echo "Missing dependencies: ${packages[*]}. Dependency auto-install is disabled by PULLWISE_WORKER_AUTO_INSTALL_DEPS." >&2
     exit 1
   }
-  is_ubuntu_2204 || {
-    echo "Missing dependencies: ${packages[*]}. Automatic installation is supported on Ubuntu 22.04 hosts." >&2
+  is_ubuntu_2204_or_newer || {
+    echo "Missing dependencies: ${packages[*]}. Automatic dependency installation is supported on Ubuntu 22.04 or newer Linux hosts." >&2
     exit 1
   }
   local apt_get
   apt_get="$(apt_get_bin)"
   [ -n "$apt_get" ] || {
-    echo "Missing dependencies: ${packages[*]}. apt-get is required for Ubuntu 22.04 dependency installation." >&2
+    echo "Missing dependencies: ${packages[*]}. apt-get is required for Ubuntu dependency installation." >&2
     exit 1
   }
   echo "Installing Ubuntu packages: ${packages[*]}"
@@ -1237,24 +1249,37 @@ ensure_command_available() {
     exit 1
   }
 }
-ensure_python_runtime() {
-  if ! command -v python3.10 >/dev/null 2>&1 || ! python3.10 -m pip --version >/dev/null 2>&1; then
-    install_ubuntu_packages python3.10 python3.10-venv python3-pip
-  fi
-  command -v python3.10 >/dev/null 2>&1 || {
-    echo "python3.10 is still unavailable after installing Ubuntu packages." >&2
-    exit 1
-  }
-  python3.10 -m pip --version >/dev/null 2>&1 || {
-    echo "python3.10 pip is still unavailable after installing Ubuntu packages." >&2
-    exit 1
-  }
-  python3.10 - <<'PY'
+python_is_compatible() {
+  local candidate="$1"
+  command -v "$candidate" >/dev/null 2>&1 || return 1
+  "$candidate" - <<'PY' >/dev/null 2>&1
 import sys
-if sys.version_info < (3, 10):
-    raise SystemExit("Pullwise worker requires Python 3.10 or newer.")
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
 PY
-  PYTHON_BIN="$(python3.10 -c 'import sys; print(sys.executable)')"
+}
+python_has_pip() {
+  local candidate="$1"
+  "$candidate" -m pip --version >/dev/null 2>&1
+}
+ensure_python_runtime() {
+  local candidate
+  for candidate in "${PULLWISE_PYTHON_BIN:-}" python3.10 python3; do
+    [ -n "$candidate" ] || continue
+    if python_is_compatible "$candidate" && python_has_pip "$candidate"; then
+      PYTHON_BIN="$("$candidate" -c 'import sys; print(sys.executable)')"
+      return
+    fi
+  done
+  install_ubuntu_packages python3 python3-venv python3-pip
+  for candidate in "${PULLWISE_PYTHON_BIN:-}" python3.10 python3; do
+    [ -n "$candidate" ] || continue
+    if python_is_compatible "$candidate" && python_has_pip "$candidate"; then
+      PYTHON_BIN="$("$candidate" -c 'import sys; print(sys.executable)')"
+      return
+    fi
+  done
+  echo "Python 3.10 or newer with pip is still unavailable after installing Ubuntu packages." >&2
+  exit 1
 }
 ensure_command_available "sha256sum" sha256sum coreutils
 ensure_command_available "bwrap" bwrap bubblewrap
@@ -1458,8 +1483,8 @@ ensure_scoped_command_path() {
   local label="${2:-provider}"
   local resolved_home resolved_command
   [ -n "$command_path" ] || return 0
-  resolved_home="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
-  resolved_command="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
+  resolved_home="$("${PYTHON_BIN:-python3}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
+  resolved_command="$("${PYTHON_BIN:-python3}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
   case "$resolved_command/" in
     "$resolved_home"/*) ;;
     *)
@@ -1666,7 +1691,7 @@ export XDG_CACHE_HOME="\$WORKER_ROOT/.cache"
 export XDG_DATA_HOME="\$WORKER_ROOT/.local/share"
 SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 export PATH="\$WORKER_ROOT/.local/bin:\$WORKER_ROOT/.codex/bin:\$CODEX_HOME/bin:\$SERVICE_PATH"
-PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"
+PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
 chmod 0755 "$BIN_PATH"
@@ -1783,4 +1808,3 @@ def worker_test_payload(worker: dict) -> dict:
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}
-
