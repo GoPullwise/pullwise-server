@@ -406,6 +406,20 @@ def public_review_run_artifact_payload(row: dict) -> dict:
     return {key: value for key, value in payload.items() if value not in ("", None) and value != {}}
 
 
+
+def review_run_debug_bundle_url(artifacts: list[dict]) -> str:
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        kind = public_issue_text(artifact.get("kind"))
+        name = public_issue_text(artifact.get("name"))
+        if kind != "debug_bundle" and name != "debug-bundle.zip":
+            continue
+        storage = artifact.get("storage") if isinstance(artifact.get("storage"), dict) else {}
+        url = public_issue_text(storage.get("url") or artifact.get("storageUrl") or artifact.get("url"))
+        if url:
+            return url
+    return ""
 def public_review_run_payload(scan: dict) -> dict:
     run_id = public_issue_text(scan.get("runId") or scan.get("run_id"))
     job_id = public_issue_text(scan.get("jobId") or scan.get("job_id"))
@@ -435,6 +449,7 @@ def public_review_run_payload(scan: dict) -> dict:
         "progress": public_review_run_json(run.get("progress_json")),
         "error": public_review_run_json(run.get("error_json")),
         "artifactCount": len(artifacts),
+        "debugBundleUrl": review_run_debug_bundle_url(artifacts),
         "artifacts": artifacts,
     }
     return {key: value for key, value in payload.items() if value not in ("", None) and value != {} and value != []}

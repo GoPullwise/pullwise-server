@@ -146,6 +146,14 @@ source of truth for worker-facing server behavior. The server owns the global
 job queue, leases at most one job to a worker, and must not add worker-side
 queue, prefetch, max-claim, or parallel job controls.
 
+Repository materialization is a worker responsibility in v1. The server must
+validate repository access, issue short-lived clone credentials, and include
+`clone_url`, branch, commit, `clone_token`, and `repositoryLimits` in the lease
+payload, but it must not assume the Pullwise Server host shares a checkout
+filesystem with the worker. Workers clone or copy the repository into their own
+isolated workspace and must reject empty checkouts before inventory/review
+phases run.
+
 Worker results use `review-worker-protocol/v1`: a stable result envelope plus a
 versioned artifact manifest. Server ingest must validate protocol version,
 worker/job/run/lease binding, execution status, summary, quality gate, required
@@ -208,11 +216,15 @@ breaking the required idle heartbeat concurrency shape.
 Each leased v1 run must also have a first-class `review_runs` row. Create or
 refresh it when a lease is issued, update its progress from accepted run events,
 and finalize it from the terminal result envelope by storing summary,
-quality-gate, usage, progress, error, and raw envelope JSON. Web/admin terminal
-views should read server-owned run state and artifact metadata instead of
-parsing raw worker artifact internals. Detailed scan payloads should expose this
-as a `reviewRun` object with public terminal state and artifact metadata, never
-raw artifact upload content or raw result envelopes.
+quality-gate, usage, progress, error, and raw envelope JSON. Retry attempts must
+not reuse a prior terminal run namespace: attempt 1 may use `run_<job_id>` for
+backward compatibility, while attempt N must use an attempt-scoped run id such
+as `run_<job_id>_attempt_<N>` so progress event sequences, artifacts, and result
+idempotency are isolated per attempt. Web/admin terminal views should read
+server-owned run state and artifact metadata instead of parsing raw worker
+artifact internals. Detailed scan payloads should expose this as a `reviewRun`
+object with public terminal state and artifact metadata, never raw artifact
+upload content or raw result envelopes.
 
 Completed runs require uploaded `report.human`, `report.agent`, `coverage`,
 `qa`, and `token_budget` artifacts. Failed and cancelled runs should accept a

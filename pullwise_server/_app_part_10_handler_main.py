@@ -54,6 +54,7 @@ WORKER_REVIEW_ARTIFACT_KINDS = {
     "intent_test_result",
     "intent_test_output",
     "disposable_test_patch",
+    "debug_bundle",
 }
 REVIEW_RUN_EVENT_TYPES = {
     "run_started",
@@ -339,8 +340,7 @@ def protocol_iso_time(timestamp: int | float | None = None) -> str:
 
 
 def scan_job_run_id(job: dict) -> str:
-    job_id = public_issue_text(job.get("job_id"))
-    return public_issue_text(job.get("run_id")) or (f"run_{job_id}" if job_id else "")
+    return scan_job_attempt_run_id(job)
 
 
 def scan_job_lease_id(job: dict) -> str:
@@ -348,17 +348,38 @@ def scan_job_lease_id(job: dict) -> str:
     return public_issue_text(job.get("lease_id")) or (f"lease_{job_id}" if job_id else "")
 
 
-def scan_job_for_run_id(run_id: object) -> dict | None:
+def scan_job_id_from_run_id(run_id: object) -> str:
     normalized = clean_github_access_text(run_id) or ""
     if not normalized.startswith("run_"):
-        return None
+        return ""
     job_id = normalized[len("run_") :]
+    if "_attempt_" in job_id:
+        candidate, attempt_text = job_id.rsplit("_attempt_", 1)
+        if candidate and attempt_text.isdigit():
+            job_id = candidate
+    return job_id
+
+
+def scan_job_for_run_id(run_id: object) -> dict | None:
+    normalized = clean_github_access_text(run_id) or ""
+    job_id = scan_job_id_from_run_id(normalized)
     if not job_id:
         return None
     job = db.get_scan_job(job_id)
     if not job or scan_job_run_id(job) != normalized:
         return None
     return job
+
+
+def scan_job_for_existing_run_id(run_id: object) -> dict | None:
+    normalized = clean_github_access_text(run_id) or ""
+    job_id = scan_job_id_from_run_id(normalized)
+    if not normalized or not job_id:
+        return None
+    review_run = db.get_review_run(normalized)
+    if not review_run or public_issue_text(review_run.get("job_id")) != job_id:
+        return None
+    return db.get_scan_job(job_id)
 
 
 def append_scan_progress_log(scan: dict, entry: dict) -> list[dict]:
@@ -3271,7 +3292,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "lease_id": payload["lease_id"],
             "lease_expires_at": protocol_iso_time(pull_request_timestamp(job.get("timeout_at"))) if pull_request_timestamp(job.get("timeout_at")) else None,
         }
-        db.upsert_review_run_claimed(job, protocol_version=WORKER_PROTOCOL_VERSION)
+        db.upsert_review_run_claimed({**job, "run_id": payload["run_id"], "lease_id": payload["lease_id"]}, protocol_version=WORKER_PROTOCOL_VERSION)
         return self.json({"lease": lease, "job": payload})
 
     def handle_worker_v1_register(self, body: dict, worker_record: dict) -> None:
@@ -3453,7 +3474,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         normalized_artifact_id = public_issue_text(artifact_id)
         if not normalized_run_id or not normalized_artifact_id:
             return self.error(HTTPStatus.NOT_FOUND, "Review artifact not found.")
-        job = scan_job_for_run_id(normalized_run_id)
+        job = scan_job_for_existing_run_id(normalized_run_id)
         if not job:
             return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
         scan_id = public_issue_text(job.get("scan_id"))
@@ -3489,7 +3510,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
 
     def handle_worker_run_result(self, run_id: str, body: dict, worker_record: dict) -> None:
-        job = scan_job_for_run_id(run_id)
+        job = scan_job_for_run_id(run_id) or scan_job_for_existing_run_id(run_id)
         if not job:
             return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
         return self.handle_worker_v1_job_result(public_issue_text(job.get("job_id")), body, worker_record)

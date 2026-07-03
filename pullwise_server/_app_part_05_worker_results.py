@@ -39,6 +39,7 @@ WORKER_REVIEW_ARTIFACT_KINDS = {
     "intent_test_result",
     "intent_test_output",
     "disposable_test_patch",
+    "debug_bundle",
 }
 REQUIRED_TERMINAL_REVIEW_ARTIFACT_KINDS = {"qa", "worker_log"}
 REQUIRED_TERMINAL_REVIEW_ARTIFACT_ALTERNATIVES = {"error_report", "report.agent"}
@@ -352,6 +353,19 @@ def scan_queue_limit_error(_user_id: str = "") -> tuple[int, str, str] | None:
     return None
 
 
+def scan_job_attempt_run_id(job: dict) -> str:
+    job_id = public_issue_text(job.get("job_id"))
+    explicit = public_issue_text(job.get("run_id"))
+    if explicit:
+        return explicit
+    if not job_id:
+        return ""
+    attempt = public_scan_count(job.get("attempt")) or 1
+    if attempt <= 1:
+        return f"run_{job_id}"
+    return f"run_{job_id}_attempt_{attempt}"
+
+
 def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     scan = db.get_user_scan_snapshot(
         public_issue_text(job.get("user_id")),
@@ -363,7 +377,7 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "job_id": public_issue_text(job.get("job_id")),
         "job_type": "repo_review.full_scan",
         "priority": public_issue_text(job.get("priority")) or "normal",
-        "run_id": public_issue_text(job.get("run_id")) or f"run_{public_issue_text(job.get('job_id'))}",
+        "run_id": scan_job_attempt_run_id(job),
         "lease_id": public_issue_text(job.get("lease_id")) or f"lease_{public_issue_text(job.get('job_id'))}",
         "scan_id": public_issue_text(job.get("scan_id")),
         "repo": clean_repository_full_name(job.get("repo")),
@@ -482,7 +496,7 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
     quality_gate = envelope.get("quality_gate") if isinstance(envelope.get("quality_gate"), dict) else {}
     manifest = envelope.get("artifact_manifest") if isinstance(envelope.get("artifact_manifest"), list) else None
     expected_job_id = public_issue_text(job.get("job_id"))
-    expected_run_id = public_issue_text(job.get("run_id")) or f"run_{expected_job_id}"
+    expected_run_id = scan_job_attempt_run_id(job)
     expected_lease_id = public_issue_text(job.get("lease_id")) or f"lease_{expected_job_id}"
     expected_worker_id = public_issue_text(job.get("claimed_by_worker_id"))
     if public_issue_text(envelope_job.get("job_id")) != expected_job_id:

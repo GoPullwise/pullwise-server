@@ -2272,7 +2272,13 @@ def run_json_text(value: object) -> str | None:
 def upsert_review_run_claimed(job: dict[str, Any], *, protocol_version: str = "review-worker-protocol/v1") -> dict[str, Any]:
     ensure_initialized()
     job_id = str(job.get("job_id") or "").strip()
-    run_id = str(job.get("run_id") or (f"run_{job_id}" if job_id else "")).strip()
+    run_id = str(job.get("run_id") or "").strip()
+    if not run_id and job_id:
+        try:
+            attempt = int(job.get("attempt") or 1)
+        except (TypeError, ValueError):
+            attempt = 1
+        run_id = f"run_{job_id}" if attempt <= 1 else f"run_{job_id}_attempt_{attempt}"
     if not run_id or not job_id:
         raise ValueError("run_id and job_id are required")
     timestamp = int(time.time())

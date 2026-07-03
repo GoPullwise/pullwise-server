@@ -9,6 +9,7 @@ import os
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 import zipfile
 from http import HTTPStatus
 from unittest.mock import patch
@@ -438,6 +439,67 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         self.auth = {"Authorization": "Bearer worker-secret"}
 
+    def test_scan_payload_exposes_uploaded_worker_debug_bundle_url(self) -> None:
+        scan = {
+            "id": "sc_debug_bundle",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "running",
+            "userId": "usr_1",
+            "repoId": "repo_1",
+            "createdAt": app.now(),
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        job = db.claim_next_scan_job("wk_1", ready_providers=["codex"], recover_before_claim=False)
+        self.assertIsNotNone(job)
+        run_id = app.scan_job_run_id(job)
+        artifact = protocol_artifact_item(
+            run_id,
+            "art_debug_bundle",
+            "debug_bundle",
+            "debug-bundle.zip",
+            "application/zip",
+            "pullwise-debug-bundle",
+            required=False,
+        )
+        debug_zip = b"debug zip"
+        artifact["sha256"] = hashlib.sha256(debug_zip).hexdigest()
+        artifact["size_bytes"] = len(debug_zip)
+        upload = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": "wk_1-1",
+                "run_id": run_id,
+                "artifact": artifact,
+                "content_base64": base64.b64encode(debug_zip).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(upload, "POST")
+        self.assertEqual(upload.status, HTTPStatus.OK)
+        db.update_review_run_progress(
+            {
+                "run_id": run_id,
+                "job_id": job["job_id"],
+                "worker_id": "wk_1",
+                "event_type": "progress_updated",
+                "phase": "upload_artifacts",
+                "severity": "info",
+                "status": "running",
+                "progress": 99,
+                "created_at": app.now(),
+            }
+        )
+
+        payload = app.scan_payload(scan)
+
+        self.assertEqual(payload["reviewRun"]["debugBundleUrl"], f"/v1/review-runs/{run_id}/artifacts/art_debug_bundle")
+        debug_artifacts = [item for item in payload["reviewRun"]["artifacts"] if item.get("kind") == "debug_bundle"]
+        self.assertEqual(debug_artifacts[0]["name"], "debug-bundle.zip")
     def test_legacy_worker_review_routes_are_removed(self) -> None:
         legacy_routes = [
             ("/worker/heartbeat", {"worker_id": "wk_1", "status": "idle"}),
@@ -1060,7 +1122,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(result.payload["reviewRun"]["result_status"], "cancelled")
         self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "cancelled")
         self.assertEqual(app.SCANS[0]["status"], "cancelled")
-        with db.connect() as connection:
+        with closing(db.connect()) as connection:
             stored_result = connection.execute("SELECT status FROM job_results WHERE job_id = ?", (claimed["job_id"],)).fetchone()
         self.assertEqual(stored_result[0], "cancelled")
 
@@ -1114,7 +1176,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(scan_detail.payload["status"], "partial_completed")
         self.assertLess(scan_detail.payload["progress"], 100)
         self.assertEqual(scan_detail.payload["reviewRun"]["status"], "partial_completed")
-        with db.connect() as connection:
+        with closing(db.connect()) as connection:
             stored_result = connection.execute("SELECT status FROM job_results WHERE job_id = ?", (claimed["job_id"],)).fetchone()
         self.assertEqual(stored_result[0], "partial_completed")
 
@@ -3492,6 +3554,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         first_claim = self.v1_lease()
         self.assertEqual(first_claim.status, HTTPStatus.OK)
         first_job = first_claim.payload["job"]
+        self.assertEqual(first_job["run_id"], f"run_{first_job['job_id']}")
+        first_event = self.v1_event(first_job, sequence=1)
+        self.assertEqual(first_event.status, HTTPStatus.OK)
 
         first_failure_body = {
             "status": "failed",
@@ -3527,15 +3592,22 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(second_job["job_id"], first_job["job_id"])
         self.assertEqual(second_job["attempt"], 2)
         self.assertEqual(second_job["retry"]["maxAttempts"], 2)
+        self.assertEqual(second_job["run_id"], f"run_{first_job['job_id']}_attempt_2")
+        self.assertNotEqual(second_job["run_id"], first_job["run_id"])
+        second_event = self.v1_event(second_job, sequence=1)
+        self.assertEqual(second_event.status, HTTPStatus.OK)
+        self.assertEqual(len(db.list_review_run_events(first_job["run_id"])), 1)
+        self.assertEqual(len(db.list_review_run_events(second_job["run_id"])), 1)
 
         second_claim = self.v1_lease("wk_2", headers=worker_two_auth)
         self.assertEqual(second_claim.status, HTTPStatus.OK)
         self.assertIsNone(second_claim.payload["job"])
 
+        status_before_late_duplicate = db.get_scan_job(first_job["job_id"])["status"]
         late_duplicate_failed_result = self.v1_result(first_job, first_failure_body)
         self.assertEqual(late_duplicate_failed_result.status, HTTPStatus.OK)
         self.assertTrue(late_duplicate_failed_result.payload["duplicate"])
-        self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "claimed")
+        self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], status_before_late_duplicate)
 
         done_result = self.v1_result(
             second_job,
