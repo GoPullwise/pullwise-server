@@ -646,6 +646,60 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(deleted["deleted_at"], 456)
         self.assertEqual(deleted["disabled_at"], 123)
 
+    def test_cleanup_stale_worker_uninstall_commands_soft_deletes_old_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                for worker_id in ("wk_old_pending", "wk_recent_pending", "wk_old_running", "wk_stop_pending"):
+                    db.create_worker({"worker_id": worker_id, "name": worker_id})
+                    db.upsert_worker_heartbeat(
+                        {
+                            "worker_id": worker_id,
+                            "provider": "codex",
+                            "version": "0.4.18",
+                            "running_jobs": 0,
+                            "timestamp": 90,
+                        }
+                    )
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            INSERT INTO worker_commands (
+                                id, worker_id, command, status, created_at, started_at, updated_at
+                            )
+                            VALUES
+                                ('cmd_old_pending', 'wk_old_pending', 'uninstall', 'pending', 100, NULL, 100),
+                                ('cmd_recent_pending', 'wk_recent_pending', 'uninstall', 'pending', 950, NULL, 950),
+                                ('cmd_old_running', 'wk_old_running', 'uninstall', 'running', 100, 110, 110),
+                                ('cmd_stop_pending', 'wk_stop_pending', 'stop', 'pending', 100, NULL, 100)
+                            """
+                        )
+
+                removed = db.cleanup_stale_worker_uninstall_commands(
+                    timestamp=1000,
+                    pending_timeout_seconds=864,
+                )
+                old_worker = db.get_worker("wk_old_pending", include_deleted=True)
+                old_command = db.get_worker_command("cmd_old_pending", worker_id="wk_old_pending")
+                old_visible = db.get_worker("wk_old_pending")
+                recent_visible = db.get_worker("wk_recent_pending")
+                running_visible = db.get_worker("wk_old_running")
+                stop_visible = db.get_worker("wk_stop_pending")
+
+        self.assertEqual(removed, 1)
+        self.assertIsNotNone(old_worker)
+        self.assertEqual(old_worker["enabled"], 0)
+        self.assertEqual(old_worker["deleted_at"], 1000)
+        self.assertEqual(old_worker["disabled_at"], 1000)
+        self.assertEqual(old_command["status"], "cancelled")
+        self.assertEqual(old_command["completed_at"], 1000)
+        self.assertIsNone(old_visible)
+        self.assertIsNotNone(recent_visible)
+        self.assertIsNotNone(running_visible)
+        self.assertIsNotNone(stop_visible)
+
     def test_cleanup_operational_records_prunes_only_old_terminal_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

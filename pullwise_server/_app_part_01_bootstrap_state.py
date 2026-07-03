@@ -712,6 +712,13 @@ def cleanup_server_resources(*, timestamp: int | None = None) -> dict[str, int]:
     log_stream_cleanup = globals().get("log_stream_cleanup_expired")
     if callable(log_stream_cleanup):
         log_stream_removed = int(log_stream_cleanup(current_time) or 0)
+    stale_worker_cleanup_removed = db.cleanup_stale_worker_uninstall_commands(
+        timestamp=current_time,
+        pending_timeout_seconds=max(
+            0,
+            env_int("PULLWISE_WORKER_CLEANUP_PENDING_TIMEOUT_SECONDS", 24 * 60 * 60),
+        ),
+    )
     database_removed = db.cleanup_operational_records(
         timestamp=current_time,
         worker_command_retention_seconds=max(
@@ -738,7 +745,13 @@ def cleanup_server_resources(*, timestamp: int | None = None) -> dict[str, int]:
     )
     for key, value in retention_removed.items():
         database_removed[key] = database_removed.get(key, 0) + max(0, int(value or 0))
-    return {**state_removed, "log_stream_sessions": log_stream_removed, **database_removed, **memory_removed}
+    return {
+        **state_removed,
+        "log_stream_sessions": log_stream_removed,
+        "stale_worker_cleanup_pending": stale_worker_cleanup_removed,
+        **database_removed,
+        **memory_removed,
+    }
 
 
 def scan_issue_retention_seconds() -> int:

@@ -2056,6 +2056,44 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin_workers_after_failure.payload["workers"][0]["worker_id"], worker_id)
         self.assertEqual(admin_workers_after_failure.payload["workers"][0]["latest_command"]["status"], "failed")
 
+    def test_server_cleanup_removes_stale_cleanup_pending_worker_from_admin_list(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        heartbeat = self.post_v1_heartbeat(worker_id, token)
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        with patch.object(app, "now", return_value=100):
+            uninstall = RouteHarness(
+                f"/admin/workers/{worker_id}/commands",
+                {"command": "uninstall"},
+                cookie=self.admin_cookie,
+            )
+            app.PullwiseHandler.route(uninstall, "POST")
+
+        self.assertEqual(uninstall.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(uninstall.payload["command"]["status"], "pending")
+        before_cleanup = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(before_cleanup, "GET")
+        self.assertEqual(before_cleanup.status, HTTPStatus.OK)
+        self.assertEqual(before_cleanup.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(before_cleanup.payload["workers"][0]["latest_command"]["status"], "pending")
+
+        with patch.dict(os.environ, {"PULLWISE_WORKER_CLEANUP_PENDING_TIMEOUT_SECONDS": "864"}, clear=False):
+            removed = app.cleanup_server_resources(timestamp=1000)
+
+        self.assertEqual(removed["stale_worker_cleanup_pending"], 1)
+        deleted = db.get_worker(worker_id, include_deleted=True)
+        command = db.get_worker_command(uninstall.payload["command"]["id"], worker_id=worker_id)
+        self.assertIsNone(db.get_worker(worker_id))
+        self.assertIsNotNone(deleted)
+        self.assertEqual(deleted["deleted_at"], 1000)
+        self.assertEqual(command["status"], "cancelled")
+        after_cleanup = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(after_cleanup, "GET")
+        self.assertEqual(after_cleanup.status, HTTPStatus.OK)
+        self.assertEqual(after_cleanup.payload["workers"], [])
+        self.assertEqual(after_cleanup.payload["total"], 0)
+
     def test_worker_can_unregister_itself_from_registry(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
