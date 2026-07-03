@@ -1249,37 +1249,24 @@ ensure_command_available() {
     exit 1
   }
 }
-python_is_compatible() {
-  local candidate="$1"
-  command -v "$candidate" >/dev/null 2>&1 || return 1
-  "$candidate" - <<'PY' >/dev/null 2>&1
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
-PY
-}
-python_has_pip() {
-  local candidate="$1"
-  "$candidate" -m pip --version >/dev/null 2>&1
-}
 ensure_python_runtime() {
-  local candidate
-  for candidate in "${PULLWISE_PYTHON_BIN:-}" python3.10 python3; do
-    [ -n "$candidate" ] || continue
-    if python_is_compatible "$candidate" && python_has_pip "$candidate"; then
-      PYTHON_BIN="$("$candidate" -c 'import sys; print(sys.executable)')"
-      return
-    fi
-  done
-  install_ubuntu_packages python3 python3-venv python3-pip
-  for candidate in "${PULLWISE_PYTHON_BIN:-}" python3.10 python3; do
-    [ -n "$candidate" ] || continue
-    if python_is_compatible "$candidate" && python_has_pip "$candidate"; then
-      PYTHON_BIN="$("$candidate" -c 'import sys; print(sys.executable)')"
-      return
-    fi
-  done
-  echo "Python 3.10 or newer with pip is still unavailable after installing Ubuntu packages." >&2
-  exit 1
+  if ! command -v python3.10 >/dev/null 2>&1 || ! python3.10 -m pip --version >/dev/null 2>&1; then
+    install_ubuntu_packages python3.10 python3.10-venv python3-pip
+  fi
+  command -v python3.10 >/dev/null 2>&1 || {
+    echo "python3.10 is still unavailable after installing Ubuntu packages." >&2
+    exit 1
+  }
+  python3.10 -m pip --version >/dev/null 2>&1 || {
+    echo "python3.10 pip is still unavailable after installing Ubuntu packages." >&2
+    exit 1
+  }
+  python3.10 - <<'PY'
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit("Pullwise worker requires Python 3.10 or newer.")
+PY
+  PYTHON_BIN="$(python3.10 -c 'import sys; print(sys.executable)')"
 }
 ensure_command_available "sha256sum" sha256sum coreutils
 ensure_command_available "bwrap" bwrap bubblewrap
@@ -1483,8 +1470,8 @@ ensure_scoped_command_path() {
   local label="${2:-provider}"
   local resolved_home resolved_command
   [ -n "$command_path" ] || return 0
-  resolved_home="$("${PYTHON_BIN:-python3}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
-  resolved_command="$("${PYTHON_BIN:-python3}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
+  resolved_home="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
+  resolved_command="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
   case "$resolved_command/" in
     "$resolved_home"/*) ;;
     *)
@@ -1691,7 +1678,7 @@ export XDG_CACHE_HOME="\$WORKER_ROOT/.cache"
 export XDG_DATA_HOME="\$WORKER_ROOT/.local/share"
 SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 export PATH="\$WORKER_ROOT/.local/bin:\$WORKER_ROOT/.codex/bin:\$CODEX_HOME/bin:\$SERVICE_PATH"
-PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3}"
+PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
 chmod 0755 "$BIN_PATH"
