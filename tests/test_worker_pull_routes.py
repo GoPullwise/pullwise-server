@@ -399,7 +399,7 @@ def audit_result_fields(
 class WorkerPullRoutesTest(unittest.TestCase):
     def setUp(self) -> None:
         start_fast_sqlite_connections(self)
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temp_dir.cleanup)
         self.env = patch.dict(
             os.environ,
