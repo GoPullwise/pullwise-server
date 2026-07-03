@@ -348,7 +348,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(stop.payload["status"], "cancelled")
 
     def test_api_current_and_stop_reconcile_completed_scan_when_state_is_stale(self) -> None:
-        _cookie, key = self.create_api_key()
+        cookie, key = self.create_api_key()
         auth = {"Authorization": f"Bearer {key}"}
         repositories = RouteHarness("/api/v1/repositories", headers=auth)
         app.PullwiseHandler.route(repositories, "GET")
@@ -450,6 +450,53 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(web_bundle.content_type, "application/zip")
         with zipfile.ZipFile(io.BytesIO(web_bundle.binary_payload), "r") as archive:
             self.assertIn("scan/scan.json", archive.namelist())
+
+        before_create = app.now()
+        temporary_key = RouteHarness(
+            "/api-keys",
+            {
+                "name": "Agent bundle download",
+                "expiresInSeconds": 3600,
+                "restrictions": {
+                    "kind": "audit_bundle",
+                    "scanId": start.payload["id"],
+                    "repoId": repo["repoId"],
+                },
+            },
+            cookie=cookie,
+        )
+        app.PullwiseHandler.route(temporary_key, "POST")
+        self.assertEqual(temporary_key.status, HTTPStatus.CREATED)
+        self.assertEqual(temporary_key.payload["scopes"], ["scans:read"])
+        self.assertEqual(temporary_key.payload["restrictions"]["kind"], "audit_bundle")
+        self.assertEqual(temporary_key.payload["restrictions"]["scanId"], start.payload["id"])
+        self.assertLessEqual(temporary_key.payload["expiresAt"], before_create + 900)
+        temporary_token = temporary_key.payload["key"]
+
+        temporary_bundle = RouteHarness(bundle_path, headers={"Authorization": f"Bearer {temporary_token}"})
+        temporary_repositories = RouteHarness("/api/v1/repositories", headers={"Authorization": f"Bearer {temporary_token}"})
+        app.PullwiseHandler.route(temporary_bundle, "GET")
+        app.PullwiseHandler.route(temporary_repositories, "GET")
+        self.assertEqual(temporary_bundle.status, HTTPStatus.OK)
+        self.assertEqual(temporary_bundle.content_type, "application/zip")
+        self.assertEqual(temporary_repositories.status, HTTPStatus.FORBIDDEN)
+
+        expired_token = f"{app.API_KEY_PREFIX}expired_bundle_token"
+        db.create_api_key(
+            {
+                "id": "key_expired_bundle",
+                "user_id": "usr_1",
+                "name": "Expired bundle",
+                "key_prefix": app.api_key_prefix(expired_token),
+                "key_hash": app.api_key_hash(expired_token),
+                "scopes": ["scans:read"],
+                "expires_at": app.now() - 1,
+                "restrictions": {"kind": "audit_bundle", "scanId": start.payload["id"], "repoId": repo["repoId"]},
+            }
+        )
+        expired_bundle = RouteHarness(bundle_path, headers={"Authorization": f"Bearer {expired_token}"})
+        app.PullwiseHandler.route(expired_bundle, "GET")
+        self.assertEqual(expired_bundle.status, HTTPStatus.UNAUTHORIZED)
 
     def test_api_key_repository_routes_reject_misbound_github_access(self) -> None:
         _cookie, key = self.create_api_key()
