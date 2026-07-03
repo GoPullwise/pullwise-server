@@ -554,7 +554,7 @@ def api_docs_payload() -> dict:
                 "method": "GET",
                 "path": "/api/v1/repositories/{repoId}/scans/{scanId}/audit-bundle.zip",
                 "scope": "scans:read",
-                "description": "Download the audit bundle ZIP referenced by agentFixPrompt for a scan in this repository.",
+                "description": "Download the audit bundle ZIP for a scan in this repository. The website /scans/{scanId}/audit-bundle.zip URL also accepts a scans:read API key for the owning account.",
             },
             {
                 "method": "GET",

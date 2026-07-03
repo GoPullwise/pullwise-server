@@ -735,9 +735,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             )
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "audit-bundle.zip":
             session = self.current_session()
-            if not session:
-                return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing scans.")
-            scan = user_scan_for_read(session, segments[1])
+            if session:
+                scan = user_scan_for_read(session, segments[1])
+            else:
+                context = self.require_api_key_context("scans:read")
+                if not context:
+                    return
+                scans = user_scans_for_read_by_ids({"userId": context["user"]["id"]}, [public_issue_text(segments[1])])
+                scan = scans[0] if scans else None
             if not scan:
                 raise ResourceNotFound("Scan")
             filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")

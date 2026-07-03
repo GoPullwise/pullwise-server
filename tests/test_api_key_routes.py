@@ -430,6 +430,27 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(scan_json["id"], start.payload["id"])
         self.assertIn("agentFixPrompt", scan_json)
 
+        read_only_token = f"{app.API_KEY_PREFIX}scan_read_bundle_token"
+        db.create_api_key(
+            {
+                "id": "key_scan_read_bundle",
+                "user_id": "usr_1",
+                "name": "Scan read bundle",
+                "key_prefix": app.api_key_prefix(read_only_token),
+                "key_hash": app.api_key_hash(read_only_token),
+                "scopes": ["scans:read"],
+            }
+        )
+        web_bundle = RouteHarness(
+            f"/scans/{start.payload['id']}/audit-bundle.zip",
+            headers={"Authorization": f"Bearer {read_only_token}"},
+        )
+        app.PullwiseHandler.route(web_bundle, "GET")
+        self.assertEqual(web_bundle.status, HTTPStatus.OK)
+        self.assertEqual(web_bundle.content_type, "application/zip")
+        with zipfile.ZipFile(io.BytesIO(web_bundle.binary_payload), "r") as archive:
+            self.assertIn("scan/scan.json", archive.namelist())
+
     def test_api_key_repository_routes_reject_misbound_github_access(self) -> None:
         _cookie, key = self.create_api_key()
         auth = {"Authorization": f"Bearer {key}"}
