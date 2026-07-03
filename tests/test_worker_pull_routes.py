@@ -3519,7 +3519,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 message="Custom worker reviewing billing rules",
                 progress_steps=[
                     {"id": "checkout", "label": "Checkout", "status": "completed", "percent": 100},
-                    {"id": "worker_custom_review", "label": "Custom worker review", "status": "running", "percent": 55},
+                    {"id": "worker_custom_review", "label": "Custom worker review", "status": "running", "percent": 55, "errorMessage": "custom review stalled"},
                 ],
             )
 
@@ -3538,6 +3538,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["progressMessage"], "Custom worker reviewing billing rules")
         self.assertEqual([step["id"] for step in payload["progressSteps"]], ["checkout", "worker_custom_review"])
         self.assertEqual(payload["progressSteps"][1]["label"], "Custom worker review")
+        self.assertEqual(payload["progressSteps"][1]["error"], "custom review stalled")
         self.assertEqual(payload["logsSummary"], "progress_updated")
         self.assertIsInstance(payload.get("updatedAt"), int)
 

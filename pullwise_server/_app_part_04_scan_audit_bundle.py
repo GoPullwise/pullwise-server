@@ -148,6 +148,9 @@ def public_scan_progress_step(value: object, index: int) -> dict:
     description = public_issue_text(value.get("description") or value.get("message")).strip()[:240]
     if description:
         payload["description"] = description
+    error = public_issue_text(value.get("error") or value.get("errorMessage") or value.get("error_message")).strip()[:300]
+    if error:
+        payload["error"] = error
     if "targetPercent" in value or "target_percent" in value:
         payload["targetPercent"] = public_scan_progress(value.get("targetPercent") if "targetPercent" in value else value.get("target_percent"))
     return payload
