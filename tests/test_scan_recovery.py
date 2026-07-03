@@ -609,6 +609,81 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["errorCode"], "WORKER_PROTOCOL_MISSING")
         self.assertEqual(app.ISSUES, [])
 
+    def test_recover_interrupted_scans_rejects_invalid_completed_protocol_result(self) -> None:
+        timestamp = app.now()
+        app.SCANS = [
+            {
+                "id": "sc_invalid_protocol_done_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "running",
+                "createdAt": timestamp - 60,
+                "queuedAt": timestamp - 50,
+                "startedAt": timestamp - 40,
+                "progress": 80,
+                "phase": "ai",
+                "jobId": "job_invalid_protocol_done_in_db",
+                "userId": "usr_1",
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            }
+        ]
+        job = db.create_scan_job(
+            {
+                "job_id": "job_invalid_protocol_done_in_db",
+                "scan_id": "sc_invalid_protocol_done_in_db",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "created_at": timestamp - 30,
+                "user_id": "usr_1",
+            }
+        )
+        claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=timestamp)
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        manifest = completed_protocol_manifest("run_other_job")
+        db.record_scan_job_result(
+            job["job_id"],
+            attempt_id=attempt_id,
+            status="done",
+            result_checksum="checksum-invalid-protocol-done",
+            payload={
+                "status": "done",
+                "attempt_id": attempt_id,
+                "result_checksum": "checksum-invalid-protocol-done",
+                "reviewWorkerProtocol": {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "message_type": "review_run_result",
+                    "job": {
+                        "job_id": job["job_id"],
+                        "run_id": "run_other_job",
+                        "lease_id": f"lease_{job['job_id']}",
+                    },
+                    "worker": {"worker_id": "wk_1"},
+                    "execution": {"status": "completed"},
+                    "progress_final": {
+                        "overall_percent": 100.0,
+                        "current_phase": "submit_result_envelope",
+                        "status": "completed",
+                        "message": "terminal progress",
+                    },
+                    "quality_gate": {"status": "pass"},
+                    "summary": completed_protocol_summary(),
+                    "artifact_manifest": manifest,
+                },
+                "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+        )
+
+        recovered = app.recover_interrupted_scans()
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["errorCode"], "WORKER_PROTOCOL_INVALID")
+        self.assertIn("job.run_id", app.SCANS[0]["error"])
+        self.assertEqual(app.ISSUES, [])
+
     def test_recover_interrupted_scans_reconciles_terminal_jobs_without_results(self) -> None:
         timestamp = app.now()
         app.SCANS = [

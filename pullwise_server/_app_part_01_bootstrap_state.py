@@ -1032,15 +1032,27 @@ def worker_protocol_required_error(exc: Exception) -> bool:
     return "Worker result must include reviewWorkerProtocol" in str(exc)
 
 
-def reject_missing_worker_protocol_completed_result_locked(row: dict, *, checksum: str) -> bool:
+def worker_protocol_invalid_error(exc: Exception) -> bool:
+    return str(exc).startswith("Invalid review-worker-protocol/v1 envelope:")
+
+
+def worker_protocol_rejected_error(exc: Exception) -> bool:
+    return worker_protocol_required_error(exc) or worker_protocol_invalid_error(exc)
+
+
+def reject_worker_protocol_completed_result_locked(
+    row: dict,
+    *,
+    checksum: str,
+    message: str,
+    error_code: str,
+) -> bool:
     scan_id = public_issue_text(row.get("scan_id"))
     scan = next((item for item in SCANS if public_issue_text(item.get("id")) == scan_id), None)
     if not scan:
         return False
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)
     completed_at = pull_request_timestamp(row.get("completed_at")) or now()
-    job_id = public_issue_text(row.get("job_id"))
-    message = "Worker result is missing reviewWorkerProtocol; result was rejected."
     scan.update(
         {
             "status": "failed",
@@ -1048,7 +1060,7 @@ def reject_missing_worker_protocol_completed_result_locked(row: dict, *, checksu
             "progress": public_scan_progress(scan.get("progress")),
             "completedAt": completed_at,
             "error": message,
-            "errorCode": "WORKER_PROTOCOL_MISSING",
+            "errorCode": error_code,
             "resultChecksum": public_issue_text(checksum),
         }
     )
@@ -1058,6 +1070,30 @@ def reject_missing_worker_protocol_completed_result_locked(row: dict, *, checksu
         db.upsert_scan(scan)
         mark_state_dirty()
     return changed
+
+
+def reject_missing_worker_protocol_completed_result_locked(row: dict, *, checksum: str) -> bool:
+    return reject_worker_protocol_completed_result_locked(
+        row,
+        checksum=checksum,
+        message="Worker result is missing reviewWorkerProtocol; result was rejected.",
+        error_code="WORKER_PROTOCOL_MISSING",
+    )
+
+
+def reject_invalid_worker_protocol_completed_result_locked(row: dict, exc: Exception, *, checksum: str) -> bool:
+    return reject_worker_protocol_completed_result_locked(
+        row,
+        checksum=checksum,
+        message=f"Worker result reviewWorkerProtocol is invalid; result was rejected. {str(exc)}",
+        error_code="WORKER_PROTOCOL_INVALID",
+    )
+
+
+def reject_worker_protocol_error_completed_result_locked(row: dict, exc: Exception, *, checksum: str) -> bool:
+    if worker_protocol_required_error(exc):
+        return reject_missing_worker_protocol_completed_result_locked(row, checksum=checksum)
+    return reject_invalid_worker_protocol_completed_result_locked(row, exc, checksum=checksum)
 
 
 def reconcile_completed_scan_job_results_locked() -> int:
@@ -1082,9 +1118,9 @@ def reconcile_completed_scan_job_results_locked() -> int:
         try:
             changed = apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum)
         except ValueError as exc:
-            if not worker_protocol_required_error(exc):
+            if not worker_protocol_rejected_error(exc):
                 raise
-            changed = reject_missing_worker_protocol_completed_result_locked(row, checksum=checksum)
+            changed = reject_worker_protocol_error_completed_result_locked(row, exc, checksum=checksum)
         if changed:
             reconciled += 1
         rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
@@ -1239,9 +1275,9 @@ def reconcile_scan_job_state_locked(
                         checksum=checksum,
                     )
                 except ValueError as exc:
-                    if not worker_protocol_required_error(exc):
+                    if not worker_protocol_rejected_error(exc):
                         raise
-                    changed = reject_missing_worker_protocol_completed_result_locked(result, checksum=checksum)
+                    changed = reject_worker_protocol_error_completed_result_locked(result, exc, checksum=checksum)
                 rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
                 if changed:
                     return True
