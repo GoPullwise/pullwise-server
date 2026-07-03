@@ -3265,7 +3265,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "claimedAt": job.get("claimed_at"),
                         "claimedByWorkerId": worker_id,
                         "progress": 0,
-                        "phase": "prepare_workspace",
+                        "phase": None,
                         "jobId": job.get("job_id"),
                         "runId": payload.get("run_id"),
                         "retry": scan_retry_summary_for_job(job),
@@ -3366,6 +3366,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 event: {validation_error}")
         phase = public_scan_phase(body.get("phase"))
         progress_payload = body.get("progress") if isinstance(body.get("progress"), dict) else {}
+        data_payload = body.get("data") if isinstance(body.get("data"), dict) else {}
+        progress_steps = public_scan_progress_steps(
+            progress_payload.get("steps")
+            or data_payload.get("progress_steps")
+            or data_payload.get("progressSteps")
+            or body.get("progressSteps")
+            or body.get("progress_steps")
+        )
         progress_value = public_scan_progress(progress_payload.get("overall_percent"))
         progress_message = public_issue_text(body.get("message"))
         progress_log_time = worker_progress_log_time({"time": body.get("timestamp")})
@@ -3399,6 +3407,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "status": public_issue_text(progress_payload.get("status")),
                     "progress": progress_value,
                     "timestamp": public_issue_text(body.get("timestamp")),
+                    "steps": progress_steps,
                     "created_at": now(),
                 }
             )
@@ -3440,6 +3449,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "updatedAt": progress_log_time,
                     "runId": run_id,
                 }
+                if progress_steps:
+                    update["progressSteps"] = progress_steps
                 progress_logs = append_scan_progress_log(scan, progress_entry)
                 if progress_logs:
                     update["progressLogs"] = progress_logs
@@ -3660,6 +3671,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 progress_value = public_scan_progress(progress_snapshot.get("overall_percent"))
                 progress_status = public_issue_text(progress_snapshot.get("current_phase_status") or progress_snapshot.get("status"))
                 progress_message = public_issue_text(progress_snapshot.get("message"))
+                progress_steps = public_scan_progress_steps(
+                    progress_snapshot.get("steps")
+                    or progress_snapshot.get("progressSteps")
+                    or progress_snapshot.get("progress_steps")
+                )
                 db.update_review_run_progress(
                     {
                         "run_id": progress_run_id,
@@ -3672,6 +3688,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "status": progress_status,
                         "progress": progress_value,
                         "timestamp": public_issue_text(progress_snapshot.get("updated_at")),
+                        "steps": progress_steps,
                         "created_at": heartbeat_timestamp,
                     }
                 )
@@ -3697,6 +3714,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                                 "logsSummary": "heartbeat",
                                 "updatedAt": heartbeat_timestamp,
                                 "runId": progress_run_id,
+                                **({"progressSteps": progress_steps} if progress_steps else {}),
                             }
                         )
                         db.upsert_scan(scan)

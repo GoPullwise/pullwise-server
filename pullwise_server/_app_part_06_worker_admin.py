@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -1307,6 +1307,7 @@ WATCHER_SERVICE_FILE="/etc/systemd/system/$WATCHER_SERVICE_NAME.service"
 LOGROTATE_FILE="/etc/logrotate.d/$SERVICE_NAME"
 UNINSTALL_MARKER_FILE="/run/$SERVICE_NAME/uninstall-requested"
 INSTALL_COMPLETED=0
+WATCHER_STARTED=0
 ROLLBACK_ENABLED=0
 HAD_SERVICE_USER=0
 HAD_CONFIG_DIR=0
@@ -1354,6 +1355,10 @@ rollback_failed_install() {
   fi
   if [ "${PULLWISE_KEEP_FAILED_INSTALL:-}" = "1" ]; then
     echo "Pullwise worker install failed; preserving partial instance because PULLWISE_KEEP_FAILED_INSTALL=1." >&2
+    exit "$status"
+  fi
+  if [ "$WATCHER_STARTED" = "1" ]; then
+    echo "Pullwise worker install failed after watcher start; preserving instance so the watcher remains the lifecycle owner." >&2
     exit "$status"
   fi
   echo "Pullwise worker install failed; rolling back partial instance $SAFE_WORKER_ID." >&2
@@ -1707,6 +1712,7 @@ cat > "$WATCHER_SERVICE_FILE" <<EOF
 Description=Pullwise Worker Watcher $WORKER_NAME
 After=network-online.target
 Wants=network-online.target
+Before=$SERVICE_NAME.service
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
@@ -1739,15 +1745,15 @@ EOF
 systemctl daemon-reload
 print_auth_commands
 run_default_auth_commands
-systemctl restart "$SERVICE_NAME"
-if ! run_as_service_user "$BIN_PATH" doctor; then
-  echo "Pullwise worker doctor failed; leaving service stopped and rolling back install." >&2
-  systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+if ! run_as_service_user env PULLWISE_DOCTOR_REQUIRE_SYSTEMD_ACTIVE=0 "$BIN_PATH" doctor; then
+  echo "Pullwise worker doctor failed before service start; rolling back install." >&2
   exit 1
 fi
-systemctl enable "$SERVICE_NAME" >/dev/null
 systemctl enable "$WATCHER_SERVICE_NAME" >/dev/null
 systemctl restart "$WATCHER_SERVICE_NAME"
+WATCHER_STARTED=1
+systemctl enable "$SERVICE_NAME" >/dev/null
+systemctl restart "$SERVICE_NAME"
 INSTALL_COMPLETED=1
 echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
 echo "Systemd service: $SERVICE_NAME"

@@ -157,35 +157,6 @@ SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled", "partial_co
 SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "partial_completed", "lost", "retrying"}
 DEFAULT_SCAN_ISSUE_RETENTION_SECONDS = 90 * 24 * 60 * 60
 TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "partial_completed", "lost"}
-SCAN_PHASES = {
-    "clone",
-    "index",
-    "secrets",
-    "deps",
-    "ai",
-    "report",
-    "prepare_workspace",
-    "start_codex_app_server",
-    "initialize_codex_connection",
-    "bootstrap_helper_scripts",
-    "inventory_repository",
-    "token_budget",
-    "repo_map",
-    "risk_routing",
-    "bundle_planning",
-    "bundle_packing",
-    "reviewer_fanout",
-    "reviewer_json_validation",
-    "location_validation",
-    "clustering_and_voting",
-    "validator_disproof",
-    "final_report_json",
-    "render_markdown_report",
-    "qa_gate",
-    "hash_artifacts",
-    "upload_artifacts",
-    "submit_result_envelope",
-}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
 API_KEY_PREFIX = "pwk_"
 API_KEY_ALLOWED_SCOPES = {"repositories:read", "scans:read", "scans:write", "quota:read"}
@@ -243,7 +214,7 @@ REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
 SCAN_BY_ID: dict[str, dict] = {}
-DEFAULT_WORKER_PACKAGE_VERSION = "0.9.14"
+DEFAULT_WORKER_PACKAGE_VERSION = "0.9.17"
 DEFAULT_WORKER_PACKAGE = (
     "https://github.com/GoPullwise/pullwise-worker/releases/download/"
     f"v{DEFAULT_WORKER_PACKAGE_VERSION}/pullwise_worker-{DEFAULT_WORKER_PACKAGE_VERSION}-py3-none-any.whl"

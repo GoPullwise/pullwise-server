@@ -1509,6 +1509,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         worker_id: str = "wk_1",
         headers: dict | None = None,
         data: dict | None = None,
+        progress_steps: list[dict] | None = None,
     ) -> RouteHarness:
         run_id = str(job.get("run_id") or f"run_{job.get('job_id')}")
         payload = {
@@ -1527,6 +1528,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "status": "running",
             },
         }
+        if progress_steps is not None:
+            payload["progress"]["steps"] = progress_steps
         if data is not None:
             payload["data"] = data
         handler = RouteHarness(f"/v1/review-runs/{run_id}/events", payload, headers=headers or self.auth)
@@ -3462,7 +3465,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 1)
         self.assertNotIn("quotaRefunded", app.scan_payload(app.SCANS[0]))
 
-    def test_worker_progress_records_phase_message_and_log_summary(self) -> None:
+    def test_worker_progress_records_worker_reported_phase_steps_message_and_log_summary(self) -> None:
         scan = {
             "id": "sc_progress_phase",
             "repo": "acme/api",
@@ -3485,9 +3488,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
         with patch.object(app.scan_logging, "log_event") as log_event:
             progress = self.v1_event(
                 job,
-                phase="repo_map",
+                phase="worker_custom_review",
                 progress=55,
-                message="Repository map: classifying source files",
+                message="Custom worker reviewing billing rules",
+                progress_steps=[
+                    {"id": "checkout", "label": "Checkout", "status": "completed", "percent": 100},
+                    {"id": "worker_custom_review", "label": "Custom worker review", "status": "running", "percent": 55},
+                ],
             )
 
         self.assertEqual(progress.status, HTTPStatus.OK)
@@ -3498,10 +3505,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(log_event.call_args.kwargs["jobId"], job["job_id"])
         self.assertEqual(log_event.call_args.kwargs["runId"], job["run_id"])
         self.assertEqual(log_event.call_args.kwargs["eventType"], "progress_updated")
-        self.assertEqual(log_event.call_args.kwargs["phase"], "repo_map")
+        self.assertEqual(log_event.call_args.kwargs["phase"], "worker_custom_review")
         self.assertEqual(log_event.call_args.kwargs["progress"], 55)
         payload = app.scan_payload(app.SCANS[0])
-        self.assertEqual(payload["progressMessage"], "Repository map: classifying source files")
+        self.assertEqual(payload["phase"], "worker_custom_review")
+        self.assertEqual(payload["progressMessage"], "Custom worker reviewing billing rules")
+        self.assertEqual([step["id"] for step in payload["progressSteps"]], ["checkout", "worker_custom_review"])
+        self.assertEqual(payload["progressSteps"][1]["label"], "Custom worker review")
         self.assertEqual(payload["logsSummary"], "progress_updated")
         self.assertIsInstance(payload.get("updatedAt"), int)
 

@@ -2338,6 +2338,8 @@ def update_review_run_progress(event: dict[str, Any]) -> dict[str, Any]:
         "overall_percent": max(0, min(100, int(event.get("progress") or 0))),
         "timestamp": event.get("timestamp"),
     }
+    if isinstance(event.get("steps"), list):
+        progress_payload["steps"] = event.get("steps")
     terminal_status = {
         "run_completed": "completed",
         "run_failed": "failed",

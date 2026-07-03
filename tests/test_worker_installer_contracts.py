@@ -16,11 +16,11 @@ def service_user_helper(script: str) -> str:
 
 def instance_metadata_helper(script: str) -> str:
     start = script.index("safe_worker_id() {")
-    end = script.index('SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"')
+    end = script.index('LOGROTATE_FILE="/etc/logrotate.d/$SERVICE_NAME"')
     return (
         'WORKER_ID="$1"\n'
         + script[start:end]
-        + '\nprintf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$SAFE_WORKER_ID" "$SERVICE_USER" "$SERVICE_NAME" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"\n'
+        + '\nprintf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$SAFE_WORKER_ID" "$SERVICE_USER" "$SERVICE_NAME" "$WATCHER_SERVICE_NAME" "$WATCHER_SERVICE_FILE" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"\n'
     )
 
 
@@ -40,11 +40,13 @@ def instance_metadata(script: str, worker_id: str) -> dict[str, str]:
     )
     if result.returncode != 0:
         raise AssertionError(result.stderr + result.stdout)
-    safe_id, service_user, service_name, config_dir, data_dir, log_dir = result.stdout.strip().split("\t")
+    safe_id, service_user, service_name, watcher_service_name, watcher_service_file, config_dir, data_dir, log_dir = result.stdout.strip().split("\t")
     return {
         "safe_id": safe_id,
         "service_user": service_user,
         "service_name": service_name,
+        "watcher_service_name": watcher_service_name,
+        "watcher_service_file": watcher_service_file,
         "config_dir": config_dir,
         "data_dir": data_dir,
         "log_dir": log_dir,
@@ -94,11 +96,26 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('write_env_value PULLWISE_WATCHER_SERVICE_NAME "$WATCHER_SERVICE_NAME"', script)
         self.assertIn('write_env_value PULLWISE_WATCHER_SERVICE_FILE "$WATCHER_SERVICE_FILE"', script)
         self.assertIn('cat > "$WATCHER_SERVICE_FILE" <<EOF', script)
+        self.assertIn("Before=$SERVICE_NAME.service", script)
         self.assertIn("ExecStart=$BIN_PATH watch", script)
         self.assertEqual(script.count("StartLimitIntervalSec=300"), 2)
         self.assertEqual(script.count("StartLimitBurst=5"), 2)
         self.assertIn('systemctl enable "$WATCHER_SERVICE_NAME"', script)
         self.assertIn('systemctl restart "$WATCHER_SERVICE_NAME"', script)
+        self.assertIn('WATCHER_STARTED=0', script)
+        self.assertIn('if [ "$WATCHER_STARTED" = "1" ]; then', script)
+        self.assertLess(
+            script.index('if [ "$WATCHER_STARTED" = "1" ]; then'),
+            script.index('systemctl stop "$WATCHER_SERVICE_NAME"'),
+        )
+        self.assertLess(
+            script.index('\nsystemctl restart "$WATCHER_SERVICE_NAME"\n'),
+            script.index('\nWATCHER_STARTED=1\n'),
+        )
+        self.assertLess(
+            script.index('\nWATCHER_STARTED=1\n'),
+            script.index('\nsystemctl restart "$SERVICE_NAME"\n'),
+        )
         self.assertIn('rollback_file "$WATCHER_SERVICE_FILE" "/etc/systemd/system" "$HAD_WATCHER_SERVICE_FILE"', script)
         self.assertNotIn("ExecStopPost=+$BIN_PATH finalize-uninstall", script)
 
@@ -111,23 +128,23 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('auth_command="$(codex_device_auth_command)"', script)
         self.assertIn('if ! eval "$auth_command"; then', script)
         self.assertIn(
-            "print_auth_commands\nrun_default_auth_commands\nsystemctl restart \"$SERVICE_NAME\"",
+            "print_auth_commands\nrun_default_auth_commands\nif ! run_as_service_user env PULLWISE_DOCTOR_REQUIRE_SYSTEMD_ACTIVE=0 \"$BIN_PATH\" doctor; then",
             script,
         )
 
-    def test_installer_does_not_install_codegraph_before_starting_worker(self) -> None:
+    def test_installer_runs_doctor_preflight_before_starting_worker(self) -> None:
         script = app.worker_install_script()
 
+        doctor_call = script.index('\nif ! run_as_service_user env PULLWISE_DOCTOR_REQUIRE_SYSTEMD_ACTIVE=0 "$BIN_PATH" doctor; then\n')
         service_start = script.index('\nsystemctl restart "$SERVICE_NAME"\n')
-        doctor_call = script.index('\nif ! run_as_service_user "$BIN_PATH" doctor; then\n')
-        self.assertLess(service_start, doctor_call)
+        self.assertLess(doctor_call, service_start)
         self.assertNotIn("CODEGRAPH_INSTALL_URL", script)
         self.assertNotIn("CODEGRAPH_INSTALL_DIR", script)
         self.assertNotIn("CODEGRAPH_BIN_DIR", script)
         self.assertNotIn("ensure_codegraph_cli", script)
         self.assertNotIn("configure_codegraph_codex_mcp", script)
         self.assertNotIn("codegraph install", script)
-        self.assertIn('if ! run_as_service_user "$BIN_PATH" doctor; then', script)
+        self.assertIn('if ! run_as_service_user env PULLWISE_DOCTOR_REQUIRE_SYSTEMD_ACTIVE=0 "$BIN_PATH" doctor; then', script)
         self.assertNotIn('run_as_service_user "$BIN_PATH" doctor || true', script)
 
     def test_service_user_name_uses_digest_to_avoid_prefix_collisions(self) -> None:
@@ -171,8 +188,18 @@ class WorkerInstallerContractsTest(unittest.TestCase):
             self.assertTrue(metadata["safe_id"].endswith(f"-{digest}"))
             self.assertLessEqual(len(metadata["service_user"]), 32)
 
-        for field in ("safe_id", "service_user", "service_name", "config_dir", "data_dir", "log_dir"):
+        for field in (
+            "safe_id",
+            "service_user",
+            "service_name",
+            "watcher_service_name",
+            "watcher_service_file",
+            "config_dir",
+            "data_dir",
+            "log_dir",
+        ):
             self.assertNotEqual(instances[0][field], instances[1][field])
+            self.assertNotIn(instances[0][field], instances[1][field])
 
     def test_existing_service_user_must_belong_to_current_worker_home(self) -> None:
         script = app.worker_install_script()

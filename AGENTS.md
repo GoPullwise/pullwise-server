@@ -122,6 +122,23 @@ directory, data directory, log directory, runtime directory, or lifecycle marker
 across worker instances. Each worker instance must have its own paired watcher or
 supervisor with instance-scoped names derived from the safe worker id.
 
+The paired watcher is the host-local role that monitors and controls a worker
+instance. Server-generated installers must make the watcher reliable by enabling
+and starting it before the worker service and by ordering the watcher systemd
+unit before the paired worker unit. The watcher may stop and remove the worker
+service and instance-scoped resources while carrying out lifecycle cleanup.
+
+Watcher identity is per worker instance. Multiple worker instances on the same
+machine must never share a watcher id, watcher service name, runtime directory,
+env/config path, or lifecycle marker.
+
+Once a watcher service has successfully started, do not design any non-delete
+path to stop, disable, or remove it, including update, restart, cleanup,
+manual/local uninstall, and post-watcher-start install failures. Watcher
+self-removal is valid only for an admin-initiated Delete instance lifecycle
+flow, after the host-local watcher has confirmed the paired worker instance has
+been successfully uninstalled.
+
 ## Agent Config Source Of Truth
 
 The server owns subscription plan agent policy.
@@ -199,9 +216,16 @@ progress snapshot whose `run_id` matches the active run. Resolve `active_run_id`
 to the server-owned job for lease renewal, cancellation, and progress snapshots
 instead of requiring worker-side queue state. Progress snapshots shown to the
 product should be derived from accepted v1 run events, v1 heartbeat progress,
-and stored scan state, not from raw worker-only artifact internals. Existing `/worker/...`
-lifecycle routes are operator plumbing; do not reintroduce `/worker/jobs/...`,
-`/worker/heartbeat`, or `/worker/agent-configs` for review protocol behavior.
+and stored scan state, not from raw worker-only artifact internals. The server
+must not own or hardcode the jobscan detail flow definition. Workers report
+their own full ordered progress steps with phase ids, labels, status, and
+percent; the server sanitizes, stores, and exposes those steps as
+`progressSteps` / `reviewRun.progress.steps` without assuming a fixed 30-step
+pipeline or rejecting unknown safe phase ids. Quota and other business logic may
+still key off known core phase ids, but display flow shape belongs to the
+worker that is running the job. Existing `/worker/...` lifecycle routes are
+operator plumbing; do not reintroduce `/worker/jobs/...`, `/worker/heartbeat`,
+or `/worker/agent-configs` for review protocol behavior.
 Active v1 heartbeat `progress` snapshots must include `message`, the full
 counter set from the v1.2 spec (`source_like_files_*`, `bundles_*`,
 `reviewer_runs_*`, `intent_tests_*`, `validator_candidates_*`, and

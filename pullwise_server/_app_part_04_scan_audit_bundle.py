@@ -120,6 +120,53 @@ def public_scan_progress_logs(value: object) -> list[dict]:
     return logs[-20:]
 
 
+def public_scan_progress_step_id(value: object) -> str:
+    text = public_issue_text(value)[:80]
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./:")
+    return text if text and all(char in allowed for char in text) else ""
+
+
+def public_scan_progress_step_status(value: object) -> str:
+    status = public_issue_text(value).lower()
+    return status if status in {"pending", "running", "completed", "skipped", "failed", "cancelled"} else "pending"
+
+
+def public_scan_progress_step(value: object, index: int) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    step_id = public_scan_progress_step_id(value.get("id") or value.get("phase") or value.get("key"))
+    label = public_issue_text(value.get("label") or value.get("title") or step_id).strip()[:120]
+    if not step_id and not label:
+        return {}
+    payload = {
+        "id": step_id or f"step_{index}",
+        "index": public_scan_count(value.get("index")) or index,
+        "label": label or step_id,
+        "status": public_scan_progress_step_status(value.get("status")),
+        "percent": public_scan_progress(value.get("percent") if "percent" in value else value.get("progress")),
+    }
+    description = public_issue_text(value.get("description") or value.get("message")).strip()[:240]
+    if description:
+        payload["description"] = description
+    if "targetPercent" in value or "target_percent" in value:
+        payload["targetPercent"] = public_scan_progress(value.get("targetPercent") if "targetPercent" in value else value.get("target_percent"))
+    return payload
+
+
+def public_scan_progress_steps(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    steps = []
+    seen = set()
+    for raw_index, item in enumerate(value[:80], start=1):
+        step = public_scan_progress_step(item, raw_index)
+        step_id = step.get("id")
+        if not step or step_id in seen:
+            continue
+        seen.add(step_id)
+        steps.append(step)
+    return steps
+
 def public_result_status(value: object) -> str:
     status = public_issue_text(value).lower()
     return status if status in {"done", "failed"} else ""
@@ -479,6 +526,9 @@ def scan_payload(scan: dict) -> dict:
     progress_logs = public_scan_progress_logs(scan.get("progressLogs") or scan.get("progress_logs"))
     if progress_logs:
         payload["progressLogs"] = progress_logs
+    progress_steps = public_scan_progress_steps(scan.get("progressSteps") or scan.get("progress_steps"))
+    if progress_steps:
+        payload["progressSteps"] = progress_steps
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
@@ -494,6 +544,11 @@ def scan_payload(scan: dict) -> dict:
     review_run = public_review_run_payload(scan)
     if review_run:
         payload["reviewRun"] = review_run
+        if "progressSteps" not in payload:
+            review_progress = review_run.get("progress") if isinstance(review_run.get("progress"), dict) else {}
+            progress_steps = public_scan_progress_steps(review_progress.get("steps"))
+            if progress_steps:
+                payload["progressSteps"] = progress_steps
     reading_guide = public_result_reading_guide(scan.get("readingGuide"))
     if reading_guide:
         payload["readingGuide"] = reading_guide
@@ -635,6 +690,9 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     progress_logs = public_scan_progress_logs(scan.get("progressLogs") or scan.get("progress_logs"))
     if progress_logs:
         payload["progressLogs"] = progress_logs
+    progress_steps = public_scan_progress_steps(scan.get("progressSteps") or scan.get("progress_steps"))
+    if progress_steps:
+        payload["progressSteps"] = progress_steps
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
@@ -754,8 +812,7 @@ def public_scan_status(value: object) -> str:
 
 
 def public_scan_phase(value: object) -> str:
-    phase = public_issue_text(value)
-    return phase if phase in SCAN_PHASES else ""
+    return public_scan_progress_step_id(value)
 
 
 def public_scan_progress(value: object) -> float:
