@@ -465,7 +465,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "pullwise-debug-bundle",
             required=False,
         )
-        debug_zip = b"debug zip"
+        debug_buffer = io.BytesIO()
+        with zipfile.ZipFile(debug_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("debug-summary.json", "{}\n")
+            archive.writestr("run/worker.log.jsonl", "{\"event\":\"phase_failed\"}\n")
+        debug_zip = debug_buffer.getvalue()
         artifact["sha256"] = hashlib.sha256(debug_zip).hexdigest()
         artifact["size_bytes"] = len(debug_zip)
         upload = RouteHarness(
@@ -500,6 +504,28 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["reviewRun"]["debugBundleUrl"], f"/v1/review-runs/{run_id}/artifacts/art_debug_bundle")
         debug_artifacts = [item for item in payload["reviewRun"]["artifacts"] if item.get("kind") == "debug_bundle"]
         self.assertEqual(debug_artifacts[0]["name"], "debug-bundle.zip")
+
+        app.USERS = {"usr_1": {"id": "usr_1", "createdAt": app.now(), "providers": ["github"]}}
+        app.SESSIONS = {"ses_1": {"id": "ses_1", "userId": "usr_1", "createdAt": app.now(), "expiresAt": app.now() + 3600}}
+        download = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts/art_debug_bundle",
+            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_1"},
+        )
+        app.PullwiseHandler.route(download, "GET")
+        self.assertEqual(download.status, HTTPStatus.OK)
+        self.assertEqual(download.content_type, "application/zip")
+        with zipfile.ZipFile(io.BytesIO(download.binary_payload), "r") as archive:
+            names = set(archive.namelist())
+            self.assertIn("worker/debug-summary.json", names)
+            self.assertIn("worker/run/worker.log.jsonl", names)
+            self.assertIn("server/server-debug-evidence.json", names)
+            server_evidence = json.loads(archive.read("server/server-debug-evidence.json").decode("utf-8"))
+        self.assertEqual(server_evidence["schema_version"], "pullwise-server-debug-evidence/v1")
+        self.assertEqual(server_evidence["run_id"], run_id)
+        self.assertEqual(server_evidence["scan"]["id"], "sc_debug_bundle")
+        self.assertEqual(server_evidence["scan_job_attempts"][0]["worker_id"], "wk_1")
+        self.assertEqual(server_evidence["database_records"]["scan_job_attempts"][0]["worker_id"], "wk_1")
+        self.assertIn("review_run_events", server_evidence["server_logs"])
     def test_legacy_worker_review_routes_are_removed(self) -> None:
         legacy_routes = [
             ("/worker/heartbeat", {"worker_id": "wk_1", "status": "idle"}),

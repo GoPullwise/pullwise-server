@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import io
+import json
 import time
+import zipfile
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -491,6 +494,89 @@ def review_artifact_binary_payload(row: dict) -> tuple[bytes, str, dict[str, str
     return content, media_type, headers
 
 
+def _json_safe_debug_value(value: object) -> object:
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _without_large_or_secret_fields(row: dict | None, *, omit: set[str] | None = None) -> dict:
+    if not isinstance(row, dict):
+        return {}
+    blocked = {"payload_json", "raw_result_envelope_json", "token_hash", "key_hash", "content_base64", "contentBase64"}
+    if omit:
+        blocked.update(omit)
+    return {key: _json_safe_debug_value(value) for key, value in row.items() if key not in blocked}
+
+
+def server_debug_evidence_payload(run_id: str, job: dict, scan: dict | None, artifact: dict) -> dict:
+    events = db.list_review_run_events(run_id, limit=500)
+    artifacts = db.list_review_run_artifact_records(run_id)
+    run = db.get_review_run(run_id) or {}
+    attempts = db.list_scan_job_attempts(public_issue_text(job.get("job_id")))
+    sanitized_scan = _without_large_or_secret_fields(scan)
+    sanitized_job = _without_large_or_secret_fields(job)
+    sanitized_run = _without_large_or_secret_fields(run)
+    sanitized_attempts = [_without_large_or_secret_fields(item) for item in attempts]
+    sanitized_artifact = _without_large_or_secret_fields(artifact)
+    sanitized_events = [_without_large_or_secret_fields(item) for item in events]
+    sanitized_artifacts = [_without_large_or_secret_fields(item) for item in artifacts]
+    return {
+        "schema_version": "pullwise-server-debug-evidence/v1",
+        "generated_at": protocol_iso_time(now()),
+        "run_id": run_id,
+        "scan": sanitized_scan,
+        "scan_job": sanitized_job,
+        "review_run": sanitized_run,
+        "scan_job_attempts": sanitized_attempts,
+        "requested_artifact": sanitized_artifact,
+        "review_run_events": sanitized_events,
+        "review_artifacts": sanitized_artifacts,
+        "server_logs": {"review_run_events": sanitized_events},
+        "database_records": {
+            "scan": sanitized_scan,
+            "scan_job": sanitized_job,
+            "scan_job_attempts": sanitized_attempts,
+            "review_run": sanitized_run,
+            "review_artifacts": sanitized_artifacts,
+            "requested_artifact": sanitized_artifact,
+        },
+        "notes": [
+            "This server-side evidence is scoped to the requested scan/job/run.",
+            "Worker-local evidence remains under worker/ from the uploaded debug bundle.",
+            "Raw artifact payload content and secret-bearing fields are omitted from server evidence.",
+        ],
+    }
+
+
+def merged_debug_bundle_bytes(worker_zip: bytes, *, run_id: str, job: dict, scan: dict | None, artifact: dict) -> bytes:
+    output = io.BytesIO()
+    evidence = server_debug_evidence_payload(run_id, job, scan, artifact)
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as merged:
+        merged.writestr("server/server-debug-evidence.json", json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+        try:
+            with zipfile.ZipFile(io.BytesIO(worker_zip), mode="r") as source:
+                for info in source.infolist():
+                    if info.is_dir():
+                        continue
+                    name = str(info.filename or "").replace("\\", "/").lstrip("/")
+                    if not name or name.startswith("../") or "/../" in name:
+                        continue
+                    merged.writestr(f"worker/{name}", source.read(info.filename))
+        except (OSError, zipfile.BadZipFile) as exc:
+            merged.writestr(
+                "worker/worker-debug-bundle-read-error.json",
+                json.dumps({"error": str(exc), "worker_zip_size_bytes": len(worker_zip)}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            )
+    return output.getvalue()
+
+
+def review_artifact_is_debug_bundle(row: dict) -> bool:
+    return public_issue_text(row.get("kind")) == "debug_bundle" or public_issue_text(row.get("name")) == "debug-bundle.zip"
+
+
 class PullwiseHandler(BaseHTTPRequestHandler):
     server_version = "PullwiseDevAPI/0.1"
 
@@ -738,11 +824,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if session:
                 scan = user_scan_for_read(session, segments[1])
             else:
-                context = self.require_api_key_context("scans:read")
+                context = self.require_api_key_context("scans:read", allow_restricted=True)
                 if not context:
                     return
                 scans = user_scans_for_read_by_ids({"userId": context["user"]["id"]}, [public_issue_text(segments[1])])
                 scan = scans[0] if scans else None
+                if scan and not self.api_key_context_allows_audit_bundle(context, scan):
+                    return self.error(HTTPStatus.FORBIDDEN, "This API key cannot download this audit bundle.")
             if not scan:
                 raise ResourceNotFound("Scan")
             filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
@@ -2370,16 +2458,25 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not record:
             self._api_key_context = None
             return None
+        expires_at = pull_request_timestamp(record.get("expires_at"))
+        if expires_at and expires_at < now():
+            self._api_key_context = None
+            return None
         user = USERS.get(str(record.get("user_id") or ""))
         if not user:
             self._api_key_context = None
             return None
         db.mark_api_key_used(record["id"])
-        context = {"apiKey": record, "user": user, "scopes": parse_api_key_scopes(record.get("scopes"))}
+        context = {
+            "apiKey": record,
+            "user": user,
+            "scopes": parse_api_key_scopes(record.get("scopes")),
+            "restrictions": parse_api_key_restrictions(record.get("restrictions")),
+        }
         self._api_key_context = context
         return context
 
-    def require_api_key_context(self, scope: str) -> dict | None:
+    def require_api_key_context(self, scope: str, *, allow_restricted: bool = False) -> dict | None:
         context = self.current_api_key_context()
         if not context:
             self.error(HTTPStatus.UNAUTHORIZED, "A valid Pullwise API key is required.")
@@ -2387,7 +2484,28 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if scope not in context.get("scopes", []):
             self.error(HTTPStatus.FORBIDDEN, f"API key scope {scope} is required.")
             return None
+        if context.get("restrictions") and not allow_restricted:
+            self.error(HTTPStatus.FORBIDDEN, "This API key is restricted to a specific audit bundle download.")
+            return None
         return context
+
+    def api_key_context_allows_audit_bundle(self, context: dict, scan: dict, requested_repo_id: str = "") -> bool:
+        restrictions = context.get("restrictions") if isinstance(context.get("restrictions"), dict) else {}
+        if not restrictions:
+            return True
+        if restrictions.get("kind") != "audit_bundle":
+            return False
+        scan_id = public_issue_text(scan.get("id"))
+        restricted_scan_id = public_issue_text(restrictions.get("scanId"))
+        if restricted_scan_id and restricted_scan_id != scan_id:
+            return False
+        restricted_repo_id = clean_github_access_text(restrictions.get("repoId"), allow_int=True)
+        if restricted_repo_id:
+            scan_repo_id = clean_github_access_text(scan.get("repoId"), allow_int=True)
+            request_repo_id = clean_github_access_text(requested_repo_id, allow_int=True)
+            if restricted_repo_id not in {scan_repo_id, request_repo_id}:
+                return False
+        return True
 
     def api_repository_context(self, context: dict, repo_id: str) -> tuple[dict, dict] | None:
         repo_id = clean_github_access_text(repo_id, allow_int=True) or ""
@@ -2432,6 +2550,23 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         scopes, scopes_error = requested_api_key_scopes(body.get("scopes"), provided="scopes" in body)
         if scopes_error:
             return self.error(HTTPStatus.BAD_REQUEST, scopes_error)
+        restrictions = parse_api_key_restrictions(body.get("restrictions"))
+        expires_at = pull_request_timestamp(body.get("expiresAt") or body.get("expires_at"))
+        expires_in_seconds = non_negative_int(body.get("expiresInSeconds") or body.get("expires_in_seconds"))
+        if expires_in_seconds:
+            expires_at = now() + expires_in_seconds
+        if restrictions.get("kind") == "audit_bundle":
+            scan_id = public_issue_text(restrictions.get("scanId"))
+            if not scan_id:
+                return self.error(HTTPStatus.BAD_REQUEST, "Audit bundle API keys require scanId.")
+            scan = user_scan_for_read(session, scan_id)
+            if not scan:
+                raise ResourceNotFound("Scan")
+            restricted_repo_id = clean_github_access_text(restrictions.get("repoId"), allow_int=True)
+            if restricted_repo_id and restricted_repo_id != clean_github_access_text(scan.get("repoId"), allow_int=True):
+                return self.error(HTTPStatus.BAD_REQUEST, "Audit bundle API key repoId must match the scan.")
+            scopes = ["scans:read"]
+            expires_at = min(expires_at or now() + 900, now() + 900)
         token = API_KEY_PREFIX + secrets.token_urlsafe(32)
         record = db.create_api_key(
             {
@@ -2441,6 +2576,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "key_prefix": api_key_prefix(token),
                 "key_hash": api_key_hash(token),
                 "scopes": scopes,
+                "expires_at": expires_at,
+                "restrictions": restrictions,
             }
         )
         return self.json(api_key_public_payload(record, token=token), HTTPStatus.CREATED, headers=api_key_response_headers())
@@ -3503,6 +3640,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if binary_payload is None:
             return self.error(HTTPStatus.CONFLICT, "Stored review artifact content is unavailable.")
         content, media_type, headers = binary_payload
+        if review_artifact_is_debug_bundle(artifact):
+            scan = user_scan_for_read(session, scan_id)
+            content = merged_debug_bundle_bytes(content, run_id=normalized_run_id, job=job, scan=scan, artifact=artifact)
+            media_type = "application/zip"
+            headers = {
+                "Cache-Control": "private, max-age=3600",
+                "Content-Disposition": 'attachment; filename="debug-bundle.zip"',
+                "X-Pullwise-Artifact-Id": normalized_artifact_id,
+            }
         return self.binary(content, content_type=media_type, headers=headers)
 
     def handle_worker_run_artifact_upload(self, run_id: str, body: dict, worker_record: dict) -> None:
@@ -3905,7 +4051,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             and segments[2] == "scans"
             and segments[4] == "audit-bundle.zip"
         ):
-            context = self.require_api_key_context("scans:read")
+            context = self.require_api_key_context("scans:read", allow_restricted=True)
             if not context:
                 return
             repo_context = self.api_repository_context(context, segments[1])
@@ -3921,6 +4067,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 requested_repository=repository["full_name"],
             ):
                 raise ResourceNotFound("Scan")
+            if not self.api_key_context_allows_audit_bundle(context, scan, requested_repo_id=repository["id"]):
+                return self.error(HTTPStatus.FORBIDDEN, "This API key cannot download this audit bundle.")
             filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
             cache_key = audit_bundle_cache_key(scan)
             return self.binary(

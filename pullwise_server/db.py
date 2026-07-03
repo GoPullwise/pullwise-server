@@ -1102,6 +1102,8 @@ def normalize_api_keys_schema(connection: sqlite3.Connection) -> None:
         "key_prefix",
         "key_hash",
         "scopes",
+        "expires_at",
+        "restrictions",
         "created_at",
         "last_used_at",
         "revoked_at",
@@ -1125,6 +1127,8 @@ def normalize_api_keys_schema(connection: sqlite3.Connection) -> None:
             key_prefix TEXT NOT NULL,
             key_hash TEXT NOT NULL UNIQUE,
             scopes TEXT NOT NULL DEFAULT '[]',
+            expires_at INTEGER,
+            restrictions TEXT NOT NULL DEFAULT '{}',
             created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
             last_used_at INTEGER,
             revoked_at INTEGER
@@ -5543,6 +5547,23 @@ def store_review_run_artifact(
     }
 
 
+def list_scan_job_attempts(job_id: str) -> list[dict[str, Any]]:
+    ensure_initialized()
+    normalized_job_id = str(job_id or "").strip()
+    if not normalized_job_id:
+        return []
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT * FROM scan_job_attempts
+            WHERE job_id = ?
+            ORDER BY attempt ASC
+            """,
+            (normalized_job_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
 def list_review_run_artifacts(job_id: str, attempt_id: str) -> list[dict[str, Any]]:
     ensure_initialized()
     with _LOCK, closing(connect()) as connection:
@@ -6189,9 +6210,16 @@ def create_api_key(record: dict[str, Any]) -> dict[str, Any]:
     key_prefix = str(record.get("key_prefix") or "").strip()
     key_hash = str(record.get("key_hash") or "").strip()
     scopes = record.get("scopes")
+    expires_at = int(record.get("expires_at") or 0) or None
+    restrictions = record.get("restrictions")
     if not api_key_id or not user_id or not key_prefix or not key_hash:
         raise ValueError("api key id, user_id, prefix, and hash are required")
     scopes_text = scopes if isinstance(scopes, str) else json.dumps(scopes or [], sort_keys=True)
+    restrictions_text = (
+        restrictions
+        if isinstance(restrictions, str)
+        else json.dumps(restrictions or {}, sort_keys=True)
+    )
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -6199,11 +6227,20 @@ def create_api_key(record: dict[str, Any]) -> dict[str, Any]:
                 """
                 INSERT INTO api_keys (
                     id, user_id, name, key_prefix, key_hash, scopes,
-                    created_at, last_used_at, revoked_at
+                    expires_at, restrictions, created_at, last_used_at, revoked_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, strftime('%s', 'now'), NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), NULL, NULL)
                 """,
-                (api_key_id, user_id, name, key_prefix, key_hash, scopes_text),
+                (
+                    api_key_id,
+                    user_id,
+                    name,
+                    key_prefix,
+                    key_hash,
+                    scopes_text,
+                    expires_at,
+                    restrictions_text,
+                ),
             )
             return row_to_dict(connection.execute("SELECT * FROM api_keys WHERE id = ?", (api_key_id,)).fetchone()) or {}
 

@@ -424,6 +424,30 @@ def parse_api_key_scopes(value: object) -> list[str]:
     return clean_api_key_scopes(decoded)
 
 
+def parse_api_key_restrictions(value: object) -> dict:
+    if isinstance(value, dict):
+        source = value
+    elif isinstance(value, str) and value:
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        source = decoded if isinstance(decoded, dict) else {}
+    else:
+        return {}
+    kind = public_issue_text(source.get("kind") or source.get("purpose")).replace("-", "_")
+    if kind != "audit_bundle":
+        return {}
+    restrictions = {"kind": "audit_bundle"}
+    scan_id = public_issue_text(source.get("scanId") or source.get("scan_id"))
+    repo_id = clean_github_access_text(source.get("repoId") or source.get("repo_id"), allow_int=True)
+    if scan_id:
+        restrictions["scanId"] = scan_id
+    if repo_id:
+        restrictions["repoId"] = repo_id
+    return restrictions
+
+
 def api_key_public_payload(record: dict, *, token: str | None = None) -> dict:
     payload = {
         "id": public_issue_text(record.get("id")),
@@ -432,9 +456,13 @@ def api_key_public_payload(record: dict, *, token: str | None = None) -> dict:
         "prefix": public_issue_text(record.get("key_prefix")),
         "scopes": parse_api_key_scopes(record.get("scopes")),
         "createdAt": pull_request_timestamp(record.get("created_at")) or 0,
+        "expiresAt": pull_request_timestamp(record.get("expires_at")),
         "lastUsedAt": pull_request_timestamp(record.get("last_used_at")),
         "revokedAt": pull_request_timestamp(record.get("revoked_at")),
     }
+    restrictions = parse_api_key_restrictions(record.get("restrictions"))
+    if restrictions:
+        payload["restrictions"] = restrictions
     if token:
         payload["key"] = token
     return payload
