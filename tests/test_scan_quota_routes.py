@@ -196,7 +196,19 @@ class ScanQuotaRoutesTest(unittest.TestCase):
             ledger_count = connection.execute("SELECT COUNT(*) FROM quota_ledger").fetchone()[0]
         self.assertEqual(ledger_count, 0)
 
-    def test_private_worker_management_is_owner_scoped(self) -> None:
+    @patch.object(
+        app,
+        "worker_defaults_payload",
+        return_value={
+            "workerVersion": "0.9.9",
+            "latestWorkerVersion": "0.9.9",
+            "configuredWorkerVersion": "",
+            "defaults": {"version": "0.9.9", "source": "latest"},
+            "release": {"latestVersion": "0.9.9"},
+        },
+    )
+    @patch.object(app, "latest_worker_release_version", return_value="0.9.9")
+    def test_private_worker_management_is_owner_scoped(self, _latest_release, _worker_defaults) -> None:
         owner_cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
         other_cookie = seed_user("usr_b", "ses_b", installation_id="222", repo_id="456")
 
@@ -211,12 +223,14 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         worker_id = create.payload["worker"]["worker_id"]
         self.assertEqual(create.payload["worker"]["scope"], "private")
         self.assertEqual(create.payload["worker"]["ownerUserId"], "usr_a")
+        self.assertEqual(create.payload["worker"]["version"], "0.9.9")
         self.assertTrue(create.payload["worker_token"].startswith("pww_"))
         self.assertEqual(create.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "0.13.0")
         self.assertIn("--codex-release '0.13.0'", create.payload["install_commands"]["standard"])
         stored = db.get_worker(worker_id)
         self.assertEqual(stored["worker_scope"], db.WORKER_SCOPE_PRIVATE)
         self.assertEqual(stored["owner_user_id"], "usr_a")
+        self.assertEqual(stored["version"], "0.9.9")
 
         owner_list = RouteHarness(cookie=owner_cookie, path="/private-workers")
         other_list = RouteHarness(cookie=other_cookie, path="/private-workers")
@@ -225,6 +239,9 @@ class ScanQuotaRoutesTest(unittest.TestCase):
 
         self.assertEqual(owner_list.status, HTTPStatus.OK)
         self.assertEqual([worker["worker_id"] for worker in owner_list.payload["workers"]], [worker_id])
+        self.assertEqual(owner_list.payload["workerVersion"], "0.9.9")
+        self.assertEqual(owner_list.payload["latestWorkerVersion"], "0.9.9")
+        self.assertEqual(owner_list.payload["defaults"]["source"], "latest")
         self.assertEqual(other_list.status, HTTPStatus.OK)
         self.assertEqual(other_list.payload["workers"], [])
 

@@ -2597,7 +2597,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         payloads = [worker_public_payload(worker, admin=True) for worker in workers]
         active_count = sum(1 for worker in payloads if worker.get("status") in {"idle", "busy"})
-        return {"workers": payloads, "items": payloads, "total": len(payloads), "active": active_count}
+        defaults = worker_defaults_payload()
+        return {
+            "workers": payloads,
+            "items": payloads,
+            "total": len(payloads),
+            "active": active_count,
+            "workerVersion": defaults.get("workerVersion"),
+            "latestWorkerVersion": defaults.get("latestWorkerVersion"),
+            "configuredWorkerVersion": defaults.get("configuredWorkerVersion"),
+            "defaults": defaults.get("defaults"),
+            "release": defaults.get("release"),
+        }
 
     def require_private_worker_owner(
         self,
@@ -2640,7 +2651,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "provider": "codex",
                         "provider_chain": ["codex"],
                         "region": public_issue_text(body.get("region")),
-                        "version": public_issue_text(body.get("version")),
+                        "version": public_issue_text(body.get("version")) or latest_worker_release_version(),
                     }
                 )
             except ValueError as exc:
