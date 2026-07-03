@@ -1297,6 +1297,7 @@ AUTH_COMMANDS_FILE="$CONFIG_DIR/auth-commands.txt"
 BIN_PATH="/usr/local/bin/$SERVICE_NAME"
 DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
 CHECKOUT_ROOT="$DATA_DIR/checkouts"
+WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$WORKER_ID"
 LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 WATCHER_SERVICE_FILE="/etc/systemd/system/$WATCHER_SERVICE_NAME.service"
@@ -1405,19 +1406,19 @@ if [ -z "$PROVIDER_CHAIN" ]; then
 fi
 PROVIDER="${PROVIDER_CHAIN%%,*}"
 SERVICE_TOOL_PATH="$DATA_DIR/.local/bin:$DATA_DIR/.codex/bin:$SERVICE_PATH"
-CODEX_HOME="$DATA_DIR/.codex"
-CODEX_SQLITE_HOME="$DATA_DIR/.codex-sqlite"
-XDG_CONFIG_HOME="$DATA_DIR/.config"
-XDG_CACHE_HOME="$DATA_DIR/.cache"
-XDG_DATA_HOME="$DATA_DIR/.local/share"
+CODEX_HOME="$WORKER_RUNTIME_ROOT/codex-home"
+CODEX_SQLITE_HOME="$WORKER_RUNTIME_ROOT/codex-sqlite"
+XDG_CONFIG_HOME="$WORKER_RUNTIME_ROOT/.config"
+XDG_CACHE_HOME="$WORKER_RUNTIME_ROOT/.cache"
+XDG_DATA_HOME="$WORKER_RUNTIME_ROOT/.local/share"
 
 run_as_service_user() {
   (
-    cd "$DATA_DIR"
+    cd "$WORKER_RUNTIME_ROOT"
     if command -v runuser >/dev/null 2>&1; then
-      runuser -u "$SERVICE_USER" -- env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
+      runuser -u "$SERVICE_USER" -- env HOME="$WORKER_RUNTIME_ROOT" USERPROFILE="$WORKER_RUNTIME_ROOT" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     elif command -v sudo >/dev/null 2>&1; then
-      sudo -u "$SERVICE_USER" env HOME="$DATA_DIR" USERPROFILE="$DATA_DIR" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
+      sudo -u "$SERVICE_USER" env HOME="$WORKER_RUNTIME_ROOT" USERPROFILE="$WORKER_RUNTIME_ROOT" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
     else
       echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
       return 127
@@ -1431,7 +1432,7 @@ service_user_auth_command() {
     command_line="${command_line:+$command_line }$(printf '%q' "$part")"
   done
   printf 'sudo -u %q env HOME=%q USERPROFILE=%q CODEX_HOME=%q CODEX_SQLITE_HOME=%q XDG_CONFIG_HOME=%q XDG_CACHE_HOME=%q XDG_DATA_HOME=%q PATH=%q sh -lc %q\n' \
-    "$SERVICE_USER" "$DATA_DIR" "$DATA_DIR" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
+    "$SERVICE_USER" "$WORKER_RUNTIME_ROOT" "$WORKER_RUNTIME_ROOT" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
 }
 scoped_command_path() {
   local fallback_one="${1:-}"
@@ -1526,7 +1527,7 @@ else
 fi
 install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
 install -d -m 0755 -o root -g root "$BASE_DATA_DIR" "$BASE_LOG_DIR"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$LOG_DIR" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$WORKER_RUNTIME_ROOT" "$LOG_DIR" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.local" "$DATA_DIR/.local/bin" "$DATA_DIR/.codex/bin"
 if [ ! -f "$CODEX_HOME/config.toml" ]; then
   install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"
@@ -1593,6 +1594,7 @@ if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
   write_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"
   write_env_value PULLWISE_CODEX_INSTALLER_URL "$CODEX_INSTALLER_URL"
+  write_env_value PULLWISE_CODEX_HOME "$CODEX_HOME"
   write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
@@ -1604,6 +1606,7 @@ write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
 write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"
 write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"
+write_env_value PULLWISE_WORKER_ROOT "$WORKER_RUNTIME_ROOT"
 write_env_value PULLWISE_SERVICE_NAME "$SERVICE_NAME"
 write_env_value PULLWISE_SERVICE_FILE "$SERVICE_FILE"
 write_env_value PULLWISE_LIFECYCLE_WATCHER_ENABLED "1"
@@ -1645,13 +1648,14 @@ load_worker_env() {
 }
 load_worker_env "\${PULLWISE_WORKER_ENV_FILE:-$ENV_FILE}"
 SERVICE_HOME="\${PULLWISE_SERVICE_HOME:-/var/lib/pullwise-worker}"
-export HOME="\$SERVICE_HOME"
-export USERPROFILE="\$SERVICE_HOME"
-export CODEX_HOME="\$SERVICE_HOME/.codex"
-export CODEX_SQLITE_HOME="\$SERVICE_HOME/.codex-sqlite"
-export XDG_CONFIG_HOME="\$SERVICE_HOME/.config"
-export XDG_CACHE_HOME="\$SERVICE_HOME/.cache"
-export XDG_DATA_HOME="\$SERVICE_HOME/.local/share"
+WORKER_ROOT="\${PULLWISE_WORKER_ROOT:-\$SERVICE_HOME/workers/\${PULLWISE_WORKER_ID:-worker}}"
+export HOME="\$WORKER_ROOT"
+export USERPROFILE="\$WORKER_ROOT"
+export CODEX_HOME="\${PULLWISE_CODEX_HOME:-\$WORKER_ROOT/codex-home}"
+export CODEX_SQLITE_HOME="\${PULLWISE_CODEX_SQLITE_HOME:-\$WORKER_ROOT/codex-sqlite}"
+export XDG_CONFIG_HOME="\$WORKER_ROOT/.config"
+export XDG_CACHE_HOME="\$WORKER_ROOT/.cache"
+export XDG_DATA_HOME="\$WORKER_ROOT/.local/share"
 SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 export PATH="\$SERVICE_HOME/.local/bin:\$SERVICE_HOME/.codex/bin:\$SERVICE_PATH"
 PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"
@@ -1674,13 +1678,13 @@ Group=$SERVICE_USER
 WorkingDirectory=$DATA_DIR
 EnvironmentFile=$ENV_FILE
 Environment=PATH=$SERVICE_TOOL_PATH
-Environment=HOME=$DATA_DIR
-Environment=USERPROFILE=$DATA_DIR
-Environment=CODEX_HOME=$DATA_DIR/.codex
-Environment=CODEX_SQLITE_HOME=$DATA_DIR/.codex-sqlite
-Environment=XDG_CONFIG_HOME=$DATA_DIR/.config
-Environment=XDG_CACHE_HOME=$DATA_DIR/.cache
-Environment=XDG_DATA_HOME=$DATA_DIR/.local/share
+Environment=HOME=$WORKER_RUNTIME_ROOT
+Environment=USERPROFILE=$WORKER_RUNTIME_ROOT
+Environment=CODEX_HOME=$CODEX_HOME
+Environment=CODEX_SQLITE_HOME=$CODEX_SQLITE_HOME
+Environment=XDG_CONFIG_HOME=$XDG_CONFIG_HOME
+Environment=XDG_CACHE_HOME=$XDG_CACHE_HOME
+Environment=XDG_DATA_HOME=$XDG_DATA_HOME
 ExecStart=$BIN_PATH run
 Restart=on-failure
 RestartSec=5

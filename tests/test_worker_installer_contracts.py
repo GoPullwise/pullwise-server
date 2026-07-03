@@ -64,14 +64,20 @@ class WorkerInstallerContractsTest(unittest.TestCase):
     def test_installer_scopes_codex_sqlite_state_and_config(self) -> None:
         script = app.worker_install_script()
 
-        self.assertIn('CODEX_SQLITE_HOME="$DATA_DIR/.codex-sqlite"', script)
+        self.assertIn('WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$WORKER_ID"', script)
+        self.assertIn('CODEX_HOME="$WORKER_RUNTIME_ROOT/codex-home"', script)
+        self.assertIn('CODEX_SQLITE_HOME="$WORKER_RUNTIME_ROOT/codex-sqlite"', script)
         self.assertIn('CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME"', script)
         self.assertIn('CODEX_SQLITE_HOME=%q', script)
         self.assertIn('"$CODEX_SQLITE_HOME"', script)
         self.assertIn('install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"', script)
+        self.assertIn('write_env_value PULLWISE_CODEX_HOME "$CODEX_HOME"', script)
         self.assertIn('write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"', script)
-        self.assertIn('export CODEX_SQLITE_HOME="\\$SERVICE_HOME/.codex-sqlite"', script)
-        self.assertIn("Environment=CODEX_SQLITE_HOME=$DATA_DIR/.codex-sqlite", script)
+        self.assertIn('write_env_value PULLWISE_WORKER_ROOT "$WORKER_RUNTIME_ROOT"', script)
+        self.assertIn('export CODEX_HOME="\\${PULLWISE_CODEX_HOME:-\\$WORKER_ROOT/codex-home}"', script)
+        self.assertIn('export CODEX_SQLITE_HOME="\\${PULLWISE_CODEX_SQLITE_HOME:-\\$WORKER_ROOT/codex-sqlite}"', script)
+        self.assertIn("Environment=CODEX_HOME=$CODEX_HOME", script)
+        self.assertIn("Environment=CODEX_SQLITE_HOME=$CODEX_SQLITE_HOME", script)
 
     def test_installer_creates_one_watcher_service_per_worker_instance(self) -> None:
         script = app.worker_install_script()
