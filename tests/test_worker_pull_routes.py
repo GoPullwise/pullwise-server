@@ -590,7 +590,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "job": {
                     "job_id": job["job_id"],
                     "run_id": run_id,
-                    "lease_id": job["lease_id"],
+                    "lease_id": f"lease_{job['job_id']}",
                     "job_type": "repo_review.full_scan",
                 },
                 "worker": {
