@@ -519,6 +519,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             self.assertIn("worker/debug-summary.json", names)
             self.assertIn("worker/run/worker.log.jsonl", names)
             self.assertIn("server/server-debug-evidence.json", names)
+            self.assertNotIn("audit.json", names)
+            self.assertFalse(any(name.endswith("audit-bundle.zip") for name in names))
             server_evidence = json.loads(archive.read("server/server-debug-evidence.json").decode("utf-8"))
         self.assertEqual(server_evidence["schema_version"], "pullwise-server-debug-evidence/v1")
         self.assertEqual(server_evidence["run_id"], run_id)
