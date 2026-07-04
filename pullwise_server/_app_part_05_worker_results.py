@@ -66,8 +66,6 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "review_output_language": clean_review_output_language(scan.get("reviewOutputLanguage")),
             "provider_chain": [billing.review_agent_provider(plan)],
             "max_attempts": system_config.scan_job_max_attempts(),
-            "worker_scope": scan.get("workerScope") or scan.get("worker_scope"),
-            "worker_owner_user_id": scan.get("workerOwnerUserId") or scan.get("worker_owner_user_id") or scan.get("userId"),
         }
     )
     scan["jobId"] = job.get("job_id")
@@ -279,13 +277,6 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
         scan = next((item for item in SCANS if item.get("id") == scan_id), None)
         request_id = quota_request_id_for_scan(scan)
         already_consumed = scan_quota_has_been_consumed(scan)
-        scan_worker_scope = scan.get("workerScope") if scan else None
-        private_worker_scan = (
-            db.normalize_worker_scope(job.get("worker_scope") or scan_worker_scope) == db.WORKER_SCOPE_PRIVATE
-            or public_issue_text(scan.get("quotaState") if scan else "") == "private_worker"
-        )
-    if private_worker_scan:
-        return {"skipped": True, "reason": "private_worker"}
     if already_consumed:
         return {"deduplicated": True, "consumed": True}
     user = USERS.get(user_id)
@@ -399,10 +390,6 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
         "clone_url": trusted_github_web_url(job.get("clone_url")),
     }
-    worker_scope = db.normalize_worker_scope(job.get("worker_scope"))
-    if worker_scope == db.WORKER_SCOPE_PRIVATE:
-        payload["workerScope"] = worker_scope
-        payload["privateWorker"] = True
     plan = worker_plan_for_job(job, scan)
     agent_config = billing.review_agent_config(plan)
     job_provider_chain = db.normalize_provider_list(job.get("provider_chain"))

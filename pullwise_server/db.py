@@ -1732,12 +1732,11 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     timestamp = int(record.get("timestamp") or time.time())
     provider = (normalize_provider_list(record.get("provider")) or ["codex"])[0]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
-    worker_scope = normalize_worker_scope(record.get("worker_scope") or record.get("scope"))
-    owner_user_id = str(record.get("owner_user_id") or record.get("user_id") or "").strip()
-    if worker_scope == WORKER_SCOPE_PRIVATE and not owner_user_id:
-        raise ValueError("owner_user_id is required for private workers.")
-    if worker_scope != WORKER_SCOPE_PRIVATE:
-        owner_user_id = ""
+    requested_scope = normalize_worker_scope(record.get("worker_scope") or record.get("scope"))
+    if requested_scope == WORKER_SCOPE_PRIVATE:
+        raise ValueError("Private workers are not supported.")
+    worker_scope = WORKER_SCOPE_SHARED
+    owner_user_id = ""
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -3300,12 +3299,8 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("job_id, scan_id, and repo are required")
     timestamp = int(record.get("created_at") or time.time())
     provider_chain = provider_list_json(record.get("provider_chain"))
-    worker_scope = normalize_worker_scope(record.get("worker_scope") or record.get("scope"))
-    worker_owner_user_id = str(
-        record.get("worker_owner_user_id") or record.get("owner_user_id") or record.get("user_id") or ""
-    ).strip()
-    if worker_scope != WORKER_SCOPE_PRIVATE:
-        worker_owner_user_id = ""
+    worker_scope = WORKER_SCOPE_SHARED
+    worker_owner_user_id = ""
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -4116,14 +4111,12 @@ def scan_job_effective_max_attempts(job: dict[str, Any] | None) -> int:
     ensure_initialized()
     if not job:
         return 1
-    worker_scope = normalize_worker_scope(job.get("worker_scope"))
-    owner_user_id = job.get("worker_owner_user_id") if worker_scope == WORKER_SCOPE_PRIVATE else None
     with _LOCK, closing(connect()) as connection:
         return _effective_scan_job_max_attempts_locked(
             connection,
             job.get("max_attempts"),
-            worker_scope=worker_scope,
-            owner_user_id=owner_user_id,
+            worker_scope=WORKER_SCOPE_SHARED,
+            owner_user_id=None,
         )
 
 
@@ -4251,13 +4244,11 @@ def scan_job_retry_state(job: dict[str, Any] | None) -> dict[str, int]:
     except (TypeError, ValueError):
         attempt = 0
     with _LOCK, closing(connect()) as connection:
-        worker_scope = normalize_worker_scope(job.get("worker_scope"))
-        owner_user_id = job.get("worker_owner_user_id") if worker_scope == WORKER_SCOPE_PRIVATE else None
         effective_max = _effective_scan_job_max_attempts_locked(
             connection,
             job.get("max_attempts"),
-            worker_scope=worker_scope,
-            owner_user_id=owner_user_id,
+            worker_scope=WORKER_SCOPE_SHARED,
+            owner_user_id=None,
         )
         attempted_workers = _attempted_worker_count_locked(connection, job_id) if job_id else 0
     return {
@@ -4906,15 +4897,10 @@ def claim_next_scan_job(
         connection.execute("BEGIN IMMEDIATE")
         try:
             worker = connection.execute(
-                "SELECT enabled, deleted_at, worker_scope, owner_user_id FROM workers WHERE worker_id = ?",
+                "SELECT enabled, deleted_at FROM workers WHERE worker_id = ?",
                 (worker_id,),
             ).fetchone()
             if worker and (int(worker["enabled"] or 0) == 0 or worker["deleted_at"] is not None):
-                connection.commit()
-                return None
-            worker_scope = normalize_worker_scope(worker["worker_scope"] if worker else WORKER_SCOPE_SHARED)
-            worker_owner_user_id = str((worker["owner_user_id"] if worker else "") or "").strip()
-            if worker_scope == WORKER_SCOPE_PRIVATE and not worker_owner_user_id:
                 connection.commit()
                 return None
             offline_after = max(60, int(worker_heartbeat_timeout_seconds or 120))
@@ -4944,19 +4930,12 @@ def claim_next_scan_job(
                         AND worker_active.status IN ('claimed', 'running', 'uploading_result')
                       LIMIT 1
                   )
-                  AND (
-                      (? = 'private'
-                        AND queued.worker_scope = 'private'
-                        AND queued.user_id = ?)
-                      OR
-                      (? != 'private'
-                        AND COALESCE(NULLIF(queued.worker_scope, ''), 'shared') = 'shared')
-                  )
+                  AND COALESCE(NULLIF(queued.worker_scope, ''), 'shared') = 'shared'
                 ORDER BY queued.created_at ASC, queued.job_id ASC
                 LIMIT 1
                 """
                 ,
-                (worker_id, worker_scope, worker_owner_user_id, worker_scope),
+                (worker_id,),
             ).fetchone()
             if not row:
                 connection.commit()

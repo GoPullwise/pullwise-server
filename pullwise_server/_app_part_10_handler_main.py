@@ -780,8 +780,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing the dashboard.")
             return self.json(dashboard_overview_payload(session))
-        if path == "/private-workers":
-            return self.handle_private_workers_get()
         if path == "/api-keys":
             return self.handle_api_keys_get(params)
         if path == "/auth/github/authorize":
@@ -928,8 +926,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.handle_worker_post(segments, body)
         if segments and segments[0] == "admin":
             return self.handle_admin_post(segments, body)
-        if segments and segments[0] == "private-workers":
-            return self.handle_private_workers_post(segments, body)
         if path == "/auth/sign-out":
             self.clear_current_session()
             return self.json({"ok": True}, headers={"Set-Cookie": clear_cookie_header()})
@@ -1012,7 +1008,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             repo_meta = None
             repository_record = None
             quota_result = None
-            private_worker_selected = False
             requested_branch = ""
             request_key = None
             scan_id = ""
@@ -1105,37 +1100,28 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     else:
                         scan_error = (HTTPStatus.BAD_REQUEST, "Unable to resolve repository context.")
                 else:
-                    private_worker_selected = user_has_active_private_worker(session["userId"])
-                    if private_worker_selected:
-                        quota_result = {
-                            "deduplicated": False,
-                            "bucketIds": {},
-                            "user": quota.quota_payload_for_user(scan_user),
-                            "repository": quota.quota_payload_for_repository(repository_record, scan_user),
-                        }
+                    try:
+                        quota_result = quota.reserve_scan_quota(
+                            user=scan_user,
+                            repository=repository_record,
+                            requested_by_user_id=session["userId"],
+                            scan_id=scan_id,
+                            request_id=request_id or None,
+                        )
+                    except quota.QuotaExceeded as exc:
+                        scan_error = (HTTPStatus.PAYMENT_REQUIRED, exc.message)
+                        scan_error_code = exc.code
+                        scan_error_repo_id = exc.repo_id
                     else:
-                        try:
-                            quota_result = quota.reserve_scan_quota(
-                                user=scan_user,
-                                repository=repository_record,
-                                requested_by_user_id=session["userId"],
-                                scan_id=scan_id,
-                                request_id=request_id or None,
-                            )
-                        except quota.QuotaExceeded as exc:
-                            scan_error = (HTTPStatus.PAYMENT_REQUIRED, exc.message)
-                            scan_error_code = exc.code
-                            scan_error_repo_id = exc.repo_id
-                        else:
-                            if quota_result.get("deduplicated"):
-                                scan = wait_for_user_scan_by_request_id(session["userId"], request_id)
-                                if scan is None or not scan_matches_requested_repository(
-                                    scan,
-                                    requested_repo_id=requested_repo_id,
-                                    requested_repository=requested_repository,
-                                ):
-                                    scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
-                                    scan_error_code = "IDEMPOTENCY_KEY_REUSED"
+                        if quota_result.get("deduplicated"):
+                            scan = wait_for_user_scan_by_request_id(session["userId"], request_id)
+                            if scan is None or not scan_matches_requested_repository(
+                                scan,
+                                requested_repo_id=requested_repo_id,
+                                requested_repository=requested_repository,
+                            ):
+                                scan_error = (HTTPStatus.CONFLICT, IDEMPOTENCY_KEY_REUSED_MESSAGE)
+                                scan_error_code = "IDEMPOTENCY_KEY_REUSED"
             if scan_error is None and scan is None:
                 review_output_language = settings_payload(session["userId"])["review"]["outputLanguage"]
                 scan = {
@@ -1171,11 +1157,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "repoPath": None,
                     "billingUsage": quota_result.get("user") or {},
                     "repoUsage": quota_result.get("repository") or {},
-                    "quotaState": "private_worker" if private_worker_selected else "reserved",
-                    "quotaReservedAt": None if private_worker_selected else now(),
-                    "workerScope": db.WORKER_SCOPE_PRIVATE if private_worker_selected else db.WORKER_SCOPE_SHARED,
-                    "workerOwnerUserId": session["userId"] if private_worker_selected else "",
-                    "privateWorker": private_worker_selected,
+                    "quotaState": "reserved",
+                    "quotaReservedAt": now(),
                     "by": "you",
                 }
                 if request_id:
@@ -1187,7 +1170,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     with STATE_LOCK:
                         forget_memory_scan_locked(scan_id)
                         mark_state_dirty()
-                    if quota_result and not private_worker_selected and not quota_result.get("deduplicated"):
+                    if quota_result and not quota_result.get("deduplicated"):
                         quota.release_scan_quota_reservation(
                             scan_id=scan_id,
                             requested_by_user_id=session["userId"],
@@ -1531,8 +1514,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         body = self.read_json()
         if segments and segments[0] == "admin":
             return self.handle_admin_patch(segments, body)
-        if segments and segments[0] == "private-workers":
-            return self.handle_private_workers_patch(segments, body)
         if segments == ["issues", "status"]:
             session = self.current_session()
             if not session:
@@ -1601,8 +1582,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json({"ok": True, "worker": worker_public_payload(worker, admin=True), "deleted": True})
         if segments and segments[0] == "admin":
             return self.handle_admin_delete(segments)
-        if segments and segments[0] == "private-workers":
-            return self.handle_private_workers_delete(segments)
         if len(segments) == 2 and segments[0] == "api-keys":
             return self.handle_api_key_delete(segments[1])
         if len(segments) == 2 and segments[0] == "integrations":
@@ -2590,130 +2569,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "API key not found.")
         return self.json({"ok": True, "id": public_issue_text(key_id), "revoked": True})
 
-    def private_workers_payload(self, session: dict) -> dict:
-        workers = annotate_worker_runtime_payloads(
-            db.list_private_workers_for_user(session["userId"]),
-            include_latest_commands=True,
-        )
-        payloads = [worker_public_payload(worker, admin=True) for worker in workers]
-        active_count = sum(1 for worker in payloads if worker.get("status") in {"idle", "busy"})
-        defaults = worker_defaults_payload()
-        return {
-            "workers": payloads,
-            "items": payloads,
-            "total": len(payloads),
-            "active": active_count,
-            "workerVersion": defaults.get("workerVersion"),
-            "latestWorkerVersion": defaults.get("latestWorkerVersion"),
-            "configuredWorkerVersion": defaults.get("configuredWorkerVersion"),
-            "defaults": defaults.get("defaults"),
-            "release": defaults.get("release"),
-        }
-
-    def require_private_worker_owner(
-        self,
-        session: dict,
-        worker_id: str,
-        *,
-        include_deleted: bool = False,
-    ) -> dict | None:
-        worker_id = clean_github_access_text(worker_id) or ""
-        worker = db.get_private_worker_for_user(
-            session["userId"],
-            worker_id,
-            include_deleted=include_deleted,
-        )
-        if not worker:
-            self.error(HTTPStatus.NOT_FOUND, "Private worker not found.")
-            return None
-        return worker
-
-    def handle_private_workers_get(self) -> None:
-        session = self.current_session()
-        if not session:
-            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before viewing private workers.")
-        return self.json(self.private_workers_payload(session))
-
-    def handle_private_workers_post(self, segments: list[str], body: dict) -> None:
-        session = self.current_session()
-        if not session:
-            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before managing private workers.")
-        if not isinstance(body, dict):
-            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
-        if segments == ["private-workers"]:
-            try:
-                codex_install_options = worker_codex_install_options(body)
-                worker = db.create_worker(
-                    {
-                        "name": public_issue_text(body.get("name")) or "Private worker",
-                        "worker_scope": db.WORKER_SCOPE_PRIVATE,
-                        "owner_user_id": session["userId"],
-                        "provider": "codex",
-                        "provider_chain": ["codex"],
-                        "region": public_issue_text(body.get("region")),
-                        "version": public_issue_text(body.get("version")) or latest_worker_release_version(),
-                    }
-                )
-            except ValueError as exc:
-                self.audit_worker_action(session, "create_private_worker", success=False, error=str(exc))
-                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-            self.audit_worker_action(
-                session,
-                "create_private_worker",
-                worker_id=worker.get("worker_id"),
-                changed_fields={"scope": "private", "ownerUserId": session["userId"]},
-            )
-            return self.json(worker_create_payload(worker, codex_install_options=codex_install_options), HTTPStatus.CREATED)
-        if len(segments) == 3 and segments[0] == "private-workers":
-            worker_id = segments[1]
-            action = segments[2]
-            worker = self.require_private_worker_owner(session, worker_id)
-            if not worker:
-                return
-            if action == "enable":
-                updated = db.set_worker_enabled(worker["worker_id"], True)
-                self.audit_worker_action(session, "enable_private_worker", worker_id=worker["worker_id"], changed_fields={"enabled": True})
-                return self.json({"worker": worker_public_payload(updated or worker, admin=True)})
-            if action == "disable":
-                updated = db.set_worker_enabled(worker["worker_id"], False)
-                self.audit_worker_action(session, "disable_private_worker", worker_id=worker["worker_id"], changed_fields={"enabled": False})
-                return self.json({"worker": worker_public_payload(updated or worker, admin=True)})
-            if action == "rotate-token":
-                updated = db.rotate_worker_token(worker["worker_id"])
-                if not updated:
-                    self.audit_worker_action(session, "rotate_private_worker_token", worker_id=worker["worker_id"], success=False, error="Worker not found.")
-                    return self.error(HTTPStatus.NOT_FOUND, "Private worker not found.")
-                self.audit_worker_action(session, "rotate_private_worker_token", worker_id=worker["worker_id"], changed_fields={"tokenHash": "rotated"})
-                return self.json(worker_create_payload(updated))
-        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
-
-    def handle_private_workers_patch(self, segments: list[str], body: dict) -> None:
-        session = self.current_session()
-        if not session:
-            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before managing private workers.")
-        if not isinstance(body, dict):
-            return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
-        if len(segments) != 2 or segments[0] != "private-workers":
-            return self.error(HTTPStatus.NOT_FOUND, "Route not found")
-        worker = self.require_private_worker_owner(session, segments[1])
-        if not worker:
-            return
-        patch = {}
-        if "name" in body:
-            patch["name"] = public_issue_text(body.get("name")) or worker.get("name")
-        if "region" in body:
-            patch["region"] = public_issue_text(body.get("region"))
-        if "version" in body:
-            patch["version"] = public_issue_text(body.get("version"))
-        updated = db.update_worker(worker["worker_id"], patch)
-        self.audit_worker_action(
-            session,
-            "update_private_worker",
-            worker_id=worker["worker_id"],
-            changed_fields={key: value for key, value in patch.items() if value is not None},
-        )
-        return self.json({"worker": worker_public_payload(updated or worker, admin=True)})
-
     def worker_host_lifecycle_contact_seen(self, worker: dict | None) -> bool:
         # No lifecycle contact means neither the worker nor its host watcher ever reached the server.
         if not isinstance(worker, dict):
@@ -2768,43 +2623,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
             self.error(HTTPStatus.CONFLICT, str(exc))
             return None, False
-
-    def handle_private_workers_delete(self, segments: list[str]) -> None:
-        session = self.current_session()
-        if not session:
-            return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before managing private workers.")
-        if len(segments) != 2 or segments[0] != "private-workers":
-            return self.error(HTTPStatus.NOT_FOUND, "Route not found")
-        worker = self.require_private_worker_owner(session, segments[1])
-        if not worker:
-            return
-        worker_command, reused_command = self.create_or_reuse_worker_uninstall_command(
-            session,
-            worker["worker_id"],
-            action_name="delete_private_worker",
-        )
-        if worker_command is None:
-            return
-        if not worker_command:
-            self.audit_worker_action(session, "delete_private_worker", worker_id=worker["worker_id"], success=False, error="Worker not found.")
-            return self.error(HTTPStatus.NOT_FOUND, "Private worker not found.")
-        updated = db.get_worker(worker["worker_id"], include_deleted=True) or worker
-        if not reused_command:
-            self.audit_worker_action(
-                session,
-                "delete_private_worker",
-                worker_id=worker["worker_id"],
-                changed_fields={"deleteQueued": True, "command": "uninstall", "commandId": worker_command.get("id")},
-            )
-        return self.json(
-            {
-                "worker": worker_public_payload(updated, admin=True),
-                "command": worker_command_payload(worker_command, admin=True),
-                "deleteQueued": True,
-                "alreadyQueued": reused_command,
-            },
-            HTTPStatus.ACCEPTED,
-        )
 
     def require_admin_session(self) -> dict | None:
         session = self.current_session()
@@ -4177,38 +3995,29 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if limit_error:
             return self.json({"message": limit_error[1], "code": limit_error[2]}, limit_error[0])
         scan_id = make_id("sc")
-        private_worker_selected = user_has_active_private_worker(context["user"]["id"])
-        if private_worker_selected:
-            quota_result = {
-                "deduplicated": False,
-                "bucketIds": {},
-                "user": quota.quota_payload_for_user(context["user"]),
-                "repository": quota.quota_payload_for_repository(repository, context["user"]),
-            }
-        else:
-            try:
-                quota_result = quota.reserve_scan_quota(
-                    user=context["user"],
-                    repository=repository,
-                    requested_by_user_id=context["user"]["id"],
-                    scan_id=scan_id,
-                    request_id=request_id or None,
-                )
-            except quota.QuotaExceeded as exc:
-                payload = {"message": exc.message, "code": exc.code}
-                if exc.repo_id:
-                    payload["repoId"] = exc.repo_id
-                return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
-            if quota_result.get("deduplicated"):
-                existing = wait_for_user_scan_by_request_id(context["user"]["id"], request_id)
-                if existing and existing.get("repoId") == repository["id"]:
-                    return self.json(scan_payload(existing))
-                if existing:
-                    return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
-                return self.json(
-                    {"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"},
-                    HTTPStatus.CONFLICT,
-                )
+        try:
+            quota_result = quota.reserve_scan_quota(
+                user=context["user"],
+                repository=repository,
+                requested_by_user_id=context["user"]["id"],
+                scan_id=scan_id,
+                request_id=request_id or None,
+            )
+        except quota.QuotaExceeded as exc:
+            payload = {"message": exc.message, "code": exc.code}
+            if exc.repo_id:
+                payload["repoId"] = exc.repo_id
+            return self.json(payload, HTTPStatus.PAYMENT_REQUIRED)
+        if quota_result.get("deduplicated"):
+            existing = wait_for_user_scan_by_request_id(context["user"]["id"], request_id)
+            if existing and existing.get("repoId") == repository["id"]:
+                return self.json(scan_payload(existing))
+            if existing:
+                return self.json(idempotency_key_reused_payload(existing), HTTPStatus.CONFLICT)
+            return self.json(
+                {"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"},
+                HTTPStatus.CONFLICT,
+            )
 
         review_output_language = settings_payload(context["user"]["id"])["review"]["outputLanguage"]
         scan = {
@@ -4239,11 +4048,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "repoPath": None,
             "billingUsage": quota_result.get("user") or {},
             "repoUsage": quota_result.get("repository") or {},
-            "quotaState": "private_worker" if private_worker_selected else "reserved",
-            "quotaReservedAt": None if private_worker_selected else now(),
-            "workerScope": db.WORKER_SCOPE_PRIVATE if private_worker_selected else db.WORKER_SCOPE_SHARED,
-            "workerOwnerUserId": context["user"]["id"] if private_worker_selected else "",
-            "privateWorker": private_worker_selected,
+            "quotaState": "reserved",
+            "quotaReservedAt": now(),
             "by": "api key",
         }
         if request_id:
@@ -4254,13 +4060,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 forget_memory_scan_locked(scan_id)
                 mark_state_dirty()
-            if not private_worker_selected:
-                quota.release_scan_quota_reservation(
-                    scan_id=scan_id,
-                    requested_by_user_id=context["user"]["id"],
-                    request_id=request_id or None,
-                    record_ledger=False,
-                )
+            quota.release_scan_quota_reservation(
+                scan_id=scan_id,
+                requested_by_user_id=context["user"]["id"],
+                request_id=request_id or None,
+                record_ledger=False,
+            )
             raise
         scan_logging.log_event(
             "scan_queued",

@@ -112,17 +112,6 @@ def worker_can_claim(worker: dict, *, timestamp: int | None = None) -> tuple[boo
     return False, status
 
 
-def user_has_active_private_worker(user_id: str, *, timestamp: int | None = None) -> bool:
-    user_id = public_issue_text(user_id)
-    if not user_id:
-        return False
-    for worker in db.list_private_workers_for_user(user_id):
-        allowed, _status = worker_can_claim(worker, timestamp=timestamp)
-        if allowed and worker_record_ready_providers(worker):
-            return True
-    return False
-
-
 def worker_command_payload(command: dict | None, *, admin: bool = False) -> dict | None:
     if not command:
         return None
@@ -204,14 +193,11 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         worker["running_jobs"] = running_jobs
     provider_chain = worker_record_provider_chain(worker)
     ready_providers = worker_record_ready_providers(worker)
-    worker_scope = db.normalize_worker_scope(worker.get("worker_scope") or worker.get("scope"))
-    owner_user_id = public_issue_text(worker.get("owner_user_id") or worker.get("ownerUserId"))
+    worker_scope = db.WORKER_SCOPE_SHARED
     payload = {
         "worker_id": public_issue_text(worker.get("worker_id")),
         "name": public_issue_text(worker.get("name")) or public_issue_text(worker.get("worker_id")),
         "scope": worker_scope,
-        "private": worker_scope == db.WORKER_SCOPE_PRIVATE,
-        "ownerUserId": owner_user_id,
         "provider": public_issue_text(worker.get("provider")) or (provider_chain[0] if provider_chain else "codex"),
         "providerChain": provider_chain,
         "readyProviders": ready_providers,
