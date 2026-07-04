@@ -1516,8 +1516,7 @@ def worker_token_hash(token: str) -> str:
 
 WORKER_PROVIDER_VALUES = {"codex"}
 WORKER_SCOPE_SHARED = "shared"
-WORKER_SCOPE_PRIVATE = "private"
-WORKER_SCOPE_VALUES = {WORKER_SCOPE_SHARED, WORKER_SCOPE_PRIVATE}
+WORKER_SCOPE_VALUES = {WORKER_SCOPE_SHARED}
 
 
 def normalize_worker_scope(value: Any, *, default: str = WORKER_SCOPE_SHARED) -> str:
@@ -1732,8 +1731,8 @@ def create_worker(record: dict[str, Any]) -> dict[str, Any]:
     timestamp = int(record.get("timestamp") or time.time())
     provider = (normalize_provider_list(record.get("provider")) or ["codex"])[0]
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
-    requested_scope = normalize_worker_scope(record.get("worker_scope") or record.get("scope"))
-    if requested_scope == WORKER_SCOPE_PRIVATE:
+    requested_scope = str(record.get("worker_scope") or record.get("scope") or "").strip().lower().replace("-", "_")
+    if requested_scope == "private":
         raise ValueError("Private workers are not supported.")
     worker_scope = WORKER_SCOPE_SHARED
     owner_user_id = ""
@@ -1883,57 +1882,6 @@ def get_worker(
             connection.execute(
                 f"SELECT * FROM workers WHERE worker_id = ? {where_deleted} {scope_clause}",
                 tuple(params),
-            ).fetchone()
-        )
-
-
-def list_private_workers_for_user(user_id: str, *, include_deleted: bool = False) -> list[dict[str, Any]]:
-    ensure_initialized()
-    user_id = str(user_id or "").strip()
-    if not user_id:
-        return []
-    deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
-    with _LOCK, closing(connect()) as connection:
-        connection.row_factory = sqlite3.Row
-        rows = connection.execute(
-            f"""
-            SELECT *
-            FROM workers
-            WHERE worker_scope = ?
-              AND owner_user_id = ?
-              {deleted_clause}
-            ORDER BY created_at DESC, worker_id ASC
-            """,
-            (WORKER_SCOPE_PRIVATE, user_id),
-        ).fetchall()
-        return [dict(row) for row in rows]
-
-
-def get_private_worker_for_user(
-    user_id: str,
-    worker_id: str,
-    *,
-    include_deleted: bool = False,
-) -> dict[str, Any] | None:
-    ensure_initialized()
-    user_id = str(user_id or "").strip()
-    worker_id = str(worker_id or "").strip()
-    if not user_id or not worker_id:
-        return None
-    deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
-    with _LOCK, closing(connect()) as connection:
-        connection.row_factory = sqlite3.Row
-        return row_to_dict(
-            connection.execute(
-                f"""
-                SELECT *
-                FROM workers
-                WHERE worker_scope = ?
-                  AND owner_user_id = ?
-                  AND worker_id = ?
-                  {deleted_clause}
-                """,
-                (WORKER_SCOPE_PRIVATE, user_id, worker_id),
             ).fetchone()
         )
 

@@ -158,7 +158,6 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
 
         for method, path, body in (
-            ("GET", "/private-workers", {}),
             ("POST", "/private-workers", {"name": "Home lab"}),
             ("PATCH", "/private-workers/wk_1", {"name": "Desk worker"}),
             ("POST", "/private-workers/wk_1/rotate-token", {}),
@@ -175,7 +174,7 @@ class ScanQuotaRoutesTest(unittest.TestCase):
                     "worker_id": "wk_private_removed",
                     "name": "Private",
                     "provider": "codex",
-                    "worker_scope": db.WORKER_SCOPE_PRIVATE,
+                    "worker_scope": "private",
                     "owner_user_id": "usr_a",
                 }
             )
