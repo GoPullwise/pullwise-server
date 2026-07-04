@@ -526,6 +526,109 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(server_evidence["scan_job_attempts"][0]["worker_id"], "wk_1")
         self.assertEqual(server_evidence["database_records"]["scan_job_attempts"][0]["worker_id"], "wk_1")
         self.assertIn("review_run_events", server_evidence["server_logs"])
+
+    def test_failed_result_exposes_debug_bundle_when_later_artifact_uploads_fail(self) -> None:
+        scan = {
+            "id": "sc_failed_debug_bundle",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "running",
+            "userId": "usr_1",
+            "repoId": "repo_1",
+            "createdAt": app.now(),
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        job = db.claim_next_scan_job("wk_1", ready_providers=["codex"], recover_before_claim=False)
+        self.assertIsNotNone(job)
+        run_id = app.scan_job_run_id(job)
+        manifest = protocol_artifact_manifest(run_id, "failed")
+        debug_artifact = protocol_artifact_item(
+            run_id,
+            "art_debug_bundle",
+            "debug_bundle",
+            "debug-bundle.zip",
+            "application/zip",
+            "pullwise-debug-bundle",
+            required=False,
+        )
+        debug_buffer = io.BytesIO()
+        with zipfile.ZipFile(debug_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("debug-summary.json", json.dumps({"status": "failed"}) + "\n")
+            archive.writestr("run/worker.log.jsonl", "{\"event\":\"job_failed\"}\n")
+        debug_zip = debug_buffer.getvalue()
+        debug_artifact["sha256"] = hashlib.sha256(debug_zip).hexdigest()
+        debug_artifact["size_bytes"] = len(debug_zip)
+        manifest.append(debug_artifact)
+
+        upload = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": "wk_1-1",
+                "run_id": run_id,
+                "artifact": debug_artifact,
+                "content_base64": base64.b64encode(debug_zip).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(upload, "POST")
+        self.assertEqual(upload.status, HTTPStatus.OK)
+
+        result_body = {
+            "status": "failed",
+            "attempt_id": "wk_1-1",
+            "duration_ms": 1234,
+            "error": "artifact upload failed after debug bundle upload",
+            "error_code": "CODEX_QUOTA_EXHAUSTED",
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "reviewWorkerProtocol": {
+                "protocol_version": "review-worker-protocol/v1",
+                "message_type": "review_run_result",
+                "job": {
+                    "job_id": job["job_id"],
+                    "run_id": run_id,
+                    "lease_id": job["lease_id"],
+                    "job_type": "repo_review.full_scan",
+                },
+                "worker": {
+                    "worker_id": "wk_1",
+                    "worker_version": "0.1.0",
+                    "concurrency": {"max_active_jobs": 1, "maintains_local_queue": False},
+                    "engine": {"type": "codex_app_server", "app_server_transport": "stdio"},
+                },
+                "execution": {"status": "failed", "review_mode": "full_repo"},
+                "progress_final": {
+                    "run_id": run_id,
+                    "overall_percent": 41.5,
+                    "current_phase": "failure_handling",
+                    "status": "failed",
+                    "message": "Run failed.",
+                },
+                "error": {
+                    "code": "CODEX_QUOTA_EXHAUSTED",
+                    "category": "codex_usage_limit_exceeded",
+                    "message": "artifact upload failed after debug bundle upload",
+                    "retryable": False,
+                    "failure_action": "fail_job_retryable",
+                },
+                "quality_gate": {"status": "fail", "errors": ["Run failed."], "warnings": []},
+                "artifact_manifest": manifest,
+                "summary": protocol_summary([], "failed"),
+                "extensions": {"worker_internal": {"artifact_upload_error": "qa upload failed"}},
+            },
+        }
+        result = RouteHarness(f"/v1/review-runs/{run_id}/result", result_body, headers=self.auth)
+        app.PullwiseHandler.route(result, "POST")
+        self.assertEqual(result.status, HTTPStatus.OK)
+
+        payload = app.scan_payload(scan)
+
+        self.assertEqual(payload["reviewRun"]["status"], "failed")
+        self.assertEqual(payload["reviewRun"]["debugBundleUrl"], f"/v1/review-runs/{run_id}/artifacts/art_debug_bundle")
+
     def test_legacy_worker_review_routes_are_removed(self) -> None:
         legacy_routes = [
             ("/worker/heartbeat", {"worker_id": "wk_1", "status": "idle"}),
