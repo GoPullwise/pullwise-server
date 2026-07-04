@@ -138,17 +138,30 @@ def public_scan_progress_step(value: object, index: int) -> dict:
     label = public_issue_text(value.get("label") or value.get("title") or step_id).strip()[:120]
     if not step_id and not label:
         return {}
+    status = public_scan_progress_step_status(value.get("status"))
     payload = {
         "id": step_id or f"step_{index}",
         "index": public_scan_count(value.get("index")) or index,
         "label": label or step_id,
-        "status": public_scan_progress_step_status(value.get("status")),
+        "status": status,
         "percent": public_scan_progress(value.get("percent") if "percent" in value else value.get("progress")),
     }
     description = public_issue_text(value.get("description") or value.get("message")).strip()[:240]
     if description:
         payload["description"] = description
-    error = public_issue_text(value.get("error") or value.get("errorMessage") or value.get("error_message")).strip()[:300]
+    error = public_issue_text(
+        value.get("error")
+        or value.get("errorMessage")
+        or value.get("error_message")
+        or value.get("errorReason")
+        or value.get("error_reason")
+        or value.get("failureReason")
+        or value.get("failure_reason")
+        or value.get("reason")
+        or value.get("cause")
+    ).strip()[:300]
+    if not error and status in {"failed", "cancelled"}:
+        error = public_issue_text(value.get("message") or value.get("description")).strip()[:300]
     if error:
         payload["error"] = error
     if "targetPercent" in value or "target_percent" in value:

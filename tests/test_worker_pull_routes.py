@@ -3441,7 +3441,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 message="Custom worker reviewing billing rules",
                 progress_steps=[
                     {"id": "checkout", "label": "Checkout", "status": "completed", "percent": 100},
-                    {"id": "worker_custom_review", "label": "Custom worker review", "status": "running", "percent": 55, "errorMessage": "custom review stalled"},
+                    {"id": "worker_custom_review", "label": "Custom worker review", "status": "running", "percent": 55, "failureReason": "custom review stalled"},
                 ],
             )
 
