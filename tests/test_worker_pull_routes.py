@@ -3547,6 +3547,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 progress_steps=[
                     {"id": "checkout", "label": "Checkout", "status": "completed", "percent": 100},
                     {"id": "worker_custom_review", "label": "Custom worker review", "status": "running", "percent": 55, "failureReason": "custom review stalled"},
+                    {"id": "qa_gate", "label": "QA gate", "status": "partial_completed", "percent": 100},
                 ],
             )
 
@@ -3563,9 +3564,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(payload["phase"], "worker_custom_review")
         self.assertEqual(payload["progressMessage"], "Custom worker reviewing billing rules")
-        self.assertEqual([step["id"] for step in payload["progressSteps"]], ["checkout", "worker_custom_review"])
+        self.assertEqual([step["id"] for step in payload["progressSteps"]], ["checkout", "worker_custom_review", "qa_gate"])
         self.assertEqual(payload["progressSteps"][1]["label"], "Custom worker review")
         self.assertEqual(payload["progressSteps"][1]["error"], "custom review stalled")
+        self.assertEqual(payload["progressSteps"][2]["status"], "partial_completed")
         self.assertEqual(payload["logsSummary"], "progress_updated")
         self.assertIsInstance(payload.get("updatedAt"), int)
 
