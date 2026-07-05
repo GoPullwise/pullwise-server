@@ -746,6 +746,29 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
     }
 
 
+def completed_scan_progress_steps(value: object) -> list[dict]:
+    steps = public_scan_progress_steps(value)
+    completed_steps = []
+    seen_cleanup = False
+    for step in steps:
+        next_step = dict(step)
+        seen_cleanup = seen_cleanup or next_step.get("id") == "cleanup_active_job"
+        next_step["status"] = "completed"
+        next_step["percent"] = 100.0
+        completed_steps.append(next_step)
+    if completed_steps and not seen_cleanup:
+        completed_steps.append(
+            {
+                "id": "cleanup_active_job",
+                "index": len(completed_steps) + 1,
+                "label": "Cleanup active job",
+                "status": "completed",
+                "percent": 100.0,
+            }
+        )
+    return completed_steps
+
+
 def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) -> bool:
     status = public_issue_text(prepared.get("status")).lower()
     checksum = public_issue_text(prepared.get("checksum"))
@@ -759,6 +782,13 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
     reading_guide = public_result_reading_guide(prepared.get("reading_guide"))
     error_code = worker_result_error_code({"error_code": prepared.get("error_code")})
     review_worker_protocol = public_review_worker_protocol(prepared.get("review_worker_protocol"))
+    progress_final = review_worker_protocol.get("progress_final") if isinstance(review_worker_protocol.get("progress_final"), dict) else {}
+    progress_steps = public_scan_progress_steps(progress_final.get("steps"))
+    progress_phase = public_scan_phase(progress_final.get("current_phase"))
+    progress_message = public_issue_text(progress_final.get("message"))
+    if status == "done":
+        progress_phase = "cleanup_active_job"
+        progress_message = progress_message or "Run completed and active job cleaned up."
     completed_at = pull_request_timestamp(prepared.get("completed_at")) or now()
     scan = memory_scan_by_id(job.get("scan_id"))
     changed = False
@@ -767,7 +797,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
         scan.update(
             {
                 "status": status,
-                "phase": "report",
+                "phase": progress_phase or "report",
                 "progress": public_scan_display_progress(status, scan.get("progress")),
                 "completedAt": completed_at,
                 "durationMs": public_scan_count(prepared.get("duration_ms")),
@@ -802,6 +832,12 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["reviewWorkerProtocol"] = review_worker_protocol
         else:
             scan.pop("reviewWorkerProtocol", None)
+        if status == "done" and not progress_steps:
+            progress_steps = completed_scan_progress_steps(scan.get("progressSteps") or scan.get("progress_steps"))
+        if progress_steps:
+            scan["progressSteps"] = progress_steps
+        if progress_message:
+            scan["progressMessage"] = progress_message
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status in {"done", "partial_completed"}:
             before_issues = json.dumps(

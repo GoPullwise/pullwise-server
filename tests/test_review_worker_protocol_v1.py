@@ -384,6 +384,75 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             app.validate_review_worker_protocol_artifacts(claimed, body, status="done")
             app.db.reset_initialization_cache()
 
+    def test_completed_result_applies_final_cleanup_progress_steps(self) -> None:
+        old_scans = app.SCANS
+        old_issues = app.ISSUES
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "test.sqlite3")},
+            clear=False,
+        ):
+            try:
+                app.db.reset_initialization_cache()
+                scan = {
+                    "id": "scan_final_progress_v1",
+                    "userId": "usr_1",
+                    "repo": "acme/api",
+                    "branch": "main",
+                    "commit": "pending",
+                    "status": "running",
+                    "progress": 100,
+                    "progressSteps": [
+                        {"id": "submit_result_envelope", "index": 1, "label": "Submit result envelope", "status": "completed", "percent": 100},
+                        {"id": "cleanup_active_job", "index": 2, "label": "Cleanup active job", "status": "queued", "percent": 0},
+                    ],
+                }
+                app.SCANS = [scan]
+                app.ISSUES = []
+                app.db.create_scan_job(
+                    {
+                        "job_id": "job_final_progress_v1",
+                        "scan_id": scan["id"],
+                        "repo": scan["repo"],
+                        "branch": scan["branch"],
+                        "commit": scan["commit"],
+                        "status": "queued",
+                        "created_at": app.now(),
+                        "user_id": scan["userId"],
+                    }
+                )
+                claimed = app.db.claim_next_scan_job("wk_1")
+                attempt_id = f"wk_1-{claimed['attempt']}"
+                manifest = required_completed_manifest()
+                for item in manifest:
+                    app.db.store_review_run_artifact(
+                        job_id=claimed["job_id"],
+                        attempt_id=attempt_id,
+                        artifact_id=item["artifact_id"],
+                        payload={
+                            "artifact_id": item["artifact_id"],
+                            "sha256": item["sha256"],
+                            "size_bytes": item["size_bytes"],
+                        },
+                    )
+                envelope = v1_envelope(claimed, manifest, worker_id="wk_1")
+
+                result = app.apply_worker_job_result(
+                    claimed,
+                    {"status": "done", "attempt_id": attempt_id, "reviewWorkerProtocol": envelope},
+                )
+                payload = app.scan_payload(app.SCANS[0])
+            finally:
+                app.SCANS = old_scans
+                app.ISSUES = old_issues
+                app.db.reset_initialization_cache()
+
+        self.assertTrue(result["accepted"])
+        self.assertEqual(payload["phase"], "cleanup_active_job")
+        cleanup_step = next(step for step in payload["progressSteps"] if step["id"] == "cleanup_active_job")
+        self.assertEqual(cleanup_step["status"], "completed")
+        self.assertEqual(cleanup_step["percent"], 100.0)
+
     def test_review_worker_protocol_allows_terminal_upload_error_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
             os.environ,
