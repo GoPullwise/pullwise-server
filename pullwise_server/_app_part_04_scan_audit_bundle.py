@@ -128,7 +128,7 @@ def public_scan_progress_step_id(value: object) -> str:
 
 def public_scan_progress_step_status(value: object) -> str:
     status = public_issue_text(value).lower()
-    return status if status in {"pending", "running", "completed", "skipped", "failed", "cancelled"} else "pending"
+    return status if status in {"pending", "running", "completed", "skipped", "failed", "cancelled", "partial_completed"} else "pending"
 
 
 def public_scan_progress_step(value: object, index: int) -> dict:
