@@ -203,7 +203,7 @@ def public_issue_affected_locations(issue: dict, *, job: dict | None = None) -> 
     for item in raw_locations:
         if not isinstance(item, dict):
             continue
-        file_path = public_issue_file(item.get("file"), issue=issue, job=job)
+        file_path = public_issue_file(item.get("file") or item.get("path"), issue=issue, job=job)
         if not file_path:
             continue
         start_line, end_line = public_line_range(item)
@@ -331,6 +331,11 @@ def public_issue_evidence(
     evidence = []
     raw_evidence = issue.get("evidence") if isinstance(issue.get("evidence"), list) else []
     for item in raw_evidence:
+        if isinstance(item, str):
+            summary = review._safe_text_lenient(item)
+            if summary:
+                evidence.append({"type": "code", "label": "Evidence", "summary": summary[:2000]})
+            continue
         if not isinstance(item, dict):
             continue
         evidence_type = public_issue_text(item.get("type")).lower()
@@ -338,7 +343,7 @@ def public_issue_evidence(
             evidence_type = "code"
         label = public_issue_text(item.get("label")) or evidence_type.replace("_", " ").title()
         summary = review._safe_text_lenient(item.get("summary"))
-        file_path = public_issue_file(item.get("file"), issue=issue, job=job)
+        file_path = public_issue_file(item.get("file") or item.get("path"), issue=issue, job=job)
         start_line, end_line = public_line_range(item)
         command = public_issue_text(item.get("command"))
         exit_code = public_optional_int(item.get("exitCode") if "exitCode" in item else item.get("exit_code"))
@@ -577,6 +582,9 @@ def public_issue_evidence_trace(
 
     for item in review._safe_text_list(issue.get("whyNotFalsePositive"))[:4]:
         append_public_reasoning_item(path_items, f"Reachability check: {item}")
+    disproof_attempt = review._safe_text_lenient(issue.get("disproofAttempt") or issue.get("disproof_attempt"))
+    if disproof_attempt:
+        append_public_reasoning_item(path_items, f"Disproof attempt: {disproof_attempt}")
 
     impact = review._safe_text_lenient(issue.get("impact"))
     if impact:
@@ -586,6 +594,12 @@ def public_issue_evidence_trace(
         if summary:
             append_public_reasoning_item(impact_items, f"Reported behavior: {summary}")
 
+    recommendation = review._safe_text_lenient(issue.get("recommendation") or issue.get("remediation") or issue.get("fix"))
+    if recommendation:
+        append_public_reasoning_item(fix_items, f"Recommendation: {recommendation}")
+    next_agent_task = review._safe_text_lenient(issue.get("nextAgentTask") or issue.get("next_agent_task"))
+    if next_agent_task:
+        append_public_reasoning_item(fix_items, f"Next agent task: {next_agent_task}")
     for step in review._safe_text_list(issue.get("steps"))[:4]:
         append_public_reasoning_item(fix_items, f"Remediation step: {step}")
     if review._safe_code_lines(issue.get("badCode")) or review._safe_code_lines(issue.get("goodCode")):
@@ -657,6 +671,10 @@ def public_issue_reasoning_breakdown(
     for item in review._safe_text_list(issue.get("whyNotFalsePositive"))[:3]:
         append_public_reasoning_item(inferences, f"Negative check: {item}")
 
+    recommendation = review._safe_text_lenient(issue.get("recommendation") or issue.get("remediation") or issue.get("fix"))
+    append_public_reasoning_item(recommendations, recommendation)
+    next_agent_task = review._safe_text_lenient(issue.get("nextAgentTask") or issue.get("next_agent_task"))
+    append_public_reasoning_item(recommendations, next_agent_task)
     for step in review._safe_text_list(issue.get("steps"))[:6]:
         append_public_reasoning_item(recommendations, step)
     if review._safe_code_lines(issue.get("badCode")) or review._safe_code_lines(issue.get("goodCode")):
@@ -676,6 +694,31 @@ def public_issue_reasoning_breakdown(
         "inferences": inferences[:8],
         "recommendations": recommendations[:8],
     }
+
+def public_issue_json_value(value: object, *, depth: int = 0) -> object:
+    if depth > 3:
+        return None
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        return review._safe_text_lenient(value)[:2000]
+    if isinstance(value, list):
+        cleaned = [public_issue_json_value(item, depth=depth + 1) for item in value[:20]]
+        return [item for item in cleaned if item not in (None, "", [], {})]
+    if isinstance(value, dict):
+        payload: dict[str, object] = {}
+        for key, item in list(value.items())[:40]:
+            public_key = public_issue_text(key)
+            if not public_key:
+                continue
+            public_value = public_issue_json_value(item, depth=depth + 1)
+            if public_value not in (None, "", [], {}):
+                payload[public_key] = public_value
+        return payload
+    return None
+
 
 def public_issue_audit_metadata(issue: dict, *, job: dict | None = None) -> dict:
     scan = issue_scan(issue)
@@ -727,6 +770,11 @@ def issue_payload(issue: dict) -> dict:
         "summary": review._safe_text_lenient(issue.get("summary")) or public_issue_text(issue.get("description")),
         "impact": review._safe_text_lenient(issue.get("impact")),
         "detectionReasoning": review._safe_text_lenient(issue.get("detectionReasoning")),
+        "failureScenario": review._safe_text_lenient(issue.get("failureScenario") or issue.get("failure_scenario")),
+        "recommendation": review._safe_text_lenient(issue.get("recommendation") or issue.get("remediation") or issue.get("fix")),
+        "nextAgentTask": review._safe_text_lenient(issue.get("nextAgentTask") or issue.get("next_agent_task")),
+        "disproofAttempt": review._safe_text_lenient(issue.get("disproofAttempt") or issue.get("disproof_attempt")),
+        "validationSources": public_issue_json_value(issue.get("validationSources") or issue.get("validation_sources")),
         "reproductionPath": public_issue_text(issue.get("reproductionPath") or issue.get("reproduction_path")),
         "verificationStatus": verification_status,
         "verificationSummary": review._safe_text_lenient(issue.get("verificationSummary")),
