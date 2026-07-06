@@ -502,6 +502,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         payload = app.scan_payload(scan)
 
         self.assertEqual(payload["reviewRun"]["debugBundleUrl"], f"/v1/review-runs/{run_id}/artifacts/art_debug_bundle")
+        self.assertEqual(payload["debugBundleUrl"], f"/v1/review-runs/{run_id}/artifacts/art_debug_bundle")
+        list_payload = app.scan_list_payload(scan)
+        self.assertEqual(list_payload["debugBundleUrl"], f"/v1/review-runs/{run_id}/artifacts/art_debug_bundle")
         debug_artifacts = [item for item in payload["reviewRun"]["artifacts"] if item.get("kind") == "debug_bundle"]
         self.assertEqual(debug_artifacts[0]["name"], "debug-bundle.zip")
 

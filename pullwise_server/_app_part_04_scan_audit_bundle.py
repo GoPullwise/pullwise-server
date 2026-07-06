@@ -483,12 +483,19 @@ def review_run_debug_bundle_url(artifacts: list[dict]) -> str:
         if url:
             return url
     return ""
-def public_review_run_payload(scan: dict) -> dict:
+
+
+def review_run_record_for_scan(scan: dict) -> dict | None:
     run_id = public_issue_text(scan.get("runId") or scan.get("run_id"))
     job_id = public_issue_text(scan.get("jobId") or scan.get("job_id"))
     run = db.get_review_run(run_id) if run_id else None
     if run is None and job_id:
         run = db.get_latest_review_run_for_job(job_id)
+    return run if isinstance(run, dict) else None
+
+
+def public_review_run_payload(scan: dict) -> dict:
+    run = review_run_record_for_scan(scan)
     if not run:
         return {}
     resolved_run_id = public_issue_text(run.get("run_id"))
@@ -516,6 +523,17 @@ def public_review_run_payload(scan: dict) -> dict:
         "artifacts": artifacts,
     }
     return {key: value for key, value in payload.items() if value not in ("", None) and value != {} and value != []}
+
+
+def scan_debug_bundle_url(scan: dict) -> str:
+    run = review_run_record_for_scan(scan)
+    if not run:
+        return ""
+    resolved_run_id = public_issue_text(run.get("run_id"))
+    if not resolved_run_id:
+        return ""
+    artifacts = [public_review_run_artifact_payload(row) for row in db.list_review_run_artifact_records(resolved_run_id)]
+    return review_run_debug_bundle_url(artifacts)
 
 
 def scan_payload(scan: dict) -> dict:
@@ -560,6 +578,8 @@ def scan_payload(scan: dict) -> dict:
     review_run = public_review_run_payload(scan)
     if review_run:
         payload["reviewRun"] = review_run
+        if public_issue_text(review_run.get("debugBundleUrl")):
+            payload["debugBundleUrl"] = public_issue_text(review_run.get("debugBundleUrl"))
         if "progressSteps" not in payload:
             review_progress = review_run.get("progress") if isinstance(review_run.get("progress"), dict) else {}
             progress_steps = public_scan_progress_steps(review_progress.get("steps"))
@@ -708,6 +728,9 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config
+    debug_bundle_url = scan_debug_bundle_url(scan)
+    if debug_bundle_url:
+        payload["debugBundleUrl"] = debug_bundle_url
     for key in ("queuedAt", "startedAt", "completedAt", "updatedAt", "recoveredAt"):
         if key in scan:
             payload[key] = pull_request_timestamp(scan.get(key)) or 0
