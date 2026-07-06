@@ -2560,6 +2560,57 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["issues"]["high"], 1)
         self.assertEqual(app.SCANS[0]["issues"]["medium"], 0)
 
+    def test_worker_protocol_finding_source_preserves_agent_report_detail_fields(self) -> None:
+        finding = {
+            "id": "cluster-p0-b002-correctness-001",
+            "title": "Bundle planner emits over-cap bundles",
+            "severity": "medium",
+            "category": "pipeline-correctness",
+            "confidence": 0.98,
+            "locations": [
+                {"path": "pullwise_worker/review_worker_v1.py", "start_line": 3795, "end_line": 3806},
+                {"path": "tests/test_review_worker_v1.py", "start_line": 1208, "end_line": 1224},
+            ],
+            "impact": "Oversized single-file hotspots are sent above the intended token cap.",
+            "recommendation": "Split or specially route single files above the token cap.",
+            "next_agent_task": "Add a regression test for one oversized file.",
+            "evidence": [
+                "Location verification kept the cited planner range valid.",
+                "Intent test ITV-002 reproduced the defect.",
+            ],
+            "validation_sources": {
+                "location_verification": "location-verification.json",
+                "related_code": ["pullwise_worker/review_worker_v1.py:3795-3806"],
+                "intent_test": {"test_id": "ITV-002", "classification": "confirmed_bug"},
+            },
+            "disproof_attempt": "Existing tests only cover multi-file overflow.",
+        }
+        source = app.worker_protocol_finding_source(finding)
+        issue = app.worker_finding_payload(
+            {
+                "job_id": "job_agent_detail",
+                "scan_id": "sc_agent_detail",
+                "user_id": "usr_1",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc1234",
+            },
+            source,
+            0,
+        )
+
+        payload = app.issue_payload(issue)
+
+        self.assertEqual(payload["impact"], finding["impact"])
+        self.assertEqual(payload["recommendation"], finding["recommendation"])
+        self.assertEqual(payload["nextAgentTask"], finding["next_agent_task"])
+        self.assertEqual(payload["disproofAttempt"], finding["disproof_attempt"])
+        self.assertEqual(payload["validationSources"]["intent_test"]["classification"], "confirmed_bug")
+        self.assertGreaterEqual(len(payload["affectedLocations"]), 2)
+        self.assertEqual(payload["affectedLocations"][0]["file"], "pullwise_worker/review_worker_v1.py")
+        self.assertEqual(payload["affectedLocations"][1]["file"], "tests/test_review_worker_v1.py")
+        self.assertTrue(any("Location verification" in item.get("summary", "") for item in payload["evidence"]))
+
     def test_worker_result_exposes_reproducible_evidence_chain(self) -> None:
         scan = {
             "id": "sc_evidence",

@@ -1173,18 +1173,28 @@ def worker_protocol_finding_source(finding: dict) -> dict:
     recommendation = review._safe_text_lenient(
         finding.get("recommendation") or finding.get("fix") or finding.get("remediation")
     )
+    impact = review._safe_text_lenient(finding.get("impact") or finding.get("failure_scenario") or finding.get("scenario"))
     scenario = review._safe_text_lenient(
         finding.get("failure_scenario") or finding.get("scenario") or finding.get("impact") or finding.get("description")
     )
+    validation_sources = finding.get("validation_sources") if isinstance(finding.get("validation_sources"), dict) else {}
+    if not validation_sources and isinstance(finding.get("validationSources"), dict):
+        validation_sources = finding.get("validationSources")
     return {
         "id": public_issue_text(finding.get("id") or finding.get("issue_id")),
         "title": public_issue_text(finding.get("title") or finding.get("summary")),
         "severity": review._safe_severity(finding.get("severity")),
+        "category": public_issue_text(finding.get("category")),
+        "confidence": review._safe_confidence(finding.get("confidence")),
         "status": public_issue_status(finding.get("status") or "open"),
         "file": file_path,
         "line": line,
         "description": review._safe_text_lenient(finding.get("description") or scenario),
+        "impact": impact,
         "recommendation": recommendation,
+        "nextAgentTask": review._safe_text_lenient(finding.get("next_agent_task") or finding.get("nextAgentTask")),
+        "disproofAttempt": review._safe_text_lenient(finding.get("disproof_attempt") or finding.get("disproofAttempt")),
+        "validationSources": validation_sources,
         "failureScenario": scenario,
         "evidence": evidence_items,
         "reproduction": finding.get("reproduction") if isinstance(finding.get("reproduction"), dict) else {},
