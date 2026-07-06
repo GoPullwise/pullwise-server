@@ -813,6 +813,17 @@ def issue_payload(issue: dict) -> dict:
         "references": review._safe_references(issue.get("references")),
         "createdAt": pull_request_timestamp(issue.get("createdAt")) or 0,
     }
+    raw_markdown = review._safe_text_lenient(
+        issue.get("rawMarkdown")
+        or issue.get("raw_markdown")
+        or issue.get("markdown")
+        or issue.get("bodyMarkdown")
+        or issue.get("body_markdown")
+        or issue.get("descriptionMarkdown")
+        or issue.get("description_markdown")
+    )[:50000]
+    if raw_markdown:
+        payload["rawMarkdown"] = raw_markdown
     payload["reproduction"] = public_issue_reproduction_payload(issue)
     updated_at = pull_request_timestamp(issue.get("updatedAt"))
     if updated_at is not None:
