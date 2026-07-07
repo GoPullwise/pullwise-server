@@ -194,6 +194,12 @@ V1 terminal result status must preserve `completed`/`done`, `failed`,
 `review_runs`, scan state, public scan payloads, and artifact/result retrieval;
 do not collapse cancelled or partial results back to legacy `failed` or
 `queued` states.
+After a v1 terminal result is accepted, the matching terminal progress event
+from the same worker (`run_completed`, `run_failed`, `run_cancelled`, or
+`run_partial_completed`) may still arrive as the worker refreshes final logs.
+Accept and store only the event that matches the terminal job status, update the
+review run event/progress snapshot, and do not regress the terminal scan job,
+scan state, quota state, or lease accounting back to running.
 
 Expose the worker-facing v1 review routes explicitly: register under
 `/v1/workers/register`, lease and heartbeat under `/v1/workers/{worker_id}/...`,

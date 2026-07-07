@@ -3229,13 +3229,21 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Review run not found.")
         if not self.authenticated_worker_id_matches(worker_record, public_issue_text(job.get("claimed_by_worker_id"))):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
-        if public_issue_text(job.get("status")) not in {"claimed", "running", "uploading_result"}:
-            return self.error(HTTPStatus.CONFLICT, "Run is no longer accepting progress events.")
         event_type = public_issue_text(body.get("event_type"))
         if not event_type:
             return self.error(HTTPStatus.BAD_REQUEST, "event_type is required.")
         if event_type not in REVIEW_RUN_EVENT_TYPES:
             return self.error(HTTPStatus.BAD_REQUEST, "Unsupported review run event_type.")
+        job_status = public_issue_text(job.get("status"))
+        terminal_event_for_status = {
+            "done": "run_completed",
+            "failed": "run_failed",
+            "cancelled": "run_cancelled",
+            "partial_completed": "run_partial_completed",
+        }.get(job_status)
+        terminal_event_after_result = bool(terminal_event_for_status and event_type == terminal_event_for_status)
+        if job_status not in {"claimed", "running", "uploading_result"} and not terminal_event_after_result:
+            return self.error(HTTPStatus.CONFLICT, "Run is no longer accepting progress events.")
         validation_error = worker_v1_event_validation_error(body, run_id, public_issue_text(job.get("claimed_by_worker_id")))
         if validation_error:
             return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 event: {validation_error}")
@@ -3291,6 +3299,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if "monotonic" in message or "already exists" in message:
                 return self.error(HTTPStatus.CONFLICT, message)
             return self.error(HTTPStatus.BAD_REQUEST, message)
+        if terminal_event_after_result:
+            return self.json(
+                {
+                    "ack": True,
+                    "run_id": run_id,
+                    "sequence": public_scan_count(stored_event.get("sequence")),
+                    "server_time": protocol_iso_time(now()),
+                }
+            )
         job = db.update_scan_job_progress(
             public_issue_text(job.get("job_id")),
             {

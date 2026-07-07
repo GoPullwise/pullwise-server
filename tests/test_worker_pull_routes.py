@@ -1320,6 +1320,53 @@ class WorkerPullRoutesTest(unittest.TestCase):
         stored_run = db.get_review_run(run_id)
         self.assertEqual(stored_run["status"], "failed")
         self.assertEqual(stored_run["result_status"], "failed")
+
+    def test_terminal_run_event_after_result_is_accepted_without_regressing_job(self) -> None:
+        self.create_claimable_scan_job(job_id="job_terminal_event_after_result", scan_id="sc_terminal_event_after_result", user_id="usr_1")
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+
+        result = self.v1_result(
+            claimed,
+            {
+                "status": "done",
+                "attempt_id": attempt_id,
+                **audit_result_fields([]),
+            },
+        )
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "done")
+
+        terminal_event = RouteHarness(
+            f"/v1/review-runs/{run_id}/events",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "run_id": run_id,
+                "worker_id": "wk_1",
+                "sequence": 1,
+                "timestamp": "2026-07-07T06:34:10Z",
+                "event_type": "run_completed",
+                "phase": "submit_result_envelope",
+                "severity": "info",
+                "message": "Run completed.",
+                "progress": {"overall_percent": 100.0, "current_phase_percent": 100, "status": "completed"},
+                "data": {},
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(terminal_event, "POST")
+
+        self.assertEqual(terminal_event.status, HTTPStatus.OK)
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "done")
+        stored_run = db.get_review_run(run_id)
+        self.assertEqual(stored_run["status"], "completed")
+        self.assertEqual(stored_run["result_status"], "done")
+        stored_events = db.list_review_run_events(run_id)
+        self.assertEqual(stored_events[-1]["event_type"], "run_completed")
+
     def test_v1_worker_result_accepts_cancelled_terminal_status(self) -> None:
         scan = {
             "id": "sc_v1_cancelled_result",
