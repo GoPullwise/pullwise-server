@@ -4062,9 +4062,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         length = self.request_content_length()
         if length == 0:
             return b""
-        if length > max_body_bytes():
+        if length > self.request_body_size_limit():
             raise RequestBodyTooLarge("Request body is too large.")
         return self.rfile.read(length)
+
+    def request_body_size_limit(self) -> int:
+        value = getattr(self, "_request_body_size_limit", None)
+        if isinstance(value, int) and value >= 0:
+            return value
+        return max_body_bytes()
 
     def enforce_body_size_limit(self, method: str, path: str = "", segments: list[str] | None = None) -> None:
         if method not in {"POST", "PATCH"}:
@@ -4082,6 +4088,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
         if is_worker_review_payload:
             limit = max_decompressed_body_bytes()
+        self._request_body_size_limit = limit
         if length > limit:
             raise RequestBodyTooLarge("Request body is too large.")
 

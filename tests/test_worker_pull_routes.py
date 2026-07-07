@@ -67,6 +67,10 @@ class RouteHarness(app.PullwiseHandler):
 
 
 class RawBodyRouteHarness(RouteHarness):
+    def read_raw_body(self) -> bytes:
+        self.rfile = io.BytesIO(self._raw_body)
+        return app.PullwiseHandler.read_raw_body(self)
+
     def read_json(self) -> dict:
         return app.PullwiseHandler.read_json(self)
 
