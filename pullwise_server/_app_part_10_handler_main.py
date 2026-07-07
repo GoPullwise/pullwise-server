@@ -726,9 +726,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             except ResourceNotFound as exc:
                 return self.error(HTTPStatus.NOT_FOUND, str(exc))
             except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             except billing.BillingProviderResponseError as exc:
                 return self.error(HTTPStatus.BAD_GATEWAY, str(exc))
@@ -1351,9 +1348,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             try:
                 preview = preview_issue_fix_for_user(USERS[session["userId"]], issue)
             except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             return self.json(preview, HTTPStatus.OK if preview.get("valid") else HTTPStatus.BAD_REQUEST)
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "apply":
@@ -1370,9 +1364,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             except github_auth.GitHubError as exc:
                 return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             return self.json(pull_request)
         if len(segments) == 2 and segments[0] == "integrations":
@@ -1558,9 +1549,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             try:
                 issue = self.update_issue_status_for_session(session, segments[1], body)
             except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             return self.json(issue_payload(issue))
         if len(segments) == 1 and segments[0] == "settings":
@@ -2803,9 +2791,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             except ResourceNotFound as exc:
                 return self.error(HTTPStatus.NOT_FOUND, str(exc))
             except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             return self.json({"ok": True, "session": log_stream_session_payload(session_record)}, HTTPStatus.CREATED)
         if len(segments) == 4 and segments[:2] == ["admin", "log-streams"] and segments[3] == "pause":
@@ -3104,9 +3089,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             except ResourceNotFound:
                 return self.error(HTTPStatus.NOT_FOUND, "User not found.")
             except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 

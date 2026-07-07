@@ -3307,7 +3307,9 @@ def scan_job_status_values_for_public_status(status: str) -> list[str]:
         return ["queued", "retrying"]
     if normalized == "failed":
         return ["failed", "lost"]
-    if normalized in {"done", "cancelled"}:
+    if normalized == "done":
+        return ["done", "partial_completed"]
+    if normalized == "cancelled":
         return [normalized]
     return []
 
