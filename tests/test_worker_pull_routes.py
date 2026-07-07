@@ -3991,55 +3991,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["billingUsage"]["used"], 1)
         self.assertEqual(payload["billingUsage"]["reserved"], 0)
 
-    def test_retry_consumes_quota_and_requeues_failed_scan(self) -> None:
-        user = {"id": "usr_1", "name": "Owner", "providers": []}
-        app.USERS = {"usr_1": user}
-        app.SESSIONS = {"ses_owner": {"id": "ses_owner", "userId": "usr_1", "createdAt": app.now(), "expiresAt": app.now() + 3600}}
-        repository = db.upsert_repository(
-            {
-                "github_repo_id": "12001",
-                "full_name": "acme/retry",
-                "owner_login": "acme",
-                "default_branch": "main",
-            }
-        )
-        initial_quota = app.quota.consume_scan_quota(
-            user=user,
-            repository=repository,
-            requested_by_user_id=user["id"],
-            scan_id="sc_retry_route",
-            request_id="req_initial",
-        )
-        scan = {
-            "id": "sc_retry_route",
-            "repo": repository["full_name"],
-            "branch": "main",
-            "commit": "pending",
-            "status": "failed",
-            "userId": user["id"],
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "completedAt": app.now(),
-            "progress": 80,
-            "phase": "report",
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "repoId": repository["id"],
-            "githubRepoId": repository["github_repo_id"],
-            "requestId": "req_initial",
-            "quotaBucketIds": initial_quota["bucketIds"],
-            "billingUsage": initial_quota["user"],
-            "repoUsage": initial_quota["repository"],
-            "error": "worker failed",
-        }
-        app.SCANS = [scan]
-        app.create_scan_job_for_scan(scan)
-        connection = db.connect()
-        try:
-            connection.execute("UPDATE scan_jobs SET status = 'failed' WHERE scan_id = ?", (scan["id"],))
-            connection.commit()
-        finally:
-            connection.close()
-
+    def test_manual_scan_retry_route_is_disabled(self) -> None:
         retry = RouteHarness(
             "/scans/sc_retry_route/retry",
             {"requestId": "req_retry_route"},
@@ -4047,109 +3999,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(retry, "POST")
 
-        self.assertEqual(retry.status, HTTPStatus.CREATED)
-        self.assertEqual(retry.payload["status"], "queued")
-        self.assertEqual(app.SCANS[0]["requestId"], "req_retry_route")
-        user_quota = app.quota.quota_payload_for_user(user)
-        repo_quota = app.quota.quota_payload_for_repository(repository, user)
-        self.assertEqual(user_quota["used"], 1)
-        self.assertEqual(user_quota["reserved"], 1)
-        self.assertEqual(repo_quota["used"], 1)
-        self.assertEqual(repo_quota["reserved"], 1)
-        self.assertEqual(db.get_scan_job_for_scan("sc_retry_route")["status"], "queued")
-        self.assertEqual(app.SCANS[0]["progress"], 0)
-
-    def test_retry_repository_too_large_refunds_only_current_retry_request(self) -> None:
-        user = {"id": "usr_1", "name": "Owner", "providers": []}
-        app.USERS = {"usr_1": user}
-        app.SESSIONS = {"ses_owner": {"id": "ses_owner", "userId": "usr_1", "createdAt": app.now(), "expiresAt": app.now() + 3600}}
-        repository = db.upsert_repository(
-            {
-                "github_repo_id": "12002",
-                "full_name": "acme/retry-large",
-                "owner_login": "acme",
-                "default_branch": "main",
-            }
-        )
-        initial_quota = app.quota.consume_scan_quota(
-            user=user,
-            repository=repository,
-            requested_by_user_id=user["id"],
-            scan_id="sc_retry_large",
-            request_id="req_initial_large",
-        )
-        scan = {
-            "id": "sc_retry_large",
-            "repo": repository["full_name"],
-            "branch": "main",
-            "commit": "pending",
-            "status": "failed",
-            "userId": user["id"],
-            "createdAt": app.now(),
-            "queuedAt": app.now(),
-            "completedAt": app.now(),
-            "progress": 90,
-            "phase": "report",
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "repoId": repository["id"],
-            "githubRepoId": repository["github_repo_id"],
-            "requestId": "req_initial_large",
-            "quotaBucketIds": initial_quota["bucketIds"],
-            "billingUsage": initial_quota["user"],
-            "repoUsage": initial_quota["repository"],
-        }
-        app.SCANS = [scan]
-        app.create_scan_job_for_scan(scan)
-        connection = db.connect()
-        try:
-            connection.execute("UPDATE scan_jobs SET status = 'failed' WHERE scan_id = ?", (scan["id"],))
-            connection.commit()
-        finally:
-            connection.close()
-
-        retry = RouteHarness(
-            "/scans/sc_retry_large/retry",
-            {"requestId": "req_retry_large"},
-            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
-        )
-        app.PullwiseHandler.route(retry, "POST")
-        self.assertEqual(retry.status, HTTPStatus.CREATED)
-        self.assertEqual(retry.payload["status"], "queued")
-        self.assertEqual(app.SCANS[0]["requestId"], "req_retry_large")
-        user_quota = app.quota.quota_payload_for_user(user)
-        self.assertEqual(user_quota["used"], 1)
-        self.assertEqual(user_quota["reserved"], 1)
-
-        claim = self.v1_lease()
-        self.assertEqual(claim.status, HTTPStatus.OK)
-        claimed_job = claim.payload["job"]
-        result = self.v1_result(
-            claimed_job,
-            {
-                "status": "failed",
-                "attempt_id": f"wk_1-{claimed_job['attempt']}",
-                "result_checksum": "checksum-retry-repository-too-large",
-                "error": "Repository is too large for Pullwise scanning.",
-                "error_code": "REPOSITORY_TOO_LARGE",
-                **audit_result_fields([], execution_status="failed"),
-                "preflight": {
-                    "mode": "static",
-                    "execution": "repository_limit_check",
-                    "repositoryStats": {"fileCount": 2001, "totalBytes": 50 * 1024 * 1024 + 1},
-                    "repositoryLimits": {"maxFiles": 2000, "maxBytes": 50 * 1024 * 1024},
-                    "repositoryLimitExceeded": True,
-                    "repositoryLimitReasons": ["file_count"],
-                },
-            },
-        )
-
-        self.assertEqual(result.status, HTTPStatus.OK)
-        self.assertEqual(result.payload["quotaRelease"]["ledgerRows"], 2)
-        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)
-        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
-        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 1)
-        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["reserved"], 0)
-        self.assertEqual(app.SCANS[0]["requestId"], "req_retry_large")
+        self.assertEqual(retry.status, HTTPStatus.GONE)
+        self.assertEqual(retry.payload["message"], "Scan retry has been disabled.")
 
     def test_worker_result_backfills_pending_commit_with_resolved_sha(self) -> None:
         resolved_commit = "1234567890abcdef1234567890abcdef12345678"

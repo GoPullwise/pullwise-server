@@ -375,7 +375,7 @@ def initialize() -> None:
                     progress INTEGER NOT NULL DEFAULT 0,
                     progress_message TEXT,
                     logs_summary TEXT,
-                    max_attempts INTEGER NOT NULL DEFAULT 2,
+                    max_attempts INTEGER NOT NULL DEFAULT 1,
                     review_output_language TEXT,
                     provider_chain TEXT,
                     last_attempt_id TEXT
@@ -3270,7 +3270,7 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("github_repo_id"),
                     record.get("installation_id"),
                     record.get("clone_url"),
-                    max(1, int(record.get("max_attempts") or 2)),
+                    1,
                     record.get("review_output_language"),
                     provider_chain,
                 ),
@@ -3580,51 +3580,7 @@ def list_scan_jobs_for_scans(
 
 
 def retry_scan_job(scan_id: str, *, timestamp: int | None = None, max_attempts: int | None = None) -> dict[str, Any] | None:
-    ensure_initialized()
-    scan_id = str(scan_id or "").strip()
-    if not scan_id:
-        return None
-    current_time = int(timestamp if timestamp is not None else time.time())
-    with _LOCK, closing(connect()) as connection:
-        connection.row_factory = sqlite3.Row
-        with connection:
-            existing = connection.execute("SELECT job_id, max_attempts FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()
-            if not existing:
-                return None
-            job_id = str(existing["job_id"] or "")
-            configured_max_attempts = max(1, int(max_attempts or existing["max_attempts"] or 1))
-            cursor = connection.execute(
-                """
-                UPDATE scan_jobs
-                SET status = 'queued',
-                    attempt = 0,
-                    claimed_by_worker_id = NULL,
-                    claimed_at = NULL,
-                    started_at = NULL,
-                    completed_at = NULL,
-                    timeout_at = NULL,
-                    error = NULL,
-                    result_checksum = NULL,
-                    progress_phase = NULL,
-                    progress = 0,
-                    progress_message = NULL,
-                    logs_summary = NULL,
-                    max_attempts = ?,
-                    last_attempt_id = NULL,
-                    created_at = ?,
-                    updated_at = ?
-                WHERE scan_id = ?
-                  AND status IN ('failed', 'cancelled', 'lost')
-                """,
-                (configured_max_attempts, current_time, current_time, scan_id),
-            )
-            if cursor.rowcount != 1:
-                return None
-            connection.execute("DELETE FROM scan_job_attempts WHERE job_id = ?", (job_id,))
-            connection.execute("DELETE FROM job_result_artifacts WHERE job_id = ?", (job_id,))
-            connection.execute("DELETE FROM job_results WHERE job_id = ?", (job_id,))
-            connection.execute("DELETE FROM review_decision_events WHERE job_id = ?", (job_id,))
-            return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
+    return None
 
 
 def list_scan_jobs_missing_from_state(scan_ids: list[str] | set[str]) -> list[dict[str, Any]]:
@@ -4029,19 +3985,7 @@ def _effective_scan_job_max_attempts_locked(
     worker_scope: str | None = WORKER_SCOPE_SHARED,
     owner_user_id: str | None = None,
 ) -> int:
-    try:
-        configured = int(max_attempts or 1)
-    except (TypeError, ValueError):
-        configured = 1
-    configured = max(1, configured)
-    worker_count = _enabled_worker_count_locked(
-        connection,
-        worker_scope=worker_scope,
-        owner_user_id=owner_user_id,
-    )
-    if worker_count <= 0:
-        return configured
-    return max(1, min(configured, worker_count))
+    return 1
 
 
 def scan_job_effective_max_attempts(job: dict[str, Any] | None) -> int:
@@ -5641,46 +5585,7 @@ def record_scan_job_result(
                 (current_time, job_id),
             )
             effective_max_attempts = _effective_scan_job_max_attempts_locked(connection, job["max_attempts"])
-            retry_queued = status == "failed" and bool(retryable) and attempt < effective_max_attempts
-            if retry_queued:
-                connection.execute(
-                    """
-                    UPDATE scan_jobs
-                    SET status = 'queued',
-                        claimed_by_worker_id = NULL,
-                        claimed_at = NULL,
-                        started_at = NULL,
-                        completed_at = NULL,
-                        timeout_at = NULL,
-                        error = ?,
-                        result_checksum = ?,
-                        last_attempt_id = ?,
-                        progress_phase = NULL,
-                        progress = 0,
-                        progress_message = NULL,
-                        updated_at = ?
-                    WHERE job_id = ?
-                    """,
-                    (
-                        payload.get("error") or "worker_result_failed",
-                        result_checksum,
-                        attempt_id,
-                        current_time,
-                        job_id,
-                    ),
-                )
-                next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
-                result = {
-                    "accepted": True,
-                    "duplicate": False,
-                    "conflict": False,
-                    "retry_queued": True,
-                    "job_status": "queued",
-                    "attempt": attempt,
-                    "max_attempts": effective_max_attempts,
-                    "job": next_job or {},
-                }
-            else:
+            if True:
                 connection.execute(
                     """
                     UPDATE scan_jobs

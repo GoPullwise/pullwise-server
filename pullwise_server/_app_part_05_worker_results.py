@@ -383,8 +383,6 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
         "timeout_at": pull_request_timestamp(job.get("timeout_at")),
         "error": clean_scan_error(job.get("error")),
         "result_checksum": public_issue_text(job.get("result_checksum")),
-        "max_attempts": max(1, public_scan_count(db.scan_job_retry_state(job).get("maxAttempts"))),
-        "retry": scan_retry_summary_for_job(job),
         "repo_id": clean_github_access_text(job.get("repo_id"), allow_int=True),
         "github_repo_id": clean_github_access_text(job.get("github_repo_id"), allow_int=True),
         "installation_id": clean_github_access_text(job.get("installation_id"), allow_int=True),
@@ -936,7 +934,7 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         status=status,
         result_checksum=checksum,
         payload=body,
-        retryable=worker_result_allows_auto_retry(body, status=status),
+        retryable=False,
     )
     if record_result.get("conflict"):
         return {"accepted": False, "conflict": True}
@@ -960,25 +958,6 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     quota_finalized = {}
     if worker_result_should_finalize_quota(job, body, status=status):
         quota_finalized = finalize_scan_quota_for_job(job, trigger="worker_result")
-    retry_queued = bool(record_result.get("retry_queued"))
-    if retry_queued:
-        retry_job = record_result.get("job") if isinstance(record_result.get("job"), dict) else job
-        if resolved_commit:
-            retry_job = {**retry_job, "commit": resolved_commit}
-        with STATE_LOCK:
-            apply_worker_job_retry_to_state_locked(retry_job, body, checksum=checksum)
-        result = {
-            "accepted": True,
-            "duplicate": duplicate,
-            "conflict": False,
-            "retryQueued": True,
-            "issueCount": worker_result_issue_count(body),
-            "reviewDecisionEvents": event_result,
-            "retry": scan_retry_summary_for_job(retry_job, reason="worker_result_failed"),
-        }
-        if quota_finalized.get("consumed"):
-            result["quotaConsumed"] = True
-        return result
     prepared_result = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     with STATE_LOCK:
         apply_prepared_worker_job_result_to_state_locked(job, prepared_result)
@@ -1030,12 +1009,7 @@ WORKER_TERMINAL_REFUNDABLE_ERROR_CODES = frozenset(
 
 
 def worker_result_allows_auto_retry(body: dict, *, status: str) -> bool:
-    if status != "failed":
-        return False
-    if worker_result_error_code(body) in WORKER_TERMINAL_REFUNDABLE_ERROR_CODES:
-        return False
-    return True
-
+    return False
 
 def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, status: str) -> dict:
     error_code = worker_result_error_code(body)
