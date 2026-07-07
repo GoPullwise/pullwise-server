@@ -1014,39 +1014,15 @@ class DatabaseContractsTest(unittest.TestCase):
                     status='failed',
                     result_checksum='checksum-no-retry',
                     payload={'status': 'failed', 'error': 'worker_result_failed'},
-                    retryable=True,
                 )
                 second_claim = db.claim_next_scan_job('wk_single', lease_seconds=3600, timestamp=130)
                 stored = db.get_scan_job('job_no_retry_worker_failure')
 
         self.assertEqual(claimed['attempt'], 1)
         self.assertTrue(failed['accepted'])
-        self.assertFalse(failed['retry_queued'])
         self.assertIsNone(second_claim)
         self.assertEqual(stored['status'], 'failed')
         self.assertEqual(stored['attempt'], 1)
-    def test_retry_scan_job_is_disabled(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            db_path = os.path.join(temp_dir, 'pullwise.sqlite3')
-            with patch.dict(os.environ, {'PULLWISE_DB_PATH': db_path}, clear=False):
-                db.initialize()
-                db.create_scan_job(
-                    {
-                        'job_id': 'job_retry_disabled',
-                        'scan_id': 'sc_retry_disabled',
-                        'repo': 'acme/api',
-                        'branch': 'main',
-                        'commit': 'pending',
-                        'status': 'failed',
-                        'created_at': 100,
-                        'user_id': 'usr_1',
-                    }
-                )
-                retry = db.retry_scan_job('sc_retry_disabled', timestamp=200)
-                stored = db.get_scan_job('job_retry_disabled')
-
-        self.assertIsNone(retry)
-        self.assertEqual(stored['status'], 'failed')
     def test_exhausted_queued_scan_job_fails_before_claim(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
@@ -1078,9 +1054,9 @@ class DatabaseContractsTest(unittest.TestCase):
 
         self.assertEqual(claimed, None)
         self.assertEqual(recovered[0]["status"], "failed")
-        self.assertEqual(recovered[0]["reason"], "retry_attempts_exhausted")
+        self.assertEqual(recovered[0]["reason"], "scan_attempts_exhausted")
         self.assertEqual(stored["status"], "failed")
-        self.assertEqual(stored["error"], "retry_attempts_exhausted")
+        self.assertEqual(stored["error"], "scan_attempts_exhausted")
 
     def test_record_scan_job_result_stores_large_payload_as_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

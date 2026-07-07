@@ -25,32 +25,11 @@ class WorkerRetryPolicyTest(unittest.TestCase):
         expected = {"REPOSITORY_TOO_LARGE", *CODEX_READINESS_ERROR_CODES}
         self.assertTrue(expected.issubset(app.WORKER_TERMINAL_REFUNDABLE_ERROR_CODES))
 
-    def test_codex_readiness_failures_are_not_automatically_retried(self) -> None:
-        for error_code in CODEX_READINESS_ERROR_CODES:
-            with self.subTest(error_code=error_code):
-                self.assertFalse(
-                    app.worker_result_allows_auto_retry(
-                        {"error_code": error_code},
-                        status="failed",
-                    )
-                )
-
-    def test_transient_worker_failure_is_not_auto_retryable(self) -> None:
-        self.assertFalse(
-            app.worker_result_allows_auto_retry(
-                {"error_code": "CODEX_REVIEW_COMPLETION_FAILED"},
-                status="failed",
-            )
-        )
-
     def test_scan_status_mapper_preserves_partial_completed(self) -> None:
         self.assertEqual(app.scan_status_from_job_status("partial_completed"), "partial_completed")
 
     def test_done_scan_filter_includes_partial_completed_results(self) -> None:
         self.assertEqual(app.db.scan_job_status_values_for_public_status("done"), ["done", "partial_completed"])
-    def test_success_is_never_sent_to_failure_retry_policy(self) -> None:
-        self.assertFalse(app.worker_result_allows_auto_retry({}, status="done"))
-
 
 if __name__ == "__main__":
     unittest.main()

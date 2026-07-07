@@ -780,7 +780,7 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS, original)
         self.persist_state.assert_not_called()
 
-    def test_recover_interrupted_scans_requeues_timed_out_job_and_scan(self) -> None:
+    def test_recover_interrupted_scans_fails_timed_out_job_and_scan(self) -> None:
         timestamp = app.now()
         app.SCANS = [
             {
@@ -858,10 +858,10 @@ class ScanRecoveryTest(unittest.TestCase):
 
         self.assertEqual(recovered, 1)
         self.assertEqual(stored["status"], "failed")
-        self.assertEqual(stored["error"], "retry_attempts_exhausted")
+        self.assertEqual(stored["error"], "scan_attempts_exhausted")
         self.assertEqual(app.SCANS[0]["status"], "failed")
-        self.assertEqual(app.SCANS[0]["error"], "Scan exceeded the configured retry attempts before completing.")
-        self.assertEqual(app.SCANS[0]["recoveryReason"], "retry_attempts_exhausted")
+        self.assertEqual(app.SCANS[0]["error"], "Scan worker timed out before completing the job.")
+        self.assertEqual(app.SCANS[0]["recoveryReason"], "scan_attempts_exhausted")
 
     def test_recover_interrupted_scans_releases_reserved_quota_for_exhausted_job_before_ai(self) -> None:
         timestamp = app.now()
@@ -896,7 +896,7 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "failed")
         self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertEqual(app.SCANS[0]["quotaState"], "released")
-        self.assertEqual(app.SCANS[0]["quotaReleaseReason"], "retry_attempts_exhausted")
+        self.assertEqual(app.SCANS[0]["quotaReleaseReason"], "scan_attempts_exhausted")
         self.assertEqual(usage["used"], 0)
         self.assertEqual(usage["reserved"], 0)
         self.assertEqual(app.SCANS[0]["billingUsage"]["reserved"], 0)
@@ -971,7 +971,7 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["billingUsage"]["used"], 1)
         self.assertNotIn("quotaReleaseReason", app.SCANS[0])
 
-    def test_recover_interrupted_scans_requeues_job_when_worker_heartbeat_times_out(self) -> None:
+    def test_recover_interrupted_scans_fails_job_when_worker_heartbeat_times_out(self) -> None:
         timestamp = app.now()
         with patch.dict(os.environ, {"PULLWISE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": "60"}, clear=False):
             db.upsert_worker_heartbeat(

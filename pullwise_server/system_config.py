@@ -911,9 +911,6 @@ def scan_job_max_attempts() -> int:
     return 1
 
 
-def scan_job_retry_attempts() -> int:
-    return 0
-
 
 def scan_job_lease_seconds() -> int:
     return max(60, int_setting("scan.jobLeaseSeconds"))

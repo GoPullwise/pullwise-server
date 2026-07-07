@@ -814,7 +814,6 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         status=status,
         result_checksum=checksum,
         payload=body,
-        retryable=False,
     )
     if record_result.get("conflict"):
         return {"accepted": False, "conflict": True}
@@ -887,9 +886,6 @@ WORKER_TERMINAL_REFUNDABLE_ERROR_CODES = frozenset(
     }
 )
 
-
-def worker_result_allows_auto_retry(body: dict, *, status: str) -> bool:
-    return False
 
 def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, status: str) -> dict:
     error_code = worker_result_error_code(body)

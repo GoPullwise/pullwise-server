@@ -154,7 +154,7 @@ AUDIT_SWARM_EVIDENCE_BLOCK_KINDS = {
 }
 REVIEW_DECISION_EVENT_PROTOCOL_VERSION = "pullwise-review-decision/0.1"
 SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled", "partial_completed"}
-SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "partial_completed", "lost", "retrying"}
+SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "partial_completed", "lost"}
 DEFAULT_SCAN_ISSUE_RETENTION_SECONDS = 90 * 24 * 60 * 60
 TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "partial_completed", "lost"}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
@@ -1254,8 +1254,6 @@ def scan_status_from_job_status(status: object) -> str:
     normalized = public_issue_text(status).lower()
     if normalized in {"claimed", "running", "uploading_result"}:
         return "running"
-    if normalized == "retrying":
-        return "queued"
     if normalized == "lost":
         return "failed"
     return normalized if normalized in {"queued", "done", "failed", "cancelled", "partial_completed"} else ""
@@ -1379,11 +1377,7 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
         elif job.get("status") == "failed":
             reason = public_issue_text(job.get("reason")) or "timed_out"
             stored_job = db.get_scan_job(public_issue_text(job.get("job_id"))) if public_issue_text(job.get("job_id")) else None
-            error = (
-                "Scan exceeded the configured retry attempts before completing."
-                if reason == "retry_attempts_exhausted"
-                else "Scan worker timed out before completing the job."
-            )
+            error = "Scan worker timed out before completing the job."
             scan.update(
                 {
                     "status": "failed",

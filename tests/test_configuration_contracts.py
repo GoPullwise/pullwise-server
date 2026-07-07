@@ -262,21 +262,8 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(runtime_config["alerts"]["email"]["smtpPassword"], "smtp-secret")
         self.assertTrue(runtime_config["alerts"]["email"]["enabled"])
 
-    def test_scan_job_retry_attempts_are_disabled(self) -> None:
-        config = app.system_config.default_config()
-        fields = {
-            field["path"]: field
-            for group in app.system_config.metadata()
-            if group["id"] == "scan"
-            for field in group["fields"]
-        }
-
-        self.assertNotIn("jobRetryAttempts", config["scan"])
-        self.assertNotIn("jobMaxAttempts", config["scan"])
-        self.assertNotIn("scan.jobRetryAttempts", fields)
-        with patch.dict(os.environ, {"PULLWISE_SCAN_JOB_RETRY_ATTEMPTS": "3"}, clear=False):
-            self.assertEqual(app.system_config.scan_job_retry_attempts(), 0)
-            self.assertEqual(app.system_config.scan_job_max_attempts(), 1)
+    def test_scan_job_attempts_are_single_run(self) -> None:
+        self.assertEqual(app.system_config.scan_job_max_attempts(), 1)
     def test_worker_allowed_providers_filters_unsupported_values(self) -> None:
         with patch.object(app.system_config, "list_setting", return_value=["unsupported", " CODEX "]):
             self.assertEqual(app.system_config.worker_allowed_providers(), {"codex"})

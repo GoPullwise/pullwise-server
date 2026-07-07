@@ -146,7 +146,7 @@ def current_review_worker_job_for_test() -> dict:
         cursor = connection.execute(
             """
             SELECT * FROM scan_jobs
-            WHERE status IN ('claimed', 'running', 'uploading_result', 'queued', 'retrying', 'done', 'failed')
+            WHERE status IN ('claimed', 'running', 'uploading_result', 'queued', 'done', 'failed')
             ORDER BY claimed_at DESC, created_at DESC, job_id DESC
             LIMIT 1
             """
@@ -3766,32 +3766,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
             },
         )
         self.assertEqual(failed_result.status, HTTPStatus.OK)
-        self.assertFalse(failed_result.payload.get("retryQueued", False))
         stored_after_failure = db.get_scan_job(first_job["job_id"])
         self.assertEqual(stored_after_failure["status"], "failed")
         self.assertEqual(stored_after_failure["attempt"], 1)
         self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertNotIn("retry", app.SCANS[0])
-    def test_scan_job_effective_attempts_stay_single_attempt(self) -> None:
-        self.create_registry_worker("wk_2")
-        job = db.create_scan_job(
-            {
-                "job_id": "job_single_attempt_cap",
-                "scan_id": "sc_single_attempt_cap",
-                "repo": "acme/cap",
-                "branch": "main",
-                "commit": "pending",
-                "status": "queued",
-                "user_id": "usr_1",
-                "max_attempts": 6,
-            }
-        )
-
-        retry = db.scan_job_retry_state(job)
-
-        self.assertEqual(retry["maxAttempts"], 1)
-        self.assertEqual(retry["retryAttempts"], 0)
-        self.assertEqual(retry["remainingAttempts"], 0)
     def test_v1_worker_core_progress_consumes_reserved_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
         app.USERS = {"usr_1": user}
@@ -3953,17 +3932,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["quotaState"], "consumed")
         self.assertEqual(payload["billingUsage"]["used"], 1)
         self.assertEqual(payload["billingUsage"]["reserved"], 0)
-
-    def test_manual_scan_retry_route_is_disabled(self) -> None:
-        retry = RouteHarness(
-            "/scans/sc_retry_route/retry",
-            {"requestId": "req_retry_route"},
-            headers={"Cookie": f"{app.SESSION_COOKIE}=ses_owner"},
-        )
-        app.PullwiseHandler.route(retry, "POST")
-
-        self.assertEqual(retry.status, HTTPStatus.GONE)
-        self.assertEqual(retry.payload["message"], "Scan retry has been disabled.")
 
     def test_worker_result_backfills_pending_commit_with_resolved_sha(self) -> None:
         resolved_commit = "1234567890abcdef1234567890abcdef12345678"
@@ -4772,7 +4740,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertEqual(app.SCANS[0]["status"], "failed")
-        self.assertEqual(app.SCANS[0]["phase"], "report")
+        self.assertEqual(app.SCANS[0]["phase"], "failure_handling")
         self.assertEqual(app.SCANS[0]["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
         self.assertEqual(app.scan_payload(app.SCANS[0])["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
         self.assertEqual(app.scan_list_payload(app.SCANS[0])["progress"], app.INCOMPLETE_TERMINAL_SCAN_PROGRESS_MAX)
@@ -4990,13 +4958,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         stored = db.get_scan_job(job["job_id"])
-        self.assertEqual(stored["status"], "queued")
-        self.assertEqual(stored["claimed_by_worker_id"], None)
-        self.assertEqual(stored["claimed_at"], None)
+        self.assertEqual(stored["status"], "failed")
+        self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
         self.assertEqual(stored["started_at"], None)
         self.assertEqual(stored["timeout_at"], None)
         self.assertEqual(stored["error"], "worker_job_startup_lost")
-        self.assertEqual(app.SCANS[0]["status"], "queued")
+        self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertEqual(app.SCANS[0]["recoveryReason"], "worker_job_startup_lost")
 
     def test_worker_heartbeat_keeps_unstarted_claim_during_startup_grace(self) -> None:

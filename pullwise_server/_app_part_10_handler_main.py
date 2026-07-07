@@ -1227,8 +1227,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     status=scan.get("status"),
                 )
             return self.json(scan_payload(scan), HTTPStatus.CREATED if scan_created else HTTPStatus.OK)
-        if len(segments) == 3 and segments[0] == "scans" and segments[2] == "retry":
-            return self.error(HTTPStatus.GONE, "Scan retry has been disabled.")
         if len(segments) == 3 and segments[0] == "scans" and segments[2] == "cancel":
             session = self.current_session()
             if not session:
