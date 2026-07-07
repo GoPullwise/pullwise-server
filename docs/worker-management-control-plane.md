@@ -50,14 +50,17 @@ APIs.
 `/admin/workers/*` is the worker registry control plane. These endpoints are
 admin-only and are limited to registry state, desired state, and credentials:
 
-- `GET /admin/workers`: list admin worker details
+- `GET /admin/workers`: list admin worker details with pagination
 - `GET /admin/workers/{id}`: worker detail plus audit events
 - `POST /admin/workers`: create a worker and return the worker token once
+- `GET /admin/workers/defaults`: read worker install defaults and latest release metadata
+- `POST /admin/workers/releases`: trigger the worker release workflow
 - `PATCH /admin/workers/{id}`: update metadata such as name, provider, region, and version
 - `POST /admin/workers/{id}/enable`: allow a worker to claim new jobs
 - `POST /admin/workers/{id}/disable`: prevent a worker from claiming new jobs
 - `POST /admin/workers/{id}/rotate-token`: rotate the worker credential and return the new token once
 - `POST /admin/workers/{id}/test`: evaluate server-side registry and heartbeat diagnostics
+- `POST /admin/workers/{id}/commands`: queue lifecycle commands such as `stop` or `uninstall`
 - `DELETE /admin/workers/{id}`: queue worker uninstall and keep cleanup status visible until completion
 - `DELETE /worker/registry`: worker-token authenticated self-unregister used by local uninstall
 
@@ -85,9 +88,11 @@ pull-based command queue:
 
 Review execution does not use this control plane. Review workers use
 `review-worker-protocol/v1` under `/v1/workers/...` and `/v1/review-runs/...`.
-Do not reintroduce `/worker/heartbeat`, `/worker/agent-configs`, or
-`/worker/jobs/...` for review heartbeat, lease, progress, artifact, or result
-traffic.
+The v1 `POST /v1/workers/{worker_id}/agent-configs` route is only for
+server-owned plan config/readiness data used by `pullwise-worker doctor`; it is
+not a job claim, heartbeat, progress, artifact, or result route. Do not
+reintroduce `/worker/heartbeat`, `/worker/agent-configs`, or `/worker/jobs/...`
+for review heartbeat, lease, progress, artifact, or result traffic.
 
 `stop` commands disable job claiming but keep the worker in the registry.
 `DELETE /admin/workers/{id}` creates an `uninstall` command instead of only

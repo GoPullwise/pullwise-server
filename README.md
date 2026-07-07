@@ -20,7 +20,7 @@ Current production-trial scope:
 - Rich issue findings and manual triage/status changes
 - Deterministic fix preview for auto-fixable findings
 - GitHub pull request creation for deterministic issue fixes
-- Resource-scoped quota system with workspace/repository-level limit tracking
+- Resource-scoped quota system with account/repository-level limit tracking
 - Creem billing, pricing metadata, API docs metadata, and live
   readiness status
 
@@ -246,28 +246,43 @@ execute them, and report progress and results. Work is dispatched atomically
 so multiple workers never receive the same job.
 
 Public status is available at `GET /status/system`. It returns scan-system
-summary fields plus a sanitized `workers` list for the web status page. Public
-worker entries expose fixed capacity and heartbeat status only; hostnames, internal
-errors, worker tokens, token hashes, and audit events remain admin-only.
+summary fields and aggregate worker counts for the web status page. It does not
+return per-worker records. Hostnames, internal errors, worker tokens, token
+hashes, and audit events remain admin-only.
 
 Administrators manage workers at `/admin/*` endpoints:
 
-These admin APIs are the registry control plane. They manage desired state and
-credentials, including create, enable, disable, metadata update, token rotation,
-diagnostics, detail, audit, and worker deletion. They should not directly execute
-host commands from the server. Delete/uninstall operations use a pull-based
-command model where the admin creates a command, the worker receives it during
-heartbeat or command polling, executes it locally, and reports the result. See
+These admin APIs are the registry and operations control plane. They manage
+desired state and credentials, including create, enable, disable, metadata
+update, token rotation, diagnostics, detail, audit, release/defaults, lifecycle
+commands, system config, users, server metrics, log streams, and worker
+deletion. They should not directly execute host commands from the server.
+Delete/uninstall operations use a pull-based command model where the admin
+creates a command, the worker receives it during heartbeat or command polling,
+executes it locally, and reports the result. See
 `docs/worker-management-control-plane.md`.
 
-- `GET /admin/workers` — list all workers
-- `GET /admin/workers/{id}` — worker detail with audit events
-- `POST /admin/workers` — create a new worker (returns one-time token)
-- `POST /admin/workers/{id}/enable` — enable a disabled worker
-- `POST /admin/workers/{id}/disable` — disable a worker
-- `PATCH /admin/workers/{id}` — update worker metadata
-- `DELETE /admin/workers/{id}` — queue worker uninstall and keep cleanup status visible until completion
-- `GET /admin/status` — scan system status (admin view)
+- `GET /admin/workers` - list all workers, paginated
+- `GET /admin/workers/{id}` - worker detail with audit events
+- `POST /admin/workers` - create a new worker (returns one-time token)
+- `GET /admin/workers/defaults` - read worker install defaults and latest release metadata
+- `POST /admin/workers/releases` - trigger the worker release workflow
+- `POST /admin/workers/{id}/enable` - enable a disabled worker
+- `POST /admin/workers/{id}/disable` - disable a worker
+- `PATCH /admin/workers/{id}` - update worker metadata
+- `POST /admin/workers/{id}/rotate-token` - rotate the worker credential
+- `POST /admin/workers/{id}/test` - run registry/heartbeat diagnostics
+- `POST /admin/workers/{id}/commands` - queue lifecycle commands such as stop or uninstall
+- `DELETE /admin/workers/{id}` - queue worker uninstall and keep cleanup status visible until completion
+- `GET /admin/status` - scan system status (admin view)
+- `GET /admin/server-metrics` - read server host metrics for the admin console
+- `POST /admin/log-streams` - start a server or worker log stream session
+- `GET /admin/log-streams/{id}/lines` - read redacted log stream lines
+- `POST /admin/log-streams/{id}/pause` - pause a log stream session
+- `GET /admin/system-config` / `PATCH /admin/system-config` - read and update database-backed system settings
+- `GET /admin/subscription-plans/agent-configs` / `PATCH /admin/subscription-plans/agent-configs/{plan}` - read and update plan agent policy
+- `GET /admin/users` / `DELETE /admin/users/{id}` - admin user listing and deletion
+- `POST /admin/server/restart` - request a server restart when the deployment mode supports it
 
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
 the worker package as a systemd service. The script accepts `--server`,
@@ -286,13 +301,14 @@ OpenAI's official standalone installer. `PULLWISE_CODEX_RELEASE` or
 
 Worker review protocol endpoints (authenticated via bearer token):
 
-- `POST /v1/workers/register` — validate and store worker v1 capability/isolation metadata for a preissued worker token
-- `POST /v1/workers/{worker_id}/heartbeat` — report active job, health, and fixed single-job capacity
-- `POST /v1/workers/{worker_id}/lease` — atomically lease one queued job when the worker is idle, including canonical `repository`, `model_profile`, and `review_request` policy
-- `POST /v1/review-runs/{run_id}/events` — durably store monotonic phase/progress events and renew the active lease
-- `POST /v1/review-runs/{run_id}/artifacts` — upload versioned run artifacts
-- `GET /v1/review-runs/{run_id}/artifacts/{artifact_id}` — read stored artifacts for the owning scan user
-- `POST /v1/review-runs/{run_id}/result` — submit the terminal v1 result envelope
+- `POST /v1/workers/register` - validate and store worker v1 capability/isolation metadata for a preissued worker token
+- `POST /v1/workers/{worker_id}/heartbeat` - report active job, health, and fixed single-job capacity
+- `POST /v1/workers/{worker_id}/agent-configs` - return the server-owned plan agent configs used by worker `doctor`
+- `POST /v1/workers/{worker_id}/lease` - atomically lease one queued job when the worker is idle, including canonical `repository`, `model_profile`, and `review_request` policy
+- `POST /v1/review-runs/{run_id}/events` - durably store monotonic phase/progress events and renew the active lease
+- `POST /v1/review-runs/{run_id}/artifacts` - upload versioned run artifacts
+- `GET /v1/review-runs/{run_id}/artifacts/{artifact_id}` - read stored artifacts for the owning scan user
+- `POST /v1/review-runs/{run_id}/result` - submit the terminal v1 result envelope
 
 The server keeps first-class protocol records for each leased v1 run:
 `review_runs` is created at lease time, updated from accepted progress events,
@@ -404,7 +420,8 @@ for the same repository returns the existing scan; reuse for a different
 repository returns `409 Conflict`.
 
 The machine-readable API description is available at `GET /api-docs` and
-`GET /api/docs`.
+`GET /api/docs`. The public docs helpers used by the web app are available at
+`GET /docs/subscription-plans` and `GET /docs/server-config`.
 
 When the database-backed API rate limit setting is enabled, public REST API
 requests under `/api/v1` are counted in SQLite in the `api_rate_limits` table.
@@ -809,12 +826,19 @@ Implemented endpoints:
 - `GET /integrations`
 - `DELETE /integrations/github`
 - `GET /repositories`
+- `GET /repositories/{id}/branches`
 - `POST /repositories/sync`
 - `GET /scans`
+- `POST /scans/preflight`
 - `POST /scans`
+- `POST /scans/status`
 - `GET /scans/{id}`
 - `POST /scans/{id}/cancel`
+- `POST /scans/{id}/retry`
+- `GET /scans/{id}/audit-bundle`
+- `GET /scans/{id}/audit-bundle.zip`
 - `GET /issues`
+- `PATCH /issues/status`
 - `GET /issues/{id}`
 - `PATCH /issues/{id}/status`
 - `POST /issues/{id}/fixes/preview`
