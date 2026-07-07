@@ -2412,6 +2412,7 @@ def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, sta
         raise ValueError("run_id and job_id are required")
     timestamp = int(time.time())
     execution_status = str(execution.get("status") or "").strip() or ("completed" if status == "done" else "failed")
+    overall_risk = str(summary.get("overall_risk") or "").strip().lower() or None
     started_at = protocol_timestamp(execution.get("started_at")) or protocol_timestamp(job.get("started_at")) or protocol_timestamp(job.get("claimed_at"))
     completed_at = protocol_timestamp(execution.get("completed_at")) or protocol_timestamp(job.get("completed_at")) or timestamp
     try:
@@ -2426,17 +2427,18 @@ def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, sta
             connection.execute(
                 """
                 INSERT INTO review_runs (
-                    run_id, job_id, worker_id, status, result_status,
+                    run_id, job_id, worker_id, status, overall_risk, result_status,
                     started_at, completed_at, duration_ms, protocol_version,
                     worker_version, engine_type, codex_thread_id, summary_json,
                     quality_gate_json, usage_json, progress_json, error_json,
                     raw_result_envelope_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     job_id = excluded.job_id,
                     worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
                     status = excluded.status,
+                    overall_risk = excluded.overall_risk,
                     result_status = excluded.result_status,
                     started_at = COALESCE(review_runs.started_at, excluded.started_at),
                     completed_at = excluded.completed_at,
@@ -2458,6 +2460,7 @@ def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, sta
                     job_id,
                     str(envelope_worker.get("worker_id") or job.get("claimed_by_worker_id") or "").strip(),
                     execution_status,
+                    overall_risk,
                     status,
                     started_at,
                     completed_at,

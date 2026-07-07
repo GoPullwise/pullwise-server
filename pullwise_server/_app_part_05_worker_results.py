@@ -590,6 +590,9 @@ def worker_result_resolved_commit(
     candidates: list[object] = []
     if isinstance(body, dict):
         candidates.extend([body.get("resolved_commit"), body.get("resolvedCommit"), body.get("commit")])
+        envelope = review_worker_protocol_envelope(body)
+        repository = envelope.get("repository") if isinstance(envelope.get("repository"), dict) else {}
+        candidates.extend([repository.get("commit_sha"), repository.get("commitSha"), repository.get("commit")])
     if isinstance(preflight, dict):
         candidates.append(preflight.get("commit"))
     if isinstance(job, dict):
