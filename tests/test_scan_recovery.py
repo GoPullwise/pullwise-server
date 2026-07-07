@@ -813,13 +813,11 @@ class ScanRecoveryTest(unittest.TestCase):
         stored = db.get_scan_job(job["job_id"])
 
         self.assertEqual(recovered, 1)
-        self.assertEqual(stored["status"], "queued")
+        self.assertEqual(stored["status"], "failed")
         self.assertEqual(stored["attempt"], 1)
-        self.assertEqual(app.SCANS[0]["status"], "queued")
-        self.assertEqual(app.SCANS[0]["progress"], 0)
-        self.assertIsNone(app.SCANS[0]["phase"])
-        self.assertIsNone(app.SCANS[0]["claimedAt"])
-        self.assertIsNone(app.SCANS[0]["claimedByWorkerId"])
+        self.assertEqual(stored["error"], "timed_out")
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["recoveryReason"], "timed_out")
 
     def test_recover_interrupted_scans_fails_exhausted_queued_job_and_scan(self) -> None:
         timestamp = app.now()
@@ -1025,11 +1023,7 @@ class ScanRecoveryTest(unittest.TestCase):
             stored = db.get_scan_job(job["job_id"])
 
         self.assertEqual(recovered, 1)
-        self.assertEqual(stored["status"], "queued")
+        self.assertEqual(stored["status"], "failed")
         self.assertEqual(stored["error"], "worker_heartbeat_timed_out")
-        self.assertEqual(app.SCANS[0]["status"], "queued")
-        self.assertEqual(app.SCANS[0]["progress"], 0)
-        self.assertIsNone(app.SCANS[0]["phase"])
-        self.assertIsNone(app.SCANS[0]["claimedAt"])
-        self.assertIsNone(app.SCANS[0]["claimedByWorkerId"])
+        self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertEqual(app.SCANS[0]["recoveryReason"], "worker_heartbeat_timed_out")
