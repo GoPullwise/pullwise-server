@@ -355,6 +355,10 @@ new read and write paths aligned with the normalized SQLite tables.
 - Worker result routes accept gzip-compressed JSON bodies. Keep JSON decoding,
   body-size checks, and decompressed-size limits in sync when changing request
   parsing.
+- Authenticated v1 worker gzip result/artifact uploads may exceed the public
+  REST API compressed body limit; gate them with the worker decompressed-size
+  limit instead. Do not broaden this exception to unauthenticated requests,
+  browser routes, or identity/uncompressed payloads.
 - Startup/recovery should be incremental by cursor/timestamp/job id. Avoid
   full reverse synchronization from all completed results back into memory.
 - Worker/admin/status pages should use aggregate queries and short TTL caches

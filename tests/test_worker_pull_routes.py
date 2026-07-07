@@ -1886,6 +1886,61 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(result.payload["accepted"])
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "done")
 
+    def test_worker_artifact_route_allows_authenticated_gzip_body_over_public_limit(self) -> None:
+        scan = {
+            "id": "sc_gzip_artifact",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "repoId": "repo_1",
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        job = claim.payload["job"]
+        run_id = job["run_id"]
+        content = b"{\"status\":\"pass\"}\n"
+        artifact_payload = {
+            "protocol_version": "review-worker-protocol/v1",
+            "attempt_id": "wk_1-1",
+            "run_id": run_id,
+            "artifact": {
+                "artifact_id": "art_qa",
+                "kind": "qa",
+                "name": "qa.json",
+                "media_type": "application/json",
+                "schema_id": "qa-gate",
+                "schema_version": "v1",
+                "encoding": "utf-8",
+                "compression": "none",
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "size_bytes": len(content),
+                "required": True,
+            },
+            "content_base64": base64.b64encode(content).decode("ascii"),
+        }
+        raw_body = gzip.compress(json.dumps(artifact_payload).encode("utf-8"))
+
+        with patch.dict(
+            app.os.environ,
+            {"PULLWISE_MAX_BODY_BYTES": "1", "PULLWISE_MAX_DECOMPRESSED_BODY_BYTES": "65536"},
+            clear=False,
+        ):
+            artifact = RawBodyRouteHarness(
+                f"/v1/review-runs/{run_id}/artifacts",
+                artifact_payload,
+                headers={**self.auth, "Content-Encoding": "gzip", "Content-Length": str(len(raw_body))},
+                raw_body=raw_body,
+            )
+            app.PullwiseHandler.route(artifact, "POST")
+
+        self.assertEqual(artifact.status, HTTPStatus.OK)
+        self.assertTrue(artifact.payload["accepted"])
+        stored_artifact = db.get_review_run_artifact(run_id, "art_qa")
+        self.assertEqual(stored_artifact["sha256"], hashlib.sha256(content).hexdigest())
+
     def test_decode_json_body_rejects_oversized_gzip_json(self) -> None:
         raw_body = gzip.compress(json.dumps({"payload": "x" * 256}).encode("utf-8"))
 

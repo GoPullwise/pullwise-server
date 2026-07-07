@@ -707,7 +707,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             try:
                 if self.apply_rate_limit(method, path, segments):
                     return
-                self.enforce_body_size_limit(method)
+                self.enforce_body_size_limit(method, path, segments)
                 if cookie_state_change_needs_origin_check(method, path, segments, self) and not request_origin_is_trusted(self):
                     return self.error(HTTPStatus.FORBIDDEN, "State-changing requests must come from a trusted origin.")
                 if method == "GET":
@@ -4066,11 +4066,23 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             raise RequestBodyTooLarge("Request body is too large.")
         return self.rfile.read(length)
 
-    def enforce_body_size_limit(self, method: str) -> None:
+    def enforce_body_size_limit(self, method: str, path: str = "", segments: list[str] | None = None) -> None:
         if method not in {"POST", "PATCH"}:
             return
         length = self.request_content_length()
-        if length > max_body_bytes():
+        limit = max_body_bytes()
+        segments = segments if segments is not None else [unquote(part) for part in path.split("/") if part]
+        is_worker_review_payload = (
+            method == "POST"
+            and len(segments) == 4
+            and segments[:2] == ["v1", "review-runs"]
+            and segments[3] in {"artifacts", "result"}
+            and str(self.headers.get("Content-Encoding") or "").strip().lower() == "gzip"
+            and worker_token_record(self)
+        )
+        if is_worker_review_payload:
+            limit = max_decompressed_body_bytes()
+        if length > limit:
             raise RequestBodyTooLarge("Request body is too large.")
 
     def request_content_length(self) -> int:
