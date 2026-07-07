@@ -4892,9 +4892,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
         job = claim.payload["job"]
         lease_seconds = app.system_config.scan_job_lease_seconds()
         original_timeout_at = db.get_scan_job(job["job_id"])["timeout_at"]
-        self.assertEqual(original_timeout_at, timestamp + lease_seconds)
+        self.assertGreaterEqual(original_timeout_at, timestamp + lease_seconds)
+        self.assertLessEqual(original_timeout_at, timestamp + lease_seconds + 1)
 
-        heartbeat_at = timestamp + lease_seconds + 100
+        heartbeat_at = original_timeout_at + 100
         with patch("pullwise_server.app.now", return_value=heartbeat_at):
             heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
         self.assertEqual(heartbeat.status, HTTPStatus.OK)

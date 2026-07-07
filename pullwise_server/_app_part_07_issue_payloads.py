@@ -786,11 +786,6 @@ def issue_payload(issue: dict) -> dict:
         "summary": review._safe_text_lenient(issue.get("summary")) or public_issue_text(issue.get("description")),
         "impact": review._safe_text_lenient(issue.get("impact")),
         "detectionReasoning": review._safe_text_lenient(issue.get("detectionReasoning")),
-        "failureScenario": review._safe_text_lenient(issue.get("failureScenario") or issue.get("failure_scenario")),
-        "recommendation": review._safe_text_lenient(issue.get("recommendation") or issue.get("remediation") or issue.get("fix")),
-        "nextAgentTask": review._safe_text_lenient(issue.get("nextAgentTask") or issue.get("next_agent_task")),
-        "disproofAttempt": review._safe_text_lenient(issue.get("disproofAttempt") or issue.get("disproof_attempt")),
-        "validationSources": public_issue_json_value(issue.get("validationSources") or issue.get("validation_sources")),
         "reproductionPath": public_issue_text(issue.get("reproductionPath") or issue.get("reproduction_path")),
         "verificationStatus": verification_status,
         "verificationSummary": review._safe_text_lenient(issue.get("verificationSummary")),
@@ -829,6 +824,17 @@ def issue_payload(issue: dict) -> dict:
         "references": review._safe_references(issue.get("references")),
         "createdAt": pull_request_timestamp(issue.get("createdAt")) or 0,
     }
+    for key, value in (
+        ("failureScenario", review._safe_text_lenient(issue.get("failureScenario") or issue.get("failure_scenario"))),
+        ("recommendation", review._safe_text_lenient(issue.get("recommendation") or issue.get("remediation") or issue.get("fix"))),
+        ("nextAgentTask", review._safe_text_lenient(issue.get("nextAgentTask") or issue.get("next_agent_task"))),
+        ("disproofAttempt", review._safe_text_lenient(issue.get("disproofAttempt") or issue.get("disproof_attempt"))),
+    ):
+        if value:
+            payload[key] = value
+    validation_sources = public_issue_json_value(issue.get("validationSources") or issue.get("validation_sources"))
+    if validation_sources not in (None, "", [], {}):
+        payload["validationSources"] = validation_sources
     raw_markdown = review._safe_text_lenient(
         issue.get("rawMarkdown")
         or issue.get("raw_markdown")
