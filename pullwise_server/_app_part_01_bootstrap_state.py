@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -214,7 +214,41 @@ REPOSITORIES: list[dict] = [dict(repo) for repo in DEFAULT_REPOSITORIES]
 ISSUES: list[dict] = []
 SCANS: list[dict] = []
 SCAN_BY_ID: dict[str, dict] = {}
-DEFAULT_WORKER_PACKAGE_VERSION = "0.9.17"
+def _normalize_worker_package_version(value: object) -> str:
+    version = str(value or "").strip()
+    if version.startswith("v"):
+        version = version[1:]
+    return version if re.fullmatch(r"\d+\.\d+\.\d+", version) else ""
+
+
+def _read_adjacent_worker_package_version() -> str:
+    workspace_root = os.path.dirname(project_root())
+    candidates = (
+        os.path.join(workspace_root, "pullwise-worker", "pyproject.toml"),
+        os.path.join(workspace_root, "pullwise-worker", "pullwise_worker", "__init__.py"),
+    )
+    for candidate in candidates:
+        try:
+            text = open(candidate, "r", encoding="utf-8").read()
+        except OSError:
+            continue
+        for pattern in (r'^version\s*=\s*"([^"]+)"', r'^__version__\s*=\s*"([^"]+)"'):
+            match = re.search(pattern, text, flags=re.MULTILINE)
+            version = _normalize_worker_package_version(match.group(1) if match else "")
+            if version:
+                return version
+    return ""
+
+
+def default_worker_package_version() -> str:
+    configured = _normalize_worker_package_version(
+        os.environ.get("PULLWISE_WORKER_DEFAULT_VERSION")
+        or os.environ.get("PULLWISE_DEFAULT_WORKER_PACKAGE_VERSION")
+    )
+    return configured or _read_adjacent_worker_package_version() or "0.0.0"
+
+
+DEFAULT_WORKER_PACKAGE_VERSION = default_worker_package_version()
 DEFAULT_WORKER_PACKAGE = (
     "https://github.com/GoPullwise/pullwise-worker/releases/download/"
     f"v{DEFAULT_WORKER_PACKAGE_VERSION}/pullwise_worker-{DEFAULT_WORKER_PACKAGE_VERSION}-py3-none-any.whl"
@@ -1359,3 +1393,5 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
     if recovered:
         mark_state_dirty()
     return recovered
+
+

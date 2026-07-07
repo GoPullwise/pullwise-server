@@ -1876,7 +1876,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.UNAUTHORIZED)
 
-    def test_admin_delete_worker_without_host_contact_completes_registry_cleanup(self) -> None:
+    def test_admin_delete_worker_without_host_contact_keeps_cleanup_pending_visible(self) -> None:
         payload, _token = self.create_worker()
         worker_id = payload["worker_id"]
         worker = db.get_worker(worker_id)
@@ -1889,14 +1889,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(delete, "DELETE")
 
         self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
-        self.assertTrue(delete.payload["deleted"])
+        self.assertFalse(delete.payload["deleted"])
         self.assertTrue(delete.payload["deleteQueued"])
-        self.assertEqual(delete.payload["cleanup_status"], "succeeded")
+        self.assertNotIn("cleanup_status", delete.payload)
         command = delete.payload["command"]
         self.assertEqual(command["command"], "uninstall")
-        self.assertEqual(command["status"], "succeeded")
-        self.assertIsNone(db.get_worker(worker_id))
-        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+        self.assertEqual(command["status"], "pending")
+        worker_after_delete = db.get_worker(worker_id)
+        self.assertIsNotNone(worker_after_delete)
+        self.assertEqual(worker_after_delete["enabled"], 0)
+        self.assertIsNone(worker_after_delete["deleted_at"])
 
     def test_admin_delete_retries_stuck_uninstall_for_worker_without_host_contact(self) -> None:
         payload, _token = self.create_worker()
@@ -1908,11 +1910,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(delete, "DELETE")
 
         self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
-        self.assertTrue(delete.payload["deleted"])
+        self.assertFalse(delete.payload["deleted"])
         self.assertTrue(delete.payload["alreadyQueued"])
         self.assertEqual(delete.payload["command"]["id"], stale_command["id"])
-        self.assertEqual(delete.payload["command"]["status"], "succeeded")
-        self.assertIsNone(db.get_worker(worker_id))
+        self.assertEqual(delete.payload["command"]["status"], "pending")
+        self.assertIsNotNone(db.get_worker(worker_id))
 
     def test_admin_can_queue_worker_stop_and_uninstall_commands(self) -> None:
         payload, token = self.create_worker()
@@ -2091,7 +2093,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin_workers_after_failure.payload["workers"][0]["worker_id"], worker_id)
         self.assertEqual(admin_workers_after_failure.payload["workers"][0]["latest_command"]["status"], "failed")
 
-    def test_server_cleanup_removes_stale_cleanup_pending_worker_from_admin_list(self) -> None:
+    def test_server_cleanup_keeps_stale_cleanup_pending_worker_visible_as_cancelled(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
         heartbeat = self.post_v1_heartbeat(worker_id, token)
@@ -2117,17 +2119,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             removed = app.cleanup_server_resources(timestamp=1000)
 
         self.assertEqual(removed["stale_worker_cleanup_pending"], 1)
-        deleted = db.get_worker(worker_id, include_deleted=True)
+        worker_after_cleanup = db.get_worker(worker_id)
         command = db.get_worker_command(uninstall.payload["command"]["id"], worker_id=worker_id)
-        self.assertIsNone(db.get_worker(worker_id))
-        self.assertIsNotNone(deleted)
-        self.assertEqual(deleted["deleted_at"], 1000)
+        self.assertIsNotNone(worker_after_cleanup)
+        self.assertIsNone(worker_after_cleanup["deleted_at"])
         self.assertEqual(command["status"], "cancelled")
         after_cleanup = RouteHarness("/admin/workers", cookie=self.admin_cookie)
         app.PullwiseHandler.route(after_cleanup, "GET")
         self.assertEqual(after_cleanup.status, HTTPStatus.OK)
-        self.assertEqual(after_cleanup.payload["workers"], [])
-        self.assertEqual(after_cleanup.payload["total"], 0)
+        self.assertEqual(after_cleanup.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(after_cleanup.payload["workers"][0]["latest_command"]["status"], "cancelled")
+        self.assertEqual(after_cleanup.payload["total"], 1)
 
     def test_worker_can_unregister_itself_from_registry(self) -> None:
         payload, token = self.create_worker()
@@ -2140,14 +2142,20 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(unregister, "DELETE")
 
         self.assertEqual(unregister.status, HTTPStatus.OK)
-        self.assertTrue(unregister.payload["deleted"])
-        self.assertIsNone(db.get_worker(worker_id))
-        self.assertIsNotNone(db.get_worker(worker_id, include_deleted=True)["deleted_at"])
+        self.assertFalse(unregister.payload["deleted"])
+        self.assertTrue(unregister.payload["deleteQueued"])
+        self.assertEqual(unregister.payload["command"]["command"], "uninstall")
+        self.assertEqual(unregister.payload["command"]["status"], "pending")
+        worker_after_unregister = db.get_worker(worker_id)
+        self.assertIsNotNone(worker_after_unregister)
+        self.assertEqual(worker_after_unregister["enabled"], 0)
+        self.assertIsNone(worker_after_unregister["deleted_at"])
 
         admin_workers = RouteHarness("/admin/workers", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin_workers, "GET")
         self.assertEqual(admin_workers.status, HTTPStatus.OK)
-        self.assertEqual(admin_workers.payload["workers"], [])
+        self.assertEqual(admin_workers.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(admin_workers.payload["workers"][0]["latest_command"]["status"], "pending")
 
         claim = RouteHarness(
             f"/v1/workers/{worker_id}/lease",

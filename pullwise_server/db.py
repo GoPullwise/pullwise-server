@@ -840,25 +840,6 @@ def ensure_column(connection: sqlite3.Connection, table: str, column: str, defin
 def reconcile_worker_uninstall_deletes(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
-        UPDATE worker_commands
-        SET status = 'succeeded',
-            completed_at = COALESCE(completed_at, updated_at, created_at, strftime('%s', 'now')),
-            updated_at = COALESCE(updated_at, created_at, strftime('%s', 'now'))
-        WHERE command = 'uninstall'
-          AND status IN ('pending', 'running')
-          AND EXISTS (
-              SELECT 1
-              FROM workers
-              WHERE workers.worker_id = worker_commands.worker_id
-                AND workers.deleted_at IS NULL
-                AND workers.token_last_used_at IS NULL
-                AND workers.last_heartbeat_at IS NULL
-                AND workers.registered_at IS NULL
-          )
-        """
-    )
-    connection.execute(
-        """
         UPDATE workers
         SET enabled = 0,
             disabled_at = COALESCE(
@@ -1778,7 +1759,14 @@ def worker_visibility_where_clause(
     if not include_deleted:
         filters.append("deleted_at IS NULL")
     if activated_only:
-        filters.append("last_heartbeat_at IS NOT NULL")
+        filters.append(
+            "(last_heartbeat_at IS NOT NULL OR EXISTS ("
+            "SELECT 1 FROM worker_commands "
+            "WHERE worker_commands.worker_id = workers.worker_id "
+            "AND worker_commands.command = 'uninstall' "
+            "AND worker_commands.status IN ('pending', 'running', 'failed', 'cancelled')"
+            "))"
+        )
     if worker_scope is not None:
         scope = normalize_worker_scope(worker_scope)
         filters.append(f"COALESCE(worker_scope, '{WORKER_SCOPE_SHARED}') = '{scope}'")
@@ -1999,7 +1987,7 @@ def cleanup_stale_worker_uninstall_commands(
                 f"""
                 UPDATE worker_commands
                 SET status = 'cancelled',
-                    error = COALESCE(NULLIF(error, ''), 'cleanup pending exceeded timeout; registry entry pruned'),
+                    error = COALESCE(NULLIF(error, ''), 'cleanup pending exceeded timeout; host cleanup was not confirmed'),
                     completed_at = COALESCE(completed_at, ?),
                     updated_at = ?
                 WHERE id IN ({command_placeholders})
@@ -2009,19 +1997,18 @@ def cleanup_stale_worker_uninstall_commands(
                 (current_time, current_time, *command_ids),
             )
             worker_placeholders = ",".join("?" for _ in worker_ids)
-            deleted_count = connection.execute(
+            affected_count = connection.execute(
                 f"""
                 UPDATE workers
                 SET enabled = 0,
-                    deleted_at = COALESCE(deleted_at, ?),
                     disabled_at = COALESCE(disabled_at, ?),
                     updated_at = ?
                 WHERE worker_id IN ({worker_placeholders})
                   AND deleted_at IS NULL
                 """,
-                (current_time, current_time, current_time, *worker_ids),
+                (current_time, current_time, *worker_ids),
             ).rowcount
-            return max(0, int(deleted_count or 0))
+            return max(0, int(affected_count or 0))
 
 
 def rotate_worker_token(worker_id: str) -> dict[str, Any] | None:
