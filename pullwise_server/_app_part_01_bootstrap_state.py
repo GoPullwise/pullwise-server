@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -1058,6 +1058,17 @@ def worker_protocol_rejected_error(exc: Exception) -> bool:
     return worker_protocol_required_error(exc) or worker_protocol_invalid_error(exc)
 
 
+def worker_artifact_rejected_error(exc: Exception) -> bool:
+    text = str(exc)
+    return text.startswith("Required review artifacts were not uploaded before result submit:") or text.startswith(
+        "Uploaded review artifacts do not match result manifest:"
+    )
+
+
+def worker_completed_result_rejected_error(exc: Exception) -> bool:
+    return worker_protocol_rejected_error(exc) or worker_artifact_rejected_error(exc)
+
+
 def reject_worker_protocol_completed_result_locked(
     row: dict,
     *,
@@ -1114,6 +1125,21 @@ def reject_worker_protocol_error_completed_result_locked(row: dict, exc: Excepti
     return reject_invalid_worker_protocol_completed_result_locked(row, exc, checksum=checksum)
 
 
+def reject_worker_artifact_error_completed_result_locked(row: dict, exc: Exception, *, checksum: str) -> bool:
+    return reject_worker_protocol_completed_result_locked(
+        row,
+        checksum=checksum,
+        message=str(exc),
+        error_code="WORKER_ARTIFACT_INVALID",
+    )
+
+
+def reject_worker_completed_result_error_locked(row: dict, exc: Exception, *, checksum: str) -> bool:
+    if worker_protocol_rejected_error(exc):
+        return reject_worker_protocol_error_completed_result_locked(row, exc, checksum=checksum)
+    return reject_worker_artifact_error_completed_result_locked(row, exc, checksum=checksum)
+
+
 def reconcile_completed_scan_job_results_locked() -> int:
     reconciled = 0
     cursor = db.load_state_item("completedScanResultReconcileCursor")
@@ -1136,9 +1162,9 @@ def reconcile_completed_scan_job_results_locked() -> int:
         try:
             changed = apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum)
         except ValueError as exc:
-            if not worker_protocol_rejected_error(exc):
+            if not worker_completed_result_rejected_error(exc):
                 raise
-            changed = reject_worker_protocol_error_completed_result_locked(row, exc, checksum=checksum)
+            changed = reject_worker_completed_result_error_locked(row, exc, checksum=checksum)
         if changed:
             reconciled += 1
         rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
@@ -1293,9 +1319,9 @@ def reconcile_scan_job_state_locked(
                         checksum=checksum,
                     )
                 except ValueError as exc:
-                    if not worker_protocol_rejected_error(exc):
+                    if not worker_completed_result_rejected_error(exc):
                         raise
-                    changed = reject_worker_protocol_error_completed_result_locked(result, exc, checksum=checksum)
+                    changed = reject_worker_completed_result_error_locked(result, exc, checksum=checksum)
                 rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
                 if changed:
                     return True
