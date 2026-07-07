@@ -110,7 +110,10 @@ def _system_alert(payload):
     offline = payload.get('offlineWorkerCount', 0)
     queued = payload.get('queuedJobs', 0)
     running = payload.get('runningJobs', 0)
+    manual_uninstall = payload.get('administratorWorkerUninstallCount', 0)
     subject = f'Pullwise scan system {status}'
+    if manual_uninstall:
+        subject = f'{subject} (admin worker uninstall)'
     lines = [
         'Pullwise scan system problem detected.',
         f'Status: {status}',
@@ -120,6 +123,9 @@ def _system_alert(payload):
         f'Queued jobs: {queued}',
         f'Running jobs: {running}',
     ]
+    if manual_uninstall:
+        noun = 'command is' if manual_uninstall == 1 else 'commands are'
+        lines.append(f'Administrator action: {manual_uninstall} worker uninstall {noun} pending or running.')
     return {
         f'server:scan-system:{status}': {
             'subject': subject,

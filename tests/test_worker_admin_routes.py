@@ -801,6 +801,41 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(send_alert.call_count, 1)
 
 
+    def test_scan_system_alert_email_marks_admin_worker_uninstall(self) -> None:
+        payload_one, token_one = self.create_worker()
+        payload_two, token_two = self.create_worker()
+        worker_one_id = payload_one["worker_id"]
+        worker_two_id = payload_two["worker_id"]
+
+        first_heartbeat = self.post_v1_heartbeat(worker_one_id, token_one)
+        second_heartbeat = self.post_v1_heartbeat(worker_two_id, token_two)
+        self.assertEqual(first_heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(second_heartbeat.status, HTTPStatus.OK)
+
+        delete_one = RouteHarness(f"/admin/workers/{worker_one_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(delete_one, "DELETE")
+        delete_two = RouteHarness(f"/admin/workers/{worker_two_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(delete_two, "DELETE")
+        self.assertEqual(delete_one.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(delete_two.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(delete_one.payload["command"]["command"], "uninstall")
+        self.assertEqual(delete_two.payload["command"]["command"], "uninstall")
+
+        app.SCAN_SYSTEM_STATUS_CACHE.clear()
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            status = RouteHarness("/status/system")
+            app.PullwiseHandler.route(status, "GET")
+
+        self.assertEqual(status.status, HTTPStatus.OK)
+        self.assertEqual(status.payload["scanSystemStatus"], "down")
+        self.assertEqual(status.payload["onlineWorkerCount"], 0)
+        self.assertEqual(status.payload["totalWorkerCount"], 2)
+        self.assertEqual(status.payload["administratorWorkerUninstallCount"], 2)
+        self.assertEqual(send_alert.call_count, 1)
+        subject, body = send_alert.call_args.args
+        self.assertIn("admin worker uninstall", subject)
+        self.assertIn("Administrator action: 2 worker uninstall commands are pending or running.", body)
+
     def test_alert_email_uses_admin_system_config_smtp_settings(self) -> None:
         config = app.system_config.default_config()
         config["alerts"]["email"].update(
