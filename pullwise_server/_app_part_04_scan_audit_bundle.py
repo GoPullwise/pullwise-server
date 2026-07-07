@@ -513,6 +513,10 @@ def scan_debug_bundle_url(scan: dict) -> str:
     artifacts = [public_review_run_artifact_payload(row) for row in db.list_review_run_artifact_records(resolved_run_id)]
     return review_run_debug_bundle_url(artifacts)
 
+def public_scan_request_id(scan: dict) -> str:
+    request_id = clean_github_access_text(scan.get("requestId"), allow_int=True)
+    return request_id[:128] if request_id else ""
+
 
 def scan_payload(scan: dict) -> dict:
     status = public_scan_status(scan.get("status"))
@@ -529,9 +533,9 @@ def scan_payload(scan: dict) -> dict:
         "verification": public_scan_verification_counts(scan),
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
-    request_id = clean_github_access_text(scan.get("requestId"), allow_int=True)
+    request_id = public_scan_request_id(scan)
     if request_id:
-        payload["requestId"] = request_id[:128]
+        payload["requestId"] = request_id
     progress_message = public_issue_text(scan.get("progressMessage") or scan.get("progress_message"))
     if progress_message:
         payload["progressMessage"] = progress_message
@@ -691,6 +695,9 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
         "verification": verification_counts,
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
+    request_id = public_scan_request_id(scan)
+    if request_id:
+        payload["requestId"] = request_id
     progress_message = public_issue_text(scan.get("progressMessage") or scan.get("progress_message"))
     if progress_message:
         payload["progressMessage"] = progress_message

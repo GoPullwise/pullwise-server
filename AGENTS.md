@@ -329,6 +329,7 @@ quota to workspace quota.
 The server is being moved away from full in-memory scan/issue traversal. Keep
 new read and write paths aligned with the normalized SQLite tables.
 
+- Browser scan payloads must preserve non-secret scan `requestId` values in create, detail, history list, and `/scans/status` responses. Web uses that idempotency key to reconcile batch scan handoff with Scan history while newly created rows propagate through pagination and status refreshes.
 - `/scans`, `/issues`, scan detail, issue detail, status, and admin worker APIs
   should use DB-side `user_id` filtering, sorting, counts, and pagination.
   Hydrate only the current page or requested object.
