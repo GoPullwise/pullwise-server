@@ -4012,6 +4012,76 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn(f"/blob/{resolved_commit}/src/app.py#L12", payload["affectedLocations"][0]["url"])
         self.assertEqual(payload["verificationStatus"], "verified")
 
+    def test_worker_result_backfills_pending_commit_from_protocol_repository(self) -> None:
+        resolved_commit = "1234567890abcdef1234567890abcdef12345678"
+        scan = {
+            "id": "sc_protocol_repo_commit",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        payload = {
+            "status": "done",
+            "attempt_id": "wk_1-1",
+            "result_checksum": "checksum-protocol-repo-commit",
+            **audit_result_fields([]),
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        payload["reviewWorkerProtocol"]["repository"] = {"commit_sha": resolved_commit}
+
+        result = self.v1_result(job, payload)
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(app.SCANS[0]["commit"], resolved_commit)
+        self.assertEqual(db.get_scan_job(job["job_id"])["commit"], resolved_commit)
+
+    def test_worker_result_flattens_review_run_overall_risk(self) -> None:
+        scan = {
+            "id": "sc_review_run_risk",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        payload = {
+            "status": "done",
+            "attempt_id": "wk_1-1",
+            "result_checksum": "checksum-review-run-risk",
+            **audit_result_fields([]),
+            "summary": {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+        }
+        payload["reviewWorkerProtocol"]["summary"]["overall_risk"] = "medium"
+
+        result = self.v1_result(job, payload)
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        run_id = job["run_id"]
+        self.assertEqual(db.get_review_run(run_id)["overall_risk"], "medium")
     def test_claim_payload_includes_short_lived_clone_token_when_github_app_is_configured(self) -> None:
         job = {
             "job_id": "job_token",
