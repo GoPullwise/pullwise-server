@@ -488,6 +488,7 @@ def admin_user_payload(user: dict, *, current_user_id: str | None = None) -> dic
         "scanCount": scan_count,
         "issueCount": issue_count,
         "subscription": admin_user_subscription_payload(user),
+        "quota": quota.quota_payload_for_user(user),
     }
 
 
@@ -499,6 +500,26 @@ def admin_users_payload(current_user_id: str | None = None) -> dict:
     ]
     users.sort(key=lambda item: (str(item.get("email") or item.get("name") or "").lower(), str(item.get("id") or "")))
     return {"items": users, "users": users}
+
+
+def reset_authorized_user_quota(user_id: str, *, actor_user_id: str | None = None) -> dict:
+    target_user_id = public_issue_text(user_id)
+    if not target_user_id:
+        raise ValueError("User id is required.")
+    target_user = USERS.get(target_user_id)
+    if not isinstance(target_user, dict):
+        raise ResourceNotFound("User")
+    result = quota.reset_user_quota(target_user)
+    return {
+        "user": admin_user_payload(target_user, current_user_id=actor_user_id),
+        "quota": result["after"],
+        "previousQuota": result["before"],
+        "reset": True,
+        "removed": {
+            "quotaLedger": result["ledgerRows"],
+            "quotaBuckets": result["bucketRows"],
+        },
+    }
 
 
 def scan_user_id(scan: dict | None) -> str:

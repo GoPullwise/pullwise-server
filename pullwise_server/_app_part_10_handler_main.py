@@ -2798,6 +2798,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not session_record:
                 return self.json({"ok": True, "session": missing_log_stream_session_payload(segments[2])})
             return self.json({"ok": True, "session": log_stream_session_payload(session_record)})
+        if len(segments) == 5 and segments[:2] == ["admin", "users"] and segments[3:] == ["quota", "reset"]:
+            user_id = clean_github_access_text(segments[2]) or ""
+            try:
+                return self.json(reset_authorized_user_quota(user_id, actor_user_id=session["userId"]))
+            except ResourceNotFound:
+                return self.error(HTTPStatus.NOT_FOUND, "User not found.")
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if segments == ["admin", "review-calibration", "labels"]:
             return self.error(HTTPStatus.GONE, "Review calibration labels have been retired; use Codex review worker outcomes.")
         if segments == ["admin", "workers", "releases"]:

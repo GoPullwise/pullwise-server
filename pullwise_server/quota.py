@@ -286,6 +286,64 @@ def quota_payload_for_user(user: dict[str, Any], *, timestamp: int | None = None
     return quota_payload(bucket, scope="user")
 
 
+
+def reset_user_quota(user: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any]:
+    db.ensure_initialized()
+    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+    bucket = ensure_quota_bucket(
+        scope_type="user",
+        scope_id=str(user["id"]),
+        period=entitlement["period"],
+        plan=entitlement["plan"],
+        limit=entitlement["userLimit"],
+        reset_at=entitlement["resetAt"],
+    )
+    with closing(db.connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            before_row = connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (bucket["id"],)).fetchone()
+            if before_row is None:
+                connection.rollback()
+                return {
+                    "before": quota_payload(bucket, scope="user"),
+                    "after": quota_payload(bucket, scope="user"),
+                    "ledgerRows": 0,
+                    "bucketRows": 0,
+                }
+            before = quota_payload(dict(before_row), scope="user")
+            ledger_rows = connection.execute(
+                """
+                DELETE FROM quota_ledger
+                WHERE requested_by_user_id = ?
+                  AND bucket_id = ?
+                """,
+                (str(user["id"]), bucket["id"]),
+            ).rowcount
+            bucket_rows = connection.execute(
+                """
+                UPDATE quota_buckets
+                SET used = 0,
+                    reserved = 0,
+                    updated_at = strftime('%s', 'now')
+                WHERE id = ?
+                """,
+                (bucket["id"],),
+            ).rowcount
+            after_row = connection.execute("SELECT * FROM quota_buckets WHERE id = ?", (bucket["id"],)).fetchone()
+            connection.commit()
+            return {
+                "before": before,
+                "after": quota_payload(dict(after_row), scope="user") if after_row else before,
+                "ledgerRows": ledger_rows,
+                "bucketRows": bucket_rows,
+            }
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+
+
 def quota_payload_for_repository(repository: dict[str, Any], user: dict[str, Any] | None = None, *, timestamp: int | None = None) -> dict[str, Any]:
     entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
     bucket = ensure_quota_bucket(

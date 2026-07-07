@@ -1571,6 +1571,37 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             },
         )
 
+    def test_admin_can_reset_user_quota(self) -> None:
+        user = app.USERS["usr_user"]
+        repository = db.upsert_repository({"github_repo_id": "repo_reset", "full_name": "owner/reset"})
+        app.quota.consume_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id="usr_user",
+            scan_id="sc_reset",
+            request_id="req_reset",
+        )
+
+        before = app.quota.quota_payload_for_user(user)
+        self.assertEqual(before["used"], 1)
+
+        handler = RouteHarness("/admin/users/usr_user/quota/reset", {}, cookie=self.admin_cookie)
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["reset"])
+        self.assertEqual(handler.payload["previousQuota"]["used"], 1)
+        self.assertEqual(handler.payload["quota"]["used"], 0)
+        self.assertEqual(handler.payload["quota"]["reserved"], 0)
+        self.assertEqual(handler.payload["user"]["quota"]["used"], 0)
+        self.assertEqual(handler.payload["removed"]["quotaLedger"], 1)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
+
+        users = RouteHarness("/admin/users", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(users, "GET")
+        listed = {item["id"]: item for item in users.payload["users"]}
+        self.assertEqual(listed["usr_user"]["quota"]["used"], 0)
+
     def test_admin_delete_user_removes_sessions_state_and_database_records(self) -> None:
         app.USERS["usr_user"]["githubRepositoryAccess"] = {
             "repositoryItems": [{"id": "repo_123", "fullName": "owner/repo"}],
