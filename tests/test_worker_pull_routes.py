@@ -4785,6 +4785,71 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(row["progress"], 70)
         self.assertEqual(app.SCANS[0]["status"], "running")
 
+    def test_scan_list_isolates_rejected_worker_artifact_result_to_failed_row(self) -> None:
+        app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_bad_artifact_result",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        other_scan = {
+            "id": "sc_other_done",
+            "repo": "acme/other",
+            "branch": "main",
+            "commit": "def456",
+            "status": "done",
+            "userId": "usr_1",
+            "createdAt": app.now() - 10,
+            "completedAt": app.now() - 5,
+            "progress": 100,
+            "phase": "report",
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan, other_scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        claimed = claim.payload["job"]
+        self.v1_event(claimed, phase="failure_handling", progress=80, message="Repository exceeds checkout limit")
+        body = {
+            "status": "failed",
+            "attempt_id": "wk_1-1",
+            "result_checksum": "checksum-bad-artifact-result",
+            "error": "Repository exceeds checkout limit.",
+            "error_code": "REPOSITORY_TOO_LARGE",
+            **audit_result_fields([], execution_status="failed"),
+        }
+        artifact_manifest = body["reviewWorkerProtocol"]["artifact_manifest"]
+        worker_log = next(item for item in artifact_manifest if item["artifact_id"] == "art_worker_log")
+        worker_log["size_bytes"] = int(worker_log["size_bytes"]) + 1
+
+        rejected = self.v1_result(claimed, body)
+        self.assertEqual(rejected.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("Uploaded review artifacts do not match result manifest", rejected.payload["message"])
+
+        listing = RouteHarness("/scans", headers={"Cookie": "pw_session=ses_1"})
+        app.PullwiseHandler.route(listing, "GET")
+
+        self.assertEqual(listing.status, HTTPStatus.OK)
+        by_id = {item["id"]: item for item in listing.payload["items"]}
+        self.assertEqual(by_id["sc_bad_artifact_result"]["status"], "failed")
+        self.assertEqual(by_id["sc_bad_artifact_result"]["errorCode"], "WORKER_ARTIFACT_INVALID")
+        self.assertIn("art_worker_log", by_id["sc_bad_artifact_result"]["error"])
     def test_scan_list_reconciles_completed_job_result_when_state_is_stale(self) -> None:
         app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
         app.SESSIONS = {

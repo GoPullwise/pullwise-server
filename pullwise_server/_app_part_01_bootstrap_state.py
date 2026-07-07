@@ -1311,6 +1311,7 @@ def reconcile_scan_job_state_locked(
             result_status = public_issue_text(result.get("result_status") or result.get("status")).lower()
             checksum = clean_github_access_text(result.get("result_result_checksum") or result.get("result_checksum"))
             if result_status in {"done", "failed", "partial_completed"}:
+                rejected_result = False
                 try:
                     changed = apply_worker_job_result_to_state_locked(
                         result,
@@ -1322,8 +1323,9 @@ def reconcile_scan_job_state_locked(
                     if not worker_completed_result_rejected_error(exc):
                         raise
                     changed = reject_worker_completed_result_error_locked(result, exc, checksum=checksum)
+                    rejected_result = True
                 rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
-                if changed:
+                if changed or rejected_result:
                     return True
         return reconcile_terminal_scan_job_locked(scan, job)
     if status == "cancelled":

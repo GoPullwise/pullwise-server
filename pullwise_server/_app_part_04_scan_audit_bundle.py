@@ -1130,6 +1130,9 @@ def public_scan_error_code(value: object) -> str:
         "CODEX_SUBSCRIPTION_INACTIVE",
         "CODEX_QUOTA_EXHAUSTED",
         "CODEX_VERSION_UNSUPPORTED",
+        "WORKER_PROTOCOL_MISSING",
+        "WORKER_PROTOCOL_INVALID",
+        "WORKER_ARTIFACT_INVALID",
     } else ""
 
 

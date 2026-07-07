@@ -1038,10 +1038,16 @@ def scan_snapshot_with_job_state(scan: dict, job: dict) -> dict:
     status = scan_status_from_job_status(job.get("status"))
     if not status:
         return hydrated
+    snapshot_error_code = public_issue_text(hydrated.get("errorCode") or hydrated.get("error_code")).replace("-", "_").upper()
+    preserve_snapshot_error = snapshot_error_code in {
+        "WORKER_PROTOCOL_MISSING",
+        "WORKER_PROTOCOL_INVALID",
+        "WORKER_ARTIFACT_INVALID",
+    } and bool(clean_scan_error(hydrated.get("error")))
     update = {
         "jobId": public_issue_text(job.get("job_id")) or hydrated.get("jobId"),
         "status": status,
-        "error": clean_scan_error(job.get("error")),
+        "error": clean_scan_error(hydrated.get("error")) if preserve_snapshot_error else clean_scan_error(job.get("error")),
         "retry": scan_retry_summary_for_job(job),
     }
     progress_message = "" if status == "queued" else public_issue_text(job.get("progress_message"))
