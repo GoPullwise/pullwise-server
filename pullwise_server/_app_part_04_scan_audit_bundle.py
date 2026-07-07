@@ -66,28 +66,6 @@ def public_scan_agent_config(value: object) -> dict:
     return payload
 
 
-def public_scan_retry(value: object) -> dict:
-    if not isinstance(value, dict):
-        return {}
-    max_attempts = max(1, public_scan_count(value.get("maxAttempts") or value.get("max_attempts") or 1))
-    attempt = public_scan_count(value.get("attempt"))
-    retry_attempts = public_scan_count(value.get("retryAttempts") or value.get("retry_attempts"))
-    if "retryAttempts" not in value and "retry_attempts" not in value:
-        retry_attempts = max(0, max_attempts - 1)
-    remaining = public_scan_count(value.get("remainingAttempts") or value.get("remaining_attempts"))
-    payload = {
-        "attempt": attempt,
-        "maxAttempts": max_attempts,
-        "retryAttempts": max(0, retry_attempts),
-        "remainingAttempts": max(0, min(remaining, max_attempts)),
-        "attemptedWorkers": public_scan_count(value.get("attemptedWorkers") or value.get("attempted_workers")),
-    }
-    reason = public_issue_text(value.get("reason"))
-    if reason:
-        payload["reason"] = reason
-    return payload
-
-
 def public_scan_progress_log(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
@@ -687,9 +665,6 @@ def scan_payload(scan: dict) -> dict:
     queue = scan_queue_payload(scan)
     if queue:
         payload["queue"] = queue
-    retry = public_scan_retry(scan.get("retry"))
-    if retry:
-        payload["retry"] = retry
     return payload
 
 
@@ -827,9 +802,6 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     queue = scan_queue_payload(scan)
     if queue:
         payload["queue"] = queue
-    retry = public_scan_retry(scan.get("retry"))
-    if retry:
-        payload["retry"] = retry
     return payload
 
 

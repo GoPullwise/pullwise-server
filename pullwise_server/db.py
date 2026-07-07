@@ -2357,10 +2357,25 @@ def update_review_run_progress(event: dict[str, Any]) -> dict[str, Any]:
                 ON CONFLICT(run_id) DO UPDATE SET
                     job_id = excluded.job_id,
                     worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
-                    status = excluded.status,
+                    status = CASE
+                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
+                             AND excluded.status = 'running'
+                        THEN review_runs.status
+                        ELSE excluded.status
+                    END,
                     completed_at = COALESCE(excluded.completed_at, review_runs.completed_at),
-                    progress_json = excluded.progress_json,
-                    updated_at = excluded.updated_at
+                    progress_json = CASE
+                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
+                             AND excluded.status = 'running'
+                        THEN review_runs.progress_json
+                        ELSE excluded.progress_json
+                    END,
+                    updated_at = CASE
+                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
+                             AND excluded.status = 'running'
+                        THEN review_runs.updated_at
+                        ELSE excluded.updated_at
+                    END
                 """,
                 (
                     run_id,
@@ -4136,7 +4151,7 @@ def scan_job_retry_state(job: dict[str, Any] | None) -> dict[str, int]:
         "attempt": attempt,
         "maxAttempts": effective_max,
         "retryAttempts": max(0, effective_max - 1),
-        "remainingAttempts": max(0, effective_max - attempt),
+        "remainingAttempts": max(0, effective_max - max(1, attempt)),
         "attemptedWorkers": attempted_workers,
     }
 
@@ -5247,7 +5262,7 @@ def review_artifact_inline_json(payload: dict[str, Any], media_type: str, size_b
     return json.dumps(to_jsonable(decoded), ensure_ascii=False, sort_keys=True)
 
 
-REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log"}
+REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log", "debug_bundle"}
 
 
 def store_review_run_artifact(

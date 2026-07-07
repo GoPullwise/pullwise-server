@@ -1261,23 +1261,6 @@ def scan_status_from_job_status(status: object) -> str:
     return normalized if normalized in {"queued", "done", "failed", "cancelled", "partial_completed"} else ""
 
 
-def scan_retry_summary_for_job(job: dict | None, *, reason: str = "") -> dict:
-    if not job:
-        return {}
-    state = db.scan_job_retry_state(job)
-    payload = {
-        "attempt": public_scan_count(state.get("attempt")),
-        "maxAttempts": max(1, public_scan_count(state.get("maxAttempts"))),
-        "retryAttempts": public_scan_count(state.get("retryAttempts")),
-        "remainingAttempts": public_scan_count(state.get("remainingAttempts")),
-        "attemptedWorkers": public_scan_count(state.get("attemptedWorkers")),
-    }
-    retry_reason = public_issue_text(reason)
-    if retry_reason:
-        payload["reason"] = retry_reason
-    return payload
-
-
 def reconcile_scan_job_state_locked(
     scan: dict,
     *,
@@ -1338,7 +1321,6 @@ def reconcile_scan_job_state_locked(
         "progress": 0 if status == "queued" else public_scan_progress(job.get("progress")),
         "phase": None if status == "queued" else public_scan_phase(job.get("progress_phase")) or None,
         "error": clean_scan_error(job.get("error")),
-        "retry": scan_retry_summary_for_job(job),
     }
     progress_message = "" if status == "queued" else public_issue_text(job.get("progress_message"))
     if progress_message:
@@ -1392,7 +1374,6 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
                     "claimedByWorkerId": None,
                     "recoveredAt": timestamp,
                     "recoveryReason": public_issue_text(job.get("reason")) or "timed_out",
-                    "retry": scan_retry_summary_for_job(stored_job or job, reason=public_issue_text(job.get("reason"))),
                 }
             )
         elif job.get("status") == "failed":
@@ -1410,7 +1391,6 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
                     "error": error,
                     "recoveredAt": timestamp,
                     "recoveryReason": reason,
-                    "retry": scan_retry_summary_for_job(stored_job or job, reason=reason),
                 }
             )
             reconcile_terminal_scan_quota_locked(scan, stored_job or job, status="failed", reason=reason)

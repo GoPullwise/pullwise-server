@@ -35,8 +35,8 @@ class WorkerRetryPolicyTest(unittest.TestCase):
                     )
                 )
 
-    def test_transient_worker_failure_remains_retryable(self) -> None:
-        self.assertTrue(
+    def test_transient_worker_failure_is_not_auto_retryable(self) -> None:
+        self.assertFalse(
             app.worker_result_allows_auto_retry(
                 {"error_code": "CODEX_REVIEW_COMPLETION_FAILED"},
                 status="failed",

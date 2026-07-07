@@ -896,15 +896,15 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(remaining_issues, ["iss_old_queued", "iss_old_running", "iss_recent_done"])
         self.assertEqual(remaining_jobs, ["sc_old_queued", "sc_old_running", "sc_recent_done"])
 
-    def test_scan_job_defaults_to_one_retry_attempt(self) -> None:
+    def test_scan_job_defaults_to_single_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
                 db.initialize()
                 job = db.create_scan_job(
                     {
-                        "job_id": "job_default_retry",
-                        "scan_id": "sc_default_retry",
+                        "job_id": "job_default_single_attempt",
+                        "scan_id": "sc_default_single_attempt",
                         "repo": "acme/api",
                         "branch": "main",
                         "commit": "pending",
@@ -919,8 +919,8 @@ class DatabaseContractsTest(unittest.TestCase):
                         row[4] for row in connection.execute("PRAGMA table_info(scan_jobs)") if row[1] == "max_attempts"
                     )
 
-        self.assertEqual(job["max_attempts"], 2)
-        self.assertEqual(max_attempts_default, "2")
+        self.assertEqual(job["max_attempts"], 1)
+        self.assertEqual(max_attempts_default, "1")
 
     def test_record_scan_job_result_requires_current_claimed_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -989,119 +989,64 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(current_job["status"], "claimed")
         self.assertEqual(result_count, 0)
 
-    def test_retry_queued_scan_job_can_be_reclaimed_by_same_worker(self) -> None:
+    def test_failed_scan_job_result_does_not_requeue(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, 'pullwise.sqlite3')
             with patch.dict(os.environ, {'PULLWISE_DB_PATH': db_path}, clear=False):
                 db.initialize()
                 db.create_scan_job(
                     {
-                        'job_id': 'job_same_worker_retry',
-                        'scan_id': 'sc_same_worker_retry',
+                        'job_id': 'job_no_retry_worker_failure',
+                        'scan_id': 'sc_no_retry_worker_failure',
                         'repo': 'acme/api',
                         'branch': 'main',
                         'commit': 'pending',
                         'status': 'queued',
                         'created_at': 100,
                         'user_id': 'usr_1',
-                        'max_attempts': 2,
+                        'max_attempts': 3,
                     }
                 )
-
-                first_claim = db.claim_next_scan_job('wk_single', lease_seconds=3600, timestamp=120)
+                claimed = db.claim_next_scan_job('wk_single', lease_seconds=3600, timestamp=120)
                 failed = db.record_scan_job_result(
-                    first_claim['job_id'],
-                    attempt_id=f"wk_single-{first_claim['attempt']}",
+                    'job_no_retry_worker_failure',
+                    attempt_id='wk_single-1',
                     status='failed',
-                    result_checksum='checksum-same-worker-retry-failed',
+                    result_checksum='checksum-no-retry',
                     payload={'status': 'failed', 'error': 'worker_result_failed'},
                     retryable=True,
                 )
                 second_claim = db.claim_next_scan_job('wk_single', lease_seconds=3600, timestamp=130)
+                stored = db.get_scan_job('job_no_retry_worker_failure')
 
-                with closing(sqlite3.connect(db_path)) as connection:
-                    attempt_rows = connection.execute(
-                        'SELECT attempt, worker_id, status FROM scan_job_attempts WHERE job_id = ? ORDER BY attempt',
-                        ('job_same_worker_retry',),
-                    ).fetchall()
-
+        self.assertEqual(claimed['attempt'], 1)
         self.assertTrue(failed['accepted'])
-        self.assertTrue(failed['retry_queued'])
-        self.assertIsNotNone(second_claim)
-        self.assertEqual(second_claim['job_id'], 'job_same_worker_retry')
-        self.assertEqual(second_claim['attempt'], 2)
-        self.assertEqual(attempt_rows, [(2, 'wk_single', 'claimed')])
-
-    def test_retry_scan_job_preserves_evidence_when_scan_is_not_retryable(self) -> None:
+        self.assertFalse(failed['retry_queued'])
+        self.assertIsNone(second_claim)
+        self.assertEqual(stored['status'], 'failed')
+        self.assertEqual(stored['attempt'], 1)
+    def test_retry_scan_job_is_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, 'pullwise.sqlite3')
             with patch.dict(os.environ, {'PULLWISE_DB_PATH': db_path}, clear=False):
                 db.initialize()
                 db.create_scan_job(
                     {
-                        'job_id': 'job_retry_preserve_evidence',
-                        'scan_id': 'sc_retry_preserve_evidence',
+                        'job_id': 'job_retry_disabled',
+                        'scan_id': 'sc_retry_disabled',
                         'repo': 'acme/api',
                         'branch': 'main',
                         'commit': 'pending',
-                        'status': 'queued',
+                        'status': 'failed',
                         'created_at': 100,
                         'user_id': 'usr_1',
                     }
                 )
-                claimed = db.claim_next_scan_job('wk_1', lease_seconds=3600, timestamp=120)
-                result = db.record_scan_job_result(
-                    claimed['job_id'],
-                    attempt_id='wk_1-1',
-                    status='done',
-                    result_checksum='checksum-retry-preserve-evidence',
-                    payload={'status': 'done', 'summary': {'high': 1}},
-                )
-                db.record_review_decision_events(
-                    [
-                        {
-                            'event_id': 'ev_retry_preserve_evidence',
-                            'protocol': 'review-worker-protocol/v1',
-                            'candidate_observation_key': 'obs_retry_preserve_evidence',
-                            'scan_id': 'sc_retry_preserve_evidence',
-                            'job_id': 'job_retry_preserve_evidence',
-                            'attempt_id': 'wk_1-1',
-                            'decision': 'confirmed',
-                        }
-                    ]
-                )
+                retry = db.retry_scan_job('sc_retry_disabled', timestamp=200)
+                stored = db.get_scan_job('job_retry_disabled')
 
-                retry = db.retry_scan_job('sc_retry_preserve_evidence', timestamp=200)
-
-                with closing(sqlite3.connect(db_path)) as connection:
-                    attempt_count = connection.execute(
-                        'SELECT COUNT(*) FROM scan_job_attempts WHERE job_id = ?',
-                        ('job_retry_preserve_evidence',),
-                    ).fetchone()[0]
-                    result_count = connection.execute(
-                        'SELECT COUNT(*) FROM job_results WHERE job_id = ?',
-                        ('job_retry_preserve_evidence',),
-                    ).fetchone()[0]
-                    artifact_count = connection.execute(
-                        'SELECT COUNT(*) FROM job_result_artifacts WHERE job_id = ?',
-                        ('job_retry_preserve_evidence',),
-                    ).fetchone()[0]
-                    event_count = connection.execute(
-                        'SELECT COUNT(*) FROM review_decision_events WHERE job_id = ?',
-                        ('job_retry_preserve_evidence',),
-                    ).fetchone()[0]
-                    status = connection.execute(
-                        'SELECT status FROM scan_jobs WHERE job_id = ?',
-                        ('job_retry_preserve_evidence',),
-                    ).fetchone()[0]
-
-        self.assertTrue(result['accepted'])
         self.assertIsNone(retry)
-        self.assertEqual(status, 'done')
-        self.assertEqual(attempt_count, 1)
-        self.assertEqual(result_count, 1)
-        self.assertEqual(artifact_count, 1)
-        self.assertEqual(event_count, 1)
+        self.assertEqual(stored['status'], 'failed')
     def test_exhausted_queued_scan_job_fails_before_claim(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

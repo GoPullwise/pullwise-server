@@ -32,7 +32,7 @@ WORKER_V1_PROGRESS_COUNTER_KEYS = (
     "artifacts_total",
     "artifacts_uploaded",
 )
-REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log"}
+REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log", "debug_bundle"}
 WORKER_REVIEW_ARTIFACT_KINDS = {
     "report.human",
     "report.agent",
@@ -3146,7 +3146,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "phase": None,
                         "jobId": job.get("job_id"),
                         "runId": payload.get("run_id"),
-                        "retry": scan_retry_summary_for_job(job),
                     }
                 )
                 db.upsert_scan(scan)

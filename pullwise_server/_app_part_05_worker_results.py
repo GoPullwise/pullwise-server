@@ -75,78 +75,6 @@ def create_scan_job_for_scan(scan: dict) -> dict:
     return job
 
 
-def reset_scan_for_retry_locked(scan: dict, *, job: dict, queued_at: int | None = None) -> None:
-    scan_id = public_issue_text(scan.get("id"))
-    if scan_id:
-        ISSUES[:] = [issue for issue in ISSUES if public_issue_text(issue.get("scanId")) != scan_id]
-        db.delete_issues_for_scan(scan_id, user_id=public_issue_text(scan.get("userId")))
-    queued_timestamp = pull_request_timestamp(queued_at) or now()
-    scan.update(
-        {
-            "status": "queued",
-            "queuedAt": queued_timestamp,
-            "progress": 0,
-            "phase": None,
-            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "jobId": public_issue_text(job.get("job_id")) or public_issue_text(scan.get("jobId")),
-        }
-    )
-    commit = clean_github_access_text(job.get("commit"))
-    if commit:
-        scan["commit"] = commit
-    for key in (
-        "claimedAt",
-        "claimedByWorkerId",
-        "completedAt",
-        "durationMs",
-        "effectiveAgentConfig",
-        "error",
-        "errorCode",
-        "preflight",
-        "quotaConsumedAt",
-        "quotaConsumeTrigger",
-        "quotaRefunded",
-        "quotaReleasedAt",
-        "quotaReleaseReason",
-        "quotaReservedAt",
-        "quotaState",
-        "recoveredAt",
-        "recoveryReason",
-        "resultChecksum",
-        "startedAt",
-        "updatedAt",
-    ):
-        scan.pop(key, None)
-    db.upsert_scan(scan)
-
-
-def retry_scan_job_for_scan_locked(scan: dict, *, queued_at: int | None = None) -> dict:
-    scan_id = public_issue_text(scan.get("id"))
-    if not scan_id:
-        raise ValueError("Scan id is required.")
-    job = db.get_scan_job_for_scan(scan_id)
-    if job:
-        job_status = public_issue_text(job.get("status")).lower()
-        if job_status not in {"failed", "lost", "cancelled"}:
-            raise RuntimeError("Only failed, lost, or cancelled scan jobs can be retried.")
-        retried_job = db.retry_scan_job(
-            scan_id,
-            timestamp=queued_at,
-            max_attempts=system_config.scan_job_max_attempts(),
-        )
-        if not retried_job:
-            raise RuntimeError("Scan job could not be retried.")
-        job = retried_job
-    else:
-        if public_scan_status(scan.get("status")) not in {"failed", "cancelled"}:
-            raise RuntimeError("Only failed, lost, or cancelled scan jobs can be retried.")
-        job = create_scan_job_for_scan(scan)
-        if not job:
-            raise RuntimeError("Scan job could not be created.")
-    reset_scan_for_retry_locked(scan, job=job, queued_at=queued_at)
-    return job
-
-
 def worker_plan_for_job(job: dict, scan: dict | None = None) -> str:
     user_id = str(job.get("user_id") or (scan or {}).get("userId") or "").strip()
     user = USERS.get(user_id) if user_id else None
@@ -865,54 +793,6 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
 def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: str, checksum: str) -> bool:
     prepared = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     return apply_prepared_worker_job_result_to_state_locked(job, prepared)
-
-
-def apply_worker_job_retry_to_state_locked(job: dict, body: dict, *, checksum: str) -> bool:
-    scan_id = public_issue_text(job.get("scan_id"))
-    if not scan_id:
-        return False
-    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
-    if scan is None:
-        scan = scan_from_recovered_job(job)
-        if scan:
-            remember_scan_snapshot_locked(scan)
-    if scan is None:
-        return False
-    before = json.dumps(db.to_jsonable(scan), sort_keys=True)
-    queued_at = now()
-    retry = scan_retry_summary_for_job(job, reason="worker_result_failed")
-    scan.update(
-        {
-            "status": "queued",
-            "queuedAt": queued_at,
-            "progress": 0,
-            "phase": None,
-            "jobId": public_issue_text(job.get("job_id")) or public_issue_text(scan.get("jobId")),
-            "retry": retry,
-            "updatedAt": queued_at,
-            "recoveryReason": "worker_result_failed",
-            "lastWorkerResultChecksum": checksum,
-        }
-    )
-    commit = worker_result_resolved_commit(job=job, body=body)
-    if commit:
-        scan["commit"] = commit
-    for key in (
-        "claimedAt",
-        "claimedByWorkerId",
-        "completedAt",
-        "durationMs",
-        "error",
-        "errorCode",
-        "resultChecksum",
-        "startedAt",
-    ):
-        scan.pop(key, None)
-    changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
-    if changed:
-        db.upsert_scan(scan)
-        mark_state_dirty()
-    return changed
 
 
 def apply_worker_job_result(job: dict, body: dict) -> dict:

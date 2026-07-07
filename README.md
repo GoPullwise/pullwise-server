@@ -13,7 +13,7 @@ Current production-trial scope:
 - Repository listing and sync
 - Scan creation, queueing, recovery, cancellation, and history
 - Distributed worker system: worker registry, heartbeat, atomic job claiming,
-  progress reporting, result upload, timeout recovery, and retry logic
+  progress reporting, result upload, and timeout recovery
 - Admin worker management: create, enable, disable, delete, rotate token,
   and view audit events
 - Workspace creation and API key management for external automation
@@ -144,7 +144,7 @@ PULLWISE_ADMIN_USER_IDS=
 PULLWISE_ADMIN_EMAILS=admin@example.com
 ```
 
-Plan quotas, scan queue/retry/lease limits, repository scan limits, rate
+Plan quotas, scan queue/lease limits, repository scan limits, rate
 limits, worker control-plane defaults, operational alert email settings,
 review calibration settings, and the non-secret Creem catalog live in the
 server database. Edit them through the admin app Settings page or
@@ -834,7 +834,6 @@ Implemented endpoints:
 - `POST /scans/status`
 - `GET /scans/{id}`
 - `POST /scans/{id}/cancel`
-- `POST /scans/{id}/retry`
 - `GET /scans/{id}/audit-bundle`
 - `GET /scans/{id}/audit-bundle.zip`
 - `GET /issues`
