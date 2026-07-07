@@ -529,6 +529,9 @@ def scan_payload(scan: dict) -> dict:
         "verification": public_scan_verification_counts(scan),
         "createdAt": pull_request_timestamp(scan.get("createdAt")) or 0,
     }
+    request_id = clean_github_access_text(scan.get("requestId"), allow_int=True)
+    if request_id:
+        payload["requestId"] = request_id[:128]
     progress_message = public_issue_text(scan.get("progressMessage") or scan.get("progress_message"))
     if progress_message:
         payload["progressMessage"] = progress_message

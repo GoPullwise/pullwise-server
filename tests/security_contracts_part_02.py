@@ -609,7 +609,22 @@ class SecurityContractsPart02Test(SecurityContractsBase):
         self.assertEqual(first.status, HTTPStatus.CREATED)
         self.assertEqual(second.status, HTTPStatus.OK)
         self.assertEqual(first.payload["id"], second.payload["id"])
+        self.assertEqual(first.payload["requestId"], "scan_req_1")
+        self.assertEqual(second.payload["requestId"], "scan_req_1")
         self.assertEqual(len([scan for scan in app.SCANS if scan.get("requestId") == "scan_req_1"]), 1)
+
+        listing = RouteHarness("/scans", cookie="pw_session=ses_1")
+        status = RouteHarness(
+            "/scans/status",
+            {"ids": [first.payload["id"]]},
+            cookie="pw_session=ses_1",
+        )
+        with patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True):
+            app.PullwiseHandler.route(listing, "GET")
+            app.PullwiseHandler.route(status, "POST")
+
+        self.assertEqual(listing.payload["items"][0]["requestId"], "scan_req_1")
+        self.assertEqual(status.payload["items"][0]["requestId"], "scan_req_1")
     def test_scan_creation_rejects_request_id_reuse_for_different_repo(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubRepositoryAccess"] = {
