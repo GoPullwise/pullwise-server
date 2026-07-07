@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -13,6 +13,19 @@ SCAN_SYSTEM_STATUS_CACHE_SECONDS = 5
 SCAN_SYSTEM_STATUS_CACHE: dict[str, dict] = {}
 
 
+def manual_worker_uninstall_count(worker_records: list[dict]) -> int:
+    count = 0
+    for worker in worker_records:
+        command = worker.get("_latest_command")
+        if not isinstance(command, dict):
+            continue
+        command_name = public_issue_text(command.get("command")).lower()
+        command_status = public_issue_text(command.get("status")).lower()
+        if command_name == "uninstall" and command_status in {"pending", "running"}:
+            count += 1
+    return count
+
+
 def scan_system_status_payload(*, admin: bool = False) -> dict:
     cache_key = "admin" if admin else "public"
     current_time = now()
@@ -22,9 +35,10 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         return cached["payload"]
     worker_records = annotate_worker_runtime_payloads(
         db.list_workers(activated_only=True, worker_scope=db.WORKER_SCOPE_SHARED),
-        include_latest_commands=admin,
+        include_latest_commands=True,
     )
     workers = [worker_public_payload(worker, admin=False) for worker in worker_records]
+    uninstalling_workers = manual_worker_uninstall_count(worker_records)
     job_counts = db.scan_job_status_counts(worker_scope=db.WORKER_SCOPE_SHARED)
     queued_jobs = public_scan_count(job_counts.get("queued"))
     running_jobs = public_scan_count(job_counts.get("running"))
@@ -53,6 +67,8 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         "degradedWorkerCount": len(degraded),
         "offlineWorkerCount": len(offline),
     }
+    if uninstalling_workers:
+        payload["administratorWorkerUninstallCount"] = uninstalling_workers
     alert_workers = workers
     if admin:
         admin_workers = [worker_public_payload(worker, admin=True) for worker in worker_records]
