@@ -2001,12 +2001,13 @@ def cleanup_stale_worker_uninstall_commands(
                 f"""
                 UPDATE workers
                 SET enabled = 0,
+                    deleted_at = COALESCE(deleted_at, ?),
                     disabled_at = COALESCE(disabled_at, ?),
                     updated_at = ?
                 WHERE worker_id IN ({worker_placeholders})
                   AND deleted_at IS NULL
                 """,
-                (current_time, current_time, *worker_ids),
+                (current_time, current_time, current_time, *worker_ids),
             ).rowcount
             return max(0, int(affected_count or 0))
 

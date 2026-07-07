@@ -2124,7 +2124,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(admin_workers_after_failure.payload["workers"][0]["worker_id"], worker_id)
         self.assertEqual(admin_workers_after_failure.payload["workers"][0]["latest_command"]["status"], "failed")
 
-    def test_server_cleanup_keeps_stale_cleanup_pending_worker_visible_as_cancelled(self) -> None:
+    def test_server_cleanup_removes_stale_cleanup_pending_worker_from_admin_list(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
         heartbeat = self.post_v1_heartbeat(worker_id, token)
@@ -2150,17 +2150,18 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             removed = app.cleanup_server_resources(timestamp=1000)
 
         self.assertEqual(removed["stale_worker_cleanup_pending"], 1)
-        worker_after_cleanup = db.get_worker(worker_id)
+        worker_after_cleanup = db.get_worker(worker_id, include_deleted=True)
+        visible_worker_after_cleanup = db.get_worker(worker_id)
         command = db.get_worker_command(uninstall.payload["command"]["id"], worker_id=worker_id)
         self.assertIsNotNone(worker_after_cleanup)
-        self.assertIsNone(worker_after_cleanup["deleted_at"])
+        self.assertIsNotNone(worker_after_cleanup["deleted_at"])
+        self.assertIsNone(visible_worker_after_cleanup)
         self.assertEqual(command["status"], "cancelled")
         after_cleanup = RouteHarness("/admin/workers", cookie=self.admin_cookie)
         app.PullwiseHandler.route(after_cleanup, "GET")
         self.assertEqual(after_cleanup.status, HTTPStatus.OK)
-        self.assertEqual(after_cleanup.payload["workers"][0]["worker_id"], worker_id)
-        self.assertEqual(after_cleanup.payload["workers"][0]["latest_command"]["status"], "cancelled")
-        self.assertEqual(after_cleanup.payload["total"], 1)
+        self.assertEqual(after_cleanup.payload["workers"], [])
+        self.assertEqual(after_cleanup.payload["total"], 0)
 
     def test_worker_can_unregister_itself_from_registry(self) -> None:
         payload, token = self.create_worker()

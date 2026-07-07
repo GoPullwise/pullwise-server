@@ -646,7 +646,7 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(deleted["deleted_at"], 456)
         self.assertEqual(deleted["disabled_at"], 123)
 
-    def test_cleanup_stale_worker_uninstall_commands_keeps_timed_out_cleanup_visible(self) -> None:
+    def test_cleanup_stale_worker_uninstall_commands_soft_deletes_timed_out_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
@@ -691,12 +691,12 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(removed, 1)
         self.assertIsNotNone(old_worker)
         self.assertEqual(old_worker["enabled"], 0)
-        self.assertIsNone(old_worker["deleted_at"])
+        self.assertEqual(old_worker["deleted_at"], 1000)
         self.assertEqual(old_worker["disabled_at"], 1000)
         self.assertEqual(old_command["status"], "cancelled")
         self.assertIn("host cleanup was not confirmed", old_command["error"])
         self.assertEqual(old_command["completed_at"], 1000)
-        self.assertIsNotNone(old_visible)
+        self.assertIsNone(old_visible)
         self.assertIsNotNone(recent_visible)
         self.assertIsNotNone(running_visible)
         self.assertIsNotNone(stop_visible)

@@ -116,6 +116,14 @@ itself. A running worker may acknowledge admin delete, but the durable cleanup
 responsibility belongs to the worker host manager so stopped, degraded, or
 self-removing workers can still be cleaned up and reported accurately.
 
+If a pending uninstall command exceeds the server cleanup timeout before host
+cleanup is confirmed, the server must still soft-delete only that timed-out
+worker registry record so the admin list does not keep a stuck Cleanup
+cancelled instance forever. Keep the terminal command row and error reason for
+auditability. Do not broaden this timeout cleanup to recent pending commands,
+running cleanup commands, stop commands, already deleted workers, or other
+worker instances on the same host.
+
 A single worker host may run multiple Pullwise worker instances. Do not reuse a
 worker process, watcher process, systemd unit, service user, env file, config
 directory, data directory, log directory, runtime directory, or lifecycle marker
