@@ -2357,8 +2357,7 @@ def upsert_review_run_claimed(job: dict[str, Any], *, protocol_version: str = "r
             return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
 
 
-def update_review_run_progress(event: dict[str, Any]) -> dict[str, Any]:
-    ensure_initialized()
+def _review_run_progress_values(event: dict[str, Any]) -> tuple[str, str, str, int, int | None, str, str | None, str | None]:
     run_id = str(event.get("run_id") or "").strip()
     job_id = str(event.get("job_id") or "").strip()
     worker_id = str(event.get("worker_id") or "").strip()
@@ -2385,52 +2384,61 @@ def update_review_run_progress(event: dict[str, Any]) -> dict[str, Any]:
     }.get(event_type)
     status = terminal_status or "running"
     completed_at = timestamp if terminal_status else None
+    return run_id, job_id, worker_id, timestamp, completed_at, status, run_json_text(progress_payload), terminal_status
+
+
+def _upsert_review_run_progress_locked(connection: sqlite3.Connection, event: dict[str, Any]) -> dict[str, Any]:
+    run_id, job_id, worker_id, timestamp, completed_at, status, progress_text, _terminal_status = _review_run_progress_values(event)
+    connection.execute(
+        """
+        INSERT INTO review_runs (
+            run_id, job_id, worker_id, status, completed_at,
+            progress_json, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+            job_id = excluded.job_id,
+            worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
+            status = CASE
+                WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
+                     AND excluded.status = 'running'
+                THEN review_runs.status
+                ELSE excluded.status
+            END,
+            completed_at = COALESCE(excluded.completed_at, review_runs.completed_at),
+            progress_json = CASE
+                WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
+                     AND excluded.status = 'running'
+                THEN review_runs.progress_json
+                ELSE excluded.progress_json
+            END,
+            updated_at = CASE
+                WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
+                     AND excluded.status = 'running'
+                THEN review_runs.updated_at
+                ELSE excluded.updated_at
+            END
+        """,
+        (
+            run_id,
+            job_id,
+            worker_id,
+            status,
+            completed_at,
+            progress_text,
+            timestamp,
+            timestamp,
+        ),
+    )
+    return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
+
+
+def update_review_run_progress(event: dict[str, Any]) -> dict[str, Any]:
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
-            connection.execute(
-                """
-                INSERT INTO review_runs (
-                    run_id, job_id, worker_id, status, completed_at,
-                    progress_json, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(run_id) DO UPDATE SET
-                    job_id = excluded.job_id,
-                    worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
-                    status = CASE
-                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
-                             AND excluded.status = 'running'
-                        THEN review_runs.status
-                        ELSE excluded.status
-                    END,
-                    completed_at = COALESCE(excluded.completed_at, review_runs.completed_at),
-                    progress_json = CASE
-                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
-                             AND excluded.status = 'running'
-                        THEN review_runs.progress_json
-                        ELSE excluded.progress_json
-                    END,
-                    updated_at = CASE
-                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
-                             AND excluded.status = 'running'
-                        THEN review_runs.updated_at
-                        ELSE excluded.updated_at
-                    END
-                """,
-                (
-                    run_id,
-                    job_id,
-                    worker_id,
-                    status,
-                    completed_at,
-                    run_json_text(progress_payload),
-                    timestamp,
-                    timestamp,
-                ),
-            )
-            return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
-
+            return _upsert_review_run_progress_locked(connection, event)
 
 def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, status: str) -> dict[str, Any]:
     ensure_initialized()
@@ -2553,8 +2561,7 @@ def get_latest_review_run_for_job(job_id: str) -> dict[str, Any] | None:
         )
 
 
-def store_review_run_event(event: dict[str, Any]) -> dict[str, Any]:
-    ensure_initialized()
+def _insert_review_run_event_locked(connection: sqlite3.Connection, event: dict[str, Any]) -> dict[str, Any]:
     run_id = str(event.get("run_id") or "").strip()
     job_id = str(event.get("job_id") or "").strip()
     worker_id = str(event.get("worker_id") or "").strip()
@@ -2577,42 +2584,56 @@ def store_review_run_event(event: dict[str, Any]) -> dict[str, Any]:
     payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
     created_at = int(event.get("created_at") or time.time())
     event_id = stable_id("rve", f"{run_id}:{sequence}")
+    latest = connection.execute(
+        "SELECT MAX(sequence) AS latest_sequence FROM review_run_events WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    latest_sequence = int(latest["latest_sequence"]) if latest and latest["latest_sequence"] is not None else 0
+    if sequence <= latest_sequence:
+        raise ValueError("event sequence must be monotonic")
+    connection.execute(
+        """
+        INSERT INTO review_run_events (
+            id, run_id, job_id, worker_id, sequence, event_type, phase,
+            severity, status, progress, event_timestamp, payload, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_id,
+            run_id,
+            job_id,
+            worker_id,
+            sequence,
+            event_type,
+            event.get("phase"),
+            event.get("severity"),
+            event.get("status"),
+            max(0, min(100, int(event.get("progress") or 0))),
+            event.get("timestamp"),
+            payload_text,
+            created_at,
+        ),
+    )
+    return row_to_dict(connection.execute("SELECT * FROM review_run_events WHERE id = ?", (event_id,)).fetchone()) or {}
+
+
+def store_review_run_event(event: dict[str, Any]) -> dict[str, Any]:
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
-            latest = connection.execute(
-                "SELECT MAX(sequence) AS latest_sequence FROM review_run_events WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
-            latest_sequence = int(latest["latest_sequence"]) if latest and latest["latest_sequence"] is not None else 0
-            if sequence <= latest_sequence:
-                raise ValueError("event sequence must be monotonic")
-            connection.execute(
-                """
-                INSERT INTO review_run_events (
-                    id, run_id, job_id, worker_id, sequence, event_type, phase,
-                    severity, status, progress, event_timestamp, payload, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    run_id,
-                    job_id,
-                    worker_id,
-                    sequence,
-                    event_type,
-                    event.get("phase"),
-                    event.get("severity"),
-                    event.get("status"),
-                    max(0, min(100, int(event.get("progress") or 0))),
-                    event.get("timestamp"),
-                    payload_text,
-                    created_at,
-                ),
-            )
-            return row_to_dict(connection.execute("SELECT * FROM review_run_events WHERE id = ?", (event_id,)).fetchone()) or {}
+            return _insert_review_run_event_locked(connection, event)
 
+
+def store_review_run_event_and_progress(event: dict[str, Any], progress_event: dict[str, Any] | None = None) -> dict[str, Any]:
+    ensure_initialized()
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            stored_event = _insert_review_run_event_locked(connection, event)
+            _upsert_review_run_progress_locked(connection, progress_event or event)
+            return stored_event
 
 def list_review_run_events(run_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
     ensure_initialized()

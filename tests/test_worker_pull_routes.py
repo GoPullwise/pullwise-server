@@ -471,6 +471,41 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(progress["status"], "leased")
         self.assertEqual(db.get_scan_job(job["job_id"])["progress"], 0)
         self.assertEqual(scan["progress"], 0)
+
+    def test_worker_run_event_uses_combined_event_progress_persistence(self) -> None:
+        scan = {
+            "id": "sc_event_hot_path",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        lease = self.v1_lease()
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+
+        with (
+            patch.object(app.db, "store_review_run_event_and_progress", wraps=app.db.store_review_run_event_and_progress) as combined,
+            patch.object(app.db, "store_review_run_event", side_effect=AssertionError("separate event insert should not run")),
+            patch.object(app.db, "update_review_run_progress", side_effect=AssertionError("separate run progress update should not run")),
+        ):
+            event = self.v1_event(job, phase="reviewer_fanout", progress=42)
+
+        self.assertEqual(event.status, HTTPStatus.OK)
+        combined.assert_called_once()
+        stored_events = db.list_review_run_events(job["run_id"])
+        self.assertEqual(len(stored_events), 1)
+        run_progress = json.loads(db.get_review_run(job["run_id"])["progress_json"])
+        self.assertEqual(run_progress["phase"], "reviewer_fanout")
+        self.assertEqual(db.get_scan_job(job["job_id"])["progress"], 42)
+
     def test_worker_token_record_is_cached_per_request(self) -> None:
         handler = RouteHarness("/v1/workers/wk_1/heartbeat", headers=self.auth)
         with patch.object(app.db, "get_enabled_worker_token", wraps=app.db.get_enabled_worker_token) as lookup:

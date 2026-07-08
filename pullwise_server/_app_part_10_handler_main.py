@@ -3285,39 +3285,24 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         progress_message = public_issue_text(body.get("message"))
         progress_log_time = worker_progress_log_time({"time": body.get("timestamp")})
         logs_summary = public_issue_text(event_type)
+        event_created_at = now()
+        event_record = {
+            "run_id": run_id,
+            "job_id": public_issue_text(job.get("job_id")),
+            "worker_id": public_issue_text(worker_record.get("worker_id")),
+            "sequence": body.get("sequence"),
+            "event_type": event_type,
+            "phase": phase,
+            "severity": public_issue_text(body.get("severity")),
+            "status": public_issue_text(progress_payload.get("status")),
+            "progress": progress_value,
+            "timestamp": public_issue_text(body.get("timestamp")),
+            "payload": body,
+            "created_at": event_created_at,
+        }
+        progress_record = {**event_record, "steps": progress_steps}
         try:
-            stored_event = db.store_review_run_event(
-                {
-                    "run_id": run_id,
-                    "job_id": public_issue_text(job.get("job_id")),
-                    "worker_id": public_issue_text(worker_record.get("worker_id")),
-                    "sequence": body.get("sequence"),
-                    "event_type": event_type,
-                    "phase": phase,
-                    "severity": public_issue_text(body.get("severity")),
-                    "status": public_issue_text(progress_payload.get("status")),
-                    "progress": progress_value,
-                    "timestamp": public_issue_text(body.get("timestamp")),
-                    "payload": body,
-                    "created_at": now(),
-                }
-            )
-            db.update_review_run_progress(
-                {
-                    "run_id": run_id,
-                    "job_id": public_issue_text(job.get("job_id")),
-                    "worker_id": public_issue_text(worker_record.get("worker_id")),
-                    "sequence": body.get("sequence"),
-                    "event_type": event_type,
-                    "phase": phase,
-                    "severity": public_issue_text(body.get("severity")),
-                    "status": public_issue_text(progress_payload.get("status")),
-                    "progress": progress_value,
-                    "timestamp": public_issue_text(body.get("timestamp")),
-                    "steps": progress_steps,
-                    "created_at": now(),
-                }
-            )
+            stored_event = db.store_review_run_event_and_progress(event_record, progress_record)
         except ValueError as exc:
             message = str(exc)
             if "monotonic" in message or "already exists" in message:
