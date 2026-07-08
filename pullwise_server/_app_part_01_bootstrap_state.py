@@ -1043,11 +1043,34 @@ def recover_interrupted_scans() -> int:
             job_id = public_issue_text(scan.get("jobId"))
             job = db.get_scan_job(job_id) if job_id else None
             if job and public_issue_text(job.get("status")) in {"done", "partial_completed"}:
-                if reconcile_scan_job_state_locked(scan):
+                changed = reconcile_scan_job_state_locked(scan)
+                if public_issue_text(job.get("status")) == "done" and public_issue_text(scan.get("status")) != "done" and not public_issue_text(scan.get("errorCode")):
+                    if reconcile_terminal_scan_job_locked(scan, job):
+                        scan.setdefault("issues", {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0})
+                        changed = True
+                if changed:
                     recovered += 1
                 continue
             if job and public_issue_text(job.get("status")) in {"failed", "cancelled"}:
-                if reconcile_terminal_scan_job_locked(scan, job):
+                completed_result = db.get_completed_scan_job_result(job_id) if job_id else None
+                if completed_result:
+                    payload = completed_result.get("result_payload") if isinstance(completed_result.get("result_payload"), dict) else {}
+                    result_status = public_issue_text(completed_result.get("result_status") or completed_result.get("status")).lower()
+                    checksum = clean_github_access_text(completed_result.get("result_result_checksum") or completed_result.get("result_checksum"))
+                    try:
+                        changed = apply_worker_job_result_to_state_locked(completed_result, payload, status=result_status, checksum=checksum)
+                    except ValueError as exc:
+                        if not worker_completed_result_rejected_error(exc):
+                            raise
+                        changed = reject_worker_completed_result_error_locked(completed_result, exc, checksum=checksum)
+                    if result_status == "done" and public_issue_text(scan.get("status")) != "done":
+                        terminal_job = dict(completed_result)
+                        terminal_job["status"] = "done"
+                        if reconcile_terminal_scan_job_locked(scan, terminal_job):
+                            changed = True
+                    if changed:
+                        recovered += 1
+                elif reconcile_terminal_scan_job_locked(scan, job):
                     recovered += 1
                 continue
             if scan.get("status") != "running":

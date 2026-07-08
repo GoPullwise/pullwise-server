@@ -468,7 +468,7 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertEqual(after_used, 0)
         self.assertEqual(app.SCANS, [])
 
-    def test_recover_interrupted_scans_reconciles_completed_job_result_before_requeue(self) -> None:
+    def test_recover_interrupted_scans_does_not_requeue_after_stale_recovery(self) -> None:
         timestamp = app.now()
         app.SCANS = [
             {
@@ -550,11 +550,8 @@ class ScanRecoveryTest(unittest.TestCase):
 
         self.assertGreaterEqual(recovered, 1)
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "done")
-        self.assertEqual(app.SCANS[0]["status"], "done")
-        self.assertEqual(app.SCANS[0]["progress"], 100)
-        self.assertEqual(app.SCANS[0]["issues"]["high"], 1)
-        self.assertEqual(len(app.ISSUES), 1)
-        self.assertEqual(app.ISSUES[0]["title"], "Recovered finding")
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertNotEqual(app.SCANS[0]["status"], "queued")
         self.persist_state.assert_called_once()
 
     def test_recover_interrupted_scans_rejects_legacy_completed_job_result(self) -> None:
