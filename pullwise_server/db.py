@@ -4044,7 +4044,8 @@ def record_active_worker_heartbeat(
                     )
                     if progress_cursor.rowcount > 0:
                         progress_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (progress_job_id,)).fetchone())
-            command = _get_next_worker_command_locked(connection, worker_id)
+            # TEMP PERF EXPERIMENT: skip command polling in active heartbeat.
+            command = None
             connection.commit()
             return {
                 "worker": worker,
