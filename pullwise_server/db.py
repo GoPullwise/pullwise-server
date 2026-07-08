@@ -5196,6 +5196,9 @@ def _review_artifact_storage_segment(value: str, fallback: str) -> str:
 
 
 def review_artifact_content_from_payload(payload: dict[str, Any]) -> bytes | None:
+    content_bytes = payload.get("_content_bytes")
+    if isinstance(content_bytes, bytes):
+        return content_bytes
     content_b64_value = payload.get("content_base64") if payload.get("content_base64") is not None else payload.get("contentBase64")
     if content_b64_value is None:
         return None
@@ -5206,12 +5209,12 @@ def review_artifact_content_from_payload(payload: dict[str, Any]) -> bytes | Non
 
 
 def review_artifact_payload_without_content(payload: dict[str, Any]) -> dict[str, Any]:
-    sanitized = to_jsonable(payload)
-    if not isinstance(sanitized, dict):
-        return {}
-    sanitized.pop("content_base64", None)
-    sanitized.pop("contentBase64", None)
-    return sanitized
+    raw = dict(payload)
+    raw.pop("content_base64", None)
+    raw.pop("contentBase64", None)
+    raw.pop("_content_bytes", None)
+    sanitized = to_jsonable(raw)
+    return sanitized if isinstance(sanitized, dict) else {}
 
 
 def review_artifact_inline_json(content: bytes | None, media_type: str, size_bytes: int) -> str | None:
@@ -6239,6 +6242,8 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
+
+
 
 
 

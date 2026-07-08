@@ -465,6 +465,7 @@ def worker_artifact_upload_payload(body: dict) -> dict:
         "artifact_id": artifact_id,
         "artifact": db.to_jsonable(artifact),
         "content_base64": content_b64,
+        "_content_bytes": content,
         "sha256": actual_sha,
         "size_bytes": len(content),
     }
@@ -4306,4 +4307,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
