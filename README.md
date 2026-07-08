@@ -381,20 +381,25 @@ probe:
   300/300 success, p50 about 196s and p95 about 222s.
 - `--operation lease --workers 100 --uploads 100 --concurrency 100`: after
   moving recovery out of the lease hot path, creating `review_runs` inside the
-  claim transaction, and skipping presence rewrites for already-ready workers,
-  100/100 succeeded with p50 about 44.2s and p95 about 51.1s.
+  claim transaction, skipping presence rewrites for already-ready workers, and
+  removing the process-wide Python `_LOCK` around `db.claim_next_scan_job` while
+  keeping SQLite `BEGIN IMMEDIATE` and conditional claim updates, 100/100
+  succeeded with p50 about 21.3s and p95 about 21.4s on July 8, 2026. Temporary
+  short-circuit probes showed that bypassing the claim transaction, not payload
+  construction or scan mirror dirty marking, produced the large improvement.
 - `--operation lease --workers 300 --uploads 300 --concurrency 300`: after the
   same lease hot-path changes, `offline` 503s were eliminated and 300/300
-  completed on July 8, 2026, with p50 about 138.5s and p95 about 158.1s. Earlier,
-  before these changes, only 199/300 completed within a 240s request timeout and
-  p95 hit the timeout.
+  completed on July 8, 2026, with `--timeout-seconds 300`, p50 about 82.1s and
+  p95 about 82.3s. Earlier, before these changes, only 199/300 completed within
+  a 240s request timeout and p95 hit the timeout; an intermediate serialized
+  claim path completed 300/300 with p50 about 138.5s and p95 about 158.1s.
 
 Treat these as a failing scale signal, not a production capacity claim. The
-current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
-single process-wide `_LOCK`, per-request worker token/job/run lookups,
-artifact content decoding/file writes, heartbeat command polling/scan mirror writes, progress event
-fan-out across multiple tables, and queue claiming through serialized
-`BEGIN IMMEDIATE` transactions.
+current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite write
+serialization on hot paths, per-request worker token/job/run lookups, artifact
+content decoding/file writes, heartbeat command polling/scan mirror writes,
+progress event fan-out across multiple tables, and queue claiming through
+serialized `BEGIN IMMEDIATE` transactions.
 `PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to 512 so a 300-worker burst can at
 least enter the process, `PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS` defaults
 to 30 so heartbeat does not persist progress on every active ping, and
