@@ -55,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1", help="Local bind host for the in-process test server.")
     parser.add_argument("--port", type=int, default=0, help="Local bind port. 0 asks the OS for a free port.")
     parser.add_argument("--gzip", action=argparse.BooleanOptionalAction, default=True, help="Gzip JSON request bodies.")
+    parser.add_argument("--timeout-seconds", type=float, default=120.0, help="Per-request HTTP timeout in seconds.")
     parser.add_argument("--keep-db", type=Path, default=None, help="Optional SQLite path to keep after the run.")
     return parser.parse_args()
 
@@ -67,7 +68,7 @@ def percentile(values: list[float], pct: float) -> float:
     return ordered[index]
 
 
-def json_post(url: str, token: str, payload: dict[str, Any], *, use_gzip: bool) -> tuple[int, bytes, float]:
+def json_post(url: str, token: str, payload: dict[str, Any], *, use_gzip: bool, timeout_seconds: float) -> tuple[int, bytes, float]:
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {token}",
@@ -82,7 +83,7 @@ def json_post(url: str, token: str, payload: dict[str, Any], *, use_gzip: bool) 
     started = time.perf_counter()
     request = urllib.request.Request(url, data=raw, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             body = response.read()
             return int(response.status), body, time.perf_counter() - started
     except urllib.error.HTTPError as exc:
@@ -391,7 +392,7 @@ def main() -> int:
     runs = seed_runs(app, db, args.workers)
     if args.operation == "result":
         seed_result_artifacts(db, runs)
-    httpd = ThreadingHTTPServer((args.host, args.port), app.PullwiseHandler)
+    httpd = app.PullwiseThreadingHTTPServer((args.host, args.port), app.PullwiseHandler)
     host, port = httpd.server_address[:2]
     base_url = f"http://{host}:{port}"
     server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -433,7 +434,7 @@ def main() -> int:
                 else:
                     sequence = request_index + 1
                 url, payload = request_for_operation(base_url, run, operation, request_index, sequence, args)
-                status, body, elapsed = json_post(url, str(run["token"]), payload, use_gzip=args.gzip)
+                status, body, elapsed = json_post(url, str(run["token"]), payload, use_gzip=args.gzip, timeout_seconds=args.timeout_seconds)
             with result_lock:
                 latencies_by_operation.setdefault(operation, []).append(elapsed)
                 statuses = statuses_by_operation.setdefault(operation, {})

@@ -107,6 +107,15 @@ class ConfigurationContractsTest(unittest.TestCase):
         ):
             self.assertFalse(app.rate_limit_enabled())
 
+    def test_http_request_queue_size_defaults_for_worker_bursts(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertGreaterEqual(app.http_request_queue_size(), 512)
+
+        with patch.dict(os.environ, {"PULLWISE_HTTP_REQUEST_QUEUE_SIZE": "1024"}, clear=True):
+            self.assertEqual(app.http_request_queue_size(), 1024)
+
+        with patch.dict(os.environ, {"PULLWISE_HTTP_REQUEST_QUEUE_SIZE": "1"}, clear=True):
+            self.assertEqual(app.http_request_queue_size(), 5)
     def test_main_uses_default_port_for_invalid_port_env(self) -> None:
         class ServerStub:
             def __init__(self) -> None:

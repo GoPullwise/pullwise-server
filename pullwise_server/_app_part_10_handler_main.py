@@ -4254,6 +4254,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         self.json({"message": message}, status)
 
 
+def http_request_queue_size() -> int:
+    return max(5, env_int("PULLWISE_HTTP_REQUEST_QUEUE_SIZE", 512))
+
+
+class PullwiseThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.request_queue_size = http_request_queue_size()
+        super().__init__(*args, **kwargs)
+
 def main() -> None:
     load_env_file()
     logging_config.configure_logging(project_root=project_root())
@@ -4268,7 +4279,7 @@ def main() -> None:
         logger.info("Recovered %s interrupted scan(s).", recovered_scans)
     cleanup_server_resources_if_due(force=True)
     persist_state()
-    httpd = ThreadingHTTPServer((args.host, args.port), PullwiseHandler)
+    httpd = PullwiseThreadingHTTPServer((args.host, args.port), PullwiseHandler)
     logger.info("Pullwise API listening on http://%s:%s", args.host, args.port)
     logger.info("Press Ctrl+C to stop.")
     try:
