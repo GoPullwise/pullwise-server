@@ -276,6 +276,8 @@ sha256, size, and raw upload payload. The storage URL must resolve through an
 owner-authenticated server GET route so web clients can read terminal run
 artifacts without parsing worker internals. Do not store new v1 artifact uploads
 as legacy `job_result_artifacts` compatibility entries.
+
+Required artifact result validation must compare the uploaded artifact record's identity metadata (`kind`, `name`, media type, schema, required flag, and storage URL) as well as SHA-256 and size. Do not accept a reused `artifact_id` just because the bytes match.
 For `failed`, `cancelled`, and `partial_completed` terminal envelopes, the
 server may accept missing required artifact uploads only when the v1 envelope
 records `extensions.worker_internal.artifact_upload_error`; completed results

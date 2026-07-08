@@ -506,7 +506,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(run_progress["phase"], "reviewer_fanout")
         self.assertEqual(db.get_scan_job(job["job_id"])["progress"], 42)
 
-    def test_active_heartbeat_uses_combined_job_status_classification(self) -> None:
+    def test_active_heartbeat_uses_combined_db_persistence(self) -> None:
         scan = {
             "id": "sc_heartbeat_status_hot_path",
             "repo": "acme/api",
@@ -526,23 +526,23 @@ class WorkerPullRoutesTest(unittest.TestCase):
         job = lease.payload["job"]
 
         with (
-            patch.object(app.db, "worker_job_update_statuses", wraps=app.db.worker_job_update_statuses) as combined,
+            patch.object(app.db, "record_active_worker_heartbeat", wraps=app.db.record_active_worker_heartbeat) as combined,
+            patch.object(app.db, "worker_job_update_statuses", side_effect=AssertionError("separate job status lookup should not run")),
+            patch.object(app.db, "upsert_worker_heartbeat", side_effect=AssertionError("separate heartbeat upsert should not run")),
             patch.object(
                 app.db,
-                "worker_job_ids_no_longer_accepting_updates",
-                side_effect=AssertionError("separate inactive job lookup should not run"),
+                "requeue_worker_unstarted_scan_jobs_missing_from_heartbeat",
+                side_effect=AssertionError("separate heartbeat missing-job recovery should not run"),
             ),
-            patch.object(
-                app.db,
-                "worker_job_ids_accepting_updates",
-                side_effect=AssertionError("separate active job lookup should not run"),
-            ),
+            patch.object(app.db, "renew_worker_scan_job_leases", side_effect=AssertionError("separate lease renewal should not run")),
         ):
             heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
-        combined.assert_called_once_with("wk_1", [job["job_id"]])
+        combined.assert_called_once()
         self.assertEqual(heartbeat.payload["cancelled_job_ids"], [])
+        stored_job = db.get_scan_job(job["job_id"])
+        self.assertEqual(stored_job["status"], "running")
         self.assertEqual(db.get_worker("wk_1")["running_jobs"], 1)
 
     def test_heartbeat_alert_sync_skips_admin_worker_payload_db_hydration(self) -> None:
@@ -1171,7 +1171,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "compression": "none",
                 "sha256": __import__("hashlib").sha256(content).hexdigest(),
                 "size_bytes": len(content),
-                "required": False,
+                "required": True,
             },
             "content_base64": base64.b64encode(content).decode("ascii"),
         }
@@ -1387,6 +1387,49 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(final_log.payload["replaced"])
         stored = db.get_review_run_artifact(run_id, "art_progress_log")
         self.assertEqual(stored["sha256"], hashlib.sha256(new_content).hexdigest())
+    def test_worker_artifact_upload_rejects_content_hash_or_size_mismatch(self) -> None:
+        self.create_claimable_scan_job(job_id="job_bad_artifact_content", scan_id="sc_bad_artifact_content", user_id="usr_1")
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        content = b"qa:qa.json\n"
+        item = protocol_artifact_item(run_id, "art_qa", "qa", "qa.json", "application/json", "qa-gate")
+
+        bad_sha_item = dict(item)
+        bad_sha_item["sha256"] = hashlib.sha256(b"different").hexdigest()
+        bad_sha = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": bad_sha_item,
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(bad_sha, "POST")
+        self.assertEqual(bad_sha.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("artifact sha256 does not match content", bad_sha.payload["message"])
+
+        bad_size_item = dict(item)
+        bad_size_item["size_bytes"] = len(content) + 1
+        bad_size = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": bad_size_item,
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(bad_size, "POST")
+        self.assertEqual(bad_size.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("artifact size_bytes does not match content", bad_size.payload["message"])
     def test_worker_result_artifact_mismatch_reports_art_qa(self) -> None:
         scan = {
             "id": "sc_bad_qa_artifact_result",
@@ -1423,6 +1466,93 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(rejected.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("Uploaded review artifacts do not match result manifest: art_qa", rejected.payload["message"])
 
+    def test_worker_result_artifact_metadata_mismatch_reports_art_qa(self) -> None:
+        self.create_claimable_scan_job(job_id="job_bad_qa_metadata", scan_id="sc_bad_qa_metadata", user_id="usr_1")
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        manifest = protocol_artifact_manifest(run_id, "failed")
+
+        for item in manifest:
+            upload_item = dict(item)
+            content = f"{item['kind']}:{item['name']}\n".encode("utf-8")
+            if item["artifact_id"] == "art_qa":
+                upload_item["kind"] = "worker_log"
+                upload_item["name"] = "worker.log.jsonl"
+                upload_item["schema_id"] = "worker-log"
+                upload_item["media_type"] = "application/jsonl"
+            upload = RouteHarness(
+                f"/v1/review-runs/{run_id}/artifacts",
+                {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "attempt_id": attempt_id,
+                    "run_id": run_id,
+                    "artifact": upload_item,
+                    "content_base64": base64.b64encode(content).decode("ascii"),
+                },
+                headers=self.auth,
+            )
+            app.PullwiseHandler.route(upload, "POST")
+            self.assertEqual(upload.status, HTTPStatus.OK, item["artifact_id"])
+
+        rejected = self.v1_result(
+            claimed,
+            {
+                "status": "failed",
+                "attempt_id": attempt_id,
+                "result_checksum": "checksum-bad-qa-metadata",
+                "error": "Repository exceeds checkout limit.",
+                "error_code": "REPOSITORY_TOO_LARGE",
+                **audit_result_fields([], execution_status="failed"),
+            },
+        )
+
+        self.assertEqual(rejected.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("Uploaded review artifacts do not match result manifest: art_qa", rejected.payload["message"])
+    def test_worker_result_artifact_required_flag_mismatch_reports_art_qa(self) -> None:
+        self.create_claimable_scan_job(job_id="job_bad_qa_required", scan_id="sc_bad_qa_required", user_id="usr_1")
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        manifest = protocol_artifact_manifest(run_id, "failed")
+
+        for item in manifest:
+            upload_item = dict(item)
+            content = f"{item['kind']}:{item['name']}\n".encode("utf-8")
+            if item["artifact_id"] == "art_qa":
+                upload_item["required"] = False
+            upload = RouteHarness(
+                f"/v1/review-runs/{run_id}/artifacts",
+                {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "attempt_id": attempt_id,
+                    "run_id": run_id,
+                    "artifact": upload_item,
+                    "content_base64": base64.b64encode(content).decode("ascii"),
+                },
+                headers=self.auth,
+            )
+            app.PullwiseHandler.route(upload, "POST")
+            self.assertEqual(upload.status, HTTPStatus.OK, item["artifact_id"])
+
+        rejected = self.v1_result(
+            claimed,
+            {
+                "status": "failed",
+                "attempt_id": attempt_id,
+                "result_checksum": "checksum-bad-qa-required",
+                "error": "Repository exceeds checkout limit.",
+                "error_code": "REPOSITORY_TOO_LARGE",
+                **audit_result_fields([], execution_status="failed"),
+            },
+        )
+
+        self.assertEqual(rejected.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("Uploaded review artifacts do not match result manifest: art_qa", rejected.payload["message"])
     def test_failed_result_accepts_manifest_matching_uploaded_worker_log_and_late_final_log(self) -> None:
         self.create_claimable_scan_job(job_id="job_failed_manifest_match", scan_id="sc_failed_manifest_match", user_id="usr_1")
         claim = self.v1_lease()

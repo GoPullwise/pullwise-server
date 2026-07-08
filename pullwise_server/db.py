@@ -2136,8 +2136,7 @@ def touch_worker_presence(worker_id: str, *, timestamp: int | None = None) -> di
                 return None
             return row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone())
 
-def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
-    ensure_initialized()
+def _upsert_worker_heartbeat_locked(connection: sqlite3.Connection, record: dict[str, Any]) -> dict[str, Any]:
     worker_id = str(record.get("worker_id") or "").strip()
     if not worker_id:
         raise ValueError("worker_id is required")
@@ -2159,67 +2158,71 @@ def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(machine_metrics_history, list)
         else None
     )
+    connection.execute(
+        """
+        INSERT INTO workers (
+            worker_id, name, version, provider, provider_chain, enabled, running_jobs,
+            hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
+            created_at, updated_at, doctor_status, codex_ready, ready_providers,
+            codex_quota, systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
+        )
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(worker_id) DO UPDATE SET
+            version = excluded.version,
+            provider = excluded.provider,
+            provider_chain = COALESCE(excluded.provider_chain, workers.provider_chain),
+            running_jobs = excluded.running_jobs,
+            hostname = excluded.hostname,
+            region = COALESCE(NULLIF(excluded.region, ''), workers.region),
+            last_error = excluded.last_error,
+            doctor_status = COALESCE(excluded.doctor_status, workers.doctor_status),
+            codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
+            ready_providers = COALESCE(excluded.ready_providers, workers.ready_providers),
+            codex_quota = COALESCE(excluded.codex_quota, workers.codex_quota),
+            systemd_active = COALESCE(excluded.systemd_active, workers.systemd_active),
+            doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
+            machine_metrics = COALESCE(excluded.machine_metrics, workers.machine_metrics),
+            machine_metrics_history = COALESCE(excluded.machine_metrics_history, workers.machine_metrics_history),
+            status = CASE WHEN workers.enabled = 0 THEN 'disabled' ELSE 'online' END,
+            last_heartbeat_at = excluded.last_heartbeat_at,
+            updated_at = excluded.updated_at
+        """,
+        (
+            worker_id,
+            record.get("name") or worker_id,
+            record.get("version"),
+            provider,
+            provider_chain,
+            running_jobs,
+            record.get("hostname"),
+            record.get("region"),
+            record.get("last_error"),
+            timestamp,
+            timestamp,
+            timestamp,
+            timestamp,
+            record.get("doctor_status"),
+            record.get("codex_ready"),
+            ready_providers,
+            codex_quota_text,
+            record.get("systemd_active"),
+            record.get("doctor_checked_at"),
+            machine_metrics_text,
+            machine_metrics_history_text,
+        ),
+    )
+    row = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
+    if row.get("enabled") == 0:
+        row["status"] = "disabled"
+    return row
+
+
+def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
-            connection.execute(
-                """
-                INSERT INTO workers (
-                    worker_id, name, version, provider, provider_chain, enabled, running_jobs,
-                    hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
-                    created_at, updated_at, doctor_status, codex_ready, ready_providers,
-                    codex_quota, systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
-                )
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(worker_id) DO UPDATE SET
-                    version = excluded.version,
-                    provider = excluded.provider,
-                    provider_chain = COALESCE(excluded.provider_chain, workers.provider_chain),
-                    running_jobs = excluded.running_jobs,
-                    hostname = excluded.hostname,
-                    region = COALESCE(NULLIF(excluded.region, ''), workers.region),
-                    last_error = excluded.last_error,
-                    doctor_status = COALESCE(excluded.doctor_status, workers.doctor_status),
-                    codex_ready = COALESCE(excluded.codex_ready, workers.codex_ready),
-                    ready_providers = COALESCE(excluded.ready_providers, workers.ready_providers),
-                    codex_quota = COALESCE(excluded.codex_quota, workers.codex_quota),
-                    systemd_active = COALESCE(excluded.systemd_active, workers.systemd_active),
-                    doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
-                    machine_metrics = COALESCE(excluded.machine_metrics, workers.machine_metrics),
-                    machine_metrics_history = COALESCE(excluded.machine_metrics_history, workers.machine_metrics_history),
-                    status = CASE WHEN workers.enabled = 0 THEN 'disabled' ELSE 'online' END,
-                    last_heartbeat_at = excluded.last_heartbeat_at,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    worker_id,
-                    record.get("name") or worker_id,
-                    record.get("version"),
-                    provider,
-                    provider_chain,
-                    running_jobs,
-                    record.get("hostname"),
-                    record.get("region"),
-                    record.get("last_error"),
-                    timestamp,
-                    timestamp,
-                    timestamp,
-                    timestamp,
-                    record.get("doctor_status"),
-                    record.get("codex_ready"),
-                    ready_providers,
-                    codex_quota_text,
-                    record.get("systemd_active"),
-                    record.get("doctor_checked_at"),
-                    machine_metrics_text,
-                    machine_metrics_history_text,
-                ),
-            )
-            row = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
-            if row.get("enabled") == 0:
-                row["status"] = "disabled"
-            return row
-
+            return _upsert_worker_heartbeat_locked(connection, record)
 
 def register_worker_protocol(record: dict[str, Any]) -> dict[str, Any]:
     ensure_initialized()
@@ -3805,6 +3808,177 @@ def worker_job_update_statuses(worker_id: str, job_ids: list[str]) -> dict[str, 
     no_longer_accepting = [job_id for job_id in unique_job_ids if job_id in statuses and statuses.get(job_id) not in accepting_statuses]
     return {"accepting": accepting, "no_longer_accepting": no_longer_accepting}
 
+
+def record_active_worker_heartbeat(
+    record: dict[str, Any],
+    active_job_ids: list[str],
+    *,
+    grace_seconds: int = 120,
+    lease_seconds: int = 3600,
+    timestamp: int | None = None,
+) -> dict[str, Any]:
+    ensure_initialized()
+    worker_id = str(record.get("worker_id") or "").strip()
+    if not worker_id:
+        raise ValueError("worker_id is required")
+    unique_active_job_ids = []
+    seen = set()
+    for value in active_job_ids or []:
+        job_id = str(value or "").strip()
+        if job_id and job_id not in seen:
+            unique_active_job_ids.append(job_id)
+            seen.add(job_id)
+    current_time = int(timestamp if timestamp is not None else record.get("timestamp") or time.time())
+    requested_running_jobs = 1 if int(record.get("running_jobs") or 0) > 0 else 0
+    accepting_statuses = {"claimed", "running", "uploading_result"}
+    accepting: list[str] = []
+    no_longer_accepting: list[str] = []
+    recovered: list[dict[str, Any]] = []
+    renewed_count = 0
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            if unique_active_job_ids:
+                placeholders = ",".join("?" for _ in unique_active_job_ids)
+                rows = connection.execute(
+                    f"""
+                    SELECT job_id, status
+                    FROM scan_jobs
+                    WHERE claimed_by_worker_id = ?
+                      AND job_id IN ({placeholders})
+                    """,
+                    (worker_id, *unique_active_job_ids),
+                ).fetchall()
+                statuses = {
+                    str(row["job_id"] or "").strip(): str(row["status"] or "").strip()
+                    for row in rows
+                    if str(row["job_id"] or "").strip()
+                }
+                accepting = [job_id for job_id in unique_active_job_ids if statuses.get(job_id) in accepting_statuses]
+                no_longer_accepting = [
+                    job_id
+                    for job_id in unique_active_job_ids
+                    if job_id in statuses and statuses.get(job_id) not in accepting_statuses
+                ]
+            heartbeat_record = {
+                **record,
+                "running_jobs": 1 if requested_running_jobs and accepting else 0,
+                "timestamp": current_time,
+            }
+            worker = _upsert_worker_heartbeat_locked(connection, heartbeat_record)
+            cutoff = current_time - max(30, int(grace_seconds or 120))
+            active_clause = ""
+            active_values: list[Any] = []
+            if unique_active_job_ids:
+                active_placeholders = ",".join("?" for _ in unique_active_job_ids)
+                active_clause = f"AND job_id NOT IN ({active_placeholders})"
+                active_values.extend(unique_active_job_ids)
+            rows = connection.execute(
+                f"""
+                SELECT job_id, scan_id, attempt, max_attempts
+                FROM scan_jobs
+                WHERE claimed_by_worker_id = ?
+                  AND status = 'claimed'
+                  AND started_at IS NULL
+                  AND claimed_at IS NOT NULL
+                  AND claimed_at <= ?
+                  {active_clause}
+                """,
+                (worker_id, cutoff, *active_values),
+            ).fetchall()
+            for row in rows:
+                effective_max_attempts = _effective_scan_job_max_attempts_locked(connection, row["max_attempts"])
+                _complete_scan_job_attempt_locked(
+                    connection,
+                    job_id=row["job_id"],
+                    attempt=int(row["attempt"]),
+                    worker_id=worker_id,
+                    status="failed",
+                    completed_at=current_time,
+                    error="worker_job_startup_lost",
+                )
+                if int(row["attempt"]) < effective_max_attempts:
+                    connection.execute(
+                        """
+                        UPDATE scan_jobs
+                        SET status = 'queued',
+                            claimed_by_worker_id = NULL,
+                            claimed_at = NULL,
+                            started_at = NULL,
+                            timeout_at = NULL,
+                            error = 'worker_job_startup_lost',
+                            updated_at = ?
+                        WHERE job_id = ? AND status = 'claimed' AND started_at IS NULL
+                        """,
+                        (current_time, row["job_id"]),
+                    )
+                    recovered.append(
+                        {
+                            "job_id": row["job_id"],
+                            "scan_id": row["scan_id"],
+                            "status": "queued",
+                            "reason": "worker_job_startup_lost",
+                            "attempt": int(row["attempt"]),
+                            "max_attempts": effective_max_attempts,
+                        }
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE scan_jobs
+                        SET status = 'failed',
+                            completed_at = ?,
+                            timeout_at = NULL,
+                            error = 'worker_job_startup_lost',
+                            updated_at = ?
+                        WHERE job_id = ? AND status = 'claimed' AND started_at IS NULL
+                        """,
+                        (current_time, current_time, row["job_id"]),
+                    )
+                    recovered.append(
+                        {
+                            "job_id": row["job_id"],
+                            "scan_id": row["scan_id"],
+                            "status": "failed",
+                            "reason": "worker_job_startup_lost",
+                            "attempt": int(row["attempt"]),
+                            "max_attempts": effective_max_attempts,
+                        }
+                    )
+            if accepting:
+                timeout_at = current_time + max(60, int(lease_seconds or 3600))
+                placeholders = ",".join("?" for _ in accepting)
+                cursor = connection.execute(
+                    f"""
+                    UPDATE scan_jobs
+                    SET status = CASE
+                            WHEN status = 'claimed' THEN 'running'
+                            ELSE status
+                        END,
+                        timeout_at = CASE
+                            WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
+                            ELSE timeout_at
+                        END,
+                        updated_at = ?
+                    WHERE claimed_by_worker_id = ?
+                      AND status IN ('claimed', 'running', 'uploading_result')
+                      AND job_id IN ({placeholders})
+                    """,
+                    (timeout_at, timeout_at, current_time, worker_id, *accepting),
+                )
+                renewed_count = max(0, cursor.rowcount)
+            connection.commit()
+            return {
+                "worker": worker,
+                "accepting": accepting,
+                "no_longer_accepting": no_longer_accepting,
+                "recovered_jobs": recovered,
+                "renewed_count": renewed_count,
+            }
+        except Exception:
+            connection.rollback()
+            raise
 
 def worker_job_ids_no_longer_accepting_updates(worker_id: str, job_ids: list[str]) -> list[str]:
     return worker_job_update_statuses(worker_id, job_ids)["no_longer_accepting"]

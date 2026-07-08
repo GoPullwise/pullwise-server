@@ -3524,57 +3524,60 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 active_job_ids.append(public_issue_text(active_job_from_run.get("job_id")))
         cancelled_job_ids = []
         active_job_ids_accepting_updates = active_job_ids
-        if active_job_ids:
-            job_update_statuses = db.worker_job_update_statuses(worker_id, active_job_ids)
-            cancelled_job_ids = job_update_statuses["no_longer_accepting"]
-            active_job_ids_accepting_updates = job_update_statuses["accepting"]
-        running_jobs = public_scan_count(concurrency.get("active_jobs")) if concurrency else 0
-        if active_job_ids_provided:
-            running_jobs = 1 if running_jobs and active_job_ids_accepting_updates else 0
+        requested_running_jobs = public_scan_count(concurrency.get("active_jobs")) if concurrency else 0
         codex_ready = body.get("codex_ready")
         if codex_ready is None and codex_app_server:
             codex_ready = public_issue_text(codex_app_server.get("status")) == "ready"
+        heartbeat_record = {
+            "worker_id": worker_id,
+            "version": public_issue_text(body.get("version")) or public_issue_text(worker_record.get("version")),
+            "provider": public_issue_text(body.get("provider")) or "codex",
+            "provider_chain": body.get("providerChain") or body.get("provider_chain"),
+            "running_jobs": requested_running_jobs,
+            "hostname": public_issue_text(body.get("hostname")),
+            "region": heartbeat_region or None,
+            "last_error": last_error,
+            "doctor_status": public_issue_text(body.get("doctor_status") or body.get("status")),
+            "codex_ready": 1 if codex_ready is True else 0 if codex_ready is False else None,
+            "ready_providers": body.get("readyProviders") if "readyProviders" in body else body.get("ready_providers"),
+            "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
+            "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
+            "machine_metrics": machine_metrics,
+            "machine_metrics_history": machine_metrics_history,
+            "codex_quota": body.get("codexQuota") if "codexQuota" in body else body.get("codex_quota"),
+            "timestamp": heartbeat_timestamp,
+        }
         try:
-            record = db.upsert_worker_heartbeat(
-                {
-                    "worker_id": worker_id,
-                    "version": public_issue_text(body.get("version")) or public_issue_text(worker_record.get("version")),
-                    "provider": public_issue_text(body.get("provider")) or "codex",
-                    "provider_chain": body.get("providerChain") or body.get("provider_chain"),
-                    "running_jobs": running_jobs,
-                    "hostname": public_issue_text(body.get("hostname")),
-                    "region": heartbeat_region or None,
-                    "last_error": last_error,
-                    "doctor_status": public_issue_text(body.get("doctor_status") or body.get("status")),
-                    "codex_ready": 1 if codex_ready is True else 0 if codex_ready is False else None,
-                    "ready_providers": body.get("readyProviders") if "readyProviders" in body else body.get("ready_providers"),
-                    "systemd_active": 1 if body.get("systemd_active") is True else 0 if body.get("systemd_active") is False else None,
-                    "doctor_checked_at": pull_request_timestamp(body.get("doctor_checked_at")),
-                    "machine_metrics": machine_metrics,
-                    "machine_metrics_history": machine_metrics_history,
-                    "codex_quota": body.get("codexQuota") if "codexQuota" in body else body.get("codex_quota"),
-                    "timestamp": heartbeat_timestamp,
-                }
-            )
+            if active_job_ids:
+                heartbeat_update = db.record_active_worker_heartbeat(
+                    heartbeat_record,
+                    active_job_ids,
+                    grace_seconds=system_config.scan_job_startup_grace_seconds(),
+                    lease_seconds=system_config.scan_job_lease_seconds(),
+                    timestamp=heartbeat_timestamp,
+                )
+                record = heartbeat_update["worker"]
+                cancelled_job_ids = heartbeat_update["no_longer_accepting"]
+                active_job_ids_accepting_updates = heartbeat_update["accepting"]
+                recovered_jobs = heartbeat_update["recovered_jobs"]
+                if recovered_jobs:
+                    with STATE_LOCK:
+                        apply_recovered_scan_jobs_locked(recovered_jobs)
+            else:
+                record = db.upsert_worker_heartbeat(heartbeat_record)
+                if active_job_ids_provided:
+                    recovered_jobs = db.requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
+                        worker_id,
+                        active_job_ids,
+                        grace_seconds=system_config.scan_job_startup_grace_seconds(),
+                        timestamp=heartbeat_timestamp,
+                    )
+                    if recovered_jobs:
+                        with STATE_LOCK:
+                            apply_recovered_scan_jobs_locked(recovered_jobs)
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-        if active_job_ids_provided:
-            recovered_jobs = db.requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
-                worker_id,
-                active_job_ids,
-                grace_seconds=system_config.scan_job_startup_grace_seconds(),
-                timestamp=heartbeat_timestamp,
-            )
-            if recovered_jobs:
-                with STATE_LOCK:
-                    apply_recovered_scan_jobs_locked(recovered_jobs)
-        if active_job_ids_accepting_updates:
-            db.renew_worker_scan_job_leases(
-                worker_id,
-                active_job_ids_accepting_updates,
-                lease_seconds=system_config.scan_job_lease_seconds(),
-                timestamp=heartbeat_timestamp,
-            )
+        running_jobs = public_scan_count(record.get("running_jobs"))
         progress_snapshot = body.get("progress") if isinstance(body.get("progress"), dict) else {}
         if progress_snapshot and active_job_ids_accepting_updates:
             progress_job = active_job_from_run or db.get_scan_job(active_job_ids_accepting_updates[0])

@@ -512,6 +512,21 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
     return envelope
 
 
+
+def uploaded_required_artifact_matches_manifest(stored: dict, item: dict) -> bool:
+    storage = item.get("storage") if isinstance(item.get("storage"), dict) else {}
+    expected_storage_url = public_issue_text(storage.get("url"))
+    stored_required = public_scan_count(stored.get("required")) == 1 or stored.get("required") is True
+    if item.get("required") is True and not stored_required:
+        return False
+    for field in ("kind", "name", "media_type", "schema_id", "schema_version"):
+        if public_issue_text(stored.get(field)) != public_issue_text(item.get(field)):
+            return False
+    if expected_storage_url and public_issue_text(stored.get("storage_url")) != expected_storage_url:
+        return False
+    return True
+
+
 def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: str = "") -> None:
     envelope = validate_review_worker_protocol_envelope(job, body, status=status)
     if not envelope:
@@ -547,6 +562,9 @@ def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: 
             mismatched.append(artifact_id)
             continue
         if public_scan_count(stored.get("size_bytes")) != public_scan_count(item.get("size_bytes")):
+            mismatched.append(artifact_id)
+            continue
+        if not uploaded_required_artifact_matches_manifest(stored, item):
             mismatched.append(artifact_id)
     if missing and not allow_missing_uploads:
         raise ValueError("Required review artifacts were not uploaded before result submit: " + ", ".join(missing[:10]))

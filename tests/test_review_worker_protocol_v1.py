@@ -119,6 +119,22 @@ def required_completed_manifest() -> list[dict]:
     ]
 
 
+
+def store_manifest_artifacts_for_test(job: dict, attempt_id: str, manifest: list[dict]) -> None:
+    run_id = str(job.get("run_id") or f"run_{job['job_id']}")
+    for item in manifest:
+        item["storage"] = {"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/{item['artifact_id']}"}
+        content = b"abc"
+        app.db.store_review_run_artifact(
+            job_id=job["job_id"],
+            attempt_id=attempt_id,
+            artifact_id=item["artifact_id"],
+            payload={
+                "run_id": run_id,
+                "artifact": dict(item),
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            },
+        )
 def required_terminal_manifest() -> list[dict]:
     return [
         manifest_item(
@@ -370,17 +386,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not uploaded"):
                 app.validate_review_worker_protocol_artifacts(claimed, body, status="done")
 
-            for item in manifest:
-                app.db.store_review_run_artifact(
-                    job_id=job["job_id"],
-                    attempt_id=attempt_id,
-                    artifact_id=item["artifact_id"],
-                    payload={
-                        "artifact_id": item["artifact_id"],
-                        "sha256": item["sha256"],
-                        "size_bytes": item["size_bytes"],
-                    },
-                )
+            store_manifest_artifacts_for_test(claimed, attempt_id, manifest)
             app.validate_review_worker_protocol_artifacts(claimed, body, status="done")
             app.db.reset_initialization_cache()
 
@@ -424,17 +430,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
                 claimed = app.db.claim_next_scan_job("wk_1")
                 attempt_id = f"wk_1-{claimed['attempt']}"
                 manifest = required_completed_manifest()
-                for item in manifest:
-                    app.db.store_review_run_artifact(
-                        job_id=claimed["job_id"],
-                        attempt_id=attempt_id,
-                        artifact_id=item["artifact_id"],
-                        payload={
-                            "artifact_id": item["artifact_id"],
-                            "sha256": item["sha256"],
-                            "size_bytes": item["size_bytes"],
-                        },
-                    )
+                store_manifest_artifacts_for_test(claimed, attempt_id, manifest)
                 envelope = v1_envelope(claimed, manifest, worker_id="wk_1")
 
                 result = app.apply_worker_job_result(
@@ -682,17 +678,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             envelope = v1_envelope(claimed, manifest, worker_id="wk_1")
             envelope["summary"]["top_findings"] = [{"title": "Important issue", "severity": "high"}]
             attempt_id = f"wk_1-{claimed['attempt']}"
-            for item in manifest:
-                app.db.store_review_run_artifact(
-                    job_id=claimed["job_id"],
-                    attempt_id=attempt_id,
-                    artifact_id=item["artifact_id"],
-                    payload={
-                        "artifact_id": item["artifact_id"],
-                        "sha256": item["sha256"],
-                        "size_bytes": item["size_bytes"],
-                    },
-                )
+            store_manifest_artifacts_for_test(claimed, attempt_id, manifest)
             body = {
                 "status": "done",
                 "attempt_id": attempt_id,
