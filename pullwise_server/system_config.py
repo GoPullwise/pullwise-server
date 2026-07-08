@@ -897,9 +897,6 @@ def repository_review_limit() -> int:
     return max(0, int_setting("quota.repositoryReviewLimit"))
 
 
-def plan_repository_review_limit(plan: object) -> int:
-    return repository_review_limit()
-
 
 def plan_repository_file_limit(plan: object) -> int:
     return max(1, int_setting(f"plans.{plan_id(plan, default='max')}.maxRepoFiles"))
@@ -925,8 +922,7 @@ def max_queued_scans_global() -> int:
     return max(1, int_setting("scan.maxQueuedScansGlobal"))
 
 
-def scan_job_max_attempts() -> int:
-    return 1
+
 
 
 

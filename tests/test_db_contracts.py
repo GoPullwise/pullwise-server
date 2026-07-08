@@ -896,15 +896,15 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(remaining_issues, ["iss_old_queued", "iss_old_running", "iss_recent_done"])
         self.assertEqual(remaining_jobs, ["sc_old_queued", "sc_old_running", "sc_recent_done"])
 
-    def test_scan_job_defaults_to_single_attempt(self) -> None:
+    def test_scan_jobs_do_not_create_max_attempts_retry_column(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
                 db.initialize()
                 job = db.create_scan_job(
                     {
-                        "job_id": "job_default_single_attempt",
-                        "scan_id": "sc_default_single_attempt",
+                        "job_id": "job_default_single_run",
+                        "scan_id": "sc_default_single_run",
                         "repo": "acme/api",
                         "branch": "main",
                         "commit": "pending",
@@ -915,12 +915,10 @@ class DatabaseContractsTest(unittest.TestCase):
                 )
 
                 with closing(sqlite3.connect(db_path)) as connection:
-                    max_attempts_default = next(
-                        row[4] for row in connection.execute("PRAGMA table_info(scan_jobs)") if row[1] == "max_attempts"
-                    )
+                    columns = [row[1] for row in connection.execute("PRAGMA table_info(scan_jobs)")]
 
-        self.assertEqual(job["max_attempts"], 1)
-        self.assertEqual(max_attempts_default, "1")
+        self.assertNotIn("max_attempts", columns)
+        self.assertNotIn("max_attempts", job)
 
     def test_record_scan_job_result_requires_current_claimed_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -506,6 +506,58 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(run_progress["phase"], "reviewer_fanout")
         self.assertEqual(db.get_scan_job(job["job_id"])["progress"], 42)
 
+    def test_worker_run_artifact_upload_reuses_resolved_job(self) -> None:
+        scan = {
+            "id": "sc_artifact_hot_path",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        lease = self.v1_lease()
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+        run_id = job["run_id"]
+        attempt_id = f"wk_1-{job['attempt']}"
+        content = b"{}"
+        payload = {
+            "protocol_version": "review-worker-protocol/v1",
+            "attempt_id": attempt_id,
+            "run_id": run_id,
+            "artifact": {
+                "artifact_id": "art_report_agent",
+                "kind": "report.agent",
+                "name": "report.agent.json",
+                "media_type": "application/json",
+                "schema_id": "codex-full-repo-review",
+                "schema_version": "v1",
+                "encoding": "utf-8",
+                "compression": "none",
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "size_bytes": len(content),
+                "required": True,
+            },
+            "content_base64": base64.b64encode(content).decode("ascii"),
+        }
+
+        with patch.object(app.db, "get_scan_job", wraps=app.db.get_scan_job) as lookup:
+            upload = RouteHarness(f"/v1/review-runs/{run_id}/artifacts", payload, headers=self.auth)
+            app.PullwiseHandler.route(upload, "POST")
+
+        self.assertEqual(upload.status, HTTPStatus.OK)
+        self.assertTrue(upload.payload["accepted"])
+        self.assertEqual(lookup.call_count, 1)
+        stored_artifact = db.get_review_run_artifact(run_id, "art_report_agent")
+        self.assertEqual(stored_artifact["job_id"], job["job_id"])
+        self.assertEqual(stored_artifact["run_id"], run_id)
+
     def test_active_heartbeat_uses_combined_db_persistence(self) -> None:
         scan = {
             "id": "sc_heartbeat_status_hot_path",
@@ -531,7 +583,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             patch.object(app.db, "upsert_worker_heartbeat", side_effect=AssertionError("separate heartbeat upsert should not run")),
             patch.object(
                 app.db,
-                "requeue_worker_unstarted_scan_jobs_missing_from_heartbeat",
+                "fail_worker_unstarted_scan_jobs_missing_from_heartbeat",
                 side_effect=AssertionError("separate heartbeat missing-job recovery should not run"),
             ),
             patch.object(app.db, "renew_worker_scan_job_leases", side_effect=AssertionError("separate lease renewal should not run")),
@@ -4883,7 +4935,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.ISSUES[0]["file"] = "/var/log/pullwise/server.log"
         self.assertEqual(app.issue_payload(app.ISSUES[0]).get("file"), "")
 
-    def test_claim_token_failure_requeues_job_without_marking_scan_running(self) -> None:
+    def test_claim_token_failure_fails_job_without_marking_scan_running(self) -> None:
         scan = {
             "id": "sc_token_fail",
             "repo": "acme/api",
@@ -4913,10 +4965,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
         stored_job = db.get_scan_job(job["job_id"])
-        self.assertEqual(stored_job["status"], "queued")
-        self.assertIsNone(stored_job["claimed_by_worker_id"])
-        self.assertEqual(app.SCANS[0]["status"], "queued")
-        self.assertNotIn("claimedByWorkerId", app.SCANS[0])
+        self.assertEqual(stored_job["status"], "failed")
+        self.assertEqual(stored_job["error"], "clone_token_unavailable")
+        self.assertEqual(app.SCANS[0]["status"], "failed")
+        self.assertEqual(app.SCANS[0]["error"], "clone_token_unavailable")
+        self.assertNotEqual(app.SCANS[0].get("status"), "running")
 
     def test_worker_routes_require_enabled_token(self) -> None:
         denied = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload())
@@ -5479,8 +5532,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         }
         app.SCANS = [scan]
-        with patch.object(app.system_config, "scan_job_max_attempts", return_value=1):
-            job = app.create_scan_job_for_scan(scan)
+        job = app.create_scan_job_for_scan(scan)
         claim = self.v1_lease()
         self.assertEqual(claim.status, HTTPStatus.OK)
         claimed = claim.payload["job"]
@@ -5689,7 +5741,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(db.get_scan_job(first_job["job_id"])["status"], "cancelled")
         self.assertEqual(db.get_scan_job(second_job["job_id"])["claimed_by_worker_id"], "wk_1")
 
-    def test_worker_heartbeat_requeues_unstarted_claim_missing_from_active_jobs(self) -> None:
+    def test_worker_heartbeat_fails_unstarted_claim_missing_from_active_jobs(self) -> None:
         timestamp = app.now()
         self.create_registry_worker("wk_2")
         scan = {

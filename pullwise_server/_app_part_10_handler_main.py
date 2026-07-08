@@ -2954,7 +2954,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "id": agent_config["plan"],
                         "name": {"free": "Free", "pro": "Pro", "max": "Max"}[agent_config["plan"]],
                         "reviewLimit": billing.review_limit(agent_config["plan"]),
-                        "repositoryReviewLimit": billing.repository_review_limit(agent_config["plan"]),
                         "repositoryLimits": billing.repository_limits(agent_config["plan"]),
                         "agentConfig": agent_config,
                         "source": "database",
@@ -3155,11 +3154,27 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         try:
             payload = scan_job_payload(job, include_clone_token=True)
         except github_auth.GitHubError as exc:
-            db.requeue_interrupted_scan_job(
+            failure_timestamp = now()
+            db.fail_interrupted_scan_job(
                 str(job.get("scan_id") or ""),
                 reason="clone_token_unavailable",
-                timestamp=now(),
+                timestamp=failure_timestamp,
             )
+            with STATE_LOCK:
+                scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+                if scan:
+                    scan.update(
+                        {
+                            "status": "failed",
+                            "progress": min(99, public_scan_progress(scan.get("progress"))),
+                            "phase": None,
+                            "jobId": job.get("job_id"),
+                            "completedAt": failure_timestamp,
+                            "error": "clone_token_unavailable",
+                        }
+                    )
+                    db.upsert_scan(scan)
+                    mark_state_dirty()
             return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
@@ -3434,6 +3449,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             artifact_id,
             {**body, "run_id": run_id},
             worker_record,
+            job=job,
         )
 
     def handle_worker_run_result(self, run_id: str, body: dict, worker_record: dict) -> None:
@@ -3570,7 +3586,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             else:
                 record = db.upsert_worker_heartbeat(heartbeat_record)
                 if active_job_ids_provided:
-                    recovered_jobs = db.requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
+                    recovered_jobs = db.fail_worker_unstarted_scan_jobs_missing_from_heartbeat(
                         worker_id,
                         active_job_ids,
                         grace_seconds=system_config.scan_job_startup_grace_seconds(),
@@ -3701,12 +3717,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.NOT_FOUND, "Worker command not found.")
         return self.json({"ok": True, "command": worker_command_payload(command)})
 
-    def handle_worker_v1_job_artifact_upload(self, job_id: str, artifact_id: str, body: dict, worker_record: dict) -> None:
+    def handle_worker_v1_job_artifact_upload(
+        self,
+        job_id: str,
+        artifact_id: str,
+        body: dict,
+        worker_record: dict,
+        *,
+        job: dict | None = None,
+    ) -> None:
         job_id = clean_github_access_text(job_id) or ""
         artifact_id = clean_github_access_text(artifact_id) or ""
         if not job_id or not artifact_id:
             return self.error(HTTPStatus.BAD_REQUEST, "job_id and artifact_id are required.")
-        job = db.get_scan_job(job_id)
+        job = job or db.get_scan_job(job_id)
         if not job:
             return self.error(HTTPStatus.NOT_FOUND, "Job not found.")
         claimed_worker_id = public_issue_text(job.get("claimed_by_worker_id"))

@@ -65,7 +65,6 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "clone_url": scan.get("cloneUrl"),
             "review_output_language": clean_review_output_language(scan.get("reviewOutputLanguage")),
             "provider_chain": [billing.review_agent_provider(plan)],
-            "max_attempts": system_config.scan_job_max_attempts(),
         }
     )
     scan["jobId"] = job.get("job_id")

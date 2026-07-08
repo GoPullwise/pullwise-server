@@ -196,9 +196,12 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(config["quota"]["repositoryReviewLimit"], 1000)
         self.assertIn("quota.repositoryReviewLimit", metadata_paths)
         self.assertIn("quota.repositoryReviewLimit", public_paths)
-        self.assertNotIn("plans.free.repositoryReviewLimit", metadata_paths)
-        self.assertNotIn("plans.pro.repositoryReviewLimit", metadata_paths)
-        self.assertNotIn("plans.max.repositoryReviewLimit", metadata_paths)
+        self.assertFalse(
+            any(
+                path.startswith("plans.") and "repository" in path.lower() and "reviewlimit" in path.lower()
+                for path in metadata_paths
+            )
+        )
     def test_scan_job_lease_and_worker_codex_timeout_are_admin_system_config_fields(self) -> None:
         config = app.system_config.default_config()
         scan_fields = {
@@ -290,8 +293,6 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(runtime_config["alerts"]["email"]["smtpPassword"], "smtp-secret")
         self.assertTrue(runtime_config["alerts"]["email"]["enabled"])
 
-    def test_scan_job_attempts_are_single_run(self) -> None:
-        self.assertEqual(app.system_config.scan_job_max_attempts(), 1)
     def test_worker_allowed_providers_filters_unsupported_values(self) -> None:
         with patch.object(app.system_config, "list_setting", return_value=["unsupported", " CODEX "]):
             self.assertEqual(app.system_config.worker_allowed_providers(), {"codex"})

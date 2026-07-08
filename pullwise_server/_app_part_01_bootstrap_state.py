@@ -1043,7 +1043,7 @@ def recover_interrupted_scans() -> int:
                     if reconcile_scan_job_state_locked(scan):
                         recovered += 1
                     continue
-            db.requeue_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=timestamp)
+            db.fail_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=timestamp)
             scan["status"] = "queued"
             scan["progress"] = 0
             scan["phase"] = None

@@ -283,9 +283,7 @@ server may accept missing required artifact uploads only when the v1 envelope
 records `extensions.worker_internal.artifact_upload_error`; completed results
 must never use that exception.
 
-Scan job retries are disabled: effective max attempts must remain 1 even if
-legacy `scan_jobs.max_attempts` rows contain a larger value, and admin/operator
-configuration must not make a failed or exhausted scan job claimable again.
+Scan jobs run once only. Do not add job-level retry configuration, max-attempt controls, or recovery paths that return a claimed/running/lost scan job to `queued`; user retry means starting a new scan.
 
 Quota should be finalized when the worker reaches core semantic review work, not
 for mechanical setup phases. Preserve subscription-plan controlled model,

@@ -175,7 +175,7 @@ class ScanRecoveryTest(unittest.TestCase):
         app.SCANS = [scan]
         return user, repository, scan
 
-    def test_recover_interrupted_scans_requeues_running_scans(self) -> None:
+    def test_recover_interrupted_scans_fails_running_scans_without_retry(self) -> None:
         app.SCANS = [
             {
                 "id": "sc_1",

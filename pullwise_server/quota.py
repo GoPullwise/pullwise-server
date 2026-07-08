@@ -145,9 +145,6 @@ def repository_review_limit() -> int:
     return system_config.repository_review_limit()
 
 
-def repository_limit_for_plan(plan: str) -> int:
-    return repository_review_limit()
-
 
 def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: int | None = None) -> tuple[str, int]:
     current_time = current_timestamp(timestamp)
@@ -193,7 +190,6 @@ def quota_entitlement_for_user(user: dict[str, Any] | None, *, timestamp: int | 
         "period": period,
         "resetAt": reset_at,
         "userLimit": user_limit_for_plan(plan),
-        "repositoryLimit": repository_limit_for_plan(plan),
     }
 
 def quota_entitlement_for_repository(*, timestamp: int | None = None) -> dict[str, Any]:
