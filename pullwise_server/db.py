@@ -2637,13 +2637,60 @@ def store_review_run_event(event: dict[str, Any]) -> dict[str, Any]:
             return _insert_review_run_event_locked(connection, event)
 
 
-def store_review_run_event_and_progress(event: dict[str, Any], progress_event: dict[str, Any] | None = None) -> dict[str, Any]:
+def store_review_run_event_and_progress(
+    event: dict[str, Any],
+    progress_event: dict[str, Any] | None = None,
+    scan_job_progress: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
             stored_event = _insert_review_run_event_locked(connection, event)
             _upsert_review_run_progress_locked(connection, progress_event or event)
+            if scan_job_progress is not None:
+                job_id = str(scan_job_progress.get("job_id") or event.get("job_id") or "").strip()
+                scan_job = None
+                if job_id:
+                    current_time = int(time.time())
+                    raw_timeout_at = scan_job_progress.get("timeout_at")
+                    try:
+                        timeout_at = int(raw_timeout_at) if raw_timeout_at is not None else None
+                    except (TypeError, ValueError):
+                        timeout_at = None
+                    cursor = connection.execute(
+                        """
+                        UPDATE scan_jobs
+                        SET progress_phase = ?,
+                            progress = ?,
+                            progress_message = ?,
+                            status = 'running',
+                            started_at = COALESCE(started_at, ?),
+                            timeout_at = CASE
+                                WHEN ? IS NULL THEN timeout_at
+                                WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
+                                ELSE timeout_at
+                            END,
+                            logs_summary = ?,
+                            updated_at = ?
+                        WHERE job_id = ? AND status IN ('claimed', 'running')
+                        """,
+                        (
+                            scan_job_progress.get("phase"),
+                            max(0, min(100, int(scan_job_progress.get("progress") or 0))),
+                            scan_job_progress.get("message"),
+                            int(scan_job_progress.get("started_at") or current_time),
+                            timeout_at,
+                            timeout_at,
+                            timeout_at,
+                            scan_job_progress.get("logs_summary"),
+                            current_time,
+                            job_id,
+                        ),
+                    )
+                    if cursor.rowcount > 0:
+                        scan_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+                stored_event["_scan_job"] = scan_job
             return stored_event
 
 def list_review_run_events(run_id: str, *, limit: int = 200) -> list[dict[str, Any]]:

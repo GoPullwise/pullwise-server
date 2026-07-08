@@ -495,6 +495,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             patch.object(app.db, "store_review_run_event_and_progress", wraps=app.db.store_review_run_event_and_progress) as combined,
             patch.object(app.db, "store_review_run_event", side_effect=AssertionError("separate event insert should not run")),
             patch.object(app.db, "update_review_run_progress", side_effect=AssertionError("separate run progress update should not run")),
+            patch.object(app.db, "update_scan_job_progress", side_effect=AssertionError("separate scan job progress update should not run")),
         ):
             event = self.v1_event(job, phase="reviewer_fanout", progress=42)
 

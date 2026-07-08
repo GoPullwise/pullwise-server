@@ -3320,8 +3320,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "created_at": event_created_at,
         }
         progress_record = {**event_record, "steps": progress_steps}
+        scan_job_progress = None
+        if not terminal_event_after_result:
+            scan_job_progress = {
+                "job_id": public_issue_text(job.get("job_id")),
+                "phase": phase,
+                "progress": progress_value,
+                "message": progress_message,
+                "started_at": pull_request_timestamp(body.get("timestamp")) or progress_log_time,
+                "timeout_at": now() + system_config.scan_job_lease_seconds(),
+                "logs_summary": logs_summary,
+            }
         try:
-            stored_event = db.store_review_run_event_and_progress(event_record, progress_record)
+            stored_event = db.store_review_run_event_and_progress(event_record, progress_record, scan_job_progress=scan_job_progress)
         except ValueError as exc:
             message = str(exc)
             if "monotonic" in message or "already exists" in message:
@@ -3336,17 +3347,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "server_time": protocol_iso_time(now()),
                 }
             )
-        job = db.update_scan_job_progress(
-            public_issue_text(job.get("job_id")),
-            {
-                "phase": phase,
-                "progress": progress_value,
-                "message": progress_message,
-                "started_at": pull_request_timestamp(body.get("timestamp")) or progress_log_time,
-                "timeout_at": now() + system_config.scan_job_lease_seconds(),
-                "logs_summary": logs_summary,
-            },
-        )
+        job = stored_event.get("_scan_job")
         if not job:
             return self.error(HTTPStatus.CONFLICT, "Run is no longer accepting progress events.")
         if event_type in {"phase_started", "progress_updated", "phase_completed"} and worker_progress_phase_should_finalize_quota(phase):

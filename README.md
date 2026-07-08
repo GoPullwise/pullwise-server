@@ -361,8 +361,11 @@ probe:
   100/100 success with p50 about 38.5s and p95 about 39.0s, but 300-worker
   heartbeat latency remains minute-scale.
 - `--operation artifact --workers 300 --uploads 300 --concurrency 300 --artifact-kib 32`:
-  300/300 success with artifact bytes stored outside SQLite, p50 about 72-91s
-  and p95 about 94-112s across repeated local runs.
+  after reusing the resolved job in the review-run artifact route and inserting
+  unique artifact rows before duplicate/conflict probing, 300/300 succeeded on
+  July 8, 2026, with p50 about 74.7s and p95 about 98.2s. The 100-upload probe
+  completed 100/100 with p50 about 26.6s and p95 about 34.3s. Artifact bytes
+  stay outside SQLite, but the 300-upload path remains minute-scale.
 - `--operation event --workers 300 --uploads 300 --concurrency 300 --event-kib 4`:
   after combining the review-run event insert and `review_runs` progress upsert
   into one SQLite transaction, 300/300 succeeded on July 8, 2026, with p50 about
@@ -385,8 +388,9 @@ probe:
 Treat these as a failing scale signal, not a production capacity claim. The
 current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
 single process-wide `_LOCK`, per-request worker token/job/run lookups,
-heartbeat/progress writes, progress event fan-out across multiple tables, and
-queue claiming through serialized `BEGIN IMMEDIATE` transactions.
+artifact content decoding/file writes, heartbeat/progress writes, progress event
+fan-out across multiple tables, and queue claiming through serialized
+`BEGIN IMMEDIATE` transactions.
 `PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to 512 so a 300-worker burst can at
 least enter the process, `PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS` defaults
 to 30 so heartbeat does not persist progress on every active ping, and
