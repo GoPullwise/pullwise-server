@@ -354,12 +354,13 @@ unlimited throughput.
 Latest local burst results on a Windows development host with the in-process
 probe:
 
-- `--operation heartbeat --workers 300 --uploads 300 --concurrency 300`: 300/300
-  success after request backlog/token hot-path/heartbeat throttling changes;
-  after combining active heartbeat DB persistence on July 8, 2026, p50 was about
-  169.9s and p95 about 171.7s. The 100-worker heartbeat probe improved to
-  100/100 success with p50 about 38.5s and p95 about 39.0s, but 300-worker
-  heartbeat latency remains minute-scale.
+- `--operation heartbeat --workers 300 --uploads 300 --concurrency 300`: after
+  combining active heartbeat DB persistence and heartbeat progress persistence
+  into the same SQLite transaction, 300/300 succeeded on July 8, 2026, with
+  `--timeout-seconds 300`, p50 about 109.7s and p95 about 111.2s. The
+  100-worker heartbeat probe completed 100/100 with p50 about 31.3s and p95
+  about 31.7s. This is improved from the previous 300-worker p50 about 169.9s
+  and p95 about 171.7s, but still minute-scale.
 - `--operation artifact --workers 300 --uploads 300 --concurrency 300 --artifact-kib 32`:
   after reusing the resolved job in the review-run artifact route and inserting
   unique artifact rows before duplicate/conflict probing, 300/300 succeeded on
@@ -390,7 +391,7 @@ probe:
 Treat these as a failing scale signal, not a production capacity claim. The
 current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
 single process-wide `_LOCK`, per-request worker token/job/run lookups,
-artifact content decoding/file writes, heartbeat/progress writes, progress event
+artifact content decoding/file writes, heartbeat command polling/scan mirror writes, progress event
 fan-out across multiple tables, and queue claiming through serialized
 `BEGIN IMMEDIATE` transactions.
 `PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to 512 so a 300-worker burst can at
