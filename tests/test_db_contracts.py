@@ -1023,6 +1023,47 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertIsNone(second_claim)
         self.assertEqual(stored['status'], 'failed')
         self.assertEqual(stored['attempt'], 1)
+    def test_claim_next_scan_job_does_not_mark_other_workers_offline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                db.create_worker({"worker_id": "wk_claiming", "name": "Claiming worker"})
+                db.create_worker({"worker_id": "wk_stale_other", "name": "Stale other worker"})
+                db.upsert_worker_heartbeat(
+                    {
+                        "worker_id": "wk_claiming",
+                        "running_jobs": 0,
+                        "doctor_status": "ok",
+                        "timestamp": 1_000,
+                    }
+                )
+                db.upsert_worker_heartbeat(
+                    {
+                        "worker_id": "wk_stale_other",
+                        "running_jobs": 0,
+                        "doctor_status": "ok",
+                        "timestamp": 100,
+                    }
+                )
+                db.create_scan_job(
+                    {
+                        "job_id": "job_hot_claim",
+                        "scan_id": "sc_hot_claim",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": 900,
+                        "user_id": "usr_1",
+                    }
+                )
+
+                claimed = db.claim_next_scan_job("wk_claiming", timestamp=1_000, recover_before_claim=False)
+                stale_worker = db.get_worker("wk_stale_other")
+
+        self.assertEqual(claimed["job_id"], "job_hot_claim")
+        self.assertEqual(stale_worker["status"], "online")
     def test_exhausted_queued_scan_job_fails_before_claim(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
@@ -1323,3 +1364,4 @@ class DatabaseContractsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

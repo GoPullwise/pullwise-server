@@ -334,43 +334,54 @@ python ops/worker_upload_load.py --workers 24 --uploads 240 --concurrency 24 --a
 
 The probe starts a local in-process `ThreadingHTTPServer` with a temporary
 SQLite database, seeds one claimed v1 run per simulated worker, then sends real
-HTTP `POST /v1/review-runs/{run_id}/artifacts` requests using worker bearer
-tokens. It reports status counts, RPS, and p50/p95/p99 latency. Use it before
-raising worker fleet size or artifact size limits. Authenticated gzip worker
-artifact/result uploads use `PULLWISE_MAX_DECOMPRESSED_BODY_BYTES`, defaulting
-to 50 MiB, while ordinary request bodies default to `PULLWISE_MAX_BODY_BYTES`
-1 MiB. The current SQLite backend serializes writes, so successful concurrent
-uploads prove correctness, not unlimited throughput.
+worker v1 HTTP requests using worker bearer tokens. It reports status counts,
+RPS, and p50/p95/p99 latency. Use it before raising worker fleet size, artifact
+size limits, heartbeat frequency, or progress-event frequency. Authenticated
+gzip worker artifact/result uploads use `PULLWISE_MAX_DECOMPRESSED_BODY_BYTES`,
+defaulting to 50 MiB, while ordinary request bodies default to
+`PULLWISE_MAX_BODY_BYTES` 1 MiB. Artifact bytes are stored outside SQLite under
+`PULLWISE_REVIEW_ARTIFACT_STORAGE_DIR` or next to `PULLWISE_DB_PATH` by default;
+SQLite stores artifact metadata, `content_path`, inline small JSON, and the raw
+worker payload without `content_base64`. The current SQLite backend still
+serializes writes, so successful concurrent uploads prove correctness, not
+unlimited throughput.
 
-Latest local 300-worker burst results on a Windows development host with the
-in-process probe:
+Latest local burst results on a Windows development host with the in-process
+probe:
 
 - `--operation heartbeat --workers 300 --uploads 300 --concurrency 300`: 300/300
   success after request backlog/token hot-path/heartbeat throttling changes,
   but p50 was about 177s and p95 about 201s.
-- `--operation event --workers 300 --uploads 300 --concurrency 300`: 300/300
-  success, p50 about 231s and p95 about 250s.
 - `--operation artifact --workers 300 --uploads 300 --concurrency 300 --artifact-kib 32`:
-  300/300 success, p50 about 71s and p95 about 93s.
-- `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
+  300/300 success with artifact bytes stored outside SQLite, p50 about 72-91s
+  and p95 about 94-112s across repeated local runs.
+- `--operation event --workers 300 --uploads 300 --concurrency 300 --event-kib 4`:
+  did not complete within an 8-minute local command timeout after event scan
+  mirror persistence throttling; `--workers 100 --uploads 100 --concurrency 100`
+  succeeded but still had p50 about 62s and p95 about 62s.
+- `--operation heartbeat --workers 100 --uploads 100 --concurrency 100`: 100/100
+  success, p50 about 69s and p95 about 69s, showing the current bottleneck is
+  systemic rather than only artifact or event payload size.
+- Earlier `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
   300/300 success, p50 about 196s and p95 about 222s.
-- `--operation lease --workers 300 --uploads 300 --concurrency 300`: 198/300
+- Earlier `--operation lease --workers 300 --uploads 300 --concurrency 300`: 198/300
   success; 102 workers received `503 Worker is not ready to claim jobs: offline`
   because the serialized claim storm lasted longer than the default 120s worker
   heartbeat timeout.
 
 Treat these as a failing scale signal, not a production capacity claim. The
 current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
-single process-wide `_LOCK`, worker token lookup/last-used updates, active
-heartbeat/progress persistence, progress event fan-out across multiple tables,
-artifact JSON/base64 storage in SQLite, and queue claiming through serialized
-`BEGIN IMMEDIATE` transactions. `PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to
-512 so a 300-worker burst can at least enter the process, and
-`PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS` defaults to 30 so heartbeat does
-not persist progress on every active ping. For real 300-worker operation, move
-artifact bytes out of SQLite, reduce hot-path per-request writes, batch or
-throttle progress/heartbeat persistence, and run behind a production WSGI/ASGI
-server or external queue before relying on this backend.
+single process-wide `_LOCK`, per-request worker token/job/run lookups,
+heartbeat/progress writes, progress event fan-out across multiple tables, and
+queue claiming through serialized `BEGIN IMMEDIATE` transactions.
+`PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to 512 so a 300-worker burst can at
+least enter the process, `PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS` defaults
+to 30 so heartbeat does not persist progress on every active ping, and
+`PULLWISE_EVENT_SCAN_MIRROR_PERSIST_SECONDS` defaults to 30 so event requests do
+not rewrite the scan mirror on every event. For real 300-worker operation, move
+worker control-plane traffic to a production WSGI/ASGI server, Postgres or a
+queue-backed write model, batched progress aggregation, and a lease/recovery
+path that does not run fleet-wide sweeps inside every claim burst.
 
 ### Billing Provider Configuration
 

@@ -4781,14 +4781,6 @@ def claim_next_scan_job(
                 connection.commit()
                 return None
             offline_after = max(60, int(worker_heartbeat_timeout_seconds or 120))
-            connection.execute(
-                """
-                UPDATE workers
-                SET status = 'offline'
-                WHERE status = 'online' AND last_heartbeat_at < ?
-                """,
-                (current_time - offline_after,),
-            )
             if recover_before_claim:
                 _requeue_expired_jobs_locked(connection, current_time)
                 _requeue_stale_worker_jobs_locked(connection, current_time, offline_after)
@@ -4864,6 +4856,14 @@ def recover_expired_scan_jobs(
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
         try:
+            connection.execute(
+                """
+                UPDATE workers
+                SET status = 'offline'
+                WHERE status = 'online' AND last_heartbeat_at < ?
+                """,
+                (current_time - offline_after,),
+            )
             recovered = _fail_exhausted_queued_jobs_locked(connection, current_time)
             recovered.extend(_requeue_expired_jobs_locked(connection, current_time))
             recovered.extend(_requeue_stale_worker_jobs_locked(connection, current_time, offline_after))
@@ -6242,6 +6242,7 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
+
 
 
 
