@@ -443,6 +443,65 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         self.auth = {"Authorization": "Bearer worker-secret"}
 
+    def test_active_heartbeat_throttles_progress_persistence_by_default(self) -> None:
+        scan = {
+            "id": "sc_heartbeat_throttle",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        lease = self.v1_lease()
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+        run_id = job["run_id"]
+
+        heartbeat = self.v1_heartbeat(status="busy", run_id=run_id)
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        progress = json.loads(db.get_review_run(run_id)["progress_json"])
+        self.assertEqual(progress["status"], "leased")
+        self.assertEqual(db.get_scan_job(job["job_id"])["progress"], 0)
+        self.assertEqual(scan["progress"], 0)
+    def test_worker_token_record_is_cached_per_request(self) -> None:
+        handler = RouteHarness("/v1/workers/wk_1/heartbeat", headers=self.auth)
+        with patch.object(app.db, "get_enabled_worker_token", wraps=app.db.get_enabled_worker_token) as lookup:
+            first = app.worker_token_record(handler)
+            second = app.worker_token_record(handler)
+
+        self.assertEqual(first["worker_id"], "wk_1")
+        self.assertEqual(second["worker_id"], "wk_1")
+        lookup.assert_called_once()
+
+    def test_fresh_worker_token_last_used_is_not_rewritten_on_every_lookup(self) -> None:
+        token_hash = app.db.worker_token_hash("worker-secret")
+        timestamp = app.now()
+        with app.db.connect() as connection:
+            connection.execute(
+                "UPDATE workers SET token_last_used_at = ?, updated_at = ? WHERE worker_id = 'wk_1'",
+                (timestamp, timestamp),
+            )
+            connection.execute(
+                "UPDATE worker_tokens SET last_used_at = ? WHERE token_hash = ?",
+                (timestamp, token_hash),
+            )
+
+        app.db.get_enabled_worker_token("worker-secret")
+        app.db.get_enabled_worker_token("worker-secret")
+
+        with app.db.connect() as connection:
+            row = connection.execute(
+                "SELECT token_last_used_at, updated_at FROM workers WHERE worker_id = 'wk_1'"
+            ).fetchone()
+        self.assertEqual(row[0], timestamp)
+        self.assertEqual(row[1], timestamp)
     def test_scan_payload_exposes_uploaded_worker_debug_bundle_url(self) -> None:
         scan = {
             "id": "sc_debug_bundle",
@@ -842,7 +901,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             v1_worker_heartbeat_payload(status="busy", run_id=run_id),
             headers=self.auth,
         )
-        app.PullwiseHandler.route(heartbeat, "POST")
+                app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         self.assertTrue(heartbeat.payload["ack"])
         self.assertEqual(heartbeat.payload["commands"], [])
@@ -1564,7 +1623,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         for label, payload in cases:
             with self.subTest(label=label):
                 heartbeat = RouteHarness("/v1/workers/wk_1/heartbeat", payload, headers=self.auth)
-                app.PullwiseHandler.route(heartbeat, "POST")
+                with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
+            app.PullwiseHandler.route(heartbeat, "POST")
                 self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("Invalid review-worker-protocol/v1 heartbeat", heartbeat.payload["message"])
 
@@ -1575,7 +1635,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             headers=self.auth,
         )
 
-        app.PullwiseHandler.route(heartbeat, "POST")
+        with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
+            app.PullwiseHandler.route(heartbeat, "POST")
 
         self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("active_run_id", heartbeat.payload["message"])
@@ -1654,7 +1715,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
 
         heartbeat = RouteHarness("/v1/workers/wk_1/heartbeat", heartbeat_payload, headers=self.auth)
-        app.PullwiseHandler.route(heartbeat, "POST")
+        with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
+            app.PullwiseHandler.route(heartbeat, "POST")
         lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
         app.PullwiseHandler.route(lease, "POST")
 

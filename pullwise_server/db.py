@@ -2035,12 +2035,21 @@ def rotate_worker_token(worker_id: str) -> dict[str, Any] | None:
     return worker
 
 
+def worker_token_last_used_stale(row: sqlite3.Row, timestamp: int, *, interval_seconds: int = 60) -> bool:
+    try:
+        last_used_at = int(row["token_last_used_at"] or 0)
+    except (KeyError, TypeError, ValueError):
+        last_used_at = 0
+    return last_used_at <= 0 or last_used_at <= timestamp - max(1, int(interval_seconds or 60))
+
+
 def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
     ensure_initialized()
     token = str(token or "").strip()
     if not token:
         return None
     token_hash = worker_token_hash(token)
+    timestamp = int(time.time())
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -2052,14 +2061,15 @@ def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
                 (token_hash,),
             ).fetchone()
             if row:
-                connection.execute(
-                    "UPDATE worker_tokens SET last_used_at = strftime('%s', 'now') WHERE token_hash = ?",
-                    (token_hash,),
-                )
-                connection.execute(
-                    "UPDATE workers SET token_last_used_at = strftime('%s', 'now'), updated_at = strftime('%s', 'now') WHERE token_hash = ?",
-                    (token_hash,),
-                )
+                if worker_token_last_used_stale(row, timestamp):
+                    connection.execute(
+                        "UPDATE worker_tokens SET last_used_at = ? WHERE token_hash = ?",
+                        (timestamp, token_hash),
+                    )
+                    connection.execute(
+                        "UPDATE workers SET token_last_used_at = ?, updated_at = ? WHERE token_hash = ?",
+                        (timestamp, timestamp, token_hash),
+                    )
                 return row_to_dict(row)
             return None
 
@@ -2077,6 +2087,7 @@ def get_worker_by_token(
     token_hash = worker_token_hash(token)
     enabled_clause = "" if allow_disabled else "AND enabled = 1"
     deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
+    timestamp = int(time.time())
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -2089,10 +2100,11 @@ def get_worker_by_token(
             ).fetchone()
             if not row:
                 return None
-            connection.execute(
-                "UPDATE workers SET token_last_used_at = strftime('%s', 'now'), updated_at = strftime('%s', 'now') WHERE token_hash = ?",
-                (token_hash,),
-            )
+            if worker_token_last_used_stale(row, timestamp):
+                connection.execute(
+                    "UPDATE workers SET token_last_used_at = ?, updated_at = ? WHERE token_hash = ?",
+                    (timestamp, timestamp, token_hash),
+                )
             return row_to_dict(row)
 
 

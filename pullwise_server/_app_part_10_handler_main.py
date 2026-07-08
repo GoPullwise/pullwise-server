@@ -182,6 +182,17 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
     return "; ".join(errors[:12]) if errors else None
 
 
+def worker_heartbeat_progress_persist_interval_seconds() -> int:
+    return max(0, env_int("PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS", 30))
+
+
+def worker_heartbeat_should_persist_progress(job: dict, timestamp: int) -> bool:
+    interval = worker_heartbeat_progress_persist_interval_seconds()
+    if interval <= 0:
+        return True
+    last_update = pull_request_timestamp(job.get("updated_at")) or pull_request_timestamp(job.get("claimed_at")) or 0
+    return not last_update or int(timestamp or now()) - int(last_update) >= interval
+
 def worker_v1_lease_integer(value: object, field_name: str, errors: list[str]) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         errors.append(f"capacity.{field_name} must be an integer")
