@@ -364,10 +364,14 @@ probe:
   systemic rather than only artifact or event payload size.
 - Earlier `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
   300/300 success, p50 about 196s and p95 about 222s.
-- Earlier `--operation lease --workers 300 --uploads 300 --concurrency 300`: 198/300
-  success; 102 workers received `503 Worker is not ready to claim jobs: offline`
-  because the serialized claim storm lasted longer than the default 120s worker
-  heartbeat timeout.
+- `--operation lease --workers 100 --uploads 100 --concurrency 100`: after
+  moving recovery out of the lease hot path and refreshing worker presence on
+  valid lease requests, 100/100 succeeded, p50 about 62s and p95 about 78s.
+- `--operation lease --workers 300 --uploads 300 --concurrency 300`: after the
+  same lease hot-path changes, `offline` 503s were eliminated, but only 199/300
+  completed within a 240s request timeout; p50 about 216s and p95 hit the 240s
+  timeout. Earlier, before these changes, the same probe had 198/300 success and
+  102 `503 Worker is not ready to claim jobs: offline` responses.
 
 Treat these as a failing scale signal, not a production capacity claim. The
 current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
@@ -378,10 +382,12 @@ queue claiming through serialized `BEGIN IMMEDIATE` transactions.
 least enter the process, `PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS` defaults
 to 30 so heartbeat does not persist progress on every active ping, and
 `PULLWISE_EVENT_SCAN_MIRROR_PERSIST_SECONDS` defaults to 30 so event requests do
-not rewrite the scan mirror on every event. For real 300-worker operation, move
-worker control-plane traffic to a production WSGI/ASGI server, Postgres or a
-queue-backed write model, batched progress aggregation, and a lease/recovery
-path that does not run fleet-wide sweeps inside every claim burst.
+not rewrite the scan mirror on every event. Lease requests refresh only the
+requesting worker's presence and do not run full recovery sweeps inline. For real
+300-worker operation, move worker control-plane traffic to a production WSGI/ASGI
+server, Postgres or a queue-backed write model, batched progress aggregation,
+and a claim path that does not serialize every worker through one SQLite write
+transaction.
 
 ### Billing Provider Configuration
 

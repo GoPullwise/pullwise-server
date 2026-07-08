@@ -989,6 +989,19 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(current_job["status"], "claimed")
         self.assertEqual(result_count, 0)
 
+    def test_scan_job_claim_hot_path_indexes_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    indexes = {
+                        row[1]: [column[2] for column in connection.execute(f"PRAGMA index_info({row[1]})")]
+                        for row in connection.execute("PRAGMA index_list(scan_jobs)")
+                    }
+
+        self.assertEqual(indexes["idx_scan_jobs_worker_status"], ["claimed_by_worker_id", "status"])
+        self.assertEqual(indexes["idx_scan_jobs_claimable_hot_path"], ["status", "worker_scope", "created_at", "job_id"])
     def test_failed_scan_job_result_does_not_requeue(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, 'pullwise.sqlite3')
@@ -1364,4 +1377,5 @@ class DatabaseContractsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 

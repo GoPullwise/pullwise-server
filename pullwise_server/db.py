@@ -403,6 +403,12 @@ def initialize() -> None:
             )
             connection.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable_hot_path
+                ON scan_jobs(status, worker_scope, created_at, job_id)
+                """
+            )
+            connection.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_worker_status
                 ON scan_jobs(claimed_by_worker_id, status)
                 """
@@ -6265,6 +6271,8 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
+
+
 
 
 
