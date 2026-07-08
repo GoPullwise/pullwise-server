@@ -355,33 +355,63 @@ Latest local burst results on a Windows development host with the in-process
 probe:
 
 - `--operation heartbeat --workers 300 --uploads 300 --concurrency 300`: after
-  combining active heartbeat DB persistence and heartbeat progress persistence
-  into the same SQLite transaction, then keeping the scan mirror update in
-  memory instead of doing an inline `upsert_scan`, 300/300 succeeded on July 8,
-  2026, with the default request timeout after removing the process-wide Python `_LOCK` around `db.record_active_worker_heartbeat`, p50 about 66.8s and p95 about 67.5s. The 100-worker heartbeat probe completed 100/100 with p50 about 16.8s and p95 about 18.8s. This is improved from the previous 300-worker p50 about 169.9s and p95 about 171.7s, but still above the p95-below-60s short-term target.
+  combining active heartbeat DB persistence, removing inline scan mirror DB
+  writes, removing the process-wide Python `_LOCK` around
+  `db.record_active_worker_heartbeat`, and avoiding worker token last-used
+  writes while only choosing body-size/decompression limits, 300/300 succeeded
+  on July 8, 2026, with the default request timeout, p50 about 9.4s and p95
+  about 17.5s. Earlier 300-worker heartbeat probes were p50 about 169.9s and
+  p95 about 171.7s before the DB hot-path changes, then p50 about 66.8s and
+  p95 about 67.5s before the body-limit token lookup fix.
 - `--operation artifact --workers 300 --uploads 300 --concurrency 300 --artifact-kib 32`:
-  after reusing the resolved job, inserting unique artifact rows before duplicate/conflict probing, and removing the process-wide Python `_LOCK` around `db.store_review_run_artifact`, 300/300 succeeded on July 8, 2026, with the default request timeout, p50 about 60.8s and p95 about 74.7s. The 100-upload probe completed 100/100 with p50 about 17.8s and p95 about 20.7s. Artifact bytes stay outside SQLite, but the 300-upload path remains above the p95-below-60s short-term target.
+  after reusing the resolved job, inserting unique artifact rows before
+  duplicate/conflict probing, removing the process-wide Python `_LOCK` around
+  `db.store_review_run_artifact`, and avoiding worker token last-used writes in
+  both gzip artifact body-limit checks, 300/300 succeeded on July 8, 2026, with
+  the default request timeout, p50 about 9.1s and p95 about 18.6s. Artifact bytes
+  stay outside SQLite.
 - `--operation event --workers 300 --uploads 300 --concurrency 300 --event-kib 4`:
-  after combining the review-run event insert, `review_runs` progress upsert, scan-job progress update, and removing the process-wide Python `_LOCK` around `db.store_review_run_event_and_progress`, 300/300 succeeded on July 8, 2026, with the default request timeout, p50 about 67.1s and p95 about 73.4s; the 100-worker probe completed 100/100 with p50 about 19.0s and p95 about 22.0s. Earlier, before the event lock removal, the default 120s 300-event burst only completed 2/300 before client timeouts.
-
-- Earlier `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
-  300/300 success, p50 about 196s and p95 about 222s.
-- `--operation lease --workers 100 --uploads 100 --concurrency 100`: after
+  after combining the review-run event insert, `review_runs` progress upsert,
+  scan-job progress update, removing the process-wide Python `_LOCK` around
+  `db.store_review_run_event_and_progress`, and avoiding worker token last-used
+  writes while only choosing decompression limits, 300/300 succeeded on July 8,
+  2026, with the default request timeout, p50 about 19.6s and p95 about 19.9s.
+  Earlier, before the event lock removal, the default 120s 300-event burst only
+  completed 2/300 before client timeouts.
+- `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
+  after the same heartbeat/event/artifact hot-path changes, 300/300 succeeded on
+  July 8, 2026, with the default request timeout, p50 about 18.8s and p95 about
+  19.3s. Earlier mixed 300-worker probes were p50 about 196s and p95 about 222s.
+- `--operation lease --workers 300 --uploads 300 --concurrency 300`: after
   moving recovery out of the lease hot path, creating `review_runs` inside the
-  claim transaction, skipping presence rewrites for already-ready workers, and
-  removing the process-wide Python `_LOCK` around `db.claim_next_scan_job` while
-  keeping SQLite `BEGIN IMMEDIATE` and conditional claim updates, 100/100
-  succeeded with p50 about 21.3s and p95 about 21.4s on July 8, 2026. Temporary short-circuit probes showed that bypassing the claim transaction, not payload construction or scan mirror dirty marking, produced the large improvement.
-- `--operation lease --workers 300 --uploads 300 --concurrency 300`: after the
-  same lease hot-path changes, `offline` 503s were eliminated and 300/300
-  completed on July 8, 2026, with the default request timeout, p50 about 72.7s
-  and p95 about 73.1s. Earlier, before these changes, only 199/300 completed
-  within a 240s request timeout and p95 hit the timeout; an intermediate serialized
-  claim path completed 300/300 with p50 about 138.5s and p95 about 158.1s.
+  claim transaction, skipping presence rewrites for already-ready workers,
+  removing the process-wide Python `_LOCK` around `db.claim_next_scan_job`, and
+  avoiding worker token last-used writes while only choosing body-size limits,
+  300/300 succeeded on July 8, 2026, with the default request timeout, p50 about
+  28.6s and p95 about 28.8s. Earlier, before these changes, only 199/300
+  completed within a 240s request timeout and p95 hit the timeout; an
+  intermediate serialized claim path completed 300/300 with p50 about 138.5s and
+  p95 about 158.1s.
 
-Treat these as a failing scale signal, not a production capacity claim. The
-current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite write serialization on hot paths, per-request worker/job/run lookups, artifact content decoding/file writes, progress-event and heartbeat fan-out across multiple tables, and queue claiming through serialized `BEGIN IMMEDIATE` transactions. Temporary no-op heartbeat probes measured the 300-worker HTTP/body/dispatch floor at p95 about 41.5s before worker auth and p95 about 46.9s after auth, validation, and active-run lookup. Short-circuit probes did not show meaningful heartbeat gains from removing the read lock around `db.get_scan_job`, bypassing alert/log-session response work after the heartbeat DB update, moving read-only worker-token lookup outside the Python lock, skipping active-heartbeat command polling, skipping the active-heartbeat missing-job recovery scan, disabling gzip, or switching implicit SQLite transactions to `IMMEDIATE`.
-`PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to 512 so a 300-worker burst can at
+Treat these as a local control-plane scale signal, not a production capacity
+claim. The short-term SQLite/ThreadingHTTPServer target of stable 300/300 within
+the default 120s request timeout and p95 below 60s is now met on this probe. The
+remaining production concerns are the single-process `ThreadingHTTPServer`,
+SQLite write serialization on hot paths, per-request worker/job/run lookups,
+artifact content decoding/file writes, progress-event and heartbeat fan-out
+across multiple tables, and queue claiming through serialized `BEGIN IMMEDIATE`
+transactions. Temporary no-op heartbeat probes measured the 300-worker
+HTTP/body/dispatch floor at p95 about 41.5s before auth and 46.9s after auth/run
+lookup until the body-limit token lookup fix removed token last-used writes from
+that phase; a pure no-op `ThreadingHTTPServer` with heartbeat-sized gzip bodies
+was about p95 0.12s, proving the earlier floor was Pullwise handler work, not
+Windows or urllib. Short-circuit probes did not show meaningful gains from
+removing the read lock around `db.get_scan_job`, bypassing alert/log-session
+response work after the heartbeat DB update, moving read-only worker-token
+lookup outside the Python lock, skipping active-heartbeat command polling,
+skipping the active-heartbeat missing-job recovery scan, disabling gzip,
+switching implicit SQLite transactions to `IMMEDIATE`, lease payload
+construction, scan mirror dirty marking, or scan mirror object updates.`r`n`PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to 512 so a 300-worker burst can at
 least enter the process, `PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS` defaults
 to 30 so heartbeat does not persist progress on every active ping, and
 `PULLWISE_EVENT_SCAN_MIRROR_PERSIST_SECONDS` defaults to 30 so event requests do
