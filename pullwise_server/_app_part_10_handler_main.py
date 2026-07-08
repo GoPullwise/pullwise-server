@@ -195,6 +195,19 @@ def worker_heartbeat_should_persist_progress(job: dict, timestamp: int) -> bool:
     last_update = pull_request_timestamp(job.get("updated_at")) or pull_request_timestamp(job.get("claimed_at")) or 0
     return bool(last_update) and int(timestamp or now()) - int(last_update) >= interval
 
+
+def worker_event_scan_mirror_persist_interval_seconds() -> int:
+    return max(0, env_int("PULLWISE_EVENT_SCAN_MIRROR_PERSIST_SECONDS", 30))
+
+
+def worker_event_should_persist_scan_mirror(scan: dict, event_type: str, timestamp: int) -> bool:
+    if event_type in {"run_completed", "run_failed", "run_cancelled", "run_partial_completed"}:
+        return True
+    interval = worker_event_scan_mirror_persist_interval_seconds()
+    if interval <= 0:
+        return False
+    last_update = pull_request_timestamp(scan.get("updatedAt") or scan.get("updated_at")) or 0
+    return bool(last_update) and int(timestamp or now()) - int(last_update) >= interval
 def worker_v1_lease_integer(value: object, field_name: str, errors: list[str]) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         errors.append(f"capacity.{field_name} must be an integer")
@@ -3361,8 +3374,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 progress_logs = append_scan_progress_log(scan, progress_entry)
                 if progress_logs:
                     update["progressLogs"] = progress_logs
+                should_persist_scan_mirror = worker_event_should_persist_scan_mirror(scan, event_type, now())
                 scan.update(update)
-                db.upsert_scan(scan)
+                if should_persist_scan_mirror:
+                    db.upsert_scan(scan)
                 mark_state_dirty()
         scan_logging.log_event(
             "review_run_event",
@@ -4307,5 +4322,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
 
 
