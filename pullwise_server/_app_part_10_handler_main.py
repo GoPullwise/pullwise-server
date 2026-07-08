@@ -3159,7 +3159,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 protocol_version=WORKER_PROTOCOL_VERSION,
             )
         except ValueError as exc:
-            return self.error(HTTPStatus.BAD_REQUEST, str(exc))        if not job:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if not job:
             return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
         try:
             payload = scan_job_payload(job, include_clone_token=True)

@@ -4998,7 +4998,7 @@ def claim_next_scan_job(
     ready_provider_set = set(normalize_provider_list(ready_providers)) if ready_providers is not None else None
     if ready_provider_set is not None and "codex" not in ready_provider_set:
         return None
-    with _LOCK, closing(connect()) as connection:
+    with closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
         try:
