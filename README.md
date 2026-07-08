@@ -356,11 +356,12 @@ probe:
 
 - `--operation heartbeat --workers 300 --uploads 300 --concurrency 300`: after
   combining active heartbeat DB persistence and heartbeat progress persistence
-  into the same SQLite transaction, 300/300 succeeded on July 8, 2026, with
-  `--timeout-seconds 300`, p50 about 109.7s and p95 about 111.2s. The
-  100-worker heartbeat probe completed 100/100 with p50 about 31.3s and p95
-  about 31.7s. This is improved from the previous 300-worker p50 about 169.9s
-  and p95 about 171.7s, but still minute-scale.
+  into the same SQLite transaction, then keeping the scan mirror update in
+  memory instead of doing an inline `upsert_scan`, 300/300 succeeded on July 8,
+  2026, with `--timeout-seconds 300`, p50 about 101.1s and p95 about 102.6s.
+  The 100-worker heartbeat probe completed 100/100 with p50 about 34.3s and p95
+  about 34.7s in the latest run. This is improved from the previous 300-worker
+  p50 about 169.9s and p95 about 171.7s, but still minute-scale.
 - `--operation artifact --workers 300 --uploads 300 --concurrency 300 --artifact-kib 32`:
   after reusing the resolved job in the review-run artifact route and inserting
   unique artifact rows before duplicate/conflict probing, 300/300 succeeded on

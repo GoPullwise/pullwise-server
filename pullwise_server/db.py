@@ -2905,6 +2905,22 @@ def latest_worker_commands(worker_ids: list[str] | set[str] | tuple[str, ...]) -
     return commands
 
 
+def _get_next_worker_command_locked(connection: sqlite3.Connection, worker_id: str) -> dict[str, Any] | None:
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return None
+    return row_to_dict(
+        connection.execute(
+            """
+            SELECT * FROM worker_commands
+            WHERE worker_id = ? AND status IN ('pending', 'running')
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (worker_id,),
+        ).fetchone()
+    )
+
 def get_next_worker_command(worker_id: str) -> dict[str, Any] | None:
     ensure_initialized()
     worker_id = str(worker_id or "").strip()
@@ -2912,18 +2928,7 @@ def get_next_worker_command(worker_id: str) -> dict[str, Any] | None:
         return None
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
-        return row_to_dict(
-            connection.execute(
-                """
-                SELECT * FROM worker_commands
-                WHERE worker_id = ? AND status IN ('pending', 'running')
-                ORDER BY created_at ASC
-                LIMIT 1
-                """,
-                (worker_id,),
-            ).fetchone()
-        )
-
+        return _get_next_worker_command_locked(connection, worker_id)
 
 def update_worker_command_status(record: dict[str, Any]) -> dict[str, Any] | None:
     ensure_initialized()
@@ -3892,6 +3897,7 @@ def record_active_worker_heartbeat(
     recovered: list[dict[str, Any]] = []
     renewed_count = 0
     progress_job: dict[str, Any] | None = None
+    command: dict[str, Any] | None = None
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -4038,6 +4044,7 @@ def record_active_worker_heartbeat(
                     )
                     if progress_cursor.rowcount > 0:
                         progress_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (progress_job_id,)).fetchone())
+            command = _get_next_worker_command_locked(connection, worker_id)
             connection.commit()
             return {
                 "worker": worker,
@@ -4046,6 +4053,7 @@ def record_active_worker_heartbeat(
                 "recovered_jobs": recovered,
                 "renewed_count": renewed_count,
                 "progress_job": progress_job,
+                "command": command,
             }
         except Exception:
             connection.rollback()

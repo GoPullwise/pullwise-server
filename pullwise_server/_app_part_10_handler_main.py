@@ -3616,6 +3616,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "steps": progress_steps,
             }
         updated_progress_job = None
+        command = None
+        command_loaded = False
         try:
             if active_job_ids:
                 heartbeat_update = db.record_active_worker_heartbeat(
@@ -3632,6 +3634,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 active_job_ids_accepting_updates = heartbeat_update["accepting"]
                 recovered_jobs = heartbeat_update["recovered_jobs"]
                 updated_progress_job = heartbeat_update.get("progress_job")
+                command = heartbeat_update.get("command")
+                command_loaded = True
                 if recovered_jobs:
                     with STATE_LOCK:
                         apply_recovered_scan_jobs_locked(recovered_jobs)
@@ -3674,7 +3678,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "_latest_command": None,
         }
         alerts.sync_worker_alert(worker_public_payload(alert_worker_record, admin=True))
-        command = db.get_next_worker_command(worker_id)
+        if not command_loaded:
+            command = db.get_next_worker_command(worker_id)
         commands = []
         for job_id in cancelled_job_ids:
             job = db.get_scan_job(job_id)

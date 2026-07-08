@@ -591,6 +591,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
             patch.object(app.db, "update_review_run_progress", side_effect=AssertionError("separate heartbeat run progress update should not run")),
             patch.object(app.db, "update_scan_job_progress", side_effect=AssertionError("separate heartbeat scan progress update should not run")),
             patch.object(app.db, "upsert_scan", side_effect=AssertionError("heartbeat progress should not persist scan mirror inline")),
+            patch.object(app.db, "get_next_worker_command", side_effect=AssertionError("active heartbeat should return command from combined DB persistence")),
         ):
             with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
                 heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
