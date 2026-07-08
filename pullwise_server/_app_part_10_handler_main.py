@@ -481,14 +481,16 @@ def review_artifact_binary_payload(row: dict) -> tuple[bytes, str, dict[str, str
     if not isinstance(payload, dict):
         payload = {}
     artifact = payload.get("artifact") if isinstance(payload.get("artifact"), dict) else {}
-    content_b64_value = payload.get("content_base64") if payload.get("content_base64") is not None else payload.get("contentBase64")
-    content_b64 = public_issue_text(content_b64_value)
-    if not content_b64:
-        return None
-    try:
-        content = base64.b64decode(content_b64.encode("ascii"), validate=True)
-    except (ValueError, binascii.Error):
-        return None
+    content = db.review_artifact_content_bytes(row)
+    if content is None:
+        content_b64_value = payload.get("content_base64") if payload.get("content_base64") is not None else payload.get("contentBase64")
+        content_b64 = public_issue_text(content_b64_value)
+        if not content_b64:
+            return None
+        try:
+            content = base64.b64decode(content_b64.encode("ascii"), validate=True)
+        except (ValueError, binascii.Error):
+            return None
     media_type = public_issue_text(row.get("media_type")) or public_issue_text(artifact.get("media_type") or artifact.get("mediaType"))
     if not media_type:
         media_type = "application/octet-stream"
@@ -505,7 +507,6 @@ def review_artifact_binary_payload(row: dict) -> tuple[bytes, str, dict[str, str
     if sha256:
         headers["ETag"] = f'"{sha256}"'
     return content, media_type, headers
-
 
 def _json_safe_debug_value(value: object) -> object:
     try:
@@ -4305,3 +4306,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

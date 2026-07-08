@@ -25,6 +25,8 @@ DEFAULT_STATE_ENCRYPTION_KEY_PATH = "/etc/pullwise/secrets/state-encryption-key"
 STATE_ENCRYPTION_KEY_PATH_ENV = "PULLWISE_STATE_ENCRYPTION_KEY_PATH"
 STATE_ENCRYPTION_MARKER = "pullwise-state-secret-v1"
 STATE_ENCRYPTION_AAD = b"pullwise-server-state-secret-v1"
+REVIEW_ARTIFACT_STORAGE_DIR_ENV = "PULLWISE_REVIEW_ARTIFACT_STORAGE_DIR"
+LEGACY_ARTIFACT_STORAGE_DIR_ENV = "PULLWISE_ARTIFACT_STORAGE_DIR"
 
 
 def project_root() -> str:
@@ -636,6 +638,7 @@ def initialize() -> None:
                     storage_url TEXT NOT NULL DEFAULT '',
                     storage_json TEXT,
                     inline_json TEXT,
+                    content_path TEXT,
                     payload_json TEXT NOT NULL,
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -650,6 +653,7 @@ def initialize() -> None:
                 ("review_artifacts", "storage_url", "TEXT NOT NULL DEFAULT ''"),
                 ("review_artifacts", "storage_json", "TEXT"),
                 ("review_artifacts", "inline_json", "TEXT"),
+                ("review_artifacts", "content_path", "TEXT"),
                 ("review_artifacts", "payload_json", "TEXT"),
                 ("review_artifacts", "updated_at", "INTEGER"),
             ):
@@ -5299,7 +5303,8 @@ def store_review_run_artifact(
     artifact_id = str(artifact_id or "").strip()
     if not job_id or not attempt_id or not artifact_id:
         raise ValueError("job_id, attempt_id, and artifact_id are required")
-    payload_text = json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
+    content = review_artifact_content_from_payload(payload)
+    payload_text = json.dumps(review_artifact_payload_without_content(payload), ensure_ascii=False, sort_keys=True)
     current_time = int(timestamp if timestamp is not None else time.time())
     run_id = str(payload.get("run_id") or f"run_{job_id}").strip()
     artifact = payload.get("artifact") if isinstance(payload.get("artifact"), dict) else {}
@@ -5311,6 +5316,8 @@ def store_review_run_artifact(
     schema_id = str(artifact.get("schema_id") or artifact.get("schemaId") or payload.get("schema_id") or payload.get("schemaId") or "").strip()
     schema_version = str(artifact.get("schema_version") or artifact.get("schemaVersion") or payload.get("schema_version") or payload.get("schemaVersion") or "").strip()
     sha256 = str(payload.get("sha256") or artifact.get("sha256") or "").strip().lower()
+    if content is not None and not sha256:
+        sha256 = hashlib.sha256(content).hexdigest()
     try:
         size_bytes = int(
             payload.get("size_bytes")
@@ -5322,7 +5329,7 @@ def store_review_run_artifact(
             else artifact.get("sizeBytes")
         )
     except (TypeError, ValueError):
-        size_bytes = 0
+        size_bytes = len(content) if content is not None else 0
     required = 1 if artifact.get("required") is True or payload.get("required") is True else 0
     replaceable_log_artifact = bool(replace_existing and kind in REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS)
     storage_url = f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"
@@ -5334,112 +5341,123 @@ def store_review_run_artifact(
         ensure_ascii=False,
         sort_keys=True,
     )
-    inline_json = review_artifact_inline_json(payload, media_type, size_bytes)
-    with _LOCK, closing(connect()) as connection:
-        connection.row_factory = sqlite3.Row
-        with connection:
-            job = connection.execute(
-                "SELECT status FROM scan_jobs WHERE job_id = ?",
-                (job_id,),
-            ).fetchone()
-            if not job:
-                return {"accepted": False, "conflict": True, "reason": "job_not_found"}
-            if str(job["status"] or "") not in {"claimed", "running", "uploading_result"} and not replaceable_log_artifact:
-                return {"accepted": False, "conflict": True, "reason": "job_not_accepting_artifacts"}
-            existing = connection.execute(
-                "SELECT payload_json, job_id, attempt_id, kind FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
-                (run_id, artifact_id),
-            ).fetchone()
-            if existing:
-                if str(existing["payload_json"] or "") == payload_text:
-                    return {
-                        "accepted": True,
-                        "duplicate": True,
-                        "artifactId": artifact_id,
-                        "runId": run_id,
-                        "storage": json.loads(storage_json),
-                    }
-                if (
-                    replaceable_log_artifact
-                    and str(existing["kind"] or "") in REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS
-                    and str(existing["job_id"] or "") == job_id
-                    and str(existing["attempt_id"] or "") == attempt_id
-                ):
-                    connection.execute(
-                        """
-                        UPDATE review_artifacts
-                        SET kind = ?, name = ?, media_type = ?, schema_id = ?, schema_version = ?,
-                            required = ?, sha256 = ?, size_bytes = ?, storage_url = ?, storage_json = ?,
-                            inline_json = ?, payload_json = ?, updated_at = ?
-                        WHERE run_id = ? AND artifact_id = ?
-                        """,
-                        (
-                            kind,
-                            name,
-                            media_type,
-                            schema_id,
-                            schema_version,
-                            required,
-                            sha256,
-                            size_bytes,
-                            storage_url,
-                            storage_json,
-                            inline_json,
-                            payload_text,
-                            current_time,
-                            run_id,
-                            artifact_id,
-                        ),
+    inline_json = review_artifact_inline_json(content, media_type, size_bytes)
+    staged_content = stage_review_artifact_content(run_id, artifact_id, content, sha256) if content is not None else None
+    staged_content_committed = False
+    try:
+        with _LOCK, closing(connect()) as connection:
+            connection.row_factory = sqlite3.Row
+            with connection:
+                job = connection.execute(
+                    "SELECT status FROM scan_jobs WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+                if not job:
+                    return {"accepted": False, "conflict": True, "reason": "job_not_found"}
+                if str(job["status"] or "") not in {"claimed", "running", "uploading_result"} and not replaceable_log_artifact:
+                    return {"accepted": False, "conflict": True, "reason": "job_not_accepting_artifacts"}
+                existing = connection.execute(
+                    "SELECT payload_json, job_id, attempt_id, kind FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
+                    (run_id, artifact_id),
+                ).fetchone()
+                if existing:
+                    if str(existing["payload_json"] or "") == payload_text:
+                        return {
+                            "accepted": True,
+                            "duplicate": True,
+                            "artifactId": artifact_id,
+                            "runId": run_id,
+                            "storage": json.loads(storage_json),
+                        }
+                    if (
+                        replaceable_log_artifact
+                        and str(existing["kind"] or "") in REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS
+                        and str(existing["job_id"] or "") == job_id
+                        and str(existing["attempt_id"] or "") == attempt_id
+                    ):
+                        content_path = commit_staged_review_artifact_content(staged_content)
+                        staged_content_committed = True
+                        connection.execute(
+                            """
+                            UPDATE review_artifacts
+                            SET kind = ?, name = ?, media_type = ?, schema_id = ?, schema_version = ?,
+                                required = ?, sha256 = ?, size_bytes = ?, storage_url = ?, storage_json = ?,
+                                inline_json = ?, content_path = ?, payload_json = ?, updated_at = ?
+                            WHERE run_id = ? AND artifact_id = ?
+                            """,
+                            (
+                                kind,
+                                name,
+                                media_type,
+                                schema_id,
+                                schema_version,
+                                required,
+                                sha256,
+                                size_bytes,
+                                storage_url,
+                                storage_json,
+                                inline_json,
+                                content_path,
+                                payload_text,
+                                current_time,
+                                run_id,
+                                artifact_id,
+                            ),
+                        )
+                        return {
+                            "accepted": True,
+                            "duplicate": False,
+                            "replaced": True,
+                            "artifactId": artifact_id,
+                            "runId": run_id,
+                            "storage": json.loads(storage_json),
+                        }
+                    return {"accepted": False, "conflict": True, "reason": "artifact_payload_conflict"}
+                content_path = commit_staged_review_artifact_content(staged_content)
+                staged_content_committed = True
+                connection.execute(
+                    """
+                    INSERT INTO review_artifacts (
+                        id, artifact_id, run_id, job_id, attempt_id, kind, name,
+                        media_type, schema_id, schema_version, required, sha256,
+                        size_bytes, storage_url, storage_json, inline_json,
+                        content_path, payload_json, created_at, updated_at
                     )
-                    return {
-                        "accepted": True,
-                        "duplicate": False,
-                        "replaced": True,
-                        "artifactId": artifact_id,
-                        "runId": run_id,
-                        "storage": json.loads(storage_json),
-                    }
-                return {"accepted": False, "conflict": True, "reason": "artifact_payload_conflict"}
-            connection.execute(
-                """
-                INSERT INTO review_artifacts (
-                    id, artifact_id, run_id, job_id, attempt_id, kind, name,
-                    media_type, schema_id, schema_version, required, sha256,
-                    size_bytes, storage_url, storage_json, inline_json,
-                    payload_json, created_at, updated_at
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        stable_id("art", f"{run_id}:{artifact_id}"),
+                        artifact_id,
+                        run_id,
+                        job_id,
+                        attempt_id,
+                        kind,
+                        name,
+                        media_type,
+                        schema_id,
+                        schema_version,
+                        required,
+                        sha256,
+                        size_bytes,
+                        storage_url,
+                        storage_json,
+                        inline_json,
+                        content_path,
+                        payload_text,
+                        current_time,
+                        current_time,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    stable_id("art", f"{run_id}:{artifact_id}"),
-                    artifact_id,
-                    run_id,
-                    job_id,
-                    attempt_id,
-                    kind,
-                    name,
-                    media_type,
-                    schema_id,
-                    schema_version,
-                    required,
-                    sha256,
-                    size_bytes,
-                    storage_url,
-                    storage_json,
-                    inline_json,
-                    payload_text,
-                    current_time,
-                    current_time,
-                ),
-            )
-    return {
-        "accepted": True,
-        "duplicate": False,
-        "artifactId": artifact_id,
-        "runId": run_id,
-        "storage": json.loads(storage_json),
-    }
-
+        return {
+            "accepted": True,
+            "duplicate": False,
+            "artifactId": artifact_id,
+            "runId": run_id,
+            "storage": json.loads(storage_json),
+        }
+    finally:
+        if not staged_content_committed:
+            discard_staged_review_artifact_content(staged_content)
 
 def list_scan_job_attempts(job_id: str) -> list[dict[str, Any]]:
     ensure_initialized()
@@ -6221,4 +6239,7 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
+
+
+
 

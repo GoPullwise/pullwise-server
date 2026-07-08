@@ -1093,6 +1093,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(json.loads(stored_artifact["storage_json"])["url"], f"/v1/review-runs/{run_id}/artifacts/art_report_agent")
         self.assertEqual(json.loads(stored_artifact["inline_json"]), {})
         self.assertNotIn("content_base64", stored_artifact["payload_json"])
+        self.assertTrue(stored_artifact["content_path"])
+        content_file_path = db.review_artifact_content_file_path(stored_artifact)
+        self.assertIsNotNone(content_file_path)
+        with open(content_file_path, "rb") as handle:
+            self.assertEqual(handle.read(), content)
         listed_artifacts = db.list_review_run_artifacts(claimed["job_id"], attempt_id)
         self.assertEqual(listed_artifacts[0]["artifact_id"], "art_report_agent")
         self.assertEqual(listed_artifacts[0]["run_id"], run_id)
@@ -5403,7 +5408,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
             self.assertEqual(stored["job_id"], job["job_id"])
             self.assertEqual(stored["attempt_id"], f"{worker_id}-{int(job.get('attempt') or 1)}")
             payload = json.loads(stored["payload_json"])
-            content = base64.b64decode(payload["content_base64"])
+            self.assertNotIn("content_base64", payload)
+            content = db.review_artifact_content_bytes(stored)
+            self.assertIsNotNone(content)
             self.assertEqual(hashlib.sha256(content).hexdigest(), stored["sha256"])
             self.assertEqual(len(content), stored["size_bytes"])
 
@@ -5434,4 +5441,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
 
