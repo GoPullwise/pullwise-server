@@ -3187,15 +3187,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     db.upsert_scan(scan)
                     mark_state_dirty()
             return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
-        lease = {
-            "job_id": payload["job_id"],
-            "run_id": payload["run_id"],
-            "lease_id": payload["lease_id"],
-            "lease_expires_at": protocol_iso_time(pull_request_timestamp(job.get("timeout_at"))) if pull_request_timestamp(job.get("timeout_at")) else None,
-        }
-        return self.json({"lease": lease, "job": payload})
         with STATE_LOCK:
-            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+            scan_id = public_issue_text(job.get("scan_id"))
+            if len(SCAN_BY_ID) < len(SCANS):
+                rebuild_scan_index_locked()
+            scan = SCAN_BY_ID.get(scan_id) if scan_id else None
             if scan and scan.get("status") == "queued":
                 scan.update(
                     {
