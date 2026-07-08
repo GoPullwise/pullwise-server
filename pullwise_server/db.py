@@ -2643,7 +2643,8 @@ def store_review_run_event_and_progress(
     scan_job_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ensure_initialized()
-    with _LOCK, closing(connect()) as connection:
+    # TEMP PERF EXPERIMENT: remove Python DB lock for combined event/progress write.
+    with closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
             stored_event = _insert_review_run_event_locked(connection, event)
