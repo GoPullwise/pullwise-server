@@ -280,6 +280,63 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         self.assertTrue(conflict["conflict"])
         self.assertEqual(stored, [payload])
 
+
+    def test_store_review_run_artifact_inserts_unique_before_conflict_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "test.sqlite3")},
+            clear=False,
+        ):
+            app.db.reset_initialization_cache()
+            job = app.db.create_scan_job(
+                {
+                    "job_id": "job_artifact_insert_first_v1",
+                    "scan_id": "scan_artifact_insert_first_v1",
+                    "repo": "acme/api",
+                    "branch": "main",
+                    "commit": "pending",
+                    "status": "queued",
+                    "created_at": app.now(),
+                    "user_id": "usr_1",
+                }
+            )
+            claimed = app.db.claim_next_scan_job("wk_1")
+            attempt_id = f"wk_1-{claimed['attempt']}"
+            content = b"{}"
+            run_id = claimed.get("run_id") or f"run_{claimed['job_id']}"
+            payload = {
+                "run_id": run_id,
+                "artifact": manifest_item(
+                    artifact_id="art_report_agent",
+                    kind="report.agent",
+                    name="report.agent.json",
+                    media_type="application/json",
+                    schema_id="codex-full-repo-review",
+                    sha256=hashlib.sha256(content).hexdigest(),
+                    size_bytes=len(content),
+                    storage={"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/art_report_agent"},
+                ),
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            }
+            statements: list[str] = []
+            original_connect = app.db.connect
+
+            def traced_connect(*args, **kwargs):
+                connection = original_connect(*args, **kwargs)
+                connection.set_trace_callback(lambda statement: statements.append(" ".join(statement.split())))
+                return connection
+
+            with patch.object(app.db, "connect", side_effect=traced_connect):
+                result = app.db.store_review_run_artifact(
+                    job_id=job["job_id"],
+                    attempt_id=attempt_id,
+                    artifact_id="art_report_agent",
+                    payload=payload,
+                )
+
+        self.assertTrue(result["accepted"])
+        self.assertFalse(result["duplicate"])
+        self.assertFalse(any("FROM review_artifacts WHERE run_id" in statement for statement in statements))
     def test_store_review_run_artifact_allows_explicit_log_replace_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
             os.environ,

@@ -5448,6 +5448,64 @@ def store_review_run_artifact(
                     return {"accepted": False, "conflict": True, "reason": "job_not_found"}
                 if str(job["status"] or "") not in {"claimed", "running", "uploading_result"} and not replaceable_log_artifact:
                     return {"accepted": False, "conflict": True, "reason": "job_not_accepting_artifacts"}
+                if not replaceable_log_artifact:
+                    content_path = staged_content[0] if staged_content is not None else ""
+                    cursor = connection.execute(
+                        """
+                        INSERT OR IGNORE INTO review_artifacts (
+                            id, artifact_id, run_id, job_id, attempt_id, kind, name,
+                            media_type, schema_id, schema_version, required, sha256,
+                            size_bytes, storage_url, storage_json, inline_json,
+                            content_path, payload_json, created_at, updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            stable_id("art", f"{run_id}:{artifact_id}"),
+                            artifact_id,
+                            run_id,
+                            job_id,
+                            attempt_id,
+                            kind,
+                            name,
+                            media_type,
+                            schema_id,
+                            schema_version,
+                            required,
+                            sha256,
+                            size_bytes,
+                            storage_url,
+                            storage_json,
+                            inline_json,
+                            content_path,
+                            payload_text,
+                            current_time,
+                            current_time,
+                        ),
+                    )
+                    if cursor.rowcount:
+                        commit_staged_review_artifact_content(staged_content)
+                        staged_content_committed = True
+                        return {
+                            "accepted": True,
+                            "duplicate": False,
+                            "artifactId": artifact_id,
+                            "runId": run_id,
+                            "storage": json.loads(storage_json),
+                        }
+                    existing = connection.execute(
+                        "SELECT payload_json FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
+                        (run_id, artifact_id),
+                    ).fetchone()
+                    if existing and str(existing["payload_json"] or "") == payload_text:
+                        return {
+                            "accepted": True,
+                            "duplicate": True,
+                            "artifactId": artifact_id,
+                            "runId": run_id,
+                            "storage": json.loads(storage_json),
+                        }
+                    return {"accepted": False, "conflict": True, "reason": "artifact_payload_conflict"}
                 existing = connection.execute(
                     "SELECT payload_json, job_id, attempt_id, kind FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
                     (run_id, artifact_id),
