@@ -3203,19 +3203,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     }
                 )
                 mark_state_dirty()
-            scan_logging.log_event(
-                "worker_job_claimed",
-                scanId=job.get("scan_id"),
-                repo=job.get("repo"),
-                repoId=job.get("repo_id"),
-                githubRepoId=job.get("github_repo_id"),
-                branch=job.get("branch"),
-                commit=job.get("commit"),
-                workerId=worker_id,
-                jobId=job.get("job_id"),
-                attempt=job.get("attempt"),
-                protocol="review-worker-protocol/v1",
-            )
         lease = {
             "job_id": payload["job_id"],
             "run_id": payload["run_id"],

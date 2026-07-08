@@ -2225,10 +2225,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
         job = app.create_scan_job_for_scan(scan)
 
         lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
-        with patch.object(
-            app.db,
-            "upsert_scan",
-            side_effect=AssertionError("lease claim should not persist scan mirror inline"),
+        with (
+            patch.object(
+                app.db,
+                "upsert_scan",
+                side_effect=AssertionError("lease claim should not persist scan mirror inline"),
+            ),
+            patch.object(
+                app.scan_logging,
+                "log_event",
+                side_effect=AssertionError("lease claim should not synchronously write scan logs"),
+            ),
         ):
             app.PullwiseHandler.route(lease, "POST")
 
