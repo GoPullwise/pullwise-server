@@ -545,6 +545,34 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(heartbeat.payload["cancelled_job_ids"], [])
         self.assertEqual(db.get_worker("wk_1")["running_jobs"], 1)
 
+    def test_heartbeat_alert_sync_skips_admin_worker_payload_db_hydration(self) -> None:
+        scan = {
+            "id": "sc_heartbeat_alert_hot_path",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        lease = self.v1_lease()
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+
+        with (
+            patch.object(app.db, "count_worker_running_scan_jobs", side_effect=AssertionError("heartbeat alert sync should use known running_jobs")),
+            patch.object(app.db, "get_latest_worker_command", side_effect=AssertionError("heartbeat alert sync should not hydrate latest command")),
+        ):
+            heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertTrue(heartbeat.payload["ack"])
+
     def test_worker_token_record_is_cached_per_request(self) -> None:
         handler = RouteHarness("/v1/workers/wk_1/heartbeat", headers=self.auth)
         with patch.object(app.db, "get_enabled_worker_token", wraps=app.db.get_enabled_worker_token) as lookup:

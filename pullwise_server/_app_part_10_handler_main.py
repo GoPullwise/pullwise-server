@@ -3632,7 +3632,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         )
                         db.upsert_scan(scan)
                         mark_state_dirty()
-        alerts.sync_worker_alert(worker_public_payload(record, admin=True))
+        alert_worker_record = {
+            **record,
+            "_running_jobs_count": running_jobs,
+            "_latest_command_loaded": True,
+            "_latest_command": None,
+        }
+        alerts.sync_worker_alert(worker_public_payload(alert_worker_record, admin=True))
         command = db.get_next_worker_command(worker_id)
         commands = []
         for job_id in cancelled_job_ids:
