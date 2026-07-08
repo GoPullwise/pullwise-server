@@ -254,11 +254,9 @@ breaking the required idle heartbeat concurrency shape.
 Each leased v1 run must also have a first-class `review_runs` row. Create or
 refresh it when a lease is issued, update its progress from accepted run events,
 and finalize it from the terminal result envelope by storing summary,
-quality-gate, usage, progress, error, and raw envelope JSON. Retry attempts must
-not reuse a prior terminal run namespace: attempt 1 may use `run_<job_id>` for
-backward compatibility, while attempt N must use an attempt-scoped run id such
-as `run_<job_id>_attempt_<N>` so progress event sequences, artifacts, and result
-idempotency are isolated per attempt. Web/admin terminal views should read
+quality-gate, usage, progress, error, and raw envelope JSON. Scan jobs run once
+only, so each job has one terminal run namespace and recovery paths must not
+create attempt-scoped replacement runs. Web/admin terminal views should read
 server-owned run state and artifact metadata instead of parsing raw worker
 artifact internals. Detailed scan payloads should expose this as a `reviewRun`
 object with public terminal state and artifact metadata, never raw artifact
