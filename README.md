@@ -369,19 +369,18 @@ probe:
   129.1s and p95 about 129.2s; the 100-worker probe improved to 100/100 success
   with p50/p95 about 43.5s. This is still a failing scale signal because
   progress event latency remains minute-scale.
-- `--operation heartbeat --workers 100 --uploads 100 --concurrency 100`: 100/100
-  success, p50 about 69s and p95 about 69s, showing the current bottleneck is
-  systemic rather than only artifact or event payload size.
+
 - Earlier `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
   300/300 success, p50 about 196s and p95 about 222s.
 - `--operation lease --workers 100 --uploads 100 --concurrency 100`: after
-  moving recovery out of the lease hot path and refreshing worker presence on
-  valid lease requests, 100/100 succeeded, p50 about 62s and p95 about 78s.
+  moving recovery out of the lease hot path, creating `review_runs` inside the
+  claim transaction, and skipping presence rewrites for already-ready workers,
+  100/100 succeeded with p50 about 44.2s and p95 about 51.1s.
 - `--operation lease --workers 300 --uploads 300 --concurrency 300`: after the
-  same lease hot-path changes, `offline` 503s were eliminated, but only 199/300
-  completed within a 240s request timeout; p50 about 216s and p95 hit the 240s
-  timeout. Earlier, before these changes, the same probe had 198/300 success and
-  102 `503 Worker is not ready to claim jobs: offline` responses.
+  same lease hot-path changes, `offline` 503s were eliminated and 300/300
+  completed on July 8, 2026, with p50 about 138.5s and p95 about 158.1s. Earlier,
+  before these changes, only 199/300 completed within a 240s request timeout and
+  p95 hit the timeout.
 
 Treat these as a failing scale signal, not a production capacity claim. The
 current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
