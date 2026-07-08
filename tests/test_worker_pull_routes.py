@@ -1687,6 +1687,45 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(lease.status, HTTPStatus.OK)
         self.assertIsNone(lease.payload["job"])
         self.assertEqual(lease.payload["reason"], "intent_test_validation_unavailable")
+    def test_v1_worker_lease_refreshes_presence_before_claiming(self) -> None:
+        scan = {
+            "id": "sc_stale_lease_presence",
+            "repo": "acme/stale-lease-presence",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": 200,
+            "queuedAt": 200,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_1",
+                "version": "0.1.0",
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "running_jobs": 0,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "ready_providers": ["codex"],
+                "timestamp": 100,
+            }
+        )
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        with patch("pullwise_server.app.now", return_value=300):
+            app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        self.assertEqual(lease.payload["job"]["job_id"], job["job_id"])
+        stored_worker = db.get_worker("wk_1")
+        self.assertEqual(stored_worker["last_heartbeat_at"], 300)
+        self.assertNotEqual(app.computed_worker_status(stored_worker, timestamp=300), "offline")
     def test_v1_worker_lease_blocks_idle_worker_when_codex_quota_is_not_ready(self) -> None:
         user = {"id": "usr_quota_blocked", "name": "Owner", "providers": []}
         app.USERS = {user["id"]: user}
@@ -5441,6 +5480,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
 
 
 

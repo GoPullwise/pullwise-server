@@ -2112,6 +2112,29 @@ def get_worker_by_token(
             return row_to_dict(row)
 
 
+def touch_worker_presence(worker_id: str, *, timestamp: int | None = None) -> dict[str, Any] | None:
+    ensure_initialized()
+    worker_id = str(worker_id or "").strip()
+    if not worker_id:
+        return None
+    current_time = int(timestamp if timestamp is not None else time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            updated = connection.execute(
+                """
+                UPDATE workers
+                SET status = 'online',
+                    last_heartbeat_at = ?,
+                    updated_at = ?
+                WHERE worker_id = ? AND enabled = 1 AND deleted_at IS NULL
+                """,
+                (current_time, current_time, worker_id),
+            ).rowcount
+            if updated <= 0:
+                return None
+            return row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone())
+
 def upsert_worker_heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     ensure_initialized()
     worker_id = str(record.get("worker_id") or "").strip()
@@ -6242,6 +6265,7 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
+
 
 
 
