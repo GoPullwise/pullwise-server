@@ -5537,7 +5537,6 @@ def store_review_run_artifact(
     staged_content = stage_review_artifact_content(run_id, artifact_id, content, sha256) if content is not None else None
     staged_content_committed = False
     try:
-        # TEMP PERF EXPERIMENT: remove Python DB lock for review artifact insert path.
         with closing(connect()) as connection:
             connection.row_factory = sqlite3.Row
             with connection:
