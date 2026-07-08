@@ -1092,6 +1092,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored_artifact["storage_url"], f"/v1/review-runs/{run_id}/artifacts/art_report_agent")
         self.assertEqual(json.loads(stored_artifact["storage_json"])["url"], f"/v1/review-runs/{run_id}/artifacts/art_report_agent")
         self.assertEqual(json.loads(stored_artifact["inline_json"]), {})
+        self.assertNotIn("content_base64", stored_artifact["payload_json"])
         listed_artifacts = db.list_review_run_artifacts(claimed["job_id"], attempt_id)
         self.assertEqual(listed_artifacts[0]["artifact_id"], "art_report_agent")
         self.assertEqual(listed_artifacts[0]["run_id"], run_id)
@@ -5433,3 +5434,4 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

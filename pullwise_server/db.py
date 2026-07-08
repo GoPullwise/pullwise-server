@@ -5177,18 +5177,108 @@ def _store_scan_job_result_artifact_locked(
     )
 
 
-def review_artifact_inline_json(payload: dict[str, Any], media_type: str, size_bytes: int) -> str | None:
-    if size_bytes > 256 * 1024 or "json" not in str(media_type or "").lower():
-        return None
+def review_artifact_storage_root() -> str:
+    configured = os.environ.get(REVIEW_ARTIFACT_STORAGE_DIR_ENV) or os.environ.get(LEGACY_ARTIFACT_STORAGE_DIR_ENV)
+    if configured:
+        return os.path.abspath(configured)
+    database_parent = os.path.dirname(os.path.abspath(database_path()))
+    return os.path.join(database_parent, "review-artifacts")
+
+
+def _review_artifact_storage_segment(value: str, fallback: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(value or ""))
+    cleaned = cleaned.strip("._ ")[:128]
+    return cleaned or stable_id("artifact_path", fallback)
+
+
+def review_artifact_content_from_payload(payload: dict[str, Any]) -> bytes | None:
     content_b64_value = payload.get("content_base64") if payload.get("content_base64") is not None else payload.get("contentBase64")
     if content_b64_value is None:
         return None
     try:
-        content = base64.b64decode(str(content_b64_value).encode("ascii"), validate=True)
+        return base64.b64decode(str(content_b64_value).encode("ascii"), validate=True)
+    except (ValueError, binascii.Error):
+        return None
+
+
+def review_artifact_payload_without_content(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized = to_jsonable(payload)
+    if not isinstance(sanitized, dict):
+        return {}
+    sanitized.pop("content_base64", None)
+    sanitized.pop("contentBase64", None)
+    return sanitized
+
+
+def review_artifact_inline_json(content: bytes | None, media_type: str, size_bytes: int) -> str | None:
+    if content is None or size_bytes > 256 * 1024 or "json" not in str(media_type or "").lower():
+        return None
+    try:
         decoded = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, binascii.Error, json.JSONDecodeError):
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
         return None
     return json.dumps(to_jsonable(decoded), ensure_ascii=False, sort_keys=True)
+
+
+def stage_review_artifact_content(run_id: str, artifact_id: str, content: bytes, sha256: str) -> tuple[str, str, str]:
+    run_segment = _review_artifact_storage_segment(run_id, f"{run_id}:run")
+    artifact_segment = _review_artifact_storage_segment(artifact_id, f"{run_id}:{artifact_id}")
+    sha_segment = _review_artifact_storage_segment(sha256, f"{run_id}:{artifact_id}:sha")[:64]
+    relative_path = os.path.join(run_segment, f"{artifact_segment}-{sha_segment}.bin")
+    root = review_artifact_storage_root()
+    final_path = os.path.abspath(os.path.join(root, relative_path))
+    root_path = os.path.abspath(root)
+    if os.path.commonpath([root_path, final_path]) != root_path:
+        raise ValueError("artifact content path escapes storage root")
+    os.makedirs(os.path.dirname(final_path), exist_ok=True)
+    temp_path = f"{final_path}.{threading.get_ident()}.{time.time_ns()}.tmp"
+    with open(temp_path, "wb") as handle:
+        handle.write(content)
+    return relative_path.replace(os.sep, "/"), temp_path, final_path
+
+
+def discard_staged_review_artifact_content(staged: tuple[str, str, str] | None) -> None:
+    if not staged:
+        return
+    temp_path = staged[1]
+    try:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+    except OSError:
+        pass
+
+
+def commit_staged_review_artifact_content(staged: tuple[str, str, str] | None) -> str:
+    if not staged:
+        return ""
+    relative_path, temp_path, final_path = staged
+    os.replace(temp_path, final_path)
+    return relative_path
+
+
+def review_artifact_content_file_path(row: dict[str, Any]) -> str | None:
+    content_path = str(row.get("content_path") or "").strip()
+    if not content_path:
+        return None
+    normalized = os.path.normpath(content_path.replace("\\", os.sep).replace("/", os.sep))
+    if os.path.isabs(normalized) or normalized == ".." or normalized.startswith(f"..{os.sep}"):
+        return None
+    root = os.path.abspath(review_artifact_storage_root())
+    full_path = os.path.abspath(os.path.join(root, normalized))
+    if os.path.commonpath([root, full_path]) != root:
+        return None
+    return full_path
+
+
+def review_artifact_content_bytes(row: dict[str, Any]) -> bytes | None:
+    full_path = review_artifact_content_file_path(row)
+    if not full_path:
+        return None
+    try:
+        with open(full_path, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
 
 
 REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log", "debug_bundle"}
@@ -6131,3 +6221,4 @@ def quota_bucket_id(scope_type: str, scope_id: str, period: str, plan: str) -> s
 
 def quota_ledger_id(*parts: object) -> str:
     return stable_id("ql", ":".join(str(part or "") for part in parts))
+
