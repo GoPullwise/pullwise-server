@@ -3133,6 +3133,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         capabilities = body.get("capabilities") if isinstance(body.get("capabilities"), dict) else {}
         if capabilities.get("intent_test_validation") is not True:
             return self.json({"lease": None, "retry_after_seconds": 60, "job": None, "reason": "intent_test_validation_unavailable"})
+        return self.json({"lease": None, "retry_after_seconds": 10, "job": None, "reason": "temp_bypass_claim"})
         lease_timestamp = now()
         allowed, worker_status = worker_can_claim(worker_record, timestamp=lease_timestamp)
         if not allowed and worker_status == "offline":
