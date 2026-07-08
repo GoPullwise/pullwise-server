@@ -4147,7 +4147,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             and segments[:2] == ["v1", "review-runs"]
             and segments[3] in {"artifacts", "result"}
             and str(self.headers.get("Content-Encoding") or "").strip().lower() == "gzip"
-            and worker_token_record(self)
+            and worker_token_record(self, update_last_used=False)
         )
         if is_worker_review_payload:
             limit = max_decompressed_body_bytes()
