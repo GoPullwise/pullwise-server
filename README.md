@@ -342,6 +342,32 @@ to 50 MiB, while ordinary request bodies default to `PULLWISE_MAX_BODY_BYTES`
 1 MiB. The current SQLite backend serializes writes, so successful concurrent
 uploads prove correctness, not unlimited throughput.
 
+Latest local 300-worker burst results on a Windows development host with the
+in-process probe:
+
+- `--operation heartbeat --workers 300 --uploads 300 --concurrency 300`: 300/300
+  success after request backlog/token hot-path/heartbeat throttling changes,
+  but p50 was about 177s and p95 about 201s.
+- `--operation event --workers 300 --uploads 300 --concurrency 300`: 300/300
+  success, p50 about 231s and p95 about 250s.
+- `--operation artifact --workers 300 --uploads 300 --concurrency 300 --artifact-kib 32`:
+  300/300 success, p50 about 71s and p95 about 93s.
+- `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
+  300/300 success, p50 about 196s and p95 about 222s.
+
+Treat these as a failing scale signal, not a production capacity claim. The
+current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
+single process-wide `_LOCK`, worker token lookup/last-used updates, active
+heartbeat/progress persistence, progress event fan-out across multiple tables,
+artifact JSON/base64 storage in SQLite, and queue claiming through serialized
+`BEGIN IMMEDIATE` transactions. `PULLWISE_HTTP_REQUEST_QUEUE_SIZE` defaults to
+512 so a 300-worker burst can at least enter the process, and
+`PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS` defaults to 30 so heartbeat does
+not persist progress on every active ping. For real 300-worker operation, move
+artifact bytes out of SQLite, reduce hot-path per-request writes, batch or
+throttle progress/heartbeat persistence, and run behind a production WSGI/ASGI
+server or external queue before relying on this backend.
+
 ### Billing Provider Configuration
 
 Creem:

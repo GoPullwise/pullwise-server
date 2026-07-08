@@ -3709,7 +3709,11 @@ def renew_worker_scan_job_leases(
             cursor = connection.execute(
                 f"""
                 UPDATE scan_jobs
-                SET timeout_at = CASE
+                SET status = CASE
+                        WHEN status = 'claimed' THEN 'running'
+                        ELSE status
+                    END,
+                    timeout_at = CASE
                         WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
                         ELSE timeout_at
                     END,

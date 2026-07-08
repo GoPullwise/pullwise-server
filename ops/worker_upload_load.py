@@ -17,7 +17,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-OPERATIONS = {"artifact", "event", "heartbeat", "result", "mixed"}
+OPERATIONS = {"artifact", "event", "heartbeat", "lease", "result", "mixed"}
 REQUIRED_COMPLETED_ARTIFACTS = (
     ("art_report_human", "report.human", "report.md", "text/markdown", "human-markdown-report"),
     ("art_report_agent", "report.agent", "report.agent.json", "application/json", "codex-full-repo-review"),
@@ -280,6 +280,77 @@ def seed_result_artifacts(db: Any, runs: list[dict[str, Any]]) -> None:
             )
 
 
+def seed_idle_workers_and_queued_jobs(app: Any, db: Any, worker_count: int) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    for index in range(1, worker_count + 1):
+        worker_id = f"wk_load_{index:03d}"
+        worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})
+        token = str(worker["worker_token"])
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": worker_id,
+                "version": "load-probe",
+                "provider": "codex",
+                "provider_chain": ["codex"],
+                "running_jobs": 0,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "ready_providers": ["codex"],
+                "timestamp": app.now(),
+            }
+        )
+        scan_id = f"sc_load_{index:03d}"
+        app.SCANS.append(
+            {
+                "id": scan_id,
+                "repo": f"acme/load-{index:03d}",
+                "branch": "main",
+                "commit": "abc1234",
+                "status": "queued",
+                "userId": "usr_load",
+                "createdAt": app.now() + index,
+                "queuedAt": app.now() + index,
+                "progress": 0,
+                "phase": None,
+            }
+        )
+        db.create_scan_job(
+            {
+                "job_id": f"job_load_{index:03d}",
+                "scan_id": scan_id,
+                "repo": f"acme/load-{index:03d}",
+                "branch": "main",
+                "commit": "abc1234",
+                "status": "queued",
+                "created_at": app.now() + index,
+                "user_id": "usr_load",
+                "max_attempts": 1,
+            }
+        )
+        runs.append({"worker_id": worker_id, "token": token})
+    return runs
+
+
+def lease_payload(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "protocol_version": "review-worker-protocol/v1",
+        "worker_id": str(run["worker_id"]),
+        "capacity": {
+            "available_job_slots": 1,
+            "active_jobs": 0,
+            "maintains_local_queue": False,
+            "local_queue_depth": 0,
+        },
+        "capabilities": {
+            "full_repo_scan": True,
+            "codex_app_server": True,
+            "isolated_codex_home": True,
+            "progress_events": True,
+            "cancellation": True,
+            "intent_test_validation": True,
+        },
+    }
+
 def seed_runs(app: Any, db: Any, worker_count: int) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     for index in range(1, worker_count + 1):
@@ -352,6 +423,8 @@ def request_for_operation(base_url: str, run: dict[str, Any], operation: str, re
         return f"{base_url}/v1/review-runs/{run['run_id']}/events", progress_event_payload(run, sequence, args.event_kib)
     if operation == "heartbeat":
         return f"{base_url}/v1/workers/{run['worker_id']}/heartbeat", heartbeat_payload(run, request_index)
+    if operation == "lease":
+        return f"{base_url}/v1/workers/{run['worker_id']}/lease", lease_payload(run)
     if operation == "result":
         return f"{base_url}/v1/review-runs/{run['run_id']}/result", result_payload(run)
     raise ValueError(f"unsupported operation: {operation}")
@@ -389,7 +462,7 @@ def main() -> int:
     app.ISSUES = []
     db.ensure_initialized()
 
-    runs = seed_runs(app, db, args.workers)
+    runs = seed_idle_workers_and_queued_jobs(app, db, args.workers) if args.operation == "lease" else seed_runs(app, db, args.workers)
     if args.operation == "result":
         seed_result_artifacts(db, runs)
     httpd = app.PullwiseThreadingHTTPServer((args.host, args.port), app.PullwiseHandler)
@@ -402,8 +475,8 @@ def main() -> int:
     next_request = 0
     next_lock = threading.Lock()
     result_lock = threading.Lock()
-    run_locks = {str(run["run_id"]): threading.Lock() for run in runs}
-    run_sequences = {str(run["run_id"]): 0 for run in runs}
+    run_locks = {str(run.get("run_id") or run["worker_id"]): threading.Lock() for run in runs}
+    run_sequences = {str(run.get("run_id") or run["worker_id"]): 0 for run in runs}
     latencies_by_operation: dict[str, list[float]] = {}
     statuses_by_operation: dict[str, dict[int, int]] = {}
     errors: list[str] = []
@@ -425,7 +498,7 @@ def main() -> int:
                 next_request += 1
             run = runs[request_index % len(runs)] if args.operation != "result" else runs[request_index]
             operation = choose_operation(request_index)
-            run_id = str(run["run_id"])
+            run_id = str(run.get("run_id") or run["worker_id"])
             lock = run_locks[run_id] if operation in {"event", "result"} else threading.Lock()
             with lock:
                 if operation == "event":
