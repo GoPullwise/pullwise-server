@@ -336,7 +336,12 @@ The probe starts a local in-process `ThreadingHTTPServer` with a temporary
 SQLite database, seeds one claimed v1 run per simulated worker, then sends real
 worker v1 HTTP requests using worker bearer tokens. It reports status counts,
 RPS, and p50/p95/p99 latency. Use it before raising worker fleet size, artifact
-size limits, heartbeat frequency, or progress-event frequency. Authenticated
+size limits, heartbeat frequency, or progress-event frequency. This is a server
+control-plane load probe, not a worker execution benchmark: simulated workers do
+not run Codex, clone repositories, analyze files, or upload real review output.
+In production, worker execution is distributed across many machines; these local
+burst results should be interpreted as pressure on the server's HTTP accept path,
+authentication, lease/event/artifact handlers, and database writes. Authenticated
 gzip worker artifact/result uploads use `PULLWISE_MAX_DECOMPRESSED_BODY_BYTES`,
 defaulting to 50 MiB, while ordinary request bodies default to
 `PULLWISE_MAX_BODY_BYTES` 1 MiB. Artifact bytes are stored outside SQLite under
