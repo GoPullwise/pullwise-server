@@ -354,6 +354,10 @@ in-process probe:
   300/300 success, p50 about 71s and p95 about 93s.
 - `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
   300/300 success, p50 about 196s and p95 about 222s.
+- `--operation lease --workers 300 --uploads 300 --concurrency 300`: 198/300
+  success; 102 workers received `503 Worker is not ready to claim jobs: offline`
+  because the serialized claim storm lasted longer than the default 120s worker
+  heartbeat timeout.
 
 Treat these as a failing scale signal, not a production capacity claim. The
 current bottlenecks are the single-process `ThreadingHTTPServer`, SQLite's
