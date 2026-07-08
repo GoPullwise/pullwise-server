@@ -389,9 +389,9 @@ probe:
   construction or scan mirror dirty marking, produced the large improvement.
 - `--operation lease --workers 300 --uploads 300 --concurrency 300`: after the
   same lease hot-path changes, `offline` 503s were eliminated and 300/300
-  completed on July 8, 2026, with `--timeout-seconds 300`, p50 about 82.1s and
-  p95 about 82.3s. Earlier, before these changes, only 199/300 completed within
-  a 240s request timeout and p95 hit the timeout; an intermediate serialized
+  completed on July 8, 2026, with the default request timeout, p50 about 72.7s
+  and p95 about 73.1s. Earlier, before these changes, only 199/300 completed
+  within a 240s request timeout and p95 hit the timeout; an intermediate serialized
   claim path completed 300/300 with p50 about 138.5s and p95 about 158.1s.
 
 Treat these as a failing scale signal, not a production capacity claim. The
