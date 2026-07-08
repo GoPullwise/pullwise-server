@@ -141,8 +141,12 @@ def user_limit_for_plan(plan: str) -> int:
     return system_config.plan_user_review_limit(normalize_plan(plan))
 
 
+def repository_review_limit() -> int:
+    return system_config.repository_review_limit()
+
+
 def repository_limit_for_plan(plan: str) -> int:
-    return system_config.plan_repository_review_limit(normalize_plan(plan))
+    return repository_review_limit()
 
 
 def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: int | None = None) -> tuple[str, int]:
@@ -192,6 +196,14 @@ def quota_entitlement_for_user(user: dict[str, Any] | None, *, timestamp: int | 
         "repositoryLimit": repository_limit_for_plan(plan),
     }
 
+def quota_entitlement_for_repository(*, timestamp: int | None = None) -> dict[str, Any]:
+    period = current_period(timestamp)
+    return {
+        "plan": "repository",
+        "period": period,
+        "resetAt": reset_at_for_period(period),
+        "repositoryLimit": repository_review_limit(),
+    }
 
 def repository_quota_scope_id(repository: dict[str, Any]) -> str:
     if non_negative_int(repository.get("fork")) > 0:
@@ -345,7 +357,7 @@ def reset_user_quota(user: dict[str, Any], *, timestamp: int | None = None) -> d
 
 
 def quota_payload_for_repository(repository: dict[str, Any], user: dict[str, Any] | None = None, *, timestamp: int | None = None) -> dict[str, Any]:
-    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+    entitlement = quota_entitlement_for_repository(timestamp=timestamp)
     bucket = ensure_quota_bucket(
         scope_type="repository",
         scope_id=repository_quota_scope_id(repository),
@@ -428,12 +440,16 @@ def reserve_scan_quota(
     timestamp: int | None = None,
 ) -> dict[str, Any]:
     db.ensure_initialized()
-    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
-    plan = entitlement["plan"]
-    period = entitlement["period"]
-    reset_at = entitlement["resetAt"]
-    user_limit = entitlement["userLimit"]
-    repository_limit = entitlement["repositoryLimit"]
+    user_entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+    repository_entitlement = quota_entitlement_for_repository(timestamp=timestamp)
+    plan = user_entitlement["plan"]
+    period = user_entitlement["period"]
+    reset_at = user_entitlement["resetAt"]
+    user_limit = user_entitlement["userLimit"]
+    repository_plan = repository_entitlement["plan"]
+    repository_period = repository_entitlement["period"]
+    repository_reset_at = repository_entitlement["resetAt"]
+    repository_limit = repository_entitlement["repositoryLimit"]
     user_id = str(user["id"])
     repository_id = str(repository["id"])
     repository_scope_id = repository_quota_scope_id(repository)
@@ -471,10 +487,10 @@ def reserve_scan_quota(
                 connection,
                 scope_type="repository",
                 scope_id=repository_scope_id,
-                period=period,
-                plan=plan,
+                period=repository_period,
+                plan=repository_plan,
                 limit=repository_limit,
-                reset_at=reset_at,
+                reset_at=repository_reset_at,
             )
             if existing_request:
                 connection.commit()
@@ -500,7 +516,7 @@ def reserve_scan_quota(
                 connection.rollback()
                 raise QuotaExceeded(
                     "QUOTA_EXCEEDED_REPOSITORY",
-                    "This repository has used its scan quota for the current billing period.",
+                    "This repository has used its scan quota for the current calendar month.",
                     repo_id=repository_id,
                 )
 
@@ -578,24 +594,25 @@ def consume_reserved_scan_quota(
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
         try:
-            entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+            user_entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+            repository_entitlement = quota_entitlement_for_repository(timestamp=timestamp)
             user_bucket = _ensure_quota_bucket(
                 connection,
                 scope_type="user",
                 scope_id=str(user["id"]),
-                period=entitlement["period"],
-                plan=entitlement["plan"],
-                limit=entitlement["userLimit"],
-                reset_at=entitlement["resetAt"],
+                period=user_entitlement["period"],
+                plan=user_entitlement["plan"],
+                limit=user_entitlement["userLimit"],
+                reset_at=user_entitlement["resetAt"],
             )
             repository_bucket = _ensure_quota_bucket(
                 connection,
                 scope_type="repository",
                 scope_id=repository_quota_scope_id(repository),
-                period=entitlement["period"],
-                plan=entitlement["plan"],
-                limit=entitlement["repositoryLimit"],
-                reset_at=entitlement["resetAt"],
+                period=repository_entitlement["period"],
+                plan=repository_entitlement["plan"],
+                limit=repository_entitlement["repositoryLimit"],
+                reset_at=repository_entitlement["resetAt"],
             )
             existing_consumed = connection.execute(
                 f"""
@@ -858,12 +875,16 @@ def consume_scan_quota(
     timestamp: int | None = None,
 ) -> dict[str, Any]:
     db.ensure_initialized()
-    entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
-    plan = entitlement["plan"]
-    period = entitlement["period"]
-    reset_at = entitlement["resetAt"]
-    user_limit = entitlement["userLimit"]
-    repository_limit = entitlement["repositoryLimit"]
+    user_entitlement = quota_entitlement_for_user(user, timestamp=timestamp)
+    repository_entitlement = quota_entitlement_for_repository(timestamp=timestamp)
+    plan = user_entitlement["plan"]
+    period = user_entitlement["period"]
+    reset_at = user_entitlement["resetAt"]
+    user_limit = user_entitlement["userLimit"]
+    repository_plan = repository_entitlement["plan"]
+    repository_period = repository_entitlement["period"]
+    repository_reset_at = repository_entitlement["resetAt"]
+    repository_limit = repository_entitlement["repositoryLimit"]
     user_id = str(user["id"])
     repository_id = str(repository["id"])
     repository_scope_id = repository_quota_scope_id(repository)
@@ -900,10 +921,10 @@ def consume_scan_quota(
                 connection,
                 scope_type="repository",
                 scope_id=repository_scope_id,
-                period=period,
-                plan=plan,
+                period=repository_period,
+                plan=repository_plan,
                 limit=repository_limit,
-                reset_at=reset_at,
+                reset_at=repository_reset_at,
             )
             if existing_request:
                 connection.commit()
@@ -929,7 +950,7 @@ def consume_scan_quota(
                 connection.rollback()
                 raise QuotaExceeded(
                     "QUOTA_EXCEEDED_REPOSITORY",
-                    "This repository has used its scan quota for the current billing period.",
+                    "This repository has used its scan quota for the current calendar month.",
                     repo_id=repository_id,
                 )
 

@@ -23,22 +23,22 @@ DEFAULT_CONFIG = {
     "plans": {
         "free": {
             "userReviewLimit": 5,
-            "repositoryReviewLimit": 5,
             "maxRepoFiles": 200,
             "maxRepoBytes": 5 * 1024 * 1024,
         },
         "pro": {
             "userReviewLimit": 60,
-            "repositoryReviewLimit": 60,
             "maxRepoFiles": 1000,
             "maxRepoBytes": 20 * 1024 * 1024,
         },
         "max": {
             "userReviewLimit": 90,
-            "repositoryReviewLimit": 90,
             "maxRepoFiles": 2000,
             "maxRepoBytes": 50 * 1024 * 1024,
         },
+    },
+    "quota": {
+        "repositoryReviewLimit": 1000,
     },
     "scan": {
         "maxQueuedScansGlobal": 1000,
@@ -102,13 +102,6 @@ FIELD_METADATA = [
                     "description": f"Maximum monthly scans one {plan.title()} user can start across all repositories.",
                 },
                 {
-                    "path": f"plans.{plan}.repositoryReviewLimit",
-                    "label": f"{plan.title()} repository review limit",
-                    "type": "integer",
-                    "min": 0,
-                    "description": f"Maximum monthly scans allowed for a single repository under the {plan.title()} plan.",
-                },
-                {
                     "path": f"plans.{plan}.maxRepoFiles",
                     "label": f"{plan.title()} repository file limit",
                     "type": "integer",
@@ -126,6 +119,19 @@ FIELD_METADATA = [
         ],
     },
     {
+        "id": "quota",
+        "title": "Repository quota",
+        "description": "Global monthly repository scan quota shared across all users for the same repository.",
+        "fields": [
+            {
+                "path": "quota.repositoryReviewLimit",
+                "label": "Repository monthly review limit",
+                "type": "integer",
+                "min": 0,
+                "description": "Maximum calendar-month scans allowed for one repository across all users and subscription plans.",
+            },
+        ],
+    },    {
         "id": "scan",
         "title": "Scan scheduling",
         "description": "Global queue and lease policy used by the server and worker job payloads.",
@@ -448,6 +454,7 @@ def public_docs_payload() -> dict:
         "source": "database",
         "settings": {
             "plans": current["plans"],
+            "quota": current["quota"],
             "scan": {
                 "maxQueuedScansGlobal": current["scan"]["maxQueuedScansGlobal"],
             },
@@ -487,12 +494,6 @@ def public_docs_groups(current: dict, *, pro_products: list[str], max_products: 
                         f"Maximum scans one {plan.title()} user can start in a billing cycle.",
                     ),
                     public_field(
-                        f"plans.{plan}.repositoryReviewLimit",
-                        f"{plan.title()} repository monthly scans",
-                        current["plans"][plan]["repositoryReviewLimit"],
-                        f"Maximum scans one repository can receive in a billing cycle for {plan.title()} users.",
-                    ),
-                    public_field(
                         f"plans.{plan}.maxRepoFiles",
                         f"{plan.title()} repository file limit",
                         current["plans"][plan]["maxRepoFiles"],
@@ -505,6 +506,19 @@ def public_docs_groups(current: dict, *, pro_products: list[str], max_products: 
                         f"Repository checkouts above this size stop before verifier or AI review for {plan.title()} users.",
                     ),
                 )
+            ],
+        },
+        {
+            "id": "quota",
+            "title": "Repository quota",
+            "description": "Global repository scan quota shared across all users for the same repository.",
+            "fields": [
+                public_field(
+                    "quota.repositoryReviewLimit",
+                    "Repository monthly scans",
+                    current["quota"]["repositoryReviewLimit"],
+                    "Maximum scans one repository can receive in a UTC calendar month across all users and subscription plans.",
+                ),
             ],
         },
         {
@@ -879,8 +893,12 @@ def plan_user_review_limit(plan: object) -> int:
     return max(0, int_setting(f"plans.{plan_id(plan)}.userReviewLimit"))
 
 
+def repository_review_limit() -> int:
+    return max(0, int_setting("quota.repositoryReviewLimit"))
+
+
 def plan_repository_review_limit(plan: object) -> int:
-    return max(0, int_setting(f"plans.{plan_id(plan)}.repositoryReviewLimit"))
+    return repository_review_limit()
 
 
 def plan_repository_file_limit(plan: object) -> int:

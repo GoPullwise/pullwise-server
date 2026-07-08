@@ -2121,6 +2121,33 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claimed_run["worker_id"], "wk_1")
         self.assertEqual(claimed_run["status"], "leased")
 
+    def test_v1_worker_lease_skips_presence_refresh_when_worker_is_already_ready(self) -> None:
+        scan = {
+            "id": "sc_fresh_lease_presence",
+            "repo": "acme/fresh-lease-presence",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        with patch.object(
+            app.db,
+            "touch_worker_presence",
+            side_effect=AssertionError("fresh claim-ready worker should not rewrite presence before lease claim"),
+        ):
+            app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        self.assertEqual(lease.payload["job"]["job_id"], job["job_id"])
     def test_v1_worker_lease_refreshes_presence_before_claiming(self) -> None:
         scan = {
             "id": "sc_stale_lease_presence",

@@ -86,8 +86,8 @@ def review_limit(plan: str) -> int:
     return system_config.plan_user_review_limit(normalize_plan(plan, default="free"))
 
 
-def repository_review_limit(plan: str) -> int:
-    return system_config.plan_repository_review_limit(normalize_plan(plan, default="free"))
+def repository_review_limit(plan: str | None = None) -> int:
+    return system_config.repository_review_limit()
 
 
 def repository_limits(plan: str) -> dict:

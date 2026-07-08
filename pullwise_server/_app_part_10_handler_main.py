@@ -3123,10 +3123,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         capabilities = body.get("capabilities") if isinstance(body.get("capabilities"), dict) else {}
         if capabilities.get("intent_test_validation") is not True:
             return self.json({"lease": None, "retry_after_seconds": 60, "job": None, "reason": "intent_test_validation_unavailable"})
-        refreshed_worker_record = db.touch_worker_presence(worker_id, timestamp=now())
-        if refreshed_worker_record:
-            worker_record = refreshed_worker_record
-        allowed, worker_status = worker_can_claim(worker_record)
+        lease_timestamp = now()
+        allowed, worker_status = worker_can_claim(worker_record, timestamp=lease_timestamp)
+        if not allowed and worker_status == "offline":
+            refreshed_worker_record = db.touch_worker_presence(worker_id, timestamp=lease_timestamp)
+            if refreshed_worker_record:
+                worker_record = refreshed_worker_record
+                allowed, worker_status = worker_can_claim(worker_record, timestamp=lease_timestamp)
         if not allowed:
             return self.error(
                 HTTPStatus.SERVICE_UNAVAILABLE,

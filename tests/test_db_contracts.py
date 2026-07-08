@@ -989,6 +989,37 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(current_job["status"], "claimed")
         self.assertEqual(result_count, 0)
 
+    def test_claim_next_scan_job_does_not_claim_second_attempt_even_if_row_allows_more(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                db.create_scan_job(
+                    {
+                        "job_id": "job_no_second_attempt",
+                        "scan_id": "sc_no_second_attempt",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": 100,
+                        "user_id": "usr_1",
+                        "max_attempts": 3,
+                    }
+                )
+                with db._LOCK, db.closing(db.connect()) as connection:
+                    connection.execute(
+                        "UPDATE scan_jobs SET attempt = 1 WHERE job_id = ?",
+                        ("job_no_second_attempt",),
+                    )
+                    connection.commit()
+                claimed = db.claim_next_scan_job("wk_single", lease_seconds=3600, timestamp=120)
+                stored = db.get_scan_job("job_no_second_attempt")
+
+        self.assertIsNone(claimed)
+        self.assertEqual(stored["status"], "failed")
+        self.assertEqual(stored["error"], "scan_attempts_exhausted")
+        self.assertEqual(stored["attempt"], 1)
     def test_failed_scan_job_result_does_not_requeue(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, 'pullwise.sqlite3')
