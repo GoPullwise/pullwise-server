@@ -926,6 +926,10 @@ def max_queued_scans_global() -> int:
 
 
 
+def scan_job_max_attempts() -> int:
+    return 1
+
+
 def scan_job_lease_seconds() -> int:
     return max(60, int_setting("scan.jobLeaseSeconds"))
 

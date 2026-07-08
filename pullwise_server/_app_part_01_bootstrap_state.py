@@ -1025,28 +1025,43 @@ def recover_interrupted_scans() -> int:
         recovered += reconstruct_orphan_scan_jobs_locked()
         recovered += rollback_orphan_scan_quota_locked()
         recovered += reconcile_completed_scan_job_results_locked()
-        recovered += apply_recovered_scan_jobs_locked(recovered_jobs)
+        current_recovered_jobs = []
+        for recovered_job in recovered_jobs:
+            recovered_job_id = public_issue_text(recovered_job.get("job_id"))
+            if recovered_job_id and db.get_completed_scan_job_result(recovered_job_id):
+                continue
+            current_job = db.get_scan_job(recovered_job_id)
+            if current_job and public_issue_text(current_job.get("status")) != public_issue_text(recovered_job.get("status")):
+                continue
+            current_recovered_jobs.append(recovered_job)
+        recovered += apply_recovered_scan_jobs_locked(current_recovered_jobs)
+        recovered += reconcile_completed_scan_job_results_locked()
         for scan in SCANS:
             if reconcile_terminal_reserved_scan_quota_locked(scan):
                 recovered += 1
         for scan in SCANS:
+            job_id = public_issue_text(scan.get("jobId"))
+            job = db.get_scan_job(job_id) if job_id else None
+            if job and public_issue_text(job.get("status")) in {"done", "partial_completed"}:
+                if reconcile_scan_job_state_locked(scan):
+                    recovered += 1
+                continue
+            if job and public_issue_text(job.get("status")) in {"failed", "cancelled"}:
+                if reconcile_terminal_scan_job_locked(scan, job):
+                    recovered += 1
+                continue
             if scan.get("status") != "running":
                 continue
-            job_id = public_issue_text(scan.get("jobId"))
-            if job_id:
-                job = db.get_scan_job(job_id)
-                if job and public_issue_text(job.get("status")) in {"done", "failed", "cancelled"}:
-                    if reconcile_terminal_scan_job_locked(scan, job):
-                        recovered += 1
-                    continue
-                if scan_job_has_active_restart_lease(job, timestamp):
-                    if reconcile_scan_job_state_locked(scan):
-                        recovered += 1
-                    continue
+            if scan_job_has_active_restart_lease(job, timestamp):
+                if reconcile_scan_job_state_locked(scan):
+                    recovered += 1
+                continue
             db.fail_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=timestamp)
-            scan["status"] = "queued"
-            scan["progress"] = 0
+            scan["status"] = "failed"
+            scan["progress"] = min(99, public_scan_progress(scan.get("progress")))
             scan["phase"] = None
+            scan["completedAt"] = timestamp
+            scan["error"] = "server_restart"
             scan["recoveredAt"] = timestamp
             scan["recoveryReason"] = "server_restart"
             recovered += 1
