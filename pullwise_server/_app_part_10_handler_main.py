@@ -3159,8 +3159,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 protocol_version=WORKER_PROTOCOL_VERSION,
             )
         except ValueError as exc:
-            return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-        if not job:
+            return self.error(HTTPStatus.BAD_REQUEST, str(exc))        if not job:
             return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
         try:
             payload = scan_job_payload(job, include_clone_token=True)
@@ -3190,7 +3189,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
             if scan and scan.get("status") == "queued":
-                pass  # TEMP EXPERIMENT: skip scan.update and mark_state_dirty
+                scan.update(
+                    {
+                        "status": "running",
+                        "claimedAt": job.get("claimed_at"),
+                        "claimedByWorkerId": worker_id,
+                        "progress": 0,
+                        "phase": None,
+                        "jobId": job.get("job_id"),
+                        "runId": payload.get("run_id"),
+                    }
+                )
+                mark_state_dirty()
         lease = {
             "job_id": payload["job_id"],
             "run_id": payload["run_id"],
