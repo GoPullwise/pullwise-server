@@ -4117,7 +4117,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         )
 
     def request_decompressed_body_limit(self) -> int:
-        if self.current_session() or worker_token_record(self) or self.current_api_key_context():
+        if self.current_session() or worker_token_record(self, update_last_used=False) or self.current_api_key_context():
             return max_decompressed_body_bytes()
         return max_unauthenticated_decompressed_body_bytes()
 

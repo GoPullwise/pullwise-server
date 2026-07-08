@@ -2270,6 +2270,22 @@ class WorkerPullRoutesTest(unittest.TestCase):
         auth_lookup.assert_called_once()
         self.assertIs(auth_lookup.call_args.kwargs.get("update_last_used"), False)
 
+    def test_v1_worker_gzip_body_limit_auth_does_not_touch_token_last_used(self) -> None:
+        payload = v1_worker_heartbeat_payload(status="idle")
+        raw_body = gzip.compress(json.dumps(payload).encode("utf-8"))
+        heartbeat = RouteHarness(
+            "/v1/workers/wk_1/heartbeat",
+            payload,
+            headers={**self.auth, "Content-Encoding": "gzip", "Content-Length": str(len(raw_body))},
+            raw_body=raw_body,
+        )
+
+        with patch.object(app.db, "get_enabled_worker_token", wraps=app.db.get_enabled_worker_token) as auth_lookup:
+            app.PullwiseHandler.route(heartbeat, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertTrue(auth_lookup.call_args_list)
+        self.assertTrue(all(call.kwargs.get("update_last_used") is False for call in auth_lookup.call_args_list))
     def test_v1_worker_lease_refreshes_presence_before_claiming(self) -> None:
         scan = {
             "id": "sc_stale_lease_presence",
