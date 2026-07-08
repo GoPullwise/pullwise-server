@@ -3029,8 +3029,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
-    def require_worker(self, *, allow_disabled: bool = False, include_deleted: bool = False) -> dict | None:
-        record = worker_token_record(self, allow_disabled=allow_disabled, include_deleted=include_deleted)
+    def require_worker(
+        self,
+        *,
+        allow_disabled: bool = False,
+        include_deleted: bool = False,
+        update_last_used: bool = True,
+    ) -> dict | None:
+        record = worker_token_record(
+            self,
+            allow_disabled=allow_disabled,
+            include_deleted=include_deleted,
+            update_last_used=update_last_used,
+        )
         if not record:
             logger.warning(
                 "Rejected worker request path=%s allow_disabled=%s include_deleted=%s bearer_present=%s",
@@ -3084,7 +3095,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_worker_v1_post(self, segments: list[str], body: dict) -> None:
-        worker_record = self.require_worker()
+        worker_record = self.require_worker(update_last_used=False)
         if not worker_record:
             return
         if not isinstance(body, dict):
@@ -3190,7 +3201,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         "runId": payload.get("run_id"),
                     }
                 )
-                db.upsert_scan(scan)
                 mark_state_dirty()
             scan_logging.log_event(
                 "worker_job_claimed",

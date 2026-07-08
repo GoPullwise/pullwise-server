@@ -2047,7 +2047,7 @@ def worker_token_last_used_stale(row: sqlite3.Row, timestamp: int, *, interval_s
     return last_used_at <= 0 or last_used_at <= timestamp - max(1, int(interval_seconds or 60))
 
 
-def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
+def get_enabled_worker_token(token: str, *, update_last_used: bool = True) -> dict[str, Any] | None:
     ensure_initialized()
     token = str(token or "").strip()
     if not token:
@@ -2065,7 +2065,7 @@ def get_enabled_worker_token(token: str) -> dict[str, Any] | None:
                 (token_hash,),
             ).fetchone()
             if row:
-                if worker_token_last_used_stale(row, timestamp):
+                if update_last_used and worker_token_last_used_stale(row, timestamp):
                     connection.execute(
                         "UPDATE worker_tokens SET last_used_at = ? WHERE token_hash = ?",
                         (timestamp, token_hash),

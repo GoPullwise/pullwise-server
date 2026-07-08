@@ -521,6 +521,7 @@ def worker_token_record(
     *,
     allow_disabled: bool = False,
     include_deleted: bool = False,
+    update_last_used: bool = True,
 ) -> dict | None:
     token = bearer_token(handler)
     if not token:
@@ -529,13 +530,13 @@ def worker_token_record(
     if not isinstance(cache, dict):
         cache = {}
         setattr(handler, "_worker_token_record_cache", cache)
-    cache_key = (token, bool(allow_disabled), bool(include_deleted))
+    cache_key = (token, bool(allow_disabled), bool(include_deleted), bool(update_last_used))
     if cache_key in cache:
         return cache[cache_key]
     if allow_disabled:
         record = db.get_worker_by_token(token, allow_disabled=True, include_deleted=include_deleted)
     else:
-        record = db.get_enabled_worker_token(token)
+        record = db.get_enabled_worker_token(token, update_last_used=update_last_used)
     cache[cache_key] = record
     return record
 

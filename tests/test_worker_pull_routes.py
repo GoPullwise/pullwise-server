@@ -2206,6 +2206,63 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(lease.status, HTTPStatus.OK)
         self.assertEqual(lease.payload["job"]["job_id"], job["job_id"])
+
+    def test_v1_worker_lease_does_not_persist_scan_mirror_inline(self) -> None:
+        scan = {
+            "id": "sc_lease_scan_mirror_hot_path",
+            "repo": "acme/lease-scan-mirror-hot-path",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        with patch.object(
+            app.db,
+            "upsert_scan",
+            side_effect=AssertionError("lease claim should not persist scan mirror inline"),
+        ):
+            app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        self.assertEqual(lease.payload["job"]["job_id"], job["job_id"])
+        self.assertEqual(scan["status"], "running")
+        self.assertEqual(scan["claimedByWorkerId"], "wk_1")
+
+    def test_v1_worker_lease_auth_does_not_touch_token_last_used(self) -> None:
+        scan = {
+            "id": "sc_lease_auth_hot_path",
+            "repo": "acme/lease-auth-hot-path",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        with patch.object(app.db, "get_enabled_worker_token", wraps=app.db.get_enabled_worker_token) as auth_lookup:
+            app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        self.assertEqual(lease.payload["job"]["job_id"], job["job_id"])
+        auth_lookup.assert_called_once()
+        self.assertIs(auth_lookup.call_args.kwargs.get("update_last_used"), False)
+
     def test_v1_worker_lease_refreshes_presence_before_claiming(self) -> None:
         scan = {
             "id": "sc_stale_lease_presence",
