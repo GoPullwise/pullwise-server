@@ -3525,8 +3525,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         cancelled_job_ids = []
         active_job_ids_accepting_updates = active_job_ids
         if active_job_ids:
-            cancelled_job_ids = db.worker_job_ids_no_longer_accepting_updates(worker_id, active_job_ids)
-            active_job_ids_accepting_updates = db.worker_job_ids_accepting_updates(worker_id, active_job_ids)
+            job_update_statuses = db.worker_job_update_statuses(worker_id, active_job_ids)
+            cancelled_job_ids = job_update_statuses["no_longer_accepting"]
+            active_job_ids_accepting_updates = job_update_statuses["accepting"]
         running_jobs = public_scan_count(concurrency.get("active_jobs")) if concurrency else 0
         if active_job_ids_provided:
             running_jobs = 1 if running_jobs and active_job_ids_accepting_updates else 0

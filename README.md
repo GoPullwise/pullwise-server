@@ -361,9 +361,11 @@ probe:
   300/300 success with artifact bytes stored outside SQLite, p50 about 72-91s
   and p95 about 94-112s across repeated local runs.
 - `--operation event --workers 300 --uploads 300 --concurrency 300 --event-kib 4`:
-  did not complete within an 8-minute local command timeout after event scan
-  mirror persistence throttling; `--workers 100 --uploads 100 --concurrency 100`
-  succeeded but still had p50 about 62s and p95 about 62s.
+  after combining the review-run event insert and `review_runs` progress upsert
+  into one SQLite transaction, 300/300 succeeded on July 8, 2026, with p50 about
+  129.1s and p95 about 129.2s; the 100-worker probe improved to 100/100 success
+  with p50/p95 about 43.5s. This is still a failing scale signal because
+  progress event latency remains minute-scale.
 - `--operation heartbeat --workers 100 --uploads 100 --concurrency 100`: 100/100
   success, p50 about 69s and p95 about 69s, showing the current bottleneck is
   systemic rather than only artifact or event payload size.

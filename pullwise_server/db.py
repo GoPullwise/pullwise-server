@@ -3776,7 +3776,7 @@ def renew_worker_scan_job_leases(
             return max(0, cursor.rowcount)
 
 
-def worker_job_ids_no_longer_accepting_updates(worker_id: str, job_ids: list[str]) -> list[str]:
+def worker_job_update_statuses(worker_id: str, job_ids: list[str]) -> dict[str, list[str]]:
     ensure_initialized()
     worker_id = str(worker_id or "").strip()
     unique_job_ids = []
@@ -3787,50 +3787,31 @@ def worker_job_ids_no_longer_accepting_updates(worker_id: str, job_ids: list[str
             unique_job_ids.append(job_id)
             seen.add(job_id)
     if not worker_id or not unique_job_ids:
-        return []
+        return {"accepting": [], "no_longer_accepting": []}
     placeholders = ",".join("?" for _ in unique_job_ids)
     with _LOCK, closing(connect()) as connection:
         rows = connection.execute(
             f"""
-            SELECT job_id
+            SELECT job_id, status
             FROM scan_jobs
             WHERE claimed_by_worker_id = ?
               AND job_id IN ({placeholders})
-              AND status NOT IN ('claimed', 'running', 'uploading_result')
             """,
             (worker_id, *unique_job_ids),
         ).fetchall()
-    inactive = {str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()}
-    return [job_id for job_id in unique_job_ids if job_id in inactive]
+    statuses = {str(row[0] or "").strip(): str(row[1] or "").strip() for row in rows if str(row[0] or "").strip()}
+    accepting_statuses = {"claimed", "running", "uploading_result"}
+    accepting = [job_id for job_id in unique_job_ids if statuses.get(job_id) in accepting_statuses]
+    no_longer_accepting = [job_id for job_id in unique_job_ids if job_id in statuses and statuses.get(job_id) not in accepting_statuses]
+    return {"accepting": accepting, "no_longer_accepting": no_longer_accepting}
+
+
+def worker_job_ids_no_longer_accepting_updates(worker_id: str, job_ids: list[str]) -> list[str]:
+    return worker_job_update_statuses(worker_id, job_ids)["no_longer_accepting"]
 
 
 def worker_job_ids_accepting_updates(worker_id: str, job_ids: list[str]) -> list[str]:
-    ensure_initialized()
-    worker_id = str(worker_id or "").strip()
-    unique_job_ids = []
-    seen = set()
-    for value in job_ids or []:
-        job_id = str(value or "").strip()
-        if job_id and job_id not in seen:
-            unique_job_ids.append(job_id)
-            seen.add(job_id)
-    if not worker_id or not unique_job_ids:
-        return []
-    placeholders = ",".join("?" for _ in unique_job_ids)
-    with _LOCK, closing(connect()) as connection:
-        rows = connection.execute(
-            f"""
-            SELECT job_id
-            FROM scan_jobs
-            WHERE claimed_by_worker_id = ?
-              AND job_id IN ({placeholders})
-              AND status IN ('claimed', 'running', 'uploading_result')
-            """,
-            (worker_id, *unique_job_ids),
-        ).fetchall()
-    active = {str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()}
-    return [job_id for job_id in unique_job_ids if job_id in active]
-
+    return worker_job_update_statuses(worker_id, job_ids)["accepting"]
 
 def requeue_worker_unstarted_scan_jobs_missing_from_heartbeat(
     worker_id: str,

@@ -506,6 +506,45 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(run_progress["phase"], "reviewer_fanout")
         self.assertEqual(db.get_scan_job(job["job_id"])["progress"], 42)
 
+    def test_active_heartbeat_uses_combined_job_status_classification(self) -> None:
+        scan = {
+            "id": "sc_heartbeat_status_hot_path",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        lease = self.v1_lease()
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+
+        with (
+            patch.object(app.db, "worker_job_update_statuses", wraps=app.db.worker_job_update_statuses) as combined,
+            patch.object(
+                app.db,
+                "worker_job_ids_no_longer_accepting_updates",
+                side_effect=AssertionError("separate inactive job lookup should not run"),
+            ),
+            patch.object(
+                app.db,
+                "worker_job_ids_accepting_updates",
+                side_effect=AssertionError("separate active job lookup should not run"),
+            ),
+        ):
+            heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        combined.assert_called_once_with("wk_1", [job["job_id"]])
+        self.assertEqual(heartbeat.payload["cancelled_job_ids"], [])
+        self.assertEqual(db.get_worker("wk_1")["running_jobs"], 1)
+
     def test_worker_token_record_is_cached_per_request(self) -> None:
         handler = RouteHarness("/v1/workers/wk_1/heartbeat", headers=self.auth)
         with patch.object(app.db, "get_enabled_worker_token", wraps=app.db.get_enabled_worker_token) as lookup:
@@ -1422,6 +1461,72 @@ class WorkerPullRoutesTest(unittest.TestCase):
         stored = db.get_review_run_artifact(run_id, "art_worker_log")
         self.assertEqual(stored["sha256"], hashlib.sha256(final_content).hexdigest())
 
+    def test_failed_result_duplicate_stays_idempotent_after_final_worker_log_replacement(self) -> None:
+        self.create_claimable_scan_job(
+            job_id="job_failed_duplicate_after_log_replace",
+            scan_id="sc_failed_duplicate_after_log_replace",
+            user_id="usr_1",
+        )
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        manifest = protocol_artifact_manifest(run_id, "failed")
+
+        for item in manifest:
+            content = f"{item['kind']}:{item['name']}\n".encode("utf-8")
+            upload = RouteHarness(
+                f"/v1/review-runs/{run_id}/artifacts",
+                {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "attempt_id": attempt_id,
+                    "run_id": run_id,
+                    "artifact": dict(item),
+                    "content_base64": base64.b64encode(content).decode("ascii"),
+                },
+                headers=self.auth,
+            )
+            app.PullwiseHandler.route(upload, "POST")
+            self.assertEqual(upload.status, HTTPStatus.OK, item["artifact_id"])
+
+        body = {
+            "status": "failed",
+            "attempt_id": attempt_id,
+            "result_checksum": "checksum-failed-duplicate-after-log-replace",
+            "error": "Repository exceeds checkout limit.",
+            "error_code": "REPOSITORY_TOO_LARGE",
+            **audit_result_fields([], execution_status="failed"),
+        }
+        result = self.v1_result(claimed, body)
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertTrue(result.payload["accepted"])
+
+        worker_log_item = next(item for item in manifest if item["artifact_id"] == "art_worker_log")
+        final_content = b"final worker log after accepted result\n"
+        worker_log_item["sha256"] = hashlib.sha256(final_content).hexdigest()
+        worker_log_item["size_bytes"] = len(final_content)
+        final_log = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": dict(worker_log_item),
+                "content_base64": base64.b64encode(final_content).decode("ascii"),
+                "final_log_upload": True,
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(final_log, "POST")
+        self.assertEqual(final_log.status, HTTPStatus.OK)
+        self.assertTrue(final_log.payload["replaced"])
+
+        duplicate = self.v1_result(claimed, body)
+
+        self.assertEqual(duplicate.status, HTTPStatus.OK)
+        self.assertTrue(duplicate.payload["accepted"])
+        self.assertTrue(duplicate.payload["duplicate"])
     def test_terminal_final_debug_bundle_upload_replaces_existing_bundle(self) -> None:
         self.create_claimable_scan_job(job_id="job_terminal_debug_replace", scan_id="sc_terminal_debug_replace", user_id="usr_1")
         claim = self.v1_lease()
