@@ -3095,6 +3095,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_worker_v1_post(self, segments: list[str], body: dict) -> None:
+        if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "heartbeat":
+            # TEMP PERF EXPERIMENT: pre-auth heartbeat no-op lower bound.
+            return self.json({"ack": True, "ok": True, "commands": [], "worker": {"worker_id": clean_github_access_text(segments[2]) or ""}, "command": None, "logSession": None, "cancelled_job_ids": [], "cancelledJobIds": []})
         worker_record = self.require_worker(update_last_used=False)
         if not worker_record:
             return
