@@ -3142,6 +3142,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
                 ready_providers=ready_providers,
                 recover_before_claim=False,
+                create_review_run=True,
+                protocol_version=WORKER_PROTOCOL_VERSION,
             )
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
@@ -3191,7 +3193,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "lease_id": payload["lease_id"],
             "lease_expires_at": protocol_iso_time(pull_request_timestamp(job.get("timeout_at"))) if pull_request_timestamp(job.get("timeout_at")) else None,
         }
-        db.upsert_review_run_claimed({**job, "run_id": payload["run_id"], "lease_id": payload["lease_id"]}, protocol_version=WORKER_PROTOCOL_VERSION)
         return self.json({"lease": lease, "job": payload})
 
     def handle_worker_v1_register(self, body: dict, worker_record: dict) -> None:

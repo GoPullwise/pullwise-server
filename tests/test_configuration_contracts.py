@@ -180,6 +180,25 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("scan.maxRepoFiles", scan_fields)
         self.assertNotIn("scan.maxRepoBytes", scan_fields)
 
+    def test_repository_review_quota_is_global_admin_config(self) -> None:
+        config = app.system_config.default_config()
+        metadata_paths = {
+            field["path"]
+            for group in app.system_config.metadata()
+            for field in group["fields"]
+        }
+        public_paths = {
+            field["path"]
+            for group in app.system_config.public_docs_groups(config, pro_products=[], max_products=[])
+            for field in group["fields"]
+        }
+
+        self.assertEqual(config["quota"]["repositoryReviewLimit"], 1000)
+        self.assertIn("quota.repositoryReviewLimit", metadata_paths)
+        self.assertIn("quota.repositoryReviewLimit", public_paths)
+        self.assertNotIn("plans.free.repositoryReviewLimit", metadata_paths)
+        self.assertNotIn("plans.pro.repositoryReviewLimit", metadata_paths)
+        self.assertNotIn("plans.max.repositoryReviewLimit", metadata_paths)
     def test_scan_job_lease_and_worker_codex_timeout_are_admin_system_config_fields(self) -> None:
         config = app.system_config.default_config()
         scan_fields = {

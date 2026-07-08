@@ -2309,8 +2309,13 @@ def run_json_text(value: object) -> str | None:
     return json.dumps(to_jsonable(value), ensure_ascii=False, sort_keys=True)
 
 
-def upsert_review_run_claimed(job: dict[str, Any], *, protocol_version: str = "review-worker-protocol/v1") -> dict[str, Any]:
-    ensure_initialized()
+def _upsert_review_run_claimed_locked(
+    connection: sqlite3.Connection,
+    job: dict[str, Any],
+    *,
+    protocol_version: str = "review-worker-protocol/v1",
+    timestamp: int | None = None,
+) -> dict[str, Any]:
     job_id = str(job.get("job_id") or "").strip()
     run_id = str(job.get("run_id") or "").strip()
     if not run_id and job_id:
@@ -2321,44 +2326,48 @@ def upsert_review_run_claimed(job: dict[str, Any], *, protocol_version: str = "r
         run_id = f"run_{job_id}" if attempt <= 1 else f"run_{job_id}_attempt_{attempt}"
     if not run_id or not job_id:
         raise ValueError("run_id and job_id are required")
-    timestamp = int(time.time())
+    current_time = int(timestamp if timestamp is not None else time.time())
     worker_id = str(job.get("claimed_by_worker_id") or "").strip()
-    started_at = protocol_timestamp(job.get("claimed_at")) or timestamp
+    started_at = protocol_timestamp(job.get("claimed_at")) or current_time
+    connection.execute(
+        """
+        INSERT INTO review_runs (
+            run_id, job_id, worker_id, status, started_at,
+            protocol_version, progress_json, created_at, updated_at
+        )
+        VALUES (?, ?, ?, 'leased', ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id) DO UPDATE SET
+            job_id = excluded.job_id,
+            worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
+            status = CASE
+                WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed') THEN review_runs.status
+                ELSE excluded.status
+            END,
+            started_at = COALESCE(review_runs.started_at, excluded.started_at),
+            protocol_version = COALESCE(excluded.protocol_version, review_runs.protocol_version),
+            progress_json = COALESCE(review_runs.progress_json, excluded.progress_json),
+            updated_at = excluded.updated_at
+        """,
+        (
+            run_id,
+            job_id,
+            worker_id,
+            started_at,
+            protocol_version,
+            run_json_text({"status": "leased", "overall_percent": 0}),
+            current_time,
+            current_time,
+        ),
+    )
+    return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
+
+
+def upsert_review_run_claimed(job: dict[str, Any], *, protocol_version: str = "review-worker-protocol/v1") -> dict[str, Any]:
+    ensure_initialized()
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
-            connection.execute(
-                """
-                INSERT INTO review_runs (
-                    run_id, job_id, worker_id, status, started_at,
-                    protocol_version, progress_json, created_at, updated_at
-                )
-                VALUES (?, ?, ?, 'leased', ?, ?, ?, ?, ?)
-                ON CONFLICT(run_id) DO UPDATE SET
-                    job_id = excluded.job_id,
-                    worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
-                    status = CASE
-                        WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed') THEN review_runs.status
-                        ELSE excluded.status
-                    END,
-                    started_at = COALESCE(review_runs.started_at, excluded.started_at),
-                    protocol_version = COALESCE(excluded.protocol_version, review_runs.protocol_version),
-                    progress_json = COALESCE(review_runs.progress_json, excluded.progress_json),
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    run_id,
-                    job_id,
-                    worker_id,
-                    started_at,
-                    protocol_version,
-                    run_json_text({"status": "leased", "overall_percent": 0}),
-                    timestamp,
-                    timestamp,
-                ),
-            )
-            return row_to_dict(connection.execute("SELECT * FROM review_runs WHERE run_id = ?", (run_id,)).fetchone()) or {}
-
+            return _upsert_review_run_claimed_locked(connection, job, protocol_version=protocol_version)
 
 def _review_run_progress_values(event: dict[str, Any]) -> tuple[str, str, str, int, int | None, str, str | None, str | None]:
     run_id = str(event.get("run_id") or "").strip()
@@ -4959,6 +4968,8 @@ def claim_next_scan_job(
     ready_providers: list[str] | None = None,
     timestamp: int | None = None,
     recover_before_claim: bool = True,
+    create_review_run: bool = False,
+    protocol_version: str = "review-worker-protocol/v1",
 ) -> dict[str, Any] | None:
     ensure_initialized()
     worker_id = str(worker_id or "").strip()
@@ -5037,6 +5048,13 @@ def claim_next_scan_job(
                     worker_id=worker_id,
                     claimed_at=current_time,
                 )
+                if create_review_run:
+                    _upsert_review_run_claimed_locked(
+                        connection,
+                        claimed_job,
+                        protocol_version=protocol_version,
+                        timestamp=current_time,
+                    )
             connection.commit()
             return claimed_job
         except Exception:

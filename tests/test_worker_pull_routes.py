@@ -2087,6 +2087,40 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(lease.status, HTTPStatus.OK)
         self.assertIsNone(lease.payload["job"])
         self.assertEqual(lease.payload["reason"], "intent_test_validation_unavailable")
+
+    def test_v1_worker_lease_creates_review_run_inside_claim_transaction(self) -> None:
+        scan = {
+            "id": "sc_lease_claim_run_hot_path",
+            "repo": "acme/lease-run-hot-path",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        with patch.object(
+            app.db,
+            "upsert_review_run_claimed",
+            side_effect=AssertionError("lease route should not do a separate review_runs claim write"),
+        ):
+            app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        run_id = lease.payload["job"]["run_id"]
+        claimed_run = db.get_review_run(run_id)
+        self.assertIsNotNone(claimed_run)
+        self.assertEqual(claimed_run["job_id"], lease.payload["job"]["job_id"])
+        self.assertEqual(claimed_run["worker_id"], "wk_1")
+        self.assertEqual(claimed_run["status"], "leased")
+
     def test_v1_worker_lease_refreshes_presence_before_claiming(self) -> None:
         scan = {
             "id": "sc_stale_lease_presence",

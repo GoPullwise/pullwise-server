@@ -1583,7 +1583,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
 
         before = app.quota.quota_payload_for_user(user)
+        repo_before = app.quota.quota_payload_for_repository(repository, user)
         self.assertEqual(before["used"], 1)
+        self.assertEqual(repo_before["used"], 1)
 
         handler = RouteHarness("/admin/users/usr_user/quota/reset", {}, cookie=self.admin_cookie)
         app.PullwiseHandler.route(handler, "POST")
@@ -1596,6 +1598,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["user"]["quota"]["used"], 0)
         self.assertEqual(handler.payload["removed"]["quotaLedger"], 1)
         self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
+        self.assertEqual(app.quota.quota_payload_for_repository(repository, user)["used"], 1)
 
         users = RouteHarness("/admin/users", cookie=self.admin_cookie)
         app.PullwiseHandler.route(users, "GET")

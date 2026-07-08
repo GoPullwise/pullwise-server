@@ -106,10 +106,10 @@ def database_config(**overrides: object) -> dict:
     return config
 
 
-def quota_config(*, free_limit: int = 5) -> dict:
+def quota_config(*, free_limit: int = 5, repo_limit: int | None = None) -> dict:
     return database_config(
         plans__free__userReviewLimit=free_limit,
-        plans__free__repositoryReviewLimit=free_limit,
+        quota__repositoryReviewLimit=free_limit if repo_limit is None else repo_limit,
     )
 
 
@@ -151,8 +151,8 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(first.payload["repoUsage"]["used"], 0)
         self.assertEqual(first.payload["repoUsage"]["reserved"], 1)
         self.assertEqual(first.payload["repoUsage"]["remaining"], 0)
-        self.assertEqual(first.payload["billingUsage"]["period"], first.payload["repoUsage"]["period"])
-        self.assertEqual(first.payload["billingUsage"]["resetAt"], first.payload["repoUsage"]["resetAt"])
+        self.assertEqual(first.payload["repoUsage"]["period"], app.quota.current_period())
+        self.assertEqual(first.payload["repoUsage"]["resetAt"], app.quota.reset_at_for_period(first.payload["repoUsage"]["period"]))
 
     def test_private_worker_management_routes_are_not_available(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")

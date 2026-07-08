@@ -31,14 +31,12 @@ def database_config(**overrides: object) -> dict:
     return config
 
 
-def quota_config(*, free_limit: int = 5, pro_limit: int = 60, max_limit: int = 90) -> dict:
+def quota_config(*, free_limit: int = 5, pro_limit: int = 60, max_limit: int = 90, repo_limit: int = 1000) -> dict:
     return database_config(
         plans__free__userReviewLimit=free_limit,
-        plans__free__repositoryReviewLimit=free_limit,
         plans__pro__userReviewLimit=pro_limit,
-        plans__pro__repositoryReviewLimit=pro_limit,
         plans__max__userReviewLimit=max_limit,
-        plans__max__repositoryReviewLimit=max_limit,
+        quota__repositoryReviewLimit=repo_limit,
     )
 
 
@@ -58,7 +56,7 @@ class QuotaContractsTest(unittest.TestCase):
         self.assertEqual(user_usage["period"], "2026-02")
         self.assertEqual(repo_usage["period"], "2026-02")
         self.assertEqual(user_usage["limit"], 5)
-        self.assertEqual(repo_usage["limit"], 5)
+        self.assertEqual(repo_usage["limit"], 1000)
 
     def test_user_limits_use_system_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -118,7 +116,7 @@ class QuotaContractsTest(unittest.TestCase):
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with (
                 patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
-                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1)),
+                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1, repo_limit=1)),
             ):
                 user = make_user("usr_1")
                 repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
@@ -147,7 +145,7 @@ class QuotaContractsTest(unittest.TestCase):
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with (
                 patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
-                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1)),
+                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1, repo_limit=1)),
             ):
                 user = make_user("usr_1")
                 repositories = [
@@ -212,7 +210,7 @@ class QuotaContractsTest(unittest.TestCase):
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with (
                 patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
-                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1)),
+                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=1, repo_limit=1)),
             ):
                 user = make_user("usr_1")
                 first_fork = db.upsert_repository(
@@ -250,28 +248,30 @@ class QuotaContractsTest(unittest.TestCase):
 
         self.assertEqual(context.exception.code, "QUOTA_EXCEEDED_REPOSITORY")
 
-    def test_repository_limit_matches_user_limit_for_each_plan(self) -> None:
+    def test_repository_limit_uses_global_system_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with (
                 patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
                 patch(
                     "pullwise_server.system_config.config",
-                    return_value=quota_config(free_limit=8, pro_limit=80, max_limit=90),
+                    return_value=quota_config(free_limit=8, pro_limit=80, max_limit=90, repo_limit=123),
                 ),
             ):
-                self.assertEqual(quota.repository_limit_for_plan("free"), 8)
-                self.assertEqual(quota.repository_limit_for_plan("pro"), 80)
-                self.assertEqual(quota.repository_limit_for_plan("max"), 90)
+                self.assertEqual(quota.repository_review_limit(), 123)
 
-    def test_active_pro_quota_uses_subscription_monthly_cycle(self) -> None:
+    def test_active_pro_user_quota_uses_subscription_cycle_but_repo_quota_uses_calendar_month(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch("pullwise_server.system_config.config", return_value=quota_config(repo_limit=1000)),
+            ):
                 subscription_start = calendar.timegm((2026, 1, 15, 12, 0, 0))
                 subscription_end = calendar.timegm((2027, 1, 15, 12, 0, 0))
                 cycle_start = calendar.timegm((2026, 2, 15, 12, 0, 0))
                 cycle_reset = calendar.timegm((2026, 3, 15, 12, 0, 0))
+                month_reset = calendar.timegm((2026, 3, 1, 0, 0, 0))
                 timestamp = calendar.timegm((2026, 2, 20, 8, 0, 0))
                 user = {
                     **make_user("usr_pro"),
@@ -290,11 +290,46 @@ class QuotaContractsTest(unittest.TestCase):
 
         self.assertEqual(user_usage["plan"], "pro")
         self.assertEqual(user_usage["limit"], 60)
-        self.assertEqual(repo_usage["limit"], 60)
+        self.assertEqual(repo_usage["plan"], "repository")
+        self.assertEqual(repo_usage["limit"], 1000)
         self.assertEqual(user_usage["period"], f"cycle:{cycle_start}")
         self.assertEqual(user_usage["resetAt"], cycle_reset)
-        self.assertEqual(repo_usage["period"], user_usage["period"])
-        self.assertEqual(repo_usage["resetAt"], user_usage["resetAt"])
+        self.assertEqual(repo_usage["period"], "2026-02")
+        self.assertEqual(repo_usage["resetAt"], month_reset)
+
+    def test_repository_quota_bucket_is_shared_across_user_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch("pullwise_server.system_config.config", return_value=quota_config(free_limit=5, pro_limit=5, repo_limit=1)),
+            ):
+                repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
+                free_user = make_user("usr_free")
+                pro_user = {
+                    **make_user("usr_pro"),
+                    "billing": {"plan": "pro", "status": "active"},
+                }
+
+                first = quota.consume_scan_quota(
+                    user=pro_user,
+                    repository=repository,
+                    requested_by_user_id="usr_pro",
+                    scan_id="sc_1",
+                    request_id="req_1",
+                )
+                with self.assertRaises(quota.QuotaExceeded) as context:
+                    quota.consume_scan_quota(
+                        user=free_user,
+                        repository=repository,
+                        requested_by_user_id="usr_free",
+                        scan_id="sc_2",
+                        request_id="req_2",
+                    )
+
+        self.assertEqual(first["repository"]["used"], 1)
+        self.assertEqual(first["repository"]["plan"], "repository")
+        self.assertEqual(context.exception.code, "QUOTA_EXCEEDED_REPOSITORY")
 
     def test_expired_pro_quota_falls_back_to_free_from_subscription_end(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -322,17 +357,61 @@ class QuotaContractsTest(unittest.TestCase):
         self.assertEqual(usage["period"], f"cycle:{subscription_end}")
         self.assertEqual(usage["resetAt"], next_free_reset)
 
-    def test_subscription_cycle_reset_creates_fresh_quota_bucket(self) -> None:
+    def test_subscription_cycle_reset_creates_fresh_user_bucket_without_resetting_repo_bucket(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with (
                 patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
-                patch("pullwise_server.system_config.config", return_value=quota_config(pro_limit=1)),
+                patch("pullwise_server.system_config.config", return_value=quota_config(pro_limit=2, repo_limit=1)),
             ):
                 subscription_start = calendar.timegm((2026, 1, 15, 12, 0, 0))
                 subscription_end = calendar.timegm((2026, 3, 15, 12, 0, 0))
                 first_timestamp = calendar.timegm((2026, 2, 14, 12, 0, 0))
                 second_timestamp = calendar.timegm((2026, 2, 15, 12, 0, 0))
+                user = {
+                    **make_user("usr_pro"),
+                    "billing": {
+                        "plan": "pro",
+                        "status": "active",
+                        "currentPeriodStart": subscription_start,
+                        "currentPeriodEnd": subscription_end,
+                    },
+                }
+                repository = db.upsert_repository({"github_repo_id": "123", "full_name": "acme/api"})
+
+                first = quota.consume_scan_quota(
+                    user=user,
+                    repository=repository,
+                    requested_by_user_id="usr_pro",
+                    scan_id="sc_1",
+                    request_id="req_1",
+                    timestamp=first_timestamp,
+                )
+                with self.assertRaises(quota.QuotaExceeded) as context:
+                    quota.consume_scan_quota(
+                        user=user,
+                        repository=repository,
+                        requested_by_user_id="usr_pro",
+                        scan_id="sc_2",
+                        request_id="req_2",
+                        timestamp=second_timestamp,
+                    )
+
+        self.assertEqual(first["user"]["used"], 1)
+        self.assertEqual(first["repository"]["used"], 1)
+        self.assertEqual(context.exception.code, "QUOTA_EXCEEDED_REPOSITORY")
+
+    def test_calendar_month_reset_creates_fresh_repository_bucket(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with (
+                patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True),
+                patch("pullwise_server.system_config.config", return_value=quota_config(pro_limit=5, repo_limit=1)),
+            ):
+                subscription_start = calendar.timegm((2026, 1, 15, 12, 0, 0))
+                subscription_end = calendar.timegm((2026, 3, 15, 12, 0, 0))
+                first_timestamp = calendar.timegm((2026, 2, 28, 23, 59, 59))
+                second_timestamp = calendar.timegm((2026, 3, 1, 0, 0, 0))
                 user = {
                     **make_user("usr_pro"),
                     "billing": {
@@ -361,10 +440,10 @@ class QuotaContractsTest(unittest.TestCase):
                     timestamp=second_timestamp,
                 )
 
-        self.assertEqual(first["user"]["used"], 1)
-        self.assertEqual(second["user"]["used"], 1)
-        self.assertNotEqual(first["user"]["period"], second["user"]["period"])
-
+        self.assertEqual(first["repository"]["period"], "2026-02")
+        self.assertEqual(second["repository"]["period"], "2026-03")
+        self.assertEqual(second["repository"]["used"], 1)
+        self.assertEqual(first["user"]["period"], second["user"]["period"])
 
 if __name__ == "__main__":
     unittest.main()

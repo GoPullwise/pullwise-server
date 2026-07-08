@@ -355,8 +355,11 @@ Latest local burst results on a Windows development host with the in-process
 probe:
 
 - `--operation heartbeat --workers 300 --uploads 300 --concurrency 300`: 300/300
-  success after request backlog/token hot-path/heartbeat throttling changes,
-  but p50 was about 177s and p95 about 201s.
+  success after request backlog/token hot-path/heartbeat throttling changes;
+  after combining active heartbeat DB persistence on July 8, 2026, p50 was about
+  169.9s and p95 about 171.7s. The 100-worker heartbeat probe improved to
+  100/100 success with p50 about 38.5s and p95 about 39.0s, but 300-worker
+  heartbeat latency remains minute-scale.
 - `--operation artifact --workers 300 --uploads 300 --concurrency 300 --artifact-kib 32`:
   300/300 success with artifact bytes stored outside SQLite, p50 about 72-91s
   and p95 about 94-112s across repeated local runs.
