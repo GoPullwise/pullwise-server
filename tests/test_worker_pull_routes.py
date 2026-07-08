@@ -5251,6 +5251,98 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(len(claimed), 1)
         self.assertEqual(len(set(claimed)), 1)
 
+    def test_concurrent_worker_artifact_uploads_store_each_run_independently(self) -> None:
+        worker_tokens = {"wk_1": "worker-secret"}
+        for index in range(2, 13):
+            _worker, token = self.create_registry_worker(f"wk_{index}")
+            worker_tokens[f"wk_{index}"] = token
+
+        claimed_jobs: list[dict] = []
+        for index, worker_id in enumerate(worker_tokens, start=1):
+            self.create_claimable_scan_job(
+                job_id=f"job_concurrent_upload_{index}",
+                scan_id=f"sc_concurrent_upload_{index}",
+                user_id="usr_1",
+            )
+            job = db.claim_next_scan_job(worker_id, ready_providers=["codex"], recover_before_claim=False)
+            self.assertIsNotNone(job)
+            claimed_jobs.append(job)
+
+        barrier = threading.Barrier(len(claimed_jobs))
+        outcomes: list[tuple[str, int | None, dict | None]] = []
+        errors: list[str] = []
+        lock = threading.Lock()
+
+        def upload(job: dict) -> None:
+            worker_id = str(job.get("claimed_by_worker_id") or "")
+            run_id = app.scan_job_run_id(job)
+            content = json.dumps(
+                {
+                    "run_id": run_id,
+                    "worker_id": worker_id,
+                    "padding": "x" * (128 * 1024),
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+            artifact_id = f"art_concurrent_{worker_id}"
+            payload = {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": f"{worker_id}-{int(job.get('attempt') or 1)}",
+                "run_id": run_id,
+                "artifact": {
+                    "artifact_id": artifact_id,
+                    "kind": "report.agent",
+                    "name": f"{artifact_id}.json",
+                    "media_type": "application/json",
+                    "schema_id": "codex-full-repo-review",
+                    "schema_version": "v1",
+                    "encoding": "utf-8",
+                    "compression": "none",
+                    "required": True,
+                    "storage": {"type": "server_artifact", "url": f"/v1/review-runs/{run_id}/artifacts/{artifact_id}"},
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "size_bytes": len(content),
+                },
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            }
+            try:
+                barrier.wait(timeout=5)
+                request = RouteHarness(
+                    f"/v1/review-runs/{run_id}/artifacts",
+                    payload,
+                    headers={"Authorization": f"Bearer {worker_tokens[worker_id]}"},
+                )
+                app.PullwiseHandler.route(request, "POST")
+                with lock:
+                    outcomes.append((run_id, request.status, request.payload))
+            except Exception as exc:
+                with lock:
+                    errors.append(f"{worker_id}: {exc}")
+
+        threads = [threading.Thread(target=upload, args=(job,)) for job in claimed_jobs]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(outcomes), len(claimed_jobs))
+        self.assertTrue(all(status == HTTPStatus.OK for _run_id, status, _payload in outcomes))
+        for job in claimed_jobs:
+            worker_id = str(job.get("claimed_by_worker_id") or "")
+            run_id = app.scan_job_run_id(job)
+            artifact_id = f"art_concurrent_{worker_id}"
+            stored = db.get_review_run_artifact(run_id, artifact_id)
+            self.assertIsNotNone(stored)
+            self.assertEqual(stored["run_id"], run_id)
+            self.assertEqual(stored["artifact_id"], artifact_id)
+            self.assertEqual(stored["job_id"], job["job_id"])
+            self.assertEqual(stored["attempt_id"], f"{worker_id}-{int(job.get('attempt') or 1)}")
+            payload = json.loads(stored["payload_json"])
+            content = base64.b64decode(payload["content_base64"])
+            self.assertEqual(hashlib.sha256(content).hexdigest(), stored["sha256"])
+            self.assertEqual(len(content), stored["size_bytes"])
+
     def test_expired_job_exceeding_attempts_fails(self) -> None:
         timestamp = app.now()
         job = db.create_scan_job(

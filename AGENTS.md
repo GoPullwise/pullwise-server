@@ -363,6 +363,10 @@ new read and write paths aligned with the normalized SQLite tables.
   full reverse synchronization from all completed results back into memory.
 - Worker/admin/status pages should use aggregate queries and short TTL caches
   rather than per-worker or per-scan loops.
+## Worker Upload Load Testing
+
+Use `python ops/worker_upload_load.py --workers <n> --uploads <m> --concurrency <c> --artifact-kib <k>` from `pullwise-server` to measure v1 worker artifact upload throughput against a real local `ThreadingHTTPServer` and temporary SQLite DB. The server stores artifact payload JSON, including base64 content, in `review_artifacts`; authenticated gzip worker artifact/result uploads default to a 50 MiB decompressed body limit, but writes are still serialized by the SQLite lock. Treat this probe as the regression/operational check before increasing worker fleet size, artifact size, or upload frequency.
+
 ## Debug Bundle Contract
 
 A debug bundle is not the audit bundle and must never silently fall back to the audit bundle.

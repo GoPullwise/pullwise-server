@@ -326,6 +326,22 @@ review behavior must use the v1 routes above.
 Jobs that timeout (no heartbeat or progress) are automatically re-queued up
 to the database-backed scan job max-attempts setting, then marked failed.
 
+Worker upload load probe:
+
+```bash
+python ops/worker_upload_load.py --workers 24 --uploads 240 --concurrency 24 --artifact-kib 128
+```
+
+The probe starts a local in-process `ThreadingHTTPServer` with a temporary
+SQLite database, seeds one claimed v1 run per simulated worker, then sends real
+HTTP `POST /v1/review-runs/{run_id}/artifacts` requests using worker bearer
+tokens. It reports status counts, RPS, and p50/p95/p99 latency. Use it before
+raising worker fleet size or artifact size limits. Authenticated gzip worker
+artifact/result uploads use `PULLWISE_MAX_DECOMPRESSED_BODY_BYTES`, defaulting
+to 50 MiB, while ordinary request bodies default to `PULLWISE_MAX_BODY_BYTES`
+1 MiB. The current SQLite backend serializes writes, so successful concurrent
+uploads prove correctness, not unlimited throughput.
+
 ### Billing Provider Configuration
 
 Creem:
