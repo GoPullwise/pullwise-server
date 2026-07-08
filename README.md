@@ -367,11 +367,13 @@ probe:
   completed 100/100 with p50 about 26.6s and p95 about 34.3s. Artifact bytes
   stay outside SQLite, but the 300-upload path remains minute-scale.
 - `--operation event --workers 300 --uploads 300 --concurrency 300 --event-kib 4`:
-  after combining the review-run event insert and `review_runs` progress upsert
-  into one SQLite transaction, 300/300 succeeded on July 8, 2026, with p50 about
-  129.1s and p95 about 129.2s; the 100-worker probe improved to 100/100 success
-  with p50/p95 about 43.5s. This is still a failing scale signal because
-  progress event latency remains minute-scale.
+  after combining the review-run event insert, `review_runs` progress upsert,
+  and scan-job progress update into one SQLite transaction, 300/300 succeeded on
+  July 8, 2026, with `--timeout-seconds 300`, p50 about 103.4s and p95 about
+  103.5s; the 100-worker probe completed 100/100 with p50/p95 about 34.9s.
+  This is still a failing scale signal because progress event latency remains
+  minute-scale, and the same 300-event burst with the default 120s request
+  timeout only completed 2/300 before client timeouts.
 
 - Earlier `--operation mixed --workers 300 --uploads 300 --concurrency 300 --artifact-kib 16`:
   300/300 success, p50 about 196s and p95 about 222s.

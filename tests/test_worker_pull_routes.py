@@ -588,8 +588,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 side_effect=AssertionError("separate heartbeat missing-job recovery should not run"),
             ),
             patch.object(app.db, "renew_worker_scan_job_leases", side_effect=AssertionError("separate lease renewal should not run")),
+            patch.object(app.db, "update_review_run_progress", side_effect=AssertionError("separate heartbeat run progress update should not run")),
+            patch.object(app.db, "update_scan_job_progress", side_effect=AssertionError("separate heartbeat scan progress update should not run")),
         ):
-            heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
+            with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
+                heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         combined.assert_called_once()

@@ -3568,6 +3568,54 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "codex_quota": body.get("codexQuota") if "codexQuota" in body else body.get("codex_quota"),
             "timestamp": heartbeat_timestamp,
         }
+        heartbeat_progress_context = None
+        heartbeat_progress_record = None
+        heartbeat_scan_job_progress = None
+        progress_snapshot = body.get("progress") if isinstance(body.get("progress"), dict) else {}
+        progress_job = active_job_from_run
+        if progress_snapshot and progress_job and worker_heartbeat_should_persist_progress(progress_job, heartbeat_timestamp):
+            progress_run_id = public_issue_text(progress_snapshot.get("run_id") or body.get("active_run_id")) or scan_job_run_id(progress_job)
+            phase = public_scan_phase(progress_snapshot.get("current_phase") or progress_snapshot.get("phase"))
+            progress_value = public_scan_progress(progress_snapshot.get("overall_percent"))
+            progress_status = public_issue_text(progress_snapshot.get("current_phase_status") or progress_snapshot.get("status"))
+            progress_message = public_issue_text(progress_snapshot.get("message"))
+            progress_steps = public_scan_progress_steps(
+                progress_snapshot.get("steps")
+                or progress_snapshot.get("progressSteps")
+                or progress_snapshot.get("progress_steps")
+            )
+            heartbeat_progress_record = {
+                "run_id": progress_run_id,
+                "job_id": public_issue_text(progress_job.get("job_id")),
+                "worker_id": worker_id,
+                "sequence": progress_snapshot.get("last_event_sequence"),
+                "event_type": "progress_updated",
+                "phase": phase,
+                "severity": "info",
+                "status": progress_status,
+                "progress": progress_value,
+                "timestamp": public_issue_text(progress_snapshot.get("updated_at")),
+                "steps": progress_steps,
+                "created_at": heartbeat_timestamp,
+            }
+            heartbeat_scan_job_progress = {
+                "job_id": public_issue_text(progress_job.get("job_id")),
+                "phase": phase,
+                "progress": progress_value,
+                "message": progress_message,
+                "started_at": heartbeat_timestamp,
+                "timeout_at": heartbeat_timestamp + system_config.scan_job_lease_seconds(),
+                "logs_summary": "heartbeat",
+            }
+            heartbeat_progress_context = {
+                "job": progress_job,
+                "run_id": progress_run_id,
+                "phase": phase,
+                "progress": progress_value,
+                "message": progress_message,
+                "steps": progress_steps,
+            }
+        updated_progress_job = None
         try:
             if active_job_ids:
                 heartbeat_update = db.record_active_worker_heartbeat(
@@ -3575,12 +3623,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     active_job_ids,
                     grace_seconds=system_config.scan_job_startup_grace_seconds(),
                     lease_seconds=system_config.scan_job_lease_seconds(),
+                    progress_event=heartbeat_progress_record,
+                    scan_job_progress=heartbeat_scan_job_progress,
                     timestamp=heartbeat_timestamp,
                 )
                 record = heartbeat_update["worker"]
                 cancelled_job_ids = heartbeat_update["no_longer_accepting"]
                 active_job_ids_accepting_updates = heartbeat_update["accepting"]
                 recovered_jobs = heartbeat_update["recovered_jobs"]
+                updated_progress_job = heartbeat_update.get("progress_job")
                 if recovered_jobs:
                     with STATE_LOCK:
                         apply_recovered_scan_jobs_locked(recovered_jobs)
@@ -3599,63 +3650,24 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         running_jobs = public_scan_count(record.get("running_jobs"))
-        progress_snapshot = body.get("progress") if isinstance(body.get("progress"), dict) else {}
-        if progress_snapshot and active_job_ids_accepting_updates:
-            progress_job = active_job_from_run or db.get_scan_job(active_job_ids_accepting_updates[0])
-            if progress_job and worker_heartbeat_should_persist_progress(progress_job, heartbeat_timestamp):
-                progress_run_id = public_issue_text(progress_snapshot.get("run_id") or body.get("active_run_id")) or scan_job_run_id(progress_job)
-                phase = public_scan_phase(progress_snapshot.get("current_phase") or progress_snapshot.get("phase"))
-                progress_value = public_scan_progress(progress_snapshot.get("overall_percent"))
-                progress_status = public_issue_text(progress_snapshot.get("current_phase_status") or progress_snapshot.get("status"))
-                progress_message = public_issue_text(progress_snapshot.get("message"))
-                progress_steps = public_scan_progress_steps(
-                    progress_snapshot.get("steps")
-                    or progress_snapshot.get("progressSteps")
-                    or progress_snapshot.get("progress_steps")
-                )
-                db.update_review_run_progress(
-                    {
-                        "run_id": progress_run_id,
-                        "job_id": public_issue_text(progress_job.get("job_id")),
-                        "worker_id": worker_id,
-                        "sequence": progress_snapshot.get("last_event_sequence"),
-                        "event_type": "progress_updated",
-                        "phase": phase,
-                        "severity": "info",
-                        "status": progress_status,
-                        "progress": progress_value,
-                        "timestamp": public_issue_text(progress_snapshot.get("updated_at")),
-                        "steps": progress_steps,
-                        "created_at": heartbeat_timestamp,
-                    }
-                )
-                updated_job = db.update_scan_job_progress(
-                    public_issue_text(progress_job.get("job_id")),
-                    {
-                        "phase": phase,
-                        "progress": progress_value,
-                        "message": progress_message,
-                        "started_at": heartbeat_timestamp,
-                        "timeout_at": heartbeat_timestamp + system_config.scan_job_lease_seconds(),
-                        "logs_summary": "heartbeat",
-                    },
-                )
-                with STATE_LOCK:
-                    scan = next((item for item in SCANS if item.get("id") == progress_job.get("scan_id")), None)
-                    if scan and updated_job:
-                        scan.update(
-                            {
-                                "phase": phase,
-                                "progress": progress_value,
-                                "progressMessage": progress_message,
-                                "logsSummary": "heartbeat",
-                                "updatedAt": heartbeat_timestamp,
-                                "runId": progress_run_id,
-                                **({"progressSteps": progress_steps} if progress_steps else {}),
-                            }
-                        )
-                        db.upsert_scan(scan)
-                        mark_state_dirty()
+        if heartbeat_progress_context and updated_progress_job and active_job_ids_accepting_updates:
+            progress_job = heartbeat_progress_context["job"]
+            with STATE_LOCK:
+                scan = next((item for item in SCANS if item.get("id") == progress_job.get("scan_id")), None)
+                if scan:
+                    scan.update(
+                        {
+                            "phase": heartbeat_progress_context["phase"],
+                            "progress": heartbeat_progress_context["progress"],
+                            "progressMessage": heartbeat_progress_context["message"],
+                            "logsSummary": "heartbeat",
+                            "updatedAt": heartbeat_timestamp,
+                            "runId": heartbeat_progress_context["run_id"],
+                            **({"progressSteps": heartbeat_progress_context["steps"]} if heartbeat_progress_context["steps"] else {}),
+                        }
+                    )
+                    db.upsert_scan(scan)
+                    mark_state_dirty()
         alert_worker_record = {
             **record,
             "_running_jobs_count": running_jobs,

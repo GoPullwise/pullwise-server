@@ -3869,6 +3869,8 @@ def record_active_worker_heartbeat(
     *,
     grace_seconds: int = 120,
     lease_seconds: int = 3600,
+    progress_event: dict[str, Any] | None = None,
+    scan_job_progress: dict[str, Any] | None = None,
     timestamp: int | None = None,
 ) -> dict[str, Any]:
     ensure_initialized()
@@ -3889,6 +3891,7 @@ def record_active_worker_heartbeat(
     no_longer_accepting: list[str] = []
     recovered: list[dict[str, Any]] = []
     renewed_count = 0
+    progress_job: dict[str, Any] | None = None
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -3994,6 +3997,47 @@ def record_active_worker_heartbeat(
                     (timeout_at, timeout_at, current_time, worker_id, *accepting),
                 )
                 renewed_count = max(0, cursor.rowcount)
+            if progress_event is not None and scan_job_progress is not None:
+                progress_job_id = str(scan_job_progress.get("job_id") or progress_event.get("job_id") or "").strip()
+                if progress_job_id and progress_job_id in accepting:
+                    _upsert_review_run_progress_locked(connection, progress_event)
+                    raw_timeout_at = scan_job_progress.get("timeout_at")
+                    try:
+                        progress_timeout_at = int(raw_timeout_at) if raw_timeout_at is not None else None
+                    except (TypeError, ValueError):
+                        progress_timeout_at = None
+                    progress_cursor = connection.execute(
+                        """
+                        UPDATE scan_jobs
+                        SET progress_phase = ?,
+                            progress = ?,
+                            progress_message = ?,
+                            status = 'running',
+                            started_at = COALESCE(started_at, ?),
+                            timeout_at = CASE
+                                WHEN ? IS NULL THEN timeout_at
+                                WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
+                                ELSE timeout_at
+                            END,
+                            logs_summary = ?,
+                            updated_at = ?
+                        WHERE job_id = ? AND status IN ('claimed', 'running')
+                        """,
+                        (
+                            scan_job_progress.get("phase"),
+                            max(0, min(100, int(scan_job_progress.get("progress") or 0))),
+                            scan_job_progress.get("message"),
+                            int(scan_job_progress.get("started_at") or current_time),
+                            progress_timeout_at,
+                            progress_timeout_at,
+                            progress_timeout_at,
+                            scan_job_progress.get("logs_summary"),
+                            current_time,
+                            progress_job_id,
+                        ),
+                    )
+                    if progress_cursor.rowcount > 0:
+                        progress_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (progress_job_id,)).fetchone())
             connection.commit()
             return {
                 "worker": worker,
@@ -4001,6 +4045,7 @@ def record_active_worker_heartbeat(
                 "no_longer_accepting": no_longer_accepting,
                 "recovered_jobs": recovered,
                 "renewed_count": renewed_count,
+                "progress_job": progress_job,
             }
         except Exception:
             connection.rollback()
