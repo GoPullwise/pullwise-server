@@ -3133,7 +3133,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         capabilities = body.get("capabilities") if isinstance(body.get("capabilities"), dict) else {}
         if capabilities.get("intent_test_validation") is not True:
             return self.json({"lease": None, "retry_after_seconds": 60, "job": None, "reason": "intent_test_validation_unavailable"})
-        return self.json({"lease": None, "retry_after_seconds": 10, "job": None, "reason": "temp_bypass_claim"})
         lease_timestamp = now()
         allowed, worker_status = worker_can_claim(worker_record, timestamp=lease_timestamp)
         if not allowed and worker_status == "offline":
@@ -3188,6 +3187,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     db.upsert_scan(scan)
                     mark_state_dirty()
             return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+        lease = {
+            "job_id": payload["job_id"],
+            "run_id": payload["run_id"],
+            "lease_id": payload["lease_id"],
+            "lease_expires_at": protocol_iso_time(pull_request_timestamp(job.get("timeout_at"))) if pull_request_timestamp(job.get("timeout_at")) else None,
+        }
+        return self.json({"lease": lease, "job": payload})
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
             if scan and scan.get("status") == "queued":
