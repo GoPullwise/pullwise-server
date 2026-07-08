@@ -3666,7 +3666,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             **({"progressSteps": heartbeat_progress_context["steps"]} if heartbeat_progress_context["steps"] else {}),
                         }
                     )
-                    db.upsert_scan(scan)
                     mark_state_dirty()
         alert_worker_record = {
             **record,
