@@ -1320,6 +1320,108 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(final_log.payload["replaced"])
         stored = db.get_review_run_artifact(run_id, "art_progress_log")
         self.assertEqual(stored["sha256"], hashlib.sha256(new_content).hexdigest())
+    def test_worker_result_artifact_mismatch_reports_art_qa(self) -> None:
+        scan = {
+            "id": "sc_bad_qa_artifact_result",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        body = {
+            "status": "failed",
+            "attempt_id": "wk_1-1",
+            "result_checksum": "checksum-bad-qa-artifact-result",
+            "error": "Repository exceeds checkout limit.",
+            "error_code": "REPOSITORY_TOO_LARGE",
+            **audit_result_fields([], execution_status="failed"),
+        }
+        artifact_manifest = body["reviewWorkerProtocol"]["artifact_manifest"]
+        qa = next(item for item in artifact_manifest if item["artifact_id"] == "art_qa")
+        qa["size_bytes"] = int(qa["size_bytes"]) + 1
+
+        rejected = self.v1_result(claimed, body)
+
+        self.assertEqual(rejected.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("Uploaded review artifacts do not match result manifest: art_qa", rejected.payload["message"])
+
+    def test_failed_result_accepts_manifest_matching_uploaded_worker_log_and_late_final_log(self) -> None:
+        self.create_claimable_scan_job(job_id="job_failed_manifest_match", scan_id="sc_failed_manifest_match", user_id="usr_1")
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        claimed = claim.payload["job"]
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        manifest = protocol_artifact_manifest(run_id, "failed")
+
+        for item in manifest:
+            content = f"{item['kind']}:{item['name']}\n".encode("utf-8")
+            upload = RouteHarness(
+                f"/v1/review-runs/{run_id}/artifacts",
+                {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "attempt_id": attempt_id,
+                    "run_id": run_id,
+                    "artifact": dict(item),
+                    "content_base64": base64.b64encode(content).decode("ascii"),
+                },
+                headers=self.auth,
+            )
+            app.PullwiseHandler.route(upload, "POST")
+            self.assertEqual(upload.status, HTTPStatus.OK, item["artifact_id"])
+
+        result = self.v1_result(
+            claimed,
+            {
+                "status": "failed",
+                "attempt_id": attempt_id,
+                "result_checksum": "checksum-failed-manifest-match",
+                "error": "Repository exceeds checkout limit.",
+                "error_code": "REPOSITORY_TOO_LARGE",
+                **audit_result_fields([], execution_status="failed"),
+            },
+        )
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertTrue(result.payload["accepted"])
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "failed")
+        qa_item = next(item for item in manifest if item["artifact_id"] == "art_qa")
+        stored_qa = db.get_review_run_artifact(run_id, "art_qa")
+        self.assertEqual(stored_qa["sha256"], qa_item["sha256"])
+        self.assertEqual(stored_qa["size_bytes"], qa_item["size_bytes"])
+
+        worker_log_item = next(item for item in manifest if item["artifact_id"] == "art_worker_log")
+        final_content = b"final worker log after result\n"
+        worker_log_item["sha256"] = hashlib.sha256(final_content).hexdigest()
+        worker_log_item["size_bytes"] = len(final_content)
+        final_log = RouteHarness(
+            f"/v1/review-runs/{run_id}/artifacts",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "attempt_id": attempt_id,
+                "run_id": run_id,
+                "artifact": dict(worker_log_item),
+                "content_base64": base64.b64encode(final_content).decode("ascii"),
+                "final_log_upload": True,
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(final_log, "POST")
+        self.assertEqual(final_log.status, HTTPStatus.OK)
+        self.assertTrue(final_log.payload["replaced"])
+        stored = db.get_review_run_artifact(run_id, "art_worker_log")
+        self.assertEqual(stored["sha256"], hashlib.sha256(final_content).hexdigest())
+
     def test_terminal_final_debug_bundle_upload_replaces_existing_bundle(self) -> None:
         self.create_claimable_scan_job(job_id="job_terminal_debug_replace", scan_id="sc_terminal_debug_replace", user_id="usr_1")
         claim = self.v1_lease()
