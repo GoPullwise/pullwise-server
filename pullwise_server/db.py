@@ -2643,7 +2643,6 @@ def store_review_run_event_and_progress(
     scan_job_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ensure_initialized()
-    # TEMP PERF EXPERIMENT: remove Python DB lock for combined event/progress write.
     with closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
@@ -5538,7 +5537,8 @@ def store_review_run_artifact(
     staged_content = stage_review_artifact_content(run_id, artifact_id, content, sha256) if content is not None else None
     staged_content_committed = False
     try:
-        with _LOCK, closing(connect()) as connection:
+        # TEMP PERF EXPERIMENT: remove Python DB lock for review artifact insert path.
+        with closing(connect()) as connection:
             connection.row_factory = sqlite3.Row
             with connection:
                 job = connection.execute(
