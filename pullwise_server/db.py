@@ -3898,7 +3898,7 @@ def record_active_worker_heartbeat(
     renewed_count = 0
     progress_job: dict[str, Any] | None = None
     command: dict[str, Any] | None = None
-    with _LOCK, closing(connect()) as connection:
+    with closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
         try:
