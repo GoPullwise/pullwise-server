@@ -3136,13 +3136,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not ready_providers:
             return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
         try:
-            recovered_jobs = db.recover_expired_scan_jobs(
-                now(),
-                worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
-            )
-            if recovered_jobs:
-                with STATE_LOCK:
-                    apply_recovered_scan_jobs_locked(recovered_jobs)
             job = db.claim_next_scan_job(
                 worker_id,
                 lease_seconds=system_config.scan_job_lease_seconds(),
@@ -4325,6 +4318,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

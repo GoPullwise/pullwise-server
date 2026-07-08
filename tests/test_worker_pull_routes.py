@@ -1726,6 +1726,30 @@ class WorkerPullRoutesTest(unittest.TestCase):
         stored_worker = db.get_worker("wk_1")
         self.assertEqual(stored_worker["last_heartbeat_at"], 300)
         self.assertNotEqual(app.computed_worker_status(stored_worker, timestamp=300), "offline")
+    def test_v1_worker_lease_does_not_run_recovery_sweep_inline(self) -> None:
+        scan = {
+            "id": "sc_lease_no_inline_recovery",
+            "repo": "acme/no-inline-recovery",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        job = app.create_scan_job_for_scan(scan)
+
+        lease = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload(), headers=self.auth)
+        with patch("pullwise_server.app.db.recover_expired_scan_jobs", return_value=[]) as recover:
+            app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        self.assertEqual(lease.payload["job"]["job_id"], job["job_id"])
+        recover.assert_not_called()
     def test_v1_worker_lease_blocks_idle_worker_when_codex_quota_is_not_ready(self) -> None:
         user = {"id": "usr_quota_blocked", "name": "Owner", "providers": []}
         app.USERS = {user["id"]: user}
@@ -5480,6 +5504,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
