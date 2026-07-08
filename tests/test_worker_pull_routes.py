@@ -463,7 +463,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         job = lease.payload["job"]
         run_id = job["run_id"]
 
-        heartbeat = self.v1_heartbeat(status="busy", run_id=run_id)
+        with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "30"}, clear=False):
+            heartbeat = self.v1_heartbeat(status="busy", run_id=run_id)
 
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         progress = json.loads(db.get_review_run(run_id)["progress_json"])
@@ -901,7 +902,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
             v1_worker_heartbeat_payload(status="busy", run_id=run_id),
             headers=self.auth,
         )
-                app.PullwiseHandler.route(heartbeat, "POST")
+        with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
+            app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
         self.assertTrue(heartbeat.payload["ack"])
         self.assertEqual(heartbeat.payload["commands"], [])
@@ -1623,8 +1625,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         for label, payload in cases:
             with self.subTest(label=label):
                 heartbeat = RouteHarness("/v1/workers/wk_1/heartbeat", payload, headers=self.auth)
-                with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
-            app.PullwiseHandler.route(heartbeat, "POST")
+                app.PullwiseHandler.route(heartbeat, "POST")
                 self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("Invalid review-worker-protocol/v1 heartbeat", heartbeat.payload["message"])
 

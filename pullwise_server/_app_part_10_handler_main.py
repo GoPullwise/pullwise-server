@@ -190,8 +190,10 @@ def worker_heartbeat_should_persist_progress(job: dict, timestamp: int) -> bool:
     interval = worker_heartbeat_progress_persist_interval_seconds()
     if interval <= 0:
         return True
+    if public_issue_text(job.get("status")) == "claimed":
+        return False
     last_update = pull_request_timestamp(job.get("updated_at")) or pull_request_timestamp(job.get("claimed_at")) or 0
-    return not last_update or int(timestamp or now()) - int(last_update) >= interval
+    return bool(last_update) and int(timestamp or now()) - int(last_update) >= interval
 
 def worker_v1_lease_integer(value: object, field_name: str, errors: list[str]) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
@@ -3577,7 +3579,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         progress_snapshot = body.get("progress") if isinstance(body.get("progress"), dict) else {}
         if progress_snapshot and active_job_ids_accepting_updates:
             progress_job = active_job_from_run or db.get_scan_job(active_job_ids_accepting_updates[0])
-            if progress_job:
+            if progress_job and worker_heartbeat_should_persist_progress(progress_job, heartbeat_timestamp):
                 progress_run_id = public_issue_text(progress_snapshot.get("run_id") or body.get("active_run_id")) or scan_job_run_id(progress_job)
                 phase = public_scan_phase(progress_snapshot.get("current_phase") or progress_snapshot.get("phase"))
                 progress_value = public_scan_progress(progress_snapshot.get("overall_percent"))
