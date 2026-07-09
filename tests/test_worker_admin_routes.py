@@ -1249,8 +1249,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("PULLWISE_CODEX_RELEASE", handler.payload["suggested_env"])
         self.assertNotIn("PULLWISE_CODEX_USE_LATEST", handler.payload["suggested_env"])
         self.assertNotIn("--codex-release", handler.payload["install_commands"]["standard"])
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS"], "1800")
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_TURNS"], "8")
+        self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS", handler.payload["suggested_env"])
+        self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_TURNS", handler.payload["suggested_env"])
 
     def test_admin_worker_create_ignores_codex_cli_release_inputs(self) -> None:
         handler = RouteHarness(
@@ -1280,14 +1280,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             'write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-900}"',
             script,
         )
-        self.assertIn(
-            'write_env_value PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS "${PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS:-1800}"',
-            script,
-        )
-        self.assertIn(
-            'write_env_value PULLWISE_CODEX_APP_SERVER_MAX_TURNS "${PULLWISE_CODEX_APP_SERVER_MAX_TURNS:-8}"',
-            script,
-        )
+        self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS", script)
+        self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_TURNS", script)
 
     def test_worker_minimum_version_uses_numeric_components(self) -> None:
         with patch.dict(os.environ, {"PULLWISE_MIN_WORKER_VERSION": "0.9.0"}, clear=False):
