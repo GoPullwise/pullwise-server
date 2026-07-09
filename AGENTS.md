@@ -25,7 +25,7 @@ or another worker instance's auth state.
   - `XDG_CONFIG_HOME=$WORKER_RUNTIME_ROOT/.config`
   - `XDG_CACHE_HOME=$WORKER_RUNTIME_ROOT/.cache`
   - `XDG_DATA_HOME=$WORKER_RUNTIME_ROOT/.local/share`
-  - `PATH` with this worker's `$WORKER_RUNTIME_ROOT/.local/bin`, `$WORKER_RUNTIME_ROOT/.codex/bin`, `$CODEX_HOME/bin`,
+  - `PATH` with this worker's `$WORKER_RUNTIME_ROOT/.venv/bin`, `$WORKER_RUNTIME_ROOT/.local/bin`, `$WORKER_RUNTIME_ROOT/.codex/bin`, `$CODEX_HOME/bin`,
     before the base service path
 - The installer should create the per-worker config/cache/auth directories under
   `$WORKER_RUNTIME_ROOT`.
