@@ -115,7 +115,7 @@ class LoggingConfigTest(unittest.TestCase):
             patch("sys.argv", ["pullwise-server"]),
             patch.object(app, "load_env_file"),
             patch.object(app.logging_config, "configure_logging") as configure_logging,
-            patch.object(app, "ThreadingHTTPServer", return_value=server),
+            patch.object(app, "PullwiseThreadingHTTPServer", return_value=server),
             patch("builtins.print"),
         ):
             app.main()

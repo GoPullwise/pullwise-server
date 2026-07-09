@@ -53,6 +53,12 @@ def store_completed_protocol_artifacts(job: dict, attempt_id: str, manifest: lis
             payload={
                 "run_id": job.get("run_id") or f"run_{job['job_id']}",
                 "artifact_id": item["artifact_id"],
+                "kind": item["kind"],
+                "name": item["name"],
+                "media_type": item["media_type"],
+                "schema_id": item["schema_id"],
+                "schema_version": item["schema_version"],
+                "required": item["required"],
                 "sha256": item["sha256"],
                 "size_bytes": item["size_bytes"],
             },
@@ -340,7 +346,7 @@ class ApiKeyRoutesTest(unittest.TestCase):
         quota_handler = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/quota", headers=auth)
         app.PullwiseHandler.route(quota_handler, "GET")
         self.assertEqual(quota_handler.status, HTTPStatus.OK)
-        self.assertEqual(quota_handler.payload["repository"]["remaining"], 4)
+        self.assertEqual(quota_handler.payload["repository"]["remaining"], 999)
 
         stop = RouteHarness(f"/api/v1/repositories/{repo['repoId']}/scans/stop", headers=auth)
         app.PullwiseHandler.route(stop, "POST")

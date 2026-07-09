@@ -1541,10 +1541,11 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
             headers={"Content-Length": str(len(raw)), "creem-signature": signature},
         )
 
-        app.PullwiseHandler.route(handler, "POST")
+        with patch("pullwise_server.quota.time.time", return_value=1781913600):
+            app.PullwiseHandler.route(handler, "POST")
+            billing_payload = app.billing_account_payload(app.USERS["usr_1"])
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        billing_payload = app.billing_account_payload(app.USERS["usr_1"])
         self.assertEqual(billing_payload["plan"], "pro")
         self.assertEqual(billing_payload["status"], "active")
         self.assertEqual(billing_payload["usage"]["plan"], "pro")
