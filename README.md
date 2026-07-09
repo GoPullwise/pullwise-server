@@ -295,9 +295,10 @@ worker version, default package, and release lookup URL are database-backed
 system config. Override the full package URL with `PULLWISE_WORKER_PACKAGE` or
 `--package` during controlled upgrades. Re-running the installer force-reinstalls
 the selected worker wheel so same-version rebuilds are not skipped by pip. For
-Codex providers, the installer bootstraps the instance-scoped Codex CLI with
-OpenAI's official standalone installer. `PULLWISE_CODEX_RELEASE` or
-`--codex-release` selects the release; the default is `latest`.
+Codex providers, the worker wheel's `openai-codex` dependency supplies the pinned
+Codex runtime by default. The installer runs OpenAI's standalone Codex CLI
+installer only when an explicit local override such as `PULLWISE_CODEX_COMMAND`,
+`PULLWISE_CODEX_RELEASE`, or `--codex-release` is provided.
 
 Worker review protocol endpoints (authenticated via bearer token):
 
@@ -877,7 +878,7 @@ https://developers.cloudflare.com/workers/languages/python/stdlib/
 Pullwise scans currently require capabilities that belong on a server/container:
 
 - `git clone` into a checkout directory
-- subprocess execution for Git, Codex CLI, or Claude Code
+- subprocess execution for Git, the Codex SDK runtime/app-server, or Claude Code
 - persistent SQLite state unless replaced by an external database
 - persistent checkout storage
 - long-running review work with provider CLIs and network access

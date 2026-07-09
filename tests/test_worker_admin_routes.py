@@ -1747,11 +1747,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(handler.payload["agentConfigs"]["max"]["provider"], "codex")
             self.assertNotIn("providerChain", handler.payload["agentConfigs"]["free"])
             self.assertEqual(handler.payload["agentConfigs"]["free"]["codex"]["model"], "gpt-free")
+            self.assertNotIn("cli", handler.payload["agentConfigs"]["free"]["codex"])
+            self.assertNotIn("command", handler.payload["agentConfigs"]["free"]["codex"])
 
         stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
         self.assertEqual(stored["plans"]["free"]["provider"], "codex")
         self.assertEqual(stored["plans"]["pro"]["provider"], "codex")
         self.assertEqual(stored["plans"]["max"]["provider"], "codex")
+        self.assertNotIn("cli", stored["plans"]["free"]["codex"])
+        self.assertNotIn("command", stored["plans"]["free"]["codex"])
 
     def test_admin_review_calibration_routes_are_retired(self) -> None:
         denied = RouteHarness(

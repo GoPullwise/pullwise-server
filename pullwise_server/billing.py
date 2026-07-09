@@ -30,7 +30,6 @@ PAID_PLAN_CHANGE_STATUSES = {"active", "trialing", "canceling"}
 CREEM_CHECKOUT_REQUEST_ID_WINDOW_SECONDS = 10 * 60
 CREEM_PRO_ENTITLEMENT_STATUSES = PAID_PLAN_ENTITLEMENT_STATUSES
 CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
-REVIEW_CODEX_COMMAND_DEFAULT = "codex"
 REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
 REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
 REVIEW_AGENT_PROVIDERS = ("codex",)
@@ -152,8 +151,6 @@ def default_review_agent_plan_config(plan: str) -> dict:
     return {
         "provider": "codex",
         "codex": {
-            "cli": REVIEW_CODEX_COMMAND_DEFAULT,
-            "command": REVIEW_CODEX_COMMAND_DEFAULT,
             "model": REVIEW_CODEX_MODEL_DEFAULT,
             "reasoningEffort": effort,
         },
@@ -171,12 +168,6 @@ def default_review_agent_config_state() -> dict:
 def normalize_review_agent_provider_config(provider: str, value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
-    cli = clean_review_agent_config_text(source.get("cli"))
-    if cli:
-        result["cli"] = cli
-        command = clean_review_agent_config_text(source.get("command"))
-        if "command" not in source or command == cli:
-            result["command"] = cli
     model = clean_review_agent_config_text(source.get("model"))
     if model:
         result["model"] = model
@@ -284,8 +275,6 @@ def review_agent_config(plan: str) -> dict:
         "plan": normalized_plan,
         "provider": configured["provider"],
         "codex": {
-            "cli": codex_config["cli"],
-            "command": codex_config["command"],
             "model": codex_config["model"],
             "reasoningEffort": codex_config["reasoningEffort"],
         },

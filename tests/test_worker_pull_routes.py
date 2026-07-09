@@ -1030,6 +1030,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claimed["repository"]["commit_sha"], "abc1234")
         self.assertEqual(claimed["model_profile"]["default_model"], claimed["agentConfig"]["codex"]["model"])
         self.assertEqual(claimed["model_profile"]["core_effort"], claimed["agentConfig"]["codex"]["reasoningEffort"])
+        self.assertNotIn("cli", claimed["agentConfig"]["codex"])
+        self.assertNotIn("command", claimed["agentConfig"]["codex"])
         self.assertEqual(claimed["model_profile"]["non_core_effort"], "medium")
         self.assertEqual(claimed["review_request"]["mode"], "full_repo")
         self.assertEqual(claimed["review_request"]["profile"], "standard")
@@ -2961,6 +2963,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         codex_config = agent_config["codex"]
         review_worker_config = agent_config["reviewWorker"]
         repository_limits = payload["repositoryLimits"]
+        self.assertNotIn("cli", codex_config)
+        self.assertNotIn("command", codex_config)
         self.assertEqual(payload["model_profile"]["default_model"], codex_config["model"])
         self.assertEqual(payload["model_profile"]["core_effort"], codex_config["reasoningEffort"])
         self.assertEqual(payload["model_profile"]["non_core_effort"], "medium")

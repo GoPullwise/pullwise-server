@@ -1,4 +1,4 @@
-﻿# Pullwise Server Agent Notes
+# Pullwise Server Agent Notes
 
 ## Worker Host Platform
 
@@ -38,17 +38,13 @@ mind: every worker on the same server must use only its own configured Codex
 directories.
 - Installer auth commands should call the worker SDK helper (`pullwise-worker codex-login` / `$BIN_PATH codex-login`), not `codex login --device-auth`, so device-code auth uses the same Python SDK path as worker automation.
 - Server-generated installer scripts and admin suggested env must not emit old app-server lifecycle knobs (`PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS` or `PULLWISE_CODEX_APP_SERVER_MAX_TURNS`); the worker SDK owns that lifecycle.
-- Admin-created worker payloads must not expose Codex CLI release pinning fields; the installer may keep its internal latest default/override, but admin UI/API should not send `codexVersion` or `codexUseLatest`.
-- Install Codex CLI through OpenAI's standalone macOS/Linux installer at
-  `https://chatgpt.com/codex/install.sh` with worker-scoped `CODEX_INSTALL_DIR`;
-  do not replace it with direct `npm install @openai/codex`. Upstream installer
-  errors may mention npm package or platform release assets because that is part
-  of OpenAI's installer internals.
+- Admin-created worker payloads must not expose Codex CLI command/release pinning fields; admin UI/API should not send `codexVersion`, `codexUseLatest`, or plan-level CLI command policy.
+- Default Codex automation uses the `openai-codex` Python SDK pinned runtime. Run OpenAI's standalone installer at `https://chatgpt.com/codex/install.sh` only for an explicit local CLI override such as `PULLWISE_CODEX_COMMAND` or `PULLWISE_CODEX_RELEASE`; never install `@openai/codex` directly.
 
-## Worker Codex CLI Concurrency
+## Worker Codex Runtime Concurrency
 
 Never configure or schedule a single worker identity to run multiple Codex
-agent CLI processes concurrently.
+SDK runtime/app-server processes concurrently.
 
 - Treat worker capacity for Codex jobs as permanently fixed at `1`.
 - Do not expose, persist, or route configurable worker job parallelism,
