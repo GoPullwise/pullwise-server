@@ -40,6 +40,7 @@ directories.
 - Server-generated installer scripts and admin suggested env must not emit old app-server lifecycle knobs (`PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS` or `PULLWISE_CODEX_APP_SERVER_MAX_TURNS`); the worker SDK owns that lifecycle.
 - Admin-created worker payloads must not expose Codex CLI command/release pinning fields; admin UI/API should not send `codexVersion`, `codexUseLatest`, or plan-level CLI command policy.
 - Default Codex automation uses the `openai-codex` Python SDK pinned runtime. Run OpenAI's standalone installer at `https://chatgpt.com/codex/install.sh` only for an explicit local CLI override such as `PULLWISE_CODEX_COMMAND` or `PULLWISE_CODEX_RELEASE`; never install `@openai/codex` directly.
+- Worker Python packages, including `pullwise-worker`, `openai-codex`, `openai-codex-cli-bin`, and transitive runtime dependencies, must be installed into the worker instance venv under `$WORKER_RUNTIME_ROOT/.venv`; do not install them into global/system Python. Host-level package installation is only for OS dependencies such as Python, git, bwrap, systemd helpers, and logrotate.
 
 ## Worker Codex Runtime Concurrency
 

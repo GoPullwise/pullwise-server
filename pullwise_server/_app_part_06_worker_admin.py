@@ -1272,6 +1272,7 @@ BIN_PATH="/usr/local/bin/$SERVICE_NAME"
 DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
 CHECKOUT_ROOT="$DATA_DIR/checkouts"
 WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$WORKER_ID"
+WORKER_VENV="$WORKER_RUNTIME_ROOT/.venv"
 LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 WATCHER_SERVICE_FILE="/etc/systemd/system/$WATCHER_SERVICE_NAME.service"
@@ -1389,7 +1390,7 @@ fi
 PROVIDER="${PROVIDER_CHAIN%%,*}"
 CODEX_HOME="$WORKER_RUNTIME_ROOT/codex-home"
 CODEX_SQLITE_HOME="$WORKER_RUNTIME_ROOT/codex-sqlite"
-SERVICE_TOOL_PATH="$WORKER_RUNTIME_ROOT/.local/bin:$WORKER_RUNTIME_ROOT/.codex/bin:$CODEX_HOME/bin:$SERVICE_PATH"
+SERVICE_TOOL_PATH="$WORKER_VENV/bin:$WORKER_RUNTIME_ROOT/.local/bin:$WORKER_RUNTIME_ROOT/.codex/bin:$CODEX_HOME/bin:$SERVICE_PATH"
 XDG_CONFIG_HOME="$WORKER_RUNTIME_ROOT/.config"
 XDG_CACHE_HOME="$WORKER_RUNTIME_ROOT/.cache"
 XDG_DATA_HOME="$WORKER_RUNTIME_ROOT/.local/share"
@@ -1516,11 +1517,14 @@ if [ ! -f "$CODEX_HOME/config.toml" ]; then
   install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"
 fi
 
+run_as_service_user "$PYTHON_BIN" -m venv "$WORKER_VENV"
+PYTHON_BIN="$WORKER_VENV/bin/python"
+
 if provider_chain_has codex && codex_cli_override_enabled; then
   ensure_codex_cli
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi
-"$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
+run_as_service_user "$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
 
 write_env_value() {
   local key="$1"
@@ -1595,6 +1599,7 @@ write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
 write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"
 write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"
 write_env_value PULLWISE_WORKER_ROOT "$WORKER_RUNTIME_ROOT"
+write_env_value PULLWISE_WORKER_VENV "$WORKER_VENV"
 write_env_value PULLWISE_SERVICE_NAME "$SERVICE_NAME"
 write_env_value PULLWISE_SERVICE_FILE "$SERVICE_FILE"
 write_env_value PULLWISE_LIFECYCLE_WATCHER_ENABLED "1"
@@ -1645,8 +1650,8 @@ export XDG_CONFIG_HOME="\$WORKER_ROOT/.config"
 export XDG_CACHE_HOME="\$WORKER_ROOT/.cache"
 export XDG_DATA_HOME="\$WORKER_ROOT/.local/share"
 SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-export PATH="\$WORKER_ROOT/.local/bin:\$WORKER_ROOT/.codex/bin:\$CODEX_HOME/bin:\$SERVICE_PATH"
-PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-python3.10}"
+export PATH="\$WORKER_ROOT/.venv/bin:\$WORKER_ROOT/.local/bin:\$WORKER_ROOT/.codex/bin:\$CODEX_HOME/bin:\$SERVICE_PATH"
+PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-\$WORKER_ROOT/.venv/bin/python}"
 exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
 EOF
 chmod 0755 "$BIN_PATH"
