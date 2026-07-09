@@ -8,6 +8,28 @@ import unittest
 
 from pullwise_server import app
 
+def contract_test_bash() -> str | None:
+    if os.name != "nt":
+        return shutil.which("bash")
+    seen: set[str] = set()
+    fallback = shutil.which("bash")
+    candidates: list[str] = []
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        candidate = os.path.join(directory, "bash.exe")
+        if not os.path.exists(candidate):
+            continue
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        lowered = normalized.lower()
+        if "\\windows\\system32\\bash.exe" in lowered or "\\windowsapps\\bash.exe" in lowered:
+            continue
+        candidates.append(candidate)
+    return candidates[0] if candidates else fallback
+
 
 def service_user_helper(script: str) -> str:
     start = script.index("safe_worker_id() {")
@@ -68,7 +90,7 @@ def ubuntu_dependency_support_helper(script: str) -> str:
 
 
 def ubuntu_dependency_support(script: str, os_release: str) -> str:
-    bash = shutil.which("bash")
+    bash = contract_test_bash()
     if not bash:
         raise unittest.SkipTest("bash is required for installer contract tests.")
 
