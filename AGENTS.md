@@ -1,4 +1,4 @@
-# Pullwise Server Agent Notes
+﻿# Pullwise Server Agent Notes
 
 ## Worker Host Platform
 
@@ -36,6 +36,8 @@ or another worker instance's auth state.
 When changing worker installer generation, keep multi-worker deployments in
 mind: every worker on the same server must use only its own configured Codex
 directories.
+- Installer auth commands should call the worker SDK helper (`pullwise-worker codex-login` / `$BIN_PATH codex-login`), not `codex login --device-auth`, so device-code auth uses the same Python SDK path as worker automation.
+- Admin-created worker payloads must not expose Codex CLI release pinning fields; the installer may keep its internal latest default/override, but admin UI/API should not send `codexVersion` or `codexUseLatest`.
 - Install Codex CLI through OpenAI's standalone macOS/Linux installer at
   `https://chatgpt.com/codex/install.sh` with worker-scoped `CODEX_INSTALL_DIR`;
   do not replace it with direct `npm install @openai/codex`. Upstream installer
@@ -387,3 +389,4 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 - Server-side evidence should include only scoped records for the same scan/job/run: scan/job/attempt/run identifiers, phase/progress/error snapshots, review-run events, artifact metadata/storage references, quota state, and relevant timestamps. It must not include full database dumps, secrets, other users' data, or unrelated scans.
 - The UI must disable or omit debug bundle actions when no real debug_bundle artifact/server debug bundle endpoint exists. Do not substitute /scans/{scanId}/audit-bundle.zip as a debug zip URL.
 - Tests should protect this contract: missing debugBundleUrl must not produce an audit-bundle URL, and server/worker tests must verify failed runs still expose a real debug_bundle artifact or explicit absence.
+
