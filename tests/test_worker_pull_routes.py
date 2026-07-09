@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import gzip
@@ -2041,6 +2041,34 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(non_linux, "POST")
         self.assertEqual(non_linux.status, HTTPStatus.BAD_REQUEST)
+        missing_platform = RouteHarness(
+            "/v1/workers/register",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker": {
+                    "worker_id": "wk_1",
+                    "concurrency": {"max_active_jobs": 1, "maintains_local_queue": False, "prefetch_jobs": False},
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(missing_platform, "POST")
+        self.assertEqual(missing_platform.status, HTTPStatus.BAD_REQUEST)
+
+        missing_queue_assertion = RouteHarness(
+            "/v1/workers/register",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "worker": {
+                    "worker_id": "wk_1",
+                    "concurrency": {"max_active_jobs": 1, "prefetch_jobs": False},
+                    "platform": {"os": "linux", "arch": "x86_64"},
+                },
+            },
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(missing_queue_assertion, "POST")
+        self.assertEqual(missing_queue_assertion.status, HTTPStatus.BAD_REQUEST)
 
     def test_v1_worker_heartbeat_rejects_malformed_fixed_protocol_shape(self) -> None:
         def clone(payload: dict) -> dict:
@@ -5026,22 +5054,49 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.issue_payload(app.ISSUES[0]).get("file"), "")
 
     def test_claim_token_failure_fails_job_without_marking_scan_running(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {user["id"]: user}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "111",
+                "full_name": "acme/api",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "clone_url": "https://github.com/acme/api.git",
+            }
+        )
+        quota_result = app.quota.reserve_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_token_fail",
+            request_id="req_token_fail",
+        )
         scan = {
             "id": "sc_token_fail",
             "repo": "acme/api",
             "branch": "main",
             "commit": "pending",
             "status": "queued",
-            "userId": "usr_1",
+            "userId": user["id"],
             "createdAt": app.now(),
             "queuedAt": app.now(),
             "progress": 0,
             "phase": None,
             "installationId": "111",
             "cloneUrl": "https://github.com/acme/api.git",
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_token_fail",
+            "quotaBucketIds": quota_result["bucketIds"],
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+            "quotaState": "reserved",
+            "quotaReservedAt": app.now(),
         }
         app.SCANS = [scan]
         job = app.create_scan_job_for_scan(scan)
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
 
         with (
             patch.object(app.github_auth, "app_api_configured", return_value=True),
@@ -5059,6 +5114,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored_job["error"], "clone_token_unavailable")
         self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertEqual(app.SCANS[0]["error"], "clone_token_unavailable")
+        self.assertEqual(app.SCANS[0]["quotaState"], "released")
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
         self.assertNotEqual(app.SCANS[0].get("status"), "running")
 
     def test_worker_routes_require_enabled_token(self) -> None:
@@ -6107,6 +6164,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
