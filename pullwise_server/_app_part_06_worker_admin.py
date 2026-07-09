@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -901,9 +901,6 @@ def default_worker_package(version: object = None) -> str:
 
 WORKER_INSTALL_PROVIDERS = ("codex",)
 CODEX_CLI_INSTALLER_URL = "https://chatgpt.com/codex/install.sh"
-CODEX_CLI_RELEASE_RE = re.compile(r"^(?:latest|(?:(?:rust-)?v)?[0-9]+\.[0-9]+\.[0-9]+(?:-(?:alpha|beta)(?:\.[0-9]+)?)?)$")
-
-
 def default_worker_provider_chain() -> list[str]:
     providers: list[str] = []
     for plan in billing.PLAN_IDS:
@@ -952,19 +949,8 @@ def request_bool(value: object, *, default: bool) -> bool:
 
 
 def worker_codex_install_options(body: object = None) -> dict:
-    source = body if isinstance(body, dict) else {}
-    use_latest = request_bool(
-        source.get("codexUseLatest", source.get("codex_use_latest")),
-        default=True,
-    )
-    if use_latest:
-        return {"release": "latest", "use_latest": True}
-    release = public_issue_text(source.get("codexVersion") or source.get("codex_version"))
-    if not release:
-        raise ValueError("codexVersion is required when codexUseLatest is false.")
-    if not CODEX_CLI_RELEASE_RE.fullmatch(release):
-        raise ValueError("codexVersion must be latest or x.y.z[-alpha[.N]|-beta[.N]].")
-    return {"release": release, "use_latest": False}
+    del body
+    return {"release": "latest", "use_latest": True}
 
 
 def worker_create_payload(worker: dict, *, codex_install_options: dict | None = None) -> dict:
@@ -990,8 +976,7 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     safe_worker_id = worker_safe_service_id(public["worker_id"])
     service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"
     service_log_dir = f"/var/log/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/log/pullwise-worker"
-    codex_options = codex_install_options or worker_codex_install_options()
-    codex_release = public_issue_text(codex_options.get("release")) or "latest"
+    del codex_install_options
     install_command = worker_install_command(
         install_url=install_url,
         server_url=server_url,
@@ -999,7 +984,6 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
         worker_name=public.get("name") or public["worker_id"],
         worker_package=worker_package,
         provider_chain=provider_chain_text,
-        codex_release=codex_release,
     )
     local_install_command = worker_install_command(
         install_url=local_install_url,
@@ -1008,7 +992,6 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
         worker_name=public.get("name") or public["worker_id"],
         worker_package=worker_package,
         provider_chain=provider_chain_text,
-        codex_release=codex_release,
     )
     suggested_env = {
         "PULLWISE_SERVER_URL": server_url,
@@ -1039,8 +1022,6 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
                 "PULLWISE_CODEX_COMMAND": f"{service_home}/workers/{public['worker_id']}/.local/bin/codex",
                 "PULLWISE_CODEX_HOME": f"{service_home}/workers/{public['worker_id']}/codex-home",
                 "PULLWISE_CODEX_SQLITE_HOME": f"{service_home}/workers/{public['worker_id']}/codex-sqlite",
-                "PULLWISE_CODEX_RELEASE": codex_release,
-                "PULLWISE_CODEX_USE_LATEST": "1" if codex_options.get("use_latest", True) else "0",
                 "PULLWISE_CODEX_INSTALLER_URL": CODEX_CLI_INSTALLER_URL,
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
@@ -1049,23 +1030,21 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
                 "PULLWISE_CODEX_APP_SERVER_MAX_TURNS": "8",
             }
         )
-    payload = {
-        "worker": public,
+    script_hash = worker_install_script_sha256()
+    return {
+        **public,
         "worker_id": public["worker_id"],
+        "worker": public,
         "worker_token": token,
-        "server_url": server_url,
-        "install_url": install_url,
-        "local_server_url": local_server_url,
-        "local_install_url": local_install_url,
+        "token": token,
+        "install_script_url": install_url,
         "install_commands": {
             "standard": install_command,
             "local": local_install_command,
+            "script_sha256": script_hash,
         },
-        "provider": provider_chain[0],
-        "providerChain": list(provider_chain),
         "suggested_env": suggested_env,
     }
-    return payload
 
 
 def worker_install_command(
@@ -1076,10 +1055,8 @@ def worker_install_command(
     worker_name: str,
     worker_package: str,
     provider_chain: str,
-    codex_release: str = "latest",
 ) -> str:
     script_hash = worker_install_script_sha256()
-    codex_release_text = public_issue_text(codex_release) or "latest"
     return (
         "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
         "export PULLWISE_WORKER_TOKEN; "
@@ -1092,10 +1069,8 @@ def worker_install_command(
         f"--worker-id {shell_quote(worker_id)} "
         f"--worker-name {shell_quote(worker_name)} "
         f"--package {shell_quote(worker_package)} "
-        f"--provider-chain {shell_quote(provider_chain)} "
-        f"--codex-release {shell_quote(codex_release_text)}"
+        f"--provider-chain {shell_quote(provider_chain)}"
     )
-
 
 def shell_quote(value: object) -> str:
     text = public_issue_text(value)
@@ -1163,12 +1138,14 @@ read_os_value() {
   [ -f "$os_file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      "$key"=*)
-        value="${line#*=}"
-        value="${value%\"}"
-        value="${value#\"}"
-        printf '%s' "$value"
-        return 0
+      *=*)
+        if [ "${line%%=*}" = "$key" ]; then
+          value="${line#*=}"
+          value="${value%\"}"
+          value="${value#\"}"
+          printf '%s' "$value"
+          return 0
+        fi
         ;;
     esac
   done < "$os_file"
@@ -1560,7 +1537,7 @@ write_env_value() {
   printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
 }
 codex_device_auth_command() {
-  service_user_auth_command "$CODEX_COMMAND" login --device-auth
+  service_user_auth_command "$BIN_PATH" codex-login
 }
 write_auth_commands() {
   {
@@ -1785,3 +1762,8 @@ def worker_test_payload(worker: dict) -> dict:
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}
+
+
+
+
+

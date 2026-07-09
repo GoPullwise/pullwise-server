@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -1246,12 +1246,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_HOME"], f"{worker_root}/codex-home")
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_SQLITE_HOME"], f"{worker_root}/codex-sqlite")
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_TIMEOUT_SECONDS"], "900")
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "latest")
-        self.assertIn("--codex-release 'latest'", handler.payload["install_commands"]["standard"])
+        self.assertNotIn("PULLWISE_CODEX_RELEASE", handler.payload["suggested_env"])
+        self.assertNotIn("PULLWISE_CODEX_USE_LATEST", handler.payload["suggested_env"])
+        self.assertNotIn("--codex-release", handler.payload["install_commands"]["standard"])
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS"], "1800")
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_APP_SERVER_MAX_TURNS"], "8")
 
-    def test_admin_worker_create_can_pin_codex_cli_release(self) -> None:
+    def test_admin_worker_create_ignores_codex_cli_release_inputs(self) -> None:
         handler = RouteHarness(
             "/admin/workers",
             {
@@ -1267,9 +1268,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "0.13.0")
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_USE_LATEST"], "0")
-        self.assertIn("--codex-release '0.13.0'", handler.payload["install_commands"]["standard"])
+        self.assertNotIn("PULLWISE_CODEX_RELEASE", handler.payload["suggested_env"])
+        self.assertNotIn("PULLWISE_CODEX_USE_LATEST", handler.payload["suggested_env"])
+        self.assertNotIn("--codex-release", handler.payload["install_commands"]["standard"])
 
     def test_install_worker_script_writes_configured_codex_timeout_env(self) -> None:
         with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):
@@ -2485,3 +2486,6 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import shutil
@@ -154,7 +154,7 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         script = app.worker_install_script()
 
         self.assertIn("codex_device_auth_command() {", script)
-        self.assertIn('service_user_auth_command "$CODEX_COMMAND" login --device-auth', script)
+        self.assertIn('service_user_auth_command "$BIN_PATH" codex-login', script)
         self.assertIn("run_default_auth_commands() {", script)
         self.assertIn('auth_command="$(codex_device_auth_command)"', script)
         self.assertIn('if ! eval "$auth_command"; then', script)
@@ -292,7 +292,6 @@ class WorkerInstallerContractsTest(unittest.TestCase):
             worker_name="Worker One",
             worker_package="https://github.com/GoPullwise/pullwise-worker/releases/download/v1.2.3/pullwise_worker-1.2.3-py3-none-any.whl",
             provider_chain="codex",
-            codex_release="0.13.0",
         )
         expected_hash = hashlib.sha256(app.worker_install_script().encode("utf-8")).hexdigest()
 
@@ -301,10 +300,12 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('-o "$install_script"', command)
         self.assertIn("sha256sum -c -", command)
         self.assertIn('bash "$install_script"', command)
-        self.assertIn("--codex-release '0.13.0'", command)
+        self.assertNotIn("--codex-release", command)
         self.assertNotIn("curl -fsSL 'https://api.pull-wise.com/install-worker.sh' | bash", command)
         self.assertNotIn("| bash -s --", command)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
