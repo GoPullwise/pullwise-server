@@ -1026,8 +1026,6 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
                 "PULLWISE_CODEX_TIMEOUT_SECONDS": codex_timeout_seconds,
-                "PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS": "1800",
-                "PULLWISE_CODEX_APP_SERVER_MAX_TURNS": "8",
             }
         )
     script_hash = worker_install_script_sha256()
@@ -1586,8 +1584,6 @@ if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
   write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
   write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-__PULLWISE_CODEX_TIMEOUT_SECONDS__}"
-  write_env_value PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS "${PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS:-1800}"
-  write_env_value PULLWISE_CODEX_APP_SERVER_MAX_TURNS "${PULLWISE_CODEX_APP_SERVER_MAX_TURNS:-8}"
 fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"

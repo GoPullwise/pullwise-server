@@ -37,6 +37,7 @@ When changing worker installer generation, keep multi-worker deployments in
 mind: every worker on the same server must use only its own configured Codex
 directories.
 - Installer auth commands should call the worker SDK helper (`pullwise-worker codex-login` / `$BIN_PATH codex-login`), not `codex login --device-auth`, so device-code auth uses the same Python SDK path as worker automation.
+- Server-generated installer scripts and admin suggested env must not emit old app-server lifecycle knobs (`PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS` or `PULLWISE_CODEX_APP_SERVER_MAX_TURNS`); the worker SDK owns that lifecycle.
 - Admin-created worker payloads must not expose Codex CLI release pinning fields; the installer may keep its internal latest default/override, but admin UI/API should not send `codexVersion` or `codexUseLatest`.
 - Install Codex CLI through OpenAI's standalone macOS/Linux installer at
   `https://chatgpt.com/codex/install.sh` with worker-scoped `CODEX_INSTALL_DIR`;

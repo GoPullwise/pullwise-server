@@ -1,9 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
-import tempfile
 import unittest
 
 from pullwise_server import app
@@ -59,7 +59,10 @@ def ubuntu_dependency_support_helper(script: str) -> str:
     end = script.index("auto_install_enabled() {")
     return (
         script[start:end]
-        + '\nPULLWISE_WORKER_OS_RELEASE_FILE="$1"\n'
+        + "\nos_file=\"$(mktemp)\"\n"
+        + "trap 'rm -f \"$os_file\"' EXIT\n"
+        + "printf '%s' \"$PULLWISE_TEST_OS_RELEASE\" > \"$os_file\"\n"
+        + "PULLWISE_WORKER_OS_RELEASE_FILE=\"$os_file\"\n"
         + "if is_ubuntu_2204_or_newer; then printf supported; else printf unsupported; fi\n"
     )
 
@@ -69,16 +72,14 @@ def ubuntu_dependency_support(script: str, os_release: str) -> str:
     if not bash:
         raise unittest.SkipTest("bash is required for installer contract tests.")
 
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8") as os_file:
-        os_file.write(os_release)
-        os_file.flush()
-        result = subprocess.run(
-            [bash, "-c", ubuntu_dependency_support_helper(script), "_", os_file.name],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+    result = subprocess.run(
+        [bash, "-c", ubuntu_dependency_support_helper(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PULLWISE_TEST_OS_RELEASE": os_release},
+    )
     if result.returncode != 0:
         raise AssertionError(result.stderr + result.stdout)
     return result.stdout.strip()
