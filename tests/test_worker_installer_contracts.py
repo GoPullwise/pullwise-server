@@ -260,6 +260,8 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('CODEX_INSTALLER_URL="${PULLWISE_CODEX_INSTALLER_URL:-https://chatgpt.com/codex/install.sh}"', script)
         self.assertIn('curl -fsSL "$CODEX_INSTALLER_URL" -o "$installer_path"', script)
         self.assertIn('CODEX_INSTALL_DIR="$codex_install_dir" CODEX_NON_INTERACTIVE=1 "$installer_path" --release "$release"', script)
+        self.assertIn('Codex CLI standalone installer failed for release $release.', script)
+        self.assertIn('latest release metadata and platform assets are still propagating', script)
         self.assertIn('write_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"', script)
         self.assertNotIn("https://deb.nodesource.com/node_22.x", script)
         self.assertNotIn("ensure_nodesource_nodejs", script)

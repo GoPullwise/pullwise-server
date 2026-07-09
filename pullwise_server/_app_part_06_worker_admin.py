@@ -1503,7 +1503,11 @@ ensure_codex_cli() {
   chmod 0755 "$installer_path"
   echo "Installing Codex CLI release $release into $codex_install_dir"
   if ! run_as_service_user env CODEX_RELEASE="$release" CODEX_INSTALL_DIR="$codex_install_dir" CODEX_NON_INTERACTIVE=1 "$installer_path" --release "$release"; then
-    echo "Codex CLI install failed." >&2
+    echo "Codex CLI standalone installer failed for release $release." >&2
+    echo "Installer: $CODEX_INSTALLER_URL" >&2
+    if [ "$release" = "latest" ]; then
+      echo "The official installer may fail while latest release metadata and platform assets are still propagating; retry or pin --codex-release to a known published version." >&2
+    fi
     exit 1
   fi
   [ -x "$CODEX_COMMAND" ] || {

@@ -36,6 +36,11 @@ or another worker instance's auth state.
 When changing worker installer generation, keep multi-worker deployments in
 mind: every worker on the same server must use only its own configured Codex
 directories.
+- Install Codex CLI through OpenAI's standalone macOS/Linux installer at
+  `https://chatgpt.com/codex/install.sh` with worker-scoped `CODEX_INSTALL_DIR`;
+  do not replace it with direct `npm install @openai/codex`. Upstream installer
+  errors may mention npm package or platform release assets because that is part
+  of OpenAI's installer internals.
 
 ## Worker Codex CLI Concurrency
 
