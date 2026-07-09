@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -1019,10 +1019,8 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     if "codex" in provider_chain:
         suggested_env.update(
             {
-                "PULLWISE_CODEX_COMMAND": f"{service_home}/workers/{public['worker_id']}/.local/bin/codex",
                 "PULLWISE_CODEX_HOME": f"{service_home}/workers/{public['worker_id']}/codex-home",
                 "PULLWISE_CODEX_SQLITE_HOME": f"{service_home}/workers/{public['worker_id']}/codex-sqlite",
-                "PULLWISE_CODEX_INSTALLER_URL": CODEX_CLI_INSTALLER_URL,
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
                 "PULLWISE_CODEX_TIMEOUT_SECONDS": codex_timeout_seconds,
@@ -1094,7 +1092,7 @@ PROVIDER="codex"
 PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
 CODEX_COMMAND="${PULLWISE_CODEX_COMMAND:-}"
-CODEX_RELEASE="${PULLWISE_CODEX_RELEASE:-latest}"
+CODEX_RELEASE="${PULLWISE_CODEX_RELEASE:-}"
 CODEX_INSTALLER_URL="${PULLWISE_CODEX_INSTALLER_URL:-__CODEX_CLI_INSTALLER_URL__}"
 
 while [ "$#" -gt 0 ]; do
@@ -1377,6 +1375,9 @@ normalize_provider_chain() {
 provider_chain_has() {
   case ",$PROVIDER_CHAIN," in *",$1,"*) return 0 ;; *) return 1 ;; esac
 }
+codex_cli_override_enabled() {
+  [ -n "${CODEX_COMMAND:-}" ] || [ -n "${CODEX_RELEASE:-}" ] || [ -n "${PULLWISE_CODEX_INSTALLER_URL:-}" ]
+}
 if [ -z "$PROVIDER_CHAIN" ]; then
   PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-}"
 fi
@@ -1480,9 +1481,6 @@ ensure_codex_cli() {
   if ! run_as_service_user env CODEX_RELEASE="$release" CODEX_INSTALL_DIR="$codex_install_dir" CODEX_NON_INTERACTIVE=1 "$installer_path" --release "$release"; then
     echo "Codex CLI standalone installer failed for release $release." >&2
     echo "Installer: $CODEX_INSTALLER_URL" >&2
-    if [ "$release" = "latest" ]; then
-      echo "The official installer may fail while latest release metadata and platform assets are still propagating; retry or pin --codex-release to a known published version." >&2
-    fi
     exit 1
   fi
   [ -x "$CODEX_COMMAND" ] || {
@@ -1518,11 +1516,10 @@ if [ ! -f "$CODEX_HOME/config.toml" ]; then
   install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"
 fi
 
-if provider_chain_has codex; then
+if provider_chain_has codex && codex_cli_override_enabled; then
   ensure_codex_cli
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi
-
 "$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
 
 write_env_value() {
@@ -1533,6 +1530,12 @@ write_env_value() {
     exit 2
   fi
   printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+}
+write_optional_env_value() {
+  local key="$1"
+  local value="${2:-}"
+  [ -n "$value" ] || return 0
+  write_env_value "$key" "$value"
 }
 codex_device_auth_command() {
   service_user_auth_command "$BIN_PATH" codex-login
@@ -1576,9 +1579,11 @@ write_env_value PULLWISE_CHECKOUT_ROOT "$CHECKOUT_ROOT"
 write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
 if provider_chain_has codex; then
-  write_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
-  write_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"
-  write_env_value PULLWISE_CODEX_INSTALLER_URL "$CODEX_INSTALLER_URL"
+  if codex_cli_override_enabled; then
+    write_optional_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
+    write_optional_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"
+    write_env_value PULLWISE_CODEX_INSTALLER_URL "$CODEX_INSTALLER_URL"
+  fi
   write_env_value PULLWISE_CODEX_HOME "$CODEX_HOME"
   write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
