@@ -3174,6 +3174,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
                 if scan:
+                    release_scan_quota_reservation_for_scan(scan, reason="clone_token_unavailable")
                     scan.update(
                         {
                             "status": "failed",
@@ -3221,21 +3222,25 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "worker.worker_id is required.")
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
-        concurrency = worker.get("concurrency") if isinstance(worker.get("concurrency"), dict) else {}
+        concurrency = worker.get("concurrency") if isinstance(worker.get("concurrency"), dict) else None
+        if not isinstance(concurrency, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "worker.concurrency is required.")
         capabilities = worker.get("capabilities") if isinstance(worker.get("capabilities"), dict) else {}
         max_active_jobs_value = concurrency.get("max_active_jobs")
         if max_active_jobs_value is None:
             max_active_jobs_value = capabilities.get("max_active_jobs")
-        if max_active_jobs_value is None:
-            max_active_jobs_value = 1
         max_active_jobs = public_scan_count(max_active_jobs_value)
         if max_active_jobs != 1:
             return self.error(HTTPStatus.BAD_REQUEST, "Worker protocol allows exactly one active job.")
-        if concurrency.get("maintains_local_queue") is True or concurrency.get("prefetch_jobs") is True:
-            return self.error(HTTPStatus.BAD_REQUEST, "Worker protocol does not allow local queues or prefetch.")
-        platform = worker.get("platform") if isinstance(worker.get("platform"), dict) else {}
+        if concurrency.get("maintains_local_queue") is not False:
+            return self.error(HTTPStatus.BAD_REQUEST, "Worker protocol requires maintains_local_queue=false.")
+        if concurrency.get("prefetch_jobs") is not False:
+            return self.error(HTTPStatus.BAD_REQUEST, "Worker protocol requires prefetch_jobs=false.")
+        platform = worker.get("platform") if isinstance(worker.get("platform"), dict) else None
+        if not isinstance(platform, dict):
+            return self.error(HTTPStatus.BAD_REQUEST, "worker.platform is required.")
         platform_os = public_issue_text(platform.get("os")).lower()
-        if platform_os and platform_os not in {"linux", "posix"}:
+        if not platform_os or platform_os not in {"linux", "posix"}:
             return self.error(HTTPStatus.BAD_REQUEST, "Worker runtime platform must be Linux/POSIX.")
         try:
             registered = db.register_worker_protocol({**body, "timestamp": now()})
@@ -3472,7 +3477,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "worker_id is required.")
         if not self.authenticated_worker_id_matches(worker_record, worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
-        running_jobs = db.count_worker_running_scan_jobs(worker_id)
+        running_jobs = public_scan_count(worker_record.get("running_jobs"))
         command = db.get_next_worker_command(worker_id)
         return self.json(
             {

@@ -152,6 +152,12 @@ self-removal is valid only for an admin-initiated Delete instance lifecycle
 flow, after the host-local watcher has confirmed the paired worker instance has
 been successfully uninstalled.
 
+Worker command polling for delete/uninstall must report the current worker
+heartbeat slot state (`workers.running_jobs`) to the watcher. Do not use stale
+`scan_jobs` running counts to decide whether an idle worker-host watcher may
+execute cleanup, because an already-idle worker can otherwise keep an uninstall
+command pending until server timeout cleanup.
+
 ## Agent Config Source Of Truth
 
 The server owns subscription plan agent policy.

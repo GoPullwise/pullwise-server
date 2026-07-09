@@ -1910,6 +1910,60 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(heartbeat, "POST")
         self.assertEqual(heartbeat.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_admin_delete_idle_worker_poll_ignores_stale_running_scan_job(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        timestamp = app.now()
+        scan = {
+            "id": "sc_stale_running_delete",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claimed = db.claim_next_scan_job(worker_id, lease_seconds=3600, timestamp=timestamp)
+        self.assertIsNotNone(claimed)
+        db.update_scan_job_progress(
+            claimed["job_id"],
+            {"phase": "repo_map", "progress": 50, "message": "reviewing", "started_at": timestamp + 10},
+        )
+        active = self.post_v1_active_heartbeat(
+            worker_id,
+            token,
+            str(claimed.get("run_id") or f"run_{claimed['job_id']}"),
+        )
+        self.assertEqual(active.status, HTTPStatus.OK)
+        self.assertEqual(db.count_worker_running_scan_jobs(worker_id), 1)
+
+        idle = self.post_v1_heartbeat(worker_id, token)
+        self.assertEqual(idle.status, HTTPStatus.OK)
+        self.assertEqual(db.get_worker(worker_id)["running_jobs"], 0)
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "idle")
+        self.assertEqual(db.count_worker_running_scan_jobs(worker_id), 1)
+
+        delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(delete, "DELETE")
+        self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(delete.payload["command"]["status"], "pending")
+
+        poll = RouteHarness(
+            "/worker/commands/poll",
+            {"worker_id": worker_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(poll, "POST")
+        self.assertEqual(poll.status, HTTPStatus.OK)
+        self.assertEqual(poll.payload["command"]["id"], delete.payload["command"]["id"])
+        self.assertEqual(poll.payload["worker"]["running_jobs"], 0)
+
     def test_admin_delete_worker_without_host_contact_keeps_cleanup_pending_visible(self) -> None:
         payload, _token = self.create_worker()
         worker_id = payload["worker_id"]
