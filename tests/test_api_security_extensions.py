@@ -84,8 +84,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
     def test_bearer_session_token_authenticates_private_routes(self) -> None:
         handler = HandlerHarness("/settings", headers={"Authorization": "Bearer ses_1"})
 
-        with patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "false"}, clear=True):
-            app.PullwiseHandler.route(handler, "GET")
+        app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload["profile"]["email"], "dev@example.com")
@@ -98,9 +97,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
                 },
                 clear=True,
             ):
@@ -129,9 +125,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
                 },
                 clear=True,
             ):
@@ -161,9 +154,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
                 },
                 clear=True,
             ):
@@ -184,7 +174,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         )
 
         with (
-            patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
             patch.object(app.db, "get_enabled_worker_token", return_value={"worker_id": "wk_1"}),
             patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
         ):
@@ -197,7 +186,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         handler = HandlerHarness("/v1/review-runs/run_1/artifacts/art_report")
 
         with (
-            patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
             patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
         ):
             limited = handler.apply_rate_limit(
@@ -216,9 +204,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
                 },
                 clear=True,
             ):
@@ -244,7 +229,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         handler = HandlerHarness("/api/v1/repositories")
 
         with (
-            patch.dict(os.environ, {"PULLWISE_RATE_LIMIT_ENABLED": "true"}, clear=True),
             patch.object(app.db, "record_rate_limit_hit", side_effect=RuntimeError("database locked")),
             patch.object(app.logger, "exception") as log_exception,
         ):
@@ -262,9 +246,6 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
                 os.environ,
                 {
                     "PULLWISE_DB_PATH": db_path,
-                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                    "PULLWISE_RATE_LIMIT_REQUESTS": "5",
-                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
                     "PULLWISE_TRUST_PROXY_HEADERS": "true",
                     "PULLWISE_TRUSTED_PROXY_CIDRS": "127.0.0.1/32",
                 },

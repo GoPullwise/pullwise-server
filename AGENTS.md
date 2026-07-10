@@ -97,6 +97,11 @@ the server scheduler's point of view.
   in the worker-specific subdirectory.
 - Suggested env should include provider command variables only for providers in
   the worker's configured provider chain.
+- Worker install packages are selected only from the configured/default worker
+  version or the registration-time version and resolve to the official release
+  wheel. Do not reintroduce an arbitrary admin `defaultPackage` override.
+- Generated worker env must not carry reasoning-effort or turn-timeout policy;
+  those values come from the server-owned plan policy on each claimed job.
 
 ## Worker Delete Lifecycle
 
@@ -174,6 +179,9 @@ The server owns subscription plan agent policy.
   configs that job claims use.
 - Keep the plan review-agent provider as a single `provider` field in
   worker-facing API responses.
+- Persist only canonical plan policy that affects v1 jobs: Codex model,
+  reasoning effort, turn timeout, and scan deadline. Do not restore legacy
+  `mode`, `scanMode`, reviewer-turn, discovery, bundle, or candidate limits.
 
 ## Review Worker Protocol Semantics
 
@@ -320,6 +328,9 @@ web app session traffic.
   limiting.
 - User-facing docs should say public REST API rate limit or API-key automation
   rate limit, not a shared browser web app rate limit.
+- The database-backed Admin `rateLimit` group is the only runtime source for
+  enabled state, request count, and window. Do not add environment-variable,
+  production-mode, launcher, or deployment-script overrides.
 
 ## Quota And Account Terminology
 

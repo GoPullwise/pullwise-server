@@ -210,7 +210,6 @@ class ApiKeyRoutesTest(unittest.TestCase):
             os.environ,
             {
                 "PULLWISE_DB_PATH": os.path.join(self.temp_dir.name, "pullwise.sqlite3"),
-                "PULLWISE_RATE_LIMIT_ENABLED": "false",
             },
             clear=False,
         )

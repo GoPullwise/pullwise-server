@@ -320,15 +320,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             "server": {"hostname": "api-1"},
         }
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
-                },
-                clear=False,
-            ),
+            patch.object(app.system_config, "rate_limit_enabled", return_value=True),
+            patch.object(app.system_config, "rate_limit_requests", return_value=1),
+            patch.object(app.system_config, "rate_limit_window_seconds", return_value=60),
             patch.object(app, "now", return_value=1781200000),
             patch.object(app.system_metrics, "server_metrics_payload", return_value=expected),
         ):
@@ -342,14 +336,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(second.status, HTTPStatus.OK)
 
     def test_non_admin_server_metrics_bypasses_user_rate_limit(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
-            },
-            clear=False,
+        with (
+            patch.object(app.system_config, "rate_limit_enabled", return_value=True),
+            patch.object(app.system_config, "rate_limit_requests", return_value=1),
+            patch.object(app.system_config, "rate_limit_window_seconds", return_value=60),
         ):
             first = RouteHarness("/admin/server-metrics", cookie=self.user_cookie)
             second = RouteHarness("/admin/server-metrics", cookie=self.user_cookie)
@@ -476,14 +466,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         payload, _token = self.create_worker()
         worker_id = payload["worker_id"]
 
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
-            },
-            clear=False,
+        with (
+            patch.object(app.system_config, "rate_limit_enabled", return_value=True),
+            patch.object(app.system_config, "rate_limit_requests", return_value=1),
+            patch.object(app.system_config, "rate_limit_window_seconds", return_value=60),
         ):
             server_stream = RouteHarness("/admin/log-streams", {"source": "server"}, cookie=self.admin_cookie)
             worker_stream = RouteHarness(
@@ -508,14 +494,10 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         first_session_id = first_start.payload["session"]["id"]
         second_session_id = second_start.payload["session"]["id"]
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_RATE_LIMIT_ENABLED": "true",
-                "PULLWISE_RATE_LIMIT_REQUESTS": "1",
-                "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "60",
-            },
-            clear=False,
+        with (
+            patch.object(app.system_config, "rate_limit_enabled", return_value=True),
+            patch.object(app.system_config, "rate_limit_requests", return_value=1),
+            patch.object(app.system_config, "rate_limit_window_seconds", return_value=60),
         ):
             first_pause = RouteHarness(f"/admin/log-streams/{first_session_id}/pause", cookie=self.admin_cookie)
             second_pause = RouteHarness(f"/admin/log-streams/{second_session_id}/pause", cookie=self.admin_cookie)
@@ -2535,6 +2517,23 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(failure_event["worker_id"], "missing_worker")
         self.assertEqual(failure_event["request_id"], "req_missing")
         self.assertEqual(failure_event["error"], "Worker not found.")
+
+    def test_admin_worker_patch_keeps_heartbeat_reported_version_read_only(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        heartbeat = self.post_v1_heartbeat(worker_id, token, version="0.4.18")
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        update = RouteHarness(
+            f"/admin/workers/{worker_id}",
+            {"region": "EU staging", "version": "9.9.9"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(update, "PATCH")
+
+        self.assertEqual(update.status, HTTPStatus.OK)
+        self.assertEqual(update.payload["worker"]["region"], "EU staging")
+        self.assertEqual(update.payload["worker"]["version"], "0.4.18")
 
 
 if __name__ == "__main__":
