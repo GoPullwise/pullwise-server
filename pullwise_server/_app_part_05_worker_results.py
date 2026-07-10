@@ -435,6 +435,7 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
         errors.append("artifact_manifest")
     else:
         manifest_kinds = set()
+        required_manifest_kinds = set()
         for index, item in enumerate(manifest):
             if not isinstance(item, dict):
                 errors.append(f"artifact_manifest[{index}]")
@@ -442,6 +443,8 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
             kind = public_issue_text(item.get("kind"))
             if kind:
                 manifest_kinds.add(kind)
+                if item.get("required") is True:
+                    required_manifest_kinds.add(kind)
             artifact_id = public_issue_text(item.get("artifact_id"))
             for field in ("artifact_id", "kind", "name", "media_type", "schema_id", "schema_version", "encoding", "compression", "sha256"):
                 if not public_issue_text(item.get(field)):
@@ -473,12 +476,33 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
             missing_required_kinds = sorted(REQUIRED_COMPLETED_REVIEW_ARTIFACT_KINDS - manifest_kinds)
             if missing_required_kinds:
                 errors.append("artifact_manifest.required_completed_kinds:" + ",".join(missing_required_kinds))
+            optional_required_kinds = sorted(
+                (REQUIRED_COMPLETED_REVIEW_ARTIFACT_KINDS & manifest_kinds) - required_manifest_kinds
+            )
+            if optional_required_kinds:
+                errors.append(
+                    "artifact_manifest.required_completed_kinds_must_be_required:"
+                    + ",".join(optional_required_kinds)
+                )
         elif execution_status in {"failed", "cancelled", "partial_completed"}:
             missing_terminal_kinds = sorted(REQUIRED_TERMINAL_REVIEW_ARTIFACT_KINDS - manifest_kinds)
             if missing_terminal_kinds:
                 errors.append("artifact_manifest.required_terminal_kinds:" + ",".join(missing_terminal_kinds))
-            if not (REQUIRED_TERMINAL_REVIEW_ARTIFACT_ALTERNATIVES & manifest_kinds):
+            optional_terminal_kinds = sorted(
+                (REQUIRED_TERMINAL_REVIEW_ARTIFACT_KINDS & manifest_kinds) - required_manifest_kinds
+            )
+            if optional_terminal_kinds:
+                errors.append(
+                    "artifact_manifest.required_terminal_kinds_must_be_required:"
+                    + ",".join(optional_terminal_kinds)
+                )
+            terminal_report_kinds = REQUIRED_TERMINAL_REVIEW_ARTIFACT_ALTERNATIVES & manifest_kinds
+            if not terminal_report_kinds:
                 errors.append("artifact_manifest.required_terminal_report:error_report_or_report.agent")
+            elif not (terminal_report_kinds & required_manifest_kinds):
+                errors.append(
+                    "artifact_manifest.required_terminal_report_must_be_required:error_report_or_report.agent"
+                )
     if not public_issue_text(quality_gate.get("status")):
         errors.append("quality_gate.status")
     if not summary:

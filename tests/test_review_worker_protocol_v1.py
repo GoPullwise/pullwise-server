@@ -577,6 +577,19 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "required_completed_kinds"):
             app.validate_review_worker_protocol_envelope(job, body, status="done")
 
+    def test_review_worker_protocol_requires_completed_kinds_to_be_marked_required(self) -> None:
+        job = {
+            "job_id": "job_1",
+            "run_id": "run_job_1",
+            "lease_id": "lease_job_1",
+            "claimed_by_worker_id": "wk_1",
+        }
+        manifest = [{**item, "required": False} for item in required_completed_manifest()]
+        body = {"reviewWorkerProtocol": v1_envelope(job, manifest, worker_id="wk_1")}
+
+        with self.assertRaisesRegex(ValueError, "required_completed_kinds_must_be_required"):
+            app.validate_review_worker_protocol_envelope(job, body, status="done")
+
     def test_review_worker_protocol_requires_terminal_diagnostic_artifacts(self) -> None:
         job = {
             "job_id": "job_1",
@@ -609,6 +622,47 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             app.validate_review_worker_protocol_envelope(job, passing, status="failed"),
             passing["reviewWorkerProtocol"],
         )
+
+    def test_review_worker_protocol_requires_terminal_kinds_to_be_marked_required(self) -> None:
+        job = {
+            "job_id": "job_1",
+            "run_id": "run_job_1",
+            "lease_id": "lease_job_1",
+            "claimed_by_worker_id": "wk_1",
+        }
+        manifest = [{**item, "required": False} for item in required_terminal_manifest()]
+        body = {
+            "reviewWorkerProtocol": v1_envelope(
+                job,
+                manifest,
+                status="failed",
+                worker_id="wk_1",
+            )
+        }
+
+        with self.assertRaisesRegex(ValueError, "required_terminal_kinds_must_be_required"):
+            app.validate_review_worker_protocol_envelope(job, body, status="failed")
+
+    def test_review_worker_protocol_requires_terminal_report_alternative_to_be_marked_required(self) -> None:
+        job = {
+            "job_id": "job_1",
+            "run_id": "run_job_1",
+            "lease_id": "lease_job_1",
+            "claimed_by_worker_id": "wk_1",
+        }
+        manifest = required_terminal_manifest()
+        manifest[-1] = {**manifest[-1], "required": False}
+        body = {
+            "reviewWorkerProtocol": v1_envelope(
+                job,
+                manifest,
+                status="failed",
+                worker_id="wk_1",
+            )
+        }
+
+        with self.assertRaisesRegex(ValueError, "required_terminal_report_must_be_required"):
+            app.validate_review_worker_protocol_envelope(job, body, status="failed")
 
     def test_review_worker_protocol_rejects_mismatched_job_binding(self) -> None:
         job = {
