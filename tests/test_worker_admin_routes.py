@@ -796,6 +796,103 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.alerts.sync_worker_alert(affected_workers[0])
             self.assertEqual(send_alert.call_count, 2)
 
+    def test_scan_system_alert_email_combines_worker_details_for_the_same_quota_status(self) -> None:
+        workers = [
+            {
+                "worker_id": f"wk_{index}",
+                "name": f"Quota worker {index}",
+                "status": "degraded",
+                "doctor_status": "degraded",
+                "codex_ready": False,
+                "last_error": "codex quota exhausted",
+                "codexQuota": {
+                    "status": "exhausted",
+                    "ready": False,
+                    "thresholdPercent": 5,
+                    "remainingPercent": 0,
+                    "windows": [{"label": "weekly", "remainingPercent": 0}],
+                },
+            }
+            for index in range(3)
+        ]
+
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            app.alerts.sync_scan_system_alerts({"scanSystemStatus": "ok"}, workers)
+
+        send_alert.assert_called_once()
+        subject, body = send_alert.call_args.args
+        self.assertEqual(subject, "Pullwise workers Codex quota exhausted")
+        self.assertIn("Affected workers currently included: 3", body)
+        for worker in workers:
+            self.assertIn(worker["name"], body)
+
+    def test_same_worker_health_problem_is_grouped_across_workers(self) -> None:
+        workers = [
+            {
+                "worker_id": f"wk_degraded_{index}",
+                "name": f"Degraded worker {index}",
+                "status": "degraded",
+                "doctor_status": "degraded",
+                "codex_ready": False,
+                "last_error": "codex sdk unavailable",
+            }
+            for index in range(10)
+        ]
+
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                list(executor.map(app.alerts.sync_worker_alert, workers))
+
+        send_alert.assert_called_once()
+        state = db.load_state_item("alert_notifications")
+        grouped = state["active"]["workers:status:degraded"]
+        self.assertEqual(grouped["affectedWorkerCount"], 10)
+
+    def test_legacy_per_worker_quota_alert_state_migrates_without_resending(self) -> None:
+        db.save_state_item(
+            "alert_notifications",
+            {
+                "active": {
+                    "worker:wk_legacy_1:codex-quota:low": {
+                        "attemptedAt": 1782900000,
+                        "kind": "worker_codex_quota",
+                        "status": "low",
+                        "emailDelivered": True,
+                    },
+                    "worker:wk_legacy_2:codex-quota:low": {
+                        "attemptedAt": 1782900001,
+                        "kind": "worker_codex_quota",
+                        "status": "low",
+                        "emailDelivered": True,
+                    },
+                }
+            },
+        )
+        current = {
+            "worker_id": "wk_current",
+            "status": "degraded",
+            "doctor_status": "degraded",
+            "codex_ready": False,
+            "codexQuota": {
+                "status": "low",
+                "ready": False,
+                "thresholdPercent": 5,
+                "remainingPercent": 4,
+                "windows": [{"label": "5 hour", "remainingPercent": 4}],
+            },
+        }
+
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            app.alerts.sync_worker_alert(current)
+
+        send_alert.assert_not_called()
+        active = db.load_state_item("alert_notifications")["active"]
+        self.assertEqual(set(active), {"workers:codex-quota:low"})
+        self.assertEqual(
+            set(active["workers:codex-quota:low"]["workerIds"]),
+            {"wk_legacy_1", "wk_legacy_2", "wk_current"},
+        )
+
     def test_worker_codex_quota_low_and_exhausted_are_separate_grouped_incidents(self) -> None:
         def quota_worker(worker_id: str, quota_status: str) -> dict:
             remaining = 0 if quota_status == "exhausted" else 4

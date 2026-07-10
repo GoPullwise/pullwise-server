@@ -155,7 +155,7 @@ seconds.
 
 Server cleanup only prunes operational records: expired sessions/GitHub OAuth state, terminal worker commands/audit rows, and terminal scan job/result duplicates that have already been applied to the user-visible scan state. User scan results in `SCANS`/`ISSUES` are retained.
 
-Operational alert email is configured from the admin app Settings page. A server or worker problem sends once while that same problem remains active; the dedupe key is cleared after a later health/status check observes recovery. The SMTP password is stored in system configuration and should be protected by the production state encryption key.
+Operational alert email is configured from the admin app Settings page. A server problem sends once while that problem remains active. Worker problems are grouped fleet-wide by problem kind and status, so (for example) one hundred workers reporting Codex quota `low` produce one email rather than one hundred; Codex quota `low` and `exhausted` remain separate incidents. The group tracks its affected worker ids, removes only workers that recover, and becomes eligible for another email only after every affected worker has recovered. A full system status check also reconciles group membership against the current worker snapshot. The SMTP password is stored in system configuration and should be protected by the production state encryption key.
 
 Production deployments must provide a separate state encryption key file. The
 server uses it to encrypt GitHub OAuth user tokens and admin-managed SMTP

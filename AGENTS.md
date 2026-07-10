@@ -271,6 +271,16 @@ do not remove it while refactoring readiness, lease eligibility, or worker
 details. Quota exhaustion should make the worker unable to claim jobs without
 breaking the required idle heartbeat concurrency shape.
 
+Operational worker alert emails are fleet incidents keyed by alert kind and
+status, not by worker id. Keep Codex quota `low` and `exhausted` as distinct
+groups, suppress the generic degraded alert when a quota alert explains it,
+and persist the affected worker ids in the alert state. A worker recovery must
+remove only that worker from every group; clear the incident and allow a new
+email only after its last affected worker recovers. Full scan-system status
+sync must replace group membership from the complete worker snapshot, while a
+heartbeat sync must update only the reporting worker. Preserve migration of
+legacy per-worker alert keys so an active incident is not resent on rollout.
+
 Each leased v1 run must also have a first-class `review_runs` row. Create or
 refresh it when a lease is issued, update its progress from accepted run events,
 and finalize it from the terminal result envelope by storing summary,
