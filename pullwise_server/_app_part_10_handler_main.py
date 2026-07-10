@@ -623,7 +623,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 or path.startswith("/v1/workers/")
                 or (method != "GET" and path.startswith("/v1/review-runs/"))
             )
-            and not worker_token_record(self)
+            and not worker_token_record(self, update_last_used=False)
         )
         if not applies_to_public_rest_api and not applies_to_unauthenticated_worker_probe:
             self._rate_limit_headers = {}
@@ -635,7 +635,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 path.startswith("/worker/")
                 or path.startswith("/v1/workers/")
                 or (method != "GET" and path.startswith("/v1/review-runs/"))
-            ) and worker_token_record(self):
+            ) and worker_token_record(self, update_last_used=False):
             self._rate_limit_headers = {}
             return False
         limit = rate_limit_requests()
