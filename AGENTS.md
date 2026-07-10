@@ -39,7 +39,7 @@ directories.
 - Installer auth commands should call the worker SDK helper (`pullwise-worker codex-login` / `$BIN_PATH codex-login`), not `codex login --device-auth`, so device-code auth uses the same Python SDK path as worker automation.
 - Server-generated installer scripts and admin suggested env must not emit old app-server lifecycle knobs (`PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS` or `PULLWISE_CODEX_APP_SERVER_MAX_TURNS`); the worker SDK owns that lifecycle.
 - Admin-created worker payloads must not expose Codex CLI command/release pinning fields; admin UI/API should not send `codexVersion`, `codexUseLatest`, or plan-level CLI command policy.
-- Default Codex automation uses the `openai-codex` Python SDK pinned runtime. Run OpenAI's standalone installer at `https://chatgpt.com/codex/install.sh` only for an explicit local CLI override such as `PULLWISE_CODEX_COMMAND` or `PULLWISE_CODEX_RELEASE`; never install `@openai/codex` directly.
+- Default managed Codex automation uses the `openai-codex` Python SDK with OpenAI's official standalone CLI installed under the worker runtime root and passed through `PULLWISE_CODEX_COMMAND`; default `PULLWISE_CODEX_RELEASE` to `latest` so newly supported models do not remain blocked by the SDK-bundled CLI. Use `https://chatgpt.com/codex/install.sh`, never install `@openai/codex` directly, and preserve the worker-local path in installer env plus admin suggested env.
 - Worker Python packages, including `pullwise-worker`, `openai-codex`, `openai-codex-cli-bin`, and transitive runtime dependencies, must be installed into the worker instance venv under `$WORKER_RUNTIME_ROOT/.venv`; do not install them into global/system Python. Host-level package installation is only for OS dependencies such as Python, git, bwrap, systemd helpers, and logrotate.
 
 ## Worker Codex Runtime Concurrency
@@ -287,6 +287,7 @@ artifacts without parsing worker internals. Do not store new v1 artifact uploads
 as legacy `job_result_artifacts` compatibility entries.
 
 Required artifact result validation must compare the uploaded artifact record's identity metadata (`kind`, `name`, media type, schema, required flag, and storage URL) as well as SHA-256 and size. Do not accept a reused `artifact_id` just because the bytes match.
+Every mandatory artifact kind for the submitted terminal status must be represented by an entry whose `required` flag is exactly `true`; an optional entry of the same kind must never satisfy the mandatory-artifact gate.
 For `failed`, `cancelled`, and `partial_completed` terminal envelopes, the
 server may accept missing required artifact uploads only when the v1 envelope
 records `extensions.worker_internal.artifact_upload_error`; completed results
