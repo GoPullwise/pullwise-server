@@ -5477,6 +5477,23 @@ def review_artifact_content_bytes(row: dict[str, Any]) -> bytes | None:
         return None
 
 
+def delete_review_artifact_content_file(content_path: object) -> bool:
+    full_path = review_artifact_content_file_path({"content_path": content_path})
+    if not full_path:
+        return False
+    try:
+        os.unlink(full_path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    try:
+        os.rmdir(os.path.dirname(full_path))
+    except OSError:
+        pass
+    return True
+
+
 REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log", "debug_bundle"}
 
 
@@ -5607,7 +5624,7 @@ def store_review_run_artifact(
                         }
                     return {"accepted": False, "conflict": True, "reason": "artifact_payload_conflict"}
                 existing = connection.execute(
-                    "SELECT payload_json, job_id, attempt_id, kind FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
+                    "SELECT payload_json, job_id, attempt_id, kind, content_path FROM review_artifacts WHERE run_id = ? AND artifact_id = ?",
                     (run_id, artifact_id),
                 ).fetchone()
                 if existing:
@@ -5654,6 +5671,10 @@ def store_review_run_artifact(
                                 artifact_id,
                             ),
                         )
+                        connection.commit()
+                        previous_content_path = str(existing["content_path"] or "")
+                        if previous_content_path and previous_content_path != content_path:
+                            delete_review_artifact_content_file(previous_content_path)
                         return {
                             "accepted": True,
                             "duplicate": False,

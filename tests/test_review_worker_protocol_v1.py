@@ -5,6 +5,7 @@ import hashlib
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from pullwise_server import app
@@ -388,6 +389,9 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
                 artifact_id="art_progress_log",
                 payload=first_payload,
             )
+            first_stored = app.db.get_review_run_artifact(run_id, "art_progress_log")
+            first_content_path = Path(app.db.review_artifact_content_file_path(first_stored) or "")
+            first_content_existed_before_replace = first_content_path.exists()
             replaced = app.db.store_review_run_artifact(
                 job_id=job["job_id"],
                 attempt_id=attempt_id,
@@ -409,11 +413,18 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
                 replace_existing=True,
             )
             stored = app.db.get_review_run_artifact(run_id, "art_progress_log")
+            replacement_content_path = Path(app.db.review_artifact_content_file_path(stored) or "")
+            first_content_exists_after_replace = first_content_path.exists()
+            replacement_content_bytes = replacement_content_path.read_bytes()
 
         self.assertTrue(first["accepted"])
+        self.assertTrue(first_content_existed_before_replace)
         self.assertTrue(replaced["accepted"])
         self.assertTrue(replaced["replaced"])
         self.assertEqual(stored["sha256"], hashlib.sha256(second_content).hexdigest())
+        self.assertNotEqual(first_content_path, replacement_content_path)
+        self.assertFalse(first_content_exists_after_replace)
+        self.assertEqual(replacement_content_bytes, second_content)
         self.assertTrue(report_conflict["conflict"])
         self.assertEqual(report_conflict["reason"], "artifact_payload_conflict")
     def test_review_worker_protocol_requires_uploaded_required_artifacts(self) -> None:
