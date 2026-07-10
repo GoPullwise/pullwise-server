@@ -255,6 +255,15 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("codexTimeoutSeconds", migrated["worker"])
         self.assertNotIn("codexTimeoutSeconds", custom["worker"])
 
+    def test_previous_system_config_enables_rate_limit_when_moving_to_admin_ownership(self) -> None:
+        normalized = app.system_config.normalize_config(
+            {"version": 2, "rateLimit": {"enabled": False, "requests": 25, "windowSeconds": 10}}
+        )
+
+        self.assertTrue(normalized["rateLimit"]["enabled"])
+        self.assertEqual(normalized["rateLimit"]["requests"], 25)
+        self.assertEqual(normalized["rateLimit"]["windowSeconds"], 10)
+
     def test_alert_email_is_admin_system_config_field_with_redacted_password(self) -> None:
         config = app.system_config.default_config()
         fields = {

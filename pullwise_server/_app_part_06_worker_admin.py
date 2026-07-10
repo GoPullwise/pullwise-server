@@ -74,8 +74,7 @@ def worker_record_ready_providers(worker: dict) -> list[str]:
 
 def worker_supported_provider(worker: dict) -> bool:
     provider_chain = worker_record_provider_chain(worker)
-    allowed = {item.lower() for item in system_config.worker_allowed_providers()}
-    return any(provider in allowed for provider in provider_chain)
+    return any(provider in WORKER_INSTALL_PROVIDERS for provider in provider_chain)
 
 
 def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str:
@@ -890,9 +889,6 @@ def dispatch_worker_release_workflow(version_value: object) -> dict:
 
 
 def default_worker_package(version: object = None) -> str:
-    explicit_package = system_config.worker_default_package().strip()
-    if explicit_package:
-        return explicit_package
     selected_version = public_issue_text(version) or system_config.worker_default_version().strip() or DEFAULT_WORKER_PACKAGE_VERSION
     if not WORKER_PACKAGE_RELEASE_RE.fullmatch(selected_version):
         selected_version = DEFAULT_WORKER_PACKAGE_VERSION
@@ -970,7 +966,6 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     )
     local_install_url = f"{local_server_url}/install-worker.sh"
     worker_package = default_worker_package(public.get("version"))
-    codex_timeout_seconds = str(system_config.worker_codex_timeout_seconds())
     provider_chain = worker_record_provider_chain(worker)
     provider_chain_text = ",".join(provider_chain)
     safe_worker_id = worker_safe_service_id(public["worker_id"])
@@ -1026,8 +1021,6 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
                 "PULLWISE_CODEX_HOME": f"{worker_runtime_root}/codex-home",
                 "PULLWISE_CODEX_SQLITE_HOME": f"{worker_runtime_root}/codex-sqlite",
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
-                "PULLWISE_CODEX_REASONING_EFFORT": "medium",
-                "PULLWISE_CODEX_TIMEOUT_SECONDS": codex_timeout_seconds,
             }
         )
     script_hash = worker_install_script_sha256()
@@ -1594,8 +1587,6 @@ if provider_chain_has codex; then
   write_env_value PULLWISE_CODEX_HOME "$CODEX_HOME"
   write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
-  write_env_value PULLWISE_CODEX_REASONING_EFFORT "${PULLWISE_CODEX_REASONING_EFFORT:-medium}"
-  write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-__PULLWISE_CODEX_TIMEOUT_SECONDS__}"
 fi
 write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
 write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
@@ -1751,7 +1742,6 @@ echo "Worker home: $DATA_DIR"
     return (
         script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
         .replace("__CODEX_CLI_INSTALLER_URL__", CODEX_CLI_INSTALLER_URL)
-        .replace("__PULLWISE_CODEX_TIMEOUT_SECONDS__", str(system_config.worker_codex_timeout_seconds()))
         .replace("\r\n", "\n")
     )
 

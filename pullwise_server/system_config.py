@@ -12,14 +12,13 @@ from . import db
 STATE_KEY = "system_config"
 CACHE_TTL_SECONDS = 2.0
 PLAN_IDS = ("free", "pro", "max")
-SUPPORTED_WORKER_PROVIDERS = {"codex"}
 PAID_PLAN_IDS = ("pro", "max")
 CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
 DEFAULT_CREEM_API_BASE_URL = "https://api.creem.io"
 DEFAULT_CREEM_TEST_API_BASE_URL = "https://test-api.creem.io"
 
 DEFAULT_CONFIG = {
-    "version": 2,
+    "version": 3,
     "plans": {
         "free": {
             "userReviewLimit": 5,
@@ -48,13 +47,10 @@ DEFAULT_CONFIG = {
     "worker": {
         "heartbeatTimeoutSeconds": 120,
         "minVersion": "",
-        "allowedProviders": ["codex"],
         "defaultVersion": "",
-        "defaultPackage": "",
         "releaseApiUrl": "https://api.github.com/repos/GoPullwise/pullwise-worker/releases/latest",
         "releaseFetchTimeoutSeconds": 3,
         "releaseCacheSeconds": 300,
-        "codexTimeoutSeconds": 3600,
     },
     "billing": {
         "billingTimeoutSeconds": 15,
@@ -65,7 +61,7 @@ DEFAULT_CONFIG = {
         "creemUpgradeBehavior": "proration-charge-immediately",
     },
     "rateLimit": {
-        "enabled": False,
+        "enabled": True,
         "requests": 600,
         "windowSeconds": 60,
     },
@@ -179,25 +175,11 @@ FIELD_METADATA = [
                 "description": "Lowest worker version allowed to be healthy. Leave blank to allow every version.",
             },
             {
-                "path": "worker.allowedProviders",
-                "label": "Allowed worker providers",
-                "type": "stringList",
-                "maxLength": 128,
-                "description": "Comma-separated worker provider names allowed to claim jobs. Currently only codex is supported.",
-            },
-            {
                 "path": "worker.defaultVersion",
                 "label": "Default worker version",
                 "type": "string",
                 "maxLength": 32,
                 "description": "Pinned worker release version for generated install commands. Leave blank to use the built-in default or latest release.",
-            },
-            {
-                "path": "worker.defaultPackage",
-                "label": "Default worker package",
-                "type": "string",
-                "maxLength": 512,
-                "description": "Explicit pip package or wheel URL for generated worker installs. Leave blank to use the selected release wheel.",
             },
             {
                 "path": "worker.releaseApiUrl",
@@ -219,13 +201,6 @@ FIELD_METADATA = [
                 "type": "integer",
                 "min": 0,
                 "description": "How long the server caches the latest worker release response in memory.",
-            },
-            {
-                "path": "worker.codexTimeoutSeconds",
-                "label": "Codex timeout seconds",
-                "type": "integer",
-                "min": 60,
-                "description": "Default Codex subprocess timeout written to generated worker env files.",
             },
         ],
     },
@@ -591,6 +566,12 @@ def public_field(path: str, label: str, value: object, description: str) -> dict
     return {"path": path, "label": label, "value": value, "description": description}
 
 
+def smtp_transport_modes_conflict(settings: dict) -> bool:
+    _, smtp_ssl = nested_get(settings, "alerts.email.smtpSsl")
+    _, smtp_starttls = nested_get(settings, "alerts.email.smtpStarttls")
+    return smtp_ssl is True and smtp_starttls is True
+
+
 def update(payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("System config update must be a JSON object.")
@@ -611,6 +592,8 @@ def update(payload: dict) -> dict:
                 continue
             nested_set(next_config, path, clean_value(value, spec))
 
+    if smtp_transport_modes_conflict(next_config):
+        raise ValueError("SMTP SSL and SMTP STARTTLS cannot both be enabled.")
     normalized = normalize_config(next_config)
     db.save_state_item(STATE_KEY, normalized)
     invalidate_cache()
@@ -628,7 +611,10 @@ def normalize_config(raw: dict) -> dict:
             nested_set(normalized, path, clean_value(value, spec))
         except ValueError:
             continue
-    migrate_legacy_default_timeouts(normalized, raw if isinstance(raw, dict) else {})
+    raw_config = raw if isinstance(raw, dict) else {}
+    migrate_legacy_config(normalized, raw_config)
+    if smtp_transport_modes_conflict(normalized):
+        normalized["alerts"]["email"]["smtpStarttls"] = False
     return normalized
 
 
@@ -649,13 +635,12 @@ def legacy_int_setting(raw: dict, path: str) -> int | None:
         return None
 
 
-def migrate_legacy_default_timeouts(normalized: dict, raw: dict) -> None:
-    if config_version_value(raw) >= 2:
-        return
-    if legacy_int_setting(raw, "scan.jobLeaseSeconds") == 3600:
+def migrate_legacy_config(normalized: dict, raw: dict) -> None:
+    version = config_version_value(raw)
+    if version < 2 and legacy_int_setting(raw, "scan.jobLeaseSeconds") == 3600:
         normalized["scan"]["jobLeaseSeconds"] = 14400
-    if legacy_int_setting(raw, "worker.codexTimeoutSeconds") == 1800:
-        normalized["worker"]["codexTimeoutSeconds"] = 3600
+    if version < 3:
+        normalized["rateLimit"]["enabled"] = True
 
 
 def flatten_paths(value: object, prefix: str = "") -> list[str]:
@@ -827,18 +812,6 @@ def env_int(name: str) -> int | None:
         return None
 
 
-def env_bool(name: str) -> bool | None:
-    value = os.environ.get(name)
-    if value is None or not value.strip():
-        return None
-    text = value.strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return None
-
-
 def text_setting(path: str) -> str:
     found, value = nested_get(config(), path)
     if not found:
@@ -945,21 +918,8 @@ def worker_min_version() -> str:
     return text_setting("worker.minVersion") or os.environ.get("PULLWISE_MIN_WORKER_VERSION", "")
 
 
-def worker_allowed_providers() -> set[str]:
-    providers = {
-        item.strip().lower()
-        for item in list_setting("worker.allowedProviders")
-        if item.strip().lower() in SUPPORTED_WORKER_PROVIDERS
-    }
-    return providers or set(DEFAULT_CONFIG["worker"]["allowedProviders"])
-
-
 def worker_default_version() -> str:
     return text_setting("worker.defaultVersion")
-
-
-def worker_default_package() -> str:
-    return text_setting("worker.defaultPackage")
 
 
 def worker_release_api_url() -> str:
@@ -974,34 +934,15 @@ def worker_release_cache_seconds() -> int:
     return max(0, int_setting("worker.releaseCacheSeconds"))
 
 
-def worker_codex_timeout_seconds() -> int:
-    return max(60, int_setting("worker.codexTimeoutSeconds"))
-
-
 def rate_limit_enabled() -> bool:
-    configured = env_bool("PULLWISE_RATE_LIMIT_ENABLED")
-    if configured is not None:
-        return configured
-    if os.environ.get("PULLWISE_MODE", "").strip().lower() == "production":
-        return True
     return bool_setting("rateLimit.enabled")
 
 
 def rate_limit_requests() -> int:
-    configured = env_int("PULLWISE_RATE_LIMIT_REQUESTS")
-    if configured is not None:
-        return max(0, configured)
-    if "PULLWISE_RATE_LIMIT_ENABLED" in os.environ:
-        return max(0, int(DEFAULT_CONFIG["rateLimit"]["requests"]))
     return max(0, int_setting("rateLimit.requests"))
 
 
 def rate_limit_window_seconds() -> int:
-    configured = env_int("PULLWISE_RATE_LIMIT_WINDOW_SECONDS")
-    if configured is not None:
-        return max(1, configured)
-    if "PULLWISE_RATE_LIMIT_ENABLED" in os.environ:
-        return max(1, int(DEFAULT_CONFIG["rateLimit"]["windowSeconds"]))
     return max(1, int_setting("rateLimit.windowSeconds"))
 
 

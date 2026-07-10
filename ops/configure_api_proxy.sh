@@ -156,9 +156,6 @@ write_env_defaults() {
   upsert_env PULLWISE_CHECKOUT_ROOT /var/lib/pullwise/checkouts
   upsert_env PULLWISE_LOG_LEVEL INFO
   upsert_env PULLWISE_LOG_ROTATION_TIME "00:00"
-  upsert_env PULLWISE_RATE_LIMIT_ENABLED true
-  upsert_env PULLWISE_RATE_LIMIT_REQUESTS 600
-  upsert_env PULLWISE_RATE_LIMIT_WINDOW_SECONDS 60
 
   if ! grep -qE '^PULLWISE_REVIEW_PROVIDER=' "$ENV_FILE"; then
     upsert_env PULLWISE_REVIEW_PROVIDER disabled

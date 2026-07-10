@@ -36,35 +36,14 @@ REVIEW_AGENT_PROVIDERS = ("codex",)
 REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
 REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
     "free": {
-        "mode": "fast",
-        "scanMode": "full-repo",
-        "reviewerMaxTurnsPerScan": 1,
-        "maxDiscoveryTurns": 10,
-        "maxBundleFiles": 40,
-        "maxBundleBytes": 500_000,
-        "maxCandidatesPerBundle": 1,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
     },
     "pro": {
-        "mode": "standard",
-        "scanMode": "full-repo",
-        "reviewerMaxTurnsPerScan": 2,
-        "maxDiscoveryTurns": 20,
-        "maxBundleFiles": 80,
-        "maxBundleBytes": 1_000_000,
-        "maxCandidatesPerBundle": 1,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
     },
     "max": {
-        "mode": "standard",
-        "scanMode": "full-repo",
-        "reviewerMaxTurnsPerScan": 3,
-        "maxDiscoveryTurns": 32,
-        "maxBundleFiles": 100,
-        "maxBundleBytes": 1_250_000,
-        "maxCandidatesPerBundle": 2,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
     },
@@ -121,16 +100,6 @@ def clean_review_agent_config_int(value: object, default: int, *, minimum: int, 
     return max(minimum, min(maximum, number))
 
 
-def clean_review_agent_worker_mode(value: object, default: str) -> str:
-    mode = clean_review_agent_config_text(value).lower()
-    return mode if mode in {"fast", "standard", "deep"} else default
-
-
-def clean_review_agent_scan_mode(value: object, default: str) -> str:
-    mode = clean_review_agent_config_text(value).lower()
-    return mode if mode in {"full-repo", "full-strict"} else default
-
-
 def clean_review_agent_provider_required(value: object, *, strict: bool = True) -> str:
     provider = clean_review_agent_provider(value)
     if provider:
@@ -160,7 +129,7 @@ def default_review_agent_plan_config(plan: str) -> dict:
 
 def default_review_agent_config_state() -> dict:
     return {
-        "version": 1,
+        "version": 2,
         "plans": {plan: default_review_agent_plan_config(plan) for plan in PLAN_IDS},
     }
 
@@ -179,38 +148,6 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
 def normalize_review_agent_review_worker_config(value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
-    result["mode"] = clean_review_agent_worker_mode(source.get("mode"), str(result.get("mode") or "standard"))
-    result["scanMode"] = clean_review_agent_scan_mode(source.get("scanMode"), str(result.get("scanMode") or "full-repo"))
-    result["reviewerMaxTurnsPerScan"] = clean_review_agent_config_int(
-        source.get("reviewerMaxTurnsPerScan"),
-        int(result.get("reviewerMaxTurnsPerScan") or 3),
-        minimum=1,
-        maximum=16,
-    )
-    result["maxDiscoveryTurns"] = clean_review_agent_config_int(
-        source.get("maxDiscoveryTurns"),
-        int(result.get("maxDiscoveryTurns") or 20),
-        minimum=1,
-        maximum=64,
-    )
-    result["maxBundleFiles"] = clean_review_agent_config_int(
-        source.get("maxBundleFiles"),
-        int(result.get("maxBundleFiles") or 80),
-        minimum=10,
-        maximum=400,
-    )
-    result["maxBundleBytes"] = clean_review_agent_config_int(
-        source.get("maxBundleBytes"),
-        int(result.get("maxBundleBytes") or 1_000_000),
-        minimum=100_000,
-        maximum=5_000_000,
-    )
-    result["maxCandidatesPerBundle"] = clean_review_agent_config_int(
-        source.get("maxCandidatesPerBundle"),
-        int(result.get("maxCandidatesPerBundle") or 1),
-        minimum=1,
-        maximum=4,
-    )
     result["turnTimeoutSeconds"] = clean_review_agent_config_int(
         source.get("turnTimeoutSeconds"),
         int(result.get("turnTimeoutSeconds") or 3600),
@@ -243,7 +180,7 @@ def normalize_review_agent_config_state(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     plans = source.get("plans") if isinstance(source.get("plans"), dict) else {}
     return {
-        "version": 1,
+        "version": 2,
         "plans": {
             plan: normalize_review_agent_plan_config(plan, plans.get(plan))
             for plan in PLAN_IDS

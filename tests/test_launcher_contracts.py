@@ -299,9 +299,6 @@ CURL
                 PULLWISE_CHECKOUT_ROOT={shell_path(root / "checkouts")}
                 PULLWISE_STATE_ENCRYPTION_KEY_PATH={shell_path(state_key)}
                 PULLWISE_COOKIE_SECURE=true
-                PULLWISE_RATE_LIMIT_ENABLED=true
-                PULLWISE_RATE_LIMIT_REQUESTS=600
-                PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
                 PULLWISE_GITHUB_CLIENT_ID=client_id
                 PULLWISE_GITHUB_CLIENT_SECRET=client_secret
                 PULLWISE_GITHUB_APP_SLUG=pullwise
@@ -331,9 +328,6 @@ CURL
                 PULLWISE_LOG_DIR=logs
                 PULLWISE_CHECKOUT_ROOT=checkouts
                 PULLWISE_COOKIE_SECURE=true
-                PULLWISE_RATE_LIMIT_ENABLED=true
-                PULLWISE_RATE_LIMIT_REQUESTS=600
-                PULLWISE_RATE_LIMIT_WINDOW_SECONDS=60
                 PULLWISE_GITHUB_CLIENT_ID=client_id
                 PULLWISE_GITHUB_CLIENT_SECRET=client_secret
                 PULLWISE_GITHUB_APP_SLUG=pullwise
@@ -570,7 +564,7 @@ CURL
         self.assertIn("PULLWISE_ALLOWED_ORIGINS", result.stderr + result.stdout)
         self.assertIn("must not contain wildcard", result.stderr + result.stdout)
 
-    def test_doctor_rejects_disabled_api_rate_limit_in_production(self) -> None:
+    def test_doctor_ignores_retired_rate_limit_environment_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = self.base_launcher_env(root)
@@ -579,8 +573,8 @@ CURL
 
             result = self.run_launcher(["doctor"], env)
 
-        self.assertNotEqual(0, result.returncode, result.stderr + result.stdout)
-        self.assertIn("PULLWISE_RATE_LIMIT_ENABLED", result.stderr + result.stdout)
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertNotIn("PULLWISE_RATE_LIMIT_ENABLED", result.stderr + result.stdout)
 
     def test_doctor_rejects_missing_state_encryption_key_in_production(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

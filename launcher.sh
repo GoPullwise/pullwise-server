@@ -979,9 +979,6 @@ cmd_config() {
   print_config_key PULLWISE_API_BASE_URL ""
   print_config_key PULLWISE_TRUST_PROXY_HEADERS "false"
   print_config_key PULLWISE_COOKIE_SECURE ""
-  print_config_key PULLWISE_RATE_LIMIT_ENABLED ""
-  print_config_key PULLWISE_RATE_LIMIT_REQUESTS "600"
-  print_config_key PULLWISE_RATE_LIMIT_WINDOW_SECONDS "60"
   print_config_key PULLWISE_DB_PATH "$(db_path)"
   print_config_key PULLWISE_STATE_ENCRYPTION_KEY_PATH "$(state_encryption_key_path)"
   print_config_key PULLWISE_LOG_DIR "$(log_dir)"
@@ -1175,25 +1172,6 @@ check_production_env() {
     fail "PULLWISE_COOKIE_SECURE must be true in production."
   fi
 
-  if is_true "$(env_value PULLWISE_RATE_LIMIT_ENABLED "")"; then
-    ok "PULLWISE_RATE_LIMIT_ENABLED=true"
-  else
-    fail "PULLWISE_RATE_LIMIT_ENABLED must be true in production."
-  fi
-
-  rate_limit_requests=$(env_value PULLWISE_RATE_LIMIT_REQUESTS "600")
-  if is_positive_int "$rate_limit_requests"; then
-    ok "PULLWISE_RATE_LIMIT_REQUESTS=$rate_limit_requests"
-  else
-    fail "PULLWISE_RATE_LIMIT_REQUESTS must be a positive integer."
-  fi
-
-  rate_limit_window=$(env_value PULLWISE_RATE_LIMIT_WINDOW_SECONDS "60")
-  if is_positive_int "$rate_limit_window"; then
-    ok "PULLWISE_RATE_LIMIT_WINDOW_SECONDS=$rate_limit_window"
-  else
-    fail "PULLWISE_RATE_LIMIT_WINDOW_SECONDS must be a positive integer."
-  fi
 }
 
 check_storage() {

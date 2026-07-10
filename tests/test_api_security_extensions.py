@@ -44,6 +44,21 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.persist_patcher = patch.object(app, "persist_state")
         self.persist_patcher.start()
         self.addCleanup(self.persist_patcher.stop)
+        self.rate_limit_enabled_patcher = patch.object(
+            app.system_config, "rate_limit_enabled", return_value=True
+        )
+        self.rate_limit_requests_patcher = patch.object(
+            app.system_config, "rate_limit_requests", return_value=1
+        )
+        self.rate_limit_window_patcher = patch.object(
+            app.system_config, "rate_limit_window_seconds", return_value=60
+        )
+        self.rate_limit_enabled_patcher.start()
+        self.rate_limit_requests_patcher.start()
+        self.rate_limit_window_patcher.start()
+        self.addCleanup(self.rate_limit_enabled_patcher.stop)
+        self.addCleanup(self.rate_limit_requests_patcher.stop)
+        self.addCleanup(self.rate_limit_window_patcher.stop)
         app.USERS = {
             "usr_1": {
                 "id": "usr_1",

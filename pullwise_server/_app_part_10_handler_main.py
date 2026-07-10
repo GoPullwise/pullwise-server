@@ -2911,7 +2911,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
             changed = {
                 key: body.get(key)
-                for key in ("name", "provider", "region", "version")
+                for key in ("name", "provider", "region")
                 if key in body
             }
             if "providerChain" in body:
