@@ -17,6 +17,13 @@ class ApiProxyConfigContractsTest(unittest.TestCase):
         self.assertIn('upsert_env PULLWISE_ALLOWED_ORIGINS "$ALLOWED_ORIGINS"', script)
         self.assertNotIn('upsert_env PULLWISE_ALLOWED_ORIGINS "$APP_ORIGIN"', script)
 
+    def test_api_proxy_leaves_rate_limits_to_admin_system_config(self) -> None:
+        script = (project_root() / "ops" / "configure_api_proxy.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn("PULLWISE_RATE_LIMIT_ENABLED", script)
+        self.assertNotIn("PULLWISE_RATE_LIMIT_REQUESTS", script)
+        self.assertNotIn("PULLWISE_RATE_LIMIT_WINDOW_SECONDS", script)
+
     def test_api_proxy_installs_standard_ubuntu_dependencies(self) -> None:
         script = (project_root() / "ops" / "configure_api_proxy.sh").read_text(encoding="utf-8")
 

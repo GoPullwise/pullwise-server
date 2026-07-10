@@ -1230,14 +1230,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(app.DEFAULT_WORKER_PACKAGE_VERSION, worker_version)
         self.assertEqual(app.DEFAULT_WORKER_PACKAGE, app.worker_release_package(worker_version))
 
-    def test_admin_worker_create_includes_configured_codex_timeout_env(self) -> None:
-        with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):
-            handler = RouteHarness(
-                "/admin/workers",
-                {"name": "Timeout worker", "provider": "codex", "max_concurrent_jobs": 2},
-                cookie=self.admin_cookie,
-            )
-            app.PullwiseHandler.route(handler, "POST")
+    def test_admin_worker_create_omits_retired_local_policy_env(self) -> None:
+        handler = RouteHarness(
+            "/admin/workers",
+            {"name": "Policy worker", "provider": "codex", "max_concurrent_jobs": 2},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         worker_root = handler.payload["suggested_env"]["PULLWISE_WORKER_ROOT"]
@@ -1252,7 +1251,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_HOME"], f"{worker_root}/codex-home")
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_SQLITE_HOME"], f"{worker_root}/codex-sqlite")
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_TIMEOUT_SECONDS"], "900")
+        self.assertNotIn("PULLWISE_CODEX_REASONING_EFFORT", handler.payload["suggested_env"])
+        self.assertNotIn("PULLWISE_CODEX_TIMEOUT_SECONDS", handler.payload["suggested_env"])
         self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "latest")
         self.assertNotIn("PULLWISE_CODEX_USE_LATEST", handler.payload["suggested_env"])
         self.assertNotIn("--codex-release", handler.payload["install_commands"]["standard"])
@@ -1279,14 +1279,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertNotIn("PULLWISE_CODEX_USE_LATEST", handler.payload["suggested_env"])
         self.assertNotIn("--codex-release", handler.payload["install_commands"]["standard"])
 
-    def test_install_worker_script_writes_configured_codex_timeout_env(self) -> None:
-        with patch.object(app.system_config, "worker_codex_timeout_seconds", return_value=900):
-            script = app.worker_install_script()
+    def test_install_worker_script_omits_retired_local_policy_env(self) -> None:
+        script = app.worker_install_script()
 
-        self.assertIn(
-            'write_env_value PULLWISE_CODEX_TIMEOUT_SECONDS "${PULLWISE_CODEX_TIMEOUT_SECONDS:-900}"',
-            script,
-        )
+        self.assertNotIn("PULLWISE_CODEX_REASONING_EFFORT", script)
+        self.assertNotIn("PULLWISE_CODEX_TIMEOUT_SECONDS", script)
         self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS", script)
         self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_TURNS", script)
 
@@ -1682,7 +1679,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("provider", update.payload["message"])
 
-    def test_admin_plan_agent_config_updates_review_worker_policy(self) -> None:
+    def test_admin_plan_agent_config_keeps_only_canonical_review_worker_policy(self) -> None:
         update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",
             {
@@ -1698,12 +1695,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(update, "PATCH")
 
         defaults = app.billing.default_review_agent_review_worker_config("pro")
-        self.assertEqual(defaults["reviewerMaxTurnsPerScan"], 2)
         self.assertEqual(defaults["turnTimeoutSeconds"], 3600)
         self.assertEqual(defaults["scanDeadlineSeconds"], 14400)
         expected_pro_policy = {
-            **app.billing.default_review_agent_review_worker_config("pro"),
-            "reviewerMaxTurnsPerScan": 4,
             "turnTimeoutSeconds": 1800,
             "scanDeadlineSeconds": 12000,
         }

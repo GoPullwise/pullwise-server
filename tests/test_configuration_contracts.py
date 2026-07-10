@@ -89,23 +89,38 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertNotIn("ANTHROPIC_API_KEY", values)
         self.assertNotIn("CODEX_API_KEY", values)
 
-    def test_env_example_declares_database_backed_api_rate_limits(self) -> None:
+    def test_env_example_keeps_database_backed_api_rate_limits_out_of_environment_config(self) -> None:
         values = env_example_values()
 
-        self.assertEqual(values.get("PULLWISE_RATE_LIMIT_ENABLED"), "true")
-        self.assertEqual(values.get("PULLWISE_RATE_LIMIT_REQUESTS"), "600")
-        self.assertEqual(values.get("PULLWISE_RATE_LIMIT_WINDOW_SECONDS"), "60")
+        self.assertNotIn("PULLWISE_RATE_LIMIT_ENABLED", values)
+        self.assertNotIn("PULLWISE_RATE_LIMIT_REQUESTS", values)
+        self.assertNotIn("PULLWISE_RATE_LIMIT_WINDOW_SECONDS", values)
 
-    def test_production_mode_enables_api_rate_limit_when_not_configured(self) -> None:
-        with patch.dict(os.environ, {"PULLWISE_MODE": "production"}, clear=True):
-            self.assertTrue(app.rate_limit_enabled())
-
-        with patch.dict(
-            os.environ,
-            {"PULLWISE_MODE": "production", "PULLWISE_RATE_LIMIT_ENABLED": "false"},
-            clear=True,
+    def test_api_rate_limit_uses_only_database_backed_system_config(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PULLWISE_MODE": "production",
+                    "PULLWISE_RATE_LIMIT_ENABLED": "true",
+                    "PULLWISE_RATE_LIMIT_REQUESTS": "1",
+                    "PULLWISE_RATE_LIMIT_WINDOW_SECONDS": "2",
+                },
+                clear=True,
+            ),
+            patch.object(app.system_config, "bool_setting", return_value=False),
+            patch.object(
+                app.system_config,
+                "int_setting",
+                side_effect=lambda path: {
+                    "rateLimit.requests": 17,
+                    "rateLimit.windowSeconds": 31,
+                }[path],
+            ),
         ):
             self.assertFalse(app.rate_limit_enabled())
+            self.assertEqual(app.rate_limit_requests(), 17)
+            self.assertEqual(app.rate_limit_window_seconds(), 31)
 
     def test_http_request_queue_size_defaults_for_worker_bursts(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
@@ -202,7 +217,7 @@ class ConfigurationContractsTest(unittest.TestCase):
                 for path in metadata_paths
             )
         )
-    def test_scan_job_lease_and_worker_codex_timeout_are_admin_system_config_fields(self) -> None:
+    def test_scan_job_lease_remains_admin_config_without_retired_worker_fields(self) -> None:
         config = app.system_config.default_config()
         scan_fields = {
             field["path"]: field
@@ -220,9 +235,12 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(config["scan"]["jobLeaseSeconds"], 14400)
         self.assertEqual(scan_fields["scan.jobLeaseSeconds"]["type"], "integer")
         self.assertEqual(scan_fields["scan.jobLeaseSeconds"]["min"], 60)
-        self.assertEqual(config["worker"]["codexTimeoutSeconds"], 3600)
-        self.assertEqual(worker_fields["worker.codexTimeoutSeconds"]["type"], "integer")
-        self.assertEqual(worker_fields["worker.codexTimeoutSeconds"]["min"], 60)
+        self.assertNotIn("allowedProviders", config["worker"])
+        self.assertNotIn("defaultPackage", config["worker"])
+        self.assertNotIn("codexTimeoutSeconds", config["worker"])
+        self.assertNotIn("worker.allowedProviders", worker_fields)
+        self.assertNotIn("worker.defaultPackage", worker_fields)
+        self.assertNotIn("worker.codexTimeoutSeconds", worker_fields)
 
     def test_previous_timeout_defaults_migrate_to_current_defaults(self) -> None:
         migrated = app.system_config.normalize_config(
@@ -233,9 +251,9 @@ class ConfigurationContractsTest(unittest.TestCase):
         )
 
         self.assertEqual(migrated["scan"]["jobLeaseSeconds"], 14400)
-        self.assertEqual(migrated["worker"]["codexTimeoutSeconds"], 3600)
         self.assertEqual(custom["scan"]["jobLeaseSeconds"], 7200)
-        self.assertEqual(custom["worker"]["codexTimeoutSeconds"], 2400)
+        self.assertNotIn("codexTimeoutSeconds", migrated["worker"])
+        self.assertNotIn("codexTimeoutSeconds", custom["worker"])
 
     def test_alert_email_is_admin_system_config_field_with_redacted_password(self) -> None:
         config = app.system_config.default_config()
@@ -293,11 +311,34 @@ class ConfigurationContractsTest(unittest.TestCase):
         self.assertEqual(runtime_config["alerts"]["email"]["smtpPassword"], "smtp-secret")
         self.assertTrue(runtime_config["alerts"]["email"]["enabled"])
 
-    def test_worker_allowed_providers_filters_unsupported_values(self) -> None:
-        with patch.object(app.system_config, "list_setting", return_value=["unsupported", " CODEX "]):
-            self.assertEqual(app.system_config.worker_allowed_providers(), {"codex"})
-        with patch.object(app.system_config, "list_setting", return_value=["unsupported"]):
-            self.assertEqual(app.system_config.worker_allowed_providers(), {"codex"})
+    def test_system_config_normalizes_conflicting_smtp_transport_modes(self) -> None:
+        normalized = app.system_config.normalize_config(
+            {"alerts": {"email": {"smtpSsl": True, "smtpStarttls": True}}}
+        )
+
+        self.assertTrue(normalized["alerts"]["email"]["smtpSsl"])
+        self.assertFalse(normalized["alerts"]["email"]["smtpStarttls"])
+
+    def test_system_config_update_rejects_conflicting_smtp_transport_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            key_path = os.path.join(temp_dir, "state-encryption-key")
+            with open(key_path, "w", encoding="ascii") as key_file:
+                key_file.write("01" * 32)
+            with patch.dict(
+                os.environ,
+                {"PULLWISE_DB_PATH": db_path, "PULLWISE_STATE_ENCRYPTION_KEY_PATH": key_path},
+                clear=False,
+            ):
+                app.db.reset_initialization_cache()
+                app.system_config.invalidate_cache()
+                with self.assertRaisesRegex(ValueError, "SMTP SSL and SMTP STARTTLS"):
+                    app.system_config.update(
+                        {"settings": {"alerts": {"email": {"smtpSsl": True, "smtpStarttls": True}}}}
+                    )
+
+        app.db.reset_initialization_cache()
+        app.system_config.invalidate_cache()
 
     def test_global_repository_checkout_limits_do_not_migrate_to_plan_limits(self) -> None:
         config = app.system_config.default_config()

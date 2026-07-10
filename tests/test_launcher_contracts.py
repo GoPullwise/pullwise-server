@@ -68,6 +68,13 @@ def tar_contents(path: Path) -> list[str]:
 
 @unittest.skipIf(os.name == "nt", "launcher shell contracts run on POSIX CI; Windows sh/cygpath is too slow for local full-suite gating")
 class LauncherContractsTest(unittest.TestCase):
+    def test_launcher_leaves_rate_limits_to_admin_system_config(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "launcher.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn("PULLWISE_RATE_LIMIT_ENABLED", script)
+        self.assertNotIn("PULLWISE_RATE_LIMIT_REQUESTS", script)
+        self.assertNotIn("PULLWISE_RATE_LIMIT_WINDOW_SECONDS", script)
+
     def run_launcher(self, args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         merged_env = os.environ.copy()
         if env:
