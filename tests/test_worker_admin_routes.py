@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
@@ -627,12 +628,14 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(second.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 1)
             state = db.load_state_item("alert_notifications")
-            self.assertIn(f"worker:{worker_id}:degraded", state["active"])
+            grouped_key = "workers:status:degraded"
+            self.assertIn(grouped_key, state["active"])
+            self.assertEqual(state["active"][grouped_key]["workerIds"], [worker_id])
 
             recovered = self.post_v1_heartbeat(worker_id, token, **ready)
             self.assertEqual(recovered.status, HTTPStatus.OK)
             state = db.load_state_item("alert_notifications")
-            self.assertNotIn(f"worker:{worker_id}:degraded", state.get("active", {}))
+            self.assertNotIn(grouped_key, state.get("active", {}))
 
             repeated = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(repeated.status, HTTPStatus.OK)
@@ -698,17 +701,147 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertIn("5 hour", body)
             self.assertIn("Reset credits: 1", body)
             state = db.load_state_item("alert_notifications")
-            self.assertIn(f"worker:{worker_id}:codex-quota:low", state["active"])
-            self.assertNotIn(f"worker:{worker_id}:degraded", state["active"])
+            grouped_key = "workers:codex-quota:low"
+            self.assertIn(grouped_key, state["active"])
+            self.assertEqual(state["active"][grouped_key]["workerIds"], [worker_id])
+            self.assertNotIn("workers:status:degraded", state["active"])
 
             recovered = self.post_v1_heartbeat(worker_id, token, **ready)
             self.assertEqual(recovered.status, HTTPStatus.OK)
             state = db.load_state_item("alert_notifications")
-            self.assertNotIn(f"worker:{worker_id}:codex-quota:low", state.get("active", {}))
+            self.assertNotIn(grouped_key, state.get("active", {}))
 
             repeated = self.post_v1_heartbeat(worker_id, token, **degraded)
             self.assertEqual(repeated.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 2)
+
+    def test_worker_codex_quota_alert_email_is_grouped_across_one_hundred_workers(self) -> None:
+        low_quota = {
+            "provider": "codex",
+            "planType": "pro",
+            "status": "low",
+            "ready": False,
+            "thresholdPercent": 5,
+            "remainingPercent": 4,
+            "checkedAt": 1782900000,
+            "rateLimitResetCredits": {"availableCount": 1},
+            "windows": [
+                {
+                    "windowKind": "five_hour",
+                    "label": "5 hour",
+                    "usedPercent": 96,
+                    "remainingPercent": 4,
+                    "resetsAt": 1782918371,
+                }
+            ],
+        }
+        affected_workers = [
+            {
+                "worker_id": f"wk_{index:03d}",
+                "name": f"Worker {index:03d}",
+                "status": "degraded",
+                "doctor_status": "degraded",
+                "codex_ready": False,
+                "last_error": "codex quota low",
+                "codexQuota": dict(low_quota),
+            }
+            for index in range(100)
+        ]
+
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                list(executor.map(app.alerts.sync_worker_alert, affected_workers))
+
+            self.assertEqual(send_alert.call_count, 1)
+            subject, body = send_alert.call_args.args
+            self.assertEqual(subject, "Pullwise workers Codex quota low")
+            self.assertIn("same-status alerts", body.lower())
+            state = db.load_state_item("alert_notifications")
+            grouped = state["active"]["workers:codex-quota:low"]
+            self.assertEqual(grouped["affectedWorkerCount"], 100)
+            self.assertEqual(set(grouped["workerIds"]), {item["worker_id"] for item in affected_workers})
+
+            recovered_quota = {**low_quota, "status": "ok", "ready": True, "remainingPercent": 80, "windows": []}
+            for worker in affected_workers[:-1]:
+                app.alerts.sync_worker_alert(
+                    {
+                        **worker,
+                        "status": "idle",
+                        "doctor_status": "ok",
+                        "codex_ready": True,
+                        "last_error": "",
+                        "codexQuota": recovered_quota,
+                    }
+                )
+
+            state = db.load_state_item("alert_notifications")
+            grouped = state["active"]["workers:codex-quota:low"]
+            self.assertEqual(grouped["workerIds"], [affected_workers[-1]["worker_id"]])
+            self.assertEqual(send_alert.call_count, 1)
+
+            last_worker = affected_workers[-1]
+            app.alerts.sync_worker_alert(
+                {
+                    **last_worker,
+                    "status": "idle",
+                    "doctor_status": "ok",
+                    "codex_ready": True,
+                    "last_error": "",
+                    "codexQuota": recovered_quota,
+                }
+            )
+            state = db.load_state_item("alert_notifications")
+            self.assertNotIn("workers:codex-quota:low", state.get("active", {}))
+
+            app.alerts.sync_worker_alert(affected_workers[0])
+            self.assertEqual(send_alert.call_count, 2)
+
+    def test_worker_codex_quota_low_and_exhausted_are_separate_grouped_incidents(self) -> None:
+        def quota_worker(worker_id: str, quota_status: str) -> dict:
+            remaining = 0 if quota_status == "exhausted" else 4
+            return {
+                "worker_id": worker_id,
+                "name": worker_id,
+                "status": "degraded",
+                "doctor_status": "degraded",
+                "codex_ready": False,
+                "last_error": f"codex quota {quota_status}",
+                "codexQuota": {
+                    "provider": "codex",
+                    "status": quota_status,
+                    "ready": False,
+                    "thresholdPercent": 5,
+                    "remainingPercent": remaining,
+                    "windows": [{"label": "5 hour", "remainingPercent": remaining}],
+                },
+            }
+
+        workers = [
+            quota_worker("wk_low_1", "low"),
+            quota_worker("wk_low_2", "low"),
+            quota_worker("wk_exhausted_1", "exhausted"),
+            quota_worker("wk_exhausted_2", "exhausted"),
+        ]
+        with patch.object(app.alerts, "send_alert_email", return_value=True) as send_alert:
+            for worker in workers:
+                app.alerts.sync_worker_alert(worker)
+
+            self.assertEqual(send_alert.call_count, 2)
+            self.assertEqual(
+                {call.args[0] for call in send_alert.call_args_list},
+                {"Pullwise workers Codex quota low", "Pullwise workers Codex quota exhausted"},
+            )
+            active = db.load_state_item("alert_notifications")["active"]
+            self.assertEqual(active["workers:codex-quota:low"]["affectedWorkerCount"], 2)
+            self.assertEqual(active["workers:codex-quota:exhausted"]["affectedWorkerCount"], 2)
+
+            app.alerts.sync_worker_alert(quota_worker("wk_low_1", "exhausted"))
+
+            active = db.load_state_item("alert_notifications")["active"]
+            self.assertEqual(active["workers:codex-quota:low"]["workerIds"], ["wk_low_2"])
+            self.assertEqual(active["workers:codex-quota:exhausted"]["affectedWorkerCount"], 3)
+            self.assertEqual(send_alert.call_count, 2)
+
     def test_worker_alert_email_failure_is_deduped_until_recovery(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
@@ -725,7 +858,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(first.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 1)
             state = db.load_state_item("alert_notifications")
-            alert_state = state["active"][f"worker:{worker_id}:degraded"]
+            alert_state = state["active"]["workers:status:degraded"]
             self.assertFalse(alert_state["emailDelivered"])
 
             second = self.post_v1_heartbeat(worker_id, token, **degraded)
@@ -745,7 +878,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             self.assertEqual(repeated.status, HTTPStatus.OK)
             self.assertEqual(send_alert.call_count, 2)
             state = db.load_state_item("alert_notifications")
-            alert_state = state["active"][f"worker:{worker_id}:degraded"]
+            alert_state = state["active"]["workers:status:degraded"]
             self.assertTrue(alert_state["emailDelivered"])
 
     def test_scan_system_alert_email_is_sent_once_per_active_problem(self) -> None:
@@ -2538,6 +2671,3 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-

@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 STATE_KEY = 'alert_notifications'
 _SYSTEM_PROBLEM_STATUSES = {'degraded', 'down'}
 _WORKER_PROBLEM_STATUSES = {'degraded', 'offline'}
+_GROUPED_WORKER_PREFIX = 'workers:'
+_MAX_WORKERS_IN_EMAIL = 50
 _LOCK = threading.Lock()
 
 
@@ -201,11 +203,9 @@ def _worker_quota_alert(worker):
     threshold = _format_percent(quota.get('thresholdPercent') if quota.get('thresholdPercent') is not None else 5)
     reset_credits = quota.get('rateLimitResetCredits') if isinstance(quota.get('rateLimitResetCredits'), dict) else {}
     available_resets = reset_credits.get('availableCount') if reset_credits else None
-    subject = f'Pullwise worker Codex quota {status}: {name}'
+    subject = f'Pullwise workers Codex quota {status}'
     lines = [
-        'Pullwise worker Codex quota warning detected.',
         f'Worker: {name} ({worker_id})',
-        f'Status: {status}',
         f'Plan: {_clean_text(quota.get("planType"), 80) or "unknown"}',
         f'Threshold: {threshold} remaining',
         f'Rate limit reached type: {_clean_text(quota.get("rateLimitReachedType"), 120) or "none"}',
@@ -232,9 +232,10 @@ def _worker_quota_alert(worker):
     if last_error:
         lines.append(f'Last error: {last_error}')
     return {
-        f'worker:{worker_id}:codex-quota:{status}': {
+        f'workers:codex-quota:{status}': {
             'subject': subject,
-            'body': '\n'.join(lines),
+            'intro': 'Pullwise worker Codex quota warning detected.',
+            'members': {worker_id: '\n'.join(lines)},
             'kind': 'worker_codex_quota',
             'status': status,
         }
@@ -255,11 +256,9 @@ def _worker_alert(worker):
     doctor_status = _clean_text(worker.get('doctor_status'))
     codex_ready = worker.get('codex_ready')
     last_heartbeat = worker.get('last_heartbeat_at')
-    subject = f'Pullwise worker {status}: {name}'
+    subject = f'Pullwise workers {status}'
     lines = [
-        'Pullwise worker problem detected.',
         f'Worker: {name} ({worker_id})',
-        f'Status: {status}',
         f'Provider: {provider}',
         f'Doctor status: {doctor_status}',
         f'Codex ready: {codex_ready}',
@@ -269,9 +268,10 @@ def _worker_alert(worker):
     if last_error:
         lines.append(f'Last error: {last_error}')
     return {
-        f'worker:{worker_id}:{status}': {
+        f'workers:status:{status}': {
             'subject': subject,
-            'body': '\n'.join(lines),
+            'intro': 'Pullwise worker problem detected.',
+            'members': {worker_id: '\n'.join(lines)},
             'kind': 'worker',
             'status': status,
         }
@@ -284,26 +284,160 @@ def _worker_alerts(worker):
     alerts.update(_worker_quota_alert(worker))
     return alerts
 
-def _sync_alerts(alerts, clear_prefixes):
+
+def _merge_alerts(target, additions):
+    for key, alert in additions.items():
+        existing = target.get(key)
+        existing_members = existing.get('members') if isinstance(existing, dict) else None
+        added_members = alert.get('members') if isinstance(alert, dict) else None
+        if isinstance(existing_members, dict) and isinstance(added_members, dict):
+            merged = dict(existing)
+            merged['members'] = {**existing_members, **added_members}
+            target[key] = merged
+        else:
+            target[key] = alert
+
+
+def _render_alert(alert):
+    subject = _clean_text(alert.get('subject'), 300)
+    members = alert.get('members') if isinstance(alert.get('members'), dict) else None
+    if members is None:
+        return subject, str(alert.get('body') or '')
+    worker_ids = sorted(str(worker_id) for worker_id in members if str(worker_id or '').strip())
+    lines = [
+        _clean_text(alert.get('intro'), 500) or 'Pullwise worker problem detected.',
+        f'Status: {_clean_text(alert.get("status"), 60) or "unknown"}',
+        f'Affected workers currently included: {len(worker_ids)}',
+        'Further same-status alerts from additional workers are grouped into this incident and do not send individual emails.',
+    ]
+    for worker_id in worker_ids[:_MAX_WORKERS_IN_EMAIL]:
+        detail = _clean_text(members.get(worker_id), 4000)
+        if detail:
+            lines.extend(['', detail])
+    omitted = len(worker_ids) - _MAX_WORKERS_IN_EMAIL
+    if omitted > 0:
+        lines.extend(['', f'{omitted} additional affected workers omitted from this email.'])
+    return subject, '\n'.join(lines)
+
+
+def _entry_worker_ids(entry):
+    if not isinstance(entry, dict) or not isinstance(entry.get('workerIds'), list):
+        return set()
+    return {
+        worker_id
+        for item in entry.get('workerIds') or []
+        if (worker_id := _clean_text(item, 128))
+    }
+
+
+def _entry_with_worker_ids(entry, worker_ids, alert=None):
+    updated = dict(entry) if isinstance(entry, dict) else {}
+    normalized_ids = sorted({_clean_text(item, 128) for item in worker_ids if _clean_text(item, 128)})
+    updated['workerIds'] = normalized_ids
+    updated['affectedWorkerCount'] = len(normalized_ids)
+    if isinstance(alert, dict):
+        updated['kind'] = _clean_text(alert.get('kind'), 60)
+        updated['status'] = _clean_text(alert.get('status'), 60)
+    return updated
+
+
+def _legacy_worker_group(key):
+    if not key.startswith('worker:'):
+        return '', ''
+    for status in ('low', 'exhausted'):
+        suffix = f':codex-quota:{status}'
+        if key.endswith(suffix):
+            worker_id = _clean_text(key[len('worker:') : -len(suffix)], 128)
+            return (f'workers:codex-quota:{status}', worker_id) if worker_id else ('', '')
+    for status in sorted(_WORKER_PROBLEM_STATUSES):
+        suffix = f':{status}'
+        if key.endswith(suffix):
+            worker_id = _clean_text(key[len('worker:') : -len(suffix)], 128)
+            return (f'workers:status:{status}', worker_id) if worker_id else ('', '')
+    return '', ''
+
+
+def _normalize_active(active):
+    normalized = {}
+    legacy_entries = []
+    for key, entry in active.items():
+        group_key, worker_id = _legacy_worker_group(key)
+        if group_key:
+            legacy_entries.append((group_key, worker_id, entry))
+            continue
+        normalized[key] = entry
+    for group_key, worker_id, entry in legacy_entries:
+        existing = normalized.get(group_key)
+        worker_ids = _entry_worker_ids(existing)
+        worker_ids.add(worker_id)
+        base = existing if isinstance(existing, dict) else entry
+        normalized[group_key] = _entry_with_worker_ids(base, worker_ids)
+    return normalized
+
+
+def _sync_alerts(alerts, clear_prefixes, *, worker_ids=None, complete_worker_snapshot=False):
     with _LOCK:
-        active = _load_active()
-        changed = False
+        loaded_active = _load_active()
+        active = _normalize_active(loaded_active)
+        changed = active != loaded_active
         for key in list(active):
             if any(key.startswith(prefix) for prefix in clear_prefixes) and key not in alerts:
                 active.pop(key, None)
                 changed = True
+
+        grouped_alerts = {
+            key: alert
+            for key, alert in alerts.items()
+            if key.startswith(_GROUPED_WORKER_PREFIX) and isinstance(alert.get('members'), dict)
+        }
+        incoming_worker_ids = {
+            key: {_clean_text(worker_id, 128) for worker_id in alert['members'] if _clean_text(worker_id, 128)}
+            for key, alert in grouped_alerts.items()
+        }
+        if complete_worker_snapshot:
+            for key in list(active):
+                if key.startswith(_GROUPED_WORKER_PREFIX) and key not in grouped_alerts:
+                    active.pop(key, None)
+                    changed = True
+            for key, next_worker_ids in incoming_worker_ids.items():
+                if key not in active:
+                    continue
+                updated = _entry_with_worker_ids(active[key], next_worker_ids, grouped_alerts[key])
+                if updated != active[key]:
+                    active[key] = updated
+                    changed = True
+        elif worker_ids:
+            updated_worker_ids = {_clean_text(item, 128) for item in worker_ids if _clean_text(item, 128)}
+            group_keys = {key for key in active if key.startswith(_GROUPED_WORKER_PREFIX)} | set(grouped_alerts)
+            for key in group_keys:
+                current_worker_ids = _entry_worker_ids(active.get(key))
+                next_worker_ids = (current_worker_ids - updated_worker_ids) | incoming_worker_ids.get(key, set())
+                if key not in active:
+                    continue
+                if not next_worker_ids:
+                    active.pop(key, None)
+                    changed = True
+                    continue
+                updated = _entry_with_worker_ids(active[key], next_worker_ids, grouped_alerts.get(key))
+                if updated != active[key]:
+                    active[key] = updated
+                    changed = True
+
         current_time = int(time.time())
         for key, alert in alerts.items():
             if key in active:
                 continue
-            email_delivered = send_alert_email(alert.get('subject'), alert.get('body'))
+            subject, body = _render_alert(alert)
+            email_delivered = send_alert_email(subject, body)
             entry = {
                 'attemptedAt': current_time,
-                'subject': _clean_text(alert.get('subject'), 300),
+                'subject': subject,
                 'kind': _clean_text(alert.get('kind'), 60),
                 'status': _clean_text(alert.get('status'), 60),
                 'emailDelivered': bool(email_delivered),
             }
+            if key in grouped_alerts:
+                entry = _entry_with_worker_ids(entry, incoming_worker_ids.get(key, set()), alert)
             if email_delivered:
                 entry['sentAt'] = current_time
             active[key] = entry
@@ -316,8 +450,8 @@ def sync_scan_system_alerts(payload, workers):
     try:
         alerts = _system_alert(payload if isinstance(payload, dict) else {})
         for worker in workers or []:
-            alerts.update(_worker_alerts(worker if isinstance(worker, dict) else {}))
-        _sync_alerts(alerts, ['server:scan-system:', 'worker:'])
+            _merge_alerts(alerts, _worker_alerts(worker if isinstance(worker, dict) else {}))
+        _sync_alerts(alerts, ['server:scan-system:', 'worker:'], complete_worker_snapshot=True)
     except Exception as exc:
         logger.exception('scan system alert sync failed: %s', exc)
 
@@ -329,10 +463,9 @@ def sync_worker_alert(worker):
         worker_id = _clean_text(worker.get('worker_id') or worker.get('id'), 128)
         if not worker_id:
             return
-        _sync_alerts(_worker_alerts(worker), [f'worker:{worker_id}:'])
+        _sync_alerts(_worker_alerts(worker), [f'worker:{worker_id}:'], worker_ids={worker_id})
     except Exception as exc:
         logger.exception('worker alert sync failed: %s', exc)
 
 
 __all__ = ['send_alert_email', 'sync_scan_system_alerts', 'sync_worker_alert']
-
