@@ -208,6 +208,7 @@ stable summary must include `overall_risk`, `result_status`, `finding_counts`,
 `coverage`, and `top_findings`; do not accept top-findings-only summaries as
 v1 terminal results. Store the raw envelope and artifacts; do not depend on
 `report.agent.json` internals for core result acceptance.
+Worker finding ingestion must normalize priority-style severity aliases consistently: `P0` maps to `critical`, `P1` to `high`, `P2` to `medium`, `P3` to `low`, and `P4` to `info`. Persisted issues, stable-summary counts, and public scan payloads must use the same canonical levels.
 V1 terminal result status must preserve `completed`/`done`, `failed`,
 `cancelled`, and `partial_completed` distinctly through job result rows,
 `review_runs`, scan state, public scan payloads, and artifact/result retrieval;
@@ -409,4 +410,3 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 ## CI Test Harness Notes
 
 - `app.main()` constructs `PullwiseThreadingHTTPServer`, not the stdlib `ThreadingHTTPServer` symbol. Tests that call `app.main()` must patch `app.PullwiseThreadingHTTPServer` so they do not start a real `serve_forever()` loop in CI.
-
