@@ -28,15 +28,26 @@ def preview_scan_lock(scan_id: str) -> Iterator[None]:
                 PREVIEW_SCAN_LOCKS.pop(scan_id, None)
 
 
+def issue_scan_for_user(user_id: str, scan_id: str) -> dict:
+    job = db.get_scan_job_for_scan(scan_id)
+    if job and str(job.get("user_id") or "") != user_id:
+        raise ValueError("Scan does not belong to the signed-in user.")
+    memory_scan = memory_scan_by_id(scan_id)
+    if memory_scan and str(memory_scan.get("userId") or "") != user_id:
+        raise ValueError("Scan does not belong to the signed-in user.")
+    scan = user_scan_for_read({"userId": user_id}, scan_id)
+    if not scan:
+        raise ValueError("Scan not found for issue.")
+    if str(scan.get("userId") or "") != user_id:
+        raise ValueError("Scan does not belong to the signed-in user.")
+    return scan
+
+
 def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
     scan_id = issue.get("scanId")
     user_id = str(user.get("id") or "")
-    scan = user_scan_for_read({"userId": user_id}, str(scan_id or ""))
-    if not scan:
-        raise ValueError("Scan not found for issue.")
+    scan = issue_scan_for_user(user_id, str(scan_id or ""))
     scan_id = str(scan.get("id") or scan_id or "")
-    if str(scan.get("userId") or "") != user_id:
-        raise ValueError("Scan does not belong to the signed-in user.")
     if scan.get("status") != "done":
         raise ValueError("Scan must be completed before previewing fixes.")
 
@@ -76,11 +87,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         raise ValueError("Issue does not belong to the signed-in user.")
 
     scan_id = str(issue.get("scanId") or "")
-    scan = user_scan_for_read({"userId": user_id}, scan_id)
-    if not scan:
-        raise ValueError("Scan not found for issue.")
-    if str(scan.get("userId") or "") != user_id:
-        raise ValueError("Scan does not belong to the signed-in user.")
+    scan = issue_scan_for_user(user_id, scan_id)
 
     issue_id = clean_pull_request_issue_id(issue.get("id"))
     issue_slug = issue_id

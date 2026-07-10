@@ -1200,6 +1200,9 @@ def user_scan_for_read(session: dict | None, scan_id: str) -> dict | None:
     if job:
         scans = hydrate_scan_jobs_for_read([job])
         return scans[0] if scans else None
+    memory_scan = memory_scan_by_id(target_scan_id)
+    if memory_scan is not None and public_issue_text(memory_scan.get("userId")) == user_id:
+        return memory_scan
     if db.count_user_scan_jobs(user_id) == 0:
         return next((scan for scan in user_scans_for_read(session) if public_issue_text(scan.get("id")) == target_scan_id), None)
     return None

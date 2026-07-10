@@ -1493,7 +1493,7 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
                     "canceledAt": None,
                     "lastEventType": "checkout.completed",
                     "lastEventId": "evt_creem_checkout_real_1",
-                    "lastEventCreated": 1728734325,
+                    "lastEventCreated": 1728734325.927,
                     "updatedAt": persisted_user["billingSubscriptions"][0]["updatedAt"],
                 }
             ],
@@ -1516,7 +1516,7 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
                     "canceledAt": None,
                     "eventType": "checkout.completed",
                     "eventId": "evt_creem_checkout_real_1",
-                    "eventCreated": 1728734325,
+                    "eventCreated": 1728734325.927,
                     "processedAt": persisted_user["billingSubscriptionEvents"][0]["processedAt"],
                     "stale": False,
                 }

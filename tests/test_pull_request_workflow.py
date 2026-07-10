@@ -37,6 +37,7 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.persist_patcher = patch.object(app, "persist_state")
         self.persist_patcher.start()
         self.addCleanup(self.persist_patcher.stop)
+        db.delete_issues_for_scan("sc_1", user_id="usr_1")
         app.USERS = {
             "usr_1": {
                 "id": "usr_1",
