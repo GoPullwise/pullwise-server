@@ -6450,8 +6450,44 @@ def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | N
         return {}
     target_scan_ids = [str(scan_id) for scan_id in (scan_ids or []) if str(scan_id or "").strip()]
     counts: dict[str, int] = {}
+    artifact_content_paths: list[str] = []
     with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
         with connection:
+            job_predicates = ["user_id = ?"]
+            job_parameters: list[str] = [target_user_id]
+            if target_scan_ids:
+                placeholders = ",".join("?" for _ in target_scan_ids)
+                job_predicates.append(f"scan_id IN ({placeholders})")
+                job_parameters.extend(target_scan_ids)
+            job_rows = connection.execute(
+                f"SELECT job_id FROM scan_jobs WHERE {' OR '.join(job_predicates)}",
+                job_parameters,
+            ).fetchall()
+            target_job_ids = [str(row["job_id"] or "") for row in job_rows if str(row["job_id"] or "")]
+            if target_job_ids:
+                job_placeholders = ",".join("?" for _ in target_job_ids)
+                artifact_rows = connection.execute(
+                    f"SELECT content_path FROM review_artifacts WHERE job_id IN ({job_placeholders})",
+                    target_job_ids,
+                ).fetchall()
+                artifact_content_paths = [str(row["content_path"] or "") for row in artifact_rows if str(row["content_path"] or "")]
+                counts["reviewArtifacts"] = connection.execute(
+                    f"DELETE FROM review_artifacts WHERE job_id IN ({job_placeholders})",
+                    target_job_ids,
+                ).rowcount
+                counts["reviewRunEvents"] = connection.execute(
+                    f"DELETE FROM review_run_events WHERE job_id IN ({job_placeholders})",
+                    target_job_ids,
+                ).rowcount
+                counts["reviewRuns"] = connection.execute(
+                    f"DELETE FROM review_runs WHERE job_id IN ({job_placeholders})",
+                    target_job_ids,
+                ).rowcount
+            else:
+                counts["reviewArtifacts"] = 0
+                counts["reviewRunEvents"] = 0
+                counts["reviewRuns"] = 0
             counts["apiKeys"] = connection.execute(
                 "DELETE FROM api_keys WHERE user_id = ?",
                 (target_user_id,),
@@ -6498,6 +6534,9 @@ def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | N
                     f"DELETE FROM scan_jobs WHERE scan_id IN ({placeholders})",
                     target_scan_ids,
                 ).rowcount
+    counts["reviewArtifactFiles"] = sum(
+        1 for content_path in artifact_content_paths if delete_review_artifact_content_file(content_path)
+    )
     return counts
 
 

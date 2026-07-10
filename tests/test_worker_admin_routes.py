@@ -1851,8 +1851,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         job = app.create_scan_job_for_scan(app.SCANS[0])
         claimed = db.claim_next_scan_job("wk_1")
-        run_id = claimed["run_id"]
+        run_id = claimed.get("run_id") or f"run_{claimed['job_id']}"
         attempt_id = f"wk_1-{claimed['attempt']}"
+        db.upsert_review_run_claimed(claimed)
         db.store_review_run_event(
             {
                 "run_id": run_id,
