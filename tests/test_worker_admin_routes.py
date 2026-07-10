@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -1848,6 +1850,45 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             }
         )
         job = app.create_scan_job_for_scan(app.SCANS[0])
+        claimed = db.claim_next_scan_job("wk_1")
+        run_id = claimed["run_id"]
+        attempt_id = f"wk_1-{claimed['attempt']}"
+        db.store_review_run_event(
+            {
+                "run_id": run_id,
+                "job_id": job["job_id"],
+                "worker_id": "wk_1",
+                "sequence": 1,
+                "event_type": "phase_started",
+                "phase": "repo_map",
+                "status": "running",
+                "progress": 33,
+            }
+        )
+        artifact_content = b"user review artifact"
+        db.store_review_run_artifact(
+            job_id=job["job_id"],
+            attempt_id=attempt_id,
+            artifact_id="art_worker_log",
+            payload={
+                "run_id": run_id,
+                "artifact": {
+                    "artifact_id": "art_worker_log",
+                    "kind": "worker_log",
+                    "name": "worker.log.jsonl",
+                    "media_type": "application/jsonl",
+                    "schema_id": "worker-log",
+                    "schema_version": "v1",
+                    "required": False,
+                    "sha256": hashlib.sha256(artifact_content).hexdigest(),
+                    "size_bytes": len(artifact_content),
+                },
+                "content_base64": base64.b64encode(artifact_content).decode("ascii"),
+            },
+        )
+        stored_artifact = db.get_review_run_artifact(run_id, "art_worker_log")
+        artifact_path = Path(db.review_artifact_content_file_path(stored_artifact) or "")
+        self.assertTrue(artifact_path.exists())
 
         handler = RouteHarness("/admin/users/usr_user", cookie=self.admin_cookie)
         app.PullwiseHandler.route(handler, "DELETE")
@@ -1862,9 +1903,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual([issue["id"] for issue in app.ISSUES], ["issue_admin"])
         self.assertEqual(db.list_api_keys_for_user("usr_user"), [])
         self.assertIsNone(db.get_scan_job(job["job_id"]))
+        self.assertIsNone(db.get_review_run(run_id))
+        self.assertEqual(db.list_review_run_events(run_id), [])
+        self.assertIsNone(db.get_review_run_artifact(run_id, "art_worker_log"))
+        self.assertFalse(artifact_path.exists())
         self.assertEqual(handler.payload["removed"]["sessions"], 1)
         self.assertEqual(handler.payload["removed"]["scans"], 1)
         self.assertEqual(handler.payload["removed"]["issues"], 1)
+        self.assertEqual(handler.payload["removed"]["reviewRuns"], 1)
+        self.assertEqual(handler.payload["removed"]["reviewRunEvents"], 1)
+        self.assertEqual(handler.payload["removed"]["reviewArtifacts"], 1)
 
     def test_admin_cannot_delete_current_user(self) -> None:
         handler = RouteHarness("/admin/users/usr_admin", cookie=self.admin_cookie)

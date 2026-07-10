@@ -99,7 +99,7 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["status"], "active")
         self.assertEqual(update["plan"], "pro")
         self.assertEqual(update["interval"], "month")
-        self.assertEqual(update["eventCreated"], 1728734325)
+        self.assertEqual(update["eventCreated"], 1728734325.927)
 
     def test_creem_subscription_paid_maps_period_and_metadata(self) -> None:
         event = {
@@ -133,7 +133,7 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["interval"], "year")
         self.assertEqual(update["currentPeriodStart"], "2026-06-09T00:00:00.000Z")
         self.assertEqual(update["currentPeriodEnd"], "2027-06-09T00:00:00.000Z")
-        self.assertEqual(update["eventCreated"], 1728734327)
+        self.assertEqual(update["eventCreated"], 1728734327.355)
 
     def test_creem_subscription_lifecycle_event_type_controls_status(self) -> None:
         scenarios = {
@@ -351,7 +351,7 @@ class BillingWebhookTest(unittest.TestCase):
         self.assertEqual(update["status"], "canceled")
         self.assertEqual(update["plan"], "pro")
         self.assertEqual(update["interval"], "month")
-        self.assertEqual(update["eventCreated"], 1728734351)
+        self.assertEqual(update["eventCreated"], 1728734351.631)
 
     def test_creem_refund_created_without_subscription_context_is_ignored(self) -> None:
         event = {

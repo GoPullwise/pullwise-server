@@ -435,6 +435,20 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertIn((first.payload["id"], "reserved"), activity_keys)
         self.assertIn((first.payload["id"], "released"), activity_keys)
 
+    def test_cancel_uses_db_scan_when_memory_mirror_is_empty(self) -> None:
+        cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
+        created = RouteHarness({"repoId": "123", "requestId": "req_db_only_cancel"}, cookie=cookie)
+        app.PullwiseHandler.route(created, "POST")
+        scan_id = created.payload["id"]
+        app.SCANS = []
+
+        cancel = RouteHarness({}, cookie=cookie, path=f"/scans/{scan_id}/cancel")
+        app.PullwiseHandler.route(cancel, "POST")
+
+        self.assertEqual(cancel.status, HTTPStatus.OK)
+        self.assertEqual(cancel.payload["status"], "cancelled")
+        self.assertEqual(db.get_user_scan_job("usr_a", scan_id)["status"], "cancelled")
+
     def test_scan_start_rolls_back_quota_when_job_creation_fails(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
         first = RouteHarness({"repoId": "123", "requestId": "req_job_failure"}, cookie=cookie)

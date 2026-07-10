@@ -8,7 +8,7 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import Mock, patch
 
-from pullwise_server import app, checkout, github_auth
+from pullwise_server import app, checkout, db, github_auth
 
 
 class RouteHarness(app.PullwiseHandler):
@@ -1109,6 +1109,32 @@ class PullRequestWorkflowTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
         self.assertEqual(handler.payload, {"message": "Issue not found."})
+
+    def test_issue_mutations_use_db_issue_when_memory_mirror_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "pullwise.sqlite3")},
+            clear=False,
+        ):
+            db.reset_initialization_cache()
+            db.upsert_issue(app.ISSUES[0])
+            app.ISSUES = []
+            cookie = self.signed_in()
+            preview_payload = {"issueId": "f_123", "autoFixable": True, "valid": True, "diff": "patch"}
+            pull_request_payload = {"issueId": "f_123", "url": "https://github.com/owner/repo/pull/12"}
+
+            preview = RouteHarness("/issues/f_123/fixes/preview", cookie=cookie)
+            with patch("pullwise_server.app.preview_issue_fix_for_user", return_value=preview_payload) as preview_fix:
+                app.PullwiseHandler.route(preview, "POST")
+
+            pull_request = RouteHarness("/issues/f_123/pull-requests", cookie=cookie)
+            with patch("pullwise_server.app.create_issue_pull_request", return_value=pull_request_payload) as create_pr:
+                app.PullwiseHandler.route(pull_request, "POST")
+
+        self.assertEqual(preview.status, HTTPStatus.OK)
+        self.assertEqual(pull_request.status, HTTPStatus.OK)
+        self.assertEqual(preview_fix.call_args.args[1]["id"], "f_123")
+        self.assertEqual(create_pr.call_args.args[1]["id"], "f_123")
 
     def test_route_maps_value_error_to_bad_request(self) -> None:
         handler = RouteHarness("/issues/f_123/pull-requests", cookie=self.signed_in())

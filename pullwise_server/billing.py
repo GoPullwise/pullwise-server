@@ -1094,18 +1094,23 @@ def billing_update_from_creem_event(event: dict) -> dict | None:
     }
 
 
-def event_created(event: dict) -> int | None:
+def event_created(event: dict) -> int | float | None:
     value = event.get("created") or event.get("createdAt") or event.get("created_at")
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         if not math.isfinite(value):
             return None
-        candidate = int(value)
-        return candidate // 1000 if candidate >= 10_000_000_000 else candidate
+        candidate = float(value)
+        if candidate >= 10_000_000_000:
+            candidate /= 1000
+        return int(candidate) if candidate.is_integer() else candidate
     if isinstance(value, str) and value.isdigit():
         candidate = int(value)
-        return candidate // 1000 if candidate >= 10_000_000_000 else candidate
+        if candidate >= 10_000_000_000:
+            seconds = candidate / 1000
+            return int(seconds) if seconds.is_integer() else seconds
+        return candidate
     return None
 
 

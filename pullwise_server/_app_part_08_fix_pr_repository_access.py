@@ -30,10 +30,10 @@ def preview_scan_lock(scan_id: str) -> Iterator[None]:
 
 def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
     scan_id = issue.get("scanId")
-    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+    user_id = str(user.get("id") or "")
+    scan = user_scan_for_read({"userId": user_id}, str(scan_id or ""))
     if not scan:
         raise ValueError("Scan not found for issue.")
-    user_id = str(user.get("id") or "")
     scan_id = str(scan.get("id") or scan_id or "")
     if str(scan.get("userId") or "") != user_id:
         raise ValueError("Scan does not belong to the signed-in user.")
@@ -76,7 +76,7 @@ def create_issue_pull_request(user: dict, issue: dict) -> dict:
         raise ValueError("Issue does not belong to the signed-in user.")
 
     scan_id = str(issue.get("scanId") or "")
-    scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+    scan = user_scan_for_read({"userId": user_id}, scan_id)
     if not scan:
         raise ValueError("Scan not found for issue.")
     if str(scan.get("userId") or "") != user_id:
@@ -389,6 +389,7 @@ def store_pull_request_pending(issue: dict, issue_id: str, branch: str) -> None:
             "branch": branch,
             "startedAt": now(),
         }
+        db.upsert_issue(issue)
         mark_state_dirty()
         persist_state()
 
@@ -397,6 +398,7 @@ def store_issue_pull_request(issue: dict, pull_request: dict) -> None:
     with STATE_LOCK:
         issue.pop("pullRequestPending", None)
         issue["pullRequest"] = pull_request
+        db.upsert_issue(issue)
         mark_state_dirty()
         persist_state()
 
@@ -444,6 +446,7 @@ def record_pull_request_pending_failure(issue: dict, message: str) -> None:
         if isinstance(pending, dict):
             pending["lastError"] = clean_pull_request_error(message)
             pending["failedAt"] = now()
+            db.upsert_issue(issue)
         mark_state_dirty()
         persist_state()
 
@@ -451,6 +454,7 @@ def record_pull_request_pending_failure(issue: dict, message: str) -> None:
 def clear_pull_request_pending(issue: dict) -> None:
     with STATE_LOCK:
         issue.pop("pullRequestPending", None)
+        db.upsert_issue(issue)
         mark_state_dirty()
         persist_state()
 

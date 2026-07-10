@@ -39,14 +39,15 @@ def billing_update_bool(value: object) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def billing_event_created(update: dict) -> int | None:
+def billing_event_created(update: dict) -> int | float | None:
     value = update.get("eventCreated")
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
         if not math.isfinite(value):
             return None
-        return int(value)
+        candidate = float(value)
+        return int(candidate) if candidate.is_integer() else candidate
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return None

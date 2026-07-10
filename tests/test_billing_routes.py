@@ -11,7 +11,7 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import Mock, patch
 
-from pullwise_server import app, system_config
+from pullwise_server import app, billing, system_config
 
 
 def creem_product(product_id: str, *, price: int, period: str) -> dict:
@@ -911,6 +911,43 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual([event["eventId"] for event in app.USERS["usr_1"]["billingSubscriptionEvents"]], ["evt_new", "evt_old"])
         self.assertFalse(app.USERS["usr_1"]["billingSubscriptionEvents"][0]["stale"])
         self.assertTrue(app.USERS["usr_1"]["billingSubscriptionEvents"][1]["stale"])
+
+    def test_same_second_millisecond_events_preserve_newest_billing_state(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+        later_created = billing.event_created({"created_at": 1728734325927})
+        earlier_created = billing.event_created({"created_at": 1728734325123})
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "creem",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "canceled",
+                "eventType": "subscription.canceled",
+                "eventId": "evt_later_ms",
+                "eventCreated": later_created,
+            },
+        )
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "creem",
+                "customerId": "cus_1",
+                "subscriptionId": "sub_1",
+                "status": "active",
+                "eventType": "subscription.update",
+                "eventId": "evt_earlier_ms",
+                "eventCreated": earlier_created,
+            },
+        )
+
+        self.assertGreater(later_created, earlier_created)
+        self.assertEqual(app.USERS["usr_1"]["billing"]["status"], "canceled")
+        self.assertTrue(app.BILLING_EVENTS["evt_earlier_ms"]["stale"])
 
     def test_billing_subscription_events_keep_lifecycle_history_for_same_subscription(self) -> None:
         seed_session()

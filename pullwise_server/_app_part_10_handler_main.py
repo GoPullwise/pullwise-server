@@ -1260,7 +1260,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before cancelling a scan.")
             with STATE_LOCK:
-                scan = self.find_or_404(user_scans(session), segments[1], "Scan")
+                scan = user_scan_for_read(session, segments[1])
+                if not scan:
+                    raise ResourceNotFound("Scan")
                 if scan.get("status") not in {"queued", "running"}:
                     return self.error(HTTPStatus.CONFLICT, "Only queued or running scans can be cancelled.")
                 release_scan_quota_reservation_for_scan(scan, reason="scan_cancelled")
@@ -1274,7 +1276,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before previewing fixes.")
-            issue = self.find_or_404(user_issues(session), segments[1], "Issue")
+            issue = user_issue_for_read(session, segments[1])
+            if not issue:
+                raise ResourceNotFound("Issue")
             try:
                 preview = preview_issue_fix_for_user(USERS[session["userId"]], issue)
             except ValueError as exc:
@@ -1286,7 +1290,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             session = self.current_session()
             if not session:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before creating pull requests.")
-            issue = next((item for item in user_issues(session) if item.get("id") == segments[1]), None)
+            issue = user_issue_for_read(session, segments[1])
             if not issue:
                 return self.error(HTTPStatus.NOT_FOUND, "Issue not found.")
             try:
@@ -4360,7 +4364,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
 
