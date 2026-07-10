@@ -108,6 +108,22 @@ class ReviewContractsTest(unittest.TestCase):
         self.assertEqual(finding["goodCode"], [{"ln": 0, "code": "return redirect(safe_redirect(next_url))", "t": "add"}])
         self.assertEqual(finding["references"], [{"label": "Docs", "url": "https://example.com/docs"}])
 
+    def test_normalize_findings_maps_priority_style_severities_to_canonical_levels(self) -> None:
+        findings = normalize(
+            [
+                {"id": "f_p0", "title": "Critical", "severity": "P0"},
+                {"id": "f_p1", "title": "High", "severity": "P1"},
+                {"id": "f_p2", "title": "Medium", "severity": "P2"},
+                {"id": "f_p3", "title": "Low", "severity": "P3"},
+                {"id": "f_p4", "title": "Info", "severity": "P4"},
+            ]
+        )
+
+        self.assertEqual(
+            [finding["severity"] for finding in findings],
+            ["critical", "high", "medium", "low", "info"],
+        )
+
     def test_normalize_findings_downgrades_verified_without_runtime_evidence(self) -> None:
         findings = normalize(
             [

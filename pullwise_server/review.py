@@ -250,6 +250,16 @@ def _safe_auto_fix(
 
 def _safe_severity(value: object) -> str:
     normalized = _safe_text(value).lower()
+    normalized = {
+        "p0": "critical",
+        "blocker": "critical",
+        "p1": "high",
+        "p2": "medium",
+        "moderate": "medium",
+        "p3": "low",
+        "p4": "info",
+        "informational": "info",
+    }.get(normalized, normalized)
     return normalized if normalized in VALID_FINDING_SEVERITIES else "medium"
 
 
