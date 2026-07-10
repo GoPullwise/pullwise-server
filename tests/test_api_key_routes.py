@@ -471,7 +471,8 @@ class ApiKeyRoutesTest(unittest.TestCase):
             },
             cookie=cookie,
         )
-        app.PullwiseHandler.route(temporary_key, "POST")
+        with patch.object(app, "now", return_value=before_create):
+            app.PullwiseHandler.route(temporary_key, "POST")
         self.assertEqual(temporary_key.status, HTTPStatus.CREATED)
         self.assertEqual(temporary_key.payload["scopes"], ["scans:read"])
         self.assertEqual(temporary_key.payload["restrictions"]["kind"], "audit_bundle")
