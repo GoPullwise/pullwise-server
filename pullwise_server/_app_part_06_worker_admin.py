@@ -976,6 +976,7 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     safe_worker_id = worker_safe_service_id(public["worker_id"])
     service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"
     service_log_dir = f"/var/log/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/log/pullwise-worker"
+    worker_runtime_root = f"{service_home}/workers/{public['worker_id']}"
     del codex_install_options
     install_command = worker_install_command(
         install_url=install_url,
@@ -1001,7 +1002,7 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
         "PULLWISE_PROVIDER": provider_chain[0],
         "PULLWISE_PROVIDER_CHAIN": provider_chain_text,
         "PULLWISE_CHECKOUT_ROOT": f"{service_home}/checkouts",
-        "PULLWISE_WORKER_ROOT": f"{service_home}/workers/{public['worker_id']}",
+        "PULLWISE_WORKER_ROOT": worker_runtime_root,
         "PULLWISE_LOG_DIR": service_log_dir,
         "PULLWISE_WORKER_PACKAGE": worker_package,
         "PULLWISE_SERVICE_HOME": service_home,
@@ -1019,8 +1020,11 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     if "codex" in provider_chain:
         suggested_env.update(
             {
-                "PULLWISE_CODEX_HOME": f"{service_home}/workers/{public['worker_id']}/codex-home",
-                "PULLWISE_CODEX_SQLITE_HOME": f"{service_home}/workers/{public['worker_id']}/codex-sqlite",
+                "PULLWISE_CODEX_COMMAND": f"{worker_runtime_root}/.local/bin/codex",
+                "PULLWISE_CODEX_RELEASE": "latest",
+                "PULLWISE_CODEX_INSTALLER_URL": CODEX_CLI_INSTALLER_URL,
+                "PULLWISE_CODEX_HOME": f"{worker_runtime_root}/codex-home",
+                "PULLWISE_CODEX_SQLITE_HOME": f"{worker_runtime_root}/codex-sqlite",
                 "PULLWISE_CODEX_MODEL": "gpt-5.5",
                 "PULLWISE_CODEX_REASONING_EFFORT": "medium",
                 "PULLWISE_CODEX_TIMEOUT_SECONDS": codex_timeout_seconds,
@@ -1092,7 +1096,7 @@ PROVIDER="codex"
 PROVIDER_CHAIN=""
 WORKER_PACKAGE=""
 CODEX_COMMAND="${PULLWISE_CODEX_COMMAND:-}"
-CODEX_RELEASE="${PULLWISE_CODEX_RELEASE:-}"
+CODEX_RELEASE="${PULLWISE_CODEX_RELEASE:-latest}"
 CODEX_INSTALLER_URL="${PULLWISE_CODEX_INSTALLER_URL:-__CODEX_CLI_INSTALLER_URL__}"
 
 while [ "$#" -gt 0 ]; do
@@ -1376,9 +1380,6 @@ normalize_provider_chain() {
 provider_chain_has() {
   case ",$PROVIDER_CHAIN," in *",$1,"*) return 0 ;; *) return 1 ;; esac
 }
-codex_cli_override_enabled() {
-  [ -n "${CODEX_COMMAND:-}" ] || [ -n "${CODEX_RELEASE:-}" ] || [ -n "${PULLWISE_CODEX_INSTALLER_URL:-}" ]
-}
 if [ -z "$PROVIDER_CHAIN" ]; then
   PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-}"
 fi
@@ -1431,14 +1432,14 @@ scoped_command_path() {
 ensure_scoped_command_path() {
   local command_path="${1:-}"
   local label="${2:-provider}"
-  local resolved_home resolved_command
+  local resolved_root resolved_command
   [ -n "$command_path" ] || return 0
-  resolved_home="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DATA_DIR")"
+  resolved_root="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$WORKER_RUNTIME_ROOT")"
   resolved_command="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
   case "$resolved_command/" in
-    "$resolved_home"/*) ;;
+    "$resolved_root"/*) ;;
     *)
-      echo "$label command must be inside worker home $DATA_DIR: $command_path" >&2
+      echo "$label command must be inside worker root $WORKER_RUNTIME_ROOT: $command_path" >&2
       exit 1
       ;;
   esac
@@ -1488,6 +1489,10 @@ ensure_codex_cli() {
     echo "Codex CLI install completed but $CODEX_COMMAND was not created." >&2
     exit 1
   }
+  if ! run_as_service_user "$CODEX_COMMAND" --version; then
+    echo "Codex CLI was installed but its version probe failed: $CODEX_COMMAND" >&2
+    exit 1
+  fi
 }
 ensure_python_runtime
 ensure_command_available "git" git git
@@ -1520,7 +1525,7 @@ fi
 run_as_service_user "$PYTHON_BIN" -m venv "$WORKER_VENV"
 PYTHON_BIN="$WORKER_VENV/bin/python"
 
-if provider_chain_has codex && codex_cli_override_enabled; then
+if provider_chain_has codex; then
   ensure_codex_cli
   ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
 fi
@@ -1583,11 +1588,9 @@ write_env_value PULLWISE_CHECKOUT_ROOT "$CHECKOUT_ROOT"
 write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
 write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
 if provider_chain_has codex; then
-  if codex_cli_override_enabled; then
-    write_optional_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
-    write_optional_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"
-    write_env_value PULLWISE_CODEX_INSTALLER_URL "$CODEX_INSTALLER_URL"
-  fi
+  write_optional_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
+  write_optional_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"
+  write_env_value PULLWISE_CODEX_INSTALLER_URL "$CODEX_INSTALLER_URL"
   write_env_value PULLWISE_CODEX_HOME "$CODEX_HOME"
   write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"
   write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
