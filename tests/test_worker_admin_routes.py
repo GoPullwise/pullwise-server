@@ -2448,6 +2448,66 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(detail.payload["worker"]["codexQuota"]["remainingPercent"], 40)
         self.assertEqual(detail.payload["worker"]["latest_command"]["status"], "succeeded")
 
+    def test_admin_quota_refresh_rejects_offline_worker_without_leaving_command(self) -> None:
+        payload, _token = self.create_worker()
+        worker_id = payload["worker_id"]
+
+        refresh = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(refresh, "POST")
+
+        self.assertEqual(refresh.status, HTTPStatus.CONFLICT)
+        self.assertIn("online", refresh.payload["message"].lower())
+        self.assertIsNone(db.get_next_worker_command(worker_id))
+        self.assertTrue(db.get_worker(worker_id)["enabled"])
+
+    def test_worker_uninstall_supersedes_pending_quota_refresh(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        self.assertEqual(self.post_v1_heartbeat(worker_id, token).status, HTTPStatus.OK)
+        refresh = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(refresh, "POST")
+        self.assertEqual(refresh.status, HTTPStatus.ACCEPTED)
+
+        delete = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(delete, "DELETE")
+
+        self.assertEqual(delete.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(delete.payload["command"]["command"], "uninstall")
+        refresh_command = db.get_worker_command(refresh.payload["command"]["id"], worker_id=worker_id)
+        self.assertEqual(refresh_command["status"], "cancelled")
+        self.assertEqual(db.get_next_worker_command(worker_id)["command"], "uninstall")
+
+    def test_duplicate_admin_quota_refresh_reuses_active_command(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        self.assertEqual(self.post_v1_heartbeat(worker_id, token).status, HTTPStatus.OK)
+
+        first = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+        )
+        second = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(first, "POST")
+        app.PullwiseHandler.route(second, "POST")
+
+        self.assertEqual(first.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(second.status, HTTPStatus.ACCEPTED)
+        self.assertTrue(second.payload["alreadyQueued"])
+        self.assertEqual(second.payload["command"]["id"], first.payload["command"]["id"])
+
     def test_uninstall_command_keeps_degraded_worker_visible_until_cleanup_finishes(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]

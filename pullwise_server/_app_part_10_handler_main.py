@@ -2943,17 +2943,34 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json(payload, HTTPStatus.ACCEPTED)
 
     def handle_admin_worker_command(self, session: dict, worker_id: str, body: dict) -> None:
-        command = public_issue_text(body.get("command")).lower()
-        action_name = "delete_worker_service" if command == "uninstall" else "stop_worker_service"
-        if not db.get_worker(worker_id, worker_scope=db.WORKER_SCOPE_SHARED):
+        requested_command = public_issue_text(body.get("command")).lower()
+        action_names = {
+            "uninstall": "delete_worker_service",
+            "stop": "stop_worker_service",
+            "refresh_codex_quota": "refresh_worker_codex_quota",
+        }
+        action_name = action_names.get(requested_command, "worker_command")
+        worker_record = db.get_worker(worker_id, worker_scope=db.WORKER_SCOPE_SHARED)
+        if not worker_record:
             self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error="Worker not found.")
             return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
         try:
-            command = db.normalize_worker_lifecycle_command(command)
+            command = db.normalize_worker_command(requested_command)
         except ValueError as exc:
             self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-        action_name = "delete_worker_service" if command == "uninstall" else "stop_worker_service"
+        action_name = action_names[command]
+        if command == "refresh_codex_quota":
+            worker_status = computed_worker_status(worker_record)
+            if worker_status not in {"idle", "degraded"}:
+                error = (
+                    "Worker must be online and idle before refreshing Codex quota."
+                    if worker_status == "busy"
+                    else "Worker must be online before refreshing Codex quota."
+                )
+                self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=error)
+                return self.error(HTTPStatus.CONFLICT, error)
+        reused_command = False
         try:
             worker_command = db.create_worker_command(
                 {
@@ -2965,8 +2982,16 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 }
             )
         except ValueError as exc:
-            self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
-            return self.error(HTTPStatus.CONFLICT, str(exc))
+            active_command = db.get_next_worker_command(worker_id)
+            if (
+                command == "refresh_codex_quota"
+                and public_issue_text(active_command.get("command") if active_command else "").lower() == command
+            ):
+                worker_command = active_command
+                reused_command = True
+            else:
+                self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
+                return self.error(HTTPStatus.CONFLICT, str(exc))
         if not worker_command:
             self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error="Worker not found.")
             return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
@@ -2977,6 +3002,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             changed_fields={
                 "command": command,
                 "commandId": worker_command.get("id"),
+                **({"alreadyQueued": True} if reused_command else {}),
                 **({"deleteQueued": True} if command == "uninstall" else {}),
             },
         )
@@ -2989,6 +3015,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if command == "uninstall":
             response["deleteQueued"] = True
             response["deleted"] = bool(worker.get("deleted_at"))
+        elif command == "refresh_codex_quota":
+            response["quotaRefreshQueued"] = True
+            response["alreadyQueued"] = reused_command
         return self.json(
             response,
             HTTPStatus.ACCEPTED,
@@ -4456,8 +4485,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
 
 
 

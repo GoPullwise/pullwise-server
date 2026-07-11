@@ -1675,15 +1675,25 @@ def worker_codex_quota_json(value: Any) -> str | None:
     return json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
 
 WORKER_LIFECYCLE_COMMANDS = {"stop", "uninstall"}
+WORKER_TELEMETRY_COMMANDS = {"refresh_codex_quota"}
+WORKER_COMMANDS = WORKER_LIFECYCLE_COMMANDS | WORKER_TELEMETRY_COMMANDS
 WORKER_COMMAND_ACTIVE_STATUSES = {"pending", "running"}
 WORKER_COMMAND_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+
+
+def normalize_worker_command(command: Any) -> str:
+    value = str(command or "").strip().lower()
+    if value not in WORKER_COMMANDS:
+        allowed = ", ".join(sorted(WORKER_COMMANDS))
+        raise ValueError(f"Worker command must be one of: {allowed}.")
+    return value
 
 
 def normalize_worker_lifecycle_command(command: Any) -> str:
     value = str(command or "").strip().lower()
     if value not in WORKER_LIFECYCLE_COMMANDS:
         allowed = ", ".join(sorted(WORKER_LIFECYCLE_COMMANDS))
-        raise ValueError(f"Worker command must be one of: {allowed}.")
+        raise ValueError(f"Worker lifecycle command must be one of: {allowed}.")
     return value
 
 
@@ -2775,7 +2785,7 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
     worker_id = str(record.get("worker_id") or "").strip()
     if not worker_id:
         raise ValueError("worker_id is required")
-    command = normalize_worker_lifecycle_command(record.get("command"))
+    command = normalize_worker_command(record.get("command"))
     timestamp = int(record.get("created_at") or time.time())
     command_id = str(record.get("id") or stable_id("wcmd", f"{worker_id}:{command}:{time.time_ns()}"))
     with _LOCK, closing(connect()) as connection:
@@ -2797,7 +2807,21 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                 (worker_id,),
             ).fetchone()
             if active:
-                raise ValueError("Worker already has an active lifecycle command.")
+                active_command = str(active["command"] or "").strip().lower()
+                if command in WORKER_LIFECYCLE_COMMANDS and active_command in WORKER_TELEMETRY_COMMANDS:
+                    connection.execute(
+                        """
+                        UPDATE worker_commands
+                        SET status = 'cancelled',
+                            error = NULL,
+                            completed_at = ?,
+                            updated_at = ?
+                        WHERE id = ? AND worker_id = ?
+                        """,
+                        (timestamp, timestamp, active["id"], worker_id),
+                    )
+                else:
+                    raise ValueError("Worker already has an active command.")
             connection.execute(
                 """
                 INSERT INTO worker_commands (
@@ -2816,16 +2840,17 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                     timestamp,
                 ),
             )
-            connection.execute(
-                """
-                UPDATE workers
-                SET enabled = 0,
-                    disabled_at = COALESCE(disabled_at, ?),
-                    updated_at = ?
-                WHERE worker_id = ?
-                """,
-                (timestamp, timestamp, worker_id),
-            )
+            if command in WORKER_LIFECYCLE_COMMANDS:
+                connection.execute(
+                    """
+                    UPDATE workers
+                    SET enabled = 0,
+                        disabled_at = COALESCE(disabled_at, ?),
+                        updated_at = ?
+                    WHERE worker_id = ?
+                    """,
+                    (timestamp, timestamp, worker_id),
+                )
             return row_to_dict(connection.execute("SELECT * FROM worker_commands WHERE id = ?", (command_id,)).fetchone())
 
 
