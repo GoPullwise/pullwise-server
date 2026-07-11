@@ -182,6 +182,15 @@ The server owns subscription plan agent policy.
 - Persist only canonical plan policy that affects v1 jobs: Codex model,
   reasoning effort, turn timeout, and scan deadline. Do not restore legacy
   `mode`, `scanMode`, reviewer-turn, discovery, bundle, or candidate limits.
+- The plan-agent Admin payload owns the model-aware reasoning capability
+  contract. Validate every explicit model/effort pair against it. Expose exact
+  Codex `model/list` entries when available, with a declarative longest-prefix
+  family/default fallback for offline operation; Admin must not need code
+  changes for a newly catalogued effort.
+- Mixed worker versions may temporarily differ in model support while operators
+  replace old workers. Do not hide new plan capabilities by intersecting the
+  catalog across the fleet, and do not add legacy worker compatibility adapters
+  unless explicitly requested; worker replacement/routing is separate work.
 
 ## Review Worker Protocol Semantics
 
