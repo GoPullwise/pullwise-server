@@ -1983,6 +1983,24 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("not supported by model gpt-5.5", update.payload["message"])
 
+    def test_admin_plan_agent_config_model_family_policy_is_data_driven(self) -> None:
+        future_policy = (
+            {
+                "modelPrefix": "gpt-5.7",
+                "options": ("low", "medium", "deep"),
+            },
+        )
+        with patch.object(app.billing, "REVIEW_AGENT_EFFORT_MODEL_FAMILIES", future_policy):
+            update = RouteHarness(
+                "/admin/subscription-plans/agent-configs/pro",
+                {"codex": {"model": "gpt-5.7-orbit", "reasoningEffort": "deep"}},
+                cookie=self.admin_cookie,
+            )
+            app.PullwiseHandler.route(update, "PATCH")
+
+            self.assertEqual(update.status, HTTPStatus.OK)
+            self.assertEqual(update.payload["agentConfig"]["codex"]["reasoningEffort"], "deep")
+
     def test_admin_plan_agent_config_keeps_only_canonical_review_worker_policy(self) -> None:
         update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",

@@ -17,7 +17,7 @@ def public_scan_agent_text(value: object, *, max_length: int = 128) -> str:
 
 def public_scan_agent_reasoning_effort(value: object) -> str:
     effort = public_scan_agent_text(value).lower()
-    return effort if effort in {"low", "medium", "high", "xhigh", "max", "ultra"} else ""
+    return effort if re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", effort) else ""
 
 
 def public_scan_agent_provider(value: object) -> str:

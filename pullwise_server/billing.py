@@ -40,14 +40,6 @@ REVIEW_AGENT_EFFORT_MODEL_FAMILIES = (
         "options": (*REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS, "max", "ultra"),
     },
 )
-REVIEW_AGENT_EFFORTS = {
-    effort
-    for options in (
-        REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS,
-        *(family["options"] for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES),
-    )
-    for effort in options
-}
 REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
     "free": {
         "turnTimeoutSeconds": 3600,
@@ -103,10 +95,15 @@ def clean_review_agent_provider(value: object) -> str:
 
 def review_agent_effort_options(model: object) -> tuple[str, ...]:
     normalized_model = clean_review_agent_config_text(model).lower()
-    for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES:
-        prefix = str(family["modelPrefix"]).lower()
-        if normalized_model == prefix or normalized_model.startswith(prefix + "-"):
-            return tuple(family["options"])
+    matching_families = [
+        family
+        for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES
+        if normalized_model == str(family["modelPrefix"]).lower()
+        or normalized_model.startswith(str(family["modelPrefix"]).lower() + "-")
+    ]
+    if matching_families:
+        family = max(matching_families, key=lambda item: len(str(item["modelPrefix"])))
+        return tuple(family["options"])
     return REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS
 
 
@@ -114,7 +111,9 @@ def review_agent_capabilities() -> dict:
     return {
         "codex": {
             "reasoningEffort": {
+                "source": "server-fallback",
                 "defaultOptions": list(REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS),
+                "models": [],
                 "modelFamilies": [
                     {
                         "modelPrefix": family["modelPrefix"],
@@ -129,7 +128,13 @@ def review_agent_capabilities() -> dict:
 
 def clean_review_agent_effort(value: object, default: str, *, model: object) -> str:
     effort = clean_review_agent_config_text(value).lower()
-    return effort if effort in review_agent_effort_options(model) else default
+    options = review_agent_effort_options(model)
+    if effort in options:
+        return effort
+    normalized_default = clean_review_agent_config_text(default).lower()
+    if normalized_default in options:
+        return normalized_default
+    return "medium" if "medium" in options else options[0]
 
 
 def clean_review_agent_config_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
