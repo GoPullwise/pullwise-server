@@ -539,6 +539,97 @@ def _without_large_or_secret_fields(row: dict | None, *, omit: set[str] | None =
     return {key: _json_safe_debug_value(value) for key, value in row.items() if key not in blocked}
 
 
+def server_pipeline_diagnostics_payload(
+    run: object,
+    scan: object,
+    artifacts: object,
+    events: object,
+) -> dict:
+    run_payload = run if isinstance(run, dict) else {}
+    scan_payload_value = scan if isinstance(scan, dict) else {}
+    summary = public_review_run_json(run_payload.get("summary_json"))
+    finding_counts = summary.get("finding_counts") if isinstance(summary.get("finding_counts"), dict) else {}
+    top_findings = summary.get("top_findings") if isinstance(summary.get("top_findings"), list) else []
+    confirmed = sum(
+        public_scan_count(finding_counts.get(f"confirmed_{severity}"))
+        for severity in ("critical", "high", "medium", "low", "info")
+    )
+    plausible = public_scan_count(finding_counts.get("plausible"))
+    issue_eligible_main = max(len(top_findings), confirmed + plausible)
+    weak_appendix = public_scan_count(
+        finding_counts.get("weak_appendix")
+        if "weak_appendix" in finding_counts
+        else finding_counts.get("weak")
+    )
+    disproven = public_scan_count(finding_counts.get("disproven"))
+    suppressed = public_scan_count(finding_counts.get("suppressed"))
+
+    persisted_issue_counts = public_scan_issue_counts(scan_payload_value.get("issues"))
+    persisted_issue_total = sum(public_scan_count(value) for value in persisted_issue_counts.values())
+    missing_after_ingestion = max(0, issue_eligible_main - persisted_issue_total)
+
+    artifact_kinds: dict[str, int] = {}
+    for item in artifacts if isinstance(artifacts, list) else []:
+        if not isinstance(item, dict):
+            continue
+        kind = public_issue_text(item.get("kind")) or "unknown"
+        artifact_kinds[kind] = artifact_kinds.get(kind, 0) + 1
+
+    event_phases: dict[str, int] = {}
+    event_types: dict[str, int] = {}
+    for item in events if isinstance(events, list) else []:
+        if not isinstance(item, dict):
+            continue
+        phase = public_issue_text(item.get("phase")) or "unknown"
+        event_type = public_issue_text(item.get("event_type") or item.get("eventType") or item.get("type")) or "unknown"
+        event_phases[phase] = event_phases.get(phase, 0) + 1
+        event_types[event_type] = event_types.get(event_type, 0) + 1
+
+    blocker_codes = []
+    if not summary:
+        blocker_codes.append("worker_summary_missing")
+    if issue_eligible_main == 0:
+        blocker_codes.append("no_issue_eligible_main_findings")
+    if weak_appendix:
+        blocker_codes.append("weak_candidates_not_issue_eligible")
+    if missing_after_ingestion:
+        blocker_codes.append("issue_eligible_findings_missing_after_ingestion")
+
+    if issue_eligible_main == 0 and weak_appendix:
+        disposition = "only_weak_candidates"
+    elif issue_eligible_main == 0:
+        disposition = "no_main_findings_from_worker"
+    elif missing_after_ingestion:
+        disposition = "server_ingestion_gap"
+    elif persisted_issue_total == issue_eligible_main:
+        disposition = "persisted_consistently"
+    else:
+        disposition = "persistence_count_mismatch"
+
+    return {
+        "schema_version": "server-pipeline-diagnostics/v1",
+        "worker_result": {
+            "confirmed": confirmed,
+            "plausible": plausible,
+            "issue_eligible_main": issue_eligible_main,
+            "weak_appendix": weak_appendix,
+            "disproven": disproven,
+            "suppressed": suppressed,
+            "top_findings": len(top_findings),
+        },
+        "server_persistence": {
+            "persisted_issue_counts": persisted_issue_counts,
+            "persisted_issue_total": persisted_issue_total,
+            "eligible_findings_missing": missing_after_ingestion,
+        },
+        "artifact_kinds": dict(sorted(artifact_kinds.items())),
+        "event_phases": dict(sorted(event_phases.items())),
+        "event_types": dict(sorted(event_types.items())),
+        "disposition": disposition,
+        "blocker_codes": blocker_codes,
+    }
+
+
 def server_debug_evidence_payload(run_id: str, job: dict, scan: dict | None, artifact: dict) -> dict:
     events = db.list_review_run_events(run_id, limit=500)
     artifacts = db.list_review_run_artifact_records(run_id)
@@ -562,6 +653,7 @@ def server_debug_evidence_payload(run_id: str, job: dict, scan: dict | None, art
         "requested_artifact": sanitized_artifact,
         "review_run_events": sanitized_events,
         "review_artifacts": sanitized_artifacts,
+        "pipeline_diagnostics": server_pipeline_diagnostics_payload(run, scan, artifacts, events),
         "server_logs": {"review_run_events": sanitized_events},
         "database_records": {
             "scan": sanitized_scan,
@@ -4364,7 +4456,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
 

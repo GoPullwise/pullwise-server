@@ -755,6 +755,49 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(server_evidence["scan_job_attempts"][0]["worker_id"], "wk_1")
         self.assertEqual(server_evidence["database_records"]["scan_job_attempts"][0]["worker_id"], "wk_1")
         self.assertIn("review_run_events", server_evidence["server_logs"])
+        self.assertIn("pipeline_diagnostics", server_evidence)
+
+    def test_server_pipeline_diagnostics_explains_weak_candidates_not_persisted_as_issues(self) -> None:
+        diagnostics = app.server_pipeline_diagnostics_payload(
+            {
+                "summary_json": json.dumps(
+                    {
+                        "finding_counts": {
+                            "confirmed_critical": 0,
+                            "confirmed_high": 0,
+                            "confirmed_medium": 0,
+                            "confirmed_low": 0,
+                            "plausible": 0,
+                            "weak_appendix": 2,
+                            "disproven": 1,
+                            "suppressed": 1,
+                        },
+                        "top_findings": [],
+                    }
+                )
+            },
+            {
+                "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            },
+            [
+                {"kind": "report.agent"},
+                {"kind": "validation_result"},
+                {"kind": "raw_reviewer_output"},
+                {"kind": "raw_reviewer_output"},
+            ],
+            [
+                {"event_type": "phase_started", "phase": "reviewer_fanout"},
+                {"event_type": "phase_completed", "phase": "reviewer_fanout"},
+            ],
+        )
+
+        self.assertEqual(diagnostics["worker_result"]["issue_eligible_main"], 0)
+        self.assertEqual(diagnostics["worker_result"]["weak_appendix"], 2)
+        self.assertEqual(diagnostics["server_persistence"]["persisted_issue_total"], 0)
+        self.assertEqual(diagnostics["disposition"], "only_weak_candidates")
+        self.assertIn("weak_candidates_not_issue_eligible", diagnostics["blocker_codes"])
+        self.assertEqual(diagnostics["artifact_kinds"]["raw_reviewer_output"], 2)
+        self.assertEqual(diagnostics["event_phases"]["reviewer_fanout"], 2)
 
     def test_failed_result_exposes_debug_bundle_when_later_artifact_uploads_fail(self) -> None:
         scan = {
@@ -6164,7 +6207,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 
 
 
