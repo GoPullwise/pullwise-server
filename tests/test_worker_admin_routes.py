@@ -1940,6 +1940,49 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("provider", update.payload["message"])
 
+    def test_admin_plan_agent_config_exposes_model_reasoning_capabilities(self) -> None:
+        handler = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        policy = handler.payload["capabilities"]["codex"]["reasoningEffort"]
+        self.assertEqual(policy["defaultOptions"], ["low", "medium", "high", "xhigh"])
+        self.assertEqual(
+            policy["modelFamilies"],
+            [
+                {
+                    "modelPrefix": "gpt-5.6",
+                    "options": ["low", "medium", "high", "xhigh", "max", "ultra"],
+                }
+            ],
+        )
+
+    def test_admin_plan_agent_config_accepts_gpt_5_6_max_and_ultra(self) -> None:
+        for effort in ("max", "ultra"):
+            with self.subTest(effort=effort):
+                update = RouteHarness(
+                    "/admin/subscription-plans/agent-configs/pro",
+                    {"codex": {"model": "gpt-5.6-sol", "reasoningEffort": effort}},
+                    cookie=self.admin_cookie,
+                )
+                app.PullwiseHandler.route(update, "PATCH")
+
+                self.assertEqual(update.status, HTTPStatus.OK)
+                self.assertEqual(update.payload["agentConfig"]["codex"]["reasoningEffort"], effort)
+
+    def test_admin_plan_agent_config_rejects_gpt_5_5_max_and_ultra(self) -> None:
+        for effort in ("max", "ultra"):
+            with self.subTest(effort=effort):
+                update = RouteHarness(
+                    "/admin/subscription-plans/agent-configs/pro",
+                    {"codex": {"model": "gpt-5.5", "reasoningEffort": effort}},
+                    cookie=self.admin_cookie,
+                )
+                app.PullwiseHandler.route(update, "PATCH")
+
+                self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
+                self.assertIn("not supported by model gpt-5.5", update.payload["message"])
+
     def test_admin_plan_agent_config_keeps_only_canonical_review_worker_policy(self) -> None:
         update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",

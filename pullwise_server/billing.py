@@ -33,7 +33,21 @@ CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
 REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
 REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
 REVIEW_AGENT_PROVIDERS = ("codex",)
-REVIEW_AGENT_EFFORTS = {"low", "medium", "high", "xhigh"}
+REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS = ("low", "medium", "high", "xhigh")
+REVIEW_AGENT_EFFORT_MODEL_FAMILIES = (
+    {
+        "modelPrefix": "gpt-5.6",
+        "options": (*REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS, "max", "ultra"),
+    },
+)
+REVIEW_AGENT_EFFORTS = {
+    effort
+    for options in (
+        REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS,
+        *(family["options"] for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES),
+    )
+    for effort in options
+}
 REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
     "free": {
         "turnTimeoutSeconds": 3600,
@@ -87,9 +101,35 @@ def clean_review_agent_provider(value: object) -> str:
     return provider if provider in REVIEW_AGENT_PROVIDERS else ""
 
 
-def clean_review_agent_effort(value: object, default: str) -> str:
+def review_agent_effort_options(model: object) -> tuple[str, ...]:
+    normalized_model = clean_review_agent_config_text(model).lower()
+    for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES:
+        prefix = str(family["modelPrefix"]).lower()
+        if normalized_model == prefix or normalized_model.startswith(prefix + "-"):
+            return tuple(family["options"])
+    return REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS
+
+
+def review_agent_capabilities() -> dict:
+    return {
+        "codex": {
+            "reasoningEffort": {
+                "defaultOptions": list(REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS),
+                "modelFamilies": [
+                    {
+                        "modelPrefix": family["modelPrefix"],
+                        "options": list(family["options"]),
+                    }
+                    for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES
+                ],
+            }
+        }
+    }
+
+
+def clean_review_agent_effort(value: object, default: str, *, model: object) -> str:
     effort = clean_review_agent_config_text(value).lower()
-    return effort if effort in REVIEW_AGENT_EFFORTS else default
+    return effort if effort in review_agent_effort_options(model) else default
 
 
 def clean_review_agent_config_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
@@ -140,7 +180,11 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
     model = clean_review_agent_config_text(source.get("model"))
     if model:
         result["model"] = model
-    effort = clean_review_agent_effort(source.get("reasoningEffort"), result["reasoningEffort"])
+    effort = clean_review_agent_effort(
+        source.get("reasoningEffort"),
+        result["reasoningEffort"],
+        model=result["model"],
+    )
     result["reasoningEffort"] = effort
     return result
 
@@ -236,6 +280,7 @@ def review_agent_configs_admin_payload() -> dict:
             for plan in PLAN_IDS
         ],
         "agentConfigs": agent_configs,
+        "capabilities": review_agent_capabilities(),
     }
 
 
@@ -257,9 +302,24 @@ def update_review_agent_config(plan: str, payload: dict) -> dict:
         current["provider"] = clean_review_agent_provider_required(payload.get("provider"))
     for provider in REVIEW_AGENT_PROVIDERS:
         if provider in payload:
+            provider_payload = payload[provider]
+            if isinstance(provider_payload, dict) and "reasoningEffort" in provider_payload:
+                requested_model = (
+                    clean_review_agent_config_text(provider_payload.get("model"))
+                    or current[provider]["model"]
+                )
+                requested_effort = clean_review_agent_config_text(
+                    provider_payload.get("reasoningEffort")
+                ).lower()
+                supported_efforts = review_agent_effort_options(requested_model)
+                if requested_effort not in supported_efforts:
+                    raise ValueError(
+                        f"{provider}.reasoningEffort {requested_effort or '(empty)'} is not supported "
+                        f"by model {requested_model}. Supported values: {', '.join(supported_efforts)}."
+                    )
             current[provider] = normalize_review_agent_provider_config(
                 provider,
-                payload[provider],
+                provider_payload,
                 current[provider],
             )
     if "reviewWorker" in payload:

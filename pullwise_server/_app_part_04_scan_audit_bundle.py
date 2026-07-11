@@ -17,7 +17,7 @@ def public_scan_agent_text(value: object, *, max_length: int = 128) -> str:
 
 def public_scan_agent_reasoning_effort(value: object) -> str:
     effort = public_scan_agent_text(value).lower()
-    return effort if effort in {"low", "medium", "high", "xhigh"} else ""
+    return effort if effort in {"low", "medium", "high", "xhigh", "max", "ultra"} else ""
 
 
 def public_scan_agent_provider(value: object) -> str:
