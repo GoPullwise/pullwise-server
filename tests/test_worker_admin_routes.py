@@ -2395,6 +2395,59 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(deleted_poll, "POST")
         self.assertEqual(deleted_poll.status, HTTPStatus.UNAUTHORIZED)
 
+    def test_admin_can_queue_codex_quota_refresh_without_disabling_worker(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        stale_quota = {
+            "provider": "codex",
+            "status": "ok",
+            "ready": True,
+            "checkedAt": 100,
+            "remainingPercent": 80,
+        }
+        initial_heartbeat = self.post_v1_heartbeat(worker_id, token, codex_quota=stale_quota)
+        self.assertEqual(initial_heartbeat.status, HTTPStatus.OK)
+
+        refresh = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+            headers={"X-Request-Id": "req_quota_refresh"},
+        )
+        app.PullwiseHandler.route(refresh, "POST")
+
+        self.assertEqual(refresh.status, HTTPStatus.ACCEPTED)
+        command = refresh.payload["command"]
+        self.assertEqual(command["command"], "refresh_codex_quota")
+        self.assertEqual(command["status"], "pending")
+        self.assertTrue(db.get_worker(worker_id)["enabled"])
+
+        fresh_quota = {
+            "provider": "codex",
+            "status": "low",
+            "ready": False,
+            "checkedAt": 200,
+            "remainingPercent": 40,
+        }
+        heartbeat = self.post_v1_heartbeat(worker_id, token, codex_quota=fresh_quota)
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(heartbeat.payload["command"]["id"], command["id"])
+
+        succeeded = RouteHarness(
+            f"/worker/commands/{command['id']}/status",
+            {"worker_id": worker_id, "status": "succeeded"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(succeeded, "POST")
+        self.assertEqual(succeeded.status, HTTPStatus.OK)
+
+        detail = RouteHarness(f"/admin/workers/{worker_id}", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(detail, "GET")
+        self.assertEqual(detail.status, HTTPStatus.OK)
+        self.assertEqual(detail.payload["worker"]["codexQuota"]["checkedAt"], 200)
+        self.assertEqual(detail.payload["worker"]["codexQuota"]["remainingPercent"], 40)
+        self.assertEqual(detail.payload["worker"]["latest_command"]["status"], "succeeded")
+
     def test_uninstall_command_keeps_degraded_worker_visible_until_cleanup_finishes(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
