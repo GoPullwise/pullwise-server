@@ -1938,6 +1938,22 @@ def set_worker_enabled(worker_id: str, enabled: bool) -> dict[str, Any] | None:
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            if not enabled:
+                telemetry_commands = sorted(WORKER_TELEMETRY_COMMANDS)
+                placeholders = ",".join("?" for _ in telemetry_commands)
+                connection.execute(
+                    f"""
+                    UPDATE worker_commands
+                    SET status = 'cancelled',
+                        error = NULL,
+                        completed_at = ?,
+                        updated_at = ?
+                    WHERE worker_id = ?
+                      AND command IN ({placeholders})
+                      AND status IN ('pending', 'running')
+                    """,
+                    (timestamp, timestamp, worker_id, *telemetry_commands),
+                )
             connection.execute(
                 """
                 UPDATE workers

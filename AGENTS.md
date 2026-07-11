@@ -112,6 +112,10 @@ logrotate entry, `/etc` config, service user when safe, instance `DATA_DIR` unde
 `/var/lib/pullwise-worker`, instance `LOG_DIR` under
 `/var/log/pullwise-worker`, and any other instance-scoped runtime files.
 
+Disabling a worker must atomically cancel any active telemetry command such as
+`refresh_codex_quota`. Lifecycle commands may preempt telemetry commands, and a
+late worker status report must not revive a command after it becomes terminal.
+
 The server and worker may run on different hosts. Do not implement admin delete
 by deleting paths on the Pullwise Server host or by assuming server-local
 `/var/lib/pullwise-worker` and `/var/log/pullwise-worker` are the target worker

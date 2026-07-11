@@ -2546,6 +2546,34 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(refresh_command["status"], "cancelled")
         self.assertEqual(db.get_next_worker_command(worker_id)["command"], "uninstall")
 
+    def test_admin_disable_cancels_running_quota_refresh(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        self.assertEqual(self.post_v1_heartbeat(worker_id, token).status, HTTPStatus.OK)
+        refresh = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(refresh, "POST")
+        self.assertEqual(refresh.status, HTTPStatus.ACCEPTED)
+        running = RouteHarness(
+            f"/worker/commands/{refresh.payload['command']['id']}/status",
+            {"worker_id": worker_id, "status": "running"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(running, "POST")
+        self.assertEqual(running.status, HTTPStatus.OK)
+
+        disable = RouteHarness(f"/admin/workers/{worker_id}/disable", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(disable, "POST")
+
+        self.assertEqual(disable.status, HTTPStatus.OK)
+        self.assertFalse(disable.payload["worker"]["enabled"])
+        refresh_command = db.get_worker_command(refresh.payload["command"]["id"], worker_id=worker_id)
+        self.assertEqual(refresh_command["status"], "cancelled")
+        self.assertIsNone(db.get_next_worker_command(worker_id))
+
     def test_duplicate_admin_quota_refresh_reuses_active_command(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
