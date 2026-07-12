@@ -463,12 +463,11 @@ def reserve_scan_quota(
                     FROM quota_ledger
                     WHERE requested_by_user_id = ?
                       AND request_id = ?
-                      AND repository_id = ?
                       AND reason IN ('scan_reserved', 'scan_created', 'scan_consumed')
                       AND delta > 0
                     LIMIT 1
                     """,
-                    (requested_by_user_id, request_id, repository_id),
+                    (requested_by_user_id, request_id),
                 ).fetchone()
             user_bucket = _ensure_quota_bucket(
                 connection,
@@ -898,11 +897,10 @@ def consume_scan_quota(
                     FROM quota_ledger
                     WHERE requested_by_user_id = ?
                       AND request_id = ?
-                      AND repository_id = ?
                       AND reason = 'scan_created'
                     LIMIT 1
                     """,
-                    (requested_by_user_id, request_id, repository_id),
+                    (requested_by_user_id, request_id),
                 ).fetchone()
             user_bucket = _ensure_quota_bucket(
                 connection,

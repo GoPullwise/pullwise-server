@@ -111,6 +111,8 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
     for legacy_field in ("running_jobs", "runningJobs", "active_job_ids", "activeJobIds"):
         if legacy_field in body:
             errors.append(f"{legacy_field} is not allowed in review-worker-protocol/v1 heartbeat")
+    if "active_run_id" not in body:
+        errors.append("active_run_id is required")
 
     status = public_issue_text(body.get("status"))
     if status not in {"idle", *WORKER_V1_ACTIVE_HEARTBEAT_STATUSES}:
@@ -4486,7 +4488,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
 

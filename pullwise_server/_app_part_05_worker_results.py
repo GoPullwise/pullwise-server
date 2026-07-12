@@ -427,13 +427,13 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
     if execution_status not in {"completed", "failed", "cancelled", "partial_completed"}:
         errors.append("execution.status")
     wrapper_status = public_issue_text(status).lower()
-    if wrapper_status == "done" and execution_status != "completed":
-        errors.append("execution.status")
-    if wrapper_status == "failed" and execution_status == "completed":
-        errors.append("execution.status")
-    if wrapper_status == "cancelled" and execution_status != "cancelled":
-        errors.append("execution.status")
-    if wrapper_status == "partial_completed" and execution_status != "partial_completed":
+    expected_execution_status = {
+        "done": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+        "partial_completed": "partial_completed",
+    }.get(wrapper_status)
+    if expected_execution_status and execution_status != expected_execution_status:
         errors.append("execution.status")
     if manifest is None:
         errors.append("artifact_manifest")
@@ -1078,6 +1078,71 @@ def worker_protocol_finding_source(finding: dict) -> dict:
     validation_sources = finding.get("validation_sources") if isinstance(finding.get("validation_sources"), dict) else {}
     if not validation_sources and isinstance(finding.get("validationSources"), dict):
         validation_sources = finding.get("validationSources")
+    validator_status = public_issue_text(
+        finding.get("validator_status")
+        or finding.get("validation_status")
+        or validation_sources.get("validator_status")
+        or validation_sources.get("validation_status")
+        or validation_sources.get("status")
+    ).lower()
+    intent_test = validation_sources.get("intent_test") if isinstance(validation_sources.get("intent_test"), dict) else {}
+    intent_classification = public_issue_text(intent_test.get("classification")).lower()
+    intent_command_value = intent_test.get("command") or intent_test.get("commands")
+    if isinstance(intent_command_value, list):
+        intent_commands = [public_issue_text(command) for command in intent_command_value if public_issue_text(command)]
+    else:
+        intent_command = public_issue_text(intent_command_value)
+        intent_commands = [intent_command] if intent_command else []
+    intent_log_path = public_issue_text(
+        intent_test.get("log_path")
+        or intent_test.get("logPath")
+        or intent_test.get("stderr_path")
+        or intent_test.get("stderrPath")
+        or intent_test.get("stdout_path")
+        or intent_test.get("stdoutPath")
+    )
+    intent_output = review._safe_text_lenient(
+        intent_test.get("output")
+        or intent_test.get("actual")
+        or intent_test.get("stderr")
+        or intent_test.get("stdout")
+    )
+    reproduction = finding.get("reproduction") if isinstance(finding.get("reproduction"), dict) else {}
+    reproduction = dict(reproduction)
+    if intent_commands and not reproduction.get("commands"):
+        reproduction["commands"] = intent_commands
+    if intent_log_path and not reproduction.get("logPath"):
+        reproduction["logPath"] = intent_log_path
+    if intent_output and not reproduction.get("actual"):
+        reproduction["actual"] = intent_output
+    if intent_commands or intent_log_path or intent_output:
+        evidence_items = list(evidence_items)
+        evidence_items.append(
+            {
+                "type": "test",
+                "label": f"Intent test {public_issue_text(intent_test.get('test_id'))}".strip(),
+                "summary": (
+                    f"Intent-test classification: {intent_classification}."
+                    if intent_classification
+                    else "Intent-test runtime evidence supplied by the worker."
+                ),
+                "command": intent_commands[0] if intent_commands else "",
+                "logPath": intent_log_path,
+                "output": intent_output,
+            }
+        )
+    if validator_status == "plausible":
+        verification_status = "potential_risk"
+    elif validator_status in {"confirmed", "validated"}:
+        verification_status = (
+            "verified"
+            if intent_classification == "confirmed_bug"
+            and bool(intent_commands)
+            and bool(intent_log_path or intent_output)
+            else "static_proof"
+        )
+    else:
+        verification_status = "potential_risk"
     return {
         "id": public_issue_text(finding.get("id") or finding.get("issue_id")),
         "title": public_issue_text(finding.get("title") or finding.get("summary")),
@@ -1093,9 +1158,12 @@ def worker_protocol_finding_source(finding: dict) -> dict:
         "nextAgentTask": review._safe_text_lenient(finding.get("next_agent_task") or finding.get("nextAgentTask")),
         "disproofAttempt": review._safe_text_lenient(finding.get("disproof_attempt") or finding.get("disproofAttempt")),
         "validationSources": validation_sources,
+        "validatorStatus": validator_status,
+        "intentClassification": intent_classification,
+        "verificationStatus": verification_status,
         "failureScenario": scenario,
         "evidence": evidence_items,
-        "reproduction": finding.get("reproduction") if isinstance(finding.get("reproduction"), dict) else {},
+        "reproduction": reproduction,
         "affectedLocations": locations or ([primary] if primary else []),
         "whyNotFalsePositive": review._safe_text_list(finding.get("whyNotFalsePositive") or finding.get("false_positive_checks")),
         "limitations": review._safe_text_list(finding.get("limitations")),
