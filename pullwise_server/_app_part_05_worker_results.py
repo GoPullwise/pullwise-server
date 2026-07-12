@@ -1131,7 +1131,12 @@ def worker_protocol_finding_source(finding: dict) -> dict:
                 "output": intent_output,
             }
         )
-    if validator_status == "plausible":
+    reported_verification_status = public_issue_text(
+        finding.get("verificationStatus") or finding.get("verification_status")
+    ).lower()
+    if reported_verification_status in ISSUE_VERIFICATION_STATUSES:
+        verification_status = reported_verification_status
+    elif validator_status == "plausible":
         verification_status = "potential_risk"
     elif validator_status in {"confirmed", "validated"}:
         verification_status = (
@@ -1142,7 +1147,7 @@ def worker_protocol_finding_source(finding: dict) -> dict:
             else "static_proof"
         )
     else:
-        verification_status = "potential_risk"
+        verification_status = ""
     return {
         "id": public_issue_text(finding.get("id") or finding.get("issue_id")),
         "title": public_issue_text(finding.get("title") or finding.get("summary")),
@@ -1160,7 +1165,7 @@ def worker_protocol_finding_source(finding: dict) -> dict:
         "validationSources": validation_sources,
         "validatorStatus": validator_status,
         "intentClassification": intent_classification,
-        "verificationStatus": verification_status,
+        **({"verificationStatus": verification_status} if verification_status else {}),
         "failureScenario": scenario,
         "evidence": evidence_items,
         "reproduction": reproduction,

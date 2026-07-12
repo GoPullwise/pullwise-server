@@ -1696,7 +1696,7 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
     preflight = public_scan.get("preflight") or {}
     public_scan = dict(public_scan)
 
-    log_artifact_count = len(audit_bundle_log_artifacts_from_preflight(preflight))
+    log_artifact_count = len(audit_bundle_log_artifacts({"scan": public_scan}))
     bundle = {
         "schemaVersion": 1,
         "generatedAt": now(),
@@ -1712,7 +1712,7 @@ def scan_audit_bundle_payload(scan: dict) -> dict:
         "issues": issue_payloads,
         "limitations": [
             "This bundle is generated from structured scan records stored by Pullwise.",
-            "Verifier stdout/stderr is not embedded in this bundle; logPath values only identify worker-local logs.",
+            "Available intent-test stdout/stderr artifacts are embedded after credential-pattern redaction; unavailable logPath values remain references only.",
             "All repository links are pinned to the recorded commit when a valid commit SHA is available.",
         ],
     }
@@ -1935,8 +1935,42 @@ def audit_bundle_artifact_manifest_json(artifacts: list[dict]) -> str:
 
 
 def audit_bundle_log_artifacts(bundle: dict) -> list[dict]:
-    preflight = bundle.get("preflight") if isinstance(bundle.get("preflight"), dict) else {}
-    return audit_bundle_log_artifacts_from_preflight(preflight)
+    scan = bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {}
+    artifacts: list[dict] = []
+    for metadata in audit_bundle_review_log_metadata(scan):
+        run_id = public_issue_text(metadata.get("runId"))
+        artifact_id = public_issue_text(metadata.get("artifactId"))
+        row = db.get_review_run_artifact(run_id, artifact_id)
+        content = db.review_artifact_content_bytes(row) if isinstance(row, dict) else None
+        if content is None or len(content) > 1024 * 1024:
+            continue
+        text = redact_sensitive_text(content.decode("utf-8", errors="replace"), max_length=1024 * 1024)
+        name = audit_bundle_safe_artifact_name(public_issue_text(metadata.get("name")) or artifact_id)
+        artifacts.append(
+            audit_bundle_artifact(
+                f"logs/intent/{name}",
+                "text/plain",
+                text,
+            )
+        )
+    return artifacts
+
+
+def audit_bundle_review_log_metadata(scan: dict) -> list[dict]:
+    review_run = scan.get("reviewRun") if isinstance(scan.get("reviewRun"), dict) else {}
+    run_id = public_issue_text(review_run.get("runId"))
+    artifacts = review_run.get("artifacts") if isinstance(review_run.get("artifacts"), list) else []
+    result: list[dict] = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or public_issue_text(artifact.get("kind")) != "intent_test_output":
+            continue
+        artifact_id = public_issue_text(artifact.get("artifactId"))
+        if not run_id or not artifact_id:
+            continue
+        result.append({**artifact, "runId": run_id})
+        if len(result) >= 20:
+            break
+    return result
 
 
 def audit_bundle_log_artifacts_from_preflight(preflight: dict) -> list[dict]:
