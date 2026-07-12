@@ -1856,6 +1856,7 @@ def get_or_create_scan_audit_bundle_zip_bytes(scan: dict) -> bytes:
 
 
 def audit_bundle_artifacts(bundle: dict) -> list[dict]:
+    output_language = audit_bundle_output_language(bundle)
     artifacts = [
         audit_bundle_artifact("README.md", "text/markdown", audit_bundle_readme_markdown(bundle)),
         audit_bundle_artifact("report.md", "text/markdown", audit_bundle_report_markdown(bundle)),
@@ -1894,7 +1895,7 @@ def audit_bundle_artifacts(bundle: dict) -> list[dict]:
                 audit_bundle_artifact(
                     f"issues/{issue_id}.md",
                     "text/markdown",
-                    audit_bundle_issue_markdown(issue),
+                    audit_bundle_issue_markdown(issue, output_language=output_language),
                 )
             )
     artifacts = artifacts[:99]
@@ -2027,9 +2028,65 @@ def audit_bundle_issue_title(issue: dict) -> str:
     return f"{issue_id}: {title}"
 
 
+def audit_bundle_output_language(bundle: dict) -> str:
+    scan = bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {}
+    return clean_review_output_language(scan.get("reviewOutputLanguage")) or DEFAULT_REVIEW_OUTPUT_LANGUAGE
+
+
+def localize_audit_markdown(text: str, language: str) -> str:
+    if language != "zh-CN":
+        return text
+    exact = {
+        "# Pullwise Review Audit Bundle": "# Pullwise 审查审计包",
+        "# Pullwise Review Audit Report": "# Pullwise 审查审计报告",
+        "## Summary": "## 摘要",
+        "## Issues": "## 问题",
+        "## Conclusion": "## 结论",
+        "## Confidence Evidence": "## 置信度证据",
+        "## Evidence Trace": "## 证据链路",
+        "## Facts, Inferences, and Recommendations": "## 事实、推断与建议",
+        "### Facts": "### 事实",
+        "### Inferences": "### 推断",
+        "### Recommendations": "### 建议",
+        "## Affected Locations": "## 受影响位置",
+        "## Evidence Chain": "## 证据链",
+        "## Suggested Patch": "## 建议补丁",
+        "## Why this is not a false positive": "## 为什么这不是误报",
+        "## When this may not apply": "## 可能不适用的情况",
+        "No issues were included in this bundle.": "此审计包中没有问题。",
+        "Start with report.md, then inspect scan/scan.json and issues/*.md.": "请先阅读 report.md，再检查 scan/scan.json 和 issues/*.md。",
+    }
+    prefixes = {
+        "Repository: ": "仓库：",
+        "Branch: ": "分支：",
+        "Commit: ": "提交：",
+        "Generated at: ": "生成时间：",
+        "Repo: ": "仓库：",
+        "Scan: ": "扫描：",
+        "- Issues: ": "- 问题数：",
+        "- Evidence items: ": "- 证据项数：",
+        "Status: ": "验证状态：",
+        "Severity: ": "严重度：",
+        "Confidence: ": "置信度：",
+    }
+    result: list[str] = []
+    for line in text.splitlines():
+        if line in exact:
+            result.append(exact[line])
+            continue
+        localized = line
+        for prefix, translated in prefixes.items():
+            if line.startswith(prefix):
+                localized = translated + line[len(prefix) :]
+                break
+        localized = localized.replace(": met", "：已满足").replace(": missing", "：缺失")
+        result.append(localized)
+    return "\n".join(result)
+
+
 def audit_bundle_readme_markdown(bundle: dict) -> str:
     scan = bundle.get("scan") if isinstance(bundle.get("scan"), dict) else {}
-    return "\n".join(
+    text = "\n".join(
         [
             "# Pullwise Review Audit Bundle",
             "",
@@ -2042,6 +2099,7 @@ def audit_bundle_readme_markdown(bundle: dict) -> str:
             "",
         ]
     )
+    return localize_audit_markdown(text, audit_bundle_output_language(bundle))
 
 
 def audit_bundle_report_markdown(bundle: dict) -> str:
@@ -2068,7 +2126,7 @@ def audit_bundle_report_markdown(bundle: dict) -> str:
             continue
         lines.append(f"- [{audit_bundle_issue_title(issue)}](issues/{audit_bundle_safe_artifact_name(public_issue_text(issue.get('id')) or 'issue')}.md)")
     lines.append("")
-    return "\n".join(lines)
+    return localize_audit_markdown("\n".join(lines), audit_bundle_output_language(bundle))
 
 
 def audit_bundle_patch_artifacts(bundle: dict) -> list[dict]:
@@ -2153,7 +2211,7 @@ def audit_bundle_json_text(bundle: dict) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
-def audit_bundle_issue_markdown(issue: dict) -> str:
+def audit_bundle_issue_markdown(issue: dict, *, output_language: str = "en") -> str:
     lines = [
         f"# {audit_bundle_issue_title(issue)}",
         "",
@@ -2239,7 +2297,7 @@ def audit_bundle_issue_markdown(issue: dict) -> str:
             lines.extend([f"## {title}", ""])
             lines.extend(f"- {item}" for item in items)
             lines.append("")
-    return "\n".join(lines)
+    return localize_audit_markdown("\n".join(lines), output_language)
 
 
 def shell_single_quote(value: str) -> str:

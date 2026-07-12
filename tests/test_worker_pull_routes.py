@@ -3833,6 +3833,39 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertIn("Bearer [redacted]", log["content"])
         self.assertNotIn("secret-token", log["content"])
 
+    def test_scan_audit_bundle_markdown_honors_zh_cn_output_language(self) -> None:
+        bundle = {
+            "generatedAt": app.now(),
+            "scan": {
+                "id": "sc_zh",
+                "repo": "acme/api",
+                "branch": "main",
+                "commit": "abc1234",
+                "reviewOutputLanguage": "zh-CN",
+            },
+            "evidenceSummary": {"evidenceItemCount": 0},
+            "issues": [
+                {
+                    "id": "F-001",
+                    "title": "中文问题",
+                    "verificationStatus": "potential_risk",
+                    "severity": "medium",
+                    "confidenceLevel": "medium",
+                    "repo": "acme/api",
+                    "commit": "abc1234",
+                }
+            ],
+        }
+
+        artifacts = app.audit_bundle_artifacts(bundle)
+        readme = next(item for item in artifacts if item["path"] == "README.md")["content"]
+        report = next(item for item in artifacts if item["path"] == "report.md")["content"]
+        issue = next(item for item in artifacts if item["path"] == "issues/F-001.md")["content"]
+
+        self.assertTrue(readme.startswith("# Pullwise 审查审计包"))
+        self.assertTrue(report.startswith("# Pullwise 审查审计报告"))
+        self.assertIn("验证状态：potential_risk", issue)
+
     def test_scan_audit_bundle_route_returns_owner_scoped_evidence(self) -> None:
         timestamp = app.now()
         app.USERS = {
@@ -6323,6 +6356,5 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 
 
