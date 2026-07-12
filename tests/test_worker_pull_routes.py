@@ -3772,6 +3772,67 @@ class WorkerPullRoutesTest(unittest.TestCase):
             any(item.get("type") == "test" and item.get("logPath") for item in confirmed["evidence"])
         )
 
+    def test_scan_audit_bundle_embeds_redacted_intent_test_output_artifacts(self) -> None:
+        scan = {
+            "id": "sc_audit_intent_logs",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        run_id = job["run_id"]
+        attempt_id = f"wk_1-{job['attempt']}"
+        content = b"AssertionError: mismatch\nAuthorization: Bearer secret-token\n"
+        db.store_review_run_artifact(
+            job_id=job["job_id"],
+            attempt_id=attempt_id,
+            artifact_id="art_intent_test_output_ITV_001_stderr",
+            payload={
+                "run_id": run_id,
+                "artifact_id": "art_intent_test_output_ITV_001_stderr",
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "size_bytes": len(content),
+                "artifact": {
+                    "artifact_id": "art_intent_test_output_ITV_001_stderr",
+                    "kind": "intent_test_output",
+                    "name": "ITV-001.stderr.log",
+                    "media_type": "text/plain",
+                    "schema_id": "intent-test-output",
+                    "schema_version": "v1",
+                    "encoding": "utf-8",
+                    "compression": "none",
+                    "required": False,
+                    "storage": {
+                        "type": "server_artifact",
+                        "url": f"/v1/review-runs/{run_id}/artifacts/art_intent_test_output_ITV_001_stderr",
+                    },
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "size_bytes": len(content),
+                },
+                "content_base64": base64.b64encode(content).decode("ascii"),
+            },
+        )
+
+        bundle = app.scan_audit_bundle_payload(app.SCANS[0])
+        artifacts = app.audit_bundle_artifacts(bundle)
+        log = next(item for item in artifacts if item["path"] == "logs/intent/ITV-001.stderr.log")
+
+        self.assertEqual(bundle["evidenceSummary"]["logArtifactCount"], 1)
+        self.assertIn("AssertionError: mismatch", log["content"])
+        self.assertIn("Bearer [redacted]", log["content"])
+        self.assertNotIn("secret-token", log["content"])
+
     def test_scan_audit_bundle_route_returns_owner_scoped_evidence(self) -> None:
         timestamp = app.now()
         app.USERS = {
@@ -6262,8 +6323,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
 
 
 
