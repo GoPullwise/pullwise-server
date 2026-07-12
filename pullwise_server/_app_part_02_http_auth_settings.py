@@ -149,13 +149,21 @@ def proxy_headers_trusted(handler: BaseHTTPRequestHandler) -> bool:
 
 def forwarded_client_ip(handler: BaseHTTPRequestHandler) -> str:
     forwarded_chain = request_header(handler, "X-Forwarded-For") or ""
-    candidate = forwarded_chain.rsplit(",", 1)[-1].strip()
-    if not candidate or any(char in candidate for char in "\r\n"):
+    if not forwarded_chain or any(char in forwarded_chain for char in "\r\n"):
         return ""
-    try:
-        return ipaddress.ip_address(candidate).compressed
-    except ValueError:
-        return ""
+    trusted_networks = trusted_proxy_networks()
+    for raw_candidate in reversed(forwarded_chain.split(",")):
+        candidate = raw_candidate.strip()
+        if not candidate:
+            return ""
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            return ""
+        if any(address in network for network in trusted_networks):
+            continue
+        return address.compressed
+    return ""
 
 
 def forwarded_api_base_url(handler: BaseHTTPRequestHandler) -> str | None:
