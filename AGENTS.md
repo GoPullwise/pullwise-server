@@ -445,3 +445,6 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 ## CI Test Harness Notes
 
 - `app.main()` constructs `PullwiseThreadingHTTPServer`, not the stdlib `ThreadingHTTPServer` symbol. Tests that call `app.main()` must patch `app.PullwiseThreadingHTTPServer` so they do not start a real `serve_forever()` loop in CI.
+- Scan request IDs are globally idempotent per requesting user, not per repository. Quota reservation must atomically detect the same user/request ID across repositories so concurrent requests cannot reserve twice; route code decides whether the existing repository is a dedupe or `IDEMPOTENCY_KEY_REUSED` conflict.
+- V1 heartbeat payloads must contain `active_run_id` explicitly, including `null` while idle. Terminal wrapper status maps exactly to execution status: `done/completed`, `failed/failed`, `cancelled/cancelled`, and `partial_completed/partial_completed`.
+- Preserve worker validator disposition when constructing issues: plausible stays `potential_risk`; confirmed static evidence is `static_proof`; only confirmed dynamic evidence with a command plus output/log may become `verified`. Audit bundles include redacted `intent_test_output` artifacts and localize Markdown to the scan output language.
