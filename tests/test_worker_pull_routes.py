@@ -3865,6 +3865,17 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertTrue(readme.startswith("# Pullwise 审查审计包"))
         self.assertTrue(report.startswith("# Pullwise 审查审计报告"))
         self.assertIn("验证状态：potential_risk", issue)
+        for language in ("ja", "ko", "es", "fr", "de", "pt-BR", "it"):
+            with self.subTest(language=language):
+                localized_bundle = {
+                    **bundle,
+                    "scan": {**bundle["scan"], "reviewOutputLanguage": language},
+                }
+                localized = app.audit_bundle_artifacts(localized_bundle)
+                localized_readme = next(
+                    item for item in localized if item["path"] == "README.md"
+                )["content"]
+                self.assertFalse(localized_readme.startswith("# Pullwise Review Audit Bundle"))
 
     def test_scan_audit_bundle_route_returns_owner_scoped_evidence(self) -> None:
         timestamp = app.now()
@@ -6356,5 +6367,4 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

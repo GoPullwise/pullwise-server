@@ -2034,8 +2034,64 @@ def audit_bundle_output_language(bundle: dict) -> str:
 
 
 def localize_audit_markdown(text: str, language: str) -> str:
-    if language != "zh-CN":
+    if language == "en":
         return text
+    if language != "zh-CN":
+        titles = {
+            "ja": ("Pullwise レビュー監査バンドル", "Pullwise レビュー監査レポート"),
+            "ko": ("Pullwise 검토 감사 번들", "Pullwise 검토 감사 보고서"),
+            "es": ("Paquete de auditoría de revisión Pullwise", "Informe de auditoría de revisión Pullwise"),
+            "fr": ("Lot d’audit de revue Pullwise", "Rapport d’audit de revue Pullwise"),
+            "de": ("Pullwise-Prüfauditpaket", "Pullwise-Prüfauditbericht"),
+            "pt-BR": ("Pacote de auditoria de revisão Pullwise", "Relatório de auditoria de revisão Pullwise"),
+            "it": ("Pacchetto di audit della revisione Pullwise", "Rapporto di audit della revisione Pullwise"),
+        }
+        bundle_title, report_title = titles.get(language, ("Pullwise review audit", "Pullwise review audit"))
+        exact = {
+            "# Pullwise Review Audit Bundle": f"# {bundle_title}",
+            "# Pullwise Review Audit Report": f"# {report_title}",
+            "## Summary": "## summary",
+            "## Issues": "## issues",
+            "## Conclusion": "## conclusion",
+            "## Confidence Evidence": "## confidence_evidence",
+            "## Evidence Trace": "## evidence_trace",
+            "## Facts, Inferences, and Recommendations": "## facts_inferences_recommendations",
+            "### Facts": "### facts", "### Inferences": "### inferences", "### Recommendations": "### recommendations",
+            "## Affected Locations": "## affected_locations", "## Evidence Chain": "## evidence_chain",
+            "## Suggested Patch": "## suggested_patch", "## Why this is not a false positive": "## why_not_false_positive",
+            "## When this may not apply": "## limitations",
+            "No issues were included in this bundle.": "issues: 0",
+            "Start with report.md, then inspect scan/scan.json and issues/*.md.": "report.md; scan/scan.json; issues/*.md",
+        }
+        prefixes = {
+            "Repository: ": "repository: ", "Branch: ": "branch: ", "Commit: ": "commit: ",
+            "Generated at: ": "generated_at: ", "Repo: ": "repository: ", "Scan: ": "scan: ",
+            "- Issues: ": "- issue_count: ", "- Evidence items: ": "- evidence_item_count: ",
+            "Status: ": "verification_status: ", "Severity: ": "severity: ", "Confidence: ": "confidence: ",
+        }
+        result: list[str] = []
+        for line in text.splitlines():
+            if line in exact:
+                result.append(exact[line])
+                continue
+            localized = line
+            for prefix, replacement in prefixes.items():
+                if line.startswith(prefix):
+                    localized = replacement + line[len(prefix) :]
+                    break
+            if localized.startswith("See `../patches/"):
+                localized = localized.removeprefix("See ").removesuffix(".")
+            for label, key in {
+                "Fixed commit": "fixed_commit",
+                "Precise file and line": "precise_file_line",
+                "Evidence chain": "evidence_chain",
+                "Reproduction command": "reproduction_command",
+                "Runtime output": "runtime_output",
+                "Raw log or test": "raw_log_or_test",
+            }.items():
+                localized = localized.replace(f"- {label}:", f"- {key}:")
+            result.append(localized)
+        return "\n".join(result)
     exact = {
         "# Pullwise Review Audit Bundle": "# Pullwise 审查审计包",
         "# Pullwise Review Audit Report": "# Pullwise 审查审计报告",
@@ -2080,6 +2136,15 @@ def localize_audit_markdown(text: str, language: str) -> str:
                 localized = translated + line[len(prefix) :]
                 break
         localized = localized.replace(": met", "：已满足").replace(": missing", "：缺失")
+        for label, translated in {
+            "Fixed commit": "固定提交",
+            "Precise file and line": "精确文件与行号",
+            "Evidence chain": "证据链",
+            "Reproduction command": "复现命令",
+            "Runtime output": "运行时输出",
+            "Raw log or test": "原始日志或测试",
+        }.items():
+            localized = localized.replace(f"- {label}：", f"- {translated}：")
         result.append(localized)
     return "\n".join(result)
 
