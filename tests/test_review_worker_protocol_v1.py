@@ -634,6 +634,48 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             passing["reviewWorkerProtocol"],
         )
 
+    def test_review_worker_protocol_requires_exact_wrapper_execution_status(self) -> None:
+        job = {
+            "job_id": "job_1",
+            "run_id": "run_job_1",
+            "lease_id": "lease_job_1",
+            "claimed_by_worker_id": "wk_1",
+        }
+        for execution_status in ("cancelled", "partial_completed"):
+            body = {
+                "reviewWorkerProtocol": v1_envelope(
+                    job,
+                    required_terminal_manifest(),
+                    status=execution_status,
+                    worker_id="wk_1",
+                )
+            }
+            with self.subTest(execution_status=execution_status):
+                with self.assertRaisesRegex(ValueError, "execution.status"):
+                    app.validate_review_worker_protocol_envelope(job, body, status="failed")
+
+    def test_idle_v1_heartbeat_requires_explicit_null_active_run_id(self) -> None:
+        body = {
+            "protocol_version": "review-worker-protocol/v1",
+            "status": "idle",
+            "concurrency": {
+                "max_active_jobs": 1,
+                "active_jobs": 0,
+                "available_job_slots": 1,
+                "maintains_local_queue": False,
+                "local_queue_depth": 0,
+            },
+            "codex_app_server": {
+                "status": "ready",
+                "transport": "stdio",
+            },
+        }
+
+        error = app.worker_v1_heartbeat_validation_error(body)
+
+        self.assertIsNotNone(error)
+        self.assertIn("active_run_id is required", error)
+
     def test_review_worker_protocol_requires_terminal_kinds_to_be_marked_required(self) -> None:
         job = {
             "job_id": "job_1",

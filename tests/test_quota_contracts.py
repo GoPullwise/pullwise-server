@@ -205,6 +205,48 @@ class QuotaContractsTest(unittest.TestCase):
         self.assertTrue(second["deduplicated"])
         self.assertEqual(ledger_count, 2)
 
+    def test_concurrent_same_request_id_across_repositories_reserves_only_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                user = make_user("usr_1")
+                repositories = [
+                    db.upsert_repository(
+                        {"github_repo_id": f"repo_{index}", "full_name": f"acme/api-{index}"}
+                    )
+                    for index in range(2)
+                ]
+                barrier = threading.Barrier(2)
+                results: list[dict] = []
+
+                def reserve(index: int) -> None:
+                    barrier.wait()
+                    results.append(
+                        quota.reserve_scan_quota(
+                            user=user,
+                            repository=repositories[index],
+                            requested_by_user_id="usr_1",
+                            scan_id=f"sc_{index}",
+                            request_id="req_shared",
+                        )
+                    )
+
+                threads = [threading.Thread(target=reserve, args=(index,)) for index in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    ledger_rows = connection.execute(
+                        "SELECT repository_id, scan_id FROM quota_ledger WHERE request_id = ? AND delta > 0",
+                        ("req_shared",),
+                    ).fetchall()
+
+        self.assertEqual(sorted(result["deduplicated"] for result in results), [False, True])
+        self.assertEqual(len(ledger_rows), 2)
+        self.assertEqual(len({row[0] for row in ledger_rows}), 1)
+
     def test_forks_share_repository_quota_with_source_repo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")

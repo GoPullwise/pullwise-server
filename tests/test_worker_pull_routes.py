@@ -3717,6 +3717,61 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["verificationStatus"], "verified")
         scan_payload = app.scan_payload(app.SCANS[0])
 
+    def test_worker_finding_preserves_validator_disposition_and_dynamic_intent_evidence(self) -> None:
+        job = {
+            "job_id": "job_evidence_mapping",
+            "scan_id": "sc_evidence_mapping",
+            "user_id": "usr_1",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "abc1234",
+        }
+        plausible_source = app.worker_protocol_finding_source(
+            {
+                "id": "F-plausible",
+                "title": "Plausible contract risk",
+                "severity": "medium",
+                "confidence": 0.6,
+                "validator_status": "plausible",
+                "locations": [{"path": "src/app.py", "start_line": 12, "end_line": 14}],
+                "evidence": ["Static control-flow evidence supports the scenario."],
+            }
+        )
+        plausible = app.worker_finding_payload(job, plausible_source, 0)
+
+        confirmed_source = app.worker_protocol_finding_source(
+            {
+                "id": "F-confirmed",
+                "title": "Dynamically confirmed defect",
+                "severity": "medium",
+                "confidence": 0.9,
+                "validator_status": "confirmed",
+                "locations": [{"path": "src/app.py", "start_line": 20, "end_line": 22}],
+                "validation_sources": {
+                    "intent_test": {
+                        "test_id": "ITV-001",
+                        "classification": "confirmed_bug",
+                        "command": "python -m unittest tests/test_repro.py",
+                        "stderr_path": "intent/test-output/ITV-001.stderr.log",
+                        "output": "AssertionError: expected safe result",
+                    }
+                },
+            }
+        )
+        confirmed = app.worker_finding_payload(job, confirmed_source, 1)
+
+        self.assertEqual(plausible["verificationStatus"], "potential_risk")
+        self.assertEqual(plausible["validatorStatus"], "plausible")
+        self.assertEqual(confirmed["verificationStatus"], "verified")
+        self.assertEqual(confirmed["validatorStatus"], "confirmed")
+        self.assertEqual(
+            confirmed["reproduction"]["commands"],
+            ["python -m unittest tests/test_repro.py"],
+        )
+        self.assertTrue(
+            any(item.get("type") == "test" and item.get("logPath") for item in confirmed["evidence"])
+        )
+
     def test_scan_audit_bundle_route_returns_owner_scoped_evidence(self) -> None:
         timestamp = app.now()
         app.USERS = {
@@ -6207,7 +6262,6 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 
 
 
