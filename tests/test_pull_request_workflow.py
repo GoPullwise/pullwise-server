@@ -626,6 +626,46 @@ class PullRequestWorkflowTest(unittest.TestCase):
         self.assertIn(("pop", "pullRequestPending"), mutations)
         self.assertIn(("set", "pullRequest"), mutations)
 
+    def test_issue_status_read_and_write_share_pull_request_state_lock(self) -> None:
+        app.ISSUES[0]["status"] = "open"
+        app.ISSUES[0]["updatedAt"] = app.now()
+        db.upsert_issue(app.ISSUES[0])
+
+        class TrackingLock:
+            def __init__(self) -> None:
+                self.depth = 0
+
+            def __enter__(self) -> "TrackingLock":
+                self.depth += 1
+                return self
+
+            def __exit__(self, *_exc_info: object) -> None:
+                self.depth -= 1
+
+        tracking_lock = TrackingLock()
+        original_get = db.get_user_issue
+        original_upsert = db.upsert_issue
+
+        def locked_get(*args: object, **kwargs: object) -> dict | None:
+            self.assertGreater(tracking_lock.depth, 0)
+            return original_get(*args, **kwargs)
+
+        def locked_upsert(*args: object, **kwargs: object) -> dict | None:
+            self.assertGreater(tracking_lock.depth, 0)
+            return original_upsert(*args, **kwargs)
+
+        handler = object.__new__(app.PullwiseHandler)
+        with patch.object(app, "STATE_LOCK", tracking_lock), patch.object(
+            db, "get_user_issue", side_effect=locked_get
+        ), patch.object(db, "upsert_issue", side_effect=locked_upsert):
+            updated = handler.update_issue_status_for_session(
+                {"userId": "usr_1"},
+                "f_123",
+                {"status": "fixed"},
+            )
+
+        self.assertEqual(updated["status"], "fixed")
+
     def test_concurrent_pull_request_creation_for_same_issue_runs_external_work_once(self) -> None:
         token = "ghs_secret_token"
         with tempfile.TemporaryDirectory() as tmpdir:

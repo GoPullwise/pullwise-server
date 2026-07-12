@@ -6537,6 +6537,14 @@ def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | N
                 "DELETE FROM quota_ledger WHERE requested_by_user_id = ?",
                 (target_user_id,),
             ).rowcount
+            counts["quotaLedger"] += connection.execute(
+                "DELETE FROM quota_ledger WHERE bucket_id IN (SELECT id FROM quota_buckets WHERE scope_type = 'user' AND scope_id = ?)",
+                (target_user_id,),
+            ).rowcount
+            counts["quotaBuckets"] = connection.execute(
+                "DELETE FROM quota_buckets WHERE scope_type = 'user' AND scope_id = ?",
+                (target_user_id,),
+            ).rowcount
             counts["rateLimits"] = connection.execute(
                 "DELETE FROM api_rate_limits WHERE subject = ?",
                 (f"user:{target_user_id}",),

@@ -38,6 +38,7 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         include_latest_commands=True,
     )
     workers = [worker_public_payload(worker, admin=False) for worker in worker_records]
+    alert_workers = [worker_public_payload(worker, admin=True) for worker in worker_records]
     uninstalling_workers = manual_worker_uninstall_count(worker_records)
     job_counts = db.scan_job_status_counts(worker_scope=db.WORKER_SCOPE_SHARED)
     queued_jobs = public_scan_count(job_counts.get("queued"))
@@ -69,11 +70,8 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
     }
     if uninstalling_workers:
         payload["administratorWorkerUninstallCount"] = uninstalling_workers
-    alert_workers = workers
     if admin:
-        admin_workers = [worker_public_payload(worker, admin=True) for worker in worker_records]
-        payload["workers"] = admin_workers
-        alert_workers = admin_workers
+        payload["workers"] = alert_workers
     alerts.sync_scan_system_alerts(payload, alert_workers)
     SCAN_SYSTEM_STATUS_CACHE[cache_key] = {
         "databasePath": current_db_path,

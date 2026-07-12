@@ -828,6 +828,40 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         for worker in workers:
             self.assertIn(worker["name"], body)
 
+    def test_public_system_status_syncs_alerts_with_internal_quota_context(self) -> None:
+        quota = {
+            "status": "exhausted",
+            "ready": False,
+            "remainingPercent": 0,
+            "windows": [{"label": "weekly", "remainingPercent": 0}],
+        }
+        worker = {
+            "worker_id": "wk_quota_public",
+            "name": "Quota worker",
+            "enabled": 1,
+            "provider": "codex",
+            "provider_chain": ["codex"],
+            "ready_providers": [],
+            "last_heartbeat_at": app.now(),
+            "running_jobs": 0,
+            "doctor_status": "degraded",
+            "codex_ready": 0,
+            "codex_quota": quota,
+            "version": "0.10.13",
+        }
+        app.SCAN_SYSTEM_STATUS_CACHE.clear()
+
+        with patch.object(db, "list_workers", return_value=[worker]), patch.object(
+            app, "annotate_worker_runtime_payloads", return_value=[worker]
+        ), patch.object(db, "scan_job_status_counts", return_value={}), patch.object(
+            app.alerts, "sync_scan_system_alerts"
+        ) as sync_alerts:
+            payload = app.scan_system_status_payload(admin=False)
+
+        alert_workers = sync_alerts.call_args.args[1]
+        self.assertEqual(alert_workers[0]["codexQuota"], quota)
+        self.assertNotIn("workers", payload)
+
     def test_same_worker_health_problem_is_grouped_across_workers(self) -> None:
         workers = [
             {
@@ -1849,6 +1883,24 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "scopes": ["scans:read"],
             }
         )
+        user_bucket = app.quota.ensure_quota_bucket(
+            scope_type="user",
+            scope_id="usr_user",
+            period="2026-07",
+            plan="free",
+            limit=10,
+        )
+        repository_bucket = app.quota.ensure_quota_bucket(
+            scope_type="repository",
+            scope_id="repo_123",
+            period="2026-07",
+            plan="repository",
+            limit=10,
+        )
+        with db.connect() as connection:
+            with connection:
+                connection.execute("UPDATE quota_buckets SET used = 3, reserved = 1 WHERE id = ?", (user_bucket["id"],))
+                connection.execute("UPDATE quota_buckets SET used = 2 WHERE id = ?", (repository_bucket["id"],))
         job = app.create_scan_job_for_scan(app.SCANS[0])
         claimed = db.claim_next_scan_job("wk_1")
         run_id = claimed.get("run_id") or f"run_{claimed['job_id']}"
@@ -1908,6 +1960,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(db.list_review_run_events(run_id), [])
         self.assertIsNone(db.get_review_run_artifact(run_id, "art_worker_log"))
         self.assertFalse(artifact_path.exists())
+        with db.connect() as connection:
+            remaining_buckets = connection.execute(
+                "SELECT id FROM quota_buckets WHERE id IN (?, ?) ORDER BY id",
+                (user_bucket["id"], repository_bucket["id"]),
+            ).fetchall()
+        self.assertEqual([row[0] for row in remaining_buckets], [repository_bucket["id"]])
+        self.assertEqual(handler.payload["removed"]["quotaBuckets"], 1)
         self.assertEqual(handler.payload["removed"]["sessions"], 1)
         self.assertEqual(handler.payload["removed"]["scans"], 1)
         self.assertEqual(handler.payload["removed"]["issues"], 1)

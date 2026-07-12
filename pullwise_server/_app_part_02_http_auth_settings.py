@@ -148,7 +148,8 @@ def proxy_headers_trusted(handler: BaseHTTPRequestHandler) -> bool:
 
 
 def forwarded_client_ip(handler: BaseHTTPRequestHandler) -> str:
-    candidate = first_header_value(handler, "X-Forwarded-For") or ""
+    forwarded_chain = request_header(handler, "X-Forwarded-For") or ""
+    candidate = forwarded_chain.rsplit(",", 1)[-1].strip()
     if not candidate or any(char in candidate for char in "\r\n"):
         return ""
     try:
@@ -549,6 +550,7 @@ def delete_authorized_user(user_id: str, *, actor_user_id: str | None = None) ->
     target_user = USERS.get(target_user_id)
     if not isinstance(target_user, dict):
         raise ResourceNotFound("User")
+    deleted_user_payload = admin_user_payload(target_user, current_user_id=actor_user_id)
 
     with STATE_LOCK:
         target_scan_ids = {
@@ -583,7 +585,7 @@ def delete_authorized_user(user_id: str, *, actor_user_id: str | None = None) ->
 
     database_counts = db.delete_user_related_records(target_user_id, target_scan_ids)
     return {
-        "user": admin_user_payload(target_user, current_user_id=actor_user_id),
+        "user": deleted_user_payload,
         "deleted": True,
         "removed": {
             **database_counts,

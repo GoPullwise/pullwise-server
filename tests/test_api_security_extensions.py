@@ -265,6 +265,24 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
         self.assertEqual(rows, [("ip:203.0.113.10", 1)])
 
+    def test_trusted_proxy_uses_rightmost_forwarded_client_address(self) -> None:
+        handler = HandlerHarness(
+            "/api/v1/repositories",
+            headers={"X-Forwarded-For": "198.51.100.77, 192.0.2.44"},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_TRUST_PROXY_HEADERS": "true",
+                "PULLWISE_TRUSTED_PROXY_CIDRS": "203.0.113.0/24",
+            },
+            clear=True,
+        ):
+            client_ip = handler.client_ip_address()
+
+        self.assertEqual(client_ip, "192.0.2.44")
+
     def test_samesite_none_cookie_post_rejects_untrusted_origin_before_sign_out(self) -> None:
         handler = HandlerHarness(
             "/auth/sign-out",

@@ -667,6 +667,31 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(refund_item["repo"], "owner/repo")
         self.assertEqual(refund_item["status"], "failed")
 
+    def test_quota_finalization_uses_durable_scan_when_memory_mirror_is_cold(self) -> None:
+        cookie = seed_session()
+        authorize_repo_for_seed_user()
+        created = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_cold"}, cookie=cookie)
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
+            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=1)),
+        ):
+            app.PullwiseHandler.handle_post(created, "/scans", {}, ["scans"])
+            scan_id = created.payload["id"]
+            job = app.db.get_scan_job_for_scan(scan_id)
+            app.SCANS.clear()
+
+            result = app.finalize_scan_quota_for_job(job, trigger="test-cold-mirror")
+            durable_scan = app.db.get_user_scan_snapshot("usr_1", scan_id)
+            usage = app.quota.quota_payload_for_user(app.USERS["usr_1"])
+
+        self.assertTrue(result["consumed"])
+        self.assertEqual(durable_scan["requestId"], "scan_req_cold")
+        self.assertEqual(durable_scan["quotaState"], "consumed")
+        self.assertEqual(durable_scan["quotaConsumeTrigger"], "test-cold-mirror")
+        self.assertEqual(usage["used"], 1)
+        self.assertEqual(usage["reserved"], 0)
+
     def test_consume_review_quota_uses_db_backed_user_quota(self) -> None:
         seed_session()
 

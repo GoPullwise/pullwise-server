@@ -200,8 +200,10 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
     repo_id = public_issue_text(job.get("repo_id"))
     if not scan_id or not user_id or not repo_id:
         return {}
+    durable_scan = db.get_user_scan_snapshot(user_id, scan_id)
     with STATE_LOCK:
-        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        scan = memory_scan or durable_scan
         request_id = quota_request_id_for_scan(scan)
         already_consumed = scan_quota_has_been_consumed(scan)
     if already_consumed:
@@ -221,7 +223,8 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
         return quota_result
     consumed_at = now()
     with STATE_LOCK:
-        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        scan = memory_scan or durable_scan
         if scan:
             scan["quotaState"] = "consumed"
             scan["quotaConsumedAt"] = consumed_at
@@ -229,7 +232,8 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
             scan["quotaBucketIds"] = quota_result.get("bucketIds") or scan.get("quotaBucketIds") or {}
             refresh_scan_quota_usage_locked(scan, user, repository)
             db.upsert_scan(scan)
-            mark_state_dirty()
+            if memory_scan is not None:
+                mark_state_dirty()
     return quota_result
 
 

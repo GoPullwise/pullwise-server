@@ -2689,31 +2689,32 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             raise ValueError("Request body must be a JSON object.")
         target_issue_id = public_issue_text(issue_id)
-        scoped_update = issue_status_update_has_identity(body)
-        memory_issue = memory_issue_for_status_update(session, target_issue_id, body)
-        issue = db.get_user_issue(session["userId"], target_issue_id)
-        if issue is not None and scoped_update and not issue_matches_status_update_identity(issue, target_issue_id, body):
-            issue = memory_issue
-        if issue is None:
-            if memory_issue is None:
-                issue = find_issue_for_status_update(user_issues(session), target_issue_id, body)
-            else:
-                issue = memory_issue
-        next_status = str(body.get("status") or issue["status"]).strip().lower()
-        if next_status not in ISSUE_STATUSES:
-            raise ValueError("Issue status must be open, fixed, or snoozed.")
-        updated_at = now()
-        issue["status"] = next_status
-        issue["updatedAt"] = updated_at
-        record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
-        stored_issue = db.upsert_issue(issue, timestamp=updated_at) or issue
-        if memory_issue is None:
+        with STATE_LOCK:
+            scoped_update = issue_status_update_has_identity(body)
             memory_issue = memory_issue_for_status_update(session, target_issue_id, body)
-        if memory_issue is not None and memory_issue is not stored_issue:
-            memory_issue.update(stored_issue)
-        issue = stored_issue
-        mark_state_dirty()
-        return issue
+            issue = db.get_user_issue(session["userId"], target_issue_id)
+            if issue is not None and scoped_update and not issue_matches_status_update_identity(issue, target_issue_id, body):
+                issue = memory_issue
+            if issue is None:
+                if memory_issue is None:
+                    issue = find_issue_for_status_update(user_issues(session), target_issue_id, body)
+                else:
+                    issue = memory_issue
+            next_status = str(body.get("status") or issue["status"]).strip().lower()
+            if next_status not in ISSUE_STATUSES:
+                raise ValueError("Issue status must be open, fixed, or snoozed.")
+            updated_at = now()
+            issue["status"] = next_status
+            issue["updatedAt"] = updated_at
+            record_issue_status_outcome_label(issue, next_status=next_status, body=body, user_id=session["userId"])
+            stored_issue = db.upsert_issue(issue, timestamp=updated_at) or issue
+            if memory_issue is None:
+                memory_issue = memory_issue_for_status_update(session, target_issue_id, body)
+            if memory_issue is not None and memory_issue is not stored_issue:
+                memory_issue.update(stored_issue)
+            issue = stored_issue
+            mark_state_dirty()
+            return issue
 
     def handle_admin_get(self, segments: list[str], params: dict) -> None:
         session = self.require_admin_session()
@@ -4485,7 +4486,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
 
