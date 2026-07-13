@@ -167,6 +167,33 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertIn("last_heartbeat_at", columns)
         self.assertIn("idx_workers_scope_owner", indexes)
 
+    def test_scan_status_counts_include_partial_completed_in_done_total(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                db.create_scan_job(
+                    {
+                        "job_id": "job_done",
+                        "scan_id": "scan_done",
+                        "repo": "acme/repo",
+                        "user_id": "usr_1",
+                        "status": "done",
+                    }
+                )
+                db.create_scan_job(
+                    {
+                        "job_id": "job_partial",
+                        "scan_id": "scan_partial",
+                        "repo": "acme/repo",
+                        "user_id": "usr_1",
+                        "status": "partial_completed",
+                    }
+                )
+
+                counts = db.count_user_scan_jobs_by_public_status("usr_1")
+
+        self.assertEqual(counts, {"done": 2})
+
     def test_load_state_closes_initialize_and_read_connections(self) -> None:
         initialize_connection = FakeConnection()
         read_connection = FakeConnection([("users", "{}")])

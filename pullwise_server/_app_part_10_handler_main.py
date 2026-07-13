@@ -3300,7 +3300,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 timestamp=failure_timestamp,
             )
             with STATE_LOCK:
-                scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+                scan_id = public_issue_text(job.get("scan_id"))
+                user_id = public_issue_text(job.get("user_id"))
+                memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+                scan = memory_scan or db.get_user_scan_snapshot(user_id, scan_id)
                 if scan:
                     release_scan_quota_reservation_for_scan(scan, reason="clone_token_unavailable")
                     scan.update(
@@ -3314,7 +3317,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                         }
                     )
                     db.upsert_scan(scan)
-                    mark_state_dirty()
+                    if memory_scan is not None:
+                        mark_state_dirty()
             return self.error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
         with STATE_LOCK:
             scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
@@ -3490,7 +3494,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             log_time=progress_log_time,
         )
         with STATE_LOCK:
-            scan = next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+            event_is_latest = db.review_run_event_is_latest(
+                run_id,
+                public_scan_count(stored_event.get("sequence")),
+            )
+            scan = (
+                next((item for item in SCANS if item.get("id") == job.get("scan_id")), None)
+                if event_is_latest
+                else None
+            )
             if scan and scan.get("status") == "running":
                 update = {
                     "phase": phase,
@@ -4493,5 +4505,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

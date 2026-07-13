@@ -4834,6 +4834,77 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["logsSummary"], "progress_updated")
         self.assertIsInstance(payload.get("updatedAt"), int)
 
+    def test_delayed_lower_sequence_event_cannot_overwrite_newer_scan_progress(self) -> None:
+        scan = {
+            "id": "sc_event_order",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        first_stored = threading.Event()
+        second_finished = threading.Event()
+        original_store = app.db.store_review_run_event_and_progress
+        responses: dict[str, RouteHarness] = {}
+
+        def interleaved_store(*args: object, **kwargs: object) -> dict:
+            stored = original_store(*args, **kwargs)
+            event = args[0] if args and isinstance(args[0], dict) else {}
+            if int(event.get("sequence") or 0) == 1:
+                first_stored.set()
+                self.assertTrue(second_finished.wait(5), "newer event did not finish")
+            return stored
+
+        def send_first() -> None:
+            responses["first"] = self.v1_event(
+                job,
+                sequence=1,
+                phase="repo_map",
+                progress=10,
+                message="Older progress",
+            )
+
+        def send_second() -> None:
+            self.assertTrue(first_stored.wait(5), "older event was not stored")
+            try:
+                responses["second"] = self.v1_event(
+                    job,
+                    sequence=2,
+                    phase="reviewer_fanout",
+                    progress=80,
+                    message="Newer progress",
+                )
+            finally:
+                second_finished.set()
+
+        with patch.object(app.db, "store_review_run_event_and_progress", side_effect=interleaved_store):
+            first_thread = threading.Thread(target=send_first)
+            second_thread = threading.Thread(target=send_second)
+            first_thread.start()
+            second_thread.start()
+            first_thread.join(10)
+            second_thread.join(10)
+
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertEqual(responses["first"].status, HTTPStatus.OK)
+        self.assertEqual(responses["second"].status, HTTPStatus.OK)
+        self.assertEqual(app.SCANS[0]["phase"], "reviewer_fanout")
+        self.assertEqual(app.SCANS[0]["progress"], 80)
+        stored_run = db.get_review_run(job["run_id"])
+        self.assertEqual(json.loads(stored_run["progress_json"])["sequence"], 2)
+
     def test_failed_worker_result_does_not_requeue(self) -> None:
         user = {"id": "usr_no_retry_worker", "name": "Owner", "providers": []}
         app.USERS = {user["id"]: user}
@@ -5351,6 +5422,71 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.SCANS[0]["quotaState"], "released")
         self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
         self.assertNotEqual(app.SCANS[0].get("status"), "running")
+
+    def test_claim_token_failure_releases_quota_with_cold_scan_memory(self) -> None:
+        user = {"id": "usr_1", "name": "Owner", "providers": []}
+        app.USERS = {user["id"]: user}
+        repository = db.upsert_repository(
+            {
+                "github_repo_id": "111",
+                "full_name": "acme/api",
+                "owner_login": "acme",
+                "default_branch": "main",
+                "clone_url": "https://github.com/acme/api.git",
+            }
+        )
+        quota_result = app.quota.reserve_scan_quota(
+            user=user,
+            repository=repository,
+            requested_by_user_id=user["id"],
+            scan_id="sc_token_fail_cold",
+            request_id="req_token_fail_cold",
+        )
+        scan = {
+            "id": "sc_token_fail_cold",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "installationId": "111",
+            "cloneUrl": "https://github.com/acme/api.git",
+            "repoId": repository["id"],
+            "githubRepoId": repository["github_repo_id"],
+            "requestId": "req_token_fail_cold",
+            "quotaBucketIds": quota_result["bucketIds"],
+            "billingUsage": quota_result["user"],
+            "repoUsage": quota_result["repository"],
+            "quotaState": "reserved",
+            "quotaReservedAt": app.now(),
+        }
+        job = app.create_scan_job_for_scan(scan)
+        app.SCANS = []
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
+
+        with (
+            patch.object(app.github_auth, "app_api_configured", return_value=True),
+            patch.object(
+                app.github_auth,
+                "create_installation_access_token",
+                side_effect=app.github_auth.GitHubError("token unavailable"),
+            ),
+        ):
+            claim = self.v1_lease()
+
+        self.assertEqual(claim.status, HTTPStatus.SERVICE_UNAVAILABLE)
+        stored_job = db.get_scan_job(job["job_id"])
+        stored_scan = db.get_user_scan_snapshot(user["id"], scan["id"])
+        self.assertEqual(stored_job["status"], "failed")
+        self.assertEqual(stored_scan["status"], "failed")
+        self.assertEqual(stored_scan["error"], "clone_token_unavailable")
+        self.assertEqual(stored_scan["quotaState"], "released")
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
+        self.assertEqual(app.SCANS, [])
 
     def test_worker_routes_require_enabled_token(self) -> None:
         denied = RouteHarness("/v1/workers/wk_1/lease", v1_worker_lease_payload())

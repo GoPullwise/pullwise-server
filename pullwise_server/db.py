@@ -2663,6 +2663,7 @@ def store_review_run_event(event: dict[str, Any]) -> dict[str, Any]:
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
             return _insert_review_run_event_locked(connection, event)
 
 
@@ -2672,9 +2673,10 @@ def store_review_run_event_and_progress(
     scan_job_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ensure_initialized()
-    with closing(connect()) as connection:
+    with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
             stored_event = _insert_review_run_event_locked(connection, event)
             _upsert_review_run_progress_locked(connection, progress_event or event)
             if scan_job_progress is not None:
@@ -2721,6 +2723,19 @@ def store_review_run_event_and_progress(
                         scan_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
                 stored_event["_scan_job"] = scan_job
             return stored_event
+
+
+def review_run_event_is_latest(run_id: str, sequence: int) -> bool:
+    ensure_initialized()
+    target_run_id = str(run_id or "").strip()
+    if not target_run_id:
+        return False
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute(
+            "SELECT MAX(sequence) FROM review_run_events WHERE run_id = ?",
+            (target_run_id,),
+        ).fetchone()
+    return row is not None and row[0] is not None and int(row[0]) == int(sequence)
 
 def list_review_run_events(run_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
     ensure_initialized()
@@ -3647,7 +3662,9 @@ def count_user_scan_jobs_by_public_status(user_id: str) -> dict[str, int]:
             public_status = "queued"
         elif raw_status in {"failed", "lost"}:
             public_status = "failed"
-        elif raw_status in {"done", "cancelled"}:
+        elif raw_status in {"done", "partial_completed"}:
+            public_status = "done"
+        elif raw_status == "cancelled":
             public_status = raw_status
         else:
             public_status = raw_status or "unknown"
