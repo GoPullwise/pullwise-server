@@ -774,18 +774,20 @@ The disable switch also accepts `0`, `no`, `off`, or `disabled`.
 Pullwise uses Creem for billing.
 The built-in catalog is Free, Pro, and Max. Scan quota is tracked for the
 signed-in user and for each stable GitHub repository id. Free defaults to 5
-user scans/month and 5 scans/month for each repository. GitHub forks that
-report the same source repository share the source repository quota bucket.
+user scans per account cycle and 5 scans per UTC calendar month for each
+repository. GitHub forks that report the same source repository share the
+source repository quota bucket.
 Pro and Max pricing, currency, and billing intervals are read from the
-configured Creem products. Pro defaults to 60 user scans/month and 60
-scans/month for each repository. Max defaults to 90 user scans/month and 90
-scans/month for each repository.
-Monthly review allowance resets on the user's subscription-cycle
-anniversary, or on the free-cycle anniversary when the account is not entitled
-to a paid plan.
+configured Creem products. Pro defaults to 60 user scans per account cycle and
+60 scans per UTC calendar month for each repository. Max defaults to 90 user
+scans per account cycle and 90 scans per UTC calendar month for each repository.
+Account review allowance resets on the user's subscription-cycle anniversary,
+or on the free-cycle anniversary when the account is not entitled to a paid
+plan. Repository allowance resets at the start of each UTC calendar month.
 
 Quota controls are database-backed system config. Edit Free, Pro, and Max user
-and repository monthly scan limits through the admin Settings page.
+account-cycle limits and repository UTC-calendar-month limits through the admin
+Settings page.
 
 Subscription plan agent CLI/model/reasoning policy is stored in the server
 database. The server seeds Free, Pro, and Max defaults into `app_state` on first
