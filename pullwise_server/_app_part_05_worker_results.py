@@ -764,7 +764,11 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
         progress_phase = "cleanup_active_job"
         progress_message = progress_message or "Run completed and active job cleaned up."
     completed_at = pull_request_timestamp(prepared.get("completed_at")) or now()
-    scan = memory_scan_by_id(job.get("scan_id"))
+    memory_scan = memory_scan_by_id(job.get("scan_id"))
+    scan = memory_scan or db.get_user_scan_snapshot(
+        public_issue_text(job.get("user_id")),
+        public_issue_text(job.get("scan_id")),
+    )
     changed = False
     if scan:
         before = json.dumps(db.to_jsonable(scan), sort_keys=True)
@@ -814,27 +818,29 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["progressMessage"] = progress_message
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status in {"done", "partial_completed"}:
-            before_issues = json.dumps(
-                db.to_jsonable([issue for issue in ISSUES if issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id")]),
-                sort_keys=True,
-            )
-            ISSUES[:] = [
-                issue
-                for issue in ISSUES
-                if not (issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id"))
-            ]
-            ISSUES.extend(normalized_findings)
+            if memory_scan is not None:
+                before_issues = json.dumps(
+                    db.to_jsonable([issue for issue in ISSUES if issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id")]),
+                    sort_keys=True,
+                )
+                ISSUES[:] = [
+                    issue
+                    for issue in ISSUES
+                    if not (issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id"))
+                ]
+                ISSUES.extend(normalized_findings)
+                after_issues = json.dumps(db.to_jsonable(normalized_findings), sort_keys=True)
+                changed = changed or before_issues != after_issues
             db.replace_scan_issues(
                 public_issue_text(scan.get("id")),
                 user_id=public_issue_text(scan.get("userId")),
                 job_id=public_issue_text(job.get("job_id")),
                 issues=normalized_findings,
             )
-            after_issues = json.dumps(db.to_jsonable(normalized_findings), sort_keys=True)
-            changed = changed or before_issues != after_issues
     if changed:
         db.upsert_scan(scan)
-        mark_state_dirty()
+        if memory_scan is not None:
+            mark_state_dirty()
     return changed
 
 
@@ -856,6 +862,7 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     if not review_worker_protocol:
         raise ValueError("Worker result must include reviewWorkerProtocol.")
     checksum = worker_result_checksum(body)
+    prepared_result = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     record_result = db.record_scan_job_result(
         str(job["job_id"]),
         attempt_id=attempt_id,
@@ -885,7 +892,6 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     quota_finalized = {}
     if worker_result_should_finalize_quota(job, body, status=status):
         quota_finalized = finalize_scan_quota_for_job(job, trigger="worker_result")
-    prepared_result = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     with STATE_LOCK:
         apply_prepared_worker_job_result_to_state_locked(job, prepared_result)
     quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)

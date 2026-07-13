@@ -458,6 +458,124 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             app.validate_review_worker_protocol_artifacts(claimed, body, status="done")
             app.db.reset_initialization_cache()
 
+    def test_invalid_result_does_not_terminalize_job_and_can_be_resubmitted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "test.sqlite3")},
+            clear=False,
+        ):
+            try:
+                app.db.reset_initialization_cache()
+                app.db.create_scan_job(
+                    {
+                        "job_id": "job_invalid_then_valid_v1",
+                        "scan_id": "scan_invalid_then_valid_v1",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": app.now(),
+                        "user_id": "usr_1",
+                    }
+                )
+                claimed = app.db.claim_next_scan_job("wk_1")
+                attempt_id = f"wk_1-{claimed['attempt']}"
+                manifest = required_completed_manifest()
+                body = {
+                    "status": "done",
+                    "attempt_id": attempt_id,
+                    "reviewWorkerProtocol": v1_envelope(claimed, manifest, worker_id="wk_1"),
+                }
+
+                with self.assertRaisesRegex(ValueError, "not uploaded"):
+                    app.apply_worker_job_result(claimed, body)
+
+                rejected_job = app.db.get_scan_job(claimed["job_id"])
+                self.assertEqual(rejected_job["status"], "claimed")
+                self.assertFalse(rejected_job.get("result_checksum"))
+
+                store_manifest_artifacts_for_test(claimed, attempt_id, manifest)
+                accepted = app.apply_worker_job_result(claimed, body)
+                self.assertTrue(accepted["accepted"])
+                self.assertFalse(accepted["duplicate"])
+                self.assertEqual(app.db.get_scan_job(claimed["job_id"])["status"], "done")
+            finally:
+                app.db.reset_initialization_cache()
+
+    def test_completed_result_persists_when_scan_memory_mirror_is_cold(self) -> None:
+        old_scans = app.SCANS
+        old_issues = app.ISSUES
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            os.environ,
+            {"PULLWISE_DB_PATH": os.path.join(tmp_dir, "test.sqlite3")},
+            clear=False,
+        ):
+            try:
+                app.db.reset_initialization_cache()
+                scan = {
+                    "id": "scan_cold_result_v1",
+                    "userId": "usr_1",
+                    "repo": "acme/api",
+                    "branch": "main",
+                    "commit": "pending",
+                    "status": "running",
+                    "progress": 50,
+                    "createdAt": app.now(),
+                }
+                app.db.upsert_scan(scan)
+                app.db.create_scan_job(
+                    {
+                        "job_id": "job_cold_result_v1",
+                        "scan_id": scan["id"],
+                        "repo": scan["repo"],
+                        "branch": scan["branch"],
+                        "commit": scan["commit"],
+                        "status": "queued",
+                        "created_at": app.now(),
+                        "user_id": scan["userId"],
+                    }
+                )
+                claimed = app.db.claim_next_scan_job("wk_1")
+                attempt_id = f"wk_1-{claimed['attempt']}"
+                manifest = required_completed_manifest()
+                store_manifest_artifacts_for_test(claimed, attempt_id, manifest)
+                envelope = v1_envelope(claimed, manifest, worker_id="wk_1")
+                envelope["summary"]["top_findings"] = [
+                    {
+                        "id": "finding-cold-result",
+                        "title": "Cold result remains visible",
+                        "severity": "high",
+                        "path": "src/api.py",
+                        "start_line": 12,
+                    }
+                ]
+                body = {
+                    "status": "done",
+                    "attempt_id": attempt_id,
+                    "humanReport": {
+                        "title": "Cold result report",
+                        "summaryMarkdown": "The durable report remains available after restart.",
+                    },
+                    "reviewWorkerProtocol": envelope,
+                }
+                app.SCANS = []
+                app.ISSUES = []
+
+                result = app.apply_worker_job_result(claimed, body)
+                durable_scan = app.db.get_user_scan_snapshot(scan["userId"], scan["id"])
+                durable_issues = app.db.list_user_issues_page(scan["userId"], scan_id=scan["id"])
+
+                self.assertTrue(result["accepted"])
+                self.assertEqual(durable_scan["status"], "done")
+                self.assertEqual(durable_scan["humanReport"]["title"], "Cold result report")
+                self.assertTrue(durable_scan["resultChecksum"])
+                self.assertEqual(durable_issues["total"], 1)
+                self.assertEqual(durable_issues["items"][0]["title"], "Cold result remains visible")
+            finally:
+                app.SCANS = old_scans
+                app.ISSUES = old_issues
+                app.db.reset_initialization_cache()
+
     def test_completed_result_applies_final_cleanup_progress_steps(self) -> None:
         old_scans = app.SCANS
         old_issues = app.ISSUES
