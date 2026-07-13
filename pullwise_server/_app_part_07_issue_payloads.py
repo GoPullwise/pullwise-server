@@ -868,26 +868,24 @@ def issue_payload(issue: dict) -> dict:
 
 
 def public_issue_list_verification_status(issue: dict) -> str:
-    status = public_issue_text(issue.get("verificationStatus")).lower()
-    if status in ISSUE_VERIFICATION_STATUSES:
-        return status
-    reported_status = public_issue_text(issue.get("reportedVerificationStatus")).lower()
-    if reported_status in ISSUE_VERIFICATION_STATUSES:
-        return reported_status
-    if public_issue_file(issue.get("file"), issue=issue) and review._safe_non_negative_int(issue.get("line")):
-        return "static_proof"
-    return "potential_risk"
+    affected_locations = public_issue_affected_locations(issue)
+    evidence = public_issue_evidence(issue, affected_locations=affected_locations)
+    return public_issue_verification_status(
+        issue,
+        affected_locations=affected_locations,
+        evidence=evidence,
+    )
 
 
 def public_issue_list_confidence_level(issue: dict, verification_status: str) -> str:
-    level = public_issue_text(issue.get("confidenceLevel") or issue.get("confidence_level")).lower()
-    if level in {"high", "medium", "low"}:
-        return level
-    if verification_status == "verified":
-        return "high"
-    if verification_status == "static_proof":
-        return "medium"
-    return "low"
+    affected_locations = public_issue_affected_locations(issue)
+    evidence = public_issue_evidence(issue, affected_locations=affected_locations)
+    checklist = public_issue_evidence_checklist(
+        issue,
+        affected_locations=affected_locations,
+        evidence=evidence,
+    )
+    return public_issue_confidence_level(verification_status, checklist)
 
 
 def issue_list_payload(issue: dict) -> dict:

@@ -3783,6 +3783,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             apply_recovered_scan_jobs_locked(recovered_jobs)
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if worker_codex_quota_payload(record) is not None:
+            db.mark_running_worker_quota_refresh_telemetry(
+                worker_id,
+                timestamp=heartbeat_timestamp,
+            )
         running_jobs = public_scan_count(record.get("running_jobs"))
         if heartbeat_progress_context and updated_progress_job and active_job_ids_accepting_updates:
             progress_job = heartbeat_progress_context["job"]
@@ -4488,6 +4493,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 

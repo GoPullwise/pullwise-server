@@ -921,9 +921,13 @@ def worker_result_issue_count(body: dict) -> int:
 
 
 def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -> bool:
-    if status in {"done", "partial_completed"}:
+    if status == "done":
         return True
     if worker_progress_phase_should_finalize_quota(job.get("progress_phase")):
+        return True
+    envelope = review_worker_protocol_envelope(body)
+    progress_final = envelope.get("progress_final") if isinstance(envelope.get("progress_final"), dict) else {}
+    if worker_progress_phase_should_finalize_quota(progress_final.get("current_phase")):
         return True
     return False
 

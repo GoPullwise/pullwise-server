@@ -336,11 +336,13 @@ def initialize() -> None:
                     error TEXT,
                     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     started_at INTEGER,
+                    telemetry_received_at INTEGER,
                     completed_at INTEGER,
                     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
                 )
                 """
             )
+            ensure_column(connection, "worker_commands", "telemetry_received_at", "INTEGER")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_worker_commands_worker_status
@@ -2997,6 +2999,12 @@ def update_worker_command_status(record: dict[str, Any]) -> dict[str, Any] | Non
             existing_status = str(command["status"] or "")
             if existing_status in WORKER_COMMAND_TERMINAL_STATUSES:
                 return row_to_dict(command)
+            if (
+                status == "succeeded"
+                and command["command"] == "refresh_codex_quota"
+                and command["telemetry_received_at"] is None
+            ):
+                raise ValueError("Codex quota refresh must heartbeat refreshed telemetry before succeeding.")
             started_at = command["started_at"] or (timestamp if status == "running" else None)
             completed_at = timestamp if status in WORKER_COMMAND_TERMINAL_STATUSES else command["completed_at"]
             connection.execute(
@@ -3041,6 +3049,44 @@ def update_worker_command_status(record: dict[str, Any]) -> dict[str, Any] | Non
                     (command_id, worker_id),
                 ).fetchone()
             )
+
+
+def mark_running_worker_quota_refresh_telemetry(
+    worker_id: str,
+    *,
+    timestamp: int | None = None,
+) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_worker_id = str(worker_id or "").strip()
+    if not target_worker_id:
+        return None
+    recorded_at = int(timestamp if timestamp is not None else time.time())
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        with connection:
+            connection.execute(
+                """
+                UPDATE worker_commands
+                SET telemetry_received_at = COALESCE(telemetry_received_at, ?),
+                    updated_at = ?
+                WHERE worker_id = ?
+                  AND command = 'refresh_codex_quota'
+                  AND status = 'running'
+                """,
+                (recorded_at, recorded_at, target_worker_id),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM worker_commands
+                WHERE worker_id = ?
+                  AND command = 'refresh_codex_quota'
+                  AND status = 'running'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (target_worker_id,),
+            ).fetchone()
+    return row_to_dict(row)
 
 
 def cleanup_operational_records(

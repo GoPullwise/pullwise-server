@@ -2622,6 +2622,14 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(command["status"], "pending")
         self.assertTrue(db.get_worker(worker_id)["enabled"])
 
+        running = RouteHarness(
+            f"/worker/commands/{command['id']}/status",
+            {"worker_id": worker_id, "status": "running"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(running, "POST")
+        self.assertEqual(running.status, HTTPStatus.OK)
+
         fresh_quota = {
             "provider": "codex",
             "status": "low",
@@ -2647,6 +2655,47 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(detail.payload["worker"]["codexQuota"]["checkedAt"], 200)
         self.assertEqual(detail.payload["worker"]["codexQuota"]["remainingPercent"], 40)
         self.assertEqual(detail.payload["worker"]["latest_command"]["status"], "succeeded")
+
+    def test_quota_refresh_cannot_succeed_before_post_running_telemetry(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        initial_heartbeat = self.post_v1_heartbeat(
+            worker_id,
+            token,
+            codex_quota={
+                "provider": "codex",
+                "status": "ok",
+                "ready": True,
+                "checkedAt": 100,
+                "remainingPercent": 80,
+            },
+        )
+        self.assertEqual(initial_heartbeat.status, HTTPStatus.OK)
+        refresh = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(refresh, "POST")
+        command = refresh.payload["command"]
+        running = RouteHarness(
+            f"/worker/commands/{command['id']}/status",
+            {"worker_id": worker_id, "status": "running"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(running, "POST")
+        self.assertEqual(running.status, HTTPStatus.OK)
+
+        succeeded = RouteHarness(
+            f"/worker/commands/{command['id']}/status",
+            {"worker_id": worker_id, "status": "succeeded"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(succeeded, "POST")
+
+        self.assertEqual(succeeded.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("heartbeat", succeeded.payload["message"].lower())
+        self.assertEqual(db.get_worker_command(command["id"], worker_id=worker_id)["status"], "running")
 
     def test_admin_quota_refresh_rejects_offline_worker_without_leaving_command(self) -> None:
         payload, _token = self.create_worker()

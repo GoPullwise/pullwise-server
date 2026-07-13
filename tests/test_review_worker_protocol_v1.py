@@ -192,6 +192,38 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         self.assertTrue(all(app.worker_progress_phase_should_finalize_quota(phase) for phase in consuming))
         self.assertFalse(any(app.worker_progress_phase_should_finalize_quota(phase) for phase in non_consuming))
 
+    def test_partial_result_consumes_quota_only_after_billable_core_phase(self) -> None:
+        def body_with_phase(phase: str) -> dict:
+            return {
+                "reviewWorkerProtocol": {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "message_type": "review_run_result",
+                    "progress_final": {"current_phase": phase},
+                }
+            }
+
+        self.assertFalse(
+            app.worker_result_should_finalize_quota(
+                {"progress_phase": "prepare_workspace"},
+                body_with_phase("inventory_repository"),
+                status="partial_completed",
+            )
+        )
+        self.assertTrue(
+            app.worker_result_should_finalize_quota(
+                {"progress_phase": "risk_routing"},
+                body_with_phase("failure_handling"),
+                status="partial_completed",
+            )
+        )
+        self.assertTrue(
+            app.worker_result_should_finalize_quota(
+                {"progress_phase": "prepare_workspace"},
+                body_with_phase("repo_map"),
+                status="partial_completed",
+            )
+        )
+
     def test_worker_artifact_upload_payload_validates_hash_and_size(self) -> None:
         content = b"report"
         payload = app.worker_artifact_upload_payload(

@@ -4236,8 +4236,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
 
         payload = app.issue_payload(issue)
+        list_payload = app.issue_list_payload(issue)
 
         self.assertEqual(payload["verificationStatus"], "static_proof")
+        self.assertEqual(list_payload["verificationStatus"], payload["verificationStatus"])
+        self.assertEqual(list_payload["confidenceLevel"], payload["confidenceLevel"])
         self.assertEqual(payload["reportedVerificationStatus"], "verified")
         checklist = {item["label"]: item["met"] for item in payload["evidenceChecklist"]}
         self.assertTrue(checklist["Reproduction command"])
