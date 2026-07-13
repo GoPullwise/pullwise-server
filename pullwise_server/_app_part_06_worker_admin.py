@@ -978,7 +978,7 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     safe_worker_id = worker_safe_service_id(public["worker_id"])
     service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"
     service_log_dir = f"/var/log/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/log/pullwise-worker"
-    worker_runtime_root = f"{service_home}/workers/{public['worker_id']}"
+    worker_runtime_root = f"{service_home}/workers/{safe_worker_id or 'worker'}"
     del codex_install_options
     install_command = worker_install_command(
         install_url=install_url,
@@ -1275,7 +1275,7 @@ AUTH_COMMANDS_FILE="$CONFIG_DIR/auth-commands.txt"
 BIN_PATH="/usr/local/bin/$SERVICE_NAME"
 DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
 CHECKOUT_ROOT="$DATA_DIR/checkouts"
-WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$WORKER_ID"
+WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$SAFE_WORKER_ID"
 WORKER_VENV="$WORKER_RUNTIME_ROOT/.venv"
 LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
@@ -1768,7 +1768,6 @@ def worker_test_payload(worker: dict) -> dict:
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}
-
 
 
 

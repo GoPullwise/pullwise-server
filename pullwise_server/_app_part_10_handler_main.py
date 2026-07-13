@@ -4026,20 +4026,28 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             context = self.require_api_key_context("scans:read", allow_restricted=True)
             if not context:
                 return
-            repo_context = self.api_repository_context(context, segments[1])
-            if not repo_context:
-                return
-            repository = repo_context[0]
+            restrictions = context.get("restrictions") if isinstance(context.get("restrictions"), dict) else {}
+            restricted_bundle_key = restrictions.get("kind") == "audit_bundle"
+            requested_repo_id = clean_github_access_text(segments[1], allow_int=True) or ""
             scan_id = public_issue_text(segments[3])
             scans = user_scans_for_read_by_ids({"userId": context["user"]["id"]}, [scan_id])
             scan = scans[0] if scans else None
-            if not scan or not scan_matches_requested_repository(
-                scan,
-                requested_repo_id=repository["id"],
-                requested_repository=repository["full_name"],
-            ):
-                raise ResourceNotFound("Scan")
-            if not self.api_key_context_allows_audit_bundle(context, scan, requested_repo_id=repository["id"]):
+            if restricted_bundle_key:
+                if not scan or not scan_matches_requested_repository(scan, requested_repo_id=requested_repo_id):
+                    raise ResourceNotFound("Scan")
+            else:
+                repo_context = self.api_repository_context(context, requested_repo_id)
+                if not repo_context:
+                    return
+                repository = repo_context[0]
+                requested_repo_id = repository["id"]
+                if not scan or not scan_matches_requested_repository(
+                    scan,
+                    requested_repo_id=requested_repo_id,
+                    requested_repository=repository["full_name"],
+                ):
+                    raise ResourceNotFound("Scan")
+            if not self.api_key_context_allows_audit_bundle(context, scan, requested_repo_id=requested_repo_id):
                 return self.error(HTTPStatus.FORBIDDEN, "This API key cannot download this audit bundle.")
             filename_scan_id = audit_bundle_safe_artifact_name(public_issue_text(scan.get("id")) or "scan")
             cache_key = audit_bundle_cache_key(scan)

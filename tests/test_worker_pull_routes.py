@@ -4141,6 +4141,48 @@ class WorkerPullRoutesTest(unittest.TestCase):
         cache_files = os.listdir(app.audit_bundle_cache_dir())
         self.assertEqual(len([name for name in cache_files if name.endswith(".zip")]), 1)
 
+    def test_scan_audit_bundle_cache_key_changes_when_review_artifact_is_added(self) -> None:
+        scan = self.audit_bundle_cache_fixture()
+        job = db.create_scan_job(
+            {
+                "job_id": "job_cache_artifact",
+                "scan_id": scan["id"],
+                "repo": scan["repo"],
+                "branch": scan["branch"],
+                "commit": scan["commit"],
+                "status": "queued",
+                "created_at": scan["createdAt"],
+                "user_id": scan["userId"],
+            }
+        )
+        scan["jobId"] = job["job_id"]
+        claimed = db.claim_next_scan_job("wk_cache", create_review_run=True)
+        self.assertIsNotNone(claimed)
+        run_id = app.scan_job_attempt_run_id(claimed)
+        attempt_id = db.list_scan_job_attempts(job["job_id"])[0]["id"]
+        before = app.audit_bundle_cache_key(scan)
+
+        stored = db.store_review_run_artifact(
+            job_id=job["job_id"],
+            attempt_id=attempt_id,
+            artifact_id="art_intent_output",
+            payload={
+                "run_id": run_id,
+                "artifact": {
+                    "artifact_id": "art_intent_output",
+                    "kind": "intent_test_output",
+                    "name": "intent-test-output.log",
+                    "media_type": "text/plain",
+                    "sha256": "abc",
+                    "size_bytes": 3,
+                },
+            },
+        )
+        after = app.audit_bundle_cache_key(scan)
+
+        self.assertTrue(stored["accepted"])
+        self.assertNotEqual(before, after)
+
     def test_scan_audit_bundle_zip_cache_deduplicates_concurrent_generation(self) -> None:
         scan = self.audit_bundle_cache_fixture()
         entered = threading.Event()

@@ -120,7 +120,8 @@ class WorkerInstallerContractsTest(unittest.TestCase):
     def test_installer_scopes_codex_sqlite_state_and_config(self) -> None:
         script = app.worker_install_script()
 
-        self.assertIn('WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$WORKER_ID"', script)
+        self.assertIn('WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$SAFE_WORKER_ID"', script)
+        self.assertNotIn('WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$WORKER_ID"', script)
         self.assertIn('WORKER_VENV="$WORKER_RUNTIME_ROOT/.venv"', script)
         self.assertIn('CODEX_HOME="$WORKER_RUNTIME_ROOT/codex-home"', script)
         self.assertIn('CODEX_SQLITE_HOME="$WORKER_RUNTIME_ROOT/codex-sqlite"', script)
@@ -343,5 +344,4 @@ class WorkerInstallerContractsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

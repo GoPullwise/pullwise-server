@@ -1488,7 +1488,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
         worker_root = handler.payload["suggested_env"]["PULLWISE_WORKER_ROOT"]
-        self.assertTrue(worker_root.endswith(f"/workers/{handler.payload['worker_id']}"))
+        safe_worker_id = app.worker_safe_service_id(handler.payload["worker_id"])
+        self.assertTrue(worker_root.endswith(f"/workers/{safe_worker_id}"))
         self.assertEqual(
             handler.payload["suggested_env"]["PULLWISE_CODEX_COMMAND"],
             f"{worker_root}/.local/bin/codex",

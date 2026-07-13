@@ -1751,7 +1751,7 @@ def audit_bundle_cache_dir() -> str:
 
 
 def audit_bundle_cache_source(scan: dict) -> dict:
-    return {"scan": scan, "issues": scan_issue_records_for_read(scan)}
+    return {"scan": scan_payload(scan), "issues": scan_issue_records_for_read(scan)}
 
 
 def audit_bundle_cache_key(scan: dict) -> str:

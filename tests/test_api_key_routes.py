@@ -487,6 +487,15 @@ class ApiKeyRoutesTest(unittest.TestCase):
         self.assertEqual(temporary_bundle.content_type, "application/zip")
         self.assertEqual(temporary_repositories.status, HTTPStatus.FORBIDDEN)
 
+        app.USERS["usr_1"]["githubRepositoryAccess"]["authorizedUserId"] = "usr_other"
+        temporary_bundle_after_access_change = RouteHarness(
+            bundle_path,
+            headers={"Authorization": f"Bearer {temporary_token}"},
+        )
+        app.PullwiseHandler.route(temporary_bundle_after_access_change, "GET")
+        self.assertEqual(temporary_bundle_after_access_change.status, HTTPStatus.OK)
+        self.assertEqual(temporary_bundle_after_access_change.content_type, "application/zip")
+
         expired_token = f"{app.API_KEY_PREFIX}expired_bundle_token"
         db.create_api_key(
             {
