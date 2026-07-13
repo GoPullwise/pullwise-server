@@ -1974,6 +1974,86 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(handler.payload["removed"]["reviewRunEvents"], 1)
         self.assertEqual(handler.payload["removed"]["reviewArtifacts"], 1)
 
+    def test_admin_delete_user_removes_legacy_db_only_review_records(self) -> None:
+        scan = {
+            "id": "sc_legacy_db_only",
+            "userId": "usr_user",
+            "repo": "owner/legacy",
+            "branch": "main",
+            "commit": "abc1234",
+            "status": "running",
+            "createdAt": app.now(),
+        }
+        db.upsert_scan(scan)
+        job = db.create_scan_job(
+            {
+                "job_id": "job_legacy_db_only",
+                "scan_id": scan["id"],
+                "repo": scan["repo"],
+                "branch": scan["branch"],
+                "commit": scan["commit"],
+                "status": "queued",
+                "created_at": app.now(),
+                "user_id": scan["userId"],
+            }
+        )
+        claimed = db.claim_next_scan_job("wk_legacy")
+        run_id = claimed.get("run_id") or f"run_{job['job_id']}"
+        attempt_id = f"wk_legacy-{claimed['attempt']}"
+        db.upsert_review_run_claimed(claimed)
+        db.store_review_run_event(
+            {
+                "run_id": run_id,
+                "job_id": job["job_id"],
+                "worker_id": "wk_legacy",
+                "sequence": 1,
+                "event_type": "phase_started",
+                "phase": "repo_map",
+                "status": "running",
+                "progress": 10,
+            }
+        )
+        artifact_content = b"legacy db-only artifact"
+        db.store_review_run_artifact(
+            job_id=job["job_id"],
+            attempt_id=attempt_id,
+            artifact_id="art_legacy_log",
+            payload={
+                "run_id": run_id,
+                "artifact": {
+                    "artifact_id": "art_legacy_log",
+                    "kind": "worker_log",
+                    "name": "worker.log.jsonl",
+                    "media_type": "application/jsonl",
+                    "schema_id": "worker-log",
+                    "schema_version": "v1",
+                    "required": False,
+                    "sha256": hashlib.sha256(artifact_content).hexdigest(),
+                    "size_bytes": len(artifact_content),
+                },
+                "content_base64": base64.b64encode(artifact_content).decode("ascii"),
+            },
+        )
+        stored_artifact = db.get_review_run_artifact(run_id, "art_legacy_log")
+        artifact_path = Path(db.review_artifact_content_file_path(stored_artifact) or "")
+        self.assertTrue(artifact_path.exists())
+        with db.connect() as connection:
+            with connection:
+                connection.execute(
+                    "UPDATE scan_jobs SET user_id = '' WHERE job_id = ?",
+                    (job["job_id"],),
+                )
+
+        handler = RouteHarness("/admin/users/usr_user", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(handler, "DELETE")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertIsNone(db.get_scan_job(job["job_id"]))
+        self.assertIsNone(db.get_review_run(run_id))
+        self.assertEqual(db.list_review_run_events(run_id), [])
+        self.assertIsNone(db.get_review_run_artifact(run_id, "art_legacy_log"))
+        self.assertFalse(artifact_path.exists())
+
     def test_admin_cannot_delete_current_user(self) -> None:
         handler = RouteHarness("/admin/users/usr_admin", cookie=self.admin_cookie)
         app.PullwiseHandler.route(handler, "DELETE")

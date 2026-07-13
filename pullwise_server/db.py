@@ -299,6 +299,7 @@ def initialize() -> None:
                 ("workers", "worker_platform", "TEXT"),
                 ("workers", "registration_json", "TEXT"),
                 ("workers", "registered_at", "INTEGER"),
+                ("workers", "last_heartbeat_at", "INTEGER"),
             ):
                 ensure_column(connection, table, column, definition)
             normalize_workers_schema(connection)
@@ -6495,6 +6496,16 @@ def delete_user_related_records(user_id: str, scan_ids: list[str] | set[str] | N
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            durable_scan_rows = connection.execute(
+                "SELECT scan_id FROM scans WHERE user_id = ?",
+                (target_user_id,),
+            ).fetchall()
+            target_scan_ids = list(
+                dict.fromkeys(
+                    [*target_scan_ids, *(str(row["scan_id"] or "") for row in durable_scan_rows)]
+                )
+            )
+            target_scan_ids = [scan_id for scan_id in target_scan_ids if scan_id]
             job_predicates = ["user_id = ?"]
             job_parameters: list[str] = [target_user_id]
             if target_scan_ids:

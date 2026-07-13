@@ -226,7 +226,7 @@ def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     current = user.get("billing") or {}
     incoming_created = billing_event_created(update)
     current_created = billing_event_created({"eventCreated": current.get("lastEventCreated")})
-    if incoming_created is not None and current_created is not None and incoming_created < current_created:
+    if current_created is not None and (incoming_created is None or incoming_created < current_created):
         append_billing_subscription_event(user, update, current, stale=True)
         remember_billing_event(update, applied=False, stale=True)
         return False

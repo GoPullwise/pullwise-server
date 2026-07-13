@@ -2472,6 +2472,34 @@ class WorkerPullRoutesTest(unittest.TestCase):
         stored_quota = json.loads(stored_worker["codex_quota"])
         self.assertEqual([window["windowKind"] for window in stored_quota["windows"]], ["five_hour", "weekly"])
 
+    def test_worker_cannot_claim_when_codex_quota_is_exhausted_despite_ready_provider(self) -> None:
+        worker = {
+            "worker_id": "wk_quota_exhausted",
+            "enabled": 1,
+            "provider": "codex",
+            "provider_chain": json.dumps(["codex"]),
+            "running_jobs": 0,
+            "doctor_status": "ok",
+            "codex_ready": 1,
+            "ready_providers": json.dumps(["codex"]),
+            "codex_quota": json.dumps(
+                {
+                    "provider": "codex",
+                    "status": "exhausted",
+                    "ready": False,
+                    "reason": "codex_quota_exhausted",
+                    "remainingPercent": 0,
+                }
+            ),
+            "version": "0.1.0",
+            "last_heartbeat_at": 300,
+        }
+
+        allowed, status = app.worker_can_claim(worker, timestamp=300)
+
+        self.assertFalse(allowed)
+        self.assertEqual(status, "degraded")
+
     def create_registry_worker(self, worker_id: str) -> tuple[dict, str]:
         worker = db.create_worker({"worker_id": worker_id, "name": worker_id, "provider": "codex"})
         db.upsert_worker_heartbeat(
@@ -6367,4 +6395,3 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

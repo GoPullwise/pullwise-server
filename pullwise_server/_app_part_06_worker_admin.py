@@ -88,8 +88,15 @@ def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str
     doctor_status = public_issue_text(worker.get("doctor_status")).lower()
     codex_ready = worker.get("codex_ready")
     ready_providers = worker_record_ready_providers(worker)
-    provider_readiness_blocked = not ready_providers and (
-        codex_ready == 0 or doctor_status in {"degraded", "failed", "not_ready"}
+    codex_quota = worker_codex_quota_payload(worker) or {}
+    quota_readiness_blocked = (
+        codex_quota.get("ready") is False
+        or public_issue_text(codex_quota.get("status")).lower() == "exhausted"
+        or public_issue_text(codex_quota.get("reason")).lower() == "codex_quota_exhausted"
+    )
+    provider_readiness_blocked = quota_readiness_blocked or (
+        not ready_providers
+        and (codex_ready == 0 or doctor_status in {"degraded", "failed", "not_ready"})
     )
     if (
         not worker_version_compatible(worker)
@@ -1761,7 +1768,6 @@ def worker_test_payload(worker: dict) -> dict:
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}
-
 
 
 

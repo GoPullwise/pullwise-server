@@ -1370,6 +1370,46 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertIsNone(app.USERS["usr_1"]["billing"].get("lastEventCreated"))
         self.assertIsNone(app.BILLING_EVENTS["evt_bad_created"]["eventCreated"])
 
+    def test_unparseable_billing_event_cannot_overwrite_newer_ordered_state(self) -> None:
+        seed_session()
+        handler = HandlerHarness()
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "creem",
+                "customerId": "cus_1",
+                "status": "active",
+                "eventType": "subscription.update",
+                "eventId": "evt_ordered_newer",
+                "eventCreated": 200,
+            },
+        )
+
+        app.PullwiseHandler.apply_billing_update(
+            handler,
+            {
+                "userId": "usr_1",
+                "provider": "creem",
+                "customerId": "cus_1",
+                "status": "canceled",
+                "eventType": "subscription.canceled",
+                "eventId": "evt_unparseable_older",
+                "eventCreated": "not-a-timestamp",
+            },
+        )
+
+        billing_state = app.USERS["usr_1"]["billing"]
+        self.assertEqual(billing_state["status"], "active")
+        self.assertEqual(billing_state["lastEventCreated"], 200)
+        self.assertTrue(app.BILLING_EVENTS["evt_unparseable_older"]["stale"])
+        event = next(
+            item
+            for item in app.USERS["usr_1"]["billingSubscriptionEvents"]
+            if item["eventId"] == "evt_unparseable_older"
+        )
+        self.assertTrue(event["stale"])
+
     def test_creem_subscription_update_waits_for_checkout_customer_mapping(self) -> None:
         seed_session()
         handler = HandlerHarness()

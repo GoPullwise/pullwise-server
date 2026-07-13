@@ -126,6 +126,47 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertIsNotNone(row[columns.index("created_at")])
         self.assertIsNotNone(row[columns.index("updated_at")])
 
+    def test_initialize_adds_last_heartbeat_before_creating_worker_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            CREATE TABLE workers (
+                                worker_id TEXT PRIMARY KEY,
+                                name TEXT,
+                                token_hash TEXT UNIQUE,
+                                version TEXT,
+                                provider TEXT,
+                                provider_chain TEXT,
+                                enabled INTEGER NOT NULL DEFAULT 1,
+                                running_jobs INTEGER NOT NULL DEFAULT 0,
+                                hostname TEXT,
+                                region TEXT,
+                                last_error TEXT,
+                                status TEXT NOT NULL DEFAULT 'online',
+                                first_seen_at INTEGER NOT NULL DEFAULT 100,
+                                token_last_used_at INTEGER,
+                                disabled_at INTEGER,
+                                deleted_at INTEGER
+                            )
+                            """
+                        )
+                        connection.execute(
+                            "INSERT INTO workers (worker_id, name, provider) VALUES ('wk_partial', 'Partial worker', 'codex')"
+                        )
+
+                db.initialize()
+
+                with closing(sqlite3.connect(db_path)) as connection:
+                    columns = [row[1] for row in connection.execute("PRAGMA table_info(workers)").fetchall()]
+                    indexes = [row[1] for row in connection.execute("PRAGMA index_list(workers)").fetchall()]
+
+        self.assertIn("last_heartbeat_at", columns)
+        self.assertIn("idx_workers_scope_owner", indexes)
+
     def test_load_state_closes_initialize_and_read_connections(self) -> None:
         initialize_connection = FakeConnection()
         read_connection = FakeConnection([("users", "{}")])
