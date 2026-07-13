@@ -5948,7 +5948,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(row["progress"], 70)
         self.assertEqual(app.SCANS[0]["status"], "running")
 
-    def test_scan_list_isolates_rejected_worker_artifact_result_to_failed_row(self) -> None:
+    def test_scan_list_keeps_rejected_worker_artifact_result_retryable(self) -> None:
         app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
         app.SESSIONS = {
             "ses_1": {
@@ -6010,9 +6010,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(listing.status, HTTPStatus.OK)
         by_id = {item["id"]: item for item in listing.payload["items"]}
-        self.assertEqual(by_id["sc_bad_artifact_result"]["status"], "failed")
-        self.assertEqual(by_id["sc_bad_artifact_result"]["errorCode"], "WORKER_ARTIFACT_INVALID")
-        self.assertIn("art_worker_log", by_id["sc_bad_artifact_result"]["error"])
+        self.assertEqual(by_id["sc_bad_artifact_result"]["status"], "running")
+        self.assertNotIn("errorCode", by_id["sc_bad_artifact_result"])
+        self.assertEqual(db.get_scan_job(claimed["job_id"])["status"], "running")
     def test_scan_list_reconciles_completed_job_result_when_state_is_stale(self) -> None:
         app.USERS = {"usr_1": {"id": "usr_1", "name": "Owner", "providers": []}}
         app.SESSIONS = {

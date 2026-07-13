@@ -3964,9 +3964,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         try:
             result = apply_worker_job_result(job, body)
         except ValueError as exc:
-            if worker_completed_result_rejected_error(exc):
-                with STATE_LOCK:
-                    reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if result.get("conflict"):
             return self.json({"message": "Result checksum conflicts with an existing attempt result."}, HTTPStatus.CONFLICT)

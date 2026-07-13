@@ -6052,6 +6052,46 @@ def record_scan_job_result(
     return result or {"accepted": False, "duplicate": False, "conflict": True}
 
 
+def inspect_scan_job_result_submission(
+    job_id: str,
+    *,
+    attempt_id: str,
+    result_checksum: str,
+) -> dict[str, bool]:
+    ensure_initialized()
+    normalized_job_id = str(job_id or "").strip()
+    normalized_attempt_id = str(attempt_id or "").strip()
+    normalized_checksum = str(result_checksum or "").strip()
+    if not normalized_job_id or not normalized_attempt_id or not normalized_checksum:
+        raise ValueError("job_id, attempt_id, and result_checksum are required")
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        job = connection.execute(
+            "SELECT status, claimed_by_worker_id, attempt FROM scan_jobs WHERE job_id = ?",
+            (normalized_job_id,),
+        ).fetchone()
+        if not job:
+            return {"accepted": False, "duplicate": False, "conflict": True}
+        existing = connection.execute(
+            "SELECT result_checksum FROM job_results WHERE job_id = ? AND attempt_id = ?",
+            (normalized_job_id, normalized_attempt_id),
+        ).fetchone()
+        if existing:
+            duplicate = str(existing["result_checksum"] or "") == normalized_checksum
+            return {"accepted": duplicate, "duplicate": True, "conflict": not duplicate}
+        if job["status"] not in {"claimed", "running", "uploading_result"}:
+            return {"accepted": False, "duplicate": False, "conflict": True}
+        claimed_worker_id = str(job["claimed_by_worker_id"] or "")
+        try:
+            attempt = int(job["attempt"] or 0)
+        except (TypeError, ValueError):
+            attempt = 0
+        expected_attempt_id = f"{claimed_worker_id}-{attempt}" if claimed_worker_id and attempt else ""
+        if not expected_attempt_id or normalized_attempt_id != expected_attempt_id:
+            return {"accepted": False, "duplicate": False, "conflict": True}
+    return {"accepted": False, "duplicate": False, "conflict": False}
+
+
 def record_review_decision_events(events: list[dict[str, Any]]) -> dict[str, int]:
     ensure_initialized()
     sanitized = [event for event in events if isinstance(event, dict)]

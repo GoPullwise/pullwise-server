@@ -858,10 +858,25 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
     last_attempt_id = clean_github_access_text(job.get("last_attempt_id"))
     if attempt_id != expected_attempt_id and attempt_id != last_attempt_id:
         return {"accepted": False, "conflict": True}
+    checksum = worker_result_checksum(body)
+    submission = db.inspect_scan_job_result_submission(
+        str(job["job_id"]),
+        attempt_id=attempt_id,
+        result_checksum=checksum,
+    )
+    if submission.get("conflict"):
+        return {"accepted": False, "conflict": True}
+    if submission.get("duplicate"):
+        quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
+        result = {"accepted": True, "duplicate": True, "conflict": False, "issueCount": worker_result_issue_count(body)}
+        if quota_rollback.get("reservationReleased"):
+            result["quotaRelease"] = quota_rollback
+        elif quota_rollback.get("ledgerRows"):
+            result["quotaRollback"] = quota_rollback
+        return result
     review_worker_protocol = review_worker_protocol_envelope(body)
     if not review_worker_protocol:
         raise ValueError("Worker result must include reviewWorkerProtocol.")
-    checksum = worker_result_checksum(body)
     prepared_result = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     record_result = db.record_scan_job_result(
         str(job["job_id"]),
