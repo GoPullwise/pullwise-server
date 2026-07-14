@@ -41,6 +41,9 @@ directories.
 - Admin-created worker payloads must not expose Codex CLI command/release pinning fields; admin UI/API should not send `codexVersion`, `codexUseLatest`, or plan-level CLI command policy.
 - Default managed Codex automation uses the `openai-codex` Python SDK with OpenAI's official standalone CLI installed under the worker runtime root and passed through `PULLWISE_CODEX_COMMAND`; default `PULLWISE_CODEX_RELEASE` to `latest` so newly supported models do not remain blocked by the SDK-bundled CLI. Use `https://chatgpt.com/codex/install.sh`, never install `@openai/codex` directly, and preserve the worker-local path in installer env plus admin suggested env.
 - Worker Python packages, including `pullwise-worker`, `openai-codex`, `openai-codex-cli-bin`, and transitive runtime dependencies, must be installed into the worker instance venv under `$WORKER_RUNTIME_ROOT/.venv`; do not install them into global/system Python. Host-level package installation is only for OS dependencies such as Python, git, bwrap, systemd helpers, and logrotate.
+- Installer rollback may disable/remove only units created by the failed
+  attempt. Preserve pre-existing active worker/watcher units and their enabled
+  state when a replacement install fails.
 
 ## Worker Codex Runtime Concurrency
 
@@ -308,6 +311,10 @@ counter set from the v1.2 spec (`source_like_files_*`, `bundles_*`,
 `reviewer_runs_*`, `intent_tests_*`, `validator_candidates_*`, and
 `artifacts_*`), and an `active_unit` object; malformed snapshots should be
 rejected instead of accepted as partial progress.
+Heartbeat `progress.updated_at` is a timezone-bearing RFC3339/ISO-8601 string,
+not a numeric scan-storage timestamp. Reject non-finite percentages and
+fractional event/heartbeat sequences at the protocol boundary before they can
+enter progress persistence.
 V1 heartbeats may also carry Codex app-server quota telemetry as `codex_quota`.
 Persist the sanitized quota payload, expose it through worker/admin status, and
 do not remove it while refactoring readiness, lease eligibility, or worker
@@ -411,6 +418,9 @@ quota to workspace quota.
   phase as a quota-consumption trigger. Release the reservation when a worker
   never reaches a billable core review phase. Keep idempotency and rollback
   paths aligned with both bucket ids.
+- Billable-phase evidence and refundable-reservation rollback must be derived
+  from durable job/run/event storage, not only the process-local scan mirror,
+  so cold-memory restart paths consume or refund both quota buckets correctly.
 - UI/API copy should say account, user, repository, or repo; avoid introducing
   workspace unless referring to a local checkout/worktree in the generic
   filesystem sense.
@@ -477,5 +487,9 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 
 - `app.main()` constructs `PullwiseThreadingHTTPServer`, not the stdlib `ThreadingHTTPServer` symbol. Tests that call `app.main()` must patch `app.PullwiseThreadingHTTPServer` so they do not start a real `serve_forever()` loop in CI.
 - Scan request IDs are globally idempotent per requesting user, not per repository. Quota reservation must atomically detect the same user/request ID across repositories so concurrent requests cannot reserve twice; route code decides whether the existing repository is a dedupe or `IDEMPOTENCY_KEY_REUSED` conflict.
+- Persisted issue row IDs must be globally collision-safe across scans; raw
+  worker finding IDs are source identities and may repeat in different runs.
+- `git-watch.sh` single-instance exclusion must use an OS-held lock such as
+  `flock`; a stale directory left by a crash must not block updates forever.
 - V1 heartbeat payloads must contain `active_run_id` explicitly, including `null` while idle. Terminal wrapper status maps exactly to execution status: `done/completed`, `failed/failed`, `cancelled/cancelled`, and `partial_completed/partial_completed`.
 - Preserve worker validator disposition when constructing issues: plausible stays `potential_risk`; confirmed static evidence is `static_proof`; only confirmed dynamic evidence with a command plus output/log may become `verified`. Audit bundles include redacted `intent_test_output` artifacts and localize Markdown to the scan output language.
