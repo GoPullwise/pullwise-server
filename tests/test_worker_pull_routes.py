@@ -2213,6 +2213,23 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("Invalid review-worker-protocol/v1 heartbeat", heartbeat.payload["message"])
 
+    def test_v1_worker_heartbeat_accepts_rfc3339_offset_progress_timestamp(self) -> None:
+        self.create_claimable_scan_job(
+            job_id="job_offset_timestamp",
+            scan_id="scan_offset_timestamp",
+            user_id="usr_1",
+        )
+        lease = self.v1_lease()
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+        payload = v1_worker_heartbeat_payload(status="busy", run_id=job["run_id"])
+        payload["progress"]["updated_at"] = "2026-07-01T18:42:00+08:00"
+
+        heartbeat = RouteHarness("/v1/workers/wk_1/heartbeat", payload, headers=self.auth)
+        app.PullwiseHandler.route(heartbeat, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
     def test_worker_event_rejects_fractional_sequence_without_persisting_it(self) -> None:
         self.create_claimable_scan_job(
             job_id="job_fractional_sequence",
