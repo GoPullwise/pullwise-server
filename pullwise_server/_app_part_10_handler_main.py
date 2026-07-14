@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import datetime
 import io
 import json
 import math
@@ -45,6 +46,16 @@ WORKER_V1_PROGRESS_PHASE_STATUSES = {
     "degraded",
     "blocked",
 }
+
+
+def worker_v1_progress_timestamp(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        parsed = datetime.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log", "debug_bundle"}
 WORKER_REVIEW_ARTIFACT_KINDS = {
     "report.human",
@@ -195,7 +206,7 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
         if isinstance(last_event_sequence, bool) or not isinstance(last_event_sequence, int) or last_event_sequence < 0:
             errors.append("active heartbeat progress.last_event_sequence must be a non-negative integer")
         updated_at = progress.get("updated_at")
-        if not isinstance(updated_at, str) or not pull_request_timestamp(updated_at):
+        if not worker_v1_progress_timestamp(updated_at):
             errors.append("active heartbeat progress.updated_at must be a valid timestamp")
         if "steps" in progress and not isinstance(progress.get("steps"), list):
             errors.append("active heartbeat progress.steps must be a list")
