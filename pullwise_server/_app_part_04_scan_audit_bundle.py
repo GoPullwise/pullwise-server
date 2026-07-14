@@ -523,11 +523,14 @@ def scan_estimate_validation_error(value: object, *, field_name: str = "estimate
         seconds: dict[str, int] = {}
         for key in seconds_keys:
             raw = value.get(key)
-            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)):
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
                 return f"{field_name}.{key} must be a finite number"
-            if float(raw) < 0 or float(raw) > MAX_SCAN_ESTIMATE_SECONDS:
+            if raw < 0 or raw > MAX_SCAN_ESTIMATE_SECONDS:
                 return f"{field_name}.{key} is out of range"
-            if not float(raw).is_integer():
+            normalized_number = float(raw)
+            if not math.isfinite(normalized_number):
+                return f"{field_name}.{key} must be a finite number"
+            if not normalized_number.is_integer():
                 return f"{field_name}.{key} must be whole seconds"
             seconds[key] = int(raw)
         if not seconds["lowerSeconds"] <= seconds["remainingSeconds"] <= seconds["upperSeconds"]:

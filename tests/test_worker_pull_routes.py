@@ -5001,6 +5001,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         huge = current_run_estimate()
         huge["upperSeconds"] = 99_999_999
         invalid_estimates["huge"] = huge
+        enormous_integer = current_run_estimate()
+        enormous_integer["upperSeconds"] = 10**1000
+        invalid_estimates["enormous_integer"] = enormous_integer
         reversed_range = current_run_estimate()
         reversed_range["lowerSeconds"] = reversed_range["remainingSeconds"] + 1
         invalid_estimates["reversed"] = reversed_range
