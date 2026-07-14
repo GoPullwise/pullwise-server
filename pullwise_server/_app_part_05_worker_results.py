@@ -785,6 +785,7 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
                 "resultChecksum": checksum,
             }
         )
+        scan.pop("estimate", None)
         if status == "failed" and error_code:
             scan["errorCode"] = error_code
         else:

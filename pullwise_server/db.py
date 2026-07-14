@@ -2450,6 +2450,8 @@ def _review_run_progress_values(event: dict[str, Any]) -> tuple[str, str, str, i
     }.get(event_type)
     status = terminal_status or "running"
     completed_at = timestamp if terminal_status else None
+    if not terminal_status and isinstance(event.get("estimate"), dict):
+        progress_payload["estimate"] = event.get("estimate")
     return run_id, job_id, worker_id, timestamp, completed_at, status, run_json_text(progress_payload), terminal_status
 
 

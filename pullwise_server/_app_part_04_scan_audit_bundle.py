@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import datetime
+import math
+
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 from . import _app_part_03_billing_pages as _previous_app_part
@@ -472,6 +475,102 @@ def review_run_record_for_scan(scan: dict) -> dict | None:
     return run if isinstance(run, dict) else None
 
 
+MAX_SCAN_ESTIMATE_SECONDS = 31 * 24 * 60 * 60
+MAX_SCAN_ESTIMATE_PARALLEL_UNITS = 1_000_000
+SCAN_ESTIMATE_STATES = {"estimating", "available", "unavailable"}
+SCAN_ESTIMATE_CONFIDENCE = {"low", "medium", "high"}
+
+
+def scan_estimate_validation_error(value: object, *, field_name: str = "estimate") -> str | None:
+    if not isinstance(value, dict):
+        return f"{field_name} must be an object"
+    state = public_issue_text(value.get("state"))
+    if state not in SCAN_ESTIMATE_STATES:
+        return f"{field_name}.state is invalid"
+    if public_issue_text(value.get("basis")) != "current_run_work_graph":
+        return f"{field_name}.basis must be current_run_work_graph"
+    updated_at = public_issue_text(value.get("updatedAt"))
+    try:
+        parsed_updated_at = datetime.datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        parsed_updated_at = None
+    if parsed_updated_at is None or parsed_updated_at.tzinfo is None:
+        return f"{field_name}.updatedAt must be an ISO-8601 timestamp with timezone"
+
+    parallel = value.get("parallel")
+    if not isinstance(parallel, dict):
+        return f"{field_name}.parallel must be an object"
+    parallel_values: dict[str, int] = {}
+    for key in (
+        "configuredConcurrency",
+        "effectiveConcurrency",
+        "activeUnits",
+        "pendingUnits",
+        "retryingUnits",
+    ):
+        raw = parallel.get(key)
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            return f"{field_name}.parallel.{key} must be an integer"
+        minimum = 1 if key == "configuredConcurrency" else 0
+        if raw < minimum or raw > MAX_SCAN_ESTIMATE_PARALLEL_UNITS:
+            return f"{field_name}.parallel.{key} is out of range"
+        parallel_values[key] = raw
+    if parallel_values["effectiveConcurrency"] > parallel_values["configuredConcurrency"]:
+        return f"{field_name}.parallel.effectiveConcurrency cannot exceed configuredConcurrency"
+
+    seconds_keys = ("lowerSeconds", "remainingSeconds", "upperSeconds")
+    if state == "available":
+        seconds: dict[str, int] = {}
+        for key in seconds_keys:
+            raw = value.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)):
+                return f"{field_name}.{key} must be a finite number"
+            if float(raw) < 0 or float(raw) > MAX_SCAN_ESTIMATE_SECONDS:
+                return f"{field_name}.{key} is out of range"
+            if not float(raw).is_integer():
+                return f"{field_name}.{key} must be whole seconds"
+            seconds[key] = int(raw)
+        if not seconds["lowerSeconds"] <= seconds["remainingSeconds"] <= seconds["upperSeconds"]:
+            return f"{field_name} interval must satisfy lowerSeconds <= remainingSeconds <= upperSeconds"
+        if public_issue_text(value.get("confidence")) not in SCAN_ESTIMATE_CONFIDENCE:
+            return f"{field_name}.confidence is invalid"
+    elif any(key in value for key in (*seconds_keys, "confidence")):
+        return f"{field_name} timing fields are only allowed when state is available"
+    return None
+
+
+def public_scan_estimate(value: object) -> dict:
+    if scan_estimate_validation_error(value):
+        return {}
+    source = value if isinstance(value, dict) else {}
+    parallel = source.get("parallel") if isinstance(source.get("parallel"), dict) else {}
+    payload = {
+        "state": public_issue_text(source.get("state")),
+        "basis": "current_run_work_graph",
+        "updatedAt": public_issue_text(source.get("updatedAt")),
+        "parallel": {
+            key: int(parallel[key])
+            for key in (
+                "configuredConcurrency",
+                "effectiveConcurrency",
+                "activeUnits",
+                "pendingUnits",
+                "retryingUnits",
+            )
+        },
+    }
+    if payload["state"] == "available":
+        payload.update(
+            {
+                "remainingSeconds": int(source["remainingSeconds"]),
+                "lowerSeconds": int(source["lowerSeconds"]),
+                "upperSeconds": int(source["upperSeconds"]),
+                "confidence": public_issue_text(source.get("confidence")),
+            }
+        )
+    return payload
+
+
 def public_review_run_payload(scan: dict) -> dict:
     run = review_run_record_for_scan(scan)
     if not run:
@@ -487,7 +586,6 @@ def public_review_run_payload(scan: dict) -> dict:
         "protocolVersion": public_issue_text(run.get("protocol_version")),
         "workerVersion": public_issue_text(run.get("worker_version")),
         "engine": {"type": public_issue_text(run.get("engine_type"))} if public_issue_text(run.get("engine_type")) else {},
-        "codexThreadId": public_issue_text(run.get("codex_thread_id")),
         "startedAt": pull_request_timestamp(run.get("started_at")) or 0,
         "completedAt": pull_request_timestamp(run.get("completed_at")) or 0,
         "durationMs": public_scan_count(run.get("duration_ms")),
@@ -570,6 +668,13 @@ def scan_payload(scan: dict) -> dict:
             progress_steps = public_scan_progress_steps(review_progress.get("steps"))
             if progress_steps:
                 payload["progressSteps"] = progress_steps
+    if status == "running":
+        estimate = public_scan_estimate(scan.get("estimate"))
+        if not estimate and review_run:
+            review_progress = review_run.get("progress") if isinstance(review_run.get("progress"), dict) else {}
+            estimate = public_scan_estimate(review_progress.get("estimate"))
+        if estimate:
+            payload["estimate"] = estimate
     reading_guide = public_result_reading_guide(scan.get("readingGuide"))
     if reading_guide:
         payload["readingGuide"] = reading_guide
@@ -710,6 +815,10 @@ def scan_list_payload(scan: dict, issue_summary: dict | None = None) -> dict:
     progress_steps = public_scan_progress_steps(scan.get("progressSteps") or scan.get("progress_steps"))
     if progress_steps:
         payload["progressSteps"] = progress_steps
+    if status == "running":
+        estimate = public_scan_estimate(scan.get("estimate"))
+        if estimate:
+            payload["estimate"] = estimate
     effective_agent_config = public_scan_agent_config(scan.get("effectiveAgentConfig"))
     if effective_agent_config:
         payload["effectiveAgentConfig"] = effective_agent_config

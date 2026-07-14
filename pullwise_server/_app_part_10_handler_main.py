@@ -171,6 +171,13 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
                 worker_v1_progress_counter(counters.get(counter_key), counter_key, errors)
         if not isinstance(progress.get("active_unit"), dict):
             errors.append("active heartbeat progress.active_unit must be an object")
+        if "estimate" in progress:
+            estimate_error = scan_estimate_validation_error(
+                progress.get("estimate"),
+                field_name="active heartbeat progress.estimate",
+            )
+            if estimate_error:
+                errors.append(estimate_error)
 
     codex_app_server = body.get("codex_app_server")
     if not isinstance(codex_app_server, dict):
@@ -289,6 +296,17 @@ def worker_v1_event_validation_error(body: dict, run_id: str, worker_id: str) ->
     worker_v1_progress_number(progress.get("current_phase_percent"), "current_phase_percent", errors)
     if not public_issue_text(progress.get("status")):
         errors.append("progress.status is required")
+    if "estimate" in progress:
+        event_type = public_issue_text(body.get("event_type"))
+        if event_type in {"run_completed", "run_failed", "run_cancelled", "run_partial_completed"}:
+            errors.append("terminal progress must not include estimate")
+        else:
+            estimate_error = scan_estimate_validation_error(
+                progress.get("estimate"),
+                field_name="progress.estimate",
+            )
+            if estimate_error:
+                errors.append(estimate_error)
     if "data" in body and not isinstance(body.get("data"), dict):
         errors.append("data must be an object when present")
     return "; ".join(errors[:12]) if errors else None
@@ -3422,6 +3440,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, f"Invalid review-worker-protocol/v1 event: {validation_error}")
         phase = public_scan_phase(body.get("phase"))
         progress_payload = body.get("progress") if isinstance(body.get("progress"), dict) else {}
+        estimate_payload = public_scan_estimate(progress_payload.get("estimate"))
         data_payload = body.get("data") if isinstance(body.get("data"), dict) else {}
         progress_steps = public_scan_progress_steps(
             progress_payload.get("steps")
@@ -3450,6 +3469,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "created_at": event_created_at,
         }
         progress_record = {**event_record, "steps": progress_steps}
+        if estimate_payload:
+            progress_record["estimate"] = estimate_payload
         scan_job_progress = None
         if not terminal_event_after_result:
             scan_job_progress = {
@@ -3510,11 +3531,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 }
                 if progress_steps:
                     update["progressSteps"] = progress_steps
+                if estimate_payload:
+                    update["estimate"] = estimate_payload
                 progress_logs = append_scan_progress_log(scan, progress_entry)
                 if progress_logs:
                     update["progressLogs"] = progress_logs
                 should_persist_scan_mirror = worker_event_should_persist_scan_mirror(scan, event_type, now())
                 scan.update(update)
+                if event_type in {"run_completed", "run_failed", "run_cancelled", "run_partial_completed"}:
+                    scan.pop("estimate", None)
                 if should_persist_scan_mirror:
                     db.upsert_scan(scan)
                 mark_state_dirty()
@@ -3722,6 +3747,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 or progress_snapshot.get("progressSteps")
                 or progress_snapshot.get("progress_steps")
             )
+            estimate_payload = public_scan_estimate(progress_snapshot.get("estimate"))
             heartbeat_progress_record = {
                 "run_id": progress_run_id,
                 "job_id": public_issue_text(progress_job.get("job_id")),
@@ -3736,6 +3762,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "steps": progress_steps,
                 "created_at": heartbeat_timestamp,
             }
+            if estimate_payload:
+                heartbeat_progress_record["estimate"] = estimate_payload
             heartbeat_scan_job_progress = {
                 "job_id": public_issue_text(progress_job.get("job_id")),
                 "phase": phase,
@@ -3752,6 +3780,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "progress": progress_value,
                 "message": progress_message,
                 "steps": progress_steps,
+                "estimate": estimate_payload,
             }
         updated_progress_job = None
         command = None
@@ -3811,6 +3840,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             "updatedAt": heartbeat_timestamp,
                             "runId": heartbeat_progress_context["run_id"],
                             **({"progressSteps": heartbeat_progress_context["steps"]} if heartbeat_progress_context["steps"] else {}),
+                            **({"estimate": heartbeat_progress_context["estimate"]} if heartbeat_progress_context["estimate"] else {}),
                         }
                     )
                     mark_state_dirty()

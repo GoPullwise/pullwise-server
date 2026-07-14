@@ -329,6 +329,25 @@ def v1_worker_heartbeat_payload(*, status: str = "idle", run_id: str | None = No
     return payload
 
 
+def current_run_estimate(*, concurrency: int = 3, remaining_seconds: int = 900) -> dict:
+    return {
+        "state": "available",
+        "basis": "current_run_work_graph",
+        "remainingSeconds": remaining_seconds,
+        "lowerSeconds": max(0, remaining_seconds - 120),
+        "upperSeconds": remaining_seconds + 180,
+        "confidence": "medium",
+        "updatedAt": "2026-07-01T10:42:00Z",
+        "parallel": {
+            "configuredConcurrency": concurrency,
+            "effectiveConcurrency": concurrency,
+            "activeUnits": min(2, concurrency),
+            "pendingUnits": 6,
+            "retryingUnits": 0,
+        },
+    }
+
+
 def v1_worker_lease_payload() -> dict:
     return {
         "protocol_version": "review-worker-protocol/v1",
@@ -2608,6 +2627,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         headers: dict | None = None,
         data: dict | None = None,
         progress_steps: list[dict] | None = None,
+        estimate: dict | None = None,
     ) -> RouteHarness:
         run_id = str(job.get("run_id") or f"run_{job.get('job_id')}")
         payload = {
@@ -2628,6 +2648,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         if progress_steps is not None:
             payload["progress"]["steps"] = progress_steps
+        if estimate is not None:
+            payload["progress"]["estimate"] = estimate
         if data is not None:
             payload["data"] = data
         handler = RouteHarness(f"/v1/review-runs/{run_id}/events", payload, headers=headers or self.auth)
@@ -4882,6 +4904,194 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["logsSummary"], "progress_updated")
         self.assertIsInstance(payload.get("updatedAt"), int)
 
+    def test_worker_eta_persists_and_batch_status_exposes_arbitrary_concurrency(self) -> None:
+        user = {"id": "usr_eta", "name": "ETA owner", "providers": []}
+        app.USERS = {user["id"]: user}
+        app.SESSIONS = {
+            "ses_eta": {
+                "id": "ses_eta",
+                "userId": user["id"],
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        scan = {
+            "id": "sc_eta_contract",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": user["id"],
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+
+        for sequence, concurrency in enumerate((1, 3, 8), start=1):
+            response = self.v1_event(
+                job,
+                sequence=sequence,
+                phase="reviewer_fanout",
+                progress=40 + sequence,
+                estimate=current_run_estimate(
+                    concurrency=concurrency,
+                    remaining_seconds=1_000 - (sequence * 100),
+                ),
+            )
+            self.assertEqual(response.status, HTTPStatus.OK)
+
+        with db.connect() as connection:
+            connection.execute(
+                "UPDATE review_runs SET codex_thread_id = ? WHERE run_id = ?",
+                ("internal-thread-must-not-leak", job["run_id"]),
+            )
+        stored_progress = json.loads(db.get_review_run(job["run_id"])["progress_json"])
+        self.assertEqual(stored_progress["estimate"]["parallel"]["configuredConcurrency"], 8)
+        public_payload = app.scan_payload(app.SCANS[0])
+        self.assertEqual(public_payload["estimate"], stored_progress["estimate"])
+        self.assertNotIn("codexThreadId", public_payload["reviewRun"])
+
+        batch = RouteHarness(
+            "/scans/status",
+            {"ids": [scan["id"]]},
+            headers={"Cookie": "pw_session=ses_eta"},
+        )
+        app.PullwiseHandler.route(batch, "POST")
+
+        self.assertEqual(batch.status, HTTPStatus.OK)
+        self.assertEqual(batch.payload["items"][0]["estimate"], stored_progress["estimate"])
+
+    def test_worker_eta_rejects_invalid_numbers_ranges_and_terminal_payloads(self) -> None:
+        scan = {
+            "id": "sc_eta_invalid",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+
+        invalid_estimates: dict[str, dict] = {}
+        negative = current_run_estimate()
+        negative["remainingSeconds"] = -1
+        invalid_estimates["negative"] = negative
+        not_a_number = current_run_estimate()
+        not_a_number["remainingSeconds"] = float("nan")
+        invalid_estimates["nan"] = not_a_number
+        infinite = current_run_estimate()
+        infinite["upperSeconds"] = float("inf")
+        invalid_estimates["infinite"] = infinite
+        huge = current_run_estimate()
+        huge["upperSeconds"] = 99_999_999
+        invalid_estimates["huge"] = huge
+        reversed_range = current_run_estimate()
+        reversed_range["lowerSeconds"] = reversed_range["remainingSeconds"] + 1
+        invalid_estimates["reversed"] = reversed_range
+
+        for label, estimate in invalid_estimates.items():
+            with self.subTest(label=label):
+                response = self.v1_event(job, sequence=1, estimate=estimate)
+                self.assertEqual(response.status, HTTPStatus.BAD_REQUEST)
+                self.assertIn("estimate", response.payload["message"])
+        self.assertEqual(db.list_review_run_events(job["run_id"]), [])
+
+        terminal = self.v1_event(
+            job,
+            sequence=1,
+            event_type="run_failed",
+            estimate=current_run_estimate(),
+        )
+        self.assertEqual(terminal.status, HTTPStatus.BAD_REQUEST)
+
+        heartbeat_payload = v1_worker_heartbeat_payload(status="busy", run_id=job["run_id"])
+        heartbeat_payload["progress"]["estimate"] = negative
+        heartbeat = RouteHarness(
+            "/v1/workers/wk_1/heartbeat",
+            heartbeat_payload,
+            headers=self.auth,
+        )
+        app.PullwiseHandler.route(heartbeat, "POST")
+        self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("estimate", heartbeat.payload["message"])
+
+    def test_worker_heartbeat_eta_is_persisted_and_terminal_result_clears_scan_eta(self) -> None:
+        scan = {
+            "id": "sc_eta_terminal",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        estimate = current_run_estimate(concurrency=3)
+        heartbeat_payload = v1_worker_heartbeat_payload(status="busy", run_id=job["run_id"])
+        heartbeat_payload["progress"]["estimate"] = estimate
+        heartbeat = RouteHarness(
+            "/v1/workers/wk_1/heartbeat",
+            heartbeat_payload,
+            headers=self.auth,
+        )
+        with patch.dict(os.environ, {"PULLWISE_HEARTBEAT_PROGRESS_PERSIST_SECONDS": "0"}, clear=False):
+            app.PullwiseHandler.route(heartbeat, "POST")
+
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+        self.assertEqual(json.loads(db.get_review_run(job["run_id"])["progress_json"])["estimate"], estimate)
+        self.assertEqual(app.scan_payload(app.SCANS[0])["estimate"], estimate)
+
+        terminal_event = self.v1_event(
+            job,
+            sequence=5,
+            event_type="run_failed",
+            phase="failure_handling",
+            progress=80,
+            message="Run failed.",
+        )
+        self.assertEqual(terminal_event.status, HTTPStatus.OK)
+        self.assertNotIn("estimate", app.SCANS[0])
+        self.assertNotIn("estimate", json.loads(db.get_review_run(job["run_id"])["progress_json"]))
+
+        result = self.v1_result(
+            job,
+            {
+                "status": "failed",
+                "attempt_id": f"wk_1-{job['attempt']}",
+                "result_checksum": "checksum-eta-terminal",
+                "error": "Worker failed after reporting ETA.",
+                **audit_result_fields([], execution_status="failed"),
+            },
+        )
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertNotIn("estimate", app.SCANS[0])
+        self.assertNotIn("estimate", app.scan_payload(app.SCANS[0]))
+
     def test_delayed_lower_sequence_event_cannot_overwrite_newer_scan_progress(self) -> None:
         scan = {
             "id": "sc_event_order",
@@ -4921,6 +5131,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 phase="repo_map",
                 progress=10,
                 message="Older progress",
+                estimate=current_run_estimate(concurrency=1, remaining_seconds=1_200),
             )
 
         def send_second() -> None:
@@ -4932,6 +5143,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                     phase="reviewer_fanout",
                     progress=80,
                     message="Newer progress",
+                    estimate=current_run_estimate(concurrency=8, remaining_seconds=300),
                 )
             finally:
                 second_finished.set()
@@ -4950,8 +5162,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(responses["second"].status, HTTPStatus.OK)
         self.assertEqual(app.SCANS[0]["phase"], "reviewer_fanout")
         self.assertEqual(app.SCANS[0]["progress"], 80)
+        self.assertEqual(app.SCANS[0]["estimate"]["remainingSeconds"], 300)
         stored_run = db.get_review_run(job["run_id"])
-        self.assertEqual(json.loads(stored_run["progress_json"])["sequence"], 2)
+        stored_progress = json.loads(stored_run["progress_json"])
+        self.assertEqual(stored_progress["sequence"], 2)
+        self.assertEqual(stored_progress["estimate"]["remainingSeconds"], 300)
 
     def test_failed_worker_result_does_not_requeue(self) -> None:
         user = {"id": "usr_no_retry_worker", "name": "Owner", "providers": []}
