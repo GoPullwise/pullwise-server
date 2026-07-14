@@ -4820,6 +4820,7 @@ def replace_scan_issues(
     job_id: str = "",
     issues: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     timestamp: int | None = None,
+    preserve_existing_status: bool = False,
 ) -> list[dict[str, Any]]:
     ensure_initialized()
     target_scan_id = str(scan_id or "").strip()
@@ -4851,8 +4852,39 @@ def replace_scan_issues(
             if target_job_id:
                 clauses.append("job_id = ?")
                 params.append(target_job_id)
+            existing_statuses: dict[str, tuple[str, int, dict[str, Any]]] = {}
+            if preserve_existing_status:
+                rows = connection.execute(
+                    f"SELECT issue_id, status, updated_at, payload FROM issues WHERE {' AND '.join(clauses)}",
+                    tuple(params),
+                ).fetchall()
+                for row in rows:
+                    issue_id = str(row["issue_id"] or "").strip()
+                    if not issue_id:
+                        continue
+                    payload = issue_from_row(row) or {}
+                    existing_statuses[issue_id] = (
+                        str(row["status"] or payload.get("status") or "open").strip().lower()
+                        or "open",
+                        max(0, int(row["updated_at"] or 0)),
+                        payload,
+                    )
             connection.execute(f"DELETE FROM issues WHERE {' AND '.join(clauses)}", tuple(params))
             for fields in fields_list:
+                existing_status = existing_statuses.get(fields["issue_id"])
+                if existing_status:
+                    status, updated_at, existing_payload = existing_status
+                    payload = dict(fields["payload"])
+                    payload["status"] = status
+                    existing_payload_updated_at = existing_payload.get("updatedAt")
+                    payload["updatedAt"] = (
+                        existing_payload_updated_at
+                        if existing_payload_updated_at is not None
+                        else updated_at
+                    )
+                    fields["status"] = status
+                    fields["updated_at"] = updated_at
+                    fields["payload"] = payload
                 connection.execute(
                     """
                     INSERT INTO issues (

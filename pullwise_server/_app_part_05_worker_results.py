@@ -820,6 +820,13 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["progressMessage"] = progress_message
         changed = before != json.dumps(db.to_jsonable(scan), sort_keys=True)
         if status in {"done", "partial_completed"}:
+            stored_findings = db.replace_scan_issues(
+                public_issue_text(scan.get("id")),
+                user_id=public_issue_text(scan.get("userId")),
+                job_id=public_issue_text(job.get("job_id")),
+                issues=normalized_findings,
+                preserve_existing_status=True,
+            )
             if memory_scan is not None:
                 before_issues = json.dumps(
                     db.to_jsonable([issue for issue in ISSUES if issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id")]),
@@ -830,15 +837,9 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
                     for issue in ISSUES
                     if not (issue.get("scanId") == scan.get("id") and issue.get("jobId") == job.get("job_id"))
                 ]
-                ISSUES.extend(normalized_findings)
-                after_issues = json.dumps(db.to_jsonable(normalized_findings), sort_keys=True)
+                ISSUES.extend(stored_findings)
+                after_issues = json.dumps(db.to_jsonable(stored_findings), sort_keys=True)
                 changed = changed or before_issues != after_issues
-            db.replace_scan_issues(
-                public_issue_text(scan.get("id")),
-                user_id=public_issue_text(scan.get("userId")),
-                job_id=public_issue_text(job.get("job_id")),
-                issues=normalized_findings,
-            )
     if changed:
         db.upsert_scan(scan)
         if memory_scan is not None:
