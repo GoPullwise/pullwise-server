@@ -719,7 +719,13 @@ class DatabaseContractsTest(unittest.TestCase):
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
             with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
                 db.initialize()
-                for worker_id in ("wk_old_pending", "wk_recent_pending", "wk_old_running", "wk_stop_pending"):
+                for worker_id in (
+                    "wk_old_pending",
+                    "wk_recent_pending",
+                    "wk_old_running",
+                    "wk_recent_running",
+                    "wk_stop_pending",
+                ):
                     db.create_worker({"worker_id": worker_id, "name": worker_id})
                     db.upsert_worker_heartbeat(
                         {
@@ -741,6 +747,7 @@ class DatabaseContractsTest(unittest.TestCase):
                                 ('cmd_old_pending', 'wk_old_pending', 'uninstall', 'pending', 100, NULL, 100),
                                 ('cmd_recent_pending', 'wk_recent_pending', 'uninstall', 'pending', 950, NULL, 950),
                                 ('cmd_old_running', 'wk_old_running', 'uninstall', 'running', 100, 110, 110),
+                                ('cmd_recent_running', 'wk_recent_running', 'uninstall', 'running', 100, 950, 950),
                                 ('cmd_stop_pending', 'wk_stop_pending', 'stop', 'pending', 100, NULL, 100)
                             """
                         )
@@ -748,15 +755,19 @@ class DatabaseContractsTest(unittest.TestCase):
                 removed = db.cleanup_stale_worker_uninstall_commands(
                     timestamp=1000,
                     pending_timeout_seconds=864,
+                    running_timeout_seconds=864,
                 )
                 old_worker = db.get_worker("wk_old_pending", include_deleted=True)
                 old_command = db.get_worker_command("cmd_old_pending", worker_id="wk_old_pending")
+                old_running_worker = db.get_worker("wk_old_running", include_deleted=True)
+                old_running_command = db.get_worker_command("cmd_old_running", worker_id="wk_old_running")
                 old_visible = db.get_worker("wk_old_pending")
                 recent_visible = db.get_worker("wk_recent_pending")
-                running_visible = db.get_worker("wk_old_running")
+                old_running_visible = db.get_worker("wk_old_running")
+                recent_running_visible = db.get_worker("wk_recent_running")
                 stop_visible = db.get_worker("wk_stop_pending")
 
-        self.assertEqual(removed, 1)
+        self.assertEqual(removed, 2)
         self.assertIsNotNone(old_worker)
         self.assertEqual(old_worker["enabled"], 0)
         self.assertEqual(old_worker["deleted_at"], 1000)
@@ -764,9 +775,13 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertEqual(old_command["status"], "cancelled")
         self.assertIn("host cleanup was not confirmed", old_command["error"])
         self.assertEqual(old_command["completed_at"], 1000)
+        self.assertEqual(old_running_worker["deleted_at"], 1000)
+        self.assertEqual(old_running_command["status"], "cancelled")
+        self.assertIn("cleanup running exceeded timeout", old_running_command["error"])
         self.assertIsNone(old_visible)
         self.assertIsNotNone(recent_visible)
-        self.assertIsNotNone(running_visible)
+        self.assertIsNone(old_running_visible)
+        self.assertIsNotNone(recent_running_visible)
         self.assertIsNotNone(stop_visible)
 
     def test_cleanup_operational_records_prunes_only_old_terminal_records(self) -> None:

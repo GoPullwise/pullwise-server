@@ -763,6 +763,10 @@ def cleanup_server_resources(*, timestamp: int | None = None) -> dict[str, int]:
             0,
             env_int("PULLWISE_WORKER_CLEANUP_PENDING_TIMEOUT_SECONDS", 24 * 60 * 60),
         ),
+        running_timeout_seconds=max(
+            0,
+            env_int("PULLWISE_WORKER_CLEANUP_RUNNING_TIMEOUT_SECONDS", 24 * 60 * 60),
+        ),
     )
     database_removed = db.cleanup_operational_records(
         timestamp=current_time,

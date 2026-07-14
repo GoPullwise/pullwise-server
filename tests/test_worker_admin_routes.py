@@ -2873,6 +2873,80 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(after_cleanup.payload["workers"], [])
         self.assertEqual(after_cleanup.payload["total"], 0)
 
+    def test_server_cleanup_removes_stale_cleanup_running_worker_from_admin_list(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        heartbeat = self.post_v1_heartbeat(worker_id, token)
+        self.assertEqual(heartbeat.status, HTTPStatus.OK)
+
+        with patch.object(app, "now", return_value=100):
+            uninstall = RouteHarness(
+                f"/admin/workers/{worker_id}/commands",
+                {"command": "uninstall"},
+                cookie=self.admin_cookie,
+            )
+            app.PullwiseHandler.route(uninstall, "POST")
+
+        command_id = uninstall.payload["command"]["id"]
+        with patch.object(app, "now", return_value=120):
+            running = RouteHarness(
+                f"/worker/commands/{command_id}/status",
+                {"worker_id": worker_id, "status": "running"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            app.PullwiseHandler.route(running, "POST")
+
+        self.assertEqual(running.status, HTTPStatus.OK)
+        self.assertEqual(running.payload["command"]["status"], "running")
+        with patch.dict(os.environ, {"PULLWISE_WORKER_CLEANUP_RUNNING_TIMEOUT_SECONDS": "864"}, clear=False):
+            removed = app.cleanup_server_resources(timestamp=1000)
+
+        self.assertEqual(removed["stale_worker_cleanup_pending"], 1)
+        worker_after_cleanup = db.get_worker(worker_id, include_deleted=True)
+        command = db.get_worker_command(command_id, worker_id=worker_id)
+        self.assertEqual(worker_after_cleanup["deleted_at"], 1000)
+        self.assertIsNone(db.get_worker(worker_id))
+        self.assertEqual(command["status"], "cancelled")
+        self.assertIn("cleanup running exceeded timeout", command["error"])
+        self.assertIn("host cleanup was not confirmed", command["error"])
+
+        after_cleanup = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(after_cleanup, "GET")
+        self.assertEqual(after_cleanup.status, HTTPStatus.OK)
+        self.assertEqual(after_cleanup.payload["workers"], [])
+        self.assertEqual(after_cleanup.payload["total"], 0)
+
+    def test_server_cleanup_keeps_recent_running_cleanup_even_when_command_is_old(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        self.assertEqual(self.post_v1_heartbeat(worker_id, token).status, HTTPStatus.OK)
+
+        with patch.object(app, "now", return_value=100):
+            uninstall = RouteHarness(
+                f"/admin/workers/{worker_id}/commands",
+                {"command": "uninstall"},
+                cookie=self.admin_cookie,
+            )
+            app.PullwiseHandler.route(uninstall, "POST")
+
+        command_id = uninstall.payload["command"]["id"]
+        with patch.object(app, "now", return_value=950):
+            running = RouteHarness(
+                f"/worker/commands/{command_id}/status",
+                {"worker_id": worker_id, "status": "running"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            app.PullwiseHandler.route(running, "POST")
+
+        self.assertEqual(running.status, HTTPStatus.OK)
+        with patch.dict(os.environ, {"PULLWISE_WORKER_CLEANUP_RUNNING_TIMEOUT_SECONDS": "864"}, clear=False):
+            removed = app.cleanup_server_resources(timestamp=1000)
+
+        self.assertEqual(removed["stale_worker_cleanup_pending"], 0)
+        self.assertIsNone(db.get_worker(worker_id)["deleted_at"])
+        command = db.get_worker_command(command_id, worker_id=worker_id)
+        self.assertEqual(command["status"], "running")
+
     def test_worker_can_unregister_itself_from_registry(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]

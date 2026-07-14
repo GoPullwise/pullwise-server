@@ -99,15 +99,20 @@ for review heartbeat, lease, progress, artifact, or result traffic.
 soft-deleting registry state. `uninstall` commands disable job claiming and keep
 the worker in admin lists while cleanup is pending, running, or failed so
 operators can see the watcher status and retry context. The worker registry row
-is soft-deleted only after cleanup reports success. Current installs create one
-host-local watcher service per worker instance. The watcher polls lifecycle
-commands without mutating heartbeat state, stops the paired worker service,
-writes an uninstall marker, reports command status, and removes the worker
-service unit, watcher unit, wrapper binary, logrotate file, `/etc`
-configuration directory, instance home, and instance log directory. A locally
-run `pullwise-worker uninstall` calls
-`DELETE /worker/registry` before removing the local service when a worker token
-is configured.
+is normally soft-deleted after cleanup reports success. As a server-side safety
+boundary, stale pending and stale running uninstall commands have separate
+timeouts; a timeout cancels the command, preserves its audit reason, and
+soft-deletes only that worker registry row. Running age is measured from when
+the watcher starts the command, not from when an administrator queued it.
+Current installs create one host-local watcher service per worker instance. The
+watcher polls lifecycle commands without mutating heartbeat state, stops the
+paired worker service, writes an uninstall marker, reports command status, and
+removes the worker service unit, watcher unit, wrapper binary, logrotate file,
+`/etc` configuration directory, instance home, and instance log directory. If
+the final success report fails after local cleanup, the watcher retries that
+report without executing cleanup again. A locally run
+`pullwise-worker uninstall` calls `DELETE /worker/registry` before removing the
+local service when a worker token is configured.
 
 This model keeps root, SSH, and host-specific privileges off the server. It also
 makes operations retryable, auditable, and compatible with workers behind NAT or

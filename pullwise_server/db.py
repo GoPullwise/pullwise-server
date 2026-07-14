@@ -1991,44 +1991,69 @@ def cleanup_stale_worker_uninstall_commands(
     *,
     timestamp: int | None = None,
     pending_timeout_seconds: int = 24 * 60 * 60,
+    running_timeout_seconds: int = 24 * 60 * 60,
 ) -> int:
     ensure_initialized()
     current_time = int(timestamp if timestamp is not None else time.time())
-    cutoff = current_time - max(0, int(pending_timeout_seconds))
+    pending_cutoff = current_time - max(0, int(pending_timeout_seconds))
+    running_cutoff = current_time - max(0, int(running_timeout_seconds))
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
             rows = connection.execute(
                 """
-                SELECT wc.id, wc.worker_id
+                SELECT wc.id, wc.worker_id, wc.status
                 FROM worker_commands wc
                 JOIN workers w ON w.worker_id = wc.worker_id
                 WHERE wc.command = 'uninstall'
-                  AND wc.status = 'pending'
                   AND w.deleted_at IS NULL
-                  AND COALESCE(wc.created_at, wc.updated_at, wc.started_at, 0) < ?
+                  AND (
+                    (
+                      wc.status = 'pending'
+                      AND COALESCE(wc.created_at, wc.updated_at, wc.started_at, 0) < ?
+                    )
+                    OR (
+                      wc.status = 'running'
+                      AND COALESCE(wc.started_at, wc.updated_at, wc.created_at, 0) < ?
+                    )
+                  )
                 ORDER BY wc.created_at ASC, wc.id ASC
                 """,
-                (cutoff,),
+                (pending_cutoff, running_cutoff),
             ).fetchall()
-            command_ids = [str(row["id"]) for row in rows if str(row["id"] or "").strip()]
+            command_ids_by_status = {
+                status: [
+                    str(row["id"])
+                    for row in rows
+                    if str(row["status"] or "").strip() == status and str(row["id"] or "").strip()
+                ]
+                for status in ("pending", "running")
+            }
+            command_ids = [command_id for ids in command_ids_by_status.values() for command_id in ids]
             worker_ids = sorted({str(row["worker_id"]) for row in rows if str(row["worker_id"] or "").strip()})
             if not command_ids or not worker_ids:
                 return 0
-            command_placeholders = ",".join("?" for _ in command_ids)
-            connection.execute(
-                f"""
-                UPDATE worker_commands
-                SET status = 'cancelled',
-                    error = COALESCE(NULLIF(error, ''), 'cleanup pending exceeded timeout; host cleanup was not confirmed'),
-                    completed_at = COALESCE(completed_at, ?),
-                    updated_at = ?
-                WHERE id IN ({command_placeholders})
-                  AND command = 'uninstall'
-                  AND status = 'pending'
-                """,
-                (current_time, current_time, *command_ids),
-            )
+            timeout_errors = {
+                "pending": "cleanup pending exceeded timeout; host cleanup was not confirmed",
+                "running": "cleanup running exceeded timeout; host cleanup was not confirmed",
+            }
+            for status, status_command_ids in command_ids_by_status.items():
+                if not status_command_ids:
+                    continue
+                command_placeholders = ",".join("?" for _ in status_command_ids)
+                connection.execute(
+                    f"""
+                    UPDATE worker_commands
+                    SET status = 'cancelled',
+                        error = COALESCE(NULLIF(error, ''), ?),
+                        completed_at = COALESCE(completed_at, ?),
+                        updated_at = ?
+                    WHERE id IN ({command_placeholders})
+                      AND command = 'uninstall'
+                      AND status = ?
+                    """,
+                    (timeout_errors[status], current_time, current_time, *status_command_ids, status),
+                )
             worker_placeholders = ",".join("?" for _ in worker_ids)
             affected_count = connection.execute(
                 f"""
