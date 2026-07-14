@@ -135,10 +135,12 @@ before host cleanup is confirmed, the server must soft-delete only that
 timed-out worker registry record so the admin list cannot retain a stuck cleanup
 forever. Pending age is measured from command creation; running age is measured
 from `started_at` so a command that waited in pending does not immediately time
-out after a watcher starts it. Keep the terminal command row and timeout reason
-for auditability. Do not broaden this cleanup to recent pending/running
-commands, stop commands, already deleted workers, or other worker instances on
-the same host.
+out after a watcher starts it. Acquire the SQLite write transaction before
+selecting timed-out commands so a concurrent terminal status report cannot land
+between selection, command cancellation, and worker soft deletion. Keep the
+terminal command row and timeout reason for auditability. Do not broaden this
+cleanup to recent pending/running commands, stop commands, already deleted
+workers, or other worker instances on the same host.
 
 A single worker host may run multiple Pullwise worker instances. Do not reuse a
 worker process, watcher process, systemd unit, service user, env file, config

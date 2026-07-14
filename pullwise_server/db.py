@@ -2000,6 +2000,7 @@ def cleanup_stale_worker_uninstall_commands(
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
                 """
                 SELECT wc.id, wc.worker_id, wc.status

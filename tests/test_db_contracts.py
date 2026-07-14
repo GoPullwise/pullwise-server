@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from contextlib import closing
 from unittest.mock import patch
@@ -783,6 +784,80 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertIsNone(old_running_visible)
         self.assertIsNotNone(recent_running_visible)
         self.assertIsNotNone(stop_visible)
+
+    def test_cleanup_stale_running_uninstall_holds_write_lock_from_selection_through_soft_delete(self) -> None:
+        selected = threading.Event()
+        release_selection = threading.Event()
+        concurrent_result: dict[str, str] = {}
+
+        class PausingConnection(sqlite3.Connection):
+            def execute(self, sql: str, parameters=(), /) -> sqlite3.Cursor:
+                cursor = super().execute(sql, parameters)
+                if "FROM worker_commands wc" in sql:
+                    selected.set()
+                    if not release_selection.wait(2):
+                        raise RuntimeError("concurrent status update did not finish")
+                return cursor
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                db.create_worker({"worker_id": "wk_racing_cleanup", "name": "racing cleanup"})
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            INSERT INTO worker_commands (
+                                id, worker_id, command, status, created_at, started_at, updated_at
+                            ) VALUES (?, ?, 'uninstall', 'running', 100, 110, 110)
+                            """,
+                            ("cmd_racing_cleanup", "wk_racing_cleanup"),
+                        )
+
+                def finish_command_concurrently() -> None:
+                    if not selected.wait(2):
+                        concurrent_result["status"] = "selection_timeout"
+                        release_selection.set()
+                        return
+                    try:
+                        with sqlite3.connect(db_path, timeout=0) as connection:
+                            connection.execute("PRAGMA busy_timeout=0")
+                            connection.execute(
+                                """
+                                UPDATE worker_commands
+                                SET status = 'succeeded', completed_at = 1000, updated_at = 1000
+                                WHERE id = 'cmd_racing_cleanup'
+                                """
+                            )
+                        concurrent_result["status"] = "succeeded"
+                    except sqlite3.OperationalError as exc:
+                        concurrent_result["status"] = "locked" if "locked" in str(exc).lower() else str(exc)
+                    finally:
+                        release_selection.set()
+
+                racer = threading.Thread(target=finish_command_concurrently)
+                racer.start()
+                cleanup_connection = sqlite3.connect(db_path, timeout=2, factory=PausingConnection)
+                try:
+                    with patch.object(db, "connect", return_value=cleanup_connection):
+                        removed = db.cleanup_stale_worker_uninstall_commands(
+                            timestamp=1000,
+                            pending_timeout_seconds=864,
+                            running_timeout_seconds=864,
+                        )
+                finally:
+                    release_selection.set()
+                    racer.join(timeout=2)
+
+                worker = db.get_worker("wk_racing_cleanup", include_deleted=True)
+                command = db.get_worker_command("cmd_racing_cleanup", worker_id="wk_racing_cleanup")
+
+        self.assertFalse(racer.is_alive())
+        self.assertEqual(concurrent_result.get("status"), "locked")
+        self.assertEqual(removed, 1)
+        self.assertEqual(command["status"], "cancelled")
+        self.assertEqual(worker["deleted_at"], 1000)
 
     def test_cleanup_operational_records_prunes_only_old_terminal_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
