@@ -2148,6 +2148,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "provider": "codex",
                 "reviewWorker": {
                     "reviewerMaxTurnsPerScan": 4,
+                    "reviewerConcurrency": 9,
                     "turnTimeoutSeconds": 1800,
                     "scanDeadlineSeconds": 12000,
                 },
@@ -2157,9 +2158,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(update, "PATCH")
 
         defaults = app.billing.default_review_agent_review_worker_config("pro")
+        self.assertEqual(defaults["reviewerConcurrency"], 2)
         self.assertEqual(defaults["turnTimeoutSeconds"], 3600)
         self.assertEqual(defaults["scanDeadlineSeconds"], 14400)
         expected_pro_policy = {
+            "reviewerConcurrency": 2,
             "turnTimeoutSeconds": 1800,
             "scanDeadlineSeconds": 12000,
         }

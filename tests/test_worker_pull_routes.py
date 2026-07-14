@@ -1087,6 +1087,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
             claimed["agentConfig"]["reviewWorker"]["turnTimeoutSeconds"],
         )
         self.assertEqual(
+            claimed["review_request"]["policy"]["reviewer_concurrency"],
+            claimed["agentConfig"]["reviewWorker"]["reviewerConcurrency"],
+        )
+        self.assertEqual(
             claimed["review_request"]["budget"]["max_wall_time_seconds"],
             claimed["agentConfig"]["reviewWorker"]["scanDeadlineSeconds"],
         )
@@ -3070,6 +3074,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["review_request"]["budget"]["max_wall_time_seconds"], review_worker_config["scanDeadlineSeconds"])
         self.assertGreater(payload["review_request"]["budget"]["max_estimated_input_tokens"], 0)
         self.assertEqual(payload["review_request"]["policy"]["turn_timeout_seconds"], review_worker_config["turnTimeoutSeconds"])
+        self.assertEqual(payload["review_request"]["policy"]["reviewer_concurrency"], review_worker_config["reviewerConcurrency"])
         self.assertGreater(repository_limits["maxFiles"], 0)
         self.assertGreater(repository_limits["maxBytes"], 0)
 
@@ -3107,6 +3112,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["model_profile"]["validator_effort"], "xhigh")
         self.assertEqual(payload["model_profile"]["non_core_effort"], "medium")
         self.assertEqual(payload["review_request"]["policy"]["turn_timeout_seconds"], expected_worker["turnTimeoutSeconds"])
+        self.assertEqual(payload["review_request"]["policy"]["reviewer_concurrency"], expected_worker["reviewerConcurrency"])
         self.assertEqual(payload["review_request"]["budget"]["max_wall_time_seconds"], expected_worker["scanDeadlineSeconds"])
 
     def test_claim_payload_caps_enforce_mode_until_shadow_gate_passes(self) -> None:
