@@ -51,12 +51,20 @@ SDK runtime/app-server processes concurrently.
 - Do not expose, persist, or route configurable worker job parallelism,
   max-claim, or worker-side job queue controls. The server owns the scan job
   queue; each worker claims a new job only after finishing the current job.
-- The failure mode is correctness, not just load: concurrent Codex agent CLI
+- Reviewer-turn concurrency is distinct from job/process concurrency. The
+  server may set plan policy `reviewWorker.reviewerConcurrency` to `1` or `2`;
+  the worker must realize it as fresh independent reviewer threads inside the
+  one already-running SDK/App Server for the claimed job. Root semantic phases
+  stay sequential, and no second Codex process may be launched.
+- The failure mode is correctness, not just load: separate Codex agent CLI
   processes can refresh the same auth token/session at the same time and
-  invalidate `auth.json` or stored credential state.
+  corrupt or invalidate shared `auth.json` or stored credential state. Every
+  worker identity therefore keeps its own `CODEX_HOME` and auth store; never
+  copy or share that credential file across worker roots.
 - Do not change claim payloads, worker capacity, plan policy, or server-side
-  scheduling in a way that lets one worker launch parallel Codex agent CLI runs
-  under the same auth identity.
+  scheduling in a way that lets one worker launch parallel Codex processes
+  under the same auth identity. Bounded reviewer turns must reuse the single
+  App Server/AuthManager and do not create an additional job slot.
 
 ## Worker Cancellation Slot Accounting
 
@@ -188,7 +196,8 @@ The server owns subscription plan agent policy.
 - Keep the plan review-agent provider as a single `provider` field in
   worker-facing API responses.
 - Persist only canonical plan policy that affects v1 jobs: Codex model,
-  reasoning effort, turn timeout, and scan deadline. Do not restore legacy
+  reasoning effort, bounded reviewer concurrency (`1..2`), turn timeout, and
+  scan deadline. Do not restore legacy
   `mode`, `scanMode`, reviewer-turn, discovery, bundle, or candidate limits.
 - The plan-agent Admin payload owns the model-aware reasoning capability
   contract. Validate every explicit model/effort pair against it. Expose exact
