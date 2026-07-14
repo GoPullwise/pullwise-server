@@ -209,6 +209,23 @@ The server owns subscription plan agent policy.
   catalog across the fleet, and do not add legacy worker compatibility adapters
   unless explicitly requested; worker replacement/routing is separate work.
 
+## Whole-Scan ETA Contract
+
+- The worker-provided estimate is for the whole running scan, not the current
+  phase. The server must never derive, extrapolate, smooth, or replace it.
+- Strictly validate and sanitize the estimate state, basis, timestamps, finite
+  non-negative bounds, bound ordering, confidence, and reviewer parallelism
+  metadata before persistence or exposure. Preserve only the newest accepted
+  event sequence so a delayed event cannot overwrite a fresher estimate.
+- Persist a valid running estimate in both review-run progress and the scan
+  mirror, and expose the sanitized top-level estimate consistently from scan
+  detail, history, batch status, and `/scans/status`. A nested progress estimate
+  may remain as compatibility data, but it is not a second estimate source.
+- Queued scans have no execution ETA. Terminal events and terminal result ingest
+  must clear the forecast immediately; terminal UI duration comes from actual
+  start/finish timestamps. Public scan/progress payloads must not expose Codex
+  thread ids.
+
 ## Review Worker Protocol Semantics
 
 `../codex_full_repo_review_worker_spec_v1_2_FULL_SELF_CONTAINED.md` is the
