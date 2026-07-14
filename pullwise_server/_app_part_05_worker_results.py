@@ -147,6 +147,7 @@ def review_job_review_request_payload(agent_config: dict, repository_limits: dic
             "allow_network": False,
             "helper_scripts_standard_library_only": True,
             "turn_timeout_seconds": public_scan_count(review_worker.get("turnTimeoutSeconds")) or 0,
+            "reviewer_concurrency": public_scan_count(review_worker.get("reviewerConcurrency")) or 1,
             "intent_test_validation": review_job_intent_policy(agent_config),
         },
     }

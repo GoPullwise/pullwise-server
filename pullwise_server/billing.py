@@ -42,14 +42,17 @@ REVIEW_AGENT_EFFORT_MODEL_FAMILIES = (
 )
 REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
     "free": {
+        "reviewerConcurrency": 2,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
     },
     "pro": {
+        "reviewerConcurrency": 2,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
     },
     "max": {
+        "reviewerConcurrency": 2,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
     },
@@ -197,6 +200,12 @@ def normalize_review_agent_provider_config(provider: str, value: object, default
 def normalize_review_agent_review_worker_config(value: object, defaults: dict) -> dict:
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
+    result["reviewerConcurrency"] = clean_review_agent_config_int(
+        source.get("reviewerConcurrency"),
+        int(result.get("reviewerConcurrency") or 2),
+        minimum=1,
+        maximum=2,
+    )
     result["turnTimeoutSeconds"] = clean_review_agent_config_int(
         source.get("turnTimeoutSeconds"),
         int(result.get("turnTimeoutSeconds") or 3600),
