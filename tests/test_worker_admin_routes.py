@@ -2714,6 +2714,35 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertIsNone(db.get_next_worker_command(worker_id))
         self.assertTrue(db.get_worker(worker_id)["enabled"])
 
+    def test_admin_quota_refresh_accepts_online_busy_worker(self) -> None:
+        payload, token = self.create_worker()
+        worker_id = payload["worker_id"]
+        self.assertEqual(self.post_v1_heartbeat(worker_id, token).status, HTTPStatus.OK)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": worker_id,
+                "provider": "codex",
+                "version": "0.4.18",
+                "running_jobs": 1,
+                "doctor_status": "ok",
+                "codex_ready": 1,
+                "ready_providers": ["codex"],
+                "timestamp": app.now(),
+            }
+        )
+        self.assertEqual(app.computed_worker_status(db.get_worker(worker_id)), "busy")
+
+        refresh = RouteHarness(
+            f"/admin/workers/{worker_id}/commands",
+            {"command": "refresh_codex_quota"},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(refresh, "POST")
+
+        self.assertEqual(refresh.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(refresh.payload["command"]["command"], "refresh_codex_quota")
+        self.assertEqual(refresh.payload["command"]["status"], "pending")
+
     def test_worker_uninstall_supersedes_pending_quota_refresh(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
