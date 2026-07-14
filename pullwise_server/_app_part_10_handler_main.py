@@ -2965,12 +2965,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         action_name = action_names[command]
         if command == "refresh_codex_quota":
             worker_status = computed_worker_status(worker_record)
-            if worker_status not in {"idle", "degraded"}:
-                error = (
-                    "Worker must be online and idle before refreshing Codex quota."
-                    if worker_status == "busy"
-                    else "Worker must be online before refreshing Codex quota."
-                )
+            if worker_status not in {"idle", "busy", "degraded"}:
+                error = "Worker must be online before refreshing Codex quota."
                 self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=error)
                 return self.error(HTTPStatus.CONFLICT, error)
         reused_command = False

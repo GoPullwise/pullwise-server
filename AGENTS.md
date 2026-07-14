@@ -288,7 +288,7 @@ do not remove it while refactoring readiness, lease eligibility, or worker
 details. Quota exhaustion should make the worker unable to claim jobs without
 breaking the required idle heartbeat concurrency shape.
 
-Admin manual quota refresh uses the durable `refresh_codex_quota` worker command. Queue it only for online non-busy workers, never disable the worker when creating it, and let `stop` or `uninstall` cancel and supersede an active telemetry command. The worker must heartbeat the refreshed quota before reporting the command succeeded.
+Admin manual quota refresh uses the durable `refresh_codex_quota` worker command. Queue it for any online worker (`idle`, `busy`, or `degraded`) but reject offline or disabled workers; never disable the worker when creating it, and let `stop` or `uninstall` cancel and supersede an active telemetry command. The worker must heartbeat the refreshed quota before reporting the command succeeded.
 
 Operational worker alert emails are fleet incidents keyed by alert kind and
 status, not by worker id. Keep Codex quota `low` and `exhausted` as distinct
