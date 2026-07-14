@@ -4,6 +4,7 @@ import base64
 import binascii
 import io
 import json
+import math
 import time
 import zipfile
 
@@ -32,6 +33,18 @@ WORKER_V1_PROGRESS_COUNTER_KEYS = (
     "artifacts_total",
     "artifacts_uploaded",
 )
+WORKER_V1_PROGRESS_PHASE_STATUSES = {
+    "pending",
+    "running",
+    "retrying",
+    "completed",
+    "failed",
+    "skipped",
+    "cancelled",
+    "partial_completed",
+    "degraded",
+    "blocked",
+}
 REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS = {"codex_event_log", "worker_log", "progress_log", "debug_bundle"}
 WORKER_REVIEW_ARTIFACT_KINDS = {
     "report.human",
@@ -104,6 +117,15 @@ def worker_v1_progress_counter(value: object, field_name: str, errors: list[str]
         errors.append(f"active heartbeat progress.counters.{field_name} must be non-negative")
 
 
+def worker_v1_heartbeat_progress_percent(value: object, field_name: str, errors: list[str]) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        errors.append(f"active heartbeat progress.{field_name} must be numeric")
+        return
+    number = float(value)
+    if not math.isfinite(number) or number < 0 or number > 100:
+        errors.append(f"active heartbeat progress.{field_name} must be finite and between 0 and 100")
+
+
 def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
     errors: list[str] = []
     if public_issue_text(body.get("protocol_version")) != WORKER_PROTOCOL_VERSION:
@@ -160,6 +182,23 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
         for field_name in ("overall_percent", "current_phase", "current_phase_status", "current_phase_percent", "message", "last_event_sequence", "updated_at"):
             if field_name not in progress:
                 errors.append(f"active heartbeat progress.{field_name} is required")
+        worker_v1_heartbeat_progress_percent(progress.get("overall_percent"), "overall_percent", errors)
+        worker_v1_heartbeat_progress_percent(progress.get("current_phase_percent"), "current_phase_percent", errors)
+        if not isinstance(progress.get("current_phase"), str) or not public_scan_phase(progress.get("current_phase")):
+            errors.append("active heartbeat progress.current_phase must be a non-empty string")
+        phase_status = progress.get("current_phase_status")
+        if not isinstance(phase_status, str) or phase_status.strip().lower() not in WORKER_V1_PROGRESS_PHASE_STATUSES:
+            errors.append("active heartbeat progress.current_phase_status is unsupported")
+        if not isinstance(progress.get("message"), str):
+            errors.append("active heartbeat progress.message must be a string")
+        last_event_sequence = progress.get("last_event_sequence")
+        if isinstance(last_event_sequence, bool) or not isinstance(last_event_sequence, int) or last_event_sequence < 0:
+            errors.append("active heartbeat progress.last_event_sequence must be a non-negative integer")
+        updated_at = progress.get("updated_at")
+        if not isinstance(updated_at, str) or not pull_request_timestamp(updated_at):
+            errors.append("active heartbeat progress.updated_at must be a valid timestamp")
+        if "steps" in progress and not isinstance(progress.get("steps"), list):
+            errors.append("active heartbeat progress.steps must be a list")
         counters = progress.get("counters")
         if not isinstance(counters, dict):
             errors.append("active heartbeat progress.counters must be an object")
@@ -268,6 +307,10 @@ def worker_v1_lease_validation_error(body: dict) -> str | None:
 def worker_v1_progress_number(value: object, field_name: str, errors: list[str]) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         errors.append(f"progress.{field_name} must be numeric")
+        return
+    number = float(value)
+    if not math.isfinite(number) or number < 0 or number > 100:
+        errors.append(f"progress.{field_name} must be finite and between 0 and 100")
 
 
 def worker_v1_event_validation_error(body: dict, run_id: str, worker_id: str) -> str | None:
@@ -276,11 +319,8 @@ def worker_v1_event_validation_error(body: dict, run_id: str, worker_id: str) ->
         errors.append("run_id path and payload must match")
     if public_issue_text(body.get("worker_id")) != worker_id:
         errors.append("worker_id must match the claimed worker")
-    try:
-        sequence = int(body.get("sequence"))
-    except (TypeError, ValueError):
-        sequence = 0
-    if sequence <= 0:
+    sequence = body.get("sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
         errors.append("sequence must be a positive integer")
     if not public_issue_text(body.get("timestamp")):
         errors.append("timestamp is required")

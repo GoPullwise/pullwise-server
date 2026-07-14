@@ -13,6 +13,7 @@ REMOTE=${PULLWISE_WATCH_REMOTE:-origin}
 BRANCH=${PULLWISE_WATCH_BRANCH:-}
 LOG_FILE=${PULLWISE_WATCH_LOG_FILE:-$APP_DIR/.pullwise/git-watch.log}
 LOCK_DIR=${PULLWISE_WATCH_LOCK_DIR:-$APP_DIR/.pullwise/git-watch.lock}
+LOCK_FILE=${PULLWISE_WATCH_LOCK_FILE:-$LOCK_DIR.flock}
 DEPLOYED_HEAD_FILE=${PULLWISE_WATCH_DEPLOYED_HEAD_FILE:-$APP_DIR/.pullwise/git-watch.deployed-head}
 
 RUN_SETUP=${PULLWISE_WATCH_RUN_SETUP:-true}
@@ -183,6 +184,7 @@ ensure_command_available() {
 
 ensure_host_dependencies() {
   ensure_command_available "git" git git || return 1
+  ensure_command_available "flock" flock util-linux || return 1
   ensure_command_available "tee" tee coreutils || return 1
   ensure_command_available "sed" sed sed || return 1
 }
@@ -420,15 +422,19 @@ check_once() {
 }
 
 with_lock() {
-  if mkdir "$LOCK_DIR" 2>/dev/null; then
-    trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT INT TERM
+  mkdir -p "$(dirname -- "$LOCK_FILE")" || return 1
+  exec 9>"$LOCK_FILE" || return 1
+  if flock -n 9; then
+    # Remove an empty lock directory left by versions that predated flock.
+    rmdir -- "$LOCK_DIR" 2>/dev/null || true
     check_once
     status=$?
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-    trap - EXIT INT TERM
+    flock -u 9
+    exec 9>&-
     return "$status"
   fi
 
+  exec 9>&-
   log "another git-watch run is active; skipping"
   return 0
 }

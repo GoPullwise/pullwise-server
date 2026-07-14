@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 from . import _app_part_04_scan_audit_bundle as _previous_app_part
@@ -401,7 +403,10 @@ def review_worker_protocol_envelope(body: dict) -> dict:
 
 
 def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: str = "") -> dict:
-    envelope = review_worker_protocol_envelope(body)
+    try:
+        envelope = review_worker_protocol_envelope(body)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid review-worker-protocol/v1 envelope: {exc}") from exc
     if not envelope:
         return {}
     errors = []
@@ -531,7 +536,7 @@ def validate_review_worker_protocol_envelope(job: dict, body: dict, *, status: s
         except (TypeError, ValueError):
             errors.append("progress_final.overall_percent")
         else:
-            if overall_percent < 0 or overall_percent > 100:
+            if not math.isfinite(overall_percent) or overall_percent < 0 or overall_percent > 100:
                 errors.append("progress_final.overall_percent")
         if not public_issue_text(progress_final.get("status")):
             errors.append("progress_final.status")
@@ -939,14 +944,20 @@ def worker_result_issue_count(body: dict) -> int:
 
 
 def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -> bool:
-    if status == "done":
-        return True
     if worker_progress_phase_should_finalize_quota(job.get("progress_phase")):
         return True
     envelope = review_worker_protocol_envelope(body)
     progress_final = envelope.get("progress_final") if isinstance(envelope.get("progress_final"), dict) else {}
     if worker_progress_phase_should_finalize_quota(progress_final.get("current_phase")):
         return True
+    steps = progress_final.get("steps") if isinstance(progress_final.get("steps"), list) else []
+    for step in steps:
+        if not isinstance(step, dict) or not worker_progress_phase_should_finalize_quota(step.get("id")):
+            continue
+        step_status = public_issue_text(step.get("status")).lower()
+        step_percent = public_scan_progress(step.get("percent"))
+        if step_status not in {"", "pending", "queued", "skipped", "not_started"} or step_percent > 0:
+            return True
     return False
 
 
@@ -971,8 +982,10 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
     user_id = public_issue_text(job.get("user_id"))
     if not scan_id or not user_id:
         return {}
+    durable_scan = db.get_user_scan_snapshot(user_id, scan_id)
     with STATE_LOCK:
-        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        scan = memory_scan or durable_scan
         request_id = public_issue_text((scan or {}).get("requestId")) or None
         repo_id = public_issue_text((scan or {}).get("repoId") or job.get("repo_id"))
         has_repository_limit_evidence = worker_result_has_repository_limit_evidence(body, scan)
@@ -986,19 +999,21 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
             request_id=request_id,
             record_ledger=True,
         )
-        if not release_result.get("ledgerRows"):
+        if not release_result.get("ledgerRows") and not release_result.get("bucketRows"):
             return release_result
         user = USERS.get(user_id)
         repository = db.get_repository(repo_id) if repo_id else None
         with STATE_LOCK:
-            scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+            memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+            scan = memory_scan or db.get_user_scan_snapshot(user_id, scan_id)
             if scan:
                 scan["quotaState"] = "released"
                 scan["quotaReleasedAt"] = now()
                 scan["quotaReleaseReason"] = error_code
                 refresh_scan_quota_usage_locked(scan, user, repository)
                 db.upsert_scan(scan)
-                mark_state_dirty()
+                if memory_scan is not None:
+                    mark_state_dirty()
         release_result["reservationReleased"] = True
         return release_result
     rollback_result = quota.rollback_scan_quota(
@@ -1014,7 +1029,8 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
     user_usage = quota.quota_payload_for_user(user) if user else None
     repo_usage = quota.quota_payload_for_repository(repository, user) if repository else None
     with STATE_LOCK:
-        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        scan = memory_scan or db.get_user_scan_snapshot(user_id, scan_id)
         if scan:
             if user_usage:
                 scan["billingUsage"] = user_usage
@@ -1027,7 +1043,8 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
             }
             scan["quotaState"] = "refunded"
             db.upsert_scan(scan)
-            mark_state_dirty()
+            if memory_scan is not None:
+                mark_state_dirty()
     return rollback_result
 
 
@@ -1046,14 +1063,22 @@ def worker_issue_reserved_ids(job: dict) -> set[str]:
     user_id = public_issue_text(job.get("user_id"))
     scan_id = public_issue_text(job.get("scan_id"))
     job_id = public_issue_text(job.get("job_id"))
-    reserved = set(db.list_user_issue_ids(user_id, exclude_scan_id=scan_id, exclude_job_id=job_id))
-    if reserved or db.count_user_issues(user_id) > 0:
+    reserved = set(
+        db.list_issue_ids(
+            exclude_user_id=user_id,
+            exclude_scan_id=scan_id,
+            exclude_job_id=job_id,
+        )
+    )
+    if reserved or db.count_issue_snapshots() > 0:
         return reserved
     reserved = set()
     for issue in ISSUES:
-        if user_id and public_issue_text(issue.get("userId")) != user_id:
-            continue
-        if public_issue_text(issue.get("scanId")) == scan_id and public_issue_text(issue.get("jobId")) == job_id:
+        if (
+            public_issue_text(issue.get("userId")) == user_id
+            and public_issue_text(issue.get("scanId")) == scan_id
+            and public_issue_text(issue.get("jobId")) == job_id
+        ):
             continue
         issue_id = public_issue_text(issue.get("id"))
         if issue_id:

@@ -1338,10 +1338,14 @@ rollback_failed_install() {
     exit "$status"
   fi
   echo "Pullwise worker install failed; rolling back partial instance $SAFE_WORKER_ID." >&2
-  systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-  systemctl stop "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
-  systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  systemctl disable "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
+  if [ "$HAD_SERVICE_FILE" = "0" ]; then
+    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+  if [ "$HAD_WATCHER_SERVICE_FILE" = "0" ]; then
+    systemctl stop "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
+    systemctl disable "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
   rollback_file "$SERVICE_FILE" "/etc/systemd/system" "$HAD_SERVICE_FILE"
   rollback_file "$WATCHER_SERVICE_FILE" "/etc/systemd/system" "$HAD_WATCHER_SERVICE_FILE"
   rollback_file "$LOGROTATE_FILE" "/etc/logrotate.d" "$HAD_LOGROTATE_FILE"

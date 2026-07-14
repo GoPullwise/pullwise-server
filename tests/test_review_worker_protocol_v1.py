@@ -224,6 +224,37 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
             )
         )
 
+    def test_completed_result_consumes_quota_only_with_billable_phase_evidence(self) -> None:
+        def body_with_progress(current_phase: str, steps: list[dict] | None = None) -> dict:
+            return {
+                "reviewWorkerProtocol": {
+                    "protocol_version": "review-worker-protocol/v1",
+                    "message_type": "review_run_result",
+                    "progress_final": {
+                        "current_phase": current_phase,
+                        "steps": steps or [],
+                    },
+                }
+            }
+
+        self.assertFalse(
+            app.worker_result_should_finalize_quota(
+                {"progress_phase": "prepare_workspace"},
+                body_with_progress("checkout_repository"),
+                status="done",
+            )
+        )
+        self.assertTrue(
+            app.worker_result_should_finalize_quota(
+                {"progress_phase": "cleanup_active_job"},
+                body_with_progress(
+                    "cleanup_active_job",
+                    [{"id": "reviewer_fanout", "status": "completed", "percent": 100}],
+                ),
+                status="done",
+            )
+        )
+
     def test_worker_artifact_upload_payload_validates_hash_and_size(self) -> None:
         content = b"report"
         payload = app.worker_artifact_upload_payload(
@@ -942,6 +973,27 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "progress_final"):
             app.validate_review_worker_protocol_envelope(job, body, status="done")
+
+    def test_review_worker_protocol_rejects_non_finite_terminal_progress(self) -> None:
+        job = {
+            "job_id": "job_1",
+            "run_id": "run_job_1",
+            "lease_id": "lease_job_1",
+            "claimed_by_worker_id": "wk_1",
+        }
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                body = {
+                    "reviewWorkerProtocol": v1_envelope(
+                        job,
+                        required_completed_manifest(),
+                        worker_id="wk_1",
+                    )
+                }
+                body["reviewWorkerProtocol"]["progress_final"]["overall_percent"] = value
+
+                with self.assertRaisesRegex(ValueError, "progress_final.overall_percent"):
+                    app.validate_review_worker_protocol_envelope(job, body, status="done")
 
     def test_review_worker_protocol_requires_summary_minimum_fields(self) -> None:
         job = {

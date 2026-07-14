@@ -205,6 +205,24 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertIn('if ! run_as_service_user env PULLWISE_DOCTOR_REQUIRE_SYSTEMD_ACTIVE=0 "$BIN_PATH" doctor; then', script)
         self.assertNotIn('run_as_service_user "$BIN_PATH" doctor || true', script)
 
+    def test_failed_reinstall_does_not_stop_or_disable_preexisting_units(self) -> None:
+        script = app.worker_install_script()
+
+        self.assertIn(
+            'if [ "$HAD_SERVICE_FILE" = "0" ]; then\n'
+            '    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true\n'
+            '    systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true\n'
+            '  fi',
+            script,
+        )
+        self.assertIn(
+            'if [ "$HAD_WATCHER_SERVICE_FILE" = "0" ]; then\n'
+            '    systemctl stop "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true\n'
+            '    systemctl disable "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true\n'
+            '  fi',
+            script,
+        )
+
     def test_service_user_name_uses_digest_to_avoid_prefix_collisions(self) -> None:
         shell = shutil.which("sh") or shutil.which("bash")
         if not shell:

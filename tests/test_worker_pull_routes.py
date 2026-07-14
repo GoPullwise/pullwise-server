@@ -2164,6 +2164,24 @@ class WorkerPullRoutesTest(unittest.TestCase):
         busy_progress_mismatch = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
         busy_progress_mismatch["progress"]["run_id"] = "run_other"
 
+        busy_with_non_finite_percent = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_non_finite_percent["progress"]["overall_percent"] = float("nan")
+
+        busy_with_out_of_range_percent = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_out_of_range_percent["progress"]["current_phase_percent"] = 101
+
+        busy_with_invalid_phase = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_invalid_phase["progress"]["current_phase"] = []
+
+        busy_with_invalid_phase_status = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_invalid_phase_status["progress"]["current_phase_status"] = "banana"
+
+        busy_with_fractional_sequence = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_fractional_sequence["progress"]["last_event_sequence"] = 1.5
+
+        busy_with_invalid_timestamp = clone(v1_worker_heartbeat_payload(status="busy", run_id="run_busy"))
+        busy_with_invalid_timestamp["progress"]["updated_at"] = "not-a-timestamp"
+
         legacy_running_jobs = clone(v1_worker_heartbeat_payload())
         legacy_running_jobs["running_jobs"] = 0
 
@@ -2179,6 +2197,12 @@ class WorkerPullRoutesTest(unittest.TestCase):
             ("busy_with_bad_counter", busy_with_bad_counter),
             ("busy_without_active_unit", busy_without_active_unit),
             ("busy_progress_mismatch", busy_progress_mismatch),
+            ("busy_with_non_finite_percent", busy_with_non_finite_percent),
+            ("busy_with_out_of_range_percent", busy_with_out_of_range_percent),
+            ("busy_with_invalid_phase", busy_with_invalid_phase),
+            ("busy_with_invalid_phase_status", busy_with_invalid_phase_status),
+            ("busy_with_fractional_sequence", busy_with_fractional_sequence),
+            ("busy_with_invalid_timestamp", busy_with_invalid_timestamp),
             ("legacy_running_jobs", legacy_running_jobs),
             ("legacy_active_job_ids", legacy_active_job_ids),
         ]
@@ -2188,6 +2212,74 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 app.PullwiseHandler.route(heartbeat, "POST")
                 self.assertEqual(heartbeat.status, HTTPStatus.BAD_REQUEST)
                 self.assertIn("Invalid review-worker-protocol/v1 heartbeat", heartbeat.payload["message"])
+
+    def test_worker_event_rejects_fractional_sequence_without_persisting_it(self) -> None:
+        self.create_claimable_scan_job(
+            job_id="job_fractional_sequence",
+            scan_id="scan_fractional_sequence",
+            user_id="usr_1",
+        )
+        lease = self.v1_lease()
+        self.assertEqual(lease.status, HTTPStatus.OK)
+        job = lease.payload["job"]
+
+        event = self.v1_event(job, sequence=1.5)
+
+        self.assertEqual(event.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("sequence", event.payload["message"])
+        self.assertEqual(db.list_review_run_events(job["run_id"]), [])
+
+    def test_worker_finding_ids_are_reserved_across_users(self) -> None:
+        first = db.upsert_issue(
+            {
+                "id": "F-001",
+                "userId": "usr_a",
+                "scanId": "scan_a",
+                "jobId": "job_a",
+                "repo": "acme/a",
+                "status": "open",
+                "severity": "high",
+                "title": "First tenant finding",
+                "file": "src/a.py",
+            }
+        )
+        self.assertEqual(first["id"], "F-001")
+        job = {
+            "job_id": "job_b",
+            "scan_id": "scan_b",
+            "user_id": "usr_b",
+            "repo": "acme/b",
+            "branch": "main",
+            "commit": "abc1234",
+        }
+
+        reserved = app.worker_issue_reserved_ids(job)
+        findings = app.worker_protocol_findings(
+            job,
+            {
+                "summary": {
+                    "top_findings": [
+                        {
+                            "id": "F-001",
+                            "title": "Second tenant finding",
+                            "severity": "high",
+                            "locations": [{"path": "src/b.py", "start_line": 2, "end_line": 2}],
+                        }
+                    ]
+                }
+            },
+            reserved_ids=reserved,
+        )
+        stored = db.replace_scan_issues(
+            "scan_b",
+            user_id="usr_b",
+            job_id="job_b",
+            issues=findings,
+        )
+
+        self.assertIn("F-001", reserved)
+        self.assertEqual(stored[0]["id"], "F-001-2")
+        self.assertEqual(db.get_user_issue("usr_a", "F-001")["title"], "First tenant finding")
 
     def test_v1_worker_heartbeat_rejects_unknown_active_run_id(self) -> None:
         heartbeat = RouteHarness(

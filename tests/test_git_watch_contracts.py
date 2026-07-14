@@ -52,6 +52,14 @@ class GitWatchStaticContractsTest(unittest.TestCase):
         self.assertNotIn('sh -c "$command_text"', script)
         self.assertIn('"${COMMAND_ARGV[@]}"', script)
 
+    def test_watcher_uses_an_auto_released_file_lock(self) -> None:
+        script = (project_root() / "git-watch.sh").read_text(encoding="utf-8")
+
+        self.assertIn('LOCK_FILE=${PULLWISE_WATCH_LOCK_FILE:-$LOCK_DIR.flock}', script)
+        self.assertIn('flock -n 9', script)
+        self.assertIn('flock -u 9', script)
+        self.assertIn('rmdir -- "$LOCK_DIR"', script)
+
 
 @unittest.skipIf(os.name == "nt", "git-watch shell contracts run on POSIX CI")
 class GitWatchContractsTest(unittest.TestCase):
@@ -184,6 +192,19 @@ GIT
             self.assertEqual(deploy_log.read_text(encoding="utf-8"), "restart")
             deployed_head = (app / ".pullwise" / "git-watch.deployed-head").read_text(encoding="utf-8").strip()
             self.assertEqual(deployed_head, run_git(["rev-parse", "HEAD"], app).stdout.strip())
+
+    def test_stale_lock_from_dead_owner_is_reclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = self.create_remote_and_clone(root)
+            lock_dir = app / ".pullwise" / "git-watch.lock"
+            lock_dir.mkdir(parents=True)
+            (lock_dir / "owner.pid").write_text("999999 1\n", encoding="utf-8")
+
+            result = self.run_watcher(app, {})
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(lock_dir.exists())
 
     def test_health_check_retries_after_restart_before_marking_deployed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

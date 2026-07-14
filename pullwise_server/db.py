@@ -2639,10 +2639,10 @@ def _insert_review_run_event_locked(connection: sqlite3.Connection, event: dict[
         raise ValueError("job_id is required")
     if not worker_id:
         raise ValueError("worker_id is required")
-    try:
-        sequence = int(event.get("sequence"))
-    except (TypeError, ValueError):
+    raw_sequence = event.get("sequence")
+    if isinstance(raw_sequence, bool) or not isinstance(raw_sequence, int):
         raise ValueError("event sequence is required")
+    sequence = raw_sequence
     if sequence <= 0:
         raise ValueError("event sequence must be positive")
     event_type = str(event.get("event_type") or "").strip()
@@ -4764,6 +4764,26 @@ def issue_from_row(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] |
     return payload if isinstance(payload, dict) else {}
 
 
+def assign_available_issue_id(fields: dict[str, Any], used_ids: set[str]) -> None:
+    base_id = str(fields.get("issue_id") or "").strip()
+    if not base_id:
+        return
+    issue_id = base_id
+    suffix = 2
+    while issue_id in used_ids:
+        issue_id = f"{base_id}-{suffix}"
+        suffix += 1
+    used_ids.add(issue_id)
+    if issue_id == base_id:
+        return
+    fields["issue_id"] = issue_id
+    payload = dict(fields.get("payload") or {})
+    payload["id"] = issue_id
+    if "issueId" in payload:
+        payload["issueId"] = issue_id
+    fields["payload"] = payload
+
+
 def upsert_issue(record: dict[str, Any], *, timestamp: int | None = None) -> dict[str, Any] | None:
     ensure_initialized()
     fields = issue_storage_fields(record, timestamp=timestamp)
@@ -4772,6 +4792,21 @@ def upsert_issue(record: dict[str, Any], *, timestamp: int | None = None) -> dic
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            existing = connection.execute(
+                "SELECT user_id, scan_id, job_id FROM issues WHERE issue_id = ?",
+                (fields["issue_id"],),
+            ).fetchone()
+            if existing and (
+                str(existing["user_id"] or "") != str(fields["user_id"] or "")
+                or str(existing["scan_id"] or "") != str(fields["scan_id"] or "")
+                or str(existing["job_id"] or "") != str(fields["job_id"] or "")
+            ):
+                used_ids = {
+                    str(row[0] or "").strip()
+                    for row in connection.execute("SELECT issue_id FROM issues").fetchall()
+                    if str(row[0] or "").strip()
+                }
+                assign_available_issue_id(fields, used_ids)
             connection.execute(
                 """
                 INSERT INTO issues (
@@ -4870,7 +4905,13 @@ def replace_scan_issues(
                         payload,
                     )
             connection.execute(f"DELETE FROM issues WHERE {' AND '.join(clauses)}", tuple(params))
+            used_issue_ids = {
+                str(row[0] or "").strip()
+                for row in connection.execute("SELECT issue_id FROM issues").fetchall()
+                if str(row[0] or "").strip()
+            }
             for fields in fields_list:
+                assign_available_issue_id(fields, used_issue_ids)
                 existing_status = existing_statuses.get(fields["issue_id"])
                 if existing_status:
                     status, updated_at, existing_payload = existing_status
@@ -4963,6 +5004,29 @@ def count_user_issues(user_id: str) -> int:
     with _LOCK, closing(connect()) as connection:
         row = connection.execute("SELECT COUNT(*) FROM issues WHERE user_id = ?", (target_user_id,)).fetchone()
     return max(0, int(row[0] if row else 0))
+
+
+def list_issue_ids(
+    *,
+    exclude_user_id: str = "",
+    exclude_scan_id: str = "",
+    exclude_job_id: str = "",
+) -> list[str]:
+    ensure_initialized()
+    clauses: list[str] = []
+    params: list[Any] = []
+    target_user_id = str(exclude_user_id or "").strip()
+    target_scan_id = str(exclude_scan_id or "").strip()
+    target_job_id = str(exclude_job_id or "").strip()
+    if target_user_id and target_scan_id and target_job_id:
+        clauses.append("NOT (user_id = ? AND scan_id = ? AND job_id = ?)")
+        params.extend([target_user_id, target_scan_id, target_job_id])
+    query = "SELECT issue_id FROM issues"
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    with _LOCK, closing(connect()) as connection:
+        rows = connection.execute(query, tuple(params)).fetchall()
+    return [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
 
 
 def list_user_issue_ids(

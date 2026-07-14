@@ -692,6 +692,41 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(usage["used"], 1)
         self.assertEqual(usage["reserved"], 0)
 
+    def test_refundable_worker_failure_uses_durable_quota_state_when_memory_is_cold(self) -> None:
+        cookie = seed_session()
+        authorize_repo_for_seed_user()
+        created = HandlerHarness(
+            {"repo": "owner/repo", "requestId": "scan_req_refundable_cold"},
+            cookie=cookie,
+        )
+
+        with (
+            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
+            patch(
+                "pullwise_server.system_config.config",
+                return_value=creem_database_config(free_review_limit=1),
+            ),
+        ):
+            app.PullwiseHandler.handle_post(created, "/scans", {}, ["scans"])
+            scan_id = created.payload["id"]
+            job = app.db.get_scan_job_for_scan(scan_id)
+            app.SCANS.clear()
+
+            result = app.rollback_scan_quota_for_refundable_worker_failure(
+                job,
+                {"error_code": "CODEX_QUOTA_EXHAUSTED"},
+                status="failed",
+            )
+            durable_scan = app.db.get_user_scan_snapshot("usr_1", scan_id)
+            usage = app.quota.quota_payload_for_user(app.USERS["usr_1"])
+
+        self.assertTrue(result["reservationReleased"])
+        self.assertEqual(durable_scan["requestId"], "scan_req_refundable_cold")
+        self.assertEqual(durable_scan["quotaState"], "released")
+        self.assertEqual(durable_scan["quotaReleaseReason"], "CODEX_QUOTA_EXHAUSTED")
+        self.assertEqual(usage["used"], 0)
+        self.assertEqual(usage["reserved"], 0)
+
     def test_consume_review_quota_uses_db_backed_user_quota(self) -> None:
         seed_session()
 
