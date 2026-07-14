@@ -455,6 +455,7 @@ new read and write paths aligned with the normalized SQLite tables.
 - User deletion must remove only that identity's user-scoped quota buckets and associated ledger rows while preserving repository-scoped buckets. Build the returned admin user payload before deleting buckets so quota serialization cannot recreate the deleted bucket.
 - Quota finalization must fall back to the durable user scan snapshot for `requestId`, consumed state, and the persisted consumed update when the `SCANS` mirror is cold or evicted.
 - Issue status read/replace writes and pull-request metadata writes must share `STATE_LOCK`; both persist full issue payloads, so an unlocked stale status write can erase a concurrently stored PR.
+- Terminal worker-result reconciliation may replay stored findings during `/scans` reads. Preserve the database-backed user issue status (`open`, `fixed`, or `snoozed`) and its update timestamp when replacing those findings, and rebuild the optional `ISSUES` mirror from the records actually stored; raw worker findings must not reopen user-triaged issues.
 - Public scan-system status must stay redacted, but fleet alert synchronization must receive an internal quota-bearing worker projection so complete-snapshot refreshes preserve quota incident grouping.
 - Parse trusted `X-Forwarded-For` chains from the right and use the first address outside `PULLWISE_TRUSTED_PROXY_CIDRS` as the client identity. Never use the client-controlled leftmost entry or a trusted proxy hop for rate-limit subjects.
 ## Worker Upload Load Testing
