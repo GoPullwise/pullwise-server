@@ -2164,34 +2164,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(defaults["reviewerConcurrency"], 2)
         self.assertEqual(defaults["turnTimeoutSeconds"], 3600)
         self.assertEqual(defaults["scanDeadlineSeconds"], 14400)
-        self.assertEqual(defaults["maxBundles"], 24)
-        self.assertEqual(defaults["maxReviewerAssignments"], 48)
-        self.assertEqual(app.billing.default_review_agent_review_worker_config("free")["maxBundles"], 12)
-        self.assertEqual(app.billing.default_review_agent_review_worker_config("free")["maxReviewerAssignments"], 24)
-        self.assertEqual(app.billing.default_review_agent_review_worker_config("max")["maxBundles"], 32)
-        self.assertEqual(app.billing.default_review_agent_review_worker_config("max")["maxReviewerAssignments"], 64)
         expected_pro_policy = {
             "reviewerConcurrency": 2,
             "turnTimeoutSeconds": 1800,
             "scanDeadlineSeconds": 12000,
-            "maxBundles": 64,
-            "maxReviewerAssignments": 128,
         }
         self.assertEqual(update.status, HTTPStatus.OK)
         self.assertEqual(
             update.payload["agentConfig"]["reviewWorker"],
             expected_pro_policy,
         )
-
-        lower_bound = RouteHarness(
-            "/admin/subscription-plans/agent-configs/max",
-            {"reviewWorker": {"maxBundles": 0, "maxReviewerAssignments": -1}},
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(lower_bound, "PATCH")
-        self.assertEqual(lower_bound.status, HTTPStatus.OK)
-        self.assertEqual(lower_bound.payload["agentConfig"]["reviewWorker"]["maxBundles"], 1)
-        self.assertEqual(lower_bound.payload["agentConfig"]["reviewWorker"]["maxReviewerAssignments"], 1)
 
         admin = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin, "GET")

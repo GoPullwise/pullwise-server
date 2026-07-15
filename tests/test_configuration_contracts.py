@@ -217,6 +217,38 @@ class ConfigurationContractsTest(unittest.TestCase):
                 for path in metadata_paths
             )
         )
+
+    def test_review_phase_limits_are_global_admin_config(self) -> None:
+        config = app.system_config.default_config()
+        metadata_fields = {
+            field["path"]: field
+            for group in app.system_config.metadata()
+            if group["id"] == "reviewWorker"
+            for field in group["fields"]
+        }
+
+        self.assertEqual(config["reviewWorker"]["maxBundles"], 24)
+        self.assertEqual(config["reviewWorker"]["maxReviewerAssignments"], 48)
+        self.assertEqual(metadata_fields["reviewWorker.maxBundles"]["min"], 1)
+        self.assertEqual(metadata_fields["reviewWorker.maxBundles"]["max"], 64)
+        self.assertEqual(
+            metadata_fields["reviewWorker.maxReviewerAssignments"]["max"],
+            128,
+        )
+        normalized = app.system_config.normalize_config(
+            {
+                "reviewWorker": {
+                    "maxBundles": 999,
+                    "maxReviewerAssignments": 0,
+                }
+            }
+        )
+        self.assertEqual(normalized["reviewWorker"]["maxBundles"], 64)
+        self.assertEqual(normalized["reviewWorker"]["maxReviewerAssignments"], 1)
+        for plan in app.system_config.PLAN_IDS:
+            plan_worker = app.billing.default_review_agent_review_worker_config(plan)
+            self.assertNotIn("maxBundles", plan_worker)
+            self.assertNotIn("maxReviewerAssignments", plan_worker)
     def test_scan_job_lease_remains_admin_config_without_retired_worker_fields(self) -> None:
         config = app.system_config.default_config()
         scan_fields = {

@@ -3206,6 +3206,14 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertGreater(payload["review_request"]["budget"]["max_estimated_input_tokens"], 0)
         self.assertEqual(payload["review_request"]["policy"]["turn_timeout_seconds"], review_worker_config["turnTimeoutSeconds"])
         self.assertEqual(payload["review_request"]["policy"]["reviewer_concurrency"], review_worker_config["reviewerConcurrency"])
+        self.assertEqual(
+            payload["review_request"]["policy"]["max_bundles"],
+            app.system_config.review_max_bundles(),
+        )
+        self.assertEqual(
+            payload["review_request"]["policy"]["max_reviewer_assignments"],
+            app.system_config.review_max_reviewer_assignments(),
+        )
         self.assertGreater(repository_limits["maxFiles"], 0)
         self.assertGreater(repository_limits["maxBytes"], 0)
 
@@ -3244,10 +3252,13 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(payload["model_profile"]["non_core_effort"], "medium")
         self.assertEqual(payload["review_request"]["policy"]["turn_timeout_seconds"], expected_worker["turnTimeoutSeconds"])
         self.assertEqual(payload["review_request"]["policy"]["reviewer_concurrency"], expected_worker["reviewerConcurrency"])
-        self.assertEqual(payload["review_request"]["policy"]["max_bundles"], expected_worker["maxBundles"])
+        self.assertEqual(
+            payload["review_request"]["policy"]["max_bundles"],
+            app.system_config.review_max_bundles(),
+        )
         self.assertEqual(
             payload["review_request"]["policy"]["max_reviewer_assignments"],
-            expected_worker["maxReviewerAssignments"],
+            app.system_config.review_max_reviewer_assignments(),
         )
         self.assertEqual(payload["review_request"]["budget"]["max_wall_time_seconds"], expected_worker["scanDeadlineSeconds"])
 
