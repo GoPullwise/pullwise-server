@@ -45,16 +45,22 @@ REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
         "reviewerConcurrency": 2,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
+        "maxBundles": 12,
+        "maxReviewerAssignments": 24,
     },
     "pro": {
         "reviewerConcurrency": 2,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
+        "maxBundles": 24,
+        "maxReviewerAssignments": 48,
     },
     "max": {
         "reviewerConcurrency": 2,
         "turnTimeoutSeconds": 3600,
         "scanDeadlineSeconds": 14400,
+        "maxBundles": 32,
+        "maxReviewerAssignments": 64,
     },
 }
 REVIEW_AGENT_CONFIG_TEXT_MAX_LENGTH = 128
@@ -177,7 +183,7 @@ def default_review_agent_plan_config(plan: str) -> dict:
 
 def default_review_agent_config_state() -> dict:
     return {
-        "version": 2,
+        "version": 3,
         "plans": {plan: default_review_agent_plan_config(plan) for plan in PLAN_IDS},
     }
 
@@ -218,6 +224,18 @@ def normalize_review_agent_review_worker_config(value: object, defaults: dict) -
         minimum=0,
         maximum=21600,
     )
+    result["maxBundles"] = clean_review_agent_config_int(
+        source.get("maxBundles"),
+        int(result.get("maxBundles") or 12),
+        minimum=1,
+        maximum=64,
+    )
+    result["maxReviewerAssignments"] = clean_review_agent_config_int(
+        source.get("maxReviewerAssignments"),
+        int(result.get("maxReviewerAssignments") or 24),
+        minimum=1,
+        maximum=128,
+    )
     return result
 
 def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
@@ -238,7 +256,7 @@ def normalize_review_agent_config_state(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     plans = source.get("plans") if isinstance(source.get("plans"), dict) else {}
     return {
-        "version": 2,
+        "version": 3,
         "plans": {
             plan: normalize_review_agent_plan_config(plan, plans.get(plan))
             for plan in PLAN_IDS

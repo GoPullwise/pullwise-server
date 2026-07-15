@@ -2183,6 +2183,16 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             expected_pro_policy,
         )
 
+        lower_bound = RouteHarness(
+            "/admin/subscription-plans/agent-configs/max",
+            {"reviewWorker": {"maxBundles": 0, "maxReviewerAssignments": -1}},
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(lower_bound, "PATCH")
+        self.assertEqual(lower_bound.status, HTTPStatus.OK)
+        self.assertEqual(lower_bound.payload["agentConfig"]["reviewWorker"]["maxBundles"], 1)
+        self.assertEqual(lower_bound.payload["agentConfig"]["reviewWorker"]["maxReviewerAssignments"], 1)
+
         admin = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
         app.PullwiseHandler.route(admin, "GET")
 
