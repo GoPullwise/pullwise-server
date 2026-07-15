@@ -18,7 +18,7 @@ DEFAULT_CREEM_API_BASE_URL = "https://api.creem.io"
 DEFAULT_CREEM_TEST_API_BASE_URL = "https://test-api.creem.io"
 
 DEFAULT_CONFIG = {
-    "version": 3,
+    "version": 4,
     "plans": {
         "free": {
             "userReviewLimit": 5,
@@ -43,6 +43,10 @@ DEFAULT_CONFIG = {
         "maxQueuedScansGlobal": 1000,
         "jobLeaseSeconds": 14400,
         "jobStartupGraceSeconds": 120,
+    },
+    "reviewWorker": {
+        "maxBundles": 24,
+        "maxReviewerAssignments": 48,
     },
     "worker": {
         "heartbeatTimeoutSeconds": 120,
@@ -201,6 +205,29 @@ FIELD_METADATA = [
                 "type": "integer",
                 "min": 0,
                 "description": "How long the server caches the latest worker release response in memory.",
+            },
+        ],
+    },
+    {
+        "id": "reviewWorker",
+        "title": "Review phase limits",
+        "description": "Global stage admission limits applied to every full-repository review, independent of subscription plan.",
+        "fields": [
+            {
+                "path": "reviewWorker.maxBundles",
+                "label": "Maximum review bundles",
+                "type": "integer",
+                "min": 1,
+                "max": 64,
+                "description": "Hard ceiling checked after bundle planning and exact Worker rendering; eligible paths are never truncated.",
+            },
+            {
+                "path": "reviewWorker.maxReviewerAssignments",
+                "label": "Maximum reviewer assignments",
+                "type": "integer",
+                "min": 1,
+                "max": 128,
+                "description": "Hard ceiling checked before reviewer fanout using the tier-required reviewer assignments.",
             },
         ],
     },
@@ -680,7 +707,12 @@ def nested_set(target: dict, path: str, value: object) -> None:
 def clean_value(value: object, spec: dict) -> object:
     kind = spec.get("type")
     if kind == "integer":
-        return clean_int(value, minimum=int(spec.get("min", 0)))
+        maximum = int(spec["max"]) if spec.get("max") is not None else None
+        return clean_int(
+            value,
+            minimum=int(spec.get("min", 0)),
+            maximum=maximum,
+        )
     if kind == "number":
         return clean_number(value, minimum=float(spec.get("min", 0)))
     if kind == "boolean":
@@ -700,16 +732,20 @@ def clean_value(value: object, spec: dict) -> object:
     return clean_text(value, max_length=int(spec.get("maxLength", 128)))
 
 
-def clean_int(value: object, *, minimum: int) -> int:
+def clean_int(
+    value: object,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
     if isinstance(value, bool):
         raise ValueError("Integer settings must be numbers.")
     try:
         candidate = int(value)
     except (TypeError, ValueError):
         raise ValueError("Integer settings must be numbers.") from None
-    if candidate < minimum:
-        return minimum
-    return candidate
+    candidate = max(minimum, candidate)
+    return min(maximum, candidate) if maximum is not None else candidate
 
 
 def clean_number(value: object, *, minimum: float) -> float:
@@ -886,6 +922,17 @@ def repository_scan_limits(plan: object = "max") -> dict:
         "maxBytes": plan_repository_byte_limit(normalized_plan),
         "source": "database",
     }
+
+
+def review_max_bundles() -> int:
+    return min(64, max(1, int_setting("reviewWorker.maxBundles")))
+
+
+def review_max_reviewer_assignments() -> int:
+    return min(
+        128,
+        max(1, int_setting("reviewWorker.maxReviewerAssignments")),
+    )
 
 
 def max_queued_scans_global() -> int:

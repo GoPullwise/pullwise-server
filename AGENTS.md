@@ -200,11 +200,15 @@ The server owns subscription plan agent policy.
   worker-facing API responses.
 - Persist only canonical plan policy that affects v1 jobs: Codex model,
   reasoning effort, bounded reviewer concurrency (`1..2`), turn timeout, scan
-  deadline, bundle count (`reviewWorker.maxBundles`, `1..64`), and reviewer
-  assignment count (`reviewWorker.maxReviewerAssignments`, `1..128`). Forward
-  the two count limits in v1 claim policy as `max_bundles` and
-  `max_reviewer_assignments`. Do not restore legacy `mode`, `scanMode`,
-  reviewer-turn, discovery, other bundle, or candidate limits.
+  deadline. Do not restore legacy `mode`, `scanMode`, reviewer-turn, discovery,
+  bundle, or candidate limits to subscription plan config.
+- Bundle and reviewer-assignment ceilings are global pipeline stage limits,
+  independent of subscription plan. Store them only in database-backed system
+  config as `reviewWorker.maxBundles` (`1..64`) and
+  `reviewWorker.maxReviewerAssignments` (`1..128`), then forward them in every
+  v1 claim as `max_bundles` and `max_reviewer_assignments`. They are admission
+  checks, never permission to truncate eligible paths or tier-required
+  reviewers.
 - The plan-agent Admin payload owns the model-aware reasoning capability
   contract. Validate every explicit model/effort pair against it. Expose exact
   Codex `model/list` entries when available, with a declarative longest-prefix

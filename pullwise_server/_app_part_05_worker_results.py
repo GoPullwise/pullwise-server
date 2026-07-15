@@ -150,8 +150,8 @@ def review_job_review_request_payload(agent_config: dict, repository_limits: dic
             "helper_scripts_standard_library_only": True,
             "turn_timeout_seconds": public_scan_count(review_worker.get("turnTimeoutSeconds")) or 0,
             "reviewer_concurrency": public_scan_count(review_worker.get("reviewerConcurrency")) or 1,
-            "max_bundles": public_scan_count(review_worker.get("maxBundles")) or 1,
-            "max_reviewer_assignments": public_scan_count(review_worker.get("maxReviewerAssignments")) or 1,
+            "max_bundles": system_config.review_max_bundles(),
+            "max_reviewer_assignments": system_config.review_max_reviewer_assignments(),
             "intent_test_validation": review_job_intent_policy(agent_config),
         },
     }
