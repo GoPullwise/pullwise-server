@@ -2151,6 +2151,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                     "reviewerConcurrency": 9,
                     "turnTimeoutSeconds": 1800,
                     "scanDeadlineSeconds": 12000,
+                    "maxBundles": 999,
+                    "maxReviewerAssignments": 999,
+                    "bundleLimit": 3,
                 },
             },
             cookie=self.admin_cookie,
@@ -2161,10 +2164,18 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(defaults["reviewerConcurrency"], 2)
         self.assertEqual(defaults["turnTimeoutSeconds"], 3600)
         self.assertEqual(defaults["scanDeadlineSeconds"], 14400)
+        self.assertEqual(defaults["maxBundles"], 24)
+        self.assertEqual(defaults["maxReviewerAssignments"], 48)
+        self.assertEqual(app.billing.default_review_agent_review_worker_config("free")["maxBundles"], 12)
+        self.assertEqual(app.billing.default_review_agent_review_worker_config("free")["maxReviewerAssignments"], 24)
+        self.assertEqual(app.billing.default_review_agent_review_worker_config("max")["maxBundles"], 32)
+        self.assertEqual(app.billing.default_review_agent_review_worker_config("max")["maxReviewerAssignments"], 64)
         expected_pro_policy = {
             "reviewerConcurrency": 2,
             "turnTimeoutSeconds": 1800,
             "scanDeadlineSeconds": 12000,
+            "maxBundles": 64,
+            "maxReviewerAssignments": 128,
         }
         self.assertEqual(update.status, HTTPStatus.OK)
         self.assertEqual(
@@ -2184,6 +2195,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             admin.payload["agentConfigs"]["free"]["reviewWorker"],
             app.billing.default_review_agent_review_worker_config("free"),
         )
+        stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
+        self.assertEqual(stored["version"], 3)
+        self.assertEqual(stored["plans"]["pro"]["reviewWorker"], expected_pro_policy)
+        self.assertNotIn("reviewerMaxTurnsPerScan", stored["plans"]["pro"]["reviewWorker"])
+        self.assertNotIn("bundleLimit", stored["plans"]["pro"]["reviewWorker"])
     def test_plan_agent_config_reads_repair_invalid_persisted_provider(self) -> None:
         db.save_state_item(
             app.billing.REVIEW_AGENT_CONFIG_STATE_KEY,
