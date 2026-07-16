@@ -12,6 +12,10 @@ SYSTEM_ENV_FILE=${PULLWISE_SYSTEM_ENV_FILE:-/etc/pullwise/server.env}
 SERVICE_NAME=${PULLWISE_SERVICE_NAME:-pullwise-server}
 SYSTEMD_DIR=${PULLWISE_SYSTEMD_DIR:-/etc/systemd/system}
 SERVICE_FILE=${PULLWISE_SERVICE_FILE:-$SYSTEMD_DIR/$SERVICE_NAME.service}
+WATCH_SERVICE_NAME=${PULLWISE_WATCH_SERVICE_NAME:-$SERVICE_NAME-git-watch}
+WATCH_SERVICE_FILE=${PULLWISE_WATCH_SERVICE_FILE:-$SYSTEMD_DIR/$WATCH_SERVICE_NAME.service}
+WATCH_BRANCH=${PULLWISE_WATCH_BRANCH:-main}
+WATCH_INTERVAL_SECONDS=${PULLWISE_WATCH_INTERVAL_SECONDS:-60}
 SERVICE_USER=${PULLWISE_SERVICE_USER:-pullwise}
 SERVICE_GROUP=${PULLWISE_SERVICE_GROUP:-pullwise}
 VENV_DIR=${PULLWISE_VENV_DIR:-$APP_DIR/.venv}
@@ -45,6 +49,9 @@ Commands:
   sync-env                  Copy .env.local to /etc/pullwise/server.env
   render-service            Print the systemd service unit
   install-service [--dry-run] Sync env, install unit, daemon-reload, enable
+  render-watch-service      Print the Git watcher systemd service unit
+  install-watch-service [--dry-run]
+                            Install, enable, and start the Git watcher
   start [--dry-run]         Start via systemd when installed, else direct
   run                       Run the server in the foreground
   stop [--force]            Stop via systemd when installed, else direct
@@ -615,6 +622,77 @@ SERVICE
 
 cmd_render_service() {
   render_service_content
+}
+
+render_watch_service_content() {
+  cat <<SERVICE
+[Unit]
+Description=Pullwise Server Git Watcher
+After=network-online.target $SERVICE_NAME.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$APP_DIR
+Environment=PULLWISE_WATCH_BRANCH=$WATCH_BRANCH
+Environment=PULLWISE_WATCH_INTERVAL_SECONDS=$WATCH_INTERVAL_SECONDS
+Environment=PULLWISE_WATCH_LOG_FILE=/dev/null
+Environment="PULLWISE_WATCH_RESTART_COMMAND=/usr/bin/systemctl restart $SERVICE_NAME"
+ExecStart=/usr/bin/bash $APP_DIR/git-watch.sh
+Restart=always
+RestartSec=10
+User=root
+UMask=0022
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+}
+
+cmd_render_watch_service() {
+  render_watch_service_content
+}
+
+write_watch_service_file() {
+  mkdir -p "$(dirname -- "$WATCH_SERVICE_FILE")" || die "Unable to create $(dirname -- "$WATCH_SERVICE_FILE")"
+  tmp_file=$WATCH_SERVICE_FILE.tmp.$$
+  render_watch_service_content > "$tmp_file" || die "Unable to render watcher service file."
+  mv "$tmp_file" "$WATCH_SERVICE_FILE" || die "Unable to install watcher service file: $WATCH_SERVICE_FILE"
+  chmod 644 "$WATCH_SERVICE_FILE" 2>/dev/null || warn "could not chmod 644 $WATCH_SERVICE_FILE"
+  ok "watcher service file written: $WATCH_SERVICE_FILE"
+}
+
+cmd_install_watch_service() {
+  dry_run=false
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        dry_run=true
+        ;;
+      *)
+        die "Unknown install-watch-service option: $1"
+        ;;
+    esac
+    shift
+  done
+
+  if [ "$dry_run" = true ]; then
+    say "dry-run: write watcher service file $WATCH_SERVICE_FILE"
+    say "dry-run: systemctl daemon-reload"
+    say "dry-run: systemctl enable --now $WATCH_SERVICE_NAME"
+    return 0
+  fi
+
+  service_installed || die "Install the server service first with ./launcher.sh install-service."
+  [ -f "$APP_DIR/git-watch.sh" ] || die "git-watch.sh not found: $APP_DIR/git-watch.sh"
+  write_watch_service_file
+  ensure_command_available "systemctl" PULLWISE_SYSTEMCTL_BIN systemctl systemd
+  "$(systemctl_bin)" daemon-reload || die "systemctl daemon-reload failed"
+  "$(systemctl_bin)" enable --now "$WATCH_SERVICE_NAME" || die "systemctl enable --now failed"
+  ok "$WATCH_SERVICE_NAME enabled and started"
 }
 
 write_service_file() {
@@ -1632,6 +1710,12 @@ main() {
       ;;
     install-service)
       cmd_install_service "$@"
+      ;;
+    render-watch-service)
+      cmd_render_watch_service "$@"
+      ;;
+    install-watch-service)
+      cmd_install_watch_service "$@"
       ;;
     start)
       cmd_start "$@"

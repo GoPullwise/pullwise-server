@@ -498,5 +498,15 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   worker finding IDs are source identities and may repeat in different runs.
 - `git-watch.sh` single-instance exclusion must use an OS-held lock such as
   `flock`; a stale directory left by a crash must not block updates forever.
+- A Git watcher deployment is successful only after setup, tests, server
+  restart, and health checks complete. Publish the full commit and completion
+  time atomically to `.pullwise/git-watch.status.json` only then. The admin
+  deployment endpoint must compare that commit with the server process's
+  startup commit and report verified only when they match.
+- Ubuntu 22.04 production Git polling uses the optional
+  `pullwise-server-git-watch` systemd unit installed by
+  `./launcher.sh install-watch-service`. Keep its target branch pinned to
+  `main`, reject a checkout on any other branch, and use journald rather than
+  an unbounded watcher log file.
 - V1 heartbeat payloads must contain `active_run_id` explicitly, including `null` while idle. Terminal wrapper status maps exactly to execution status: `done/completed`, `failed/failed`, `cancelled/cancelled`, and `partial_completed/partial_completed`.
 - Preserve worker validator disposition when constructing issues: plausible stays `potential_risk`; confirmed static evidence is `static_proof`; only confirmed dynamic evidence with a command plus output/log may become `verified`. Audit bundles include redacted `intent_test_output` artifacts and localize Markdown to the scan output language.

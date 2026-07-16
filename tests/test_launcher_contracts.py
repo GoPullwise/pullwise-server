@@ -378,6 +378,8 @@ CURL
             "sync-env",
             "install-service",
             "render-service",
+            "install-watch-service",
+            "render-watch-service",
             "start",
             "stop",
             "restart",
@@ -672,6 +674,35 @@ CURL
         self.assertIn("sync-env", result.stdout)
         self.assertIn("systemctl daemon-reload", result.stdout)
         self.assertIn("systemctl enable pullwise-server", result.stdout)
+
+    def test_render_watch_service_polls_main_and_restarts_the_server(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+
+            result = self.run_launcher(["render-watch-service"], env)
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("Description=Pullwise Server Git Watcher", result.stdout)
+        self.assertIn("Environment=PULLWISE_WATCH_BRANCH=main", result.stdout)
+        self.assertIn("Environment=PULLWISE_WATCH_LOG_FILE=/dev/null", result.stdout)
+        self.assertIn("PULLWISE_WATCH_RESTART_COMMAND=/usr/bin/systemctl restart pullwise-server", result.stdout)
+        self.assertIn("ExecStart=/usr/bin/bash", result.stdout)
+        self.assertIn("git-watch.sh", result.stdout)
+        self.assertIn("Restart=always", result.stdout)
+        self.assertIn("User=root", result.stdout)
+
+    def test_install_watch_service_dry_run_enables_and_starts_watcher(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self.base_launcher_env(root)
+
+            result = self.run_launcher(["install-watch-service", "--dry-run"], env)
+
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertIn("write watcher service file", result.stdout)
+        self.assertIn("systemctl daemon-reload", result.stdout)
+        self.assertIn("systemctl enable --now pullwise-server-git-watch", result.stdout)
 
     def test_start_dry_run_prints_systemd_command_when_service_is_installed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

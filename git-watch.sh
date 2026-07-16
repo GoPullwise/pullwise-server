@@ -15,7 +15,7 @@ LOG_FILE=${PULLWISE_WATCH_LOG_FILE:-$APP_DIR/.pullwise/git-watch.log}
 LOCK_DIR=${PULLWISE_WATCH_LOCK_DIR:-$APP_DIR/.pullwise/git-watch.lock}
 LOCK_FILE=${PULLWISE_WATCH_LOCK_FILE:-$LOCK_DIR.flock}
 DEPLOYED_HEAD_FILE=${PULLWISE_WATCH_DEPLOYED_HEAD_FILE:-$APP_DIR/.pullwise/git-watch.deployed-head}
-STATUS_FILE=${PULLWISE_WATCH_STATUS_FILE:-$APP_DIR/.pullwise/git-watch.status.json}
+STATUS_FILE=${PULLWISE_GIT_WATCH_STATUS_FILE:-${PULLWISE_WATCH_STATUS_FILE:-$APP_DIR/.pullwise/git-watch.status.json}}
 
 RUN_SETUP=${PULLWISE_WATCH_RUN_SETUP:-true}
 RUN_TESTS=${PULLWISE_WATCH_RUN_TESTS:-true}
@@ -52,7 +52,7 @@ Common environment overrides:
   PULLWISE_WATCH_HEALTH_RETRIES=30
   PULLWISE_WATCH_HEALTH_RETRY_SECONDS=2
   PULLWISE_WATCH_DEPLOYED_HEAD_FILE=.pullwise/git-watch.deployed-head
-  PULLWISE_WATCH_STATUS_FILE=.pullwise/git-watch.status.json
+  PULLWISE_GIT_WATCH_STATUS_FILE=.pullwise/git-watch.status.json
   PULLWISE_WATCH_RESTART_COMMAND='./launcher.sh restart'
 
 Default update flow:
@@ -79,6 +79,25 @@ is_true() {
       return 0
       ;;
     *)
+      return 1
+      ;;
+  esac
+}
+
+validate_runtime_config() {
+  case "$INTERVAL_SECONDS" in
+    ""|*[!0-9]*)
+      log "ERROR: PULLWISE_WATCH_INTERVAL_SECONDS must be a positive integer" >&2
+      return 1
+      ;;
+  esac
+  [ "$INTERVAL_SECONDS" -gt 0 ] || {
+    log "ERROR: PULLWISE_WATCH_INTERVAL_SECONDS must be greater than zero" >&2
+    return 1
+  }
+  case "$HEALTH_RETRY_SECONDS" in
+    ""|*[!0-9]*)
+      log "ERROR: PULLWISE_WATCH_HEALTH_RETRY_SECONDS must be a non-negative integer" >&2
       return 1
       ;;
   esac
@@ -500,6 +519,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+validate_runtime_config || exit 1
 ensure_host_dependencies || exit 1
 mkdir -p "$(dirname -- "$LOG_FILE")" || exit 1
 

@@ -618,6 +618,22 @@ chmod +x git-watch.sh
 PULLWISE_WATCH_INTERVAL_SECONDS=60 ./git-watch.sh
 ```
 
+On Ubuntu 22.04, install the watcher as a persistent systemd service after the
+main server service is installed:
+
+```bash
+sudo ./launcher.sh install-watch-service
+sudo systemctl status pullwise-server-git-watch --no-pager
+sudo journalctl -u pullwise-server-git-watch -f
+```
+
+The installed watcher tracks `origin/main` every 60 seconds, starts at boot,
+and restarts automatically if its process exits. It runs as root because it
+must update the deployment checkout, virtual environment, and systemd server
+service; treat write access to the configured upstream branch as privileged
+production deployment access. Use `render-watch-service` to inspect the unit
+before installation.
+
 By default the watcher runs `./launcher.sh setup`,
 `.venv/bin/python -m unittest discover -s tests`, `./launcher.sh restart`, and
 `./launcher.sh health`. Command override variables such as
@@ -636,6 +652,14 @@ logs to `.pullwise/git-watch.log`. It records the last successfully deployed
 commit in `.pullwise/git-watch.deployed-head`; if setup, tests, restart, or
 health checks fail after a pull, the next polling cycle retries deployment even
 when Git is already at the latest upstream commit.
+
+Only after restart and health checks succeed does the watcher atomically write
+`.pullwise/git-watch.status.json` with the full Git commit ID and completion
+time. The admin-only `GET /admin/server/deployment` endpoint compares that
+commit with the commit captured by the currently running server process. Admin
+Settings polls this endpoint while visible and shows `Verified` only when the
+two full commit IDs match. Set `PULLWISE_GIT_WATCH_STATUS_FILE` in both watcher
+and server environments only when the default status path must be overridden.
 
 For a non-secret support bundle, export the runtime state:
 
