@@ -2808,7 +2808,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             }
             return self.json(metrics)
         if segments == ["admin", "server", "deployment"]:
-            return self.json(server_deployment_payload())
+            return self.json(server_deployment_payload(), headers={"Cache-Control": "no-store"})
         if segments == ["admin", "users"]:
             return self.json(admin_users_payload(current_user_id=session["userId"]))
         if segments == ["admin", "system-config"]:

@@ -4,11 +4,28 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pullwise_server import deployment_status
 
 
 class DeploymentStatusTest(unittest.TestCase):
+    def test_running_commit_lookup_trusts_only_the_known_server_checkout(self) -> None:
+        revision = "d" * 40
+        result = type("GitResult", (), {"returncode": 0, "stdout": revision})()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            deployment_status.subprocess,
+            "run",
+            return_value=result,
+        ) as run:
+            root = Path(tmp).resolve()
+            current = deployment_status.current_git_revision(root)
+
+        self.assertEqual(current, revision)
+        command = run.call_args.args[0]
+        self.assertIn(f"safe.directory={root}", command)
+        self.assertEqual(command[-3:], ["rev-parse", "--verify", "HEAD^{commit}"])
+
     def test_verified_payload_requires_running_commit_to_match_successful_watcher_commit(self) -> None:
         revision = "a" * 40
         with tempfile.TemporaryDirectory() as tmp:

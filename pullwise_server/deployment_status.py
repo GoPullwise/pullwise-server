@@ -31,9 +31,10 @@ def normalize_completed_at(value: object) -> str | None:
 
 
 def current_git_revision(repository_root: str | Path) -> str | None:
+    root = str(Path(repository_root).resolve())
     try:
         result = subprocess.run(
-            ["git", "-C", str(repository_root), "rev-parse", "--verify", "HEAD^{commit}"],
+            ["git", "-c", f"safe.directory={root}", "-C", root, "rev-parse", "--verify", "HEAD^{commit}"],
             check=False,
             capture_output=True,
             text=True,

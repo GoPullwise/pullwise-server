@@ -329,6 +329,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(handler.payload, expected)
+        self.assertEqual(handler.headers_out.get("Cache-Control"), "no-store")
         deployment.assert_called_once_with()
 
     def test_non_admin_cannot_read_server_deployment_commit(self) -> None:
