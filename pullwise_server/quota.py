@@ -634,32 +634,6 @@ def consume_reserved_scan_quota(
                         "repository": repository_bucket["id"],
                     },
                 }
-            existing_release = connection.execute(
-                f"""
-                SELECT 1
-                FROM quota_ledger
-                WHERE scan_id = ?
-                  AND requested_by_user_id = ?
-                  {request_clause}
-                  AND reason = 'scan_reservation_released'
-                  AND delta < 0
-                LIMIT 1
-                """,
-                [scan_id, requested_by_user_id, *request_params],
-            ).fetchone()
-            if existing_release:
-                connection.commit()
-                return {
-                    "deduplicated": True,
-                    "consumed": False,
-                    "released": True,
-                    "user": quota_payload(user_bucket, scope="user"),
-                    "repository": quota_payload(repository_bucket, scope="repository"),
-                    "bucketIds": {
-                        "user": user_bucket["id"],
-                        "repository": repository_bucket["id"],
-                    },
-                }
             reservation_rows = connection.execute(
                 f"""
                 SELECT id, bucket_id, delta

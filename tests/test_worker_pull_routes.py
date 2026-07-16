@@ -1805,14 +1805,112 @@ class WorkerPullRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(final_log, "POST")
         self.assertEqual(final_log.status, HTTPStatus.OK)
         self.assertTrue(final_log.payload["replaced"])
+        review_run_before_duplicate = db.get_review_run(run_id)
 
-        duplicate = self.v1_result(claimed, body)
+        with patch.object(
+            app.db.time,
+            "time",
+            return_value=int(review_run_before_duplicate["updated_at"]) + 100,
+        ):
+            duplicate = self.v1_result(claimed, body)
 
         self.assertEqual(duplicate.status, HTTPStatus.OK)
         self.assertTrue(duplicate.payload["accepted"])
         self.assertTrue(duplicate.payload["duplicate"])
-    def test_worker_result_checksum_quote_probe(self) -> None:
-        self.assertEqual("quote", "quote")
+        self.assertEqual(
+            db.get_review_run(run_id)["updated_at"],
+            review_run_before_duplicate["updated_at"],
+        )
+        repaired_at = int(review_run_before_duplicate["updated_at"]) + 200
+        with db.connect() as connection, connection:
+            connection.execute(
+                "UPDATE review_runs SET summary_json = '{}', updated_at = ? WHERE run_id = ?",
+                (int(review_run_before_duplicate["updated_at"]) - 1, run_id),
+            )
+        with patch.object(app.db.time, "time", return_value=repaired_at):
+            repaired_duplicate = self.v1_result(claimed, body)
+
+        repaired_run = db.get_review_run(run_id)
+        self.assertEqual(repaired_duplicate.status, HTTPStatus.OK)
+        self.assertTrue(repaired_duplicate.payload["duplicate"])
+        self.assertNotEqual(repaired_run["summary_json"], "{}")
+        self.assertEqual(repaired_run["updated_at"], repaired_at)
+    def test_duplicate_result_replays_projection_after_post_receipt_failure(self) -> None:
+        resolved_commit = "a" * 40
+        scan = {
+            "id": "sc_result_replay_after_receipt",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_1",
+            "createdAt": app.now(),
+            "queuedAt": app.now(),
+            "progress": 0,
+            "phase": None,
+            "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        app.SCANS = [scan]
+        app.create_scan_job_for_scan(scan)
+        claim = self.v1_lease()
+        self.assertEqual(claim.status, HTTPStatus.OK)
+        job = claim.payload["job"]
+        body = {
+            "status": "done",
+            "attempt_id": f"wk_1-{job['attempt']}",
+            "resolved_commit": resolved_commit,
+            "humanReport": {"title": "Replay repaired report"},
+            **audit_result_fields(
+                [audit_issue_card("Replay repaired finding", issue_id="iss_result_replay", severity="P1")]
+            ),
+            "review_decision_events": [
+                {
+                    "protocol": "pullwise-review-decision/0.1",
+                    "event_id": "evt_result_replay",
+                    "candidate_observation_key": "obs_result_replay",
+                    "candidate_id": "iss_result_replay",
+                    "decision": "reported",
+                    "scoring_protocol": "pullwise-review-score/0.1",
+                }
+            ],
+            "summary": {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+        }
+        body["reviewWorkerProtocol"]["progress_final"]["steps"] = [
+            {"id": "reviewer_fanout", "status": "completed", "percent": 100}
+        ]
+
+        with patch.object(
+            app.db,
+            "update_scan_job_commit",
+            side_effect=RuntimeError("injected after result receipt"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "injected after result receipt"):
+                app.apply_worker_job_result(job, body)
+
+        received_job = db.get_scan_job(job["job_id"])
+        self.assertEqual(received_job["status"], "done")
+        self.assertEqual(received_job["commit"], "pending")
+        self.assertIsNotNone(db.get_completed_scan_job_result(job["job_id"]))
+        self.assertEqual(scan["status"], "running")
+        self.assertEqual(app.ISSUES, [])
+        self.assertEqual(db.get_review_run(job["run_id"])["status"], "leased")
+
+        with patch.object(app, "finalize_scan_quota_for_job", wraps=app.finalize_scan_quota_for_job) as finalize_quota:
+            duplicate = self.v1_result(received_job, body)
+
+        self.assertEqual(duplicate.status, HTTPStatus.OK)
+        self.assertTrue(duplicate.payload["accepted"])
+        self.assertTrue(duplicate.payload["duplicate"])
+        self.assertEqual(db.get_scan_job(job["job_id"])["commit"], resolved_commit)
+        self.assertEqual(scan["status"], "done")
+        self.assertEqual(scan["humanReport"]["title"], "Replay repaired report")
+        self.assertEqual([issue["id"] for issue in app.ISSUES], ["iss_result_replay"])
+        self.assertEqual(db.get_review_run(job["run_id"])["status"], "completed")
+        self.assertEqual(
+            [event["event_id"] for event in db.list_review_decision_events(job_id=job["job_id"])],
+            ["evt_result_replay"],
+        )
+        finalize_quota.assert_called_once()
 
     def test_terminal_final_debug_bundle_upload_replaces_existing_bundle(self) -> None:
         self.create_claimable_scan_job(job_id="job_terminal_debug_replace", scan_id="sc_terminal_debug_replace", user_id="usr_1")
@@ -3549,6 +3647,41 @@ class WorkerPullRoutesTest(unittest.TestCase):
         )
 
         self.assertNotEqual(first, second)
+
+    def test_worker_result_checksum_includes_projection_fields(self) -> None:
+        base = {
+            "status": "done",
+            **audit_result_fields([]),
+            "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        }
+        variants = {
+            "deterministicFindings": (
+                {"deterministicFindings": [{"id": "det-a", "title": "Finding A", "severity": "high"}]},
+                {"deterministicFindings": [{"id": "det-b", "title": "Finding B", "severity": "medium"}]},
+            ),
+            "effectiveAgentConfig": (
+                {"effectiveAgentConfig": {"provider": "codex", "model": "gpt-5.4"}},
+                {"effectiveAgentConfig": {"provider": "codex", "model": "gpt-5.5"}},
+            ),
+            "humanReport": (
+                {"humanReport": {"title": "Report A"}},
+                {"humanReport": {"title": "Report B"}},
+            ),
+            "agentReport": (
+                {"agentReport": {"oneLine": "Agent report A"}},
+                {"agentReport": {"oneLine": "Agent report B"}},
+            ),
+            "readingGuide": (
+                {"readingGuide": {"forAgentFix": "Fix A"}},
+                {"readingGuide": {"forAgentFix": "Fix B"}},
+            ),
+        }
+
+        for field, (first_value, second_value) in variants.items():
+            with self.subTest(field=field):
+                first = app.worker_result_checksum({**base, **first_value})
+                second = app.worker_result_checksum({**base, **second_value})
+                self.assertNotEqual(first, second)
 
     def test_worker_result_checksum_ignores_worker_supplied_checksum(self) -> None:
         base = {
@@ -6691,6 +6824,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
 
         stored = db.get_scan_job(job["job_id"])
+        attempt = db.list_scan_job_attempts(job["job_id"])[0]
+        review_run = db.get_review_run(job["run_id"])
         self.assertEqual(stored["status"], "failed")
         self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
         self.assertEqual(stored["started_at"], None)
@@ -6698,6 +6833,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored["error"], "worker_job_startup_lost")
         self.assertEqual(app.SCANS[0]["status"], "failed")
         self.assertEqual(app.SCANS[0]["recoveryReason"], "worker_job_startup_lost")
+        self.assertEqual((attempt["status"], attempt["error"]), ("failed", "worker_job_startup_lost"))
+        self.assertEqual((review_run["status"], review_run["result_status"]), ("failed", "failed"))
+        self.assertEqual(json.loads(review_run["error_json"])["code"], "worker_job_startup_lost")
+        self.assertEqual(json.loads(review_run["error_json"])["source"], "server_lease_reaper")
+        self.assertEqual(json.loads(review_run["progress_json"])["status"], "failed")
 
     def test_worker_heartbeat_keeps_unstarted_claim_during_startup_grace(self) -> None:
         timestamp = app.now()

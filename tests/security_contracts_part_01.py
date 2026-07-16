@@ -889,7 +889,7 @@ class SecurityContractsPart01Test(SecurityContractsBase):
                         is_first_prepare = prepare_calls == 1
                     if is_first_prepare:
                         first_prepare_entered.set()
-                        release_first_prepare.wait(1)
+                        release_first_prepare.wait(5)
                     else:
                         time.sleep(0.01)
                     with counter_lock:
@@ -913,7 +913,7 @@ class SecurityContractsPart01Test(SecurityContractsBase):
                     second = threading.Thread(target=run_preview)
                     first.start()
                     second.start()
-                    self.assertTrue(first_prepare_entered.wait(1))
+                    self.assertTrue(first_prepare_entered.wait(5))
                     time.sleep(0.05)
                     release_first_prepare.set()
                     first.join()

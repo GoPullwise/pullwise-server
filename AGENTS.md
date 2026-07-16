@@ -93,6 +93,21 @@ the server scheduler's point of view.
   heartbeat no longer has an active run, and the same worker can still lease a
   new queued job.
 
+Active user cancellation is a server-authoritative handshake, not an immediate
+terminal write. Cancel a queued job directly, but move a claimed, running, or
+uploading job through `cancel_requested` and `cancelling`; return a
+`cancel_run` heartbeat command, accept cancellation progress and required
+artifacts, and make only the matching `cancelled` result terminal. Pending
+cancellation must not renew the lease or count the worker as running, but it
+must block that same worker from claiming another job until cleanup reaches a
+terminal result or the server cancellation timeout reaps it.
+Reject a non-cancelled result in any cancellation state with HTTP 409 code
+`JOB_CANCELLATION_AUTHORITATIVE` and canonical job, run, attempt, job-status,
+and accepted-result-status bindings. A late `cancelled` receipt from that same
+attempt may attach raw evidence after the timeout reaper has finalized the
+job, but must preserve the reaper-owned job, attempt, review-run, and public
+scan completion/error/cancellation metadata.
+
 ## Worker Install Secrets And Identity
 
 - The public `/install-worker.sh` script must not embed worker tokens or other
@@ -274,6 +289,22 @@ Accept and store only the event that matches the terminal job status, update the
 review run event/progress snapshot, and do not regress the terminal scan job,
 scan state, quota state, or lease accounting back to running.
 
+Treat worker-result receipt and worker-result convergence as separate durable
+steps. Fresh submissions, checksum-identical duplicates, startup recovery, and
+terminal read reconciliation must reload the stored raw result payload and
+idempotently converge the resolved commit, decision events, quota, scan/issues,
+and review run. Revalidate the stored v1 envelope and required artifacts during
+convergence, but allow an explicitly replaceable final-log artifact to have a
+new content hash and size after receipt. A non-cancelled result must never
+overwrite an authoritative `cancel_requested`, `cancelling`, or `cancelled`
+job/scan state. Exact duplicate convergence must be a database write no-op when
+all derived review-run fields already match, while any corrupted or incomplete
+derived field must still be repaired from the stored raw envelope.
+Use the durable scan snapshot as the write base for result and recovery
+projection, then synchronize any process-local `SCANS` mirror. A stale memory
+object must never erase newer cancellation, quota, completion, or recovery
+fields; the newest in-process progress counter may still be merged explicitly.
+
 Expose the worker-facing v1 review routes explicitly: register under
 `/v1/workers/register`, lease and heartbeat under `/v1/workers/{worker_id}/...`,
 and run events, artifact upload, and terminal result submit under
@@ -373,6 +404,27 @@ must never use that exception.
 
 Scan jobs run once only. Do not add job-level retry configuration, max-attempt controls, or recovery paths that return a claimed/running/lost scan job to `queued`; user retry means starting a new scan.
 
+Run continuous scan-lease recovery from
+`PullwiseThreadingHTTPServer.service_actions`, never from the v1 claim hot
+path. A recovery must finalize `scan_jobs`, `scan_job_attempts`, and
+nonterminal `review_runs` in one SQLite transaction; it must never requeue a
+run-once job. Expired `cancel_requested`/`cancelling` jobs converge to
+`cancelled`, late heartbeats cannot renew terminal leases, and pending
+scan/quota projection is replayed idempotently until `status`, `quotaState`,
+and `recoveryReason` match the terminal job.
+Set `scan_jobs.projection_pending = 1` in the same transaction that creates a
+reaper-owned terminal state, select retries through the partial
+`idx_scan_jobs_projection_pending` index, and clear the marker only after the
+durable scan and quota projection succeeds with the same terminal status and
+reason. Legacy databases may run a one-time mismatch backfill during schema
+migration; the recurring maintenance loop must not rescan terminal history or
+evaluate scan JSON to discover pending work.
+
+Refundable worker-failure replay must derive `requestId`, repository identity,
+quota state, and preflight evidence from the durable scan snapshot before any
+process-local mirror. Replaying an existing release repairs the projection but
+preserves the first `quotaReleasedAt` value.
+
 Quota should be finalized when the worker reaches core semantic review work, not
 for mechanical setup phases. Preserve subscription-plan controlled model,
 timeout, repository limits, and core reasoning effort; non-core phases use the
@@ -428,6 +480,14 @@ quota to workspace quota.
 - Billable-phase evidence and refundable-reservation rollback must be derived
   from durable job/run/event storage, not only the process-local scan mirror,
   so cold-memory restart paths consume or refund both quota buckets correctly.
+- Billable core work remains billable after the latest progress phase advances
+  to cleanup or another non-core phase. Check durable review-run progress,
+  started/completed core steps, and historical indexed review-run events before
+  releasing a reservation during cancellation or recovery.
+- A prior `scan_reservation_released` ledger is audit history, not a permanent
+  veto on later consumption when durable core evidence arrives. Replay must
+  deterministically repair stale scan quota projections from existing release
+  or consumption ledgers without changing bucket totals twice.
 - UI/API copy should say account, user, repository, or repo; avoid introducing
   workspace unless referring to a local checkout/worktree in the generic
   filesystem sense.

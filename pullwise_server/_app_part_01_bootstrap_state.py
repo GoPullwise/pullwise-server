@@ -106,8 +106,8 @@ AUDIT_SWARM_EVIDENCE_BLOCK_KINDS = {
     "risk",
 }
 REVIEW_DECISION_EVENT_PROTOCOL_VERSION = "pullwise-review-decision/0.1"
-SCAN_STATUSES = {"queued", "running", "done", "failed", "cancelled", "partial_completed"}
-SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "done", "failed", "cancelled", "partial_completed", "lost"}
+SCAN_STATUSES = {"queued", "running", "cancel_requested", "cancelling", "done", "failed", "cancelled", "partial_completed"}
+SCAN_JOB_STATUSES = {"queued", "claimed", "running", "uploading_result", "cancel_requested", "cancelling", "done", "failed", "cancelled", "partial_completed", "lost"}
 DEFAULT_SCAN_ISSUE_RETENTION_SECONDS = 90 * 24 * 60 * 60
 TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "partial_completed", "lost"}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
@@ -965,7 +965,7 @@ def scan_job_has_active_restart_lease(job: dict | None, timestamp: int) -> bool:
     if not isinstance(job, dict):
         return False
     status = public_issue_text(job.get("status")).lower()
-    if status not in {"claimed", "running", "uploading_result"}:
+    if status not in {"claimed", "running", "uploading_result", "cancel_requested", "cancelling"}:
         return False
     timeout_at = pull_request_timestamp(job.get("timeout_at")) or 0
     return timeout_at > int(timestamp)
@@ -1015,8 +1015,15 @@ def recover_interrupted_scans() -> int:
                     payload = completed_result.get("result_payload") if isinstance(completed_result.get("result_payload"), dict) else {}
                     result_status = public_issue_text(completed_result.get("result_status") or completed_result.get("status")).lower()
                     checksum = clean_github_access_text(completed_result.get("result_result_checksum") or completed_result.get("result_checksum"))
+                    attempt_id = clean_github_access_text(completed_result.get("result_attempt_id"))
                     try:
-                        changed = apply_worker_job_result_to_state_locked(completed_result, payload, status=result_status, checksum=checksum)
+                        convergence = converge_worker_job_result(
+                            completed_result,
+                            attempt_id=attempt_id,
+                            checksum=checksum,
+                            duplicate=True,
+                        )
+                        changed = bool(convergence.get("accepted"))
                     except ValueError as exc:
                         if not worker_completed_result_rejected_error(exc):
                             raise
@@ -1037,7 +1044,17 @@ def recover_interrupted_scans() -> int:
                 if reconcile_scan_job_state_locked(scan):
                     recovered += 1
                 continue
-            db.fail_interrupted_scan_job(str(scan.get("id") or ""), reason="server_restart", timestamp=timestamp)
+            failed_job = db.fail_interrupted_scan_job(
+                str(scan.get("id") or ""),
+                reason="server_restart",
+                timestamp=timestamp,
+            )
+            if not failed_job:
+                failed_job = terminal_scan_quota_job(scan)
+            elif public_issue_text(failed_job.get("status")).lower() != "failed":
+                if reconcile_scan_job_state_locked(scan):
+                    recovered += 1
+                continue
             scan["status"] = "failed"
             scan["progress"] = min(99, public_scan_progress(scan.get("progress")))
             scan["phase"] = None
@@ -1045,6 +1062,13 @@ def recover_interrupted_scans() -> int:
             scan["error"] = "server_restart"
             scan["recoveredAt"] = timestamp
             scan["recoveryReason"] = "server_restart"
+            reconcile_terminal_scan_quota_locked(
+                scan,
+                failed_job,
+                status="failed",
+                reason="server_restart",
+            )
+            db.upsert_scan(scan)
             recovered += 1
         if recovered:
             mark_state_dirty()
@@ -1086,6 +1110,10 @@ def reject_worker_protocol_completed_result_locked(
     scan = next((item for item in SCANS if public_issue_text(item.get("id")) == scan_id), None)
     if not scan:
         return False
+    result_status = public_issue_text(row.get("result_status") or row.get("status")).lower()
+    if result_status == "cancelled":
+        terminal_job = {**row, "status": "cancelled"}
+        return reconcile_terminal_scan_job_locked(scan, terminal_job)
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)
     completed_at = pull_request_timestamp(row.get("completed_at")) or now()
     scan.update(
@@ -1162,18 +1190,25 @@ def reconcile_completed_scan_job_results_locked() -> int:
     for row in rows:
         payload = row.get("result_payload") if isinstance(row.get("result_payload"), dict) else {}
         status = public_issue_text(row.get("result_status") or row.get("status")).lower()
-        if status not in {"done", "failed", "partial_completed"}:
+        if status not in {"done", "failed", "cancelled", "partial_completed"}:
             continue
         checksum = clean_github_access_text(row.get("result_result_checksum") or row.get("result_checksum"))
+        attempt_id = clean_github_access_text(row.get("result_attempt_id"))
         try:
-            changed = apply_worker_job_result_to_state_locked(row, payload, status=status, checksum=checksum)
+            convergence = converge_worker_job_result(
+                row,
+                attempt_id=attempt_id,
+                checksum=checksum,
+                duplicate=True,
+            )
+            changed = bool(convergence.get("accepted"))
         except ValueError as exc:
             if not worker_completed_result_rejected_error(exc):
                 raise
             changed = reject_worker_completed_result_error_locked(row, exc, checksum=checksum)
+            rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
         if changed:
             reconciled += 1
-        rollback_scan_quota_for_refundable_worker_failure(row, payload, status=status)
         last_cursor = {
             "createdAt": pull_request_timestamp(row.get("result_created_at")) or cursor_created_at,
             "jobId": public_issue_text(row.get("job_id")) or cursor_job_id,
@@ -1186,7 +1221,8 @@ def reconcile_completed_scan_job_results_locked() -> int:
 def reconcile_terminal_scan_quota_locked(scan: dict, job: dict, *, status: str, reason: str = "") -> None:
     normalized_status = public_issue_text(status).lower()
     if normalized_status == "done" or (
-        normalized_status in {"failed", "partial_completed"} and worker_progress_phase_should_finalize_quota(job.get("progress_phase"))
+        normalized_status in {"failed", "cancelled", "partial_completed"}
+        and scan_job_has_billable_core_evidence(job)
     ):
         trigger = public_issue_text(reason) or f"terminal_{normalized_status}"
         finalize_scan_quota_for_job(job, trigger=trigger)
@@ -1231,6 +1267,8 @@ def reconcile_terminal_scan_job_locked(scan: dict, job: dict) -> bool:
     status = public_issue_text(job.get("status")).lower()
     if status not in {"done", "failed", "cancelled", "partial_completed"}:
         return False
+    if status != "cancelled" and public_issue_text(scan.get("status")).lower() in WORKER_RESULT_CANCELLATION_STATUSES:
+        return False
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     update = {
@@ -1262,7 +1300,7 @@ def scan_status_from_job_status(status: object) -> str:
         return "running"
     if normalized == "lost":
         return "failed"
-    return normalized if normalized in {"queued", "done", "failed", "cancelled", "partial_completed"} else ""
+    return normalized if normalized in {"queued", "cancel_requested", "cancelling", "done", "failed", "cancelled", "partial_completed"} else ""
 
 
 def reconcile_scan_job_state_locked(
@@ -1288,7 +1326,7 @@ def reconcile_scan_job_state_locked(
     status = scan_status_from_job_status(job.get("status"))
     if not status:
         return False
-    if status in {"done", "failed", "partial_completed"}:
+    if status in {"done", "failed", "cancelled", "partial_completed"}:
         job_id = public_issue_text(job.get("job_id"))
         result = result_lookup.get(job_id) if result_lookup is not None else None
         if result is None:
@@ -1297,25 +1335,24 @@ def reconcile_scan_job_state_locked(
             payload = result.get("result_payload") if isinstance(result.get("result_payload"), dict) else {}
             result_status = public_issue_text(result.get("result_status") or result.get("status")).lower()
             checksum = clean_github_access_text(result.get("result_result_checksum") or result.get("result_checksum"))
-            if result_status in {"done", "failed", "partial_completed"}:
+            if result_status in {"done", "failed", "cancelled", "partial_completed"}:
                 rejected_result = False
                 try:
-                    changed = apply_worker_job_result_to_state_locked(
+                    convergence = converge_worker_job_result(
                         result,
-                        payload,
-                        status=result_status,
+                        attempt_id=clean_github_access_text(result.get("result_attempt_id")),
                         checksum=checksum,
+                        duplicate=True,
                     )
+                    changed = bool(convergence.get("accepted"))
                 except ValueError as exc:
                     if not worker_completed_result_rejected_error(exc):
                         raise
                     changed = reject_worker_completed_result_error_locked(result, exc, checksum=checksum)
                     rejected_result = True
-                rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
+                    rollback_scan_quota_for_refundable_worker_failure(result, payload, status=result_status)
                 if changed or rejected_result:
                     return True
-        return reconcile_terminal_scan_job_locked(scan, job)
-    if status == "cancelled":
         return reconcile_terminal_scan_job_locked(scan, job)
 
     before = json.dumps(db.to_jsonable(scan), sort_keys=True)
@@ -1364,11 +1401,24 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
         scan_id = public_issue_text(job.get("scan_id"))
         if not scan_id:
             continue
-        scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        job_id = public_issue_text(job.get("job_id"))
+        stored_job = db.get_scan_job(job_id) if job_id else None
+        memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
+        user_id = public_issue_text((stored_job or {}).get("user_id"))
+        durable_scan = (
+            db.get_user_scan_snapshot(user_id, scan_id) if user_id else None
+        )
+        scan = (
+            dict(durable_scan)
+            if isinstance(durable_scan, dict)
+            else memory_scan
+        )
         if not scan:
             continue
+        recovered_at = pull_request_timestamp((stored_job or {}).get("completed_at")) or timestamp
+        terminal_status = ""
+        terminal_reason = ""
         if job.get("status") == "queued":
-            stored_job = db.get_scan_job(public_issue_text(job.get("job_id"))) if public_issue_text(job.get("job_id")) else None
             scan.update(
                 {
                     "status": "queued",
@@ -1382,24 +1432,83 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
             )
         elif job.get("status") == "failed":
             reason = public_issue_text(job.get("reason")) or "timed_out"
-            stored_job = db.get_scan_job(public_issue_text(job.get("job_id"))) if public_issue_text(job.get("job_id")) else None
             error = "Scan worker timed out before completing the job."
             scan.update(
                 {
                     "status": "failed",
-                    "completedAt": timestamp,
+                    "completedAt": recovered_at,
                     "error": error,
-                    "recoveredAt": timestamp,
+                    "recoveredAt": recovered_at,
                     "recoveryReason": reason,
                 }
             )
-            reconcile_terminal_scan_quota_locked(scan, stored_job or job, status="failed", reason=reason)
+            terminal_status = "failed"
+            terminal_reason = reason
+        elif job.get("status") == "cancelled":
+            reason = public_issue_text(job.get("reason")) or "cancel_timed_out"
+            cancel_reason = public_issue_text((stored_job or {}).get("cancel_reason")) or reason
+            scan.update(
+                {
+                    "status": "cancelled",
+                    "completedAt": recovered_at,
+                    "phase": None,
+                    "error": cancel_reason,
+                    "recoveredAt": recovered_at,
+                    "recoveryReason": reason,
+                }
+            )
+            terminal_status = "cancelled"
+            terminal_reason = reason
         else:
             continue
         db.upsert_scan(scan)
+        if terminal_status:
+            reconcile_terminal_scan_quota_locked(
+                scan,
+                stored_job or job,
+                status=terminal_status,
+                reason=terminal_reason,
+            )
+        if memory_scan is not None:
+            if memory_scan is not scan:
+                memory_scan.clear()
+                memory_scan.update(db.to_jsonable(scan))
+            mark_state_dirty()
+        if terminal_status and job_id:
+            db.mark_scan_job_projection_applied(
+                job_id,
+                status=terminal_status,
+                reason=terminal_reason,
+            )
         recovered += 1
-    if recovered:
-        mark_state_dirty()
     return recovered
+
+
+def recover_expired_scan_leases_once(timestamp: int | None = None) -> int:
+    recovery_timestamp = int(timestamp if timestamp is not None else now())
+    recovered_jobs = db.recover_expired_scan_jobs(
+        recovery_timestamp,
+        worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
+    )
+    current_recovered_jobs = []
+    for recovered_job in recovered_jobs:
+        job_id = public_issue_text(recovered_job.get("job_id"))
+        current_job = db.get_scan_job(job_id) if job_id else None
+        if not current_job:
+            continue
+        if public_issue_text(current_job.get("status")) != public_issue_text(recovered_job.get("status")):
+            continue
+        current_recovered_jobs.append(recovered_job)
+    with STATE_LOCK:
+        recovered = (
+            apply_recovered_scan_jobs_locked(current_recovered_jobs)
+            if current_recovered_jobs
+            else 0
+        )
+        reconciled_results = reconcile_completed_scan_job_results_locked()
+    changed = recovered + reconciled_results
+    if changed:
+        persist_state()
+    return changed
 
 

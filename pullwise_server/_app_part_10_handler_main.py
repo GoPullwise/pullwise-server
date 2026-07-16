@@ -764,6 +764,71 @@ def merged_debug_bundle_bytes(worker_zip: bytes, *, run_id: str, job: dict, scan
     return output.getvalue()
 
 
+def request_scan_cancellation_locked(scan: dict, *, reason: str) -> dict | None:
+    cancellation_at = now()
+    job = db.request_scan_job_cancellation(
+        public_issue_text(scan.get("id")),
+        reason=reason,
+        timeout_seconds=system_config.scan_job_lease_seconds(),
+        timestamp=cancellation_at,
+    )
+    if not job:
+        if public_issue_text(scan.get("status")).lower() not in {"queued", "running"}:
+            return None
+        job = {
+            "status": "cancelled",
+            "completed_at": cancellation_at,
+            "cancel_requested_at": cancellation_at,
+            "cancel_reason": reason,
+        }
+    status = public_issue_text(job.get("status")).lower()
+    if status not in {"cancel_requested", "cancelling", "cancelled"}:
+        return job
+    progress_phase = public_scan_phase(job.get("progress_phase"))
+    core_work_is_billable = scan_job_has_billable_core_evidence(job)
+    if not core_work_is_billable:
+        release_scan_quota_reservation_for_scan(scan, reason=reason)
+    scan.update(
+        {
+            "status": status,
+            "cancelRequestedAt": pull_request_timestamp(job.get("cancel_requested_at")) or cancellation_at,
+            "cancelReason": public_issue_text(job.get("cancel_reason")) or reason,
+        }
+    )
+    scan.pop("estimate", None)
+    if status == "cancelled":
+        scan["completedAt"] = pull_request_timestamp(job.get("completed_at")) or cancellation_at
+        scan["phase"] = None
+    else:
+        scan.pop("completedAt", None)
+        scan.pop("completed_at", None)
+    db.upsert_scan(scan)
+    if core_work_is_billable:
+        # Persist cancellation first so a stale route snapshot cannot overwrite
+        # the consumed projection. Durable core-work evidence is authoritative
+        # even when cancellation wins the terminal-state race. Do not release
+        # if projection dependencies are temporarily unavailable; recovery can
+        # replay the still-reserved consumption.
+        finalize_scan_quota_for_job(
+            job,
+            trigger=f"cancel_phase_{progress_phase}",
+        )
+        durable_scan = db.get_user_scan_snapshot(
+            public_issue_text(job.get("user_id")),
+            public_issue_text(job.get("scan_id")),
+        )
+        if durable_scan:
+            for key, value in durable_scan.items():
+                if key.startswith("quota") or key in {"billingUsage", "repoUsage"}:
+                    scan[key] = value
+    memory_scan = memory_scan_by_id(scan.get("id"))
+    if memory_scan is not None and memory_scan is not scan:
+        memory_scan.clear()
+        memory_scan.update(db.to_jsonable(scan))
+    mark_state_dirty()
+    return job
+
+
 def review_artifact_is_debug_bundle(row: dict) -> bool:
     return public_issue_text(row.get("kind")) == "debug_bundle" or public_issue_text(row.get("name")) == "debug-bundle.zip"
 
@@ -1428,12 +1493,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     raise ResourceNotFound("Scan")
                 if scan.get("status") not in {"queued", "running"}:
                     return self.error(HTTPStatus.CONFLICT, "Only queued or running scans can be cancelled.")
-                release_scan_quota_reservation_for_scan(scan, reason="scan_cancelled")
-                scan["status"] = "cancelled"
-                scan["completedAt"] = now()
-                db.upsert_scan(scan)
-                mark_state_dirty()
-                db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
+                reason = clean_scan_error(body.get("reason")) or "user_cancelled"
+                job = request_scan_cancellation_locked(scan, reason=reason)
+                if not job or public_issue_text(job.get("status")) not in {"cancel_requested", "cancelling", "cancelled"}:
+                    return self.error(HTTPStatus.CONFLICT, "Scan is no longer cancellable.")
             return self.json(scan_payload(scan))
         if len(segments) == 4 and segments[0] == "issues" and segments[2] == "fixes" and segments[3] == "preview":
             session = self.current_session()
@@ -3471,7 +3534,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "partial_completed": "run_partial_completed",
         }.get(job_status)
         terminal_event_after_result = bool(terminal_event_for_status and event_type == terminal_event_for_status)
-        if job_status not in {"claimed", "running", "uploading_result"} and not terminal_event_after_result:
+        cancellation_handshake_event = (
+            job_status in {"cancel_requested", "cancelling"}
+            and event_type in {"run_cancel_requested", "run_cancelled"}
+        )
+        if (
+            job_status not in {"claimed", "running", "uploading_result"}
+            and not terminal_event_after_result
+            and not cancellation_handshake_event
+        ):
             return self.error(HTTPStatus.CONFLICT, "Run is no longer accepting progress events.")
         validation_error = worker_v1_event_validation_error(body, run_id, public_issue_text(job.get("claimed_by_worker_id")))
         if validation_error:
@@ -3507,6 +3578,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "created_at": event_created_at,
         }
         progress_record = {**event_record, "steps": progress_steps}
+        if cancellation_handshake_event and event_type == "run_cancelled":
+            progress_record["defer_terminal"] = True
         if estimate_payload:
             progress_record["estimate"] = estimate_payload
         scan_job_progress = None
@@ -3517,14 +3590,19 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "progress": progress_value,
                 "message": progress_message,
                 "started_at": pull_request_timestamp(body.get("timestamp")) or progress_log_time,
-                "timeout_at": now() + system_config.scan_job_lease_seconds(),
+                "timeout_at": (
+                    None
+                    if cancellation_handshake_event
+                    else now() + system_config.scan_job_lease_seconds()
+                ),
                 "logs_summary": logs_summary,
+                "status": "cancelling" if cancellation_handshake_event else "running",
             }
         try:
             stored_event = db.store_review_run_event_and_progress(event_record, progress_record, scan_job_progress=scan_job_progress)
         except ValueError as exc:
             message = str(exc)
-            if "monotonic" in message or "already exists" in message:
+            if "monotonic" in message or "already exists" in message or "no longer accepting" in message:
                 return self.error(HTTPStatus.CONFLICT, message)
             return self.error(HTTPStatus.BAD_REQUEST, message)
         if terminal_event_after_result:
@@ -3558,7 +3636,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 if event_is_latest
                 else None
             )
-            if scan and scan.get("status") == "running":
+            scan_accepts_progress = bool(
+                scan
+                and (
+                    scan.get("status") == "running"
+                    or (
+                        cancellation_handshake_event
+                        and scan.get("status") in {"cancel_requested", "cancelling"}
+                    )
+                )
+            )
+            if scan_accepts_progress:
                 update = {
                     "phase": phase,
                     "progress": progress_value,
@@ -3567,6 +3655,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     "updatedAt": progress_log_time,
                     "runId": run_id,
                 }
+                if cancellation_handshake_event:
+                    update["status"] = "cancelling"
                 if progress_steps:
                     update["progressSteps"] = progress_steps
                 if estimate_payload:
@@ -3898,8 +3988,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 commands.append(
                     {
                         "type": "cancel_run",
+                        "action": "cancel_run",
                         "run_id": scan_job_run_id(job),
-                        "reason": "server_cancelled",
+                        "reason": public_issue_text(job.get("cancel_reason")) or "server_cancelled",
                     }
                 )
         return self.json(
@@ -3982,7 +4073,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if body_attempt_id != expected_attempt_id and body_attempt_id != last_attempt_id:
             return self.error(HTTPStatus.CONFLICT, "Artifact attempt_id does not match current job attempt.")
         job_status = public_issue_text(job.get("status"))
-        if job_status not in {"claimed", "running", "uploading_result"}:
+        if job_status not in {"claimed", "running", "uploading_result", "cancel_requested", "cancelling"}:
             if not (final_log_upload and last_attempt_id and body_attempt_id == last_attempt_id and job_status in {"done", "failed", "cancelled", "partial_completed", "lost"}):
                 return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting artifacts.")
         result = db.store_review_run_artifact(
@@ -4012,33 +4103,37 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             allowed_worker_id = worker_id_from_attempt_id(body_attempt_id)
         if not self.authenticated_worker_id_matches(worker_record, allowed_worker_id):
             return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match claimed job.")
-        if public_issue_text(job.get("status")) not in {"claimed", "running"}:
-            try:
-                duplicate_result = apply_worker_job_result(job, body)
-            except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
-                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-            if duplicate_result.get("duplicate"):
-                return self.json({"ok": True, **duplicate_result})
-            if duplicate_result.get("conflict"):
-                return self.json({"message": "Result checksum conflicts with an existing attempt result."}, HTTPStatus.CONFLICT)
-            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting results.")
+        job_status = public_issue_text(job.get("status")).lower()
+        result_status = public_issue_text(body.get("status")).lower()
+        cancellation_pending = job_status in {"cancel_requested", "cancelling"}
+        if job_status in {"cancel_requested", "cancelling", "cancelled"} and result_status != "cancelled":
+            return self.json(
+                {
+                    "error": "A cancellation-state job only accepts a cancelled result.",
+                    "code": "JOB_CANCELLATION_AUTHORITATIVE",
+                    "jobStatus": job_status,
+                    "jobId": public_issue_text(job.get("job_id")),
+                    "runId": scan_job_run_id(job),
+                    "attemptId": last_attempt_id or expected_worker_attempt_id(job),
+                    "acceptedResultStatus": "cancelled",
+                },
+                HTTPStatus.CONFLICT,
+            )
+        accepts_fresh_result = job_status in {"claimed", "running"} or (
+            job_status in {"cancel_requested", "cancelling", "cancelled"}
+            and result_status == "cancelled"
+        )
         try:
             result = apply_worker_job_result(job, body)
         except ValueError as exc:
+            if not accepts_fresh_result and worker_completed_result_rejected_error(exc):
+                with STATE_LOCK:
+                    reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if result.get("conflict"):
             return self.json({"message": "Result checksum conflicts with an existing attempt result."}, HTTPStatus.CONFLICT)
-        if result.get("accepted") and not result.get("duplicate"):
-            try:
-                result["reviewRun"] = db.finalize_review_run_result(job, body, status=public_issue_text(body.get("status")).lower())
-            except ValueError as exc:
-                if worker_completed_result_rejected_error(exc):
-                    with STATE_LOCK:
-                        reject_worker_completed_result_error_locked(job, exc, checksum=worker_result_checksum(body))
-                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if not accepts_fresh_result and not result.get("duplicate"):
+            return self.error(HTTPStatus.CONFLICT, "Job is no longer accepting results.")
         scan_logging.log_event(
             "worker_job_result",
             scanId=job.get("scan_id"),
@@ -4308,12 +4403,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             scan = active_scan_for_user_repo(context["user"]["id"], repository["id"])
             if not scan:
                 return self.error(HTTPStatus.NOT_FOUND, "No queued or running scan exists for this repository.")
-            release_scan_quota_reservation_for_scan(scan, reason="scan_cancelled")
-            scan["status"] = "cancelled"
-            scan["completedAt"] = now()
-            db.upsert_scan(scan)
-            mark_state_dirty()
-            db.cancel_scan_job_for_scan(str(scan.get("id") or ""))
+            job = request_scan_cancellation_locked(scan, reason="api_cancelled")
+            if not job or public_issue_text(job.get("status")) not in {"cancel_requested", "cancelling", "cancelled"}:
+                return self.error(HTTPStatus.CONFLICT, "Scan is no longer cancellable.")
         return self.json(scan_payload(scan))
 
     def clear_current_session(self) -> None:
@@ -4540,12 +4632,32 @@ def http_request_queue_size() -> int:
     return max(5, env_int("PULLWISE_HTTP_REQUEST_QUEUE_SIZE", 512))
 
 
+def scan_job_lease_recovery_interval_seconds() -> int:
+    return max(1, env_int("PULLWISE_SCAN_JOB_LEASE_RECOVERY_INTERVAL_SECONDS", 15))
+
+
 class PullwiseThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, *args, **kwargs) -> None:
         self.request_queue_size = http_request_queue_size()
+        self._last_scan_job_lease_recovery_at = time.monotonic()
         super().__init__(*args, **kwargs)
+
+    def service_actions(self) -> None:
+        super().service_actions()
+        current = time.monotonic()
+        last_recovery = float(getattr(self, "_last_scan_job_lease_recovery_at", 0.0) or 0.0)
+        if current - last_recovery < scan_job_lease_recovery_interval_seconds():
+            return
+        self._last_scan_job_lease_recovery_at = current
+        try:
+            recovered = recover_expired_scan_leases_once()
+        except Exception:
+            logger.exception("Failed to recover expired scan job leases.")
+            return
+        if recovered:
+            logger.info("Recovered %s expired scan job lease(s).", recovered)
 
 def main() -> None:
     load_env_file()

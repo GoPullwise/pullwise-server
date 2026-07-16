@@ -168,6 +168,67 @@ class DatabaseContractsTest(unittest.TestCase):
         self.assertIn("last_heartbeat_at", columns)
         self.assertIn("idx_workers_scope_owner", indexes)
 
+    def test_initialize_backfills_legacy_pending_recovery_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=True):
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            "DROP INDEX idx_scan_jobs_projection_pending"
+                        )
+                        connection.execute(
+                            "ALTER TABLE scan_jobs DROP COLUMN projection_pending"
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO scan_jobs (
+                                job_id, scan_id, repo, branch, "commit", status,
+                                attempt, completed_at, error, created_at, updated_at,
+                                user_id
+                            )
+                            VALUES (
+                                'job_legacy_pending', 'sc_legacy_pending',
+                                'acme/legacy', 'main', 'abc123', 'failed',
+                                1, 100, 'timed_out', 90, 100, 'usr_1'
+                            )
+                            """
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO scans (
+                                scan_id, user_id, job_id, repo, status,
+                                created_at, updated_at, payload
+                            )
+                            VALUES (
+                                'sc_legacy_pending', 'usr_1', 'job_legacy_pending',
+                                'acme/legacy', 'running', 90, 100,
+                                '{"quotaState":"reserved"}'
+                            )
+                            """
+                        )
+
+                db.reset_initialization_cache()
+                db.initialize()
+                with closing(sqlite3.connect(db_path)) as connection:
+                    projection_pending = connection.execute(
+                        """
+                        SELECT projection_pending
+                        FROM scan_jobs
+                        WHERE job_id = 'job_legacy_pending'
+                        """
+                    ).fetchone()[0]
+                    indexes = {
+                        row[1]
+                        for row in connection.execute(
+                            "PRAGMA index_list(scan_jobs)"
+                        ).fetchall()
+                    }
+
+        self.assertEqual(projection_pending, 1)
+        self.assertIn("idx_scan_jobs_projection_pending", indexes)
+
     def test_scan_status_counts_include_partial_completed_in_done_total(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "pullwise.sqlite3")
@@ -1275,16 +1336,86 @@ class DatabaseContractsTest(unittest.TestCase):
                             "UPDATE scan_jobs SET attempt = 2 WHERE job_id = ?",
                             ("job_exhausted",),
                         )
+                        connection.execute(
+                            """
+                            INSERT INTO scan_job_attempts (
+                                id, job_id, attempt, worker_id, status, claimed_at, created_at, updated_at
+                            )
+                            VALUES ('sja_exhausted', 'job_exhausted', 2, 'wk_exhausted', 'claimed', 100, 100, 100)
+                            """
+                        )
 
                 recovered = db.recover_expired_scan_jobs(120)
                 claimed = db.claim_next_scan_job("wk_1", lease_seconds=3600, timestamp=121)
                 stored = db.get_scan_job("job_exhausted")
+                attempts = db.list_scan_job_attempts("job_exhausted")
 
         self.assertEqual(claimed, None)
         self.assertEqual(recovered[0]["status"], "failed")
         self.assertEqual(recovered[0]["reason"], "scan_attempts_exhausted")
         self.assertEqual(stored["status"], "failed")
         self.assertEqual(stored["error"], "scan_attempts_exhausted")
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0]["status"], "failed")
+        self.assertEqual(attempts[0]["error"], "scan_attempts_exhausted")
+        self.assertEqual(attempts[0]["completed_at"], 120)
+
+    def test_result_owned_terminal_error_is_not_replayed_as_server_lease_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
+            with patch.dict(os.environ, {"PULLWISE_DB_PATH": db_path}, clear=False):
+                db.initialize()
+                db.upsert_scan(
+                    {
+                        "id": "sc_result_owned_timeout",
+                        "userId": "usr_1",
+                        "repo": "acme/api",
+                        "status": "failed",
+                        "createdAt": 100,
+                    }
+                )
+                job = db.create_scan_job(
+                    {
+                        "job_id": "job_result_owned_timeout",
+                        "scan_id": "sc_result_owned_timeout",
+                        "repo": "acme/api",
+                        "branch": "main",
+                        "commit": "pending",
+                        "status": "queued",
+                        "created_at": 100,
+                        "user_id": "usr_1",
+                    }
+                )
+                with closing(sqlite3.connect(db_path)) as connection:
+                    with connection:
+                        connection.execute(
+                            """
+                            UPDATE scan_jobs
+                            SET status = 'failed', error = 'timed_out', completed_at = 120, updated_at = 120
+                            WHERE job_id = ?
+                            """,
+                            (job["job_id"],),
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO job_results (
+                                id, job_id, attempt_id, result_checksum, status, payload, created_at
+                            )
+                            VALUES (
+                                'jr_result_owned_timeout',
+                                'job_result_owned_timeout',
+                                'wk_1-1',
+                                'checksum',
+                                'failed',
+                                '{}',
+                                120
+                            )
+                            """
+                        )
+
+                recovered = db.recover_expired_scan_jobs(121)
+
+        self.assertEqual(recovered, [])
 
     def test_record_scan_job_result_stores_large_payload_as_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

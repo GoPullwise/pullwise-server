@@ -199,6 +199,54 @@ def worker_progress_phase_should_finalize_quota(phase: object) -> bool:
     return public_scan_phase(phase) in WORKER_QUOTA_CONSUMING_PHASES
 
 
+def worker_progress_steps_should_finalize_quota(steps: object) -> bool:
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict) or not worker_progress_phase_should_finalize_quota(
+            step.get("id")
+        ):
+            continue
+        step_status = public_issue_text(step.get("status")).lower()
+        step_percent = public_scan_progress(step.get("percent"))
+        if (
+            step_status
+            not in {"", "pending", "queued", "skipped", "not_started"}
+            or step_percent > 0
+        ):
+            return True
+    return False
+
+
+def scan_job_has_billable_core_evidence(job: dict) -> bool:
+    if worker_progress_phase_should_finalize_quota(job.get("progress_phase")):
+        return True
+    run_id = scan_job_attempt_run_id(job)
+    review_run = db.get_review_run(run_id) if run_id else None
+    progress: dict = {}
+    if isinstance(review_run, dict):
+        raw_progress = review_run.get("progress_json")
+        if isinstance(raw_progress, dict):
+            progress = raw_progress
+        elif raw_progress:
+            try:
+                decoded = json.loads(str(raw_progress))
+                if isinstance(decoded, dict):
+                    progress = decoded
+            except (TypeError, ValueError, json.JSONDecodeError):
+                progress = {}
+    if worker_progress_phase_should_finalize_quota(
+        progress.get("current_phase") or progress.get("phase")
+    ):
+        return True
+    if worker_progress_steps_should_finalize_quota(progress.get("steps")):
+        return True
+    return db.scan_job_has_progress_phase_evidence(
+        public_issue_text(job.get("job_id")),
+        WORKER_QUOTA_CONSUMING_PHASES,
+    )
+
+
 def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") -> dict:
     scan_id = public_issue_text(job.get("scan_id"))
     user_id = public_issue_text(job.get("user_id"))
@@ -208,7 +256,11 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
     durable_scan = db.get_user_scan_snapshot(user_id, scan_id)
     with STATE_LOCK:
         memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
-        scan = memory_scan or durable_scan
+        scan = (
+            dict(durable_scan)
+            if isinstance(durable_scan, dict)
+            else memory_scan
+        )
         request_id = quota_request_id_for_scan(scan)
         already_consumed = scan_quota_has_been_consumed(scan)
     if already_consumed:
@@ -229,7 +281,12 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
     consumed_at = now()
     with STATE_LOCK:
         memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
-        scan = memory_scan or durable_scan
+        latest_durable_scan = db.get_user_scan_snapshot(user_id, scan_id)
+        scan = (
+            dict(latest_durable_scan)
+            if isinstance(latest_durable_scan, dict)
+            else memory_scan
+        )
         if scan:
             scan["quotaState"] = "consumed"
             scan["quotaConsumedAt"] = consumed_at
@@ -238,6 +295,9 @@ def finalize_scan_quota_for_job(job: dict, *, trigger: str = "codex_started") ->
             refresh_scan_quota_usage_locked(scan, user, repository)
             db.upsert_scan(scan)
             if memory_scan is not None:
+                if memory_scan is not scan:
+                    memory_scan.clear()
+                    memory_scan.update(db.to_jsonable(scan))
                 mark_state_dirty()
     return quota_result
 
@@ -254,11 +314,23 @@ def release_scan_quota_reservation_for_scan(scan: dict, *, reason: str = "scan_c
         request_id=request_id,
         record_ledger=True,
     )
-    if not release_result.get("ledgerRows") and not release_result.get("bucketRows"):
-        return release_result
     user = USERS.get(user_id)
     repo_id = public_issue_text(scan.get("repoId"))
     repository = db.get_repository(repo_id) if repo_id else None
+    if release_result.get("consumedRows"):
+        scan["quotaState"] = "consumed"
+        scan["quotaConsumedAt"] = pull_request_timestamp(scan.get("quotaConsumedAt")) or now()
+        scan["quotaConsumeTrigger"] = public_issue_text(scan.get("quotaConsumeTrigger")) or "quota_ledger_reconciled"
+        refresh_scan_quota_usage_locked(scan, user, repository)
+        db.upsert_scan(scan)
+        mark_state_dirty()
+        return release_result
+    if (
+        not release_result.get("ledgerRows")
+        and not release_result.get("bucketRows")
+        and not release_result.get("releasedRows")
+    ):
+        return release_result
     scan["quotaState"] = "released"
     scan["quotaReleasedAt"] = now()
     scan["quotaReleaseReason"] = public_scan_error_code(reason) or public_issue_text(reason) or "scan_cancelled"
@@ -562,7 +634,13 @@ def uploaded_required_artifact_matches_manifest(stored: dict, item: dict) -> boo
     return True
 
 
-def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: str = "") -> None:
+def validate_review_worker_protocol_artifacts(
+    job: dict,
+    body: dict,
+    *,
+    status: str = "",
+    allow_replaced_log_content: bool = False,
+) -> None:
     envelope = validate_review_worker_protocol_envelope(job, body, status=status)
     if not envelope:
         return
@@ -593,10 +671,21 @@ def validate_review_worker_protocol_artifacts(job: dict, body: dict, *, status: 
         if not stored:
             missing.append(artifact_id)
             continue
-        if public_issue_text(stored.get("sha256")).lower() != public_issue_text(item.get("sha256")).lower():
+        replaceable_final_log = (
+            allow_replaced_log_content
+            and public_issue_text(stored.get("kind")) == public_issue_text(item.get("kind"))
+            and public_issue_text(stored.get("kind")) in REPLACEABLE_REVIEW_LOG_ARTIFACT_KINDS
+        )
+        if (
+            public_issue_text(stored.get("sha256")).lower() != public_issue_text(item.get("sha256")).lower()
+            and not replaceable_final_log
+        ):
             mismatched.append(artifact_id)
             continue
-        if public_scan_count(stored.get("size_bytes")) != public_scan_count(item.get("size_bytes")):
+        if (
+            public_scan_count(stored.get("size_bytes")) != public_scan_count(item.get("size_bytes"))
+            and not replaceable_final_log
+        ):
             mismatched.append(artifact_id)
             continue
         if not uploaded_required_artifact_matches_manifest(stored, item):
@@ -613,24 +702,36 @@ def worker_result_error_code(body: dict) -> str:
     return public_scan_error_code(body.get("error_code") or body.get("errorCode"))
 
 
-def worker_result_checksum(body: dict) -> str:
-    digest_payload = {
-        "status": body.get("status"),
-        "resolved_commit": worker_result_resolved_commit(body=body),
-        "summary": body.get("summary") if isinstance(body.get("summary"), dict) else {},
-        "duration_ms": body.get("duration_ms"),
-        "error": body.get("error"),
-        "error_code": worker_result_error_code(body),
-        "preflight": public_scan_preflight(body.get("preflight")),
+def worker_result_projection_fields(body: dict) -> dict:
+    source = body if isinstance(body, dict) else {}
+    return {
+        "status": source.get("status"),
+        "resolved_commit": worker_result_resolved_commit(body=source),
+        "summary": source.get("summary") if isinstance(source.get("summary"), dict) else {},
+        "duration_ms": source.get("duration_ms"),
+        "error": source.get("error"),
+        "error_code": worker_result_error_code(source),
+        "preflight": public_scan_preflight(source.get("preflight")),
+        "deterministicFindings": (
+            source.get("deterministicFindings") if isinstance(source.get("deterministicFindings"), list) else []
+        ),
+        "effectiveAgentConfig": public_scan_agent_config(source.get("effectiveAgentConfig")),
+        "humanReport": public_result_human_report(source.get("humanReport")),
+        "agentReport": public_result_agent_report(source.get("agentReport")),
+        "readingGuide": public_result_reading_guide(source.get("readingGuide")),
         "reviewDecisionEvents": (
-            body.get("review_decision_events")
-            if isinstance(body.get("review_decision_events"), list)
-            else body.get("reviewDecisionEvents")
-            if isinstance(body.get("reviewDecisionEvents"), list)
+            source.get("review_decision_events")
+            if isinstance(source.get("review_decision_events"), list)
+            else source.get("reviewDecisionEvents")
+            if isinstance(source.get("reviewDecisionEvents"), list)
             else []
         ),
-        "reviewWorkerProtocol": review_worker_protocol_envelope(body),
+        "reviewWorkerProtocol": review_worker_protocol_envelope(source),
     }
+
+
+def worker_result_checksum(body: dict) -> str:
+    digest_payload = worker_result_projection_fields(body)
     data = json.dumps(db.to_jsonable(digest_payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(data).hexdigest()
 
@@ -675,16 +776,33 @@ def worker_id_from_attempt_id(attempt_id: object) -> str:
     return worker_id
 
 
-def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, checksum: str) -> dict:
-    preflight = public_scan_preflight(body.get("preflight"))
+def prepare_worker_job_result_state(
+    job: dict,
+    body: dict,
+    *,
+    status: str,
+    checksum: str,
+    validate_artifacts: bool = True,
+    allow_replaced_log_content: bool = False,
+) -> dict:
+    projection = worker_result_projection_fields(body)
+    preflight = dict(projection.get("preflight") or {})
     resolved_commit = worker_result_resolved_commit(job=job, body=body, preflight=preflight)
     if resolved_commit:
         preflight["commit"] = resolved_commit
     job_for_findings = dict(job)
     if resolved_commit:
         job_for_findings["commit"] = resolved_commit
-    validate_review_worker_protocol_artifacts(job, body, status=status)
-    review_worker_protocol = review_worker_protocol_envelope(body)
+    if validate_artifacts:
+        validate_review_worker_protocol_artifacts(
+            job,
+            body,
+            status=status,
+            allow_replaced_log_content=allow_replaced_log_content,
+        )
+    else:
+        validate_review_worker_protocol_envelope(job, body, status=status)
+    review_worker_protocol = projection.get("reviewWorkerProtocol") or {}
     if not review_worker_protocol:
         raise ValueError("Worker result must include reviewWorkerProtocol.")
     normalized_findings = worker_protocol_findings(
@@ -692,7 +810,7 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
         review_worker_protocol,
         reserved_ids=worker_issue_reserved_ids(job_for_findings),
     )
-    deterministic_findings = body.get("deterministicFindings")
+    deterministic_findings = projection.get("deterministicFindings")
     if isinstance(deterministic_findings, list):
         reserved_ids = {finding.get("id") for finding in normalized_findings if isinstance(finding, dict)}
         reserved_ids.update(worker_issue_reserved_ids(job_for_findings))
@@ -703,11 +821,11 @@ def prepare_worker_job_result_state(job: dict, body: dict, *, status: str, check
             issue["id"] = unique_issue_id(issue.get("id"), reserved_ids)
             normalized_findings.append(issue)
     summary = public_scan_issue_counts(summarize_findings(normalized_findings))
-    effective_agent_config = public_scan_agent_config(body.get("effectiveAgentConfig"))
-    human_report = public_result_human_report(body.get("humanReport"))
-    agent_report = public_result_agent_report(body.get("agentReport"))
-    reading_guide = public_result_reading_guide(body.get("readingGuide"))
-    error_code = worker_result_error_code(body)
+    effective_agent_config = projection.get("effectiveAgentConfig") or {}
+    human_report = projection.get("humanReport") or {}
+    agent_report = projection.get("agentReport") or {}
+    reading_guide = projection.get("readingGuide") or {}
+    error_code = public_scan_error_code(projection.get("error_code"))
     completed_at = pull_request_timestamp(job.get("completed_at")) or now()
     return {
         "status": status,
@@ -751,6 +869,28 @@ def completed_scan_progress_steps(value: object) -> list[dict]:
     return completed_steps
 
 
+WORKER_RESULT_CANCELLATION_STATUSES = frozenset({"cancel_requested", "cancelling", "cancelled"})
+
+
+def worker_result_cancellation_is_authoritative(job: dict, *, result_status: str) -> bool:
+    if public_issue_text(result_status).lower() == "cancelled":
+        return False
+    job_id = public_issue_text(job.get("job_id"))
+    current_job = db.get_scan_job(job_id) if job_id else None
+    if public_issue_text((current_job or job).get("status")).lower() in WORKER_RESULT_CANCELLATION_STATUSES:
+        return True
+    scan_id = public_issue_text((current_job or job).get("scan_id"))
+    user_id = public_issue_text((current_job or job).get("user_id"))
+    durable_scan = db.get_user_scan_snapshot(user_id, scan_id) if user_id and scan_id else None
+    with STATE_LOCK:
+        memory_scan = next((item for item in SCANS if public_issue_text(item.get("id")) == scan_id), None)
+        return any(
+            public_issue_text(scan.get("status")).lower() in WORKER_RESULT_CANCELLATION_STATUSES
+            for scan in (memory_scan, durable_scan)
+            if isinstance(scan, dict)
+        )
+
+
 def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) -> bool:
     status = public_issue_text(prepared.get("status")).lower()
     checksum = public_issue_text(prepared.get("checksum"))
@@ -773,18 +913,59 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
         progress_message = progress_message or "Run completed and active job cleaned up."
     completed_at = pull_request_timestamp(prepared.get("completed_at")) or now()
     memory_scan = memory_scan_by_id(job.get("scan_id"))
-    scan = memory_scan or db.get_user_scan_snapshot(
+    durable_scan = db.get_user_scan_snapshot(
         public_issue_text(job.get("user_id")),
         public_issue_text(job.get("scan_id")),
+    )
+    if status != "cancelled" and any(
+        public_issue_text(candidate.get("status")).lower() in WORKER_RESULT_CANCELLATION_STATUSES
+        for candidate in (memory_scan, durable_scan)
+        if isinstance(candidate, dict)
+    ):
+        return False
+    scan = (
+        dict(durable_scan)
+        if isinstance(durable_scan, dict)
+        else memory_scan
     )
     changed = False
     if scan:
         before = json.dumps(db.to_jsonable(scan), sort_keys=True)
+        preserve_server_cancellation = (
+            status == "cancelled"
+            and public_issue_text(scan.get("status")).lower() == "cancelled"
+            and (
+                public_issue_text(scan.get("recoveryReason"))
+                == "cancel_timed_out"
+                or public_issue_text(job.get("error")) == "cancel_timed_out"
+            )
+        )
+        server_terminal_fields = {
+            key: (key in scan, scan.get(key))
+            for key in (
+                "completedAt",
+                "durationMs",
+                "error",
+                "phase",
+                "recoveredAt",
+                "recoveryReason",
+                "cancelReason",
+                "cancelRequestedAt",
+            )
+        }
+        latest_progress = max(
+            public_scan_progress(scan.get("progress")),
+            public_scan_progress(
+                memory_scan.get("progress")
+                if isinstance(memory_scan, dict)
+                else 0
+            ),
+        )
         scan.update(
             {
                 "status": status,
                 "phase": progress_phase or "report",
-                "progress": public_scan_display_progress(status, scan.get("progress")),
+                "progress": public_scan_display_progress(status, latest_progress),
                 "completedAt": completed_at,
                 "durationMs": public_scan_count(prepared.get("duration_ms")),
                 "issues": summary,
@@ -797,6 +978,12 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
             scan["errorCode"] = error_code
         else:
             scan.pop("errorCode", None)
+        if preserve_server_cancellation:
+            for key, (present, value) in server_terminal_fields.items():
+                if present:
+                    scan[key] = value
+                else:
+                    scan.pop(key, None)
         if resolved_commit:
             scan["commit"] = resolved_commit
         if preflight:
@@ -847,16 +1034,109 @@ def apply_prepared_worker_job_result_to_state_locked(job: dict, prepared: dict) 
                 ISSUES.extend(stored_findings)
                 after_issues = json.dumps(db.to_jsonable(stored_findings), sort_keys=True)
                 changed = changed or before_issues != after_issues
-    if changed:
+    if changed and scan:
         db.upsert_scan(scan)
-        if memory_scan is not None:
+    memory_changed = False
+    if memory_scan is not None and scan:
+        if memory_scan is not scan:
+            memory_before = json.dumps(
+                db.to_jsonable(memory_scan),
+                sort_keys=True,
+            )
+            memory_scan.clear()
+            memory_scan.update(db.to_jsonable(scan))
+            memory_changed = memory_before != json.dumps(
+                db.to_jsonable(memory_scan),
+                sort_keys=True,
+            )
+        if changed or memory_changed:
             mark_state_dirty()
-    return changed
+    return changed or memory_changed
 
 
 def apply_worker_job_result_to_state_locked(job: dict, body: dict, *, status: str, checksum: str) -> bool:
     prepared = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
     return apply_prepared_worker_job_result_to_state_locked(job, prepared)
+
+
+def converge_worker_job_result(
+    job: dict,
+    *,
+    attempt_id: str,
+    checksum: str,
+    duplicate: bool,
+) -> dict:
+    stored_result = db.get_completed_scan_job_result(public_issue_text(job.get("job_id")))
+    if not stored_result:
+        return {"accepted": False, "duplicate": duplicate, "conflict": True}
+    stored_attempt_id = clean_github_access_text(stored_result.get("result_attempt_id"))
+    stored_checksum = clean_github_access_text(
+        stored_result.get("result_result_checksum") or stored_result.get("result_checksum")
+    )
+    if stored_attempt_id != attempt_id or stored_checksum != checksum:
+        return {"accepted": False, "duplicate": duplicate, "conflict": True}
+    stored_body = stored_result.get("result_payload") if isinstance(stored_result.get("result_payload"), dict) else {}
+    status = public_issue_text(stored_result.get("result_status") or stored_body.get("status")).lower()
+    if status not in {"done", "failed", "cancelled", "partial_completed"}:
+        return {"accepted": False, "duplicate": duplicate, "conflict": True}
+    issue_count = worker_result_issue_count(stored_body)
+    if worker_result_cancellation_is_authoritative(stored_result, result_status=status):
+        result = {
+            "accepted": True,
+            "duplicate": duplicate,
+            "conflict": False,
+            "issueCount": issue_count,
+        }
+        review_run = db.get_review_run(public_issue_text(stored_result.get("run_id")))
+        if review_run:
+            result["reviewRun"] = review_run
+        return result
+
+    prepared_result = prepare_worker_job_result_state(
+        stored_result,
+        stored_body,
+        status=status,
+        checksum=stored_checksum,
+        allow_replaced_log_content=True,
+    )
+    resolved_commit = worker_result_resolved_commit(job=stored_result, body=stored_body)
+    current_commit = clean_github_access_text(stored_result.get("commit"))
+    if resolved_commit and current_commit.lower() != resolved_commit.lower():
+        updated_job = db.update_scan_job_commit(public_issue_text(stored_result.get("job_id")), resolved_commit)
+        if updated_job:
+            stored_result = {**stored_result, **updated_job}
+        else:
+            stored_result = {**stored_result, "commit": resolved_commit}
+    elif resolved_commit:
+        stored_result = {**stored_result, "commit": resolved_commit}
+    event_result = record_worker_review_decision_events(
+        stored_result,
+        stored_body,
+        attempt_id=stored_attempt_id,
+        status=status,
+    )
+    quota_finalized = {}
+    if worker_result_should_finalize_quota(stored_result, stored_body, status=status):
+        quota_finalized = finalize_scan_quota_for_job(stored_result, trigger="worker_result")
+    with STATE_LOCK:
+        apply_prepared_worker_job_result_to_state_locked(stored_result, prepared_result)
+    quota_rollback = rollback_scan_quota_for_refundable_worker_failure(stored_result, stored_body, status=status)
+    review_run = db.finalize_review_run_result(stored_result, stored_body, status=status)
+    result = {
+        "accepted": True,
+        "duplicate": duplicate,
+        "conflict": False,
+        "issueCount": issue_count,
+        "reviewDecisionEvents": event_result,
+        "reviewRun": review_run,
+    }
+    if quota_finalized.get("consumed"):
+        result["quotaConsumed"] = True
+    if quota_rollback.get("reservationReleased"):
+        result["quotaRelease"] = quota_rollback
+    elif quota_rollback.get("ledgerRows"):
+        result["quotaRollback"] = quota_rollback
+    return result
 
 
 def apply_worker_job_result(job: dict, body: dict) -> dict:
@@ -873,67 +1153,32 @@ def apply_worker_job_result(job: dict, body: dict) -> dict:
         str(job["job_id"]),
         attempt_id=attempt_id,
         result_checksum=checksum,
+        status=status,
     )
     if submission.get("conflict"):
         return {"accepted": False, "conflict": True}
-    if submission.get("duplicate"):
-        quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
-        result = {"accepted": True, "duplicate": True, "conflict": False, "issueCount": worker_result_issue_count(body)}
-        if quota_rollback.get("reservationReleased"):
-            result["quotaRelease"] = quota_rollback
-        elif quota_rollback.get("ledgerRows"):
-            result["quotaRollback"] = quota_rollback
-        return result
-    review_worker_protocol = review_worker_protocol_envelope(body)
-    if not review_worker_protocol:
-        raise ValueError("Worker result must include reviewWorkerProtocol.")
-    prepared_result = prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
-    record_result = db.record_scan_job_result(
-        str(job["job_id"]),
+    duplicate = bool(submission.get("duplicate"))
+    if not duplicate:
+        review_worker_protocol = review_worker_protocol_envelope(body)
+        if not review_worker_protocol:
+            raise ValueError("Worker result must include reviewWorkerProtocol.")
+        prepare_worker_job_result_state(job, body, status=status, checksum=checksum)
+        record_result = db.record_scan_job_result(
+            str(job["job_id"]),
+            attempt_id=attempt_id,
+            status=status,
+            result_checksum=checksum,
+            payload=body,
+        )
+        if record_result.get("conflict"):
+            return {"accepted": False, "conflict": True}
+        duplicate = bool(record_result.get("duplicate"))
+    return converge_worker_job_result(
+        job,
         attempt_id=attempt_id,
-        status=status,
-        result_checksum=checksum,
-        payload=body,
+        checksum=checksum,
+        duplicate=duplicate,
     )
-    if record_result.get("conflict"):
-        return {"accepted": False, "conflict": True}
-    duplicate = bool(record_result.get("duplicate"))
-    if duplicate:
-        quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
-        result = {"accepted": True, "duplicate": True, "conflict": False, "issueCount": worker_result_issue_count(body)}
-        if quota_rollback.get("reservationReleased"):
-            result["quotaRelease"] = quota_rollback
-        elif quota_rollback.get("ledgerRows"):
-            result["quotaRollback"] = quota_rollback
-        return result
-    resolved_commit = worker_result_resolved_commit(job=job, body=body)
-    if resolved_commit:
-        updated_job = db.update_scan_job_commit(str(job["job_id"]), resolved_commit)
-        if updated_job:
-            job = updated_job
-        else:
-            job = {**job, "commit": resolved_commit}
-    event_result = record_worker_review_decision_events(job, body, attempt_id=attempt_id, status=status)
-    quota_finalized = {}
-    if worker_result_should_finalize_quota(job, body, status=status):
-        quota_finalized = finalize_scan_quota_for_job(job, trigger="worker_result")
-    with STATE_LOCK:
-        apply_prepared_worker_job_result_to_state_locked(job, prepared_result)
-    quota_rollback = rollback_scan_quota_for_refundable_worker_failure(job, body, status=status)
-    result = {
-        "accepted": True,
-        "duplicate": duplicate,
-        "conflict": False,
-        "issueCount": worker_result_issue_count(body),
-        "reviewDecisionEvents": event_result,
-    }
-    if quota_finalized.get("consumed"):
-        result["quotaConsumed"] = True
-    if quota_rollback.get("reservationReleased"):
-        result["quotaRelease"] = quota_rollback
-    elif quota_rollback.get("ledgerRows"):
-        result["quotaRollback"] = quota_rollback
-    return result
 
 
 def worker_result_issue_count(body: dict) -> int:
@@ -952,15 +1197,7 @@ def worker_result_should_finalize_quota(job: dict, body: dict, *, status: str) -
     progress_final = envelope.get("progress_final") if isinstance(envelope.get("progress_final"), dict) else {}
     if worker_progress_phase_should_finalize_quota(progress_final.get("current_phase")):
         return True
-    steps = progress_final.get("steps") if isinstance(progress_final.get("steps"), list) else []
-    for step in steps:
-        if not isinstance(step, dict) or not worker_progress_phase_should_finalize_quota(step.get("id")):
-            continue
-        step_status = public_issue_text(step.get("status")).lower()
-        step_percent = public_scan_progress(step.get("percent"))
-        if step_status not in {"", "pending", "queued", "skipped", "not_started"} or step_percent > 0:
-            return True
-    return False
+    return worker_progress_steps_should_finalize_quota(progress_final.get("steps"))
 
 
 WORKER_TERMINAL_REFUNDABLE_ERROR_CODES = frozenset(
@@ -987,7 +1224,11 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
     durable_scan = db.get_user_scan_snapshot(user_id, scan_id)
     with STATE_LOCK:
         memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
-        scan = memory_scan or durable_scan
+        scan = (
+            durable_scan
+            if isinstance(durable_scan, dict)
+            else memory_scan
+        )
         request_id = public_issue_text((scan or {}).get("requestId")) or None
         repo_id = public_issue_text((scan or {}).get("repoId") or job.get("repo_id"))
         has_repository_limit_evidence = worker_result_has_repository_limit_evidence(body, scan)
@@ -1001,22 +1242,51 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
             request_id=request_id,
             record_ledger=True,
         )
-        if not release_result.get("ledgerRows") and not release_result.get("bucketRows"):
+        if (
+            not release_result.get("ledgerRows")
+            and not release_result.get("bucketRows")
+            and not release_result.get("releasedRows")
+            and not release_result.get("consumedRows")
+        ):
             return release_result
         user = USERS.get(user_id)
         repository = db.get_repository(repo_id) if repo_id else None
         with STATE_LOCK:
             memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
-            scan = memory_scan or db.get_user_scan_snapshot(user_id, scan_id)
+            current_durable_scan = db.get_user_scan_snapshot(user_id, scan_id)
+            scan = (
+                dict(current_durable_scan)
+                if isinstance(current_durable_scan, dict)
+                else memory_scan
+            )
             if scan:
-                scan["quotaState"] = "released"
-                scan["quotaReleasedAt"] = now()
-                scan["quotaReleaseReason"] = error_code
+                if release_result.get("consumedRows"):
+                    scan["quotaState"] = "consumed"
+                    scan["quotaConsumedAt"] = (
+                        pull_request_timestamp(scan.get("quotaConsumedAt"))
+                        or now()
+                    )
+                    scan["quotaConsumeTrigger"] = (
+                        public_issue_text(scan.get("quotaConsumeTrigger"))
+                        or "quota_ledger_reconciled"
+                    )
+                else:
+                    scan["quotaState"] = "released"
+                    scan["quotaReleasedAt"] = (
+                        pull_request_timestamp(scan.get("quotaReleasedAt"))
+                        or now()
+                    )
+                    scan["quotaReleaseReason"] = error_code
                 refresh_scan_quota_usage_locked(scan, user, repository)
                 db.upsert_scan(scan)
                 if memory_scan is not None:
+                    if memory_scan is not scan:
+                        memory_scan.clear()
+                        memory_scan.update(db.to_jsonable(scan))
                     mark_state_dirty()
-        release_result["reservationReleased"] = True
+        release_result["reservationReleased"] = not bool(
+            release_result.get("consumedRows")
+        )
         return release_result
     rollback_result = quota.rollback_scan_quota(
         scan_id=scan_id,

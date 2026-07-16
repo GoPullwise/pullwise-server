@@ -12,7 +12,7 @@ import sqlite3
 import threading
 import time
 from contextlib import closing
-from typing import Any
+from typing import Any, Iterable
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -382,7 +382,10 @@ def initialize() -> None:
                     logs_summary TEXT,
                     review_output_language TEXT,
                     provider_chain TEXT,
-                    last_attempt_id TEXT
+                    last_attempt_id TEXT,
+                    cancel_requested_at INTEGER,
+                    cancel_reason TEXT,
+                    projection_pending INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -391,6 +394,18 @@ def initialize() -> None:
             ensure_column(connection, "scan_jobs", "last_attempt_id", "TEXT")
             ensure_column(connection, "scan_jobs", "worker_scope", "TEXT NOT NULL DEFAULT 'shared'")
             ensure_column(connection, "scan_jobs", "worker_owner_user_id", "TEXT")
+            ensure_column(connection, "scan_jobs", "cancel_requested_at", "INTEGER")
+            ensure_column(connection, "scan_jobs", "cancel_reason", "TEXT")
+            scan_job_projection_pending_added = not any(
+                row[1] == "projection_pending"
+                for row in connection.execute("PRAGMA table_info(scan_jobs)").fetchall()
+            )
+            ensure_column(
+                connection,
+                "scan_jobs",
+                "projection_pending",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable
@@ -426,6 +441,13 @@ def initialize() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_repo_created
                 ON scan_jobs(user_id, repo, created_at DESC, job_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_projection_pending
+                ON scan_jobs(updated_at, job_id)
+                WHERE projection_pending = 1
                 """
             )
             connection.execute(
@@ -497,6 +519,44 @@ def initialize() -> None:
                 ON scans(job_id)
                 """
             )
+            if scan_job_projection_pending_added:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET projection_pending = 1
+                    WHERE status IN ('failed', 'cancelled')
+                      AND error IN (
+                          'scan_attempts_exhausted',
+                          'timed_out',
+                          'worker_heartbeat_timed_out',
+                          'worker_job_startup_lost',
+                          'server_restart',
+                          'cancel_timed_out'
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM scans s
+                          WHERE s.scan_id = scan_jobs.scan_id
+                            AND (
+                                s.status != scan_jobs.status
+                                OR COALESCE(
+                                    CASE
+                                        WHEN json_valid(s.payload)
+                                        THEN json_extract(s.payload, '$.quotaState')
+                                    END,
+                                    ''
+                                ) = 'reserved'
+                                OR COALESCE(
+                                    CASE
+                                        WHEN json_valid(s.payload)
+                                        THEN json_extract(s.payload, '$.recoveryReason')
+                                    END,
+                                    ''
+                                ) != scan_jobs.error
+                            )
+                      )
+                    """
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS job_results (
@@ -1891,6 +1951,10 @@ def get_worker(
         )
 
 
+def get_worker_heartbeat(worker_id: str) -> dict[str, Any] | None:
+    return get_worker(worker_id)
+
+
 def update_worker(
     worker_id: str,
     patch: dict[str, Any],
@@ -2448,7 +2512,12 @@ def _review_run_progress_values(event: dict[str, Any]) -> tuple[str, str, str, i
         "run_cancelled": "cancelled",
         "run_partial_completed": "partial_completed",
     }.get(event_type)
-    status = terminal_status or "running"
+    cancellation_pending = event_type == "run_cancel_requested" or (
+        event_type == "run_cancelled" and event.get("defer_terminal") is True
+    )
+    if cancellation_pending:
+        terminal_status = None
+    status = "cancelling" if cancellation_pending else terminal_status or "running"
     completed_at = timestamp if terminal_status else None
     if not terminal_status and isinstance(event.get("estimate"), dict):
         progress_payload["estimate"] = event.get("estimate")
@@ -2469,20 +2538,20 @@ def _upsert_review_run_progress_locked(connection: sqlite3.Connection, event: di
             worker_id = COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id),
             status = CASE
                 WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
-                     AND excluded.status = 'running'
+                     AND excluded.status IN ('running', 'cancelling')
                 THEN review_runs.status
                 ELSE excluded.status
             END,
             completed_at = COALESCE(excluded.completed_at, review_runs.completed_at),
             progress_json = CASE
                 WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
-                     AND excluded.status = 'running'
+                     AND excluded.status IN ('running', 'cancelling')
                 THEN review_runs.progress_json
                 ELSE excluded.progress_json
             END,
             updated_at = CASE
                 WHEN review_runs.status IN ('completed', 'failed', 'cancelled', 'partial_completed')
-                     AND excluded.status = 'running'
+                     AND excluded.status IN ('running', 'cancelling')
                 THEN review_runs.updated_at
                 ELSE excluded.updated_at
             END
@@ -2541,6 +2610,48 @@ def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, sta
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            existing = row_to_dict(
+                connection.execute(
+                    """
+                    SELECT status, completed_at, duration_ms, error_json
+                    FROM review_runs
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                ).fetchone()
+            ) or {}
+            existing_error: dict[str, Any] = {}
+            try:
+                decoded_existing_error = json.loads(
+                    str(existing.get("error_json") or "{}")
+                )
+                if isinstance(decoded_existing_error, dict):
+                    existing_error = decoded_existing_error
+            except (TypeError, ValueError, json.JSONDecodeError):
+                existing_error = {}
+            preserve_server_cancellation = (
+                status == "cancelled"
+                and str(existing.get("status") or "").strip() == "cancelled"
+                and str(existing_error.get("source") or "").strip()
+                == "server_lease_reaper"
+            )
+            effective_completed_at = (
+                int(existing["completed_at"])
+                if preserve_server_cancellation
+                and existing.get("completed_at") is not None
+                else completed_at
+            )
+            effective_error_json = (
+                str(existing.get("error_json") or "")
+                if preserve_server_cancellation
+                else run_json_text(error)
+            )
+            effective_duration_ms = (
+                int(existing["duration_ms"])
+                if preserve_server_cancellation
+                and existing.get("duration_ms") is not None
+                else duration_ms
+            )
             connection.execute(
                 """
                 INSERT INTO review_runs (
@@ -2571,6 +2682,24 @@ def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, sta
                     error_json = excluded.error_json,
                     raw_result_envelope_json = excluded.raw_result_envelope_json,
                     updated_at = excluded.updated_at
+                WHERE review_runs.job_id IS NOT excluded.job_id
+                   OR review_runs.worker_id IS NOT COALESCE(NULLIF(excluded.worker_id, ''), review_runs.worker_id)
+                   OR review_runs.status IS NOT excluded.status
+                   OR review_runs.overall_risk IS NOT excluded.overall_risk
+                   OR review_runs.result_status IS NOT excluded.result_status
+                   OR review_runs.started_at IS NOT COALESCE(review_runs.started_at, excluded.started_at)
+                   OR review_runs.completed_at IS NOT excluded.completed_at
+                   OR review_runs.duration_ms IS NOT excluded.duration_ms
+                   OR review_runs.protocol_version IS NOT excluded.protocol_version
+                   OR review_runs.worker_version IS NOT excluded.worker_version
+                   OR review_runs.engine_type IS NOT excluded.engine_type
+                   OR review_runs.codex_thread_id IS NOT excluded.codex_thread_id
+                   OR review_runs.summary_json IS NOT excluded.summary_json
+                   OR review_runs.quality_gate_json IS NOT excluded.quality_gate_json
+                   OR review_runs.usage_json IS NOT excluded.usage_json
+                   OR review_runs.progress_json IS NOT COALESCE(excluded.progress_json, review_runs.progress_json)
+                   OR review_runs.error_json IS NOT excluded.error_json
+                   OR review_runs.raw_result_envelope_json IS NOT excluded.raw_result_envelope_json
                 """,
                 (
                     run_id,
@@ -2580,8 +2709,8 @@ def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, sta
                     overall_risk,
                     status,
                     started_at,
-                    completed_at,
-                    duration_ms,
+                    effective_completed_at,
+                    effective_duration_ms,
                     str(envelope.get("protocol_version") or "").strip(),
                     str(envelope_worker.get("worker_version") or "").strip(),
                     str(worker_engine.get("type") or "").strip(),
@@ -2590,7 +2719,7 @@ def finalize_review_run_result(job: dict[str, Any], body: dict[str, Any], *, sta
                     run_json_text(quality_gate),
                     run_json_text(envelope.get("usage") if isinstance(envelope.get("usage"), dict) else None),
                     run_json_text(progress_final),
-                    run_json_text(error),
+                    effective_error_json,
                     run_json_text(envelope),
                     timestamp,
                     timestamp,
@@ -2717,13 +2846,18 @@ def store_review_run_event_and_progress(
                         timeout_at = int(raw_timeout_at) if raw_timeout_at is not None else None
                     except (TypeError, ValueError):
                         timeout_at = None
+                    target_job_status = (
+                        "cancelling"
+                        if str(scan_job_progress.get("status") or "").strip().lower() == "cancelling"
+                        else "running"
+                    )
                     cursor = connection.execute(
                         """
                         UPDATE scan_jobs
                         SET progress_phase = ?,
                             progress = ?,
                             progress_message = ?,
-                            status = 'running',
+                            status = ?,
                             started_at = COALESCE(started_at, ?),
                             timeout_at = CASE
                                 WHEN ? IS NULL THEN timeout_at
@@ -2732,12 +2866,17 @@ def store_review_run_event_and_progress(
                             END,
                             logs_summary = ?,
                             updated_at = ?
-                        WHERE job_id = ? AND status IN ('claimed', 'running')
+                        WHERE job_id = ?
+                          AND (
+                              (? = 'running' AND status IN ('claimed', 'running'))
+                              OR (? = 'cancelling' AND status IN ('cancel_requested', 'cancelling'))
+                          )
                         """,
                         (
                             scan_job_progress.get("phase"),
                             max(0, min(100, int(scan_job_progress.get("progress") or 0))),
                             scan_job_progress.get("message"),
+                            target_job_status,
                             int(scan_job_progress.get("started_at") or current_time),
                             timeout_at,
                             timeout_at,
@@ -2745,8 +2884,12 @@ def store_review_run_event_and_progress(
                             scan_job_progress.get("logs_summary"),
                             current_time,
                             job_id,
+                            target_job_status,
+                            target_job_status,
                         ),
                     )
+                    if cursor.rowcount <= 0 and target_job_status == "cancelling":
+                        raise ValueError("Run is no longer accepting cancellation events.")
                     if cursor.rowcount > 0:
                         scan_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
                 stored_event["_scan_job"] = scan_job
@@ -2783,6 +2926,92 @@ def list_review_run_events(run_id: str, *, limit: int = 200) -> list[dict[str, A
             (normalized, safe_limit),
         ).fetchall()
         return [row_to_dict(row) or {} for row in rows]
+
+
+def scan_job_has_progress_phase_evidence(
+    job_id: str,
+    phases: Iterable[str],
+) -> bool:
+    ensure_initialized()
+    normalized_job_id = str(job_id or "").strip()
+    normalized_phases = sorted(
+        {
+            str(phase or "").strip()
+            for phase in phases
+            if str(phase or "").strip()
+        }
+    )
+    if not normalized_job_id or not normalized_phases:
+        return False
+    placeholders = ", ".join("?" for _ in normalized_phases)
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute(
+            f"""
+            SELECT 1
+            FROM review_run_events AS event
+            WHERE event.job_id = ?
+              AND (
+                  (
+                      event.phase IN ({placeholders})
+                      AND event.event_type IN (
+                          'phase_started',
+                          'progress_updated',
+                          'phase_completed'
+                      )
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM json_tree(
+                          CASE
+                              WHEN json_valid(event.payload)
+                              THEN event.payload
+                              ELSE '{{}}'
+                          END
+                      ) AS step
+                      WHERE step.type = 'object'
+                        AND step.path IN (
+                            '$.progress.steps',
+                            '$.data.progress_steps',
+                            '$.data.progressSteps',
+                            '$.progressSteps',
+                            '$.progress_steps'
+                        )
+                        AND json_extract(step.value, '$.id') IN ({placeholders})
+                        AND (
+                            LOWER(
+                                CAST(
+                                    COALESCE(
+                                        json_extract(step.value, '$.status'),
+                                        ''
+                                    )
+                                    AS TEXT
+                                )
+                            ) NOT IN (
+                                '',
+                                'pending',
+                                'queued',
+                                'skipped',
+                                'not_started'
+                            )
+                            OR CAST(
+                                COALESCE(
+                                    json_extract(step.value, '$.percent'),
+                                    0
+                                )
+                                AS REAL
+                            ) > 0
+                        )
+                  )
+              )
+            LIMIT 1
+            """,
+            (
+                normalized_job_id,
+                *normalized_phases,
+                *normalized_phases,
+            ),
+        ).fetchone()
+    return row is not None
 
 
 def record_worker_audit_event(record: dict[str, Any]) -> dict[str, Any]:
@@ -4100,10 +4329,18 @@ def record_active_worker_heartbeat(
                         completed_at = ?,
                         timeout_at = NULL,
                         error = 'worker_job_startup_lost',
+                        projection_pending = 1,
                         updated_at = ?
                     WHERE job_id = ? AND status = 'claimed' AND started_at IS NULL
                     """,
                     (current_time, current_time, row["job_id"]),
+                )
+                _finalize_recovered_review_run_locked(
+                    connection,
+                    job_id=str(row["job_id"]),
+                    status="failed",
+                    reason="worker_job_startup_lost",
+                    completed_at=current_time,
                 )
                 recovered.append(
                     {
@@ -4260,10 +4497,18 @@ def fail_worker_unstarted_scan_jobs_missing_from_heartbeat(
                         completed_at = ?,
                         timeout_at = NULL,
                         error = 'worker_job_startup_lost',
+                        projection_pending = 1,
                         updated_at = ?
                     WHERE job_id = ? AND status = 'claimed' AND started_at IS NULL
                     """,
                     (current_time, current_time, row["job_id"]),
+                )
+                _finalize_recovered_review_run_locked(
+                    connection,
+                    job_id=str(row["job_id"]),
+                    status="failed",
+                    reason="worker_job_startup_lost",
+                    completed_at=current_time,
                 )
                 recovered.append(
                     {
@@ -5254,7 +5499,13 @@ def claim_next_scan_job(
                       SELECT 1
                       FROM scan_jobs worker_active
                       WHERE worker_active.claimed_by_worker_id = ?
-                        AND worker_active.status IN ('claimed', 'running', 'uploading_result')
+                        AND worker_active.status IN (
+                            'claimed',
+                            'running',
+                            'uploading_result',
+                            'cancel_requested',
+                            'cancelling'
+                        )
                       LIMIT 1
                   )
                   AND COALESCE(NULLIF(queued.worker_scope, ''), 'shared') = 'shared'
@@ -5332,6 +5583,12 @@ def recover_expired_scan_jobs(
             recovered = _fail_exhausted_queued_jobs_locked(connection, current_time)
             recovered.extend(_fail_expired_jobs_locked(connection, current_time))
             recovered.extend(_fail_stale_worker_jobs_locked(connection, current_time, offline_after))
+            recovered_job_ids = {str(item.get("job_id") or "") for item in recovered}
+            for pending in _pending_recovered_scan_jobs_locked(connection):
+                pending_job_id = str(pending.get("job_id") or "")
+                if pending_job_id and pending_job_id not in recovered_job_ids:
+                    recovered.append(pending)
+                    recovered_job_ids.add(pending_job_id)
             connection.commit()
             return recovered
         except Exception:
@@ -5347,26 +5604,129 @@ def fail_interrupted_scan_job(scan_id: str, *, reason: str = "server_restart", t
     current_time = int(timestamp if timestamp is not None else time.time())
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
-        with connection:
-            connection.execute(
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = connection.execute(
+                "SELECT * FROM scan_jobs WHERE scan_id = ?",
+                (scan_id,),
+            ).fetchone()
+            if not row:
+                connection.commit()
+                return None
+            prior_status = str(row["status"] or "").strip().lower()
+            if prior_status not in {"claimed", "running", "uploading_result"}:
+                connection.commit()
+                return row_to_dict(row)
+            updated = connection.execute(
                 """
                 UPDATE scan_jobs
                 SET status = 'failed',
                     completed_at = ?,
                     timeout_at = NULL,
                     error = ?,
+                    projection_pending = 1,
                     updated_at = ?
                 WHERE scan_id = ?
-                  AND status IN ('claimed', 'running', 'uploading_result')
+                  AND status = ?
                 """,
-                (current_time, reason, current_time, scan_id),
-            )
-            return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone())
+                (current_time, reason, current_time, scan_id, prior_status),
+            ).rowcount
+            if updated > 0:
+                _complete_scan_job_attempt_locked(
+                    connection,
+                    job_id=str(row["job_id"]),
+                    attempt=int(row["attempt"] or 0),
+                    worker_id=str(row["claimed_by_worker_id"] or ""),
+                    status="failed",
+                    completed_at=current_time,
+                    error=reason,
+                )
+                _finalize_recovered_review_run_locked(
+                    connection,
+                    job_id=str(row["job_id"]),
+                    status="failed",
+                    reason=reason,
+                    completed_at=current_time,
+                )
+            stored = connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()
+            connection.commit()
+            return row_to_dict(stored)
+        except Exception:
+            connection.rollback()
+            raise
+
+def _finalize_recovered_review_run_locked(
+    connection: sqlite3.Connection,
+    *,
+    job_id: str,
+    status: str,
+    reason: str,
+    completed_at: int,
+) -> None:
+    terminal_status = str(status or "").strip().lower()
+    if terminal_status not in {"failed", "cancelled"}:
+        raise ValueError("recovered review run status must be failed or cancelled")
+    rows = connection.execute(
+        """
+        SELECT run_id, progress_json
+        FROM review_runs
+        WHERE job_id = ?
+          AND status NOT IN ('completed', 'failed', 'cancelled', 'partial_completed')
+        """,
+        (job_id,),
+    ).fetchall()
+    error_text = run_json_text(
+        {
+            "code": str(reason or "").strip() or "timed_out",
+            "source": "server_lease_reaper",
+        }
+    )
+    for row in rows:
+        try:
+            progress = json.loads(str(row["progress_json"] or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            progress = {}
+        if not isinstance(progress, dict):
+            progress = {}
+        progress["status"] = terminal_status
+        progress.pop("estimate", None)
+        connection.execute(
+            """
+            UPDATE review_runs
+            SET status = ?,
+                result_status = ?,
+                completed_at = ?,
+                duration_ms = COALESCE(
+                    duration_ms,
+                    CASE
+                        WHEN started_at IS NOT NULL
+                        THEN MAX(0, (? - started_at) * 1000)
+                        ELSE NULL
+                    END
+                ),
+                progress_json = ?,
+                error_json = ?,
+                updated_at = ?
+            WHERE run_id = ?
+              AND status NOT IN ('completed', 'failed', 'cancelled', 'partial_completed')
+            """,
+            (
+                terminal_status,
+                terminal_status,
+                completed_at,
+                completed_at,
+                run_json_text(progress),
+                error_text,
+                completed_at,
+                row["run_id"],
+            ),
+        )
+
 
 def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_time: int) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT job_id, scan_id, attempt
+        SELECT job_id, scan_id, attempt, claimed_by_worker_id
         FROM scan_jobs
         WHERE status = 'queued'
           AND attempt > 0
@@ -5374,7 +5734,7 @@ def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_t
     ).fetchall()
     recovered: list[dict[str, Any]] = []
     for row in rows:
-        connection.execute(
+        updated = connection.execute(
             """
             UPDATE scan_jobs
             SET status = 'failed',
@@ -5384,10 +5744,29 @@ def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_t
                 completed_at = ?,
                 timeout_at = NULL,
                 error = 'scan_attempts_exhausted',
+                projection_pending = 1,
                 updated_at = ?
             WHERE job_id = ? AND status = 'queued'
             """,
             (current_time, current_time, row["job_id"]),
+        ).rowcount
+        if updated <= 0:
+            continue
+        _complete_scan_job_attempt_locked(
+            connection,
+            job_id=str(row["job_id"]),
+            attempt=int(row["attempt"]),
+            worker_id=str(row["claimed_by_worker_id"] or ""),
+            status="failed",
+            completed_at=current_time,
+            error="scan_attempts_exhausted",
+        )
+        _finalize_recovered_review_run_locked(
+            connection,
+            job_id=str(row["job_id"]),
+            status="failed",
+            reason="scan_attempts_exhausted",
+            completed_at=current_time,
         )
         recovered.append(
             {
@@ -5403,41 +5782,64 @@ def _fail_exhausted_queued_jobs_locked(connection: sqlite3.Connection, current_t
 def _fail_expired_jobs_locked(connection: sqlite3.Connection, current_time: int) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT job_id, scan_id, attempt, claimed_by_worker_id
+        SELECT job_id, scan_id, attempt, claimed_by_worker_id, status
         FROM scan_jobs
-        WHERE status IN ('claimed', 'running', 'uploading_result') AND timeout_at IS NOT NULL AND timeout_at <= ?
+        WHERE status IN ('claimed', 'running', 'uploading_result', 'cancel_requested', 'cancelling')
+          AND timeout_at IS NOT NULL
+          AND timeout_at <= ?
         """,
         (current_time,),
     ).fetchall()
     recovered: list[dict[str, Any]] = []
     for row in rows:
+        prior_status = str(row["status"] or "").strip()
+        cancel_recovery = prior_status in {"cancel_requested", "cancelling"}
+        terminal_status = "cancelled" if cancel_recovery else "failed"
+        reason = "cancel_timed_out" if cancel_recovery else "timed_out"
+        updated = connection.execute(
+            """
+            UPDATE scan_jobs
+            SET status = ?,
+                completed_at = ?,
+                timeout_at = NULL,
+                error = ?,
+                projection_pending = 1,
+                updated_at = ?
+            WHERE job_id = ? AND status = ?
+            """,
+            (
+                terminal_status,
+                current_time,
+                reason,
+                current_time,
+                row["job_id"],
+                prior_status,
+            ),
+        ).rowcount
+        if updated <= 0:
+            continue
         _complete_scan_job_attempt_locked(
             connection,
             job_id=row["job_id"],
             attempt=int(row["attempt"]),
             worker_id=str(row["claimed_by_worker_id"] or ""),
-            status="failed",
+            status=terminal_status,
             completed_at=current_time,
-            error="timed_out",
+            error=reason,
         )
-        connection.execute(
-            """
-            UPDATE scan_jobs
-            SET status = 'failed',
-                completed_at = ?,
-                timeout_at = NULL,
-                error = 'timed_out',
-                updated_at = ?
-            WHERE job_id = ?
-            """,
-            (current_time, current_time, row["job_id"]),
+        _finalize_recovered_review_run_locked(
+            connection,
+            job_id=str(row["job_id"]),
+            status=terminal_status,
+            reason=reason,
+            completed_at=current_time,
         )
         recovered.append(
             {
                 "job_id": row["job_id"],
                 "scan_id": row["scan_id"],
-                "status": "failed",
-                "reason": "timed_out",
+                "status": terminal_status,
+                "reason": reason,
                 "attempt": int(row["attempt"]),
             }
         )
@@ -5450,10 +5852,10 @@ def _fail_stale_worker_jobs_locked(
 ) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT sj.job_id, sj.scan_id, sj.attempt, sj.claimed_by_worker_id
+        SELECT sj.job_id, sj.scan_id, sj.attempt, sj.claimed_by_worker_id, sj.status
         FROM scan_jobs sj
         JOIN workers w ON w.worker_id = sj.claimed_by_worker_id
-        WHERE sj.status IN ('claimed', 'running', 'uploading_result')
+        WHERE sj.status IN ('claimed', 'running', 'uploading_result', 'cancel_requested', 'cancelling')
           AND w.last_heartbeat_at IS NOT NULL
           AND w.last_heartbeat_at < ?
         """,
@@ -5461,37 +5863,118 @@ def _fail_stale_worker_jobs_locked(
     ).fetchall()
     recovered: list[dict[str, Any]] = []
     for row in rows:
+        prior_status = str(row["status"] or "").strip()
+        cancel_recovery = prior_status in {"cancel_requested", "cancelling"}
+        terminal_status = "cancelled" if cancel_recovery else "failed"
+        reason = "cancel_timed_out" if cancel_recovery else "worker_heartbeat_timed_out"
+        updated = connection.execute(
+            """
+            UPDATE scan_jobs
+            SET status = ?,
+                completed_at = ?,
+                timeout_at = NULL,
+                error = ?,
+                projection_pending = 1,
+                updated_at = ?
+            WHERE job_id = ? AND status = ?
+            """,
+            (
+                terminal_status,
+                current_time,
+                reason,
+                current_time,
+                row["job_id"],
+                prior_status,
+            ),
+        ).rowcount
+        if updated <= 0:
+            continue
         _complete_scan_job_attempt_locked(
             connection,
             job_id=row["job_id"],
             attempt=int(row["attempt"]),
             worker_id=str(row["claimed_by_worker_id"] or ""),
-            status="failed",
+            status=terminal_status,
             completed_at=current_time,
-            error="worker_heartbeat_timed_out",
+            error=reason,
         )
-        connection.execute(
-            """
-            UPDATE scan_jobs
-            SET status = 'failed',
-                completed_at = ?,
-                timeout_at = NULL,
-                error = 'worker_heartbeat_timed_out',
-                updated_at = ?
-            WHERE job_id = ?
-            """,
-            (current_time, current_time, row["job_id"]),
+        _finalize_recovered_review_run_locked(
+            connection,
+            job_id=str(row["job_id"]),
+            status=terminal_status,
+            reason=reason,
+            completed_at=current_time,
         )
         recovered.append(
             {
                 "job_id": row["job_id"],
                 "scan_id": row["scan_id"],
-                "status": "failed",
-                "reason": "worker_heartbeat_timed_out",
+                "status": terminal_status,
+                "reason": reason,
                 "attempt": int(row["attempt"]),
             }
         )
     return recovered
+
+
+def _pending_recovered_scan_jobs_locked(
+    connection: sqlite3.Connection,
+    *,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT sj.job_id,
+               sj.scan_id,
+               sj.status,
+               sj.error AS reason,
+               sj.attempt
+        FROM scan_jobs sj
+        JOIN scans s ON s.scan_id = sj.scan_id
+        WHERE sj.projection_pending = 1
+        ORDER BY sj.updated_at ASC, sj.job_id ASC
+        LIMIT ?
+        """,
+        (max(1, min(5000, int(limit or 500))),),
+    ).fetchall()
+    return [
+        {
+            "job_id": row["job_id"],
+            "scan_id": row["scan_id"],
+            "status": row["status"],
+            "reason": row["reason"],
+            "attempt": int(row["attempt"] or 0),
+        }
+        for row in rows
+    ]
+
+
+def mark_scan_job_projection_applied(
+    job_id: str,
+    *,
+    status: str,
+    reason: str,
+) -> bool:
+    ensure_initialized()
+    normalized_job_id = str(job_id or "").strip()
+    normalized_status = str(status or "").strip().lower()
+    normalized_reason = str(reason or "").strip()
+    if not normalized_job_id or normalized_status not in {"failed", "cancelled"}:
+        return False
+    with _LOCK, closing(connect()) as connection:
+        with connection:
+            updated = connection.execute(
+                """
+                UPDATE scan_jobs
+                SET projection_pending = 0
+                WHERE job_id = ?
+                  AND status = ?
+                  AND error = ?
+                  AND projection_pending = 1
+                """,
+                (normalized_job_id, normalized_status, normalized_reason),
+            ).rowcount
+    return updated > 0
 
 def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str, Any] | None:
     ensure_initialized()
@@ -5537,6 +6020,70 @@ def update_scan_job_progress(job_id: str, progress: dict[str, Any]) -> dict[str,
             if cursor.rowcount <= 0:
                 return None
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+
+
+def request_scan_job_cancellation(
+    scan_id: str,
+    *,
+    reason: str = "user_cancelled",
+    timeout_seconds: int = 3600,
+    timestamp: int | None = None,
+) -> dict[str, Any] | None:
+    ensure_initialized()
+    target_scan_id = str(scan_id or "").strip()
+    if not target_scan_id:
+        return None
+    current_time = int(timestamp if timestamp is not None else time.time())
+    cancel_reason = str(reason or "").strip() or "user_cancelled"
+    cancellation_timeout_at = current_time + max(60, int(timeout_seconds or 3600))
+    with _LOCK, closing(connect()) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = connection.execute(
+                "SELECT * FROM scan_jobs WHERE scan_id = ?",
+                (target_scan_id,),
+            ).fetchone()
+            if not row:
+                connection.commit()
+                return None
+            status = str(row["status"] or "").strip().lower()
+            if status == "queued":
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET status = 'cancelled',
+                        completed_at = COALESCE(completed_at, ?),
+                        timeout_at = NULL,
+                        cancel_requested_at = COALESCE(cancel_requested_at, ?),
+                        cancel_reason = ?,
+                        updated_at = ?
+                    WHERE scan_id = ? AND status = 'queued'
+                    """,
+                    (current_time, current_time, cancel_reason, current_time, target_scan_id),
+                )
+            elif status in {"claimed", "running", "uploading_result"}:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET status = 'cancel_requested',
+                        completed_at = NULL,
+                        timeout_at = ?,
+                        cancel_requested_at = COALESCE(cancel_requested_at, ?),
+                        cancel_reason = ?,
+                        updated_at = ?
+                    WHERE scan_id = ?
+                      AND status IN ('claimed', 'running', 'uploading_result')
+                    """,
+                    (cancellation_timeout_at, current_time, cancel_reason, current_time, target_scan_id),
+                )
+            connection.commit()
+            return row_to_dict(
+                connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (target_scan_id,)).fetchone()
+            )
+        except Exception:
+            connection.rollback()
+            raise
 
 
 def cancel_scan_job_for_scan(scan_id: str) -> None:
@@ -5792,7 +6339,11 @@ def store_review_run_artifact(
                 ).fetchone()
                 if not job:
                     return {"accepted": False, "conflict": True, "reason": "job_not_found"}
-                if str(job["status"] or "") not in {"claimed", "running", "uploading_result"} and not replaceable_log_artifact:
+                if (
+                    str(job["status"] or "")
+                    not in {"claimed", "running", "uploading_result", "cancel_requested", "cancelling"}
+                    and not replaceable_log_artifact
+                ):
                     return {"accepted": False, "conflict": True, "reason": "job_not_accepting_artifacts"}
                 if not replaceable_log_artifact:
                     content_path = staged_content[0] if staged_content is not None else ""
@@ -6066,7 +6617,12 @@ def record_scan_job_result(
         connection.execute("BEGIN IMMEDIATE")
         try:
             job = connection.execute(
-                "SELECT status, last_attempt_id, claimed_by_worker_id, attempt FROM scan_jobs WHERE job_id = ?",
+                """
+                SELECT status, last_attempt_id, claimed_by_worker_id, attempt,
+                       completed_at, error, cancel_reason
+                FROM scan_jobs
+                WHERE job_id = ?
+                """,
                 (job_id,),
             ).fetchone()
             if not job:
@@ -6082,9 +6638,17 @@ def record_scan_job_result(
                     return {"accepted": True, "duplicate": True, "conflict": False}
                 connection.commit()
                 return {"accepted": False, "duplicate": True, "conflict": True}
-            if job["status"] not in {"claimed", "running", "uploading_result"}:
+            job_status = str(job["status"] or "").strip().lower()
+            accepts_result = job_status in {"claimed", "running", "uploading_result"} or (
+                status == "cancelled"
+                and job_status in {"cancel_requested", "cancelling", "cancelled"}
+            )
+            if not accepts_result:
                 connection.commit()
                 return {"accepted": False, "duplicate": False, "conflict": True}
+            late_cancelled_receipt = (
+                job_status == "cancelled" and status == "cancelled"
+            )
             claimed_worker_id = str(job["claimed_by_worker_id"] or "")
             try:
                 attempt = int(job["attempt"] or 0)
@@ -6094,15 +6658,16 @@ def record_scan_job_result(
             if not expected_attempt_id or attempt_id != expected_attempt_id:
                 connection.commit()
                 return {"accepted": False, "duplicate": False, "conflict": True}
-            _complete_scan_job_attempt_locked(
-                connection,
-                job_id=job_id,
-                attempt=attempt,
-                worker_id=claimed_worker_id,
-                status=status,
-                completed_at=current_time,
-                error=payload.get("error"),
-            )
+            if not late_cancelled_receipt:
+                _complete_scan_job_attempt_locked(
+                    connection,
+                    job_id=job_id,
+                    attempt=attempt,
+                    worker_id=claimed_worker_id,
+                    status=status,
+                    completed_at=current_time,
+                    error=payload.get("error"),
+                )
             connection.execute(
                 """
                 INSERT INTO job_results (id, job_id, attempt_id, result_checksum, status, payload, payload_artifact_id)
@@ -6126,16 +6691,32 @@ def record_scan_job_result(
                 payload_text=artifact_payload_text,
                 timestamp=current_time,
             )
-            connection.execute(
-                """
-                UPDATE scan_jobs
-                SET status = 'uploading_result',
-                    updated_at = ?
-                WHERE job_id = ?
-                """,
-                (current_time, job_id),
-            )
-            if True:
+            if late_cancelled_receipt:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET result_checksum = ?,
+                        last_attempt_id = ?,
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (
+                        result_checksum,
+                        attempt_id,
+                        current_time,
+                        job_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE scan_jobs
+                    SET status = 'uploading_result',
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (current_time, job_id),
+                )
                 connection.execute(
                     """
                     UPDATE scan_jobs
@@ -6160,15 +6741,15 @@ def record_scan_job_result(
                         job_id,
                     ),
                 )
-                next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
-                result = {
-                    "accepted": True,
-                    "duplicate": False,
-                    "conflict": False,
-                    "job_status": status,
-                    "attempt": attempt,
-                    "job": next_job or {},
-                }
+            next_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
+            result = {
+                "accepted": True,
+                "duplicate": False,
+                "conflict": False,
+                "job_status": status,
+                "attempt": attempt,
+                "job": next_job or {},
+            }
             connection.commit()
         except Exception:
             connection.rollback()
@@ -6181,11 +6762,13 @@ def inspect_scan_job_result_submission(
     *,
     attempt_id: str,
     result_checksum: str,
+    status: str = "",
 ) -> dict[str, bool]:
     ensure_initialized()
     normalized_job_id = str(job_id or "").strip()
     normalized_attempt_id = str(attempt_id or "").strip()
     normalized_checksum = str(result_checksum or "").strip()
+    normalized_status = str(status or "").strip().lower()
     if not normalized_job_id or not normalized_attempt_id or not normalized_checksum:
         raise ValueError("job_id, attempt_id, and result_checksum are required")
     with _LOCK, closing(connect()) as connection:
@@ -6203,7 +6786,12 @@ def inspect_scan_job_result_submission(
         if existing:
             duplicate = str(existing["result_checksum"] or "") == normalized_checksum
             return {"accepted": duplicate, "duplicate": True, "conflict": not duplicate}
-        if job["status"] not in {"claimed", "running", "uploading_result"}:
+        job_status = str(job["status"] or "").strip().lower()
+        accepts_result = job_status in {"claimed", "running", "uploading_result"} or (
+            normalized_status == "cancelled"
+            and job_status in {"cancel_requested", "cancelling", "cancelled"}
+        )
+        if not accepts_result:
             return {"accepted": False, "duplicate": False, "conflict": True}
         claimed_worker_id = str(job["claimed_by_worker_id"] or "")
         try:
@@ -6214,6 +6802,19 @@ def inspect_scan_job_result_submission(
         if not expected_attempt_id or normalized_attempt_id != expected_attempt_id:
             return {"accepted": False, "duplicate": False, "conflict": True}
     return {"accepted": False, "duplicate": False, "conflict": False}
+
+
+def count_scan_job_results(job_id: str) -> int:
+    ensure_initialized()
+    target_job_id = str(job_id or "").strip()
+    if not target_job_id:
+        return 0
+    with _LOCK, closing(connect()) as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) FROM job_results WHERE job_id = ?",
+            (target_job_id,),
+        ).fetchone()
+    return max(0, int(row[0] if row else 0))
 
 
 def record_review_decision_events(events: list[dict[str, Any]]) -> dict[str, int]:

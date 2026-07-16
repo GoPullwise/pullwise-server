@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sqlite3
 import tempfile
@@ -196,6 +197,74 @@ class ScanRecoveryTest(unittest.TestCase):
         self.assertIn("recoveredAt", app.SCANS[0])
         self.assertEqual(app.SCANS[0]["recoveryReason"], "server_restart")
         self.persist_state.assert_called_once()
+
+    def test_restart_fallback_finalizes_job_attempt_run_and_reserved_quota(self) -> None:
+        timestamp = app.now()
+        user, _repository, scan = self.seed_reserved_scan(
+            scan_id="sc_restart_fallback",
+            request_id="req_restart_fallback",
+            timestamp=timestamp,
+        )
+        queued_job = app.create_scan_job_for_scan(scan)
+        db.upsert_worker_heartbeat(
+            {
+                "worker_id": "wk_restart_fallback",
+                "version": "0.1.0",
+                "provider": "codex",
+                "running_jobs": 1,
+                "doctor_status": "ok",
+                "timestamp": timestamp,
+            }
+        )
+        job = db.claim_next_scan_job(
+            "wk_restart_fallback",
+            lease_seconds=3600,
+            timestamp=timestamp,
+            recover_before_claim=False,
+            create_review_run=True,
+            protocol_version="review-worker-protocol/v1",
+        )
+        self.assertEqual(job["job_id"], queued_job["job_id"])
+        db.update_scan_job_progress(
+            job["job_id"],
+            {
+                "phase": "clone",
+                "progress": 20,
+                "message": "cloning",
+                "started_at": timestamp,
+            },
+        )
+        with closing(sqlite3.connect(os.environ["PULLWISE_DB_PATH"])) as connection:
+            with connection:
+                connection.execute(
+                    "UPDATE scan_jobs SET timeout_at = NULL WHERE job_id = ?",
+                    (job["job_id"],),
+                )
+        scan.update(
+            {
+                "status": "running",
+                "phase": "clone",
+                "jobId": job["job_id"],
+                "runId": app.scan_job_run_id(job),
+                "claimedByWorkerId": "wk_restart_fallback",
+            }
+        )
+        db.upsert_scan(scan)
+
+        with patch.object(app, "now", return_value=timestamp + 1):
+            app.recover_interrupted_scans()
+
+        stored_job = db.get_scan_job(job["job_id"])
+        attempt = db.list_scan_job_attempts(job["job_id"])[0]
+        review_run = db.get_review_run(app.scan_job_run_id(job))
+        stored_scan = db.get_user_scan_snapshot(user["id"], scan["id"])
+        self.assertEqual((stored_job["status"], stored_job["error"]), ("failed", "server_restart"))
+        self.assertEqual((attempt["status"], attempt["error"]), ("failed", "server_restart"))
+        self.assertEqual((review_run["status"], review_run["result_status"]), ("failed", "failed"))
+        self.assertEqual(json.loads(review_run["error_json"])["code"], "server_restart")
+        self.assertEqual((scan["status"], scan["quotaState"]), ("failed", "released"))
+        self.assertEqual((stored_scan["status"], stored_scan["quotaState"]), ("failed", "released"))
+        self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
 
     def test_state_loader_uses_database_scan_snapshots_as_memory_cache(self) -> None:
         db.reset_initialization_cache()
