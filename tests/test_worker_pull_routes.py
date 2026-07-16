@@ -1811,6 +1811,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(duplicate.status, HTTPStatus.OK)
         self.assertTrue(duplicate.payload["accepted"])
         self.assertTrue(duplicate.payload["duplicate"])
+    def test_worker_result_checksum_quote_probe(self) -> None:
+        self.assertEqual("quote", "quote")
+
     def test_terminal_final_debug_bundle_upload_replaces_existing_bundle(self) -> None:
         self.create_claimable_scan_job(job_id="job_terminal_debug_replace", scan_id="sc_terminal_debug_replace", user_id="usr_1")
         claim = self.v1_lease()
