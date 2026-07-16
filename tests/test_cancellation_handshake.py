@@ -439,6 +439,12 @@ class CancellationHandshakeTest(unittest.TestCase):
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "cancel_requested")
         stored_scan = db.get_user_scan_snapshot("usr_1", scan["id"])
         self.assertEqual(stored_scan["quotaState"], "consumed")
+        self.assertEqual(scan["quotaState"], "consumed")
+        self.assertEqual(scan["quotaConsumedAt"], stored_scan["quotaConsumedAt"])
+        self.assertEqual(
+            db.get_scan_job(job["job_id"])["projection_pending"],
+            0,
+        )
         usage = app.quota.quota_payload_for_user(app.USERS["usr_1"])
         self.assertEqual((usage["used"], usage["reserved"]), (1, 0))
         with db.connect() as connection:
@@ -635,6 +641,45 @@ class CancellationHandshakeTest(unittest.TestCase):
         second_projection = db.get_user_scan_snapshot("usr_1", scan["id"])
         self.assertEqual(second_projection["quotaReleasedAt"], 100)
 
+    def test_refundable_consumed_rollback_preserves_durable_cancellation_fields(self) -> None:
+        scan = self.create_quota_scan("sc_refundable_consumed_stale_memory")
+        job = db.get_scan_job_for_scan(scan["id"])
+        consumed = app.finalize_scan_quota_for_job(job, trigger="repo_map")
+        self.assertTrue(consumed["consumed"])
+
+        authoritative = db.get_user_scan_snapshot("usr_1", scan["id"])
+        authoritative.update(
+            {
+                "status": "cancelled",
+                "completedAt": 103,
+                "cancelReason": "user requested cancellation",
+                "cancelRequestedAt": 101,
+            }
+        )
+        db.upsert_scan(authoritative)
+        scan["status"] = "running"
+        scan.pop("completedAt", None)
+        scan.pop("cancelReason", None)
+        scan.pop("cancelRequestedAt", None)
+
+        rolled_back = app.rollback_scan_quota_for_refundable_worker_failure(
+            job,
+            {"error_code": "CODEX_QUOTA_EXHAUSTED"},
+            status="failed",
+        )
+
+        self.assertEqual(rolled_back["ledgerRows"], 2)
+        stored_scan = db.get_user_scan_snapshot("usr_1", scan["id"])
+        self.assertEqual(stored_scan["quotaState"], "refunded")
+        for key in (
+            "status",
+            "completedAt",
+            "cancelReason",
+            "cancelRequestedAt",
+        ):
+            self.assertEqual(stored_scan.get(key), authoritative.get(key), key)
+            self.assertEqual(scan.get(key), authoritative.get(key), key)
+
     def test_cancelled_core_evidence_consumes_previously_released_quota_idempotently(self) -> None:
         scan = self.create_quota_scan("sc_cancel_released_then_core")
         job = self.lease()
@@ -734,6 +779,12 @@ class CancellationHandshakeTest(unittest.TestCase):
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "cancelled")
         stored_scan = db.get_user_scan_snapshot("usr_1", scan["id"])
         self.assertEqual(stored_scan["quotaState"], "consumed")
+        self.assertEqual(scan["quotaState"], "consumed")
+        self.assertEqual(scan["quotaConsumedAt"], stored_scan["quotaConsumedAt"])
+        self.assertEqual(
+            db.get_scan_job(job["job_id"])["projection_pending"],
+            0,
+        )
         usage = app.quota.quota_payload_for_user(app.USERS["usr_1"])
         self.assertEqual((usage["used"], usage["reserved"]), (1, 0))
 

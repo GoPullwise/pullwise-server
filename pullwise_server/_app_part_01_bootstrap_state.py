@@ -1469,6 +1469,13 @@ def apply_recovered_scan_jobs_locked(recovered_jobs: list[dict]) -> int:
                 status=terminal_status,
                 reason=terminal_reason,
             )
+            latest_durable_scan = (
+                db.get_user_scan_snapshot(user_id, scan_id)
+                if user_id
+                else None
+            )
+            if isinstance(latest_durable_scan, dict):
+                scan = dict(latest_durable_scan)
         if memory_scan is not None:
             if memory_scan is not scan:
                 memory_scan.clear()

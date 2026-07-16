@@ -1302,7 +1302,12 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
     repo_usage = quota.quota_payload_for_repository(repository, user) if repository else None
     with STATE_LOCK:
         memory_scan = next((item for item in SCANS if item.get("id") == scan_id), None)
-        scan = memory_scan or db.get_user_scan_snapshot(user_id, scan_id)
+        latest_durable_scan = db.get_user_scan_snapshot(user_id, scan_id)
+        scan = (
+            dict(latest_durable_scan)
+            if isinstance(latest_durable_scan, dict)
+            else memory_scan
+        )
         if scan:
             if user_usage:
                 scan["billingUsage"] = user_usage
@@ -1316,6 +1321,9 @@ def rollback_scan_quota_for_refundable_worker_failure(job: dict, body: dict, *, 
             scan["quotaState"] = "refunded"
             db.upsert_scan(scan)
             if memory_scan is not None:
+                if memory_scan is not scan:
+                    memory_scan.clear()
+                    memory_scan.update(db.to_jsonable(scan))
                 mark_state_dirty()
     return rollback_result
 
