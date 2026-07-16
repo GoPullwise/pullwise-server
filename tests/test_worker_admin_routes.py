@@ -379,6 +379,13 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(first.status, HTTPStatus.FORBIDDEN)
         self.assertEqual(second.status, HTTPStatus.FORBIDDEN)
 
+    def test_admin_server_restart_route_is_removed(self) -> None:
+        handler = RouteHarness("/admin/server/restart", cookie=self.admin_cookie)
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+
     def test_admin_can_start_pullwise_server_restart(self) -> None:
         fake_process = type("FakeProcess", (), {"pid": 4321})()
         with (
