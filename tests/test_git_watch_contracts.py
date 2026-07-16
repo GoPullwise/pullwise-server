@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
@@ -192,6 +193,11 @@ GIT
             self.assertEqual(deploy_log.read_text(encoding="utf-8"), "restart")
             deployed_head = (app / ".pullwise" / "git-watch.deployed-head").read_text(encoding="utf-8").strip()
             self.assertEqual(deployed_head, run_git(["rev-parse", "HEAD"], app).stdout.strip())
+            status = json.loads((app / ".pullwise" / "git-watch.status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["schemaVersion"], 1)
+            self.assertEqual(status["status"], "succeeded")
+            self.assertEqual(status["revision"], deployed_head)
+            self.assertRegex(status["completedAt"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
     def test_stale_legacy_lock_directory_does_not_block_deploy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -295,6 +301,54 @@ GIT
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(marker.exists())
             self.assertEqual(arg_log.read_text(encoding="utf-8"), f";\ntouch\n{marker}\n")
+
+    def test_failed_health_check_does_not_publish_success_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = self.create_remote_and_clone(root)
+            restart_script = root / "restart.sh"
+            health_script = root / "health.sh"
+            write_executable(restart_script, "#!/usr/bin/env sh\nexit 0\n")
+            write_executable(health_script, "#!/usr/bin/env sh\nexit 7\n")
+
+            result = self.run_watcher(
+                app,
+                {
+                    "PULLWISE_WATCH_RESTART_COMMAND": str(restart_script),
+                    "PULLWISE_WATCH_RUN_HEALTH": "true",
+                    "PULLWISE_WATCH_HEALTH_COMMAND": str(health_script),
+                    "PULLWISE_WATCH_HEALTH_RETRIES": "1",
+                },
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((app / ".pullwise" / "git-watch.status.json").exists())
+            self.assertFalse((app / ".pullwise" / "git-watch.deployed-head").exists())
+
+    def test_configured_branch_must_match_checked_out_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = self.create_remote_and_clone(root)
+            run_git(["checkout", "-b", "release"], app)
+            restart_marker = root / "restart-called"
+            restart_script = root / "restart.sh"
+            write_executable(
+                restart_script,
+                f"#!/usr/bin/env sh\nprintf called > \{restart_marker}\\n",
+            )
+
+            result = self.run_watcher(
+                app,
+                {
+                    "PULLWISE_WATCH_BRANCH": "main",
+                    "PULLWISE_WATCH_RESTART_COMMAND": str(restart_script),
+                },
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("checked out branch is release", result.stdout + result.stderr)
+            self.assertEqual(run_git(["branch", "--show-current"], app).stdout.strip(), "release")
+            self.assertFalse(restart_marker.exists())
 
     def test_installs_missing_git_on_ubuntu_2204_before_polling(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

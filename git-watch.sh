@@ -15,6 +15,7 @@ LOG_FILE=${PULLWISE_WATCH_LOG_FILE:-$APP_DIR/.pullwise/git-watch.log}
 LOCK_DIR=${PULLWISE_WATCH_LOCK_DIR:-$APP_DIR/.pullwise/git-watch.lock}
 LOCK_FILE=${PULLWISE_WATCH_LOCK_FILE:-$LOCK_DIR.flock}
 DEPLOYED_HEAD_FILE=${PULLWISE_WATCH_DEPLOYED_HEAD_FILE:-$APP_DIR/.pullwise/git-watch.deployed-head}
+STATUS_FILE=${PULLWISE_WATCH_STATUS_FILE:-$APP_DIR/.pullwise/git-watch.status.json}
 
 RUN_SETUP=${PULLWISE_WATCH_RUN_SETUP:-true}
 RUN_TESTS=${PULLWISE_WATCH_RUN_TESTS:-true}
@@ -51,6 +52,7 @@ Common environment overrides:
   PULLWISE_WATCH_HEALTH_RETRIES=30
   PULLWISE_WATCH_HEALTH_RETRY_SECONDS=2
   PULLWISE_WATCH_DEPLOYED_HEAD_FILE=.pullwise/git-watch.deployed-head
+  PULLWISE_WATCH_STATUS_FILE=.pullwise/git-watch.status.json
   PULLWISE_WATCH_RESTART_COMMAND='./launcher.sh restart'
 
 Default update flow:
@@ -308,8 +310,49 @@ write_deployed_head() {
   printf '%s\n' "$head" > "$DEPLOYED_HEAD_FILE"
 }
 
+write_success_status() {
+  head=$1
+  case "$head" in
+    *[!0-9a-fA-F]*|"")
+      log "ERROR: refusing to publish an invalid Git revision" >&2
+      return 1
+      ;;
+  esac
+  case "${#head}" in
+    40|64)
+      ;;
+    *)
+      log "ERROR: refusing to publish an invalid Git revision length" >&2
+      return 1
+      ;;
+  esac
+
+  completed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return 1
+  mkdir -p "$(dirname -- "$STATUS_FILE")" || return 1
+  status_tmp=$STATUS_FILE.tmp.$$
+  if ! printf '{"schemaVersion":1,"status":"succeeded","revision":"%s","completedAt":"%s"}\n' \
+    "$head" "$completed_at" > "$status_tmp"; then
+    rm -f -- "$status_tmp"
+    return 1
+  fi
+  chmod 0644 "$status_tmp" || {
+    rm -f -- "$status_tmp"
+    return 1
+  }
+  mv -f -- "$status_tmp" "$STATUS_FILE" || {
+    rm -f -- "$status_tmp"
+    return 1
+  }
+}
+
 current_branch() {
   if [ -n "$BRANCH" ]; then
+    checked_out_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    if [ "$checked_out_branch" != "$BRANCH" ]; then
+      [ -n "$checked_out_branch" ] || checked_out_branch="detached HEAD"
+      die "checked out branch is $checked_out_branch, expected $BRANCH"
+      return 1
+    fi
     printf '%s' "$BRANCH"
     return 0
   fi
@@ -365,6 +408,7 @@ deploy_current_head() {
   head=$(git rev-parse HEAD) || return 1
   log "deploying $reason at $head"
   deploy_after_pull || return 1
+  write_success_status "$head" || return 1
   write_deployed_head "$head" || return 1
   log "deployed HEAD $head"
 }

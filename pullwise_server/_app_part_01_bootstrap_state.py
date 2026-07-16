@@ -29,7 +29,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
-from . import billing, checkout, db, fix_workflow, github_auth, logging_config, quota, review, scan_logging, system_config, system_metrics
+from . import billing, checkout, db, deployment_status, fix_workflow, github_auth, logging_config, quota, review, scan_logging, system_config, system_metrics
 from ._app_imports import sync_compat_globals as _sync_compat_globals
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,22 @@ access_logger = logging.getLogger("pullwise_server.access")
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(__file__))
+
+
+SERVER_STARTED_AT = int(time.time())
+SERVER_GIT_REVISION = deployment_status.current_git_revision(project_root())
+
+
+def server_deployment_payload() -> dict[str, object]:
+    status_file = env(
+        "PULLWISE_GIT_WATCH_STATUS_FILE",
+        os.path.join(project_root(), ".pullwise", "git-watch.status.json"),
+    )
+    return deployment_status.deployment_payload(
+        status_file=status_file,
+        running_revision=SERVER_GIT_REVISION,
+        server_started_at=SERVER_STARTED_AT,
+    )
 
 
 def web_root() -> str:

@@ -313,6 +313,31 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(collect.call_args.kwargs["timestamp"], 1781200000)
         self.assertEqual(collect.call_args.kwargs["storage_path"], os.path.dirname(db.database_path()))
 
+    def test_admin_can_read_verified_server_deployment_commit(self) -> None:
+        revision = "0123456789abcdef0123456789abcdef01234567"
+        expected = {
+            "state": "verified",
+            "verified": True,
+            "runningCommit": revision,
+            "lastSuccessfulCommit": revision,
+            "lastSuccessfulAt": "2026-07-16T10:20:30Z",
+            "serverStartedAt": 1784197230,
+        }
+        with patch.object(app, "server_deployment_payload", return_value=expected) as deployment:
+            handler = RouteHarness("/admin/server/deployment", cookie=self.admin_cookie)
+            app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertEqual(handler.payload, expected)
+        deployment.assert_called_once_with()
+
+    def test_non_admin_cannot_read_server_deployment_commit(self) -> None:
+        handler = RouteHarness("/admin/server/deployment", cookie=self.user_cookie)
+
+        app.PullwiseHandler.route(handler, "GET")
+
+        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
+
     def test_admin_server_metrics_bypasses_user_rate_limit(self) -> None:
         expected = {
             "ok": True,

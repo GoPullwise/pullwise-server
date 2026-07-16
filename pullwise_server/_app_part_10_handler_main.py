@@ -2807,6 +2807,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "minIntervalSeconds": system_metrics.SERVER_METRICS_HISTORY_MIN_INTERVAL_SECONDS,
             }
             return self.json(metrics)
+        if segments == ["admin", "server", "deployment"]:
+            return self.json(server_deployment_payload())
         if segments == ["admin", "users"]:
             return self.json(admin_users_payload(current_user_id=session["userId"]))
         if segments == ["admin", "system-config"]:
