@@ -15,7 +15,6 @@ import mimetypes
 import os
 import re
 import secrets
-import signal
 import subprocess
 import threading
 import time
@@ -62,68 +61,6 @@ def web_root() -> str:
         return os.path.abspath(custom)
     # Default: ../pullwise-web/dist relative to this file
     return os.path.join(os.path.dirname(project_root()), "pullwise-web", "dist")
-
-
-def admin_server_restart_mode() -> str:
-    mode = os.environ.get("PULLWISE_ADMIN_RESTART_MODE", "").strip().lower()
-    if mode in {"launcher", "self"}:
-        return mode
-    if os.environ.get("INVOCATION_ID", "").strip() or os.environ.get("JOURNAL_STREAM", "").strip():
-        return "self"
-    return "launcher"
-
-
-def schedule_server_process_exit(delay_seconds: float = 0.5) -> threading.Timer:
-    def terminate_current_process() -> None:
-        os.kill(os.getpid(), signal.SIGTERM)
-
-    timer = threading.Timer(delay_seconds, terminate_current_process)
-    timer.daemon = True
-    timer.start()
-    return timer
-
-
-def start_server_restart_process() -> dict:
-    if admin_server_restart_mode() == "self":
-        schedule_server_process_exit()
-        return {
-            "ok": True,
-            "message": "Pullwise server restart started.",
-            "command": "self SIGTERM for systemd restart",
-            "cwd": project_root(),
-            "pid": os.getpid(),
-            "startedAt": now(),
-        }
-
-    workdir = project_root()
-    launcher = os.path.join(workdir, "launcher.sh")
-    if not os.path.isfile(launcher):
-        raise FileNotFoundError("launcher.sh not found.")
-
-    popen_kwargs = {
-        "cwd": workdir,
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "close_fds": True,
-    }
-    if os.name == "nt":
-        popen_kwargs["creationflags"] = (
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0)
-        )
-    else:
-        popen_kwargs["start_new_session"] = True
-
-    process = subprocess.Popen(["bash", "launcher.sh", "restart"], **popen_kwargs)
-    return {
-        "ok": True,
-        "message": "Pullwise server restart started.",
-        "command": "bash launcher.sh restart",
-        "cwd": workdir,
-        "pid": process.pid,
-        "startedAt": now(),
-    }
 
 
 def load_env_file(path: str | None = None) -> None:

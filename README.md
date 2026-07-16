@@ -284,7 +284,6 @@ executes it locally, and reports the result. See
 - `GET /admin/system-config` / `PATCH /admin/system-config` - read and update database-backed system settings
 - `GET /admin/subscription-plans/agent-configs` / `PATCH /admin/subscription-plans/agent-configs/{plan}` - read and update plan agent policy
 - `GET /admin/users` / `DELETE /admin/users/{id}` - admin user listing and deletion
-- `POST /admin/server/restart` - request a server restart when the deployment mode supports it
 
 Worker bootstrap: `GET /install-worker.sh` returns a shell script that installs
 the worker package as a systemd service. The script accepts `--server`,

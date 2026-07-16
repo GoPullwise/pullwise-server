@@ -503,6 +503,9 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   time atomically to `.pullwise/git-watch.status.json` only then. The admin
   deployment endpoint must compare that commit with the server process's
   startup commit and report verified only when they match.
+- Do not expose an authenticated Admin endpoint for restarting Pullwise Server.
+  Production restart ownership belongs exclusively to the Git watcher and
+  systemd deployment lifecycle.
 - Ubuntu 22.04 production Git polling uses the optional
   `pullwise-server-git-watch` systemd unit installed by
   `./launcher.sh install-watch-service`. Keep its target branch pinned to
