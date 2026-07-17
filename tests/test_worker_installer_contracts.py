@@ -107,6 +107,65 @@ def ubuntu_dependency_support(script: str, os_release: str) -> str:
     return result.stdout.strip()
 
 
+def python_runtime_dependency_calls(script: str) -> str:
+    bash = contract_test_bash()
+    if not bash:
+        raise unittest.SkipTest("bash is required for installer contract tests.")
+
+    start = script.index("read_os_value() {")
+    end = script.index('ensure_command_available "sha256sum"')
+    helper = (
+        script[start:end]
+        + r'''
+venv_ready_file="$(mktemp)"
+apt_calls_file="$(mktemp)"
+rm -f "$venv_ready_file"
+trap 'rm -f "$venv_ready_file" "$apt_calls_file"' EXIT
+function python3.10 {
+  if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "--version" ]; then
+    return 0
+  fi
+  if [ "$1" = "-c" ] && [[ "$2" == *"ensurepip"* ]]; then
+    [ -f "$venv_ready_file" ]
+    return
+  fi
+  if [ "$1" = "-c" ] && [[ "$2" == *"sys.executable"* ]]; then
+    printf '/usr/bin/python3.10\n'
+    return 0
+  fi
+  if [ "$1" = "-" ]; then
+    return 0
+  fi
+  return 0
+}
+is_ubuntu_2204_or_newer() {
+  return 0
+}
+apt_get_bin() {
+  printf 'fake_apt'
+}
+fake_apt() {
+  printf '%s\n' "$*" >> "$apt_calls_file"
+  if [ "$1" = "install" ]; then
+    : > "$venv_ready_file"
+  fi
+}
+ensure_python_runtime
+cat "$apt_calls_file"
+'''
+    )
+    result = subprocess.run(
+        [bash, "-c", helper],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr + result.stdout)
+    return result.stdout
+
+
 class WorkerInstallerContractsTest(unittest.TestCase):
     def test_systemd_write_paths_are_instance_scoped(self) -> None:
         script = app.worker_install_script()
@@ -322,6 +381,14 @@ class WorkerInstallerContractsTest(unittest.TestCase):
         self.assertNotIn("ensure_nodesource_nodejs", script)
         self.assertNotIn("@openai/codex", script)
         self.assertNotRegex(script, r"\|\s*(?:sh|bash)\b")
+
+    def test_installer_auto_installs_venv_when_python_and_pip_already_exist(self) -> None:
+        calls = python_runtime_dependency_calls(app.worker_install_script())
+
+        self.assertIn(
+            "install -y --no-install-recommends python3.10 python3.10-venv python3-pip",
+            calls,
+        )
 
     def test_dependency_auto_install_supports_ubuntu_2204_or_newer(self) -> None:
         script = app.worker_install_script()

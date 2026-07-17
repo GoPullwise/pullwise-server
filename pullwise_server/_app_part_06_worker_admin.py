@@ -1212,8 +1212,11 @@ ensure_command_available() {
     exit 1
   }
 }
+python_venv_available() {
+  python3.10 -c 'import ensurepip, venv; ensurepip.version()' >/dev/null 2>&1
+}
 ensure_python_runtime() {
-  if ! command -v python3.10 >/dev/null 2>&1 || ! python3.10 -m pip --version >/dev/null 2>&1; then
+  if ! command -v python3.10 >/dev/null 2>&1 || ! python3.10 -m pip --version >/dev/null 2>&1 || ! python_venv_available; then
     install_ubuntu_packages python3.10 python3.10-venv python3-pip
   fi
   command -v python3.10 >/dev/null 2>&1 || {
@@ -1222,6 +1225,10 @@ ensure_python_runtime() {
   }
   python3.10 -m pip --version >/dev/null 2>&1 || {
     echo "python3.10 pip is still unavailable after installing Ubuntu packages." >&2
+    exit 1
+  }
+  python_venv_available || {
+    echo "python3.10 venv/ensurepip is still unavailable after installing Ubuntu packages." >&2
     exit 1
   }
   python3.10 - <<'PY'
