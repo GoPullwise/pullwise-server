@@ -40,21 +40,54 @@
       "type": "object",
       "additionalProperties": false,
       "x-pullwise-digest": {"field": "registry_digest", "domain": "pullwise:gate-predicate-registry:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["gate_predicate_registry"],
+        "contextual_helpers": []
+      },
       "required": ["schema_id", "predicates", "registry_digest"],
       "properties": {
         "schema_id": {"const": "gate-predicate-registry/v1"},
         "predicates": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 20,
+          "maxItems": 20,
           "uniqueItems": true,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["predicate_id", "input_schema_ids", "failure_code"],
+            "required": ["predicate_id", "decision_kind", "input_schema_ids", "failure_codes"],
             "properties": {
-              "predicate_id": {"enum": ["GATE_BUDGET_SETTLED", "GATE_EVIDENCE_COMPLETE", "GATE_POLICY_SATISFIED", "GATE_SOURCE_STABLE"]},
-              "input_schema_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$"}},
-              "failure_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"}
+              "predicate_id": {
+                "enum": [
+                  "GATE_TASK_STATE", "GATE_LEASE_VALID", "GATE_DEADLINE", "GATE_POLICY", "GATE_LEDGER",
+                  "GATE_SOURCE_FROZEN", "GATE_PROPOSAL_FRESH", "GATE_QUALITY_PLAN", "GATE_ATTESTATIONS",
+                  "GATE_REQUIREMENTS", "GATE_OUTCOME_SHAPE", "GATE_EFFECTS_EMPTY", "GATE_EVIDENCE_CLOSURE",
+                  "GATE_BUDGET", "GATE_SECRET_SCAN", "GATE_TERMINAL_AUTHORITY_FACT", "GATE_TERMINAL_AVAILABILITY",
+                  "GATE_TERMINAL_NO_ACTIVE_EFFECTS", "GATE_TERMINAL_OUTCOME_CLASSIFICATION",
+                  "GATE_TERMINAL_ARTIFACT_DELIVERY"
+                ]
+              },
+              "decision_kind": {"enum": ["success", "terminalization"]},
+              "input_schema_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$"}
+              },
+              "failure_codes": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "ABSOLUTE_DEADLINE_EXCEEDED", "ATTESTATION_NOT_INDEPENDENT", "BUDGET_EXHAUSTED", "CAS_CORRUPT",
+                    "CONTRACT_DOCUMENT_INVALID", "DEBUG_REDACTION_FAILED", "DEBUG_UPLOAD_FAILED",
+                    "EVIDENCE_CLOSURE_INVALID", "EVENT_DELIVERY_UNKNOWN", "EXECUTION_STATE_UNAVAILABLE",
+                    "GATE_INPUT_STALE", "LEASE_INVALID", "MANDATORY_REQUIREMENT_FAILED",
+                    "MANDATORY_REQUIREMENT_UNVERIFIABLE", "NATIVE_EPOCH_STALE", "OBSERVATION_ACTOR_MISMATCH",
+                    "OBSERVATION_MISSING", "OWNER_EPOCH_STALE", "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED",
+                    "PROTOCOL_FAILURE", "REQUIREMENT_ID_COLLISION", "ROLE_NOT_ENABLED", "SOURCE_STATE_CHANGED",
+                    "SOURCE_STATE_MISMATCH", "STATE_TRANSITION_INVALID", "TASK_VERSION_STALE",
+                    "TERMINALIZATION_RESERVE_REACHED", "WAIVER_INVALID"
+                  ]
+                }
+              }
             }
           }
         },
@@ -70,12 +103,110 @@
       "document": {
         "schema_id": "gate-predicate-registry/v1",
         "predicates": [
-          {"predicate_id": "GATE_BUDGET_SETTLED", "input_schema_ids": ["elapsed-budget-settlement/v1"], "failure_code": "GATE_BUDGET_UNSETTLED"},
-          {"predicate_id": "GATE_EVIDENCE_COMPLETE", "input_schema_ids": ["observation/v1"], "failure_code": "GATE_EVIDENCE_INCOMPLETE"},
-          {"predicate_id": "GATE_POLICY_SATISFIED", "input_schema_ids": ["effective-execution-policy/v1"], "failure_code": "GATE_POLICY_UNSATISFIED"},
-          {"predicate_id": "GATE_SOURCE_STABLE", "input_schema_ids": ["source-state/v1"], "failure_code": "GATE_SOURCE_UNSTABLE"}
+          {
+            "predicate_id": "GATE_TASK_STATE", "decision_kind": "success",
+            "input_schema_ids": ["attempt-record/v1", "gate-input-snapshot/v1", "task-record/v1"],
+            "failure_codes": ["GATE_INPUT_STALE", "STATE_TRANSITION_INVALID", "TASK_VERSION_STALE"]
+          },
+          {
+            "predicate_id": "GATE_LEASE_VALID", "decision_kind": "success",
+            "input_schema_ids": ["gate-input-snapshot/v1"],
+            "failure_codes": ["LEASE_INVALID", "NATIVE_EPOCH_STALE", "OWNER_EPOCH_STALE"]
+          },
+          {
+            "predicate_id": "GATE_DEADLINE", "decision_kind": "success",
+            "input_schema_ids": ["budget-summary/v1", "gate-input-snapshot/v1"],
+            "failure_codes": ["ABSOLUTE_DEADLINE_EXCEEDED", "TERMINALIZATION_RESERVE_REACHED"]
+          },
+          {
+            "predicate_id": "GATE_POLICY", "decision_kind": "success",
+            "input_schema_ids": ["effective-execution-policy/v1"],
+            "failure_codes": ["POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED"]
+          },
+          {
+            "predicate_id": "GATE_LEDGER", "decision_kind": "success",
+            "input_schema_ids": ["requirement-ledger/v1"],
+            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "REQUIREMENT_ID_COLLISION"]
+          },
+          {
+            "predicate_id": "GATE_SOURCE_FROZEN", "decision_kind": "success",
+            "input_schema_ids": ["source-tree-manifest/v1"],
+            "failure_codes": ["SOURCE_STATE_CHANGED", "SOURCE_STATE_MISMATCH"]
+          },
+          {
+            "predicate_id": "GATE_PROPOSAL_FRESH", "decision_kind": "success",
+            "input_schema_ids": ["completion-proposal/v1", "gate-input-snapshot/v1"],
+            "failure_codes": ["GATE_INPUT_STALE", "SOURCE_STATE_MISMATCH"]
+          },
+          {
+            "predicate_id": "GATE_QUALITY_PLAN", "decision_kind": "success",
+            "input_schema_ids": ["quality-policy-plan/v1"],
+            "failure_codes": ["POLICY_INVARIANT_BROKEN", "ROLE_NOT_ENABLED"]
+          },
+          {
+            "predicate_id": "GATE_ATTESTATIONS", "decision_kind": "success",
+            "input_schema_ids": ["observation-manifest/v1", "verification-attestation-manifest/v1"],
+            "failure_codes": ["ATTESTATION_NOT_INDEPENDENT", "OBSERVATION_ACTOR_MISMATCH", "OBSERVATION_MISSING"]
+          },
+          {
+            "predicate_id": "GATE_REQUIREMENTS", "decision_kind": "success",
+            "input_schema_ids": ["requirement-ledger/v1", "verification-attestation-manifest/v1"],
+            "failure_codes": ["MANDATORY_REQUIREMENT_FAILED", "MANDATORY_REQUIREMENT_UNVERIFIABLE", "WAIVER_INVALID"]
+          },
+          {
+            "predicate_id": "GATE_OUTCOME_SHAPE", "decision_kind": "success",
+            "input_schema_ids": ["completion-proposal/v1"],
+            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "POLICY_INVARIANT_BROKEN"]
+          },
+          {
+            "predicate_id": "GATE_EFFECTS_EMPTY", "decision_kind": "success",
+            "input_schema_ids": ["effect-ledger-snapshot/v1"],
+            "failure_codes": ["EVENT_DELIVERY_UNKNOWN", "POLICY_INVARIANT_BROKEN"]
+          },
+          {
+            "predicate_id": "GATE_EVIDENCE_CLOSURE", "decision_kind": "success",
+            "input_schema_ids": ["pre-gate-evidence-closure-manifest/v1", "pre-gate-root-set/v1"],
+            "failure_codes": ["CAS_CORRUPT", "EVIDENCE_CLOSURE_INVALID"]
+          },
+          {
+            "predicate_id": "GATE_BUDGET", "decision_kind": "success",
+            "input_schema_ids": ["budget-summary/v1"],
+            "failure_codes": ["BUDGET_EXHAUSTED", "TERMINALIZATION_RESERVE_REACHED"]
+          },
+          {
+            "predicate_id": "GATE_SECRET_SCAN", "decision_kind": "success",
+            "input_schema_ids": [
+              "debug-redaction-plan/v1", "pre-gate-evidence-closure-manifest/v1", "publication-content-manifest/v1"
+            ],
+            "failure_codes": ["DEBUG_REDACTION_FAILED", "POLICY_INVARIANT_BROKEN"]
+          },
+          {
+            "predicate_id": "GATE_TERMINAL_AUTHORITY_FACT", "decision_kind": "terminalization",
+            "input_schema_ids": ["terminalization-fact/v1", "terminalization-input-snapshot/v1"],
+            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "GATE_INPUT_STALE"]
+          },
+          {
+            "predicate_id": "GATE_TERMINAL_AVAILABILITY", "decision_kind": "terminalization",
+            "input_schema_ids": ["terminalization-input-snapshot/v1"],
+            "failure_codes": ["EXECUTION_STATE_UNAVAILABLE", "OBSERVATION_MISSING", "SOURCE_STATE_MISMATCH"]
+          },
+          {
+            "predicate_id": "GATE_TERMINAL_NO_ACTIVE_EFFECTS", "decision_kind": "terminalization",
+            "input_schema_ids": ["effect-ledger-snapshot/v1", "terminalization-input-snapshot/v1"],
+            "failure_codes": ["EVENT_DELIVERY_UNKNOWN", "POLICY_INVARIANT_BROKEN"]
+          },
+          {
+            "predicate_id": "GATE_TERMINAL_OUTCOME_CLASSIFICATION", "decision_kind": "terminalization",
+            "input_schema_ids": ["terminalization-fact/v1", "terminalization-input-snapshot/v1"],
+            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "POLICY_INVARIANT_BROKEN"]
+          },
+          {
+            "predicate_id": "GATE_TERMINAL_ARTIFACT_DELIVERY", "decision_kind": "terminalization",
+            "input_schema_ids": ["publication-content-manifest/v1", "terminalization-fact/v1"],
+            "failure_codes": ["DEBUG_UPLOAD_FAILED", "EVENT_DELIVERY_UNKNOWN", "PROTOCOL_FAILURE"]
+          }
         ],
-        "registry_digest": "31252a7c9498b84632305c6fc205826a5084194e1e807c1e81006e47e1c0ddfe"
+        "registry_digest": "dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0"
       },
       "expected_code": null
     },

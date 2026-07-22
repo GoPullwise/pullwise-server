@@ -30,7 +30,7 @@
         "quality_risk": {"enum":["Q1","Q2","Q3"]},
         "slots": {
           "type": "array",
-          "maxItems": 256,
+          "maxItems": 2,
           "uniqueItems": true,
           "items": {
             "type": "object",
@@ -38,7 +38,7 @@
             "required": ["slot_id","concern","requirement_ids"],
             "properties": {
               "slot_id": {"type":"string","pattern":"^slot_[0-9a-f]{32}$"},
-              "concern": {"type":"string","minLength":1,"maxLength":160,"pattern":"^[a-z0-9]+(?:[._-][a-z0-9]+)*$"},
+              "concern": {"enum":["contract_and_data","security_and_concurrency"]},
               "requirement_ids": {
                 "type": "array",
                 "minItems": 1,
@@ -56,7 +56,48 @@
         "rationale": {"type":"string","minLength":1,"maxLength":4096},
         "policy_implementation_version": {"const":"pullwise-quality-policy/v1"},
         "plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
-      }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "quality_risk": {"const":"Q1"},
+            "slots": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "concern": {"const":"contract_and_data"}
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "quality_risk": {"const":"Q2"},
+            "slots": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "quality_risk": {"const":"Q3"},
+            "slots": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 0
+            }
+          }
+        }
+      ]
     }
   ],
   "fixtures": [

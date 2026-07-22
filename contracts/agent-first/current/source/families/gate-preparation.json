@@ -275,7 +275,7 @@
             "encoding": "utf-8"
           }
         ],
-        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "plan_digest": "dee5718c4d170950d498d4ffa0abccc8a72acb47507ff8a17d5e3ae549e2d7e8"
       },
       "expected_code": null
     },
@@ -326,7 +326,7 @@
           }
         ],
         "entry_count": 2,
-        "manifest_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "manifest_digest": "a7e349ed6b097c21436a3d1549b9058151ea257d4208c6d81251f0239c65b549"
       },
       "expected_code": null
     },
@@ -385,7 +385,7 @@
             "encoding": "utf-8"
           }
         ],
-        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "plan_digest": "dee5718c4d170950d498d4ffa0abccc8a72acb47507ff8a17d5e3ae549e2d7e8"
       },
       "expected_code": null
     },
@@ -436,7 +436,7 @@
           }
         ],
         "entry_count": 2,
-        "manifest_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "manifest_digest": "a7e349ed6b097c21436a3d1549b9058151ea257d4208c6d81251f0239c65b549"
       },
       "expected_code": null
     },

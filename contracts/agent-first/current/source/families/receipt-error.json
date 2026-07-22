@@ -175,24 +175,45 @@
             "properties": {
               "code": {
                 "enum": [
+                  "ABSOLUTE_DEADLINE_EXCEEDED",
                   "AGENT_GRANT_INVALID",
+                  "ATTESTATION_NOT_INDEPENDENT",
                   "AUTHORITY_FENCED",
                   "AUTHORITY_INPUT_UNTRUSTED",
                   "AUTHORITY_RELOAD_REQUIRED",
                   "BUDGET_EXHAUSTED",
+                  "CAS_CORRUPT",
                   "CONTRACT_DOCUMENT_INVALID",
                   "CURRENT_PACKAGE_PIN_MISMATCH",
                   "CURRENT_PACKAGE_PIN_MISSING",
+                  "DEBUG_REDACTION_FAILED",
+                  "DEBUG_UPLOAD_FAILED",
                   "DISPATCH_ABANDONED",
-                  "GATE_BUDGET_UNSETTLED",
-                  "GATE_EVIDENCE_INCOMPLETE",
+                  "EVENT_DELIVERY_UNKNOWN",
+                  "EVIDENCE_CLOSURE_INVALID",
+                  "EXECUTION_STATE_UNAVAILABLE",
                   "GATE_INPUT_CLOSURE_DIRECTION_INVALID",
-                  "GATE_POLICY_UNSATISFIED",
-                  "GATE_SOURCE_UNSTABLE",
+                  "GATE_INPUT_STALE",
                   "IDEMPOTENCY_CONFLICT",
                   "INVOCATION_PENDING",
+                  "LEASE_INVALID",
+                  "MANDATORY_REQUIREMENT_FAILED",
+                  "MANDATORY_REQUIREMENT_UNVERIFIABLE",
+                  "NATIVE_EPOCH_STALE",
+                  "OBSERVATION_ACTOR_MISMATCH",
+                  "OBSERVATION_MISSING",
+                  "OWNER_EPOCH_STALE",
+                  "POLICY_INVARIANT_BROKEN",
+                  "POLICY_UNSUPPORTED",
+                  "PROTOCOL_FAILURE",
+                  "REQUIREMENT_ID_COLLISION",
+                  "ROLE_NOT_ENABLED",
                   "SOURCE_STATE_CHANGED",
+                  "SOURCE_STATE_MISMATCH",
+                  "STATE_TRANSITION_INVALID",
                   "TASK_NOT_CLAIMABLE",
+                  "TASK_VERSION_STALE",
+                  "TERMINALIZATION_RESERVE_REACHED",
                   "TRANSPORT_BINDING_ROLLED_BACK",
                   "TRANSPORT_ENVELOPE_DIGEST_INVALID",
                   "TRANSPORT_RECEIPT_ALREADY_BOUND",
@@ -230,24 +251,45 @@
         "schema_id": { "const": "stable-error/v1" },
         "code": {
           "enum": [
+            "ABSOLUTE_DEADLINE_EXCEEDED",
             "AGENT_GRANT_INVALID",
+            "ATTESTATION_NOT_INDEPENDENT",
             "AUTHORITY_FENCED",
             "AUTHORITY_INPUT_UNTRUSTED",
             "AUTHORITY_RELOAD_REQUIRED",
             "BUDGET_EXHAUSTED",
+            "CAS_CORRUPT",
             "CONTRACT_DOCUMENT_INVALID",
             "CURRENT_PACKAGE_PIN_MISMATCH",
             "CURRENT_PACKAGE_PIN_MISSING",
+            "DEBUG_REDACTION_FAILED",
+            "DEBUG_UPLOAD_FAILED",
             "DISPATCH_ABANDONED",
-            "GATE_BUDGET_UNSETTLED",
-            "GATE_EVIDENCE_INCOMPLETE",
+            "EVENT_DELIVERY_UNKNOWN",
+            "EVIDENCE_CLOSURE_INVALID",
+            "EXECUTION_STATE_UNAVAILABLE",
             "GATE_INPUT_CLOSURE_DIRECTION_INVALID",
-            "GATE_POLICY_UNSATISFIED",
-            "GATE_SOURCE_UNSTABLE",
+            "GATE_INPUT_STALE",
             "IDEMPOTENCY_CONFLICT",
             "INVOCATION_PENDING",
+            "LEASE_INVALID",
+            "MANDATORY_REQUIREMENT_FAILED",
+            "MANDATORY_REQUIREMENT_UNVERIFIABLE",
+            "NATIVE_EPOCH_STALE",
+            "OBSERVATION_ACTOR_MISMATCH",
+            "OBSERVATION_MISSING",
+            "OWNER_EPOCH_STALE",
+            "POLICY_INVARIANT_BROKEN",
+            "POLICY_UNSUPPORTED",
+            "PROTOCOL_FAILURE",
+            "REQUIREMENT_ID_COLLISION",
+            "ROLE_NOT_ENABLED",
             "SOURCE_STATE_CHANGED",
+            "SOURCE_STATE_MISMATCH",
+            "STATE_TRANSITION_INVALID",
             "TASK_NOT_CLAIMABLE",
+            "TASK_VERSION_STALE",
+            "TERMINALIZATION_RESERVE_REACHED",
             "TRANSPORT_BINDING_ROLLED_BACK",
             "TRANSPORT_ENVELOPE_DIGEST_INVALID",
             "TRANSPORT_RECEIPT_ALREADY_BOUND",
@@ -284,152 +326,53 @@
       "document": {
         "schema_id": "stable-error-registry/v1",
         "entries": [
-          {
-            "code": "AGENT_GRANT_INVALID",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "AUTHORITY_FENCED",
-            "retryable": false,
-            "retry_scope": "new_claim",
-            "outcome": "fenced"
-          },
-          {
-            "code": "AUTHORITY_INPUT_UNTRUSTED",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "AUTHORITY_RELOAD_REQUIRED",
-            "retryable": true,
-            "retry_scope": "same_invocation",
-            "outcome": "pending"
-          },
-          {
-            "code": "BUDGET_EXHAUSTED",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "CONTRACT_DOCUMENT_INVALID",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "CURRENT_PACKAGE_PIN_MISMATCH",
-            "retryable": false,
-            "retry_scope": "operator",
-            "outcome": "rejected"
-          },
-          {
-            "code": "CURRENT_PACKAGE_PIN_MISSING",
-            "retryable": false,
-            "retry_scope": "operator",
-            "outcome": "rejected"
-          },
-          {
-            "code": "DISPATCH_ABANDONED",
-            "retryable": false,
-            "retry_scope": "new_claim",
-            "outcome": "fenced"
-          },
-          {
-            "code": "GATE_BUDGET_UNSETTLED",
-            "retryable": false,
-            "retry_scope": "same_invocation",
-            "outcome": "rejected"
-          },
-          {
-            "code": "GATE_EVIDENCE_INCOMPLETE",
-            "retryable": false,
-            "retry_scope": "same_invocation",
-            "outcome": "rejected"
-          },
-          {
-            "code": "GATE_INPUT_CLOSURE_DIRECTION_INVALID",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "GATE_POLICY_UNSATISFIED",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "GATE_SOURCE_UNSTABLE",
-            "retryable": false,
-            "retry_scope": "new_claim",
-            "outcome": "rejected"
-          },
-          {
-            "code": "IDEMPOTENCY_CONFLICT",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "conflict"
-          },
-          {
-            "code": "INVOCATION_PENDING",
-            "retryable": true,
-            "retry_scope": "same_invocation",
-            "outcome": "pending"
-          },
-          {
-            "code": "SOURCE_STATE_CHANGED",
-            "retryable": false,
-            "retry_scope": "new_claim",
-            "outcome": "error"
-          },
-          {
-            "code": "TASK_NOT_CLAIMABLE",
-            "retryable": false,
-            "retry_scope": "new_claim",
-            "outcome": "conflict"
-          },
-          {
-            "code": "TRANSPORT_BINDING_ROLLED_BACK",
-            "retryable": true,
-            "retry_scope": "same_invocation",
-            "outcome": "pending"
-          },
-          {
-            "code": "TRANSPORT_ENVELOPE_DIGEST_INVALID",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "TRANSPORT_RECEIPT_ALREADY_BOUND",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "conflict"
-          },
-          {
-            "code": "TRANSPORT_RECEIPT_BINDING_CONFLICT",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "conflict"
-          },
-          {
-            "code": "TRANSPORT_RECEIPT_TYPE_INVALID",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          },
-          {
-            "code": "WAIVER_INVALID",
-            "retryable": false,
-            "retry_scope": "none",
-            "outcome": "rejected"
-          }
+          {"code":"ABSOLUTE_DEADLINE_EXCEEDED","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"AGENT_GRANT_INVALID","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"ATTESTATION_NOT_INDEPENDENT","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"AUTHORITY_FENCED","retryable":false,"retry_scope":"new_claim","outcome":"fenced"},
+          {"code":"AUTHORITY_INPUT_UNTRUSTED","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"AUTHORITY_RELOAD_REQUIRED","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"BUDGET_EXHAUSTED","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"CAS_CORRUPT","retryable":false,"retry_scope":"operator","outcome":"error"},
+          {"code":"CONTRACT_DOCUMENT_INVALID","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"CURRENT_PACKAGE_PIN_MISMATCH","retryable":false,"retry_scope":"operator","outcome":"rejected"},
+          {"code":"CURRENT_PACKAGE_PIN_MISSING","retryable":false,"retry_scope":"operator","outcome":"rejected"},
+          {"code":"DEBUG_REDACTION_FAILED","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"DEBUG_UPLOAD_FAILED","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"DISPATCH_ABANDONED","retryable":false,"retry_scope":"new_claim","outcome":"fenced"},
+          {"code":"EVENT_DELIVERY_UNKNOWN","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"EVIDENCE_CLOSURE_INVALID","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"EXECUTION_STATE_UNAVAILABLE","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"GATE_INPUT_CLOSURE_DIRECTION_INVALID","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"GATE_INPUT_STALE","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"IDEMPOTENCY_CONFLICT","retryable":false,"retry_scope":"none","outcome":"conflict"},
+          {"code":"INVOCATION_PENDING","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"LEASE_INVALID","retryable":false,"retry_scope":"new_claim","outcome":"fenced"},
+          {"code":"MANDATORY_REQUIREMENT_FAILED","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"MANDATORY_REQUIREMENT_UNVERIFIABLE","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"NATIVE_EPOCH_STALE","retryable":false,"retry_scope":"new_claim","outcome":"fenced"},
+          {"code":"OBSERVATION_ACTOR_MISMATCH","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"OBSERVATION_MISSING","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"OWNER_EPOCH_STALE","retryable":false,"retry_scope":"new_claim","outcome":"fenced"},
+          {"code":"POLICY_INVARIANT_BROKEN","retryable":false,"retry_scope":"operator","outcome":"error"},
+          {"code":"POLICY_UNSUPPORTED","retryable":false,"retry_scope":"operator","outcome":"rejected"},
+          {"code":"PROTOCOL_FAILURE","retryable":false,"retry_scope":"operator","outcome":"error"},
+          {"code":"REQUIREMENT_ID_COLLISION","retryable":false,"retry_scope":"none","outcome":"conflict"},
+          {"code":"ROLE_NOT_ENABLED","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"SOURCE_STATE_CHANGED","retryable":false,"retry_scope":"new_claim","outcome":"error"},
+          {"code":"SOURCE_STATE_MISMATCH","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"STATE_TRANSITION_INVALID","retryable":false,"retry_scope":"none","outcome":"conflict"},
+          {"code":"TASK_NOT_CLAIMABLE","retryable":false,"retry_scope":"new_claim","outcome":"conflict"},
+          {"code":"TASK_VERSION_STALE","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"TERMINALIZATION_RESERVE_REACHED","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"TRANSPORT_BINDING_ROLLED_BACK","retryable":true,"retry_scope":"same_invocation","outcome":"pending"},
+          {"code":"TRANSPORT_ENVELOPE_DIGEST_INVALID","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"TRANSPORT_RECEIPT_ALREADY_BOUND","retryable":false,"retry_scope":"none","outcome":"conflict"},
+          {"code":"TRANSPORT_RECEIPT_BINDING_CONFLICT","retryable":false,"retry_scope":"none","outcome":"conflict"},
+          {"code":"TRANSPORT_RECEIPT_TYPE_INVALID","retryable":false,"retry_scope":"none","outcome":"rejected"},
+          {"code":"WAIVER_INVALID","retryable":false,"retry_scope":"none","outcome":"rejected"}
         ],
-        "registry_digest": "b2716a4a12cc2ee60a6021bb52bbc5ed8a93c28dd097785d230d83a7f059a62c"
+        "registry_digest": "97806ed9943a7078cb8534ac99eb74ad21f87990c4c57f6177ed9c088db0eb8a"
       },
       "expected_code": null
     },
