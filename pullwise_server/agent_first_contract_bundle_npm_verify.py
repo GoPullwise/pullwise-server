@@ -156,8 +156,8 @@ export async function verifyBundle() {
     root.semantic_cycle_exceptions_sha256 !==
       await sha256(canonicalDocumentBytes(SEMANTIC_CYCLE_EXCEPTIONS))
   ) fail("CONTRACT_SEMANTIC_CYCLE_EXCEPTION_INVALID");
-  if (JSON.stringify(document.families.map((item) => item.family_id)) !==
-      JSON.stringify(root.required_families)) fail("CONTRACT_FAMILY_CLOSURE_INVALID");
+  if (canonicalString(document.families.map((item) => item.family_id)) !==
+      canonicalString(root.required_families)) fail("CONTRACT_FAMILY_CLOSURE_INVALID");
 
   const schemas = [];
   const fixtures = [];
@@ -192,10 +192,10 @@ export async function verifyBundle() {
         sha256: await sha256(canonicalDocumentBytes(item)),
       });
     }
-    if (JSON.stringify(localSchemas) !== JSON.stringify(family.schema_registry)) {
+    if (canonicalString(localSchemas) !== canonicalString(family.schema_registry)) {
       fail("CONTRACT_SCHEMA_REGISTRY_INVALID");
     }
-    if (JSON.stringify(localFixtures) !== JSON.stringify(family.fixture_registry)) {
+    if (canonicalString(localFixtures) !== canonicalString(family.fixture_registry)) {
       fail("CONTRACT_FIXTURE_REGISTRY_INVALID");
     }
     schemas.push(...localSchemas);
@@ -207,11 +207,11 @@ export async function verifyBundle() {
       sha256: await sha256(canonicalDocumentBytes(family)),
     });
   }
-  if (JSON.stringify(schemas) !== JSON.stringify(root.schema_registry) ||
-      JSON.stringify(fixtures) !== JSON.stringify(root.fixture_registry)) {
+  if (canonicalString(schemas) !== canonicalString(root.schema_registry) ||
+      canonicalString(fixtures) !== canonicalString(root.fixture_registry)) {
     fail("CONTRACT_ROOT_REGISTRY_INVALID");
   }
-  if (JSON.stringify(familyEntries) !== JSON.stringify(root.families)) {
+  if (canonicalString(familyEntries) !== canonicalString(root.families)) {
     fail("CONTRACT_FAMILY_DIGEST_INVALID");
   }
   for (const item of schemas) {
@@ -226,7 +226,7 @@ export async function verifyBundle() {
   })).sort((left, right) => compareUnicodeCodePointStrings(
     left.schema_id, right.schema_id,
   ));
-  if (JSON.stringify(expectedDag) !== JSON.stringify(root.reference_dag)) {
+  if (canonicalString(expectedDag) !== canonicalString(root.reference_dag)) {
     fail("CONTRACT_REFERENCE_DAG_INVALID");
   }
   const classes = new Set(fixtures.map((item) => item.fixture_class));
