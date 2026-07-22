@@ -17,7 +17,12 @@ CREATE TABLE IF NOT EXISTS agent_current_terminal_results (
     task_result_core_digest TEXT NOT NULL CHECK(length(task_result_core_digest) = 64),
     result_id TEXT NOT NULL UNIQUE,
     task_id TEXT NOT NULL UNIQUE,
-    outcome TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK(
+        outcome IN (
+            'COMPLETED', 'NO_CHANGE_NEEDED', 'COMPLETED_WITH_WAIVERS',
+            'PARTIAL', 'BLOCKED', 'FAILED', 'CANCELLED'
+        )
+    ),
     published_from_version INTEGER NOT NULL CHECK(published_from_version >= 1),
     terminal_task_version INTEGER NOT NULL CHECK(
         terminal_task_version = published_from_version + 1
@@ -56,6 +61,13 @@ CREATE TABLE IF NOT EXISTS agent_current_terminal_results (
         OR
         (diagnostics_state!='uploaded' AND receipt_digest IS NULL
          AND receipt_ref_sha256 IS NULL)
+    ),
+    CHECK(
+        (diagnostics_state IN ('uploaded','local_only')
+         AND worker_debug_descriptor_bytes IS NOT NULL)
+        OR
+        (diagnostics_state IN ('unavailable','not_applicable')
+         AND worker_debug_descriptor_bytes IS NULL)
     ),
     FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id),
     FOREIGN KEY(receipt_digest)

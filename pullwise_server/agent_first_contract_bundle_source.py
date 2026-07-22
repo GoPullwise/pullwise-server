@@ -26,6 +26,17 @@ SEMANTIC_CYCLE_EXCEPTIONS = (
         "target_schema_id": "task-charter/v1",
     },
 )
+INTERNAL_CONSTRAINT_SCHEMA_IDS = frozenset(
+    {
+        "task-result-blocked-variant/v1",
+        "task-result-cancelled-variant/v1",
+        "task-result-completed-variant/v1",
+        "task-result-completed-with-waivers-variant/v1",
+        "task-result-failed-variant/v1",
+        "task-result-no-change-needed-variant/v1",
+        "task-result-partial-variant/v1",
+    }
+)
 
 
 class ContractBundleError(RuntimeError):
@@ -69,6 +80,11 @@ def load_family(
             {
                 "schema_id": schema_id,
                 "family_id": expected_id,
+                "role": (
+                    "internal_constraint"
+                    if schema_id in INTERNAL_CONSTRAINT_SCHEMA_IDS
+                    else "public_document"
+                ),
                 "references": sorted({item["target_schema_id"] for item in edges}),
                 "edges": edges,
                 "sha256": sha256(canonical_bytes(schema)),

@@ -43,12 +43,20 @@ REQUIRED_FAMILIES = (
     "task-observation",
     "task-observation-manifests",
     "task-requirements",
+    "task-completion-proposal",
     "budget",
     "task-publication",
     "receipt-error",
     "gate",
-    "task-result-core",
+    "task-result-identities",
+    "task-result-reasons",
+    "task-result-evidence",
+    "task-result-outcomes",
+    "task-result-outcome-success-variants",
+    "task-result-outcome-stop-variants",
     "task-result",
+    "task-result-core",
+    "task-result-transport",
 )
 
 

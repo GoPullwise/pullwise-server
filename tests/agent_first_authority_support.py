@@ -169,7 +169,12 @@ class AuthorityHarness:
                     callback(authority)
             self.assertEqual(before, self.counts(*tables))
 
-    def receipt(self, envelope: dict[str, object]) -> dict[str, object]:
+    def receipt(
+        self,
+        envelope: dict[str, object],
+        *,
+        content_ref: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         fence = (
             "task_id",
             "attempt_id",
@@ -192,7 +197,7 @@ class AuthorityHarness:
                 "receipt_id": "receipt_55555555555555555555555555555555",
                 **{key: envelope[key] for key in fence},
                 "grant_digest": envelope["grant"]["grant_digest"],
-                "content_ref": {
+                "content_ref": content_ref or {
                     "schema_id": "content-ref/v1",
                     "artifact_id": "art_66666666666666666666666666666666",
                     "content_schema_id": "worker-debug-fragment/v1",

@@ -212,6 +212,9 @@ function validateNode(rule, value, path) {
 @@SEMANTICS@@
 
 export function validateDocument(schemaId, value) {
+  if (schemaRole(schemaId) !== "public_document") {
+    fail("CONTRACT_INTERNAL_CONSTRAINT", schemaId);
+  }
   const detached = JSON.parse(decoder.decode(canonicalDocumentBytes(value)));
   validateNode(schema(schemaId), detached, "$");
   validateSemantics(schemaId, detached);

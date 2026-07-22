@@ -23,6 +23,13 @@ from .agent_first_authority_store import AuthorityStoreError, FaultInjector
 from .agent_first_transport_envelopes import TransportEnvelopeStore
 
 
+_PRESERVED_CONTRACT_CODES = {
+    "TRANSPORT_ENVELOPE_DIGEST_INVALID",
+    "TRANSPORT_RECEIPT_BINDING_CONFLICT",
+    "TRANSPORT_RECEIPT_TYPE_INVALID",
+}
+
+
 def _now() -> str:
     return (
         dt.datetime.now(dt.timezone.utc)
@@ -52,7 +59,7 @@ class TransportEnvelopeAuthority:
         core_bytes = canonical_validated_bytes("task-result-core/v1", core)
         task_result_digest = hashlib.sha256(task_result_bytes).hexdigest()
         if document["task_result_digest"] != task_result_digest:
-            raise AuthorityStoreError("TERMINAL_ENVELOPE_INVALID")
+            raise AuthorityStoreError("TRANSPORT_ENVELOPE_DIGEST_INVALID")
         values = {
             "transport_envelope_digest": hashlib.sha256(envelope_bytes).hexdigest(),
             "task_result_digest": task_result_digest,
@@ -114,7 +121,9 @@ class TransportEnvelopeAuthority:
             core = derive_task_result_core(task_result)
             verify_task_result_core(task_result, core)
             return document, task_result, core
-        except (ContractValidationError, KeyError, TypeError, UnicodeError, ValueError):
+        except ContractValidationError as error:
+            raise _contract_store_error(error) from None
+        except (KeyError, TypeError, UnicodeError, ValueError):
             raise AuthorityStoreError("TERMINAL_ENVELOPE_INVALID") from None
 
     @staticmethod
@@ -147,9 +156,14 @@ class TransportEnvelopeAuthority:
     def _descriptor_bytes(descriptor: object) -> bytes | None:
         if descriptor is None:
             return None
-        return canonical_validated_bytes(
-            "worker-debug-fragment-descriptor/v1", descriptor
-        )
+        try:
+            return canonical_validated_bytes(
+                "worker-debug-fragment-descriptor/v1", descriptor
+            )
+        except ContractValidationError as error:
+            raise _contract_store_error(error) from None
+        except (TypeError, UnicodeError, ValueError):
+            raise AuthorityStoreError("TERMINAL_ENVELOPE_INVALID") from None
 
     def _build_responses(
         self,
@@ -161,13 +175,13 @@ class TransportEnvelopeAuthority:
         values: Mapping[str, object],
     ) -> Mapping[str, object]:
         try:
-            stored_authority = verify_document_digest(
+            stored_authority = self._stored_document(
                 "server-authority-envelope/v1",
-                json.loads(self._store._blob(current["authority_bytes"])),
+                current["authority_bytes"],
             )
-            stored_grant = verify_document_digest(
+            stored_grant = self._stored_document(
                 "agent-worker-grant/v1",
-                json.loads(self._store._blob(current["grant_bytes"])),
+                current["grant_bytes"],
             )
             if document["authority"] != stored_authority:
                 raise AuthorityStoreError("AUTHORITY_MISMATCH")
@@ -186,23 +200,39 @@ class TransportEnvelopeAuthority:
                 or verified["transport_envelope_digest"]
                 != values["transport_envelope_digest"]
             ):
-                raise AuthorityStoreError("TERMINAL_ENVELOPE_INVALID")
+                raise AuthorityStoreError("TRANSPORT_ENVELOPE_DIGEST_INVALID")
             return self._response_bytes(document, receipt, values)
         except AuthorityStoreError:
             raise
-        except (ContractValidationError, KeyError, TypeError, UnicodeError, ValueError):
+        except ContractValidationError as error:
+            raise _contract_store_error(error) from None
+        except (KeyError, TypeError, UnicodeError, ValueError):
             raise AuthorityStoreError("TERMINAL_ENVELOPE_INVALID") from None
 
     def _stored_receipt(self, row: sqlite3.Row | None) -> dict[str, object] | None:
         if row is None:
             return None
-        receipt = verify_document_digest(
-            "server-transport-receipt/v1",
-            json.loads(self._store._blob(row["receipt_bytes"])),
+        receipt = self._stored_document(
+            "server-transport-receipt/v1", row["receipt_bytes"]
         )
         if receipt["receipt_digest"] != row["receipt_digest"]:
             raise AuthorityStoreError("AUTHORITY_STORAGE_CORRUPT")
         return receipt
+
+    def _stored_document(
+        self,
+        schema_id: str,
+        stored_bytes: object,
+    ) -> dict[str, object]:
+        try:
+            return verify_document_digest(
+                schema_id,
+                json.loads(self._store._blob(stored_bytes)),
+            )
+        except AuthorityStoreError:
+            raise
+        except (ContractValidationError, KeyError, TypeError, UnicodeError, ValueError):
+            raise AuthorityStoreError("AUTHORITY_STORAGE_CORRUPT") from None
 
     @staticmethod
     def _response_bytes(
@@ -259,6 +289,13 @@ class TransportEnvelopeAuthority:
                 )
             ),
         }
+
+
+def _contract_store_error(error: ContractValidationError) -> AuthorityStoreError:
+    code = getattr(error, "code", None)
+    if code in _PRESERVED_CONTRACT_CODES:
+        return AuthorityStoreError(code)
+    return AuthorityStoreError("TERMINAL_ENVELOPE_INVALID")
 
 
 __all__ = ["TransportEnvelopeAuthority"]

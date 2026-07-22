@@ -155,41 +155,56 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
         values: Mapping[str, object],
     ) -> None:
         self._fault("terminal.before_result")
-        connection.execute(
-            """
-            INSERT INTO agent_current_terminal_results (
-                transport_envelope_digest, task_result_digest,
-                task_result_core_digest, result_id, task_id, outcome,
-                published_from_version, terminal_task_version, diagnostics_state,
-                receipt_digest, receipt_ref_sha256, attempt_id, session_id,
-                owner_id, grant_id, lease_id, deletion_version,
-                owner_epoch, native_epoch, transport_epoch, grant_digest,
-                authority_digest, package_identity, package_version,
-                content_sha256, root_sha256, task_result_bytes,
-                task_result_core_bytes, worker_debug_descriptor_bytes,
-                envelope_bytes, response_bytes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                values["transport_envelope_digest"], values["task_result_digest"],
-                values["task_result_core_digest"], values["result_id"],
-                values["task_id"], values["outcome"],
-                values["published_from_version"], values["terminal_task_version"],
-                values["diagnostics_state"],
-                None if receipt is None else receipt["receipt_digest"],
-                values["receipt_ref_sha256"], values["attempt_id"],
-                values["session_id"], values["owner_id"], values["grant_id"],
-                values["lease_id"],
-                values["deletion_version"], values["owner_epoch"],
-                values["native_epoch"], values["transport_epoch"],
-                values["grant_digest"], values["authority_digest"],
-                *values["package_tuple"], values["task_result_bytes"],
-                values["task_result_core_bytes"],
-                values["worker_debug_descriptor_bytes"],
-                values["envelope_bytes"], values["response_bytes"],
-            ),
-        )
+        try:
+            connection.execute(
+                """
+                INSERT INTO agent_current_terminal_results (
+                    transport_envelope_digest, task_result_digest,
+                    task_result_core_digest, result_id, task_id, outcome,
+                    published_from_version, terminal_task_version,
+                    diagnostics_state, receipt_digest, receipt_ref_sha256,
+                    attempt_id, session_id, owner_id, grant_id, lease_id,
+                    deletion_version, owner_epoch, native_epoch, transport_epoch,
+                    grant_digest, authority_digest, package_identity,
+                    package_version, content_sha256, root_sha256,
+                    task_result_bytes, task_result_core_bytes,
+                    worker_debug_descriptor_bytes, envelope_bytes, response_bytes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    values["transport_envelope_digest"],
+                    values["task_result_digest"],
+                    values["task_result_core_digest"],
+                    values["result_id"],
+                    values["task_id"],
+                    values["outcome"],
+                    values["published_from_version"],
+                    values["terminal_task_version"],
+                    values["diagnostics_state"],
+                    None if receipt is None else receipt["receipt_digest"],
+                    values["receipt_ref_sha256"],
+                    values["attempt_id"],
+                    values["session_id"],
+                    values["owner_id"],
+                    values["grant_id"],
+                    values["lease_id"],
+                    values["deletion_version"],
+                    values["owner_epoch"],
+                    values["native_epoch"],
+                    values["transport_epoch"],
+                    values["grant_digest"],
+                    values["authority_digest"],
+                    *values["package_tuple"],
+                    values["task_result_bytes"],
+                    values["task_result_core_bytes"],
+                    values["worker_debug_descriptor_bytes"],
+                    values["envelope_bytes"],
+                    values["response_bytes"],
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise AuthorityStoreError("TERMINAL_RESULT_CONFLICT") from None
         self._fault("terminal.after_result")
         self._close_current_authority(connection, values)
         self._commit_task_head(connection, current, values)

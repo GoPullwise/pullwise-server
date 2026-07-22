@@ -331,7 +331,8 @@ _DDL = (
     CREATE TRIGGER IF NOT EXISTS agent_current_binding_one_shot
     BEFORE UPDATE
     ON agent_current_transport_receipt_bindings
-    WHEN OLD.transport_envelope_digest IS NOT NULL
+    WHEN NEW.receipt_digest IS NOT OLD.receipt_digest
+      OR OLD.transport_envelope_digest IS NOT NULL
       OR NEW.transport_envelope_digest IS NULL
       OR NEW.response_bytes IS NULL
       OR NEW.bound_at IS NULL

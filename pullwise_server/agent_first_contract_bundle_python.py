@@ -216,6 +216,8 @@ def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
 
 
 def validate_document(schema_id: str, value: object) -> dict[str, object]:
+    if _schema_role(schema_id) != "public_document":
+        _fail("CONTRACT_INTERNAL_CONSTRAINT", schema_id)
     detached = json.loads(canonical_document_bytes(value).decode("utf-8"))
     _validate_node(schema(schema_id), detached, "$")
     _validate_semantics(schema_id, detached)

@@ -115,6 +115,15 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                 if self._blob(existing["receipt_bytes"]) != values["receipt_bytes"]:
                     raise AuthorityStoreError("TRANSPORT_RECEIPT_CONFLICT")
                 return self._blob(existing["response_bytes"])
+            collision = connection.execute(
+                """
+                SELECT 1 FROM agent_current_transport_receipts
+                WHERE receipt_id=? OR receipt_bytes_sha256=?
+                """,
+                (values["receipt_id"], values["receipt_bytes_sha256"]),
+            ).fetchone()
+            if collision is not None:
+                raise AuthorityStoreError("TRANSPORT_RECEIPT_CONFLICT")
             self._fault("receipt.before_receipt")
             connection.execute(
                 """

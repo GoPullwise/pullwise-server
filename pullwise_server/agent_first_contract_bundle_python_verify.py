@@ -4,7 +4,34 @@ from __future__ import annotations
 
 
 PYTHON_VERIFY = r'''
+_INTERNAL_CONSTRAINT_SCHEMA_IDS = {
+    "task-result-blocked-variant/v1",
+    "task-result-cancelled-variant/v1",
+    "task-result-completed-variant/v1",
+    "task-result-completed-with-waivers-variant/v1",
+    "task-result-failed-variant/v1",
+    "task-result-no-change-needed-variant/v1",
+    "task-result-partial-variant/v1",
+}
+
+
+def _schema_role(schema_id: str) -> str:
+    return (
+        "internal_constraint"
+        if schema_id in _INTERNAL_CONSTRAINT_SCHEMA_IDS
+        else "public_document"
+    )
+
+
 def schema_ids() -> tuple[str, ...]:
+    return tuple(
+        item["schema_id"]
+        for item in root_manifest()["schema_registry"]
+        if item["role"] == "public_document"
+    )
+
+
+def all_schema_ids() -> tuple[str, ...]:
     return tuple(item["schema_id"] for item in root_manifest()["schema_registry"])
 
 
@@ -28,20 +55,76 @@ def stable_error_registry() -> dict[str, object]:
     )
 
 
-def _references(value: object) -> set[str]:
-    if isinstance(value, dict):
-        found = {
-            item for key, item in value.items() if key == "$ref" and isinstance(item, str)
-        }
-        for item in value.values():
-            found.update(_references(item))
-        return found
-    if isinstance(value, list):
-        found: set[str] = set()
-        for item in value:
-            found.update(_references(item))
-        return found
-    return set()
+_SEMANTIC_CYCLE_EXCEPTIONS = [
+    {
+        "schema_id": "task-charter/v1",
+        "kind": "content_ref_target",
+        "path": "$.properties.previous_charter_ref.oneOf[0]",
+        "target_schema_id": "task-charter/v1",
+    }
+]
+
+
+def _schema_edges(value: object) -> list[dict[str, str]]:
+    found: list[dict[str, str]] = []
+
+    def visit(item: object, path: str) -> None:
+        if isinstance(item, dict):
+            target = item.get("$ref")
+            if isinstance(target, str):
+                found.append(
+                    {"kind": "schema_ref", "path": path, "target_schema_id": target}
+                )
+            annotations = (
+                ("x-pullwise-content-schema-id", "x-pullwise-content-schema-ids", "content_ref_target"),
+                ("x-pullwise-availability-content-schema-id", "x-pullwise-availability-content-schema-ids", "availability_ref_target"),
+            )
+            for singular, plural, kind in annotations:
+                targets: list[object] = []
+                if singular in item:
+                    targets.append(item[singular])
+                if plural in item and isinstance(item[plural], list):
+                    targets.extend(item[plural])
+                for annotated in targets:
+                    if isinstance(annotated, str):
+                        found.append(
+                            {"kind": kind, "path": path, "target_schema_id": annotated}
+                        )
+            for key, child in item.items():
+                visit(child, f"{path}.{key}")
+        elif isinstance(item, list):
+            for index, child in enumerate(item):
+                visit(child, f"{path}[{index}]")
+
+    visit(value, "$")
+    unique = {canonical_document_bytes(item): item for item in found}
+    return sorted(
+        unique.values(),
+        key=lambda item: (item["path"], item["kind"], item["target_schema_id"]),
+    )
+
+
+def _verify_schema_edge_dag(
+    edges_by_schema: dict[str, list[dict[str, str]]]
+) -> None:
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(schema_id: str) -> None:
+        if schema_id in visiting:
+            _fail("CONTRACT_REFERENCE_CYCLE", schema_id)
+        if schema_id in visited:
+            return
+        visiting.add(schema_id)
+        for edge in edges_by_schema[schema_id]:
+            exception = {"schema_id": schema_id, **edge}
+            if exception not in _SEMANTIC_CYCLE_EXCEPTIONS:
+                visit(edge["target_schema_id"])
+        visiting.remove(schema_id)
+        visited.add(schema_id)
+
+    for schema_id in sorted(edges_by_schema):
+        visit(schema_id)
 
 
 def verify_bundle() -> bool:
@@ -59,23 +142,34 @@ def verify_bundle() -> bool:
     root_body = {key: value for key, value in root.items() if key != "root_sha256"}
     if presented_root != ROOT_SHA256 or canonical_document_sha256(root_body) != ROOT_SHA256:
         _fail("CONTRACT_ROOT_DIGEST_MISMATCH")
+    if (
+        root["semantic_cycle_exceptions"] != _SEMANTIC_CYCLE_EXCEPTIONS
+        or root["semantic_cycle_exceptions_sha256"]
+        != canonical_document_sha256(_SEMANTIC_CYCLE_EXCEPTIONS)
+    ):
+        _fail("CONTRACT_SEMANTIC_CYCLE_EXCEPTION_INVALID")
     family_ids = [family["family_id"] for family in document["families"]]
     if family_ids != root["required_families"]:
         _fail("CONTRACT_FAMILY_CLOSURE_INVALID")
 
     schemas, fixtures, family_entries = [], [], []
     known_schema_ids: set[str] = set()
+    edges_by_schema: dict[str, list[dict[str, str]]] = {}
     for family in document["families"]:
         local_schemas, local_fixtures = [], []
         for item in family["schemas"]:
+            edges = _schema_edges(item)
             entry = {
                 "schema_id": item["$id"],
                 "family_id": family["family_id"],
-                "references": sorted(_references(item)),
+                "role": _schema_role(item["$id"]),
+                "references": sorted({edge["target_schema_id"] for edge in edges}),
+                "edges": edges,
                 "sha256": canonical_document_sha256(item),
             }
             local_schemas.append(entry)
             known_schema_ids.add(item["$id"])
+            edges_by_schema[item["$id"]] = edges
         for item in family["fixtures"]:
             local_fixtures.append(
                 {
@@ -109,12 +203,14 @@ def verify_bundle() -> bool:
         ref not in known_schema_ids for item in schemas for ref in item["references"]
     ):
         _fail("CONTRACT_REFERENCE_UNKNOWN")
+    _verify_schema_edge_dag(edges_by_schema)
     expected_dag = sorted(
         (
             {
                 "schema_id": item["schema_id"],
                 "family_id": item["family_id"],
                 "references": item["references"],
+                "edges": item["edges"],
             }
             for item in schemas
         ),
@@ -150,7 +246,7 @@ def assert_pin(
 __all__ = [
     "BUNDLE_BASE64", "CONTENT_SHA256", "ContractValidationError",
     "PACKAGE_IDENTITY", "PACKAGE_TUPLE", "PACKAGE_VERSION", "ROOT_SHA256",
-    "assert_pin", "bundle", "bundle_bytes", "canonical_document_bytes",
+    "all_schema_ids", "assert_pin", "bundle", "bundle_bytes", "canonical_document_bytes",
     "canonical_document_sha256", "canonical_validated_bytes", "document_digest",
     "fixture", "fixture_bytes", "gate_predicate_registry", "package_tuple",
     "root_manifest", "root_manifest_bytes", "schema", "schema_bytes", "schema_ids",
