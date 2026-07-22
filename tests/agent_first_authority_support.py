@@ -51,7 +51,11 @@ class AuthorityHarness:
         self.temporary.cleanup()
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=10)
+        connection = sqlite3.connect(
+            self.db_path,
+            timeout=10,
+            check_same_thread=False,
+        )
         self.connections.append(connection)
         connection.execute("PRAGMA busy_timeout=10000")
         connection.execute("PRAGMA foreign_keys=ON")
