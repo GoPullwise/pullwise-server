@@ -23,7 +23,7 @@
             "additionalProperties": false,
             "required": ["predicate_id", "passed", "failure_code", "repairable", "evidence_refs"],
             "properties": {
-              "predicate_id": {"type": "string", "pattern": "^GATE_[A-Z0-9_]+$"},
+              "predicate_id": {"enum": ["GATE_BUDGET_SETTLED", "GATE_EVIDENCE_COMPLETE", "GATE_POLICY_SATISFIED", "GATE_SOURCE_STABLE"]},
               "passed": {"type": "boolean"},
               "failure_code": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{2,95}$"},
               "repairable": {"type": "boolean"},
@@ -70,7 +70,7 @@
             "additionalProperties": false,
             "required": ["predicate_id", "input_schema_ids", "failure_code"],
             "properties": {
-              "predicate_id": {"type": "string", "pattern": "^GATE_[A-Z0-9_]+$"},
+              "predicate_id": {"enum": ["GATE_BUDGET_SETTLED", "GATE_EVIDENCE_COMPLETE", "GATE_POLICY_SATISFIED", "GATE_SOURCE_STABLE"]},
               "input_schema_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$"}},
               "failure_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"}
             }
@@ -85,7 +85,16 @@
       "fixture_id": "gate_golden_independent_registry",
       "fixture_class": "golden",
       "schema_id": "gate-predicate-registry/v1",
-      "document": {"references_final_closure": false, "predicate_ids": ["GATE_SOURCE_STABLE", "GATE_POLICY_SATISFIED"]},
+      "document": {
+        "schema_id": "gate-predicate-registry/v1",
+        "predicates": [
+          {"predicate_id": "GATE_BUDGET_SETTLED", "input_schema_ids": ["elapsed-budget-settlement/v1"], "failure_code": "GATE_BUDGET_UNSETTLED"},
+          {"predicate_id": "GATE_EVIDENCE_COMPLETE", "input_schema_ids": ["observation/v1"], "failure_code": "GATE_EVIDENCE_INCOMPLETE"},
+          {"predicate_id": "GATE_POLICY_SATISFIED", "input_schema_ids": ["agent-task-policy/v1"], "failure_code": "GATE_POLICY_UNSATISFIED"},
+          {"predicate_id": "GATE_SOURCE_STABLE", "input_schema_ids": ["source-state/v1"], "failure_code": "GATE_SOURCE_UNSTABLE"}
+        ],
+        "registry_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
       "expected_code": null
     },
     {

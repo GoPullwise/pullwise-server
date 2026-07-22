@@ -51,7 +51,7 @@
       "type": "object",
       "additionalProperties": false,
       "x-pullwise-digest": {"field": "receipt_digest", "domain": "pullwise:server-transport-receipt:v1"},
-      "required": ["schema_id", "receipt_kind", "package", "receipt_id", "task_id", "attempt_id", "session_id", "grant_digest", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch", "content_ref", "accepted_at", "receipt_digest"],
+      "required": ["schema_id", "receipt_kind", "package", "receipt_id", "task_id", "attempt_id", "session_id", "owner_id", "lease_id", "authority_digest", "grant_digest", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch", "content_ref", "accepted_at", "receipt_digest"],
       "properties": {
         "schema_id": {"const": "server-transport-receipt/v1"},
         "receipt_kind": {"const": "server_transport"},
@@ -60,6 +60,9 @@
         "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
         "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
         "session_id": {"type": "string", "pattern": "^sess_[0-9a-f]{32}$"},
+        "owner_id": {"type": "string", "pattern": "^owner_[0-9a-f]{32}$"},
+        "lease_id": {"type": "string", "pattern": "^lease_[0-9a-f]{32}$"},
+        "authority_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "task_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "deletion_version": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
@@ -73,6 +76,34 @@
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "stable-error-registry/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "registry_digest", "domain": "pullwise:stable-error-registry:v1"},
+      "required": ["schema_id", "entries", "registry_digest"],
+      "properties": {
+        "schema_id": {"const": "stable-error-registry/v1"},
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "retryable", "retry_scope", "outcome"],
+            "properties": {
+              "code": {"enum": ["AGENT_GRANT_INVALID", "AUTHORITY_FENCED", "AUTHORITY_INPUT_UNTRUSTED", "AUTHORITY_RELOAD_REQUIRED", "BUDGET_EXHAUSTED", "CONTRACT_DOCUMENT_INVALID", "CURRENT_PACKAGE_PIN_MISMATCH", "CURRENT_PACKAGE_PIN_MISSING", "DISPATCH_ABANDONED", "GATE_BUDGET_UNSETTLED", "GATE_EVIDENCE_INCOMPLETE", "GATE_INPUT_CLOSURE_DIRECTION_INVALID", "GATE_POLICY_UNSATISFIED", "GATE_SOURCE_UNSTABLE", "IDEMPOTENCY_CONFLICT", "INVOCATION_PENDING", "SOURCE_STATE_CHANGED", "TASK_NOT_CLAIMABLE", "TRANSPORT_BINDING_ROLLED_BACK", "TRANSPORT_ENVELOPE_DIGEST_INVALID", "TRANSPORT_RECEIPT_ALREADY_BOUND", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_TYPE_INVALID"]},
+              "retryable": {"type": "boolean"},
+              "retry_scope": {"enum": ["none", "same_invocation", "new_claim", "operator"]},
+              "outcome": {"enum": ["error", "pending", "rejected", "fenced", "conflict"]}
+            }
+          }
+        },
+        "registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "stable-error/v1",
       "type": "object",
       "additionalProperties": false,
@@ -80,7 +111,7 @@
       "required": ["schema_id", "code", "message", "retryable", "retry_scope", "request_id", "details", "error_digest"],
       "properties": {
         "schema_id": {"const": "stable-error/v1"},
-        "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"},
+        "code": {"enum": ["AGENT_GRANT_INVALID", "AUTHORITY_FENCED", "AUTHORITY_INPUT_UNTRUSTED", "AUTHORITY_RELOAD_REQUIRED", "BUDGET_EXHAUSTED", "CONTRACT_DOCUMENT_INVALID", "CURRENT_PACKAGE_PIN_MISMATCH", "CURRENT_PACKAGE_PIN_MISSING", "DISPATCH_ABANDONED", "GATE_BUDGET_UNSETTLED", "GATE_EVIDENCE_INCOMPLETE", "GATE_INPUT_CLOSURE_DIRECTION_INVALID", "GATE_POLICY_UNSATISFIED", "GATE_SOURCE_UNSTABLE", "IDEMPOTENCY_CONFLICT", "INVOCATION_PENDING", "SOURCE_STATE_CHANGED", "TASK_NOT_CLAIMABLE", "TRANSPORT_BINDING_ROLLED_BACK", "TRANSPORT_ENVELOPE_DIGEST_INVALID", "TRANSPORT_RECEIPT_ALREADY_BOUND", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_TYPE_INVALID"]},
         "message": {"type": "string", "minLength": 1, "maxLength": 512},
         "retryable": {"type": "boolean"},
         "retry_scope": {"enum": ["none", "same_invocation", "new_claim", "operator"]},
@@ -102,6 +133,41 @@
     }
   ],
   "fixtures": [
+    {
+      "fixture_id": "error_golden_current_registry",
+      "fixture_class": "golden",
+      "schema_id": "stable-error-registry/v1",
+      "document": {
+        "schema_id": "stable-error-registry/v1",
+        "entries": [
+          {"code": "AGENT_GRANT_INVALID", "retryable": false, "retry_scope": "none", "outcome": "rejected"},
+          {"code": "AUTHORITY_FENCED", "retryable": false, "retry_scope": "new_claim", "outcome": "fenced"},
+          {"code": "AUTHORITY_INPUT_UNTRUSTED", "retryable": false, "retry_scope": "none", "outcome": "rejected"},
+          {"code": "AUTHORITY_RELOAD_REQUIRED", "retryable": true, "retry_scope": "same_invocation", "outcome": "pending"},
+          {"code": "BUDGET_EXHAUSTED", "retryable": false, "retry_scope": "none", "outcome": "rejected"},
+          {"code": "CONTRACT_DOCUMENT_INVALID", "retryable": false, "retry_scope": "none", "outcome": "rejected"},
+          {"code": "CURRENT_PACKAGE_PIN_MISMATCH", "retryable": false, "retry_scope": "operator", "outcome": "rejected"},
+          {"code": "CURRENT_PACKAGE_PIN_MISSING", "retryable": false, "retry_scope": "operator", "outcome": "rejected"},
+          {"code": "DISPATCH_ABANDONED", "retryable": false, "retry_scope": "new_claim", "outcome": "fenced"},
+          {"code": "GATE_BUDGET_UNSETTLED", "retryable": false, "retry_scope": "same_invocation", "outcome": "rejected"},
+          {"code": "GATE_EVIDENCE_INCOMPLETE", "retryable": false, "retry_scope": "same_invocation", "outcome": "rejected"},
+          {"code": "GATE_INPUT_CLOSURE_DIRECTION_INVALID", "retryable": false, "retry_scope": "none", "outcome": "rejected"},
+          {"code": "GATE_POLICY_UNSATISFIED", "retryable": false, "retry_scope": "none", "outcome": "rejected"},
+          {"code": "GATE_SOURCE_UNSTABLE", "retryable": false, "retry_scope": "new_claim", "outcome": "rejected"},
+          {"code": "IDEMPOTENCY_CONFLICT", "retryable": false, "retry_scope": "none", "outcome": "conflict"},
+          {"code": "INVOCATION_PENDING", "retryable": true, "retry_scope": "same_invocation", "outcome": "pending"},
+          {"code": "SOURCE_STATE_CHANGED", "retryable": false, "retry_scope": "new_claim", "outcome": "error"},
+          {"code": "TASK_NOT_CLAIMABLE", "retryable": false, "retry_scope": "new_claim", "outcome": "conflict"},
+          {"code": "TRANSPORT_BINDING_ROLLED_BACK", "retryable": true, "retry_scope": "same_invocation", "outcome": "pending"},
+          {"code": "TRANSPORT_ENVELOPE_DIGEST_INVALID", "retryable": false, "retry_scope": "none", "outcome": "rejected"},
+          {"code": "TRANSPORT_RECEIPT_ALREADY_BOUND", "retryable": false, "retry_scope": "none", "outcome": "conflict"},
+          {"code": "TRANSPORT_RECEIPT_BINDING_CONFLICT", "retryable": false, "retry_scope": "none", "outcome": "conflict"},
+          {"code": "TRANSPORT_RECEIPT_TYPE_INVALID", "retryable": false, "retry_scope": "none", "outcome": "rejected"}
+        ],
+        "registry_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": null
+    },
     {
       "fixture_id": "receipt_crash_binding_rollback",
       "fixture_class": "crash",

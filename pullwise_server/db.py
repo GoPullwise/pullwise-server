@@ -16,6 +16,8 @@ from typing import Any, Iterable
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .agent_first_authority_migrations import install_current_authority_tables
+
 
 _LOCK = threading.Lock()
 _INITIALIZE_LOCK = threading.Lock()
@@ -895,6 +897,9 @@ def initialize() -> None:
                     """,
                     (env_worker_id, token_hash),
                 )
+
+
+            install_current_authority_tables(connection)
 
 
 def ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
