@@ -10,6 +10,7 @@ from pullwise_server._generated_agent_task_contract import (
     schema_ids,
     seal_document,
     tool_catalog,
+    verify_document_digest,
 )
 from pullwise_server.agent_first_authority import AgentFirstAuthority, AuthorityError
 from pullwise_server.agent_first_authority_migrations import (
@@ -146,6 +147,7 @@ class AuthorityHarness:
         self.assertEqual(error.code, code)
         self.assertEqual(payload["schema_id"], "error-response/v1")
         self.assertEqual(payload["error"]["code"], code)
+        verify_document_digest("stable-error/v1", payload["error"])
         self.assertEqual(error.response_bytes, error.canonical_bytes)
         return error
 

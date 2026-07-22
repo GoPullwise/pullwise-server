@@ -81,8 +81,7 @@ function canonicalValue(value, path = "$") {
 }
 
 export function canonicalDocumentBytes(value) {
-  canonicalValue(value);
-  return encoder.encode(canonicalString(value));
+  return encoder.encode(canonicalString(canonicalValue(value)));
 }
 
 export function bundleBytes() {

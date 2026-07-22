@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Mapping
+from typing import Mapping
 
 from .agent_first_authority_store import AgentFirstAuthorityStore, AuthorityStoreError
 
@@ -13,7 +13,6 @@ RECEIPT_FAULT_POINTS = (
     "receipt.before_binding_head",
     "receipt.after_binding_head",
 )
-BINDING_FAULT_POINTS = ("binding.before_cas", "binding.after_cas")
 
 
 class TransportReceiptStore(AgentFirstAuthorityStore):
@@ -149,48 +148,7 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
             self._fault("receipt.after_binding_head")
             return values["response_bytes"]  # type: ignore[return-value]
 
-    def bind_receipt(
-        self,
-        receipt_digest: str,
-        envelope_digest: str,
-        build: Callable[[str], bytes],
-    ) -> bytes:
-        with self._immediate() as connection:
-            row = connection.execute(
-                """
-                SELECT r.receipt_id, b.transport_envelope_digest, b.response_bytes
-                FROM agent_current_transport_receipts r
-                JOIN agent_current_transport_receipt_bindings b USING (receipt_digest)
-                WHERE r.receipt_digest = ? AND r.receipt_kind = 'server_transport'
-                """,
-                (receipt_digest,),
-            ).fetchone()
-            if row is None:
-                raise AuthorityStoreError("TRANSPORT_RECEIPT_NOT_FOUND")
-            current = row["transport_envelope_digest"]
-            if current is not None:
-                if current != envelope_digest:
-                    raise AuthorityStoreError("TRANSPORT_RECEIPT_ALREADY_BOUND")
-                return self._blob(row["response_bytes"])
-            self._fault("binding.before_cas")
-            response_bytes = build(row["receipt_id"])
-            changed = connection.execute(
-                """
-                UPDATE agent_current_transport_receipt_bindings
-                SET transport_envelope_digest=?, response_bytes=?,
-                    bound_at=strftime('%s','now')
-                WHERE receipt_digest=? AND transport_envelope_digest IS NULL
-                """,
-                (envelope_digest, response_bytes, receipt_digest),
-            ).rowcount
-            if changed != 1:
-                raise AuthorityStoreError("TRANSPORT_RECEIPT_ALREADY_BOUND")
-            self._fault("binding.after_cas")
-            return response_bytes
-
-
 __all__ = [
-    "BINDING_FAULT_POINTS",
     "RECEIPT_FAULT_POINTS",
     "TransportReceiptStore",
 ]

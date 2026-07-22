@@ -38,6 +38,10 @@ def _pattern_matches(pattern: str, value: str) -> bool:
     return True
 
 
+def _json_equal(left: object, right: object) -> bool:
+    return canonical_document_bytes(left) == canonical_document_bytes(right)
+
+
 def _validate_reference_annotations(
     rule: dict[str, object], value: object, path: str
 ) -> None:

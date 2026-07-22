@@ -2,116 +2,30 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 import threading
 import unittest
-from pathlib import Path
 
 from pullwise_server._generated_agent_task_contract import (
-    PACKAGE_TUPLE, canonical_validated_bytes, package_tuple, schema_ids,
-    seal_document, tool_catalog, verify_document_digest,
+    PACKAGE_TUPLE,
+    package_tuple,
+    schema_ids,
+    tool_catalog,
+    verify_document_digest,
 )
 from pullwise_server.agent_first_authority import AgentFirstAuthority, AuthorityError
-from pullwise_server.agent_first_authority_store import ACCEPT_FAULT_POINTS, REGISTER_FAULT_POINTS
-from pullwise_server.agent_first_authority_migrations import CURRENT_AUTHORITY_TABLES, install_current_authority_tables
-from pullwise_server.agent_first_claim_authority import ABANDON_FAULT_POINTS, CLAIM_FAULT_POINTS
-from pullwise_server.agent_first_transport_receipts import BINDING_FAULT_POINTS, RECEIPT_FAULT_POINTS
+from pullwise_server.agent_first_authority_store import (
+    ACCEPT_FAULT_POINTS,
+    REGISTER_FAULT_POINTS,
+)
+from pullwise_server.agent_first_authority_migrations import CURRENT_AUTHORITY_TABLES
+from pullwise_server.agent_first_claim_authority import (
+    ABANDON_FAULT_POINTS,
+    CLAIM_FAULT_POINTS,
+)
+from tests.agent_first_authority_support import AuthorityHarness
 
 
-WORKER_ID = "worker_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-TASK_ID = "task_11111111111111111111111111111111"
-LEASE_ID = "lease_22222222222222222222222222222222"
-NOW = "2026-07-22T12:00:00.000Z"
-def policy() -> dict[str, object]:
-    return seal_document("agent-task-policy/v1", {
-        "schema_id": "agent-task-policy/v1",
-        "policy_id": "policy_33333333333333333333333333333333",
-        "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
-        "elapsed_limit_ms": 60_000, "tool_call_limit": 7,
-    })
-
-
-class AgentFirstAuthorityTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temporary.name) / "authority.sqlite3"
-        with self.connect() as connection:
-            install_current_authority_tables(connection)
-        self.authority = AgentFirstAuthority(self.connect)
-
-    def tearDown(self) -> None:
-        self.temporary.cleanup()
-    def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=10)
-        connection.execute("PRAGMA busy_timeout=10000")
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
-    def register_request(
-        self, *, worker_id: str = WORKER_ID,
-        supported_schema_ids: list[str] | None = None,
-        tool_catalog_digest: str | None = None,
-    ) -> dict[str, object]:
-        supported = list(schema_ids()) if supported_schema_ids is None else supported_schema_ids
-        catalog = tool_catalog()["catalog_digest"] if tool_catalog_digest is None else tool_catalog_digest
-        return seal_document("agent-worker-register/v1", {
-            "schema_id": "agent-worker-register/v1", "package": package_tuple(),
-            "worker_id": worker_id, "supported_schema_ids": supported,
-            "tool_catalog_digest": catalog,
-        })
-    def register(self) -> bytes:
-        return self.authority.register_worker(self.register_request())
-    def accept_request(self, task_id: str = TASK_ID) -> dict[str, object]:
-        return {
-            "schema_id": "agent-task-request/v1",
-            "package": package_tuple(),
-            "task_id": task_id,
-            "task_type": "repo_review.full_scan",
-            "idempotency_key": f"accept:{task_id}",
-            "policy": policy(),
-            "request": {"repository": "octo/example", "commit": "a" * 40},
-        }
-    def accept(self, task_id: str = TASK_ID) -> bytes:
-        return self.authority.accept_current_task(self.accept_request(task_id))
-    def claim_request(
-        self, *, idempotency_key: str = "claim:one", lease_id: str = LEASE_ID,
-        task_id: str = TASK_ID, worker_id: str = WORKER_ID, transport_epoch: int = 1,
-    ) -> dict[str, object]:
-        return {
-            "schema_id": "agent-task-claim-request/v1", "package": package_tuple(),
-            "task_id": task_id, "worker_id": worker_id, "lease_id": lease_id,
-            "transport_epoch": transport_epoch, "idempotency_key": idempotency_key,
-            "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
-            "elapsed_limit_ms": 60_000, "tool_call_limit": 7,
-        }
-    def prepare_claim(self) -> tuple[dict[str, object], dict[str, object]]:
-        self.register()
-        self.accept()
-        request = self.claim_request()
-        return request, json.loads(self.authority.claim_and_issue_current_grant(request))
-    def counts(self, *tables: str) -> tuple[int, ...]:
-        with self.connect() as connection:
-            return tuple(connection.execute(
-                f"SELECT COUNT(*) FROM {table}"
-            ).fetchone()[0] for table in tables)
-    def assert_error(self, code: str, callback) -> AuthorityError:
-        with self.assertRaises(AuthorityError) as raised:
-            callback()
-        error = raised.exception
-        payload = json.loads(error.response_bytes)
-        self.assertEqual((error.code, payload["schema_id"]), (code, "error-response/v1"))
-        self.assertEqual(payload["error"]["code"], code)
-        verify_document_digest("stable-error/v1", payload["error"])
-        self.assertEqual(error.response_bytes, error.canonical_bytes)
-        return error
-    def assert_fault_rolls_back(self, points, callback, tables) -> None:
-        before = self.counts(*tables)
-        for point in points:
-            def inject(actual: str) -> None:
-                if actual == point:
-                    raise RuntimeError(f"injected:{point}")
-            with self.subTest(point=point), self.assertRaisesRegex(RuntimeError, "injected"):
-                callback(AgentFirstAuthority(self.connect, fault_injector=inject))
-            self.assertEqual(before, self.counts(*tables))
+class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
     def test_installs_self_contained_current_tables_with_wal(self) -> None:
         with self.connect() as connection:
             installed = {
@@ -271,73 +185,6 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         self.assertEqual(sum(isinstance(item, bytes) for item in outcomes), 1)
         self.assertEqual([item.code for item in outcomes if isinstance(item, AuthorityError)], ["TASK_NOT_CLAIMABLE"])
         self.assertEqual(self.counts("agent_current_claims", "agent_current_grants"), (1, 1))
-    def receipt(self, envelope: dict[str, object]) -> dict[str, object]:
-        return seal_document(
-            "server-transport-receipt/v1",
-            {
-                "schema_id": "server-transport-receipt/v1",
-                "receipt_kind": "server_transport",
-                "package": package_tuple(),
-                "receipt_id": "receipt_55555555555555555555555555555555",
-                **{key: envelope[key] for key in (
-                    "task_id", "attempt_id", "session_id", "owner_id", "lease_id",
-                    "authority_digest", "task_version", "deletion_version",
-                    "owner_epoch", "native_epoch", "transport_epoch",
-                )},
-                "grant_digest": envelope["grant"]["grant_digest"],
-                "content_ref": {
-                    "schema_id": "content-ref/v1",
-                    "artifact_id": "art_66666666666666666666666666666666",
-                    "content_schema_id": "canonical-document/v1",
-                    "sha256": "7" * 64,
-                    "size_bytes": 1,
-                    "media_type": "application/json",
-                    "encoding": "utf-8",
-                },
-                "accepted_at": NOW,
-            },
-        )
-    def test_transport_receipt_faults_immutability_and_one_shot_binding(self) -> None:
-        _, envelope = self.prepare_claim()
-        receipt = self.receipt(envelope)
-        local = {**receipt, "receipt_kind": "local_tool"}
-        self.assert_error("TRANSPORT_RECEIPT_TYPE_INVALID", lambda: self.authority.store_transport_receipt(local))
-        self.assert_fault_rolls_back(
-            RECEIPT_FAULT_POINTS, lambda a: a.store_transport_receipt(receipt),
-            ("agent_current_transport_receipts",))
-        target = {"point": ""}
-
-        def inject(point: str) -> None:
-            if point == target["point"]:
-                raise RuntimeError(f"injected:{point}")
-
-        stored = self.authority.store_transport_receipt(receipt)
-        self.assertEqual(stored, canonical_validated_bytes("server-transport-receipt/v1", receipt))
-        for point in BINDING_FAULT_POINTS:
-            target["point"] = point
-            with self.assertRaisesRegex(RuntimeError, "injected"):
-                AgentFirstAuthority(self.connect, fault_injector=inject).bind_transport_receipt(receipt["receipt_digest"], "8" * 64)
-        bound = self.authority.bind_transport_receipt(receipt["receipt_digest"], "8" * 64)
-        self.assertEqual(bound, self.authority.bind_transport_receipt(receipt["receipt_digest"], "8" * 64))
-        verify_document_digest("server-transport-receipt-binding-response/v1", json.loads(bound))
-        attacks = (
-            "UPDATE agent_current_transport_receipt_bindings SET response_bytes=x'00' WHERE receipt_digest=?",
-            "UPDATE agent_current_transport_receipt_bindings SET bound_at=0 WHERE receipt_digest=?",
-            "UPDATE agent_current_transport_receipt_bindings SET transport_envelope_digest=NULL WHERE receipt_digest=?",
-            "DELETE FROM agent_current_transport_receipt_bindings WHERE receipt_digest=?",
-        )
-        for statement in attacks:
-            with self.connect() as connection, self.assertRaises(sqlite3.DatabaseError):
-                connection.execute(statement, (receipt["receipt_digest"],))
-        self.assertEqual(bound, self.authority.bind_transport_receipt(receipt["receipt_digest"], "8" * 64))
-        self.assert_error(
-            "TRANSPORT_RECEIPT_ALREADY_BOUND",
-            lambda: self.authority.bind_transport_receipt(receipt["receipt_digest"], "9" * 64),
-        )
-        self.assert_error(
-            "TRANSPORT_ENVELOPE_DIGEST_INVALID",
-            lambda: self.authority.bind_transport_receipt(receipt["receipt_digest"], None),
-        )
     def test_abandonment_fences_full_authority_and_preserves_task_fields(self) -> None:
         claim_request, envelope = self.prepare_claim()
         stale_receipt = self.receipt(envelope)

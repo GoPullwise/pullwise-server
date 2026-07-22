@@ -1,0 +1,291 @@
+{
+  "family_id": "task-publication",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "artifact-content-ref/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-semantics": ["artifact_content_ref"],
+      "required": ["schema_id", "artifact_kind", "ref"],
+      "properties": {
+        "schema_id": {"const": "artifact-content-ref/v1"},
+        "artifact_kind": {"enum": ["change_set_patch", "task_report"]},
+        "ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-ids": ["change-set-patch/v1", "task-report/v1"]
+        }
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "artifact-content-registry/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "registry_digest",
+        "domain": "pullwise:artifact-content-registry:v1"
+      },
+      "x-pullwise-semantics": ["artifact_content_registry"],
+      "required": ["schema_id", "entries", "registry_digest"],
+      "properties": {
+        "schema_id": {"const": "artifact-content-registry/v1"},
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["artifact_kind", "content_schema_id", "media_type", "encoding"],
+            "properties": {
+              "artifact_kind": {"enum": ["change_set_patch", "task_report"]},
+              "content_schema_id": {"enum": ["change-set-patch/v1", "task-report/v1"]},
+              "media_type": {"const": "application/json"},
+              "encoding": {"const": "utf-8"}
+            }
+          }
+        },
+        "registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "budget-summary/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "summary_digest",
+        "domain": "pullwise:budget-summary:v1"
+      },
+      "x-pullwise-semantics": ["budget_summary"],
+      "required": [
+        "schema_id", "task_id", "grant_digest", "elapsed_limit_ms",
+        "consumed_ms", "tool_call_limit", "calls_consumed",
+        "unsettled_reservations", "summary_digest"
+      ],
+      "properties": {
+        "schema_id": {"const": "budget-summary/v1"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "elapsed_limit_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "tool_call_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "calls_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "unsettled_reservations": {"const": 0},
+        "summary_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "effect-ledger-snapshot/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "ledger_digest",
+        "domain": "pullwise:effect-ledger-snapshot:v1"
+      },
+      "x-pullwise-semantics": ["effect_ledger_snapshot"],
+      "required": ["schema_id", "task_id", "watermark", "rows", "state_counts", "ledger_digest"],
+      "properties": {
+        "schema_id": {"const": "effect-ledger-snapshot/v1"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "watermark": {"const": 0},
+        "rows": {"const": []},
+        "state_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["prepared", "dispatched", "committed", "not_applied", "rejected", "unknown"],
+          "properties": {
+            "prepared": {"const": 0},
+            "dispatched": {"const": 0},
+            "committed": {"const": 0},
+            "not_applied": {"const": 0},
+            "rejected": {"const": 0},
+            "unknown": {"const": 0}
+          }
+        },
+        "ledger_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "task-report/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "report_digest",
+        "domain": "pullwise:task-report:v1"
+      },
+      "x-pullwise-semantics": ["task_report"],
+      "required": ["schema_id", "task_id", "result_id", "title", "summary", "sections", "report_digest"],
+      "properties": {
+        "schema_id": {"const": "task-report/v1"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "result_id": {"type": "string", "pattern": "^result_[0-9a-f]{32}$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 512},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["section_id", "title", "body", "evidence_refs"],
+            "properties": {
+              "section_id": {"type": "string", "pattern": "^section_[0-9a-f]{32}$"},
+              "title": {"type": "string", "minLength": 1, "maxLength": 512},
+              "body": {"type": "string", "minLength": 1, "maxLength": 65536},
+              "evidence_refs": {
+                "type": "array",
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {"$ref": "content-ref/v1"}
+              }
+            }
+          }
+        },
+        "report_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "waiver-event/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "waiver_digest",
+        "domain": "pullwise:waiver-event:v1"
+      },
+      "x-pullwise-semantics": ["waiver_event"],
+      "required": [
+        "schema_id", "waiver_id", "task_id", "requirement_ids", "issuer",
+        "reason", "authorized_at", "expires_at", "waiver_digest"
+      ],
+      "properties": {
+        "schema_id": {"const": "waiver-event/v1"},
+        "waiver_id": {"type": "string", "pattern": "^waiver_[0-9a-f]{32}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "requirement_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 160}
+        },
+        "issuer": {"$ref": "actor/v1"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "authorized_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
+        "expires_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
+        "waiver_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "publication_golden_artifact_registry",
+      "fixture_class": "golden",
+      "schema_id": "artifact-content-registry/v1",
+      "document": {
+        "schema_id": "artifact-content-registry/v1",
+        "entries": [
+          {"artifact_kind": "change_set_patch", "content_schema_id": "change-set-patch/v1", "media_type": "application/json", "encoding": "utf-8"},
+          {"artifact_kind": "task_report", "content_schema_id": "task-report/v1", "media_type": "application/json", "encoding": "utf-8"}
+        ],
+        "registry_digest": "488f871734c1db88f37bb8841f1b8d3bfc39b9646bb0c387fb4a1e40b80868a5"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "publication_golden_budget_summary",
+      "fixture_class": "golden",
+      "schema_id": "budget-summary/v1",
+      "document": {
+        "schema_id": "budget-summary/v1",
+        "task_id": "task_00000000000000000000000000000001",
+        "grant_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 7,
+        "tool_call_limit": 1,
+        "calls_consumed": 1,
+        "unsettled_reservations": 0,
+        "summary_digest": "98f66031563b237db88b48d7156d3a0cf03fff762cf0ecbc78640bba550a1cb0"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "publication_golden_effect_ledger",
+      "fixture_class": "golden",
+      "schema_id": "effect-ledger-snapshot/v1",
+      "document": {
+        "schema_id": "effect-ledger-snapshot/v1",
+        "task_id": "task_00000000000000000000000000000001",
+        "watermark": 0,
+        "rows": [],
+        "state_counts": {"prepared": 0, "dispatched": 0, "committed": 0, "not_applied": 0, "rejected": 0, "unknown": 0},
+        "ledger_digest": "1465c2e2539e15ed6cbf170c4383386cf7374097a7cab9385af8a53ba74adc16"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "publication_golden_report",
+      "fixture_class": "golden",
+      "schema_id": "task-report/v1",
+      "document": {
+        "schema_id": "task-report/v1",
+        "task_id": "task_00000000000000000000000000000001",
+        "result_id": "result_00000000000000000000000000000001",
+        "title": "Review result",
+        "summary": "The frozen result report.",
+        "sections": [
+          {
+            "section_id": "section_00000000000000000000000000000001",
+            "title": "Summary",
+            "body": "No material issue was found.",
+            "evidence_refs": []
+          }
+        ],
+        "report_digest": "281026cbc19fa99087c0b172e7ad2ce012664a36efeb30003f03cd22d7cf8294"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "publication_golden_waiver",
+      "fixture_class": "golden",
+      "schema_id": "waiver-event/v1",
+      "document": {
+        "schema_id": "waiver-event/v1",
+        "waiver_id": "waiver_00000000000000000000000000000001",
+        "task_id": "task_00000000000000000000000000000001",
+        "requirement_ids": ["REQ-1"],
+        "issuer": {"schema_id": "actor/v1", "kind": "user_control", "id": "operator", "session_id": null},
+        "reason": "Explicitly authorized exception.",
+        "authorized_at": "2026-07-22T00:00:00Z",
+        "expires_at": "2026-07-23T00:00:00Z",
+        "waiver_digest": "cdc7559dd171ed74acbeac553efd2412f6152105b900d34ba29cd971d0e79e9c"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "publication_negative_artifact_tuple",
+      "fixture_class": "negative",
+      "schema_id": "artifact-content-ref/v1",
+      "document": {
+        "schema_id": "artifact-content-ref/v1",
+        "artifact_kind": "task_report",
+        "ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_00000000000000000000000000000001",
+          "content_schema_id": "change-set-patch/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        }
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

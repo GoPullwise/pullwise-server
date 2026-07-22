@@ -33,9 +33,13 @@ REQUIRED_FAMILIES = (
     "core",
     "authority-control",
     "tool-evidence",
+    "source-evidence",
+    "task-requirements",
     "budget",
+    "task-publication",
     "receipt-error",
     "gate",
+    "task-result-core",
     "task-result",
 )
 

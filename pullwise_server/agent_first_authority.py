@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-import re
 import secrets
 import sqlite3
 from typing import Callable, Mapping
@@ -35,7 +34,6 @@ from .agent_first_claim_authority import ClaimAuthorityStore
 from .agent_first_transport_receipts import TransportReceiptStore
 
 
-_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _STORE_ERROR_MAP = {
     "AGENT_GRANT_INVALID": "AGENT_GRANT_INVALID",
     "AUTHORITY_FENCED": "AUTHORITY_FENCED",
@@ -321,38 +319,6 @@ class AgentFirstAuthority:
             "response_bytes": receipt_bytes,
         }
         return self._store_call(lambda: self._receipts.store_receipt(values))
-
-    def bind_transport_receipt(
-        self, receipt_digest: str, transport_envelope_digest: str
-    ) -> bytes:
-        if not isinstance(transport_envelope_digest, str) or not _HEX_DIGEST.fullmatch(
-            transport_envelope_digest
-        ):
-            self._raise("TRANSPORT_ENVELOPE_DIGEST_INVALID")
-        if not isinstance(receipt_digest, str) or not _HEX_DIGEST.fullmatch(receipt_digest):
-            self._raise("AUTHORITY_INPUT_UNTRUSTED")
-
-        def build(receipt_id: str) -> bytes:
-            response = seal_document(
-                "server-transport-receipt-binding-response/v1",
-                {
-                    "schema_id": "server-transport-receipt-binding-response/v1",
-                    "receipt_id": receipt_id,
-                    "receipt_digest": receipt_digest,
-                    "transport_envelope_digest": transport_envelope_digest,
-                    "state": "bound",
-                    "bound_at": _now(),
-                },
-            )
-            return canonical_validated_bytes(
-                "server-transport-receipt-binding-response/v1", response
-            )
-
-        return self._store_call(
-            lambda: self._receipts.bind_receipt(
-                receipt_digest, transport_envelope_digest, build
-            )
-        )
 
     def abandon_current_claim(self, request: dict[str, object]) -> bytes:
         document = self._validate("agent-claim-abandon-request/v1", request)

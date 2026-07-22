@@ -164,9 +164,9 @@ def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
         _validate_node(schema(rule["$ref"]), value, path)
         _validate_reference_annotations(rule, value, path)
         return
-    if "const" in rule and value != rule["const"]:
+    if "const" in rule and not _json_equal(value, rule["const"]):
         _fail("CONTRACT_CONST_INVALID", path)
-    if "enum" in rule and value not in rule["enum"]:
+    if "enum" in rule and not any(_json_equal(value, item) for item in rule["enum"]):
         _fail("CONTRACT_ENUM_INVALID", path)
     declared = rule.get("type")
     if declared is not None:

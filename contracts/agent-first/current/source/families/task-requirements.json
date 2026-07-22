@@ -6,13 +6,15 @@
       "$id": "requirement-entry/v1",
       "type": "object",
       "additionalProperties": false,
-      "x-pullwise-semantics": [
-        "canonical_source_tuple_identity",
-        "derived_requirement_authority",
-        "requirement_id_source_kind_match",
-        "sorted_unique_requirement_links",
-        "utf8_nfc_byte_limits"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": [
+          "derived_requirement_shape",
+          "requirement_id_source_kind_match",
+          "sorted_unique_requirement_links",
+          "utf8_nfc_byte_limits"
+        ],
+        "contextual_helpers": ["validate_requirement_entry_ingest"]
+      },
       "required": [
         "schema_id",
         "requirement_id",
@@ -48,8 +50,7 @@
         "source_id": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 160,
-          "pattern": "^[\\x21-\\x7e]+$"
+          "maxLength": 160
         },
         "statement": {"type": "string", "minLength": 1, "maxLength": 16384},
         "mandatory": {"type": "boolean"},
@@ -101,13 +102,14 @@
         "field": "ledger_digest",
         "domain": "pullwise:requirement-ledger:v1"
       },
-      "x-pullwise-semantics": [
-        "active_set_exact",
-        "derived_graph_acyclic_same_task_lower_version",
-        "entries_source_tuple_ordered",
-        "entry_ledger_versions_valid",
-        "ledger_digest_exact"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": [
+          "entries_normative_ingest_then_append_order",
+          "ledger_digest_exact",
+          "sorted_unique_active_requirement_ids"
+        ],
+        "contextual_helpers": ["validate_requirement_ledger_transition"]
+      },
       "required": [
         "schema_id",
         "task_id",
@@ -127,14 +129,12 @@
         "entries": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 4096,
           "uniqueItems": true,
           "items": {"$ref": "requirement-entry/v1"}
         },
         "active_requirement_ids": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 4096,
           "uniqueItems": true,
           "items": {
             "type": "string",
@@ -153,12 +153,14 @@
         "field": "digest",
         "domain": "pullwise:task-charter:v1"
       },
-      "x-pullwise-semantics": [
-        "charter_digest_exact",
-        "previous_charter_exact_predecessor",
-        "sorted_unique_charter_sets",
-        "utf8_nfc_byte_limits"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": [
+          "charter_digest_exact",
+          "sorted_unique_charter_sets",
+          "utf8_nfc_byte_limits"
+        ],
+        "contextual_helpers": ["validate_task_charter_transition"]
+      },
       "required": [
         "schema_id",
         "task_id",
@@ -273,12 +275,17 @@
       "$id": "waiver-event/v1",
       "type": "object",
       "additionalProperties": false,
-      "x-pullwise-semantics": [
-        "ed25519_signature_binding",
-        "issuer_policy_authority",
-        "revocation_target_rules",
-        "waiver_time_window"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": ["utf8_nfc_byte_limits", "waiver_time_order"],
+        "contextual_helpers": ["verify_waiver_event_authority"],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-waiver-event/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "event_without_signature"
+        }
+      },
       "required": [
         "schema_id",
         "waiver_id",
@@ -367,7 +374,7 @@
           "session_id": "sess_00000000000000000000000000000001"
         },
         "created_at": "2026-07-22T00:00:00.000Z",
-        "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "digest": "127136473af811377dd6a927782d94ffc92a77c651049b5123f1e3001fc6bafb"
       },
       "expected_code": null
     },
@@ -380,26 +387,6 @@
         "task_id": "task_00000000000000000000000000000001",
         "ledger_version": 1,
         "entries": [
-          {
-            "schema_id": "requirement-entry/v1",
-            "requirement_id": "req_policy_2222222222222222222222222222222222222222222222222222222222222222",
-            "source_kind": "policy",
-            "source_id": "policy.source-read-only",
-            "statement": "Repository source bytes are read-only.",
-            "mandatory": true,
-            "necessity": "safety_necessary",
-            "parent_requirement_ids": [],
-            "introduced_by": {
-              "schema_id": "actor/v1",
-              "kind": "server_control",
-              "id": "pullwise-server",
-              "session_id": null
-            },
-            "introduced_at": "2026-07-22T00:00:00.000Z",
-            "ledger_version": 1,
-            "rationale": "MVP safety policy.",
-            "supersedes": []
-          },
           {
             "schema_id": "requirement-entry/v1",
             "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
@@ -419,15 +406,70 @@
             "ledger_version": 1,
             "rationale": "",
             "supersedes": []
+          },
+          {
+            "schema_id": "requirement-entry/v1",
+            "requirement_id": "req_policy_2222222222222222222222222222222222222222222222222222222222222222",
+            "source_kind": "policy",
+            "source_id": "policy.source-read-only",
+            "statement": "Repository source bytes are read-only.",
+            "mandatory": true,
+            "necessity": "safety_necessary",
+            "parent_requirement_ids": [],
+            "introduced_by": {
+              "schema_id": "actor/v1",
+              "kind": "server_control",
+              "id": "pullwise-server",
+              "session_id": null
+            },
+            "introduced_at": "2026-07-22T00:00:00.000Z",
+            "ledger_version": 1,
+            "rationale": "MVP safety policy.",
+            "supersedes": []
           }
         ],
         "active_requirement_ids": [
           "req_policy_2222222222222222222222222222222222222222222222222222222222222222",
           "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
         ],
-        "ledger_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "ledger_digest": "618a0cc0ce08aeb333fcad9a57d00afeff132716fc86499851dabbf5b8a8b155"
       },
       "expected_code": null
+    },
+    {
+      "fixture_id": "requirements_negative_charter_predecessor",
+      "fixture_class": "negative",
+      "schema_id": "task-charter/v1",
+      "document": {
+        "schema_id": "task-charter/v1",
+        "task_id": "task_00000000000000000000000000000001",
+        "charter_version": 2,
+        "previous_charter_ref": null,
+        "objective_restated": "Review the repository without modifying source bytes.",
+        "scope_in": ["repository review"],
+        "scope_out": [],
+        "assumptions": [],
+        "plan": ["Inspect the frozen SourceState and publish evidence-backed findings."],
+        "requirement_ids": [
+          "req_policy_2222222222222222222222222222222222222222222222222222222222222222",
+          "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+        ],
+        "unresolved_questions": [],
+        "delivery_plan": {
+          "kind": "report",
+          "required_outputs": ["report"],
+          "output_language": "en"
+        },
+        "created_by": {
+          "schema_id": "actor/v1",
+          "kind": "task_owner",
+          "id": "owner_00000000000000000000000000000001",
+          "session_id": "sess_00000000000000000000000000000001"
+        },
+        "created_at": "2026-07-22T00:01:00.000Z",
+        "digest": "4309d53239f1ef1a2796654afc9cbff0fe4988717f4acad8a8a4d7fc926ba1ab"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
     {
       "fixture_id": "requirements_negative_derived_cycle",
@@ -483,7 +525,7 @@
           "req_derived_3333333333333333333333333333333333333333333333333333333333333333",
           "req_derived_4444444444444444444444444444444444444444444444444444444444444444"
         ],
-        "ledger_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "ledger_digest": "89c95039037e7571df58c373cf4097201a6d64531874441a6916fc33dc00baa1"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -516,7 +558,7 @@
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
     {
-      "fixture_id": "requirements_negative_waiver_signature",
+      "fixture_id": "requirements_negative_waiver_empty_issuer_profile",
       "fixture_class": "negative",
       "schema_id": "waiver-event/v1",
       "document": {
@@ -534,7 +576,7 @@
         "issued_at": "2026-07-22T00:00:00.000Z",
         "expires_at": "2026-07-22T01:00:00.000Z",
         "revokes_waiver_id": null,
-        "signature": "invalid*"
+        "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
       },
       "expected_code": "WAIVER_INVALID"
     }
