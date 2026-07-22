@@ -93,7 +93,14 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
             "root_manifest": {**root_body, "root_sha256": root_sha256},
             "families": [family],
         }
-        payload = canonical_bytes(document)
+        # Preserve registry member insertion order so the public verifier reaches
+        # its reference/DAG checks; all integrity digests above remain canonical.
+        payload = json.dumps(
+            document,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
         content_sha256 = sha256(payload)
 
         python_wrapper = render_python_wrapper(
@@ -129,10 +136,14 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
 
         expected_python_order = [BMP_SCHEMA_ID, NON_BMP_SCHEMA_ID]
         self.assertEqual(expected_python_order, python_result["reference_order"])
+        self.assertEqual(expected_python_order, python_result["edge_order"])
+        self.assertEqual(
+            [OWNER_SCHEMA_ID, BMP_SCHEMA_ID, NON_BMP_SCHEMA_ID],
+            python_result["dag_order"],
+        )
         self.assertEqual(
             [NON_BMP_SCHEMA_ID, BMP_SCHEMA_ID], node_result["native_utf16_order"]
         )
-        self.assertEqual(expected_python_order, node_result["reference_order"])
         self.assertEqual("post_reference_dag", python_result["stage"])
         self.assertEqual(python_result["stage"], node_result["stage"])
 
@@ -150,6 +161,12 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
                 return {
                     "stage": "post_reference_dag",
                     "reference_order": owner["references"],
+                    "edge_order": [
+                        edge["target_schema_id"] for edge in owner["edges"]
+                    ],
+                    "dag_order": [
+                        item["schema_id"] for item in root["reference_dag"]
+                    ],
                 }
             raise
         self.fail("minimal ordering probe unexpectedly passed full bundle verification")
@@ -159,20 +176,22 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
             scratch_path = Path(scratch)
             facade_path = scratch_path / "facade.mjs"
             runner_path = scratch_path / "runner.mjs"
-            facade_path.write_bytes(self.npm_wrapper + b"\nexport { schemaEdges };\n")
+            facade_path.write_bytes(self.npm_wrapper)
+            missing_message = json.dumps(
+                f"UNKNOWN_CONTRACT_DOCUMENT: {MISSING_FIXTURE_ID}"
+            )
+            bmp_literal = json.dumps(BMP_SCHEMA_ID)
+            non_bmp_literal = json.dumps(NON_BMP_SCHEMA_ID)
             runner_path.write_text(
                 "\n".join(
                     (
                         f"import * as facade from {json.dumps(facade_path.as_uri())};",
-                        "const owner = facade.bundle().families[0].schemas[0];",
-                        "const reference_order = facade.schemaEdges(owner)",
-                        "  .map((edge) => edge.target_schema_id);",
                         "let stage;",
                         "try {",
                         "  await facade.verifyBundle();",
                         "  stage = 'verified';",
                         "} catch (error) {",
-                        f"  if (error.message === {json.dumps('UNKNOWN_CONTRACT_DOCUMENT: ' + MISSING_FIXTURE_ID)}) {{",
+                        f"  if (error.message === {missing_message}) {{",
                         "    stage = 'post_reference_dag';",
                         "  } else {",
                         "    stage = error.detail ?? error.message;",
@@ -180,8 +199,8 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
                         "}",
                         "process.stdout.write(JSON.stringify({",
                         "  stage,",
-                        "  reference_order,",
-                        f"  native_utf16_order: [{json.dumps(BMP_SCHEMA_ID)}, {json.dumps(NON_BMP_SCHEMA_ID)}].sort(),",
+                        "  native_utf16_order: "
+                        f"[{bmp_literal}, {non_bmp_literal}].sort(),",
                         "}));",
                     )
                 ),

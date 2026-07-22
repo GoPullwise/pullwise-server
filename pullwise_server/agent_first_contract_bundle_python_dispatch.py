@@ -11,6 +11,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "capability_and_delivery_sets_sorted_unique": _rule_task_request_sets,
     "capability_sets_disjoint_sorted_unique": _rule_policy_capability_sets,
     "execution_profile": _rule_execution_profile,
+    "observation": _rule_observation,
     "policy_digest_exact": _rule_policy_digest,
     "risk_ceiling_current_mvp": _rule_policy_risk_ceiling,
     "root_and_origin_sets_sorted_unique": _rule_policy_roots_and_origins,

@@ -96,24 +96,13 @@ def validate_semantic_registries(
         error_type,
     )
 
-    predicates = _unique_sorted(
-        [entry["predicate_id"] for entry in gate_registry["predicates"]],
-        "gate_predicate_registry_duplicate",
+    validate_gate_predicate_registry(
+        schemas,
+        gate_registry,
+        set(stable_codes),
+        schema_owner,
         error_type,
     )
-    registry_predicates = schemas["gate-predicate-registry/v1"]["properties"][
-        "predicates"
-    ]["items"]["properties"]["predicate_id"]["enum"]
-    decision_predicates = schemas["gate-decision/v1"]["properties"][
-        "predicate_results"
-    ]["items"]["properties"]["predicate_id"]["enum"]
-    if predicates != registry_predicates or predicates != decision_predicates:
-        raise error_type("gate_predicate_registry_bijection_invalid")
-    for entry in gate_registry["predicates"]:
-        if entry["failure_code"] not in stable_codes:
-            raise error_type("gate_failure_code_unregistered")
-        if any(item not in schema_owner for item in entry["input_schema_ids"]):
-            raise error_type("gate_input_schema_unregistered")
 
     tool_keys = [entry["tool_key"] for entry in tool_catalog["tools"]]
     if len(tool_keys) != len(set(tool_keys)) or tool_keys != sorted(tool_keys):
@@ -161,6 +150,57 @@ def validate_semantic_registries(
                     raise error_type("typed_content_ref_target_invalid")
                 if any(item not in schema_owner for item in expected):
                     raise error_type("typed_content_ref_target_unregistered")
+
+
+def validate_gate_predicate_registry(
+    schemas: dict[str, dict[str, object]],
+    gate_registry: dict[str, object],
+    stable_codes: set[str],
+    schema_owner: dict[str, str],
+    error_type: type[Exception],
+) -> None:
+    entries = gate_registry["predicates"]
+    predicate_ids = [entry["predicate_id"] for entry in entries]
+    if len(predicate_ids) != len(set(predicate_ids)):
+        raise error_type("gate_predicate_registry_duplicate")
+    registry_properties = schemas["gate-predicate-registry/v1"]["properties"][
+        "predicates"
+    ]["items"]["properties"]
+    registry_predicates = registry_properties["predicate_id"]["enum"]
+    decision_properties = schemas["gate-decision/v1"]["properties"][
+        "predicate_results"
+    ]["items"]["properties"]
+    decision_predicates = decision_properties["predicate_id"]["enum"]
+    if (
+        predicate_ids != registry_predicates
+        or predicate_ids != decision_predicates
+    ):
+        raise error_type("gate_predicate_registry_bijection_invalid")
+
+    consumed_codes: set[str] = set()
+    for entry in entries:
+        failure_codes = entry["failure_codes"]
+        if (
+            not failure_codes
+            or failure_codes != sorted(set(failure_codes))
+        ):
+            raise error_type("gate_failure_code_order_invalid")
+        if any(code not in stable_codes for code in failure_codes):
+            raise error_type("gate_failure_code_unregistered")
+        consumed_codes.update(failure_codes)
+        input_schema_ids = entry["input_schema_ids"]
+        if input_schema_ids != sorted(set(input_schema_ids)):
+            raise error_type("gate_input_schema_order_invalid")
+        if any(item not in schema_owner for item in input_schema_ids):
+            raise error_type("gate_input_schema_unregistered")
+
+    registry_codes = registry_properties["failure_codes"]["items"]["enum"]
+    decision_codes = decision_properties["failure_code"]["enum"]
+    if (
+        sorted(consumed_codes) != registry_codes
+        or [None, *registry_codes] != decision_codes
+    ):
+        raise error_type("gate_failure_code_coverage_invalid")
 
 
 def _sealed_document(

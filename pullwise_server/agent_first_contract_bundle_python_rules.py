@@ -191,14 +191,20 @@ def _timestamp_millis(value: object) -> int | None:
     ) is None:
         return None
     try:
-        return int(datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").timestamp() * 1000)
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
     except ValueError:
         return None
+    elapsed = parsed - datetime(1970, 1, 1)
+    return (
+        elapsed.days * 86_400_000
+        + elapsed.seconds * 1_000
+        + elapsed.microseconds // 1_000
+    )
 
 
 def _rule_actor(value: dict[str, object]) -> None:
     session_kinds = {
-        "task_owner", "quality_verifier", "legacy_domain_reviewer",
+        "task_owner", "quality_verifier", "domain_reviewer",
         "explorer", "troubleshooter", "implementer",
     }
     if value["kind"] in session_kinds:

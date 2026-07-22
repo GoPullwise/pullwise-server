@@ -578,3 +578,7 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   an unbounded watcher log file.
 - V1 heartbeat payloads must contain `active_run_id` explicitly, including `null` while idle. Terminal wrapper status maps exactly to execution status: `done/completed`, `failed/failed`, `cancelled/cancelled`, and `partial_completed/partial_completed`.
 - Preserve worker validator disposition when constructing issues: plausible stays `potential_risk`; confirmed static evidence is `static_proof`; only confirmed dynamic evidence with a command plus output/log may become `verified`. Audit bundles include redacted `intent_test_output` artifacts and localize Markdown to the scan output language.
+- Rendered `observation/v1` facades must parse exact millisecond UTC instants
+  with calendar validation and platform-independent epoch arithmetic; valid
+  pre-1970 instants must behave identically in Python and Node. Actor semantics
+  use the current `domain_reviewer` kind and must not restore its legacy alias.

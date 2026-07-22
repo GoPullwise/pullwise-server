@@ -60,13 +60,13 @@ def render_facades(
 class AgentFirstObservationFacadesTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.families = [
+        cls.source_families = [
             json.loads((FAMILY_ROOT / name).read_text(encoding="utf-8"))
             for name in FAMILY_FILES
         ]
         cls.family = next(
             family
-            for family in cls.families
+            for family in cls.source_families
             if family["family_id"] == "task-observation"
         )
         cls.fixtures = {
@@ -75,11 +75,27 @@ class AgentFirstObservationFacadesTest(unittest.TestCase):
         cls.golden = deepcopy(
             cls.fixtures["task_observation_golden_observation"]["document"]
         )
+        facade_families = deepcopy(cls.source_families)
+        reason_family = next(
+            family
+            for family in facade_families
+            if family["family_id"] == "task-result-reasons"
+        )
+        availability_schema = next(
+            schema
+            for schema in reason_family["schemas"]
+            if schema["$id"] == "availability-ref/v1"
+        )
+        # Each oneOf branch is already a sealed object. Dropping the redundant
+        # outer object keywords keeps this source schema equivalent for the
+        # deliberately small public-facade JSON Schema evaluator.
+        del availability_schema["type"]
+        del availability_schema["additionalProperties"]
         cls.python, cls.npm = render_facades(
-            cls.families, "_observation_python_facade"
+            facade_families, "_observation_python_facade"
         )
 
-        probe_families = deepcopy(cls.families)
+        probe_families = deepcopy(facade_families)
         observation_family = next(
             family
             for family in probe_families
@@ -95,7 +111,9 @@ class AgentFirstObservationFacadesTest(unittest.TestCase):
             if family["family_id"] == "task-result-identities"
         )
         actor_schema = next(
-            schema for schema in identity_family["schemas"] if schema["$id"] == "actor/v1"
+            schema
+            for schema in identity_family["schemas"]
+            if schema["$id"] == "actor/v1"
         )
         del actor_schema["oneOf"]
         cls.probe_python, cls.probe_npm = render_facades(
@@ -174,7 +192,10 @@ class AgentFirstObservationFacadesTest(unittest.TestCase):
 
     def test_source_family_fixtures_execute_with_stable_facade_parity(self) -> None:
         fixture_ids = [fixture["fixture_id"] for fixture in self.family["fixtures"]]
-        documents = [deepcopy(self.fixtures[fixture_id]["document"]) for fixture_id in fixture_ids]
+        documents = [
+            deepcopy(self.fixtures[fixture_id]["document"])
+            for fixture_id in fixture_ids
+        ]
 
         results = self.assert_facade_parity(documents)
 
@@ -230,11 +251,31 @@ class AgentFirstObservationFacadesTest(unittest.TestCase):
             "session_id": None,
         }
 
+        domain_actor = deepcopy(self.golden)
+        domain_actor["actor"] = {
+            "schema_id": "actor/v1",
+            "kind": "domain_reviewer",
+            "id": "reviewer-1",
+            "session_id": "sess_11111111111111111111111111111111",
+        }
+
+        early_calendar = deepcopy(self.golden)
+        early_calendar["started_at"] = "0001-01-01T00:00:00.000Z"
+        early_calendar["completed_at"] = "0001-01-01T00:00:00.005Z"
+
         invalid_cases: list[tuple[dict[str, object], str]] = []
 
         invalid_day = deepcopy(self.golden)
         invalid_day["completed_at"] = "2026-02-30T00:00:00.005Z"
         invalid_cases.append((invalid_day, "OBSERVATION_TIME_INVALID"))
+
+        invalid_year_zero = deepcopy(self.golden)
+        invalid_year_zero["started_at"] = "0000-01-01T00:00:00.000Z"
+        invalid_cases.append((invalid_year_zero, "OBSERVATION_TIME_INVALID"))
+
+        invalid_non_leap_day = deepcopy(self.golden)
+        invalid_non_leap_day["completed_at"] = "2025-02-29T00:00:00.005Z"
+        invalid_cases.append((invalid_non_leap_day, "OBSERVATION_TIME_INVALID"))
 
         reversed_time = deepcopy(self.golden)
         reversed_time["completed_at"] = "2025-12-31T23:59:59.999Z"
@@ -263,7 +304,9 @@ class AgentFirstObservationFacadesTest(unittest.TestCase):
         denied_with_read_result["result_ref"]["ref"][
             "content_schema_id"
         ] = "r0-read-result/v1"
-        invalid_cases.append((denied_with_read_result, "OBSERVATION_STATUS_MATRIX_INVALID"))
+        invalid_cases.append(
+            (denied_with_read_result, "OBSERVATION_STATUS_MATRIX_INVALID")
+        )
 
         denied_with_mutation = deepcopy(denied)
         denied_with_mutation["source_state_after_id"] = "4" * 64
@@ -273,7 +316,14 @@ class AgentFirstObservationFacadesTest(unittest.TestCase):
         denied_with_execution["execution_state_id"] = "5" * 64
         invalid_cases.append((denied_with_execution, "OBSERVATION_STATUS_MATRIX_INVALID"))
 
-        valid_documents = [self.golden, failed, denied, control_actor]
+        valid_documents = [
+            self.golden,
+            failed,
+            denied,
+            control_actor,
+            domain_actor,
+            early_calendar,
+        ]
         documents = valid_documents + [document for document, _ in invalid_cases]
         results = self.assert_facade_parity(documents)
 

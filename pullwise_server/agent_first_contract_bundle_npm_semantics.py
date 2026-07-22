@@ -8,6 +8,7 @@ from .agent_first_contract_bundle_npm_effective_policy import (
 from .agent_first_contract_bundle_npm_execution_profile import (
     NPM_EXECUTION_PROFILE_RULE,
 )
+from .agent_first_contract_bundle_npm_observation import NPM_OBSERVATION_RULE
 
 
 NPM_SEMANTICS_BASE = r'''
@@ -284,6 +285,7 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   budget_ceiling_consistency: rulePolicyBudgetCeilings,
   capability_sets_disjoint_sorted_unique: rulePolicyCapabilitySets,
   execution_profile: ruleExecutionProfile,
+  observation: ruleObservation,
   policy_digest_exact: rulePolicyDigest,
   risk_ceiling_current_mvp: rulePolicyRiskCeiling,
   root_and_origin_sets_sorted_unique: rulePolicyRootsAndOrigins,
@@ -346,6 +348,7 @@ NPM_SEMANTICS = "\n".join(
         NPM_SEMANTICS_BASE,
         NPM_EFFECTIVE_POLICY_RULES,
         NPM_EXECUTION_PROFILE_RULE,
+        NPM_OBSERVATION_RULE,
         NPM_DECLARED_DISPATCH,
     )
 )
