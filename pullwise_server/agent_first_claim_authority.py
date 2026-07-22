@@ -67,6 +67,7 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                     JOIN agent_current_owner_incarnations o ON o.session_id=c.session_id
                     JOIN agent_current_grant_authority ga ON ga.grant_id=c.grant_id
                     WHERE h.task_id=? AND c.worker_id=? AND c.authority_bytes=?
+                      AND h.current_authority_schema_id='server-authority-envelope/v1'
                     """,
                     (values["task_id"], values["worker_id"], replay),
                 ).fetchone()
@@ -116,6 +117,8 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 head["lifecycle"] == "QUEUED"
                 and head["desired_state"] == "RUN"
                 and head["current_attempt_id"] is None
+                and head["current_authority_schema_id"] is None
+                and head["current_authority_digest"] is None
                 and values["transport_epoch"] == head["transport_epoch"] + 1
             )
             if not claimable:
@@ -196,7 +199,9 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
             UPDATE agent_current_task_heads
             SET lifecycle='ACTIVE', task_version=?, native_epoch=?, owner_epoch=?,
                 transport_epoch=?, current_attempt_id=?, current_session_id=?,
-                current_grant_id=?, current_authority_digest=?, current_lease_id=?,
+                current_grant_id=?,
+                current_authority_schema_id='server-authority-envelope/v1',
+                current_authority_digest=?, current_lease_id=?,
                 updated_at=strftime('%s','now')
             WHERE task_id=? AND lifecycle='QUEUED' AND desired_state='RUN'
               AND task_version=? AND deletion_version=? AND current_attempt_id IS NULL
@@ -296,14 +301,16 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 abandonment_id, task_id, attempt_id, session_id, grant_id, owner_id,
                 lease_id, previous_task_version, abandoned_task_version,
                 deletion_version, owner_epoch, native_epoch, transport_epoch, reason,
-                abandonment_digest, abandonment_bytes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                grant_digest, superseded_authority_digest, abandonment_digest,
+                abandonment_bytes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             tuple(values[key] for key in (
                 "abandonment_id", "task_id", "attempt_id", "session_id", "grant_id",
                 "owner_id", "lease_id", "expected_task_version", "task_version",
                 "deletion_version", "owner_epoch", "native_epoch", "transport_epoch",
-                "reason", "abandonment_digest", "abandonment_bytes",
+                "reason", "grant_digest", "superseded_authority_digest",
+                "abandonment_digest", "abandonment_bytes",
             )),
         )
         self._fault("abandon.after_abandonment")
@@ -351,18 +358,22 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
         task = connection.execute(
             """
             UPDATE agent_current_task_heads
-            SET task_version=?, updated_at=strftime('%s','now')
+            SET task_version=?,
+                current_authority_schema_id='agent-claim-abandon-response/v1',
+                current_authority_digest=?, updated_at=strftime('%s','now')
             WHERE task_id=? AND task_version=? AND deletion_version=?
               AND owner_id=? AND owner_epoch=? AND native_epoch=? AND transport_epoch=?
               AND current_attempt_id=? AND current_session_id=? AND current_grant_id=?
-              AND current_lease_id=? AND lifecycle IN ('ACTIVE','FINALIZING')
+              AND current_lease_id=? AND current_authority_digest=?
+              AND lifecycle IN ('ACTIVE','FINALIZING')
             """,
             (
-                values["task_version"], values["task_id"],
+                values["task_version"], values["abandonment_digest"], values["task_id"],
                 values["expected_task_version"], values["deletion_version"],
                 values["owner_id"], values["owner_epoch"], values["native_epoch"],
                 values["transport_epoch"], values["attempt_id"], values["session_id"],
                 values["grant_id"], values["lease_id"],
+                values["superseded_authority_digest"],
             ),
         ).rowcount
         if (attempt, owner, grant, task) != (1, 1, 1, 1):

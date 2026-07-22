@@ -25,6 +25,30 @@ def _pattern_matches(pattern: str, value: str) -> bool:
     return True
 
 
+def _validate_reference_annotations(
+    rule: dict[str, object], value: object, path: str
+) -> None:
+    expected = rule.get("x-pullwise-content-schema-id")
+    allowed = rule.get("x-pullwise-content-schema-ids")
+    if expected is not None or allowed is not None:
+        targets = [expected] if expected is not None else allowed
+        if not isinstance(value, dict) or value.get("content_schema_id") not in targets:
+            _fail("CONTENT_REF_SCHEMA_INVALID", path)
+    expected = rule.get("x-pullwise-availability-content-schema-id")
+    allowed = rule.get("x-pullwise-availability-content-schema-ids")
+    if expected is not None or allowed is not None:
+        targets = [expected] if expected is not None else allowed
+        if (
+            isinstance(value, dict)
+            and value.get("availability") == "available"
+            and (
+                not isinstance(value.get("ref"), dict)
+                or value["ref"].get("content_schema_id") not in targets
+            )
+        ):
+            _fail("CONTENT_REF_SCHEMA_INVALID", f"{path}.ref")
+
+
 def verify_content_ref_set(refs: object) -> list[dict[str, object]]:
     if not isinstance(refs, list):
         _fail("CONTRACT_TYPE_INVALID")
@@ -59,18 +83,29 @@ def _validate_semantics(schema_id: str, value: dict[str, object]) -> None:
     elif schema_id == "elapsed-budget-settlement/v1":
         if value["consumed_calls"] + value["released_calls"] != 1:
             _fail("BUDGET_CALL_CONSERVATION_INVALID")
-        if value["consumed_ms"] != value["elapsed_ms"]:
-            _fail("BUDGET_ELAPSED_CONSUMPTION_INVALID")
+    elif schema_id == "agent-claim-abandon-response/v1":
+        grant = verify_document_digest("agent-worker-grant/v1", value["grant"])
+        exact = ("package", "task_id", "attempt_id", "session_id", "owner_id",
+                 "grant_id", "lease_id", "deletion_version", "owner_epoch",
+                 "native_epoch", "transport_epoch")
+        if any(value[key] != grant[key] for key in exact):
+            _fail("AUTHORITY_FENCE_MISMATCH")
+        if value["previous_task_version"] != grant["task_version"]:
+            _fail("AUTHORITY_PREVIOUS_VERSION_MISMATCH")
+        if value["task_version"] != value["previous_task_version"] + 1:
+            _fail("AUTHORITY_SUCCESSOR_VERSION_INVALID")
 
 
 def verify_budget_transition(
     previous_ledger: object,
     reservation: object,
+    reserved_ledger: object,
     settlement: object,
     resulting_ledger: object,
 ) -> bool:
     before = verify_document_digest("elapsed-budget-ledger/v1", previous_ledger)
     held = verify_document_digest("elapsed-budget-reservation/v1", reservation)
+    reserved = verify_document_digest("elapsed-budget-ledger/v1", reserved_ledger)
     settled = verify_document_digest("elapsed-budget-settlement/v1", settlement)
     after = verify_document_digest("elapsed-budget-ledger/v1", resulting_ledger)
     if held["task_id"] != before["task_id"]:
@@ -87,12 +122,38 @@ def verify_budget_transition(
         _fail("BUDGET_ELAPSED_LIMIT_EXCEEDED")
     if before["calls_consumed"] + before["calls_reserved"] + held["reserved_calls"] > before["tool_call_limit"]:
         _fail("BUDGET_CALL_LIMIT_EXCEEDED")
+    reserved_expected = {
+        "task_id": before["task_id"],
+        "grant_digest": before["grant_digest"],
+        "elapsed_limit_ms": before["elapsed_limit_ms"],
+        "tool_call_limit": before["tool_call_limit"],
+        "consumed_ms": before["consumed_ms"],
+        "reserved_ms": before["reserved_ms"] + held["reserved_ms"],
+        "calls_consumed": before["calls_consumed"],
+        "calls_reserved": before["calls_reserved"] + held["reserved_calls"],
+    }
+    if any(reserved[key] != item for key, item in reserved_expected.items()):
+        _fail("BUDGET_RESERVED_LEDGER_MISMATCH")
     if settled["reservation_id"] != held["reservation_id"] or settled["invocation_digest"] != held["invocation_digest"]:
         _fail("BUDGET_SETTLEMENT_IDENTITY_MISMATCH")
     if settled["consumed_ms"] + settled["released_ms"] != held["reserved_ms"]:
         _fail("BUDGET_ELAPSED_CONSERVATION_INVALID")
     if settled["consumed_calls"] + settled["released_calls"] != held["reserved_calls"]:
         _fail("BUDGET_CALL_CONSERVATION_INVALID")
+    if settled["outcome"] == "settled":
+        if (settled["consumed_calls"], settled["released_calls"]) != (1, 0):
+            _fail("BUDGET_SETTLED_CALL_INVALID")
+        if settled["elapsed_ms"] > held["reserved_ms"] or settled["consumed_ms"] != settled["elapsed_ms"]:
+            _fail("BUDGET_SETTLED_ELAPSED_INVALID")
+        if settled["released_ms"] != held["reserved_ms"] - settled["elapsed_ms"]:
+            _fail("BUDGET_SETTLED_RELEASE_INVALID")
+    elif (
+        settled["consumed_calls"] != 0
+        or settled["released_calls"] != 1
+        or settled["consumed_ms"] != 0
+        or settled["released_ms"] != held["reserved_ms"]
+    ):
+        _fail("BUDGET_ABANDONMENT_RELEASE_INVALID")
     expected = {
         "resulting_consumed_ms": before["consumed_ms"] + settled["consumed_ms"],
         "resulting_reserved_ms": before["reserved_ms"],

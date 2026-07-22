@@ -36,6 +36,24 @@ function patternMatches(pattern, value) {
   return true;
 }
 
+function validateReferenceAnnotations(rule, value, path) {
+  let expected = rule["x-pullwise-content-schema-id"];
+  let allowed = rule["x-pullwise-content-schema-ids"];
+  if (expected !== undefined || allowed !== undefined) {
+    const targets = expected !== undefined ? [expected] : allowed;
+    if (!value || !targets.includes(value.content_schema_id)) fail("CONTENT_REF_SCHEMA_INVALID", path);
+  }
+  expected = rule["x-pullwise-availability-content-schema-id"];
+  allowed = rule["x-pullwise-availability-content-schema-ids"];
+  if (expected !== undefined || allowed !== undefined) {
+    const targets = expected !== undefined ? [expected] : allowed;
+    if (value?.availability === "available" &&
+        (!value.ref || !targets.includes(value.ref.content_schema_id))) {
+      fail("CONTENT_REF_SCHEMA_INVALID", path + ".ref");
+    }
+  }
+}
+
 export function verifyContentRefSet(refs) {
   if (!Array.isArray(refs)) fail("CONTRACT_TYPE_INVALID");
   const validated = refs.map((item) => validateDocument("content-ref/v1", item));
@@ -97,6 +115,17 @@ function sha256Sync(bytes) {
   return hash.map((value) => value.toString(16).padStart(8, "0")).join("");
 }
 
+function verifyEmbeddedDigestSync(schemaId, value) {
+  const spec = schema(schemaId)["x-pullwise-digest"];
+  const unsigned = Object.fromEntries(Object.entries(value).filter(([key]) => key !== spec.field));
+  const domain = encoder.encode(spec.domain);
+  const document = canonicalDocumentBytes(unsigned);
+  const input = new Uint8Array(domain.length + 1 + document.length);
+  input.set(domain);
+  input.set(document, domain.length + 1);
+  if (sha256Sync(input) !== value[spec.field]) fail("CONTRACT_DIGEST_MISMATCH", spec.field);
+}
+
 function decodeBase64Canonical(value) {
   try {
     const binary = globalThis.atob(value);
@@ -118,13 +147,23 @@ function validateSemantics(schemaId, value) {
     if (value.calls_consumed + value.calls_reserved > value.tool_call_limit) fail("BUDGET_CALL_LIMIT_EXCEEDED");
   } else if (schemaId === "elapsed-budget-settlement/v1") {
     if (value.consumed_calls + value.released_calls !== 1) fail("BUDGET_CALL_CONSERVATION_INVALID");
-    if (value.consumed_ms !== value.elapsed_ms) fail("BUDGET_ELAPSED_CONSUMPTION_INVALID");
+  } else if (schemaId === "agent-claim-abandon-response/v1") {
+    const grant = value.grant;
+    verifyEmbeddedDigestSync("agent-worker-grant/v1", grant);
+    const exact = ["package", "task_id", "attempt_id", "session_id", "owner_id",
+      "grant_id", "lease_id", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"];
+    if (exact.some((key) => JSON.stringify(value[key]) !== JSON.stringify(grant[key]))) {
+      fail("AUTHORITY_FENCE_MISMATCH");
+    }
+    if (value.previous_task_version !== grant.task_version) fail("AUTHORITY_PREVIOUS_VERSION_MISMATCH");
+    if (value.task_version !== value.previous_task_version + 1) fail("AUTHORITY_SUCCESSOR_VERSION_INVALID");
   }
 }
 
-export async function verifyBudgetTransition(previousLedger, reservation, settlement, resultingLedger) {
+export async function verifyBudgetTransition(previousLedger, reservation, reservedLedger, settlement, resultingLedger) {
   const before = await verifyDocumentDigest("elapsed-budget-ledger/v1", previousLedger);
   const held = await verifyDocumentDigest("elapsed-budget-reservation/v1", reservation);
+  const reserved = await verifyDocumentDigest("elapsed-budget-ledger/v1", reservedLedger);
   const settled = await verifyDocumentDigest("elapsed-budget-settlement/v1", settlement);
   const after = await verifyDocumentDigest("elapsed-budget-ledger/v1", resultingLedger);
   if (held.task_id !== before.task_id) fail("BUDGET_TASK_MISMATCH");
@@ -135,9 +174,24 @@ export async function verifyBudgetTransition(previousLedger, reservation, settle
   if (previous.some(([left, right]) => held[left] !== before[right])) fail("BUDGET_PREVIOUS_STATE_MISMATCH");
   if (before.consumed_ms + before.reserved_ms + held.reserved_ms > before.elapsed_limit_ms) fail("BUDGET_ELAPSED_LIMIT_EXCEEDED");
   if (before.calls_consumed + before.calls_reserved + held.reserved_calls > before.tool_call_limit) fail("BUDGET_CALL_LIMIT_EXCEEDED");
+  const reservedExpected = {
+    task_id: before.task_id, grant_digest: before.grant_digest,
+    elapsed_limit_ms: before.elapsed_limit_ms, tool_call_limit: before.tool_call_limit,
+    consumed_ms: before.consumed_ms, reserved_ms: before.reserved_ms + held.reserved_ms,
+    calls_consumed: before.calls_consumed, calls_reserved: before.calls_reserved + held.reserved_calls,
+  };
+  if (Object.entries(reservedExpected).some(([key, value]) => reserved[key] !== value)) fail("BUDGET_RESERVED_LEDGER_MISMATCH");
   if (settled.reservation_id !== held.reservation_id || settled.invocation_digest !== held.invocation_digest) fail("BUDGET_SETTLEMENT_IDENTITY_MISMATCH");
   if (settled.consumed_ms + settled.released_ms !== held.reserved_ms) fail("BUDGET_ELAPSED_CONSERVATION_INVALID");
   if (settled.consumed_calls + settled.released_calls !== held.reserved_calls) fail("BUDGET_CALL_CONSERVATION_INVALID");
+  if (settled.outcome === "settled") {
+    if (settled.consumed_calls !== 1 || settled.released_calls !== 0) fail("BUDGET_SETTLED_CALL_INVALID");
+    if (settled.elapsed_ms > held.reserved_ms || settled.consumed_ms !== settled.elapsed_ms) fail("BUDGET_SETTLED_ELAPSED_INVALID");
+    if (settled.released_ms !== held.reserved_ms - settled.elapsed_ms) fail("BUDGET_SETTLED_RELEASE_INVALID");
+  } else if (settled.consumed_calls !== 0 || settled.released_calls !== 1 ||
+             settled.consumed_ms !== 0 || settled.released_ms !== held.reserved_ms) {
+    fail("BUDGET_ABANDONMENT_RELEASE_INVALID");
+  }
   const expected = {
     resulting_consumed_ms: before.consumed_ms + settled.consumed_ms,
     resulting_reserved_ms: before.reserved_ms,

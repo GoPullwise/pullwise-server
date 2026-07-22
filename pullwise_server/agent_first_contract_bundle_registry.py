@@ -29,6 +29,9 @@ _RULE_KEYS = {
     "x-pullwise-digest",
     "x-pullwise-content-schema-id",
     "x-pullwise-content-schema-ids",
+    "x-pullwise-availability-content-schema-id",
+    "x-pullwise-availability-content-schema-ids",
+    "x-pullwise-semantics",
 }
 _TYPES = {"object", "array", "string", "integer", "boolean", "null"}
 
@@ -169,19 +172,23 @@ def validate_semantic_registries(
 
     for schema in schemas.values():
         for rule in _walk(schema):
-            target = rule.get("x-pullwise-content-schema-id")
-            targets = rule.get("x-pullwise-content-schema-ids")
-            if target is None and targets is None:
-                continue
-            if rule.get("$ref") != "content-ref/v1":
-                raise error_type("typed_content_ref_base_invalid")
-            expected = [target] if target is not None else targets
-            if not isinstance(expected, list) or not expected:
-                raise error_type("typed_content_ref_target_invalid")
-            if expected != sorted(set(expected)):
-                raise error_type("typed_content_ref_target_invalid")
-            if any(item not in schema_owner for item in expected):
-                raise error_type("typed_content_ref_target_unregistered")
+            annotations = (
+                ("x-pullwise-content-schema-id", "x-pullwise-content-schema-ids", "content-ref/v1"),
+                ("x-pullwise-availability-content-schema-id", "x-pullwise-availability-content-schema-ids", "availability-ref/v1"),
+            )
+            for singular, plural, base in annotations:
+                target, targets = rule.get(singular), rule.get(plural)
+                if target is None and targets is None:
+                    continue
+                if rule.get("$ref") != base:
+                    raise error_type("typed_content_ref_base_invalid")
+                expected = [target] if target is not None else targets
+                if not isinstance(expected, list) or not expected:
+                    raise error_type("typed_content_ref_target_invalid")
+                if expected != sorted(set(expected)):
+                    raise error_type("typed_content_ref_target_invalid")
+                if any(item not in schema_owner for item in expected):
+                    raise error_type("typed_content_ref_target_unregistered")
 
 
 def _sealed_document(

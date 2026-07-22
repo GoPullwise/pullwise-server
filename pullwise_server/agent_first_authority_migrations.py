@@ -97,6 +97,7 @@ _DDL = (
         current_attempt_id TEXT,
         current_session_id TEXT,
         current_grant_id TEXT,
+        current_authority_schema_id TEXT,
         current_authority_digest TEXT CHECK(
             current_authority_digest IS NULL OR length(current_authority_digest) = 64
         ),
@@ -108,6 +109,10 @@ _DDL = (
         terminal_at INTEGER,
         created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
         updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        CHECK(
+            (current_authority_schema_id IS NULL) =
+            (current_authority_digest IS NULL)
+        ),
         FOREIGN KEY(task_id) REFERENCES agent_current_task_requests(task_id)
     )
     """,
@@ -274,6 +279,10 @@ _DDL = (
         native_epoch INTEGER NOT NULL CHECK(native_epoch >= 1),
         transport_epoch INTEGER NOT NULL CHECK(transport_epoch >= 1),
         reason TEXT NOT NULL,
+        grant_digest TEXT NOT NULL CHECK(length(grant_digest) = 64),
+        superseded_authority_digest TEXT NOT NULL CHECK(
+            length(superseded_authority_digest) = 64
+        ),
         abandonment_digest TEXT NOT NULL UNIQUE CHECK(length(abandonment_digest) = 64),
         abandonment_bytes BLOB NOT NULL,
         created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),

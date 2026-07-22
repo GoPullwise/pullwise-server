@@ -158,18 +158,7 @@ def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
         _validate_one_of(rule["oneOf"], value, path)
     if "$ref" in rule:
         _validate_node(schema(rule["$ref"]), value, path)
-        expected_schema = rule.get("x-pullwise-content-schema-id")
-        if expected_schema is not None and (
-            not isinstance(value, dict)
-            or value.get("content_schema_id") != expected_schema
-        ):
-            _fail("CONTENT_REF_SCHEMA_INVALID", path)
-        allowed_schemas = rule.get("x-pullwise-content-schema-ids")
-        if allowed_schemas is not None and (
-            not isinstance(value, dict)
-            or value.get("content_schema_id") not in allowed_schemas
-        ):
-            _fail("CONTENT_REF_SCHEMA_INVALID", path)
+        _validate_reference_annotations(rule, value, path)
         return
     if "const" in rule and value != rule["const"]:
         _fail("CONTRACT_CONST_INVALID", path)

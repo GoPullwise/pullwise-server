@@ -12,6 +12,7 @@
     "tool-evidence",
     "budget",
     "receipt-error",
-    "gate"
+    "gate",
+    "task-result"
   ]
 }

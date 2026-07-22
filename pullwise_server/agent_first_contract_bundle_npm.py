@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import base64
-
-from .agent_first_contract_bundle_npm_semantics import NPM_SEMANTICS
 import json
-
+from .agent_first_contract_bundle_npm_semantics import NPM_SEMANTICS
 
 def render_npm_wrapper(
     identity: str,
@@ -146,17 +144,7 @@ function validateNode(rule, value, path) {
   if (rule.oneOf !== undefined) validateOneOf(rule.oneOf, value, path);
   if (rule.$ref) {
     validateNode(schema(rule.$ref), value, path);
-    const expectedSchema = rule["x-pullwise-content-schema-id"];
-    if (expectedSchema !== undefined &&
-        (!typeMatches("object", value) || value.content_schema_id !== expectedSchema)) {
-      fail("CONTENT_REF_SCHEMA_INVALID", path);
-    }
-    const allowedSchemas = rule["x-pullwise-content-schema-ids"];
-    if (allowedSchemas !== undefined &&
-        (!typeMatches("object", value) ||
-         !allowedSchemas.includes(value.content_schema_id))) {
-      fail("CONTENT_REF_SCHEMA_INVALID", path);
-    }
+    validateReferenceAnnotations(rule, value, path);
     return;
   }
   if ("const" in rule && JSON.stringify(value) !== JSON.stringify(rule.const)) {

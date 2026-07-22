@@ -361,6 +361,10 @@ class AgentFirstAuthority:
         }
 
         def build(head: sqlite3.Row, stored: sqlite3.Row) -> Mapping[str, object]:
+            grant = self._verify_digest(
+                "agent-worker-grant/v1",
+                json.loads(self._store._blob(stored["grant_bytes"])),
+            )
             task_version = head["task_version"] + 1
             response = seal_document("agent-claim-abandon-response/v1", {
                 "schema_id": "agent-claim-abandon-response/v1",
@@ -380,8 +384,12 @@ class AgentFirstAuthority:
                         "transport_epoch",
                     )
                 },
+                "previous_task_version": head["task_version"],
                 "task_version": task_version,
                 "state": "FENCED",
+                "grant": grant,
+                "superseded_authority_digest": head["current_authority_digest"],
+                "reason": document["reason"],
                 "abandoned_at": _now(),
             })
             response_bytes = canonical_validated_bytes(
@@ -392,6 +400,8 @@ class AgentFirstAuthority:
                 "abandonment_id": f"abandonment_{secrets.token_hex(16)}",
                 "abandonment_digest": response["response_digest"],
                 "abandonment_bytes": response_bytes,
+                "grant_digest": stored["grant_digest"],
+                "superseded_authority_digest": head["current_authority_digest"],
                 "response_bytes": response_bytes,
             }
 

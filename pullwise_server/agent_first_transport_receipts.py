@@ -70,6 +70,7 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                 JOIN agent_current_grants g ON g.grant_id=h.current_grant_id
                 JOIN agent_current_grant_authority ga ON ga.grant_id=g.grant_id
                 WHERE h.task_id=?
+                  AND h.current_authority_schema_id='server-authority-envelope/v1'
                 """,
                 (values["task_id"],),
             ).fetchone()

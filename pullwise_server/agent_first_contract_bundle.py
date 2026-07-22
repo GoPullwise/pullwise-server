@@ -36,6 +36,7 @@ REQUIRED_FAMILIES = (
     "budget",
     "receipt-error",
     "gate",
+    "task-result",
 )
 
 
