@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .agent_first_contract_bundle_python_control import PYTHON_CONTROL
+from .agent_first_contract_bundle_python_dispatch import PYTHON_DISPATCH
 from .agent_first_contract_bundle_python_result import PYTHON_RESULT
 from .agent_first_contract_bundle_python_rules import PYTHON_RULES
 
@@ -282,7 +283,13 @@ def verify_budget_transition(
 '''
 
 PYTHON_SEMANTICS = "\n".join(
-    (PYTHON_SEMANTICS_BASE, PYTHON_RULES, PYTHON_CONTROL, PYTHON_RESULT)
+    (
+        PYTHON_SEMANTICS_BASE,
+        PYTHON_RULES,
+        PYTHON_CONTROL,
+        PYTHON_RESULT,
+        PYTHON_DISPATCH,
+    )
 )
 
 

@@ -17,13 +17,23 @@ def _utf8_fields(value: dict[str, object]) -> None:
             _require(len(value[field].encode("utf-8")) <= limit, "UTF8_BYTE_LIMIT_INVALID", f"$.{field}")
 
 
-def _rule_task_request(value: dict[str, object]) -> None:
-    _utf8_fields(value)
+def _rule_task_request_acceptance_sources(
+    value: dict[str, object]
+) -> None:
     for field in ("acceptance_criteria", "constraints"):
         items = value[field]
         _require(_ordered_unique(items, lambda item: item["source_id"]), "TASK_REQUEST_SOURCE_ID_ORDER_INVALID", f"$.{field}")
+
+
+def _rule_task_request_sets(value: dict[str, object]) -> None:
     _require(_sorted_unique(value["requested_capabilities"]), "TASK_REQUEST_CAPABILITY_ORDER_INVALID")
     _require(_sorted_unique(value["delivery"]["required_outputs"]), "TASK_REQUEST_DELIVERY_ORDER_INVALID")
+
+
+def _rule_task_request(value: dict[str, object]) -> None:
+    _utf8_fields(value)
+    _rule_task_request_acceptance_sources(value)
+    _rule_task_request_sets(value)
 
 
 def _rule_effective_policy(value: dict[str, object]) -> None:
