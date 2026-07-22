@@ -154,20 +154,26 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
 
     @classmethod
     def _positive_fixture_cases(cls) -> list[dict[str, object]]:
-        cases = []
+        preferred: dict[str, dict[str, object]] = {}
         for fixture in cls.fixtures.values():
             if fixture["expected_code"] is not None:
                 continue
             if not cls.schema_rules(fixture["schema_id"]):
                 continue
-            cases.append(
-                {
-                    "fixture_id": fixture["fixture_id"],
-                    "schema_id": fixture["schema_id"],
-                    "document": deepcopy(fixture["document"]),
-                }
-            )
-        return cases
+            schema_id = fixture["schema_id"]
+            current = preferred.get(schema_id)
+            if current is not None and current["fixture_class"] == "golden":
+                continue
+            if current is None or fixture["fixture_class"] == "golden":
+                preferred[schema_id] = fixture
+        return [
+            {
+                "fixture_id": fixture["fixture_id"],
+                "schema_id": fixture["schema_id"],
+                "document": deepcopy(fixture["document"]),
+            }
+            for schema_id, fixture in sorted(preferred.items())
+        ]
 
     @classmethod
     def synthetic_agent_tool_request(cls) -> dict[str, object]:

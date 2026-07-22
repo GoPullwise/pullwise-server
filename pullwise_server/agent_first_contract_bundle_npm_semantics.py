@@ -439,6 +439,8 @@ function validateDeclaredDocumentRules(schemaId, value) {
   for (const ruleId of rules) {
     const handler = DOCUMENT_RULE_HANDLERS[ruleId];
     if (!handler) fail("CONTRACT_SEMANTIC_RULE_UNIMPLEMENTED", ruleId);
+    const probe = globalThis.__PULLWISE_DOCUMENT_RULE_PROBE__;
+    if (typeof probe === "function") probe({schemaId, ruleId});
     handler(value);
   }
   return true;

@@ -525,33 +525,40 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
         local_ack["receipt_binding_state"], local_ack["receipt_digest"] = "not_applicable", None
         local_ack["transport_envelope_digest"] = hashlib.sha256(canonical_bytes(local_envelope)).hexdigest()
         local_ack = self.facade.reseal("task-result-transport-ack/v1", local_ack)
-        uploaded_without_receipt = deepcopy(documents["task_result_transport_envelope"])
-        forbidden_local_receipt = deepcopy(local_envelope)
-        forbidden_local_receipt["transport_receipt"] = deepcopy(documents["task_result_transport_envelope"]["transport_receipt"])
         wrong_ack = deepcopy(documents["task_result_transport_ack"])
         wrong_ack["receipt_digest"] = "0" * 64
         wrong_ack = self.facade.reseal("task-result-transport-ack/v1", wrong_ack)
         after_local = deepcopy(local_ack)
         after_local["accepted_at"] = "2026-07-22T00:00:59Z"
         after_local = self.facade.reseal("task-result-transport-ack/v1", after_local)
-        late_receipt = deepcopy(documents["transport_receipt"])
-        late_receipt["accepted_at"] = "2026-07-22T00:01:11Z"
-        late_receipt = self.facade.reseal("server-transport-receipt/v1", late_receipt)
+        receipt_time_ack = deepcopy(documents["task_result_transport_ack"])
+        receipt_time_ack["accepted_at"] = "2026-07-22T00:01:04Z"
+        receipt_time_ack = self.facade.reseal("task-result-transport-ack/v1", receipt_time_ack)
         ops = [
+            {"python": "verify_task_result_transport_envelope", "node": "verifyTaskResultTransportEnvelope", "args": [documents["task_result_transport_envelope"], documents["task_result_core"]], "kwargs": {"worker_debug_descriptor": documents["worker_debug_descriptor"], "transport_receipt": documents["transport_receipt"]}},
+            {"python": "verify_task_result_transport_envelope", "node": "verifyTaskResultTransportEnvelope", "args": [local_envelope, self.facade.derive_core_expected(local_result)], "kwargs": {"worker_debug_descriptor": local_descriptor}},
             {"python": "verify_task_result_transport_envelope", "node": "verifyTaskResultTransportEnvelope", "args": [documents["task_result_transport_envelope"], documents["task_result_core"]], "kwargs": {"worker_debug_descriptor": documents["worker_debug_descriptor"]}},
             {"python": "verify_task_result_transport_envelope", "node": "verifyTaskResultTransportEnvelope", "args": [local_envelope, self.facade.derive_core_expected(local_result)], "kwargs": {"worker_debug_descriptor": local_descriptor, "transport_receipt": documents["transport_receipt"]}},
-            {"python": "verify_task_result_transport_envelope", "node": "verifyTaskResultTransportEnvelope", "args": [forbidden_local_receipt, self.facade.derive_core_expected(local_result)], "kwargs": {"worker_debug_descriptor": local_descriptor}},
+            {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [documents["task_result_transport_ack"], documents["task_result_transport_envelope"]], "kwargs": {"transport_receipt": documents["transport_receipt"]}},
+            {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [local_ack, local_envelope]},
+            {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [documents["task_result_transport_ack"], documents["task_result_transport_envelope"]]},
+            {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [local_ack, local_envelope], "kwargs": {"transport_receipt": documents["transport_receipt"]}},
             {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [wrong_ack, documents["task_result_transport_envelope"]], "kwargs": {"transport_receipt": documents["transport_receipt"]}},
             {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [after_local, local_envelope]},
-            {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [documents["task_result_transport_ack"], documents["task_result_transport_envelope"]], "kwargs": {"transport_receipt": late_receipt}},
+            {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [receipt_time_ack, documents["task_result_transport_envelope"]], "kwargs": {"transport_receipt": documents["transport_receipt"]}},
         ]
-        self.assert_helper_batch(ops, [("worker-debug-fragment-descriptor/v1", local_descriptor), ("task-result/v1", local_result), ("task-result-transport-envelope/v1", local_envelope), ("task-result-transport-envelope/v1", uploaded_without_receipt), ("task-result-transport-envelope/v1", forbidden_local_receipt), ("task-result-transport-ack/v1", local_ack), ("task-result-transport-ack/v1", wrong_ack), ("task-result-transport-ack/v1", after_local), ("server-transport-receipt/v1", late_receipt)], [
+        self.assert_helper_batch(ops, [("worker-debug-fragment-descriptor/v1", local_descriptor), ("task-result/v1", local_result), ("task-result-transport-envelope/v1", local_envelope), ("task-result-transport-ack/v1", local_ack), ("task-result-transport-ack/v1", wrong_ack), ("task-result-transport-ack/v1", after_local), ("task-result-transport-ack/v1", receipt_time_ack)], [
+            ("OK", None, None),
+            ("OK", None, None),
             ("TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt"),
             ("TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt"),
+            ("OK", None, None),
+            ("OK", None, None),
             ("TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt"),
-            ("CONTRACT_DOCUMENT_INVALID", "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_digest"),
-            ("CONTRACT_DOCUMENT_INVALID", "TRANSPORT_ACK_TIME_INVALID", "$.accepted_at"),
-            ("CONTRACT_DOCUMENT_INVALID", "TRANSPORT_ACK_TIME_INVALID", "$.accepted_at"),
+            ("TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt"),
+            ("CONTRACT_DOCUMENT_INVALID", "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_binding_state"),
+            ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_TIME_ORDER_INVALID", "$.accepted_at"),
+            ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_TIME_ORDER_INVALID", "$.accepted_at"),
         ])
 
 
