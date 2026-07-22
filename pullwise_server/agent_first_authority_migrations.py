@@ -32,6 +32,11 @@ IMMUTABLE_TABLES = (
     "agent_current_abandonments",
     "agent_current_fences",
 )
+FENCE_STATE_TABLES = (
+    "agent_current_attempts",
+    "agent_current_owner_incarnations",
+    "agent_current_grant_authority",
+)
 
 _DDL = (
     """
@@ -340,6 +345,26 @@ def install_current_authority_tables(connection: sqlite3.Connection) -> None:
                 END
                 """
             )
+    for table in FENCE_STATE_TABLES:
+        connection.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS {table}_fence_permanent
+            BEFORE UPDATE ON {table}
+            WHEN OLD.state='FENCED'
+            BEGIN
+                SELECT RAISE(ABORT, '{table.upper()}_FENCE_PERMANENT');
+            END
+            """
+        )
+        connection.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS {table}_delete_immutable
+            BEFORE DELETE ON {table}
+            BEGIN
+                SELECT RAISE(ABORT, '{table.upper()}_IMMUTABLE');
+            END
+            """
+        )
 
 
 __all__ = [

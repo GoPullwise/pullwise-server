@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 
+from .agent_first_contract_bundle_python_semantics import PYTHON_SEMANTICS
+
 
 def render_python_wrapper(
     identity: str,
@@ -19,7 +21,7 @@ def render_python_wrapper(
         "@@CONTENT@@": repr(content_sha256),
         "@@PAYLOAD@@": repr(base64.b64encode(canonical).decode("ascii")),
     }
-    rendered = _TEMPLATE
+    rendered = _TEMPLATE.replace("@@SEMANTICS@@", PYTHON_SEMANTICS)
     for marker, value in replacements.items():
         rendered = rendered.replace(marker, value)
     return rendered.encode("utf-8")
@@ -215,9 +217,13 @@ def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
             _fail("CONTRACT_NUMBER_TOO_LARGE", path)
 
 
+@@SEMANTICS@@
+
+
 def validate_document(schema_id: str, value: object) -> dict[str, object]:
     detached = json.loads(canonical_document_bytes(value).decode("utf-8"))
     _validate_node(schema(schema_id), detached, "$")
+    _validate_semantics(schema_id, detached)
     return detached
 
 
@@ -385,6 +391,7 @@ __all__ = [
     "canonical_document_sha256", "canonical_validated_bytes", "document_digest",
     "fixture", "fixture_bytes", "package_tuple", "root_manifest",
     "root_manifest_bytes", "schema", "schema_bytes", "seal_document",
-    "validate_document", "verify_bundle", "verify_document_digest",
+    "validate_document", "verify_budget_transition", "verify_bundle",
+    "verify_document_digest",
 ]
 '''

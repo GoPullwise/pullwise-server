@@ -52,6 +52,28 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 values["request_digest"],  # type: ignore[arg-type]
             )
             if replay is not None:
+                current = connection.execute(
+                    """
+                    SELECT h.lifecycle, h.desired_state, a.state AS attempt_state,
+                           o.state AS owner_state, ga.state AS grant_state
+                    FROM agent_current_task_heads h
+                    JOIN agent_current_claims c
+                      ON c.task_id=h.task_id
+                     AND c.attempt_id=h.current_attempt_id
+                     AND c.session_id=h.current_session_id
+                     AND c.grant_id=h.current_grant_id
+                     AND c.authority_digest=h.current_authority_digest
+                    JOIN agent_current_attempts a ON a.attempt_id=c.attempt_id
+                    JOIN agent_current_owner_incarnations o ON o.session_id=c.session_id
+                    JOIN agent_current_grant_authority ga ON ga.grant_id=c.grant_id
+                    WHERE h.task_id=? AND c.worker_id=? AND c.authority_bytes=?
+                    """,
+                    (values["task_id"], values["worker_id"], replay),
+                ).fetchone()
+                if current is None or tuple(current) != (
+                    "ACTIVE", "RUN", "CLAIMED", "STARTING", "ACTIVE"
+                ):
+                    raise AuthorityStoreError("AUTHORITY_FENCED")
                 return replay
             worker = connection.execute(
                 """

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+
+from .agent_first_contract_bundle_npm_semantics import NPM_SEMANTICS
 import json
 
 
@@ -20,7 +22,7 @@ def render_npm_wrapper(
         "@@CONTENT@@": json.dumps(content_sha256),
         "@@PAYLOAD@@": json.dumps(base64.b64encode(canonical).decode("ascii")),
     }
-    rendered = _TEMPLATE
+    rendered = _TEMPLATE.replace("@@SEMANTICS@@", NPM_SEMANTICS)
     for marker, value in replacements.items():
         rendered = rendered.replace(marker, value)
     return rendered.encode("utf-8")
@@ -208,9 +210,12 @@ function validateNode(rule, value, path) {
   }
 }
 
+@@SEMANTICS@@
+
 export function validateDocument(schemaId, value) {
   const detached = JSON.parse(decoder.decode(canonicalDocumentBytes(value)));
   validateNode(schema(schemaId), detached, "$");
+  validateSemantics(schemaId, detached);
   return detached;
 }
 
@@ -388,5 +393,6 @@ export const schema_bytes = schemaBytes;
 export const seal_document = sealDocument;
 export const validate_document = validateDocument;
 export const verify_bundle = verifyBundle;
+export const verify_budget_transition = verifyBudgetTransition;
 export const verify_document_digest = verifyDocumentDigest;
 '''
