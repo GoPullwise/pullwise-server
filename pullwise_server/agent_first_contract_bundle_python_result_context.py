@@ -31,10 +31,9 @@ def _result_fragment_identity(value: dict[str, object], manifest_digest: str) ->
 
 def derive_task_result_core(task_result: object) -> dict[str, object]:
     checked = validate_document("task-result/v1", task_result)
-    projected = json.loads(canonical_document_bytes(checked).decode("utf-8"))
-    projected["schema_id"] = "task-result-core/v1"
-    projected["diagnostics"].pop("worker_debug_fragment", None)
-    return validate_document("task-result-core/v1", projected)
+    return validate_document(
+        "task-result-core/v1", _result_task_result_core_projection(checked)
+    )
 
 
 def verify_task_result_context(task_result: object, *, worker_debug_descriptor: object = None) -> dict[str, object]:

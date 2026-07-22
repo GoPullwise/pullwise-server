@@ -4,6 +4,13 @@ from __future__ import annotations
 
 
 PYTHON_RESULT_RULES = r'''
+def _result_task_result_core_projection(value: dict[str, object]) -> dict[str, object]:
+    projected = json.loads(canonical_document_bytes(value).decode("utf-8"))
+    projected["schema_id"] = "task-result-core/v1"
+    projected["diagnostics"].pop("worker_debug_fragment", None)
+    return projected
+
+
 def _result_availability_reasons() -> list[str]:
     enums = [
         branch["properties"]["reason_code"]["enum"]
@@ -232,7 +239,9 @@ def _rule_task_result_transport_envelope(value: dict[str, object]) -> None:
     result = validate_document("task-result/v1", value["task_result"])
     result_bytes = canonical_document_bytes(result)
     _seo_require(hashlib.sha256(result_bytes).hexdigest() == value["task_result_digest"], "TRANSPORT_ENVELOPE_DIGEST_INVALID", code="TRANSPORT_ENVELOPE_DIGEST_INVALID")
-    core = derive_task_result_core(result)
+    core = validate_document(
+        "task-result-core/v1", _result_task_result_core_projection(result)
+    )
     core_bytes = canonical_document_bytes(core)
     _seo_require(value["task_result_core_digest"] == hashlib.sha256(core_bytes).hexdigest(), "TRANSPORT_CORE_DIGEST_INVALID")
     _seo_require(value["task_result_core_ref"]["sha256"] == value["task_result_core_digest"] and value["task_result_core_ref"]["size_bytes"] == len(core_bytes), "TRANSPORT_CORE_REF_INVALID")
@@ -248,6 +257,9 @@ def _rule_task_result_transport_envelope(value: dict[str, object]) -> None:
     not_applicable = {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}
     if debug["availability"] == "available":
         _seo_require(descriptor is not None, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED")
+        descriptor = validate_document(
+            "worker-debug-fragment-descriptor/v1", descriptor
+        )
         receipt_valid = receipt.get("availability") == "available" if descriptor["state"] == "uploaded" else receipt == not_applicable
         _seo_require(receipt_valid, "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt")
     else:
