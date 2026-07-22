@@ -1,0 +1,123 @@
+{
+  "family_id": "tool-evidence",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "local-tool-receipt/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "receipt_kind", "tool_key", "invocation_digest", "status", "result_sha256", "size_bytes", "started_at", "completed_at", "duration_ms", "receipt_digest"],
+      "properties": {
+        "schema_id": {"const": "local-tool-receipt/v1"},
+        "receipt_kind": {"const": "local_tool"},
+        "tool_key": {"const": "internal.read_source"},
+        "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "status": {"enum": ["succeeded", "failed", "cancelled", "timed_out"]},
+        "result_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "started_at": {"type": "string", "minLength": 24, "maxLength": 24},
+        "completed_at": {"type": "string", "minLength": 24, "maxLength": 24},
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "receipt_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "observation/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "observation_id", "task_id", "attempt_id", "native_epoch", "tool_key", "invocation_digest", "local_receipt_digest", "status", "source_state_before_id", "source_state_after_id", "result_sha256", "size_bytes", "observation_digest"],
+      "properties": {
+        "schema_id": {"const": "observation/v1"},
+        "observation_id": {"type": "string", "pattern": "^obs_[0-9a-f]{32}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "tool_key": {"const": "internal.read_source"},
+        "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "local_receipt_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "status": {"enum": ["succeeded", "failed", "cancelled", "timed_out", "policy_violation", "infrastructure_error"]},
+        "source_state_before_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_state_after_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "result_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "observation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "tool-dispatch-intent/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "intent_id", "package", "grant_digest", "task_id", "attempt_id", "session_id", "owner_epoch", "native_epoch", "transport_epoch", "idempotency_key", "invocation_digest", "tool_key", "reservation_id", "capability_digest", "state", "created_at", "intent_digest"],
+      "properties": {
+        "schema_id": {"const": "tool-dispatch-intent/v1"},
+        "intent_id": {"type": "string", "pattern": "^intent_[0-9a-f]{32}$"},
+        "package": {"$ref": "current-package-ref/v1"},
+        "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "session_id": {"type": "string", "pattern": "^sess_[0-9a-f]{32}$"},
+        "owner_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "transport_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 160},
+        "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "tool_key": {"const": "internal.read_source"},
+        "reservation_id": {"type": "string", "pattern": "^reserve_[0-9a-f]{32}$"},
+        "capability_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "state": {"enum": ["INTENT", "DISPATCHED", "SETTLED", "ABANDONED"]},
+        "created_at": {"type": "string", "minLength": 24, "maxLength": 24},
+        "intent_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "tool-invocation/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "package", "task_id", "attempt_id", "session_id", "owner_epoch", "native_epoch", "idempotency_key", "tool_key", "tool_input", "invocation_digest"],
+      "properties": {
+        "schema_id": {"const": "tool-invocation/v1"},
+        "package": {"$ref": "current-package-ref/v1"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "session_id": {"type": "string", "pattern": "^sess_[0-9a-f]{32}$"},
+        "owner_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 160},
+        "tool_key": {"const": "internal.read_source"},
+        "tool_input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["relative_path"],
+          "properties": {"relative_path": {"type": "string", "minLength": 1, "maxLength": 4096}}
+        },
+        "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "tool_crash_after_intent",
+      "fixture_class": "crash",
+      "schema_id": "tool-dispatch-intent/v1",
+      "document": {"persisted_state": "INTENT", "capability_consumed": false},
+      "expected_code": "INVOCATION_PENDING"
+    },
+    {
+      "fixture_id": "tool_golden_local_receipt",
+      "fixture_class": "golden",
+      "schema_id": "local-tool-receipt/v1",
+      "document": {"receipt_kind": "local_tool", "status": "succeeded"},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "tool_negative_agent_observation",
+      "fixture_class": "negative",
+      "schema_id": "observation/v1",
+      "document": {"actor_supplied_status": "succeeded"},
+      "expected_code": "OBSERVATION_AUTHORITY_INVALID"
+    }
+  ]
+}

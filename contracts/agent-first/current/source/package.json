@@ -1,0 +1,11 @@
+{
+  "schema_id": "agent-task-contract-package-source/v1",
+  "package_identity": "@pullwise/agent-task-contract",
+  "package_version": "0.1.0",
+  "required_families": [
+    "authority-control",
+    "tool-evidence",
+    "budget",
+    "receipt-error"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "family_id": "budget",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "tool-call-budget/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "task_id", "grant_digest", "hard_limit", "consumed", "active_reserved", "budget_digest"],
+      "properties": {
+        "schema_id": {"const": "tool-call-budget/v1"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "hard_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "active_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "budget_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "tool-call-reservation/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "reservation_id", "task_id", "attempt_id", "invocation_digest", "amount", "previous_consumed", "previous_reserved", "reservation_digest"],
+      "properties": {
+        "schema_id": {"const": "tool-call-reservation/v1"},
+        "reservation_id": {"type": "string", "pattern": "^reserve_[0-9a-f]{32}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "amount": {"const": 1},
+        "previous_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "previous_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "reservation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "tool-call-settlement/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "reservation_id", "invocation_digest", "consumed_amount", "released_amount", "resulting_consumed", "resulting_reserved", "settlement_digest"],
+      "properties": {
+        "schema_id": {"const": "tool-call-settlement/v1"},
+        "reservation_id": {"type": "string", "pattern": "^reserve_[0-9a-f]{32}$"},
+        "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "consumed_amount": {"type": "integer", "minimum": 0, "maximum": 1},
+        "released_amount": {"type": "integer", "minimum": 0, "maximum": 1},
+        "resulting_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "resulting_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "settlement_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "budget_crash_after_reservation",
+      "fixture_class": "crash",
+      "schema_id": "tool-call-reservation/v1",
+      "document": {"reservation_persisted": true, "intent_persisted": true, "dispatch_started": false},
+      "expected_code": "INVOCATION_PENDING"
+    },
+    {
+      "fixture_id": "budget_golden_settlement",
+      "fixture_class": "golden",
+      "schema_id": "tool-call-settlement/v1",
+      "document": {"consumed_amount": 1, "released_amount": 0},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_negative_over_limit",
+      "fixture_class": "negative",
+      "schema_id": "tool-call-budget/v1",
+      "document": {"hard_limit": 1, "consumed": 1, "active_reserved": 1},
+      "expected_code": "BUDGET_EXHAUSTED"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "family_id": "authority-control",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "current-package-ref/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "package_identity", "package_version", "content_sha256", "root_sha256"],
+      "properties": {
+        "schema_id": {"const": "current-package-ref/v1"},
+        "package_identity": {"const": "@pullwise/agent-task-contract"},
+        "package_version": {"const": "0.1.0"},
+        "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "server-authority-envelope/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "package", "task_id", "attempt_id", "session_id", "lease_id", "task_version", "owner_epoch", "native_epoch", "transport_epoch", "lifecycle", "desired_state", "grant", "authority_digest"],
+      "properties": {
+        "schema_id": {"const": "server-authority-envelope/v1"},
+        "package": {"$ref": "current-package-ref/v1"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "session_id": {"type": "string", "pattern": "^sess_[0-9a-f]{32}$"},
+        "lease_id": {"type": "string", "minLength": 1, "maxLength": 160},
+        "task_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "owner_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "transport_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "lifecycle": {"const": "ACTIVE"},
+        "desired_state": {"const": "RUN"},
+        "grant": {"$ref": "server-dispatch-grant/v1"},
+        "authority_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "server-dispatch-grant/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "package", "grant_id", "task_id", "capability_ids", "tool_keys", "tool_call_limit", "grant_digest"],
+      "properties": {
+        "schema_id": {"const": "server-dispatch-grant/v1"},
+        "package": {"$ref": "current-package-ref/v1"},
+        "grant_id": {"type": "string", "pattern": "^grant_[0-9a-f]{32}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "capability_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["source.read"]}},
+        "tool_keys": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["internal.read_source"]}},
+        "tool_call_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "authority_crash_after_claim",
+      "fixture_class": "crash",
+      "schema_id": "server-authority-envelope/v1",
+      "document": {"crash_point": "after_claim_before_worker_projection", "recovery": "reload_exact_server_envelope"},
+      "expected_code": "AUTHORITY_RELOAD_REQUIRED"
+    },
+    {
+      "fixture_id": "authority_fence_stale_native_epoch",
+      "fixture_class": "fence",
+      "schema_id": "server-authority-envelope/v1",
+      "document": {"current_native_epoch": 8, "presented_native_epoch": 7},
+      "expected_code": "AUTHORITY_FENCED"
+    },
+    {
+      "fixture_id": "authority_golden_current_envelope",
+      "fixture_class": "golden",
+      "schema_id": "server-authority-envelope/v1",
+      "document": {"lifecycle": "ACTIVE", "desired_state": "RUN", "tool_key": "internal.read_source"},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "authority_idempotency_exact_grant",
+      "fixture_class": "idempotency",
+      "schema_id": "server-dispatch-grant/v1",
+      "document": {"same_grant_digest": true, "same_task_id": true},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "authority_negative_package_mismatch",
+      "fixture_class": "negative",
+      "schema_id": "current-package-ref/v1",
+      "document": {"package_version": "0.1.1"},
+      "expected_code": "CURRENT_PACKAGE_PIN_MISMATCH"
+    }
+  ]
+}
