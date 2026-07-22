@@ -8,6 +8,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "acceptance_source_ids_unique": _rule_task_request_acceptance_sources,
     "actor": _rule_actor,
     "capability_and_delivery_sets_sorted_unique": _rule_task_request_sets,
+    "execution_profile": _rule_execution_profile,
     "utf8_nfc_byte_limits": _utf8_fields,
 }
 

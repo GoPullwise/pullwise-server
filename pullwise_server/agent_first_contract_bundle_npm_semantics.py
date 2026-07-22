@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from .agent_first_contract_bundle_npm_execution_profile import (
+    NPM_EXECUTION_PROFILE_RULE,
+)
 
-NPM_SEMANTICS = r'''
+
+NPM_SEMANTICS_BASE = r'''
 function publicErrorCode(detail, explicit) {
   const codes = new Set(bundle().families.flatMap(
     (family) => family.fixtures
@@ -148,6 +152,7 @@ function decodeBase64Canonical(value) {
 }
 
 function validateSemantics(schemaId, value) {
+  if (validateDeclaredDocumentRules(schemaId, value)) return;
   if (schemaId === "source-content/v1") {
     const raw = decodeBase64Canonical(value.data_base64);
     if (raw.length !== value.size_bytes) fail("SOURCE_CONTENT_SIZE_MISMATCH", "$.size_bytes");
@@ -269,6 +274,52 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
   return true;
 }
 '''
+
+
+NPM_DECLARED_DISPATCH = r'''
+const DOCUMENT_RULE_HANDLERS = Object.freeze({
+  execution_profile: ruleExecutionProfile,
+});
+
+function sortedUniqueStrings(values, allowEmpty) {
+  return Array.isArray(values) && (allowEmpty || values.length > 0) &&
+    values.every((item) => typeof item === "string") &&
+    new Set(values).size === values.length &&
+    JSON.stringify(values) === JSON.stringify([...values].sort());
+}
+
+function validateDeclaredDocumentRules(schemaId, value) {
+  const semantics = schema(schemaId)["x-pullwise-semantics"];
+  const rules = semantics?.document_rules;
+  if (!Array.isArray(rules) || !rules.some(
+    (ruleId) => Object.prototype.hasOwnProperty.call(
+      DOCUMENT_RULE_HANDLERS, ruleId,
+    ),
+  )) return false;
+  if (!semantics || typeof semantics !== "object" || Array.isArray(semantics) ||
+      JSON.stringify(Object.keys(semantics).sort()) !==
+        JSON.stringify(["contextual_helpers", "document_rules"]) ||
+      !sortedUniqueStrings(rules, false) ||
+      !sortedUniqueStrings(semantics.contextual_helpers, true)) {
+    fail("CONTRACT_SEMANTICS_INVALID", schemaId);
+  }
+  for (const ruleId of rules) {
+    const handler = DOCUMENT_RULE_HANDLERS[ruleId];
+    if (!handler) fail("CONTRACT_SEMANTIC_RULE_UNIMPLEMENTED", ruleId);
+    handler(value);
+  }
+  return true;
+}
+'''
+
+
+NPM_SEMANTICS = "\n".join(
+    (
+        NPM_SEMANTICS_BASE,
+        NPM_EXECUTION_PROFILE_RULE,
+        NPM_DECLARED_DISPATCH,
+    )
+)
 
 
 __all__ = ["NPM_SEMANTICS"]

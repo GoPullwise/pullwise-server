@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import unittest
 
-from pullwise_server.agent_first_contract_bundle_source import load_family
+from pullwise_server.agent_first_contract_bundle_source import canonical_bytes, load_family
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +74,62 @@ class QualityPolicyPlanFamilyTest(unittest.TestCase):
                 )
                 for branch in self.schema["oneOf"]
             ],
+        )
+
+    def test_fixture_matrix_covers_each_mvp_quality_branch(self) -> None:
+        fixtures = {item["fixture_id"]: item for item in self.family["fixtures"]}
+        expected = {
+            "quality_policy_golden_q1_plan", "quality_policy_golden_q2_plan",
+            "quality_policy_golden_q3_unsupported", "quality_policy_idempotency_q1_plan",
+            "quality_policy_idempotency_q2_plan", "quality_policy_idempotency_q3_unsupported",
+            "quality_policy_negative_q0_removed", "quality_policy_negative_q1_missing_slot",
+            "quality_policy_negative_q1_self_attestation", "quality_policy_negative_q2_duplicate_concern",
+            "quality_policy_negative_q2_missing_slot", "quality_policy_negative_q3_has_slot",
+        }
+        self.assertEqual(expected, set(fixtures))
+        self.assertEqual(sorted(fixtures), [item["fixture_id"] for item in self.family["fixtures"]])
+        pairs = (
+            ("quality_policy_golden_q1_plan", "quality_policy_idempotency_q1_plan"),
+            ("quality_policy_golden_q2_plan", "quality_policy_idempotency_q2_plan"),
+            ("quality_policy_golden_q3_unsupported", "quality_policy_idempotency_q3_unsupported"),
+        )
+        for golden_id, retry_id in pairs:
+            golden = fixtures[golden_id]["document"]
+            retry = fixtures[retry_id]["document"]
+            self.assertEqual(canonical_bytes(golden), canonical_bytes(retry))
+            self.assertTrue(self._valid_plan(golden), golden_id)
+            self.assertIsNone(fixtures[golden_id]["expected_code"])
+            self.assertIsNone(fixtures[retry_id]["expected_code"])
+        for fixture_id, fixture in fixtures.items():
+            if fixture["fixture_class"] == "negative":
+                self.assertEqual("CONTRACT_DOCUMENT_INVALID", fixture["expected_code"])
+                self.assertFalse(self._valid_plan(fixture["document"]), fixture_id)
+
+    def _valid_plan(self, document: dict[str, object]) -> bool:
+        unsigned = {key: value for key, value in document.items() if key != "plan_digest"}
+        expected_digest = hashlib.sha256(
+            b"pullwise:quality-policy-plan:v1\0" + canonical_bytes(unsigned)
+        ).hexdigest()
+        slots = document["slots"]
+        risk = document["quality_risk"]
+        expected_concerns = {
+            "Q1": ["contract_and_data"],
+            "Q2": ["contract_and_data", "security_and_concurrency"],
+            "Q3": [],
+        }
+        return (
+            document["plan_digest"] == expected_digest
+            and document["self_attestation_allowed"] is False
+            and risk in expected_concerns
+            and len(slots) == len(expected_concerns[risk])
+            and [item["slot_id"] for item in slots]
+            == sorted({item["slot_id"] for item in slots})
+            and [item["concern"] for item in slots] == expected_concerns[risk]
+            and all(
+                item["requirement_ids"] == sorted(set(item["requirement_ids"]))
+                and bool(item["requirement_ids"])
+                for item in slots
+            )
         )
 
 

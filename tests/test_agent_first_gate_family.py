@@ -4,7 +4,12 @@ import json
 from pathlib import Path
 import unittest
 
-from tests.agent_first_task_evidence_support import sealed
+from tests.agent_first_task_evidence_support import (
+    canonical_bytes,
+    sealed,
+    valid_availability,
+    valid_content_ref,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,6 +140,59 @@ PREDICATE_CONTRACT = {
         ("DEBUG_UPLOAD_FAILED", "EVENT_DELIVERY_UNKNOWN", "PROTOCOL_FAILURE"),
     ),
 }
+COMMON_DECISION_FIELDS = {
+    "schema_id",
+    "decision_kind",
+    "input_snapshot_ref",
+    "input_digest",
+    "predicate_registry_digest",
+    "passed",
+    "predicate_results",
+    "decision_digest",
+}
+TERMINAL_REASON_MAP = {
+    "PARTIAL": {
+        "BUDGET_EXHAUSTED",
+        "CAPABILITY_UNAVAILABLE",
+        "DEADLINE_REACHED",
+        "INTERACTION_UNAVAILABLE",
+        "SAFE_PARTIAL_DELIVERY",
+        "VERIFICATION_INCOMPLETE",
+    },
+    "BLOCKED": {
+        "APPROVAL_REQUIRED",
+        "CAPABILITY_UNAVAILABLE",
+        "ENVIRONMENT_UNAVAILABLE",
+        "INPUT_REQUIRED",
+        "INTERACTION_UNAVAILABLE",
+        "POLICY_INVARIANT_BROKEN",
+        "POLICY_UNSUPPORTED",
+    },
+    "FAILED": {
+        "BUDGET_EXHAUSTED",
+        "CONTRACT_INVALID",
+        "DEADLINE_REACHED",
+        "POLICY_INVARIANT_BROKEN",
+        "POLICY_UNSUPPORTED",
+        "PROTOCOL_FAILURE",
+        "QUALITY_GATE_FAILED",
+        "RUNTIME_FAILURE",
+        "SOURCE_MUTATION_FORBIDDEN",
+        "STORAGE_FAILURE",
+    },
+    "CANCELLED": {"LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"},
+}
+
+
+def ordered_refs(values: object, targets: set[str]) -> bool:
+    if not isinstance(values, list) or not values:
+        return False
+    keys = [
+        (item["content_schema_id"], item["artifact_id"], item["sha256"])
+        for item in values
+        if valid_content_ref(item, targets)
+    ]
+    return len(keys) == len(values) and keys == sorted(set(keys))
 
 
 class GateFamilyTest(unittest.TestCase):
@@ -325,6 +383,154 @@ class GateFamilyTest(unittest.TestCase):
             else:
                 annotation = "x-pullwise-availability-content-schema-id"
             self.assertEqual(target, rule[annotation])
+
+    def valid_decision(self, document: dict[str, object]) -> bool:
+        kind = document.get("decision_kind")
+        expected_ids = (
+            SUCCESS_PREDICATES if kind == "success" else TERMINAL_PREDICATES
+        )
+        branch_fields = (
+            {"requested_outcome"}
+            if kind == "success"
+            else {
+                "selected_outcome",
+                "selected_reason",
+                "authoritative_fact_refs",
+                "source_availability",
+                "evidence_availability",
+                "effect_availability",
+            }
+        )
+        if set(document) != COMMON_DECISION_FIELDS | branch_fields:
+            return False
+        results = document["predicate_results"]
+        if (
+            not isinstance(results, list)
+            or [item.get("predicate_id") for item in results]
+            != list(expected_ids)
+        ):
+            return False
+        for result in results:
+            if set(result) != {
+                "predicate_id",
+                "passed",
+                "failure_code",
+                "repairable",
+                "evidence_refs",
+            }:
+                return False
+            failure = result["failure_code"]
+            if result["passed"] != (failure is None):
+                return False
+            inputs, allowed_failures = PREDICATE_CONTRACT[result["predicate_id"]]
+            if failure is not None and failure not in allowed_failures:
+                return False
+            if not ordered_refs(result["evidence_refs"], set(inputs)):
+                return False
+        if document["passed"] != all(item["passed"] for item in results):
+            return False
+        if document["predicate_registry_digest"] != next(
+            item
+            for item in self.gate_family["fixtures"]
+            if item["fixture_id"] == "gate_golden_independent_registry"
+        )["document"]["registry_digest"]:
+            return False
+        if not sealed(document, self.schemas["gate-decision/v1"]):
+            return False
+        if kind == "success":
+            return (
+                document["requested_outcome"]
+                in {"COMPLETED", "COMPLETED_WITH_WAIVERS", "NO_CHANGE_NEEDED"}
+                and valid_content_ref(
+                    document["input_snapshot_ref"], {"gate-input-snapshot/v1"}
+                )
+            )
+        if kind != "terminalization":
+            return False
+        outcome = document["selected_outcome"]
+        return (
+            outcome in TERMINAL_REASON_MAP
+            and document["selected_reason"] in TERMINAL_REASON_MAP[outcome]
+            and valid_content_ref(
+                document["input_snapshot_ref"],
+                {"terminalization-input-snapshot/v1"},
+            )
+            and ordered_refs(
+                document["authoritative_fact_refs"], {"terminalization-fact/v1"}
+            )
+            and valid_availability(
+                document["source_availability"], {"source-tree-manifest/v1"}
+            )
+            and valid_availability(
+                document["evidence_availability"],
+                {"pre-gate-evidence-closure-manifest/v1"},
+            )
+            and valid_availability(
+                document["effect_availability"], {"effect-ledger-snapshot/v1"}
+            )
+        )
+
+    def test_decision_fixtures_cover_success_terminal_fence_and_crash(self) -> None:
+        fixtures = {
+            item["fixture_id"]: item for item in self.gate_family["fixtures"]
+        }
+        self.assertEqual(
+            sorted(fixtures),
+            [item["fixture_id"] for item in self.gate_family["fixtures"]],
+        )
+        required = {
+            "gate_decision_crash_runtime_failure": "crash",
+            "gate_decision_fence_lease_invalid": "fence",
+            "gate_decision_golden_success": "golden",
+            "gate_decision_golden_terminalization": "golden",
+            "gate_decision_idempotency_success": "idempotency",
+            "gate_decision_negative_cross_branch": "negative",
+            "gate_decision_negative_missing_predicate": "negative",
+        }
+        for fixture_id, fixture_class in required.items():
+            self.assertEqual(fixture_class, fixtures[fixture_id]["fixture_class"])
+        valid_ids = {
+            "gate_decision_crash_runtime_failure",
+            "gate_decision_fence_lease_invalid",
+            "gate_decision_golden_success",
+            "gate_decision_golden_terminalization",
+            "gate_decision_idempotency_success",
+        }
+        for fixture_id in valid_ids:
+            self.assertTrue(
+                self.valid_decision(fixtures[fixture_id]["document"]), fixture_id
+            )
+        self.assertEqual(
+            canonical_bytes(fixtures["gate_decision_golden_success"]["document"]),
+            canonical_bytes(
+                fixtures["gate_decision_idempotency_success"]["document"]
+            ),
+        )
+        fenced = fixtures["gate_decision_fence_lease_invalid"]["document"]
+        failures = [item for item in fenced["predicate_results"] if not item["passed"]]
+        self.assertEqual(
+            [("GATE_LEASE_VALID", "LEASE_INVALID", False)],
+            [
+                (item["predicate_id"], item["failure_code"], item["repairable"])
+                for item in failures
+            ],
+        )
+        crashed = fixtures["gate_decision_crash_runtime_failure"]["document"]
+        self.assertEqual(
+            ("terminalization", "FAILED", "RUNTIME_FAILURE"),
+            (
+                crashed["decision_kind"],
+                crashed["selected_outcome"],
+                crashed["selected_reason"],
+            ),
+        )
+        for fixture_id in {
+            "gate_decision_negative_cross_branch",
+            "gate_decision_negative_missing_predicate",
+        }:
+            self.assertFalse(
+                self.valid_decision(fixtures[fixture_id]["document"]), fixture_id
+            )
 
 
 if __name__ == "__main__":

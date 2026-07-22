@@ -11,6 +11,7 @@ from pullwise_server.agent_first_contract_bundle_source import (
 from tests.agent_first_task_evidence_support import (
     ordered_unique,
     sealed,
+    valid_actor,
     valid_content_ref,
 )
 
@@ -39,6 +40,33 @@ PUBLICATION_SOURCE_SCHEMA_IDS = {
     "task-request/v1",
     "verification-attestation/v1",
     "verifier-work-report/v1",
+}
+TERMINAL_EVIDENCE_SCHEMA_IDS = {
+    "budget-summary/v1",
+    "effective-execution-policy/v1",
+    "execution-state-manifest/v1",
+    "local-tool-receipt/v1",
+    "requirement-ledger/v1",
+    "source-tree-manifest/v1",
+    "stable-error/v1",
+    "task-request/v1",
+}
+AUTHORITATIVE_ACTOR_KINDS = {
+    "server_control",
+    "system_reconciler",
+    "user_control",
+    "worker_control",
+}
+TERMINAL_REASON_CODES = {
+    "BUDGET_EXHAUSTED",
+    "CANCELLATION_REQUESTED",
+    "CAPABILITY_UNAVAILABLE",
+    "DEADLINE_REACHED",
+    "INTERACTION_UNAVAILABLE",
+    "POLICY_INVARIANT_BROKEN",
+    "PROTOCOL_FAILURE",
+    "RUNTIME_FAILURE",
+    "STORAGE_FAILURE",
 }
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -138,10 +166,88 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
                 return False
         return True
 
+    def valid_terminalization_fact(self, document: dict[str, object]) -> bool:
+        source = document["source"]
+        evidence_refs = document["evidence_refs"]
+        reason_code = document["reason_code"]
+        expected_idempotency_key = (
+            f"terminalize:{reason_code.lower()}:"
+            f"{document['observed_task_version']}"
+        )
+        return (
+            set(document)
+            == set(self.schemas["terminalization-fact/v1"]["required"])
+            and sealed(document, self.schemas["terminalization-fact/v1"])
+            and document["idempotency_key"] == expected_idempotency_key
+            and valid_actor(source)
+            and source["kind"] in AUTHORITATIVE_ACTOR_KINDS
+            and (
+                source["kind"] != "user_control"
+                or reason_code == "CANCELLATION_REQUESTED"
+            )
+            and ordered_unique(evidence_refs, self.ref_key)
+            and all(
+                valid_content_ref(ref, TERMINAL_EVIDENCE_SCHEMA_IDS)
+                for ref in evidence_refs
+            )
+            and (
+                reason_code != "BUDGET_EXHAUSTED"
+                or any(
+                    ref["content_schema_id"] == "budget-summary/v1"
+                    for ref in evidence_refs
+                )
+            )
+        )
+
     def test_public_source_loader_accepts_the_bounded_family(self) -> None:
         self.assertEqual(
             list(SCHEMA_IDS),
             [schema["$id"] for schema in self.family["schemas"]],
+        )
+
+    def test_publication_entries_discriminate_artifact_and_inline_content(self) -> None:
+        entry_schema = self.schemas["publication-content-manifest/v1"][
+            "properties"
+        ]["entries"]["items"]
+        artifact_branch, inline_branch = entry_schema["oneOf"]
+
+        self.assertEqual(
+            ["object", "object"],
+            [artifact_branch.get("type"), inline_branch.get("type")],
+        )
+        self.assertEqual(
+            "artifact_bytes",
+            artifact_branch["properties"]["content_kind"]["const"],
+        )
+        self.assertEqual(
+            {"diagnostic_summary", "unstructured_string"},
+            set(inline_branch["properties"]["content_kind"]["enum"]),
+        )
+        self.assertEqual(
+            PUBLICATION_SOURCE_SCHEMA_IDS,
+            set(
+                artifact_branch["properties"]["source_ref"][
+                    "x-pullwise-content-schema-ids"
+                ]
+            ),
+        )
+        self.assertIsNone(
+            artifact_branch["properties"]["inline_digest"]["const"]
+        )
+        self.assertIsNone(
+            inline_branch["properties"]["source_ref"]["const"]
+        )
+
+    def test_terminalization_schema_covers_cancel_and_deterministic_replay_keys(self) -> None:
+        properties = self.schemas["terminalization-fact/v1"]["properties"]
+
+        self.assertEqual(
+            TERMINAL_REASON_CODES,
+            set(properties["reason_code"]["enum"]),
+        )
+        self.assertEqual(
+            "^terminalize:[a-z][a-z0-9_]{2,95}:[1-9][0-9]{0,15}$",
+            properties["idempotency_key"]["pattern"],
         )
 
     def test_debug_plan_golden_and_retry_are_sealed_and_output_free(self) -> None:
@@ -167,6 +273,51 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
         self.assertTrue(self.valid_publication_manifest(golden))
         self.assertNotEqual("0" * 64, golden["manifest_digest"])
         self.assertEqual(canonical_bytes(golden), canonical_bytes(retry))
+
+    def test_terminalization_fact_golden_and_retry_are_authoritative(self) -> None:
+        golden = self.document(
+            "gate_preparation_golden_terminalization_fact"
+        )
+        retry = self.document(
+            "gate_preparation_idempotency_terminalization_fact"
+        )
+
+        self.assertTrue(self.valid_terminalization_fact(golden))
+        self.assertNotEqual("0" * 64, golden["fact_digest"])
+        self.assertEqual(canonical_bytes(golden), canonical_bytes(retry))
+        self.assertEqual(
+            {"budget-summary/v1"},
+            {ref["content_schema_id"] for ref in golden["evidence_refs"]},
+        )
+
+    def test_negative_fixtures_are_sealed_but_break_family_semantics(self) -> None:
+        cases = (
+            (
+                "gate_preparation_negative_debug_output_ref",
+                "debug-redaction-plan/v1",
+                self.valid_debug_plan,
+            ),
+            (
+                "gate_preparation_negative_publication_dual_source",
+                "publication-content-manifest/v1",
+                self.valid_publication_manifest,
+            ),
+            (
+                "gate_preparation_negative_terminalization_actor",
+                "terminalization-fact/v1",
+                self.valid_terminalization_fact,
+            ),
+        )
+        for fixture_id, schema_id, validator in cases:
+            with self.subTest(fixture_id=fixture_id):
+                fixture = self.fixtures[fixture_id]
+                document = fixture["document"]
+                self.assertEqual(
+                    "CONTRACT_DOCUMENT_INVALID",
+                    fixture["expected_code"],
+                )
+                self.assertTrue(sealed(document, self.schemas[schema_id]))
+                self.assertFalse(validator(document))
 
 
 if __name__ == "__main__":

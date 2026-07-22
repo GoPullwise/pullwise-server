@@ -69,8 +69,11 @@ class AgentFirstExecutionProfileFacadesTest(unittest.TestCase):
         )
 
     def test_declared_rule_has_python_and_node_stable_code_parity(self) -> None:
-        cases = [
-            (self.golden, None),
+        valid_documents = [
+            self.golden,
+            {**self.golden, "cpu_architecture": "aarch64"},
+        ]
+        invalid_cases = [
             (
                 {**self.golden, "image_identity": "mutable:latest"},
                 "EXECUTION_PROFILE_IMAGE_MUTABLE",
@@ -84,16 +87,19 @@ class AgentFirstExecutionProfileFacadesTest(unittest.TestCase):
                 "EXECUTION_PROFILE_ARCH_INVALID",
             ),
         ]
+        documents = valid_documents + [document for document, _ in invalid_cases]
 
-        python_results = [self.python_result(document) for document, _ in cases]
-        node_results = self.node_results([document for document, _ in cases])
+        python_results = [self.python_result(document) for document in documents]
+        node_results = self.node_results(documents)
 
         self.assertEqual(python_results, node_results)
         self.assertEqual(
-            {"ok": True, "value": self.golden},
-            python_results[0],
+            [{"ok": True, "value": document} for document in valid_documents],
+            python_results[: len(valid_documents)],
         )
-        for result, (_, expected_detail) in zip(python_results[1:], cases[1:]):
+        for result, (_, expected_detail) in zip(
+            python_results[len(valid_documents) :], invalid_cases
+        ):
             self.assertEqual(
                 {
                     "ok": False,

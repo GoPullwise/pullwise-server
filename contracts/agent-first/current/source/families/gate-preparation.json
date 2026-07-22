@@ -150,7 +150,9 @@
             },
             "oneOf": [
               {
+                "type": "object",
                 "properties": {
+                  "content_kind": { "const": "artifact_bytes" },
                   "source_ref": {
                     "$ref": "content-ref/v1",
                     "x-pullwise-content-schema-ids": [
@@ -168,7 +170,11 @@
                 }
               },
               {
+                "type": "object",
                 "properties": {
+                  "content_kind": {
+                    "enum": ["diagnostic_summary", "unstructured_string"]
+                  },
                   "source_ref": { "const": null },
                   "inline_digest": {
                     "type": "string",
@@ -339,7 +345,7 @@
         "fact_id": "termfact_11111111111111111111111111111111",
         "task_id": "task_11111111111111111111111111111111",
         "observed_task_version": 7,
-        "idempotency_key": "terminalize:budget:7",
+        "idempotency_key": "terminalize:budget_exhausted:7",
         "reason_code": "BUDGET_EXHAUSTED",
         "source": {
           "schema_id": "actor/v1",
@@ -359,7 +365,7 @@
           }
         ],
         "observed_at": "2026-01-01T00:00:03.000Z",
-        "fact_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "fact_digest": "73fb9b477c8db6530c3b4d101627d78627714b38eaba54e284d6a9a68db6ac24"
       },
       "expected_code": null
     },
@@ -449,7 +455,7 @@
         "fact_id": "termfact_11111111111111111111111111111111",
         "task_id": "task_11111111111111111111111111111111",
         "observed_task_version": 7,
-        "idempotency_key": "terminalize:budget:7",
+        "idempotency_key": "terminalize:budget_exhausted:7",
         "reason_code": "BUDGET_EXHAUSTED",
         "source": {
           "schema_id": "actor/v1",
@@ -469,7 +475,7 @@
           }
         ],
         "observed_at": "2026-01-01T00:00:03.000Z",
-        "fact_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "fact_digest": "73fb9b477c8db6530c3b4d101627d78627714b38eaba54e284d6a9a68db6ac24"
       },
       "expected_code": null
     },
@@ -495,7 +501,7 @@
             "encoding": "utf-8"
           }
         ],
-        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "plan_digest": "ad1ee07eee494acc61b98107c7969266f90975d40c221435e6e63ed6a472036b"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -533,7 +539,7 @@
           }
         ],
         "entry_count": 1,
-        "manifest_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "manifest_digest": "b94ecd0260d744f270672becca06710e933d7decf5a72f249393c66bb8ea7f8a"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -546,7 +552,7 @@
         "fact_id": "termfact_11111111111111111111111111111111",
         "task_id": "task_11111111111111111111111111111111",
         "observed_task_version": 7,
-        "idempotency_key": "terminalize:budget:7",
+        "idempotency_key": "terminalize:budget_exhausted:7",
         "reason_code": "BUDGET_EXHAUSTED",
         "source": {
           "schema_id": "actor/v1",
@@ -566,7 +572,7 @@
           }
         ],
         "observed_at": "2026-01-01T00:00:03.000Z",
-        "fact_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "fact_digest": "02c5073287bf60474243838f9adebf41d14f8785c3b52870626222224edd65e4"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }
