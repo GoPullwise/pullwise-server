@@ -181,6 +181,30 @@ class QualityPolicyPlanFamilyTest(unittest.TestCase):
                     ),
                 )
 
+    def test_public_digest_helpers_never_accept_a_zero_digest_document(self) -> None:
+        complete = deepcopy(
+            self.fixtures["quality_policy_golden_q1_plan"]["document"]
+        )
+        unsigned = {
+            key: value for key, value in complete.items() if key != "plan_digest"
+        }
+        self.assertEqual(
+            complete["plan_digest"],
+            self.wrapper.document_digest("quality-policy-plan/v1", unsigned),
+        )
+        self.assertEqual(
+            complete,
+            self.wrapper.seal_document("quality-policy-plan/v1", unsigned),
+        )
+
+        zero_digest = {**unsigned, "plan_digest": "0" * 64}
+        with self.assertRaises(self.wrapper.ContractValidationError) as raised:
+            self.wrapper.validate_document(
+                "quality-policy-plan/v1",
+                zero_digest,
+            )
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
+
     def test_public_document_rule_recomputes_inputs_and_fixed_slot_table(self) -> None:
         requirement_id = (
             "req_user_objective_"
@@ -220,6 +244,77 @@ class QualityPolicyPlanFamilyTest(unittest.TestCase):
                     document,
                 )
             self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
+
+    def test_context_helper_accepts_q1_q2_and_q3_evidence(self) -> None:
+        fixture_ids = (
+            "quality_policy_golden_q1_plan",
+            "quality_policy_golden_q2_plan",
+            "quality_policy_golden_q3_unsupported",
+        )
+        for fixture_id in fixture_ids:
+            context = self._quality_context(fixture_id)
+            with self.subTest(fixture_id=fixture_id):
+                self.assertEqual(
+                    context[0],
+                    self.wrapper.verify_quality_policy_plan_context(*context),
+                )
+
+        unsupported = self._quality_context(
+            "quality_policy_golden_q3_unsupported"
+        )
+        unsupported[0]["rationale"] = "Opaque unsupported-policy evidence."
+        unsupported[0] = self._reseal(unsupported[0])
+        self.assertEqual(
+            unsupported[0],
+            self.wrapper.verify_quality_policy_plan_context(*unsupported),
+        )
+
+    def test_context_helper_binds_every_input_and_mandatory_coverage(self) -> None:
+        valid = self._quality_context("quality_policy_golden_q2_plan")
+        mismatches = (
+            ("proposal_task", 1, "task_id", "task_22222222222222222222222222222222"),
+            ("proposal_id", 1, "proposal_id", "proposal_22222222222222222222222222222222"),
+            ("proposal_digest", 1, "proposal_digest", "6" * 64),
+            ("proposal_policy", 1, "policy_digest", "6" * 64),
+            ("proposal_ledger", 1, "requirement_ledger_digest", "6" * 64),
+            ("policy_digest", 2, "digest", "6" * 64),
+            ("policy_task_type", 2, "task_type", "pullwise.repo-review.incremental/v1"),
+            ("request_task", 3, "task_id", "task_22222222222222222222222222222222"),
+            ("request_task_type", 3, "task_type", "pullwise.repo-review.incremental/v1"),
+            ("ledger_task", 4, "task_id", "task_22222222222222222222222222222222"),
+            ("ledger_digest", 4, "ledger_digest", "6" * 64),
+            ("classification", 5, "change_set_classification_digest", "6" * 64),
+            ("capability", 5, "capability_usage_digest", "6" * 64),
+        )
+        for case, index, field, replacement in mismatches:
+            changed = deepcopy(valid)
+            changed[index][field] = replacement
+            with self.subTest(case=case):
+                self._assert_context_invalid(changed)
+
+        below_floor = self._quality_context(
+            "quality_policy_golden_q1_plan"
+        )
+        below_floor[2]["quality_risk_floor"] = "Q2"
+        self._assert_context_invalid(below_floor)
+
+        incomplete_coverage = self._quality_context(
+            "quality_policy_golden_q2_plan"
+        )
+        optional_id = "req_user_objective_" + "2" * 64
+        incomplete_coverage[0]["slots"][0]["requirement_ids"].append(
+            optional_id
+        )
+        incomplete_coverage[0] = self._reseal(incomplete_coverage[0])
+        incomplete_coverage[4]["entries"][1]["mandatory"] = True
+        self._assert_context_invalid(incomplete_coverage)
+
+    def test_owned_files_respect_size_and_line_limits(self) -> None:
+        for path in (FAMILY_PATH, Path(__file__)):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            with self.subTest(path=path.name):
+                self.assertLessEqual(len(lines), 600)
+                self.assertLessEqual(max(map(len, lines)), 200)
 
     def _valid_plan(self, document: dict[str, object]) -> bool:
         unsigned = {key: value for key, value in document.items() if key != "plan_digest"}
@@ -277,6 +372,56 @@ class QualityPolicyPlanFamilyTest(unittest.TestCase):
             b"pullwise:quality-policy-plan:v1\0" + canonical_bytes(unsigned)
         ).hexdigest()
         return document
+
+    def _quality_context(
+        self,
+        fixture_id: str,
+    ) -> list[dict[str, object]]:
+        plan = deepcopy(self.fixtures[fixture_id]["document"])
+        mandatory_id = "req_user_objective_" + "1" * 64
+        optional_id = "req_user_objective_" + "2" * 64
+        return [
+            plan,
+            {
+                "task_id": plan["task_id"],
+                "proposal_id": plan["proposal_id"],
+                "proposal_digest": plan["proposal_digest"],
+                "policy_digest": plan["policy_digest"],
+                "requirement_ledger_digest": plan["requirement_ledger_digest"],
+            },
+            {
+                "digest": plan["policy_digest"],
+                "task_type": plan["task_type"],
+                "quality_risk_floor": plan["quality_risk"],
+            },
+            {
+                "task_id": plan["task_id"],
+                "task_type": plan["task_type"],
+            },
+            {
+                "task_id": plan["task_id"],
+                "ledger_digest": plan["requirement_ledger_digest"],
+                "active_requirement_ids": [mandatory_id, optional_id],
+                "entries": [
+                    {"requirement_id": mandatory_id, "mandatory": True},
+                    {"requirement_id": optional_id, "mandatory": False},
+                ],
+            },
+            {
+                "change_set_classification_digest": plan[
+                    "change_set_classification_digest"
+                ],
+                "capability_usage_digest": plan["capability_usage_digest"],
+            },
+        ]
+
+    def _assert_context_invalid(
+        self,
+        context: list[dict[str, object]],
+    ) -> None:
+        with self.assertRaises(self.wrapper.ContractValidationError) as raised:
+            self.wrapper.verify_quality_policy_plan_context(*context)
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
 
 
 if __name__ == "__main__":

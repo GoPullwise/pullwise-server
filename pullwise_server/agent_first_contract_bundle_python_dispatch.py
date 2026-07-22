@@ -10,6 +10,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "budget_ceiling_consistency": _rule_policy_budget_ceilings,
     "capability_and_delivery_sets_sorted_unique": _rule_task_request_sets,
     "capability_sets_disjoint_sorted_unique": _rule_policy_capability_sets,
+    "change_set_patch": _rule_change_set_patch,
     "execution_profile": _rule_execution_profile,
     "observation": _rule_observation,
     "policy_digest_exact": _rule_policy_digest,

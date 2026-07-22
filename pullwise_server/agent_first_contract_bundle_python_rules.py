@@ -75,6 +75,11 @@ def _rule_binary_content(value: dict[str, object], data_field: str = "data_base6
     )
 
 
+def _rule_change_set_patch(value: dict[str, object]) -> None:
+    _rule_binary_content(value)
+    _verify_embedded_digest("change-set-patch/v1", value)
+
+
 def _valid_tree_entry(entry: dict[str, object]) -> bool:
     expected = {
         "file": {"path", "type", "size_bytes", "sha256", "executable"},
