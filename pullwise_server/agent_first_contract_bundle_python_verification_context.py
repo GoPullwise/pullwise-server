@@ -42,6 +42,7 @@ def verify_completion_proposal_context(
     _verification_require(checked["attempt_id"] == snapshot["current_attempt_id"], _VERIFICATION_CONTEXT_INVALID, "$.attempt_id")
     _verification_require(checked["attempt_id"] == attempt_value["attempt_id"], _VERIFICATION_CONTEXT_INVALID, "$.attempt_id")
     _verification_require(checked["attempt_id"] == owner_value["attempt_id"], _VERIFICATION_CONTEXT_INVALID, "$.attempt_id")
+    _verification_require(checked["native_epoch"] == snapshot["native_epoch"], _VERIFICATION_CONTEXT_INVALID, "$.native_epoch")
     _verification_require(checked["native_epoch"] == attempt_value["native_epoch"], _VERIFICATION_CONTEXT_INVALID, "$.native_epoch")
     _verification_require(checked["native_epoch"] == owner_value["native_epoch"], _VERIFICATION_CONTEXT_INVALID, "$.native_epoch")
     _verification_require(checked["owner_id"] == snapshot["owner_id"], _VERIFICATION_CONTEXT_INVALID, "$.owner_id")
@@ -89,6 +90,12 @@ def verify_completion_proposal_context(
         _VERIFICATION_CONTEXT_INVALID,
         "$.execution_state_ids",
     )
+    for index, state_value in enumerate(state_values):
+        _verification_require(
+            state_value["source_state_id"] == final_value["source_state_id"],
+            _VERIFICATION_CONTEXT_INVALID,
+            f"$.execution_state_ids[{index}]",
+        )
     if change_value is None:
         _verification_require(checked["change_set_ref"] is None, _VERIFICATION_CONTEXT_INVALID, "$.change_set_ref")
     else:
@@ -158,6 +165,7 @@ def verify_verifier_input_context(
     _verification_require(checked["task_id"] == proposal_value["task_id"] == plan_value["task_id"], _VERIFICATION_CONTEXT_INVALID, "$.task_id")
     _verification_require(checked["task_id"] == request_value["task_id"] == ledger_value["task_id"] == charter_value["task_id"], _VERIFICATION_CONTEXT_INVALID, "$.task_id")
     _verification_require(checked["proposal_id"] == proposal_value["proposal_id"] == plan_value["proposal_id"], _VERIFICATION_CONTEXT_INVALID, "$.proposal_id")
+    _verification_require(checked["artifact_refs"] == proposal_value["artifact_refs"], _VERIFICATION_CONTEXT_INVALID, "$.artifact_refs")
     _verification_require_ref(checked["task_request_ref"], "task-request/v1", request_value, "$.task_request_ref")
     _verification_require_ref(checked["effective_policy_ref"], "effective-execution-policy/v1", policy_value, "$.effective_policy_ref")
     _verification_require_ref(checked["requirement_ledger_ref"], "requirement-ledger/v1", ledger_value, "$.requirement_ledger_ref")
@@ -171,11 +179,11 @@ def verify_verifier_input_context(
     _verification_require(plan_value["proposal_digest"] == proposal_value["proposal_digest"], _VERIFICATION_CONTEXT_DIGEST_INVALID, "$.proposal_digest")
     _verification_require(plan_value["policy_digest"] == proposal_value["policy_digest"] == policy_value["digest"], _VERIFICATION_CONTEXT_DIGEST_INVALID, "$.policy_digest")
     _verification_require(plan_value["requirement_ledger_digest"] == ledger_value["ledger_digest"], _VERIFICATION_CONTEXT_DIGEST_INVALID, "$.requirement_ledger_digest")
-    _verification_require(checked["artifact_refs"] == proposal_value["artifact_refs"], _VERIFICATION_CONTEXT_INVALID, "$.artifact_refs")
     _verification_require(checked["slot_concern"] == slot["concern"], _VERIFICATION_CONTEXT_INVALID, "$.slot_concern")
     _verification_require(checked["requirement_ids"] == slot["requirement_ids"], _VERIFICATION_CONTEXT_INVALID, "$.requirement_ids")
-    _verification_require(checked["requirement_ids"] == _verification_requirement_ids(proposal_value["requirement_claims"]), _VERIFICATION_CONTEXT_INVALID, "$.requirement_ids")
     _verification_require(proposal_value["request_digest"] == _verification_request_digest(request_value), _VERIFICATION_CONTEXT_DIGEST_INVALID, "$.request_digest")
+    _verification_require(request_value["task_type"] == policy_value["task_type"], _VERIFICATION_CONTEXT_INVALID, "$.task_type")
+    _verification_require(proposal_value["charter_digest"] == _verification_companion_digest("task-charter/v1", charter_value), _VERIFICATION_CONTEXT_DIGEST_INVALID, "$.charter_digest")
     _verification_require(proposal_value["original_source_state_id"] == original_value["source_state_id"], _VERIFICATION_CONTEXT_INVALID, "$.original_source_ref")
     _verification_require(proposal_value["final_source_state_id"] == final_value["source_state_id"], _VERIFICATION_CONTEXT_INVALID, "$.final_source_ref")
     _verification_require(pre_value["task_id"] == proposal_value["task_id"], _VERIFICATION_CONTEXT_INVALID, "$.pre_verifier_observation_manifest_ref.task_id")
@@ -187,6 +195,8 @@ def verify_verifier_input_context(
         _verification_require(proposal_value["change_set_ref"] is None, _VERIFICATION_CONTEXT_INVALID, "$.change_set")
     else:
         _verification_require_ref(proposal_value["change_set_ref"], "change-set/v1", change_value, "$.completion_proposal_ref.change_set_ref")
+        _verification_require(change_value["original_source_state_id"] == original_value["source_state_id"], _VERIFICATION_CONTEXT_INVALID, "$.change_set.original_source_state_id")
+        _verification_require(change_value["final_source_state_id"] == final_value["source_state_id"], _VERIFICATION_CONTEXT_INVALID, "$.change_set.final_source_state_id")
     _verification_require(len(rule_values) == len(checked["engineering_rule_refs"]), _VERIFICATION_CONTEXT_INVALID, "$.engineering_rule_refs")
     for index, (ref, document) in enumerate(zip(checked["engineering_rule_refs"], rule_values)):
         _verification_require_ref(ref, "source-content/v1", document, f"$.engineering_rule_refs[{index}]")
@@ -211,6 +221,7 @@ def verify_verifier_work_context(
     _verification_require(checked["task_id"] == input_value["task_id"] == proposal_value["task_id"] == final_value["task_id"], _VERIFICATION_CONTEXT_INVALID, "$.task_id")
     _verification_require(checked["proposal_id"] == input_value["proposal_id"] == proposal_value["proposal_id"] == final_value["proposal_id"], _VERIFICATION_CONTEXT_INVALID, "$.proposal_id")
     _verification_require(checked["slot_id"] == input_value["slot_id"], _VERIFICATION_CONTEXT_INVALID, "$.slot_id")
+    _verification_require_ref(input_value["completion_proposal_ref"], "completion-proposal/v1", proposal_value, "$.completion_proposal_ref")
     _verification_require(final_value["attempt_id"] == proposal_value["attempt_id"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.attempt_id")
     _verification_require(final_value["native_epoch"] == proposal_value["native_epoch"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.native_epoch")
     _verification_require(
@@ -273,11 +284,18 @@ def verify_attestation_context(
     _verification_require(final_manifest_value["attempt_id"] == proposal_value["attempt_id"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.attempt_id")
     _verification_require(final_manifest_value["native_epoch"] == proposal_value["native_epoch"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.native_epoch")
     _verification_require(checked["source_state_id"] == proposal_value["final_source_state_id"] == final_source_value["source_state_id"], _VERIFICATION_CONTEXT_INVALID, "$.source_state_id")
+    _verification_require_ref(input_value["quality_policy_plan_ref"], "quality-policy-plan/v1", plan_value, "$.completion_proposal_ref.quality_policy_plan_ref")
+    _verification_require_companion_digest(input_value["quality_policy_plan_digest"], "quality-policy-plan/v1", plan_value, "$.completion_proposal_ref.quality_policy_plan_digest")
+    _verification_require(plan_value["proposal_digest"] == proposal_value["proposal_digest"], _VERIFICATION_CONTEXT_DIGEST_INVALID, "$.proposal_digest")
+    _verification_require(final_manifest_value["attempt_id"] == proposal_value["attempt_id"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.attempt_id")
+    _verification_require(final_manifest_value["native_epoch"] == proposal_value["native_epoch"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.native_epoch")
     _verification_require(
         checked["execution_state_ids"] == [item["execution_state_id"] for item in state_values],
         _VERIFICATION_CONTEXT_INVALID,
         "$.execution_state_ids",
     )
+    for index, state_value in enumerate(state_values):
+        _verification_require(state_value["source_state_id"] == final_source_value["source_state_id"], _VERIFICATION_CONTEXT_INVALID, f"$.execution_state_ids[{index}]")
     _verification_require(checked["own_observation_ids"] == work_value["own_observation_ids"], _VERIFICATION_CONTEXT_INVALID, "$.own_observation_ids")
     _verification_require(
         _verification_requirement_ids(checked["requirement_verdicts"]) == slot["requirement_ids"],
@@ -296,6 +314,13 @@ def verify_attestation_context(
         _verification_require(actor is not None, _VERIFICATION_CONTEXT_INVALID, f"$.own_observation_ids[{index}]")
         _verification_require(actor["kind"] == "quality_verifier", _VERIFICATION_CONTEXT_INVALID, f"$.own_observation_ids[{index}]")
         _verification_require(actor["session_id"] == checked["verifier_session_id"], _VERIFICATION_CONTEXT_INVALID, f"$.own_observation_ids[{index}]")
+    for index, entry in enumerate(final_manifest_value["entries"]):
+        actor = entry["actor"]
+        _verification_require(
+            actor["session_id"] != checked["verifier_session_id"] or actor["kind"] == "quality_verifier",
+            _VERIFICATION_CONTEXT_INVALID,
+            f"$.final_observation_manifest.entries[{index}].actor",
+        )
     for index, item in enumerate(checked["requirement_verdicts"]):
         evidence_ids = set(item["evidence_ids"])
         _verification_require(evidence_ids.issubset(own_ids), _VERIFICATION_CONTEXT_INVALID, f"$.requirement_verdicts[{index}].evidence_ids")

@@ -18,13 +18,14 @@ export async function verifyCompletionProposalContext(proposal, taskSnapshot, at
   const states = await verificationCheckDocuments("execution-state-manifest/v1", executionStates, "$.execution_states");
   const pre = await verifyDocumentDigest("pre-verifier-observation-manifest/v1", preObservationManifest);
   const change = changeSet === null ? null : await verifyDocumentDigest("change-set/v1", changeSet);
-  verificationRequire(checked.task_id === snapshot.task_id && checked.task_id === currentAttempt.task_id && checked.task_id === ownerDoc.task_id && checked.task_id === request.task_id, VERIFICATION_CONTEXT_INVALID, "$.task_id");
+  verificationRequire(checked.task_id === snapshot.task_id && checked.task_id === currentAttempt.task_id && checked.task_id === ownerDoc.task_id && checked.task_id === request.task_id && checked.task_id === ledger.task_id && checked.task_id === charter.task_id, VERIFICATION_CONTEXT_INVALID, "$.task_id");
   verificationRequire(currentAttempt.attempt_id === ownerDoc.attempt_id && ownerDoc.attempt_id === checked.attempt_id, VERIFICATION_CONTEXT_INVALID, "$.attempt_id");
   verificationRequire(snapshot.current_attempt_id === checked.attempt_id, VERIFICATION_CONTEXT_INVALID, "$.current_attempt_id");
   verificationRequire(snapshot.owner_id === ownerDoc.owner_id && ownerDoc.owner_id === checked.owner_id, VERIFICATION_CONTEXT_INVALID, "$.owner_id");
   verificationRequire(snapshot.owner_epoch === ownerDoc.owner_epoch && ownerDoc.owner_epoch === checked.owner_epoch, VERIFICATION_CONTEXT_INVALID, "$.owner_epoch");
   verificationRequire(snapshot.task_version === checked.proposed_from_task_version, VERIFICATION_CONTEXT_INVALID, "$.proposed_from_task_version");
-  verificationRequire(checked.native_epoch === currentAttempt.native_epoch && currentAttempt.native_epoch === ownerDoc.native_epoch, VERIFICATION_CONTEXT_INVALID, "$.native_epoch");
+  verificationRequire(checked.native_epoch === snapshot.native_epoch && checked.native_epoch === currentAttempt.native_epoch && currentAttempt.native_epoch === ownerDoc.native_epoch, VERIFICATION_CONTEXT_INVALID, "$.native_epoch");
+  verificationRequire(ownerDoc.session_id === currentAttempt.owner_session_id, VERIFICATION_CONTEXT_INVALID, "$.owner_session_id");
   verificationRequireRef(snapshot.request_ref, "task-request/v1", request, "$.request_ref");
   verificationRequireCompanionDigest(snapshot.request_digest, "task-request/v1", request, "$.request_digest");
   verificationRequireCompanionDigest(checked.request_digest, "task-request/v1", request, "$.request_digest");
@@ -34,11 +35,13 @@ export async function verifyCompletionProposalContext(proposal, taskSnapshot, at
   verificationRequireCompanionDigest(snapshot.ledger_head_digest, "requirement-ledger/v1", ledger, "$.requirement_ledger_digest");
   verificationRequireCompanionDigest(checked.requirement_ledger_digest, "requirement-ledger/v1", ledger, "$.requirement_ledger_digest");
   verificationRequireRef(snapshot.charter_ref, "task-charter/v1", charter, "$.charter_ref");
+  if (snapshot.completion_proposal_ref !== null) verificationRequireRef(snapshot.completion_proposal_ref, "completion-proposal/v1", checked, "$.completion_proposal_ref");
   verificationRequireCompanionDigest(checked.charter_digest, "task-charter/v1", charter, "$.charter_digest");
   verificationRequire(snapshot.task_type === request.task_type && request.task_type === policy.task_type, VERIFICATION_CONTEXT_INVALID, "$.task_type");
   verificationRequire(checked.original_source_state_id === original.source_state_id, VERIFICATION_CONTEXT_INVALID, "$.original_source_state_id");
   verificationRequire(checked.final_source_state_id === final.source_state_id, VERIFICATION_CONTEXT_INVALID, "$.final_source_state_id");
   verificationRequireIdList(checked.execution_state_ids, states.map((item) => item.execution_state_id), "$.execution_state_ids");
+  states.forEach((item, index) => verificationRequire(item.source_state_id === final.source_state_id, VERIFICATION_CONTEXT_INVALID, `$.execution_state_ids[${index}]`));
   if (change === null) {
     verificationRequire(checked.change_set_ref === null, VERIFICATION_CONTEXT_INVALID, "$.change_set_ref");
   } else {
@@ -75,6 +78,7 @@ export async function verifyVerifierInputContext(manifest, proposal, qualityPoli
   verificationRequire(slot !== null, VERIFICATION_CONTEXT_INVALID, "$.slot_id");
   verificationRequire(checked.task_id === proposalDoc.task_id && checked.task_id === request.task_id && checked.task_id === ledger.task_id && checked.task_id === charter.task_id && checked.task_id === plan.task_id, VERIFICATION_CONTEXT_INVALID, "$.task_id");
   verificationRequire(checked.proposal_id === proposalDoc.proposal_id && checked.proposal_id === plan.proposal_id, VERIFICATION_CONTEXT_INVALID, "$.proposal_id");
+  verificationRequire(request.task_type === policy.task_type, VERIFICATION_CONTEXT_INVALID, "$.task_type");
   verificationRequireRef(checked.task_request_ref, "task-request/v1", request, "$.task_request_ref");
   verificationRequireRef(checked.effective_policy_ref, "effective-execution-policy/v1", policy, "$.effective_policy_ref");
   verificationRequireRef(checked.requirement_ledger_ref, "requirement-ledger/v1", ledger, "$.requirement_ledger_ref");
@@ -91,11 +95,12 @@ export async function verifyVerifierInputContext(manifest, proposal, qualityPoli
     verificationRequireRef(ref, "source-content/v1", rules[index], `$.engineering_rule_refs[${index}]`);
   });
   if (change === null) {
-    verificationRequire(checked.change_set.availability !== "available" && proposalDoc.change_set_ref === null, VERIFICATION_CONTEXT_INVALID, "$.change_set");
+    verificationRequire(checked.change_set.availability === "not_applicable" && proposalDoc.change_set_ref === null, VERIFICATION_CONTEXT_INVALID, "$.change_set");
   } else {
     verificationRequire(checked.change_set.availability === "available", VERIFICATION_CONTEXT_INVALID, "$.change_set");
     verificationRequireRef(checked.change_set.ref, "change-set/v1", change, "$.change_set.ref");
     verificationRequireRef(proposalDoc.change_set_ref, "change-set/v1", change, "$.completion_proposal_ref");
+    verificationRequire(change.original_source_state_id === original.source_state_id && change.final_source_state_id === final.source_state_id, VERIFICATION_CONTEXT_INVALID, "$.change_set");
   }
   verificationRequire(plan.proposal_digest === proposalDoc.proposal_digest, VERIFICATION_CONTEXT_DIGEST_INVALID, "$.quality_policy_plan_digest");
   verificationRequire(plan.policy_digest === proposalDoc.policy_digest && proposalDoc.policy_digest === policy.digest, VERIFICATION_CONTEXT_DIGEST_INVALID, "$.quality_policy_plan_digest");
@@ -120,6 +125,7 @@ export async function verifyVerifierWorkContext(report, verifierInput, proposal,
   verificationRequire(checked.task_id === inputDoc.task_id && checked.task_id === proposalDoc.task_id && checked.task_id === finalManifest.task_id, VERIFICATION_CONTEXT_INVALID, "$.task_id");
   verificationRequire(checked.proposal_id === inputDoc.proposal_id && checked.proposal_id === proposalDoc.proposal_id && checked.proposal_id === finalManifest.proposal_id, VERIFICATION_CONTEXT_INVALID, "$.proposal_id");
   verificationRequire(checked.slot_id === inputDoc.slot_id, VERIFICATION_CONTEXT_INVALID, "$.slot_id");
+  verificationRequireRef(inputDoc.completion_proposal_ref, "completion-proposal/v1", proposalDoc, "$.completion_proposal_ref");
   verificationRequire(finalManifest.attempt_id === proposalDoc.attempt_id && finalManifest.native_epoch === proposalDoc.native_epoch, VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest");
   verificationRequireIdList(verificationAssessmentIds(checked.provisional_requirement_assessments), inputDoc.requirement_ids, "$.provisional_requirement_assessments");
   const finalIds = new Set(Object.keys(entries));
@@ -162,6 +168,13 @@ export async function verifyAttestationContext(attestation, verifierInput, verif
   verificationRequire(checked.model_identity === work.model_identity, VERIFICATION_CONTEXT_INVALID, "$.model_identity");
   verificationRequire(checked.source_state_id === final.source_state_id && final.source_state_id === proposalDoc.final_source_state_id, VERIFICATION_CONTEXT_INVALID, "$.source_state_id");
   verificationRequireIdList(checked.execution_state_ids, states.map((item) => item.execution_state_id), "$.execution_state_ids");
+  states.forEach((item, index) => verificationRequire(item.source_state_id === final.source_state_id, VERIFICATION_CONTEXT_INVALID, `$.execution_state_ids[${index}]`));
+  verificationRequireRef(inputDoc.quality_policy_plan_ref, "quality-policy-plan/v1", plan, "$.verifier_input_manifest_ref.quality_policy_plan_ref");
+  verificationRequireCompanionDigest(inputDoc.quality_policy_plan_digest, "quality-policy-plan/v1", plan, "$.verifier_input_manifest_digest.quality_policy_plan_digest");
+  verificationRequire(plan.proposal_digest === proposalDoc.proposal_digest, VERIFICATION_CONTEXT_DIGEST_INVALID, "$.proposal_digest");
+  verificationRequire(manifest.attempt_id === proposalDoc.attempt_id && manifest.native_epoch === proposalDoc.native_epoch, VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest");
+  const attestationSlot = verificationFindPlanSlot(plan, checked.slot_id);
+  verificationRequire(attestationSlot !== null && canonicalString(verificationAssessmentIds(checked.requirement_verdicts)) === canonicalString(attestationSlot.requirement_ids), VERIFICATION_CONTEXT_INVALID, "$.requirement_verdicts");
   verificationRequire(canonicalString(checked.own_observation_ids) === canonicalString(work.own_observation_ids), VERIFICATION_CONTEXT_INVALID, "$.own_observation_ids");
   const finalIds = new Set(Object.keys(entries));
   const ownIds = new Set(checked.own_observation_ids);
@@ -169,6 +182,7 @@ export async function verifyAttestationContext(attestation, verifierInput, verif
     const actor = entries[id]?.actor;
     verificationRequire(actor !== undefined && actor.kind === "quality_verifier" && actor.session_id === checked.verifier_session_id, VERIFICATION_CONTEXT_INVALID, "$.own_observation_ids");
   });
+  manifest.entries.forEach((entry, index) => verificationRequire(entry.actor.session_id !== checked.verifier_session_id || entry.actor.kind === "quality_verifier", VERIFICATION_CONTEXT_INVALID, `$.final_observation_manifest.entries[${index}].actor`));
   verificationRequireIdList(verificationAssessmentIds(checked.requirement_verdicts), inputDoc.requirement_ids, "$.requirement_verdicts");
   checked.requirement_verdicts.forEach((item, index) => {
     const evidence = new Set(item.evidence_ids);
@@ -189,11 +203,22 @@ export async function verifyAttestationManifestContext(manifest, qualityPolicyPl
   verificationRequireCompanionDigest(checked.final_observation_manifest_digest, "observation-manifest/v1", finalManifest, "$.final_observation_manifest_digest");
   verificationRequire(checked.task_id === plan.task_id && plan.task_id === finalManifest.task_id, VERIFICATION_CONTEXT_INVALID, "$.task_id");
   verificationRequire(checked.proposal_id === plan.proposal_id && plan.proposal_id === finalManifest.proposal_id, VERIFICATION_CONTEXT_INVALID, "$.proposal_id");
-  verificationRequire(checked.attestations.length === attestationDocs.length, VERIFICATION_CONTEXT_INVALID, "$.attestations");
+  verificationRequire(checked.attestation_count === attestationDocs.length && checked.attestations.length === attestationDocs.length, VERIFICATION_CONTEXT_INVALID, "$.attestations");
   const attestationById = new Map();
+  const attestationBySlot = new Map();
+  const planSlots = new Map(plan.slots.map((item) => [item.slot_id, item]));
   attestationDocs.forEach((document, index) => {
     verificationRequire(!attestationById.has(document.attestation_id), VERIFICATION_CONTEXT_INVALID, `$.attestations[${index}]`);
+    verificationRequire(document.task_id === checked.task_id && document.proposal_id === checked.proposal_id, VERIFICATION_CONTEXT_INVALID, `$.attestations[${index}]`);
+    verificationRequireRef(document.quality_policy_plan_ref, "quality-policy-plan/v1", plan, `$.attestations[${index}].quality_policy_plan_ref`);
+    verificationRequireCompanionDigest(document.quality_policy_plan_digest, "quality-policy-plan/v1", plan, `$.attestations[${index}].quality_policy_plan_digest`);
+    verificationRequireRef(document.final_observation_manifest_ref, "observation-manifest/v1", finalManifest, `$.attestations[${index}].final_observation_manifest_ref`);
+    verificationRequireCompanionDigest(document.final_observation_manifest_digest, "observation-manifest/v1", finalManifest, `$.attestations[${index}].final_observation_manifest_digest`);
+    const slot = planSlots.get(document.slot_id);
+    verificationRequire(slot !== undefined && !attestationBySlot.has(document.slot_id), VERIFICATION_CONTEXT_INVALID, `$.attestations[${index}].slot_id`);
+    verificationRequire(canonicalString(verificationAssessmentIds(document.requirement_verdicts)) === canonicalString(slot.requirement_ids), VERIFICATION_CONTEXT_INVALID, `$.attestations[${index}].requirement_verdicts`);
     attestationById.set(document.attestation_id, document);
+    attestationBySlot.set(document.slot_id, document);
   });
   const planSlotSet = new Set(plan.slots.map((item) => item.slot_id));
   const manifestSlots = [];
@@ -209,7 +234,7 @@ export async function verifyAttestationManifestContext(manifest, qualityPolicyPl
   verificationRequire(new Set(sessions).size === sessions.length, VERIFICATION_CONTEXT_INVALID, "$.attestations");
   const expectedRequirements = [...new Set(plan.slots.flatMap((slot) => slot.requirement_ids))].sort(verificationTextCompare);
   verificationRequireIdList(checked.requirement_aggregates.map((item) => item.requirement_id), expectedRequirements, "$.requirement_aggregates");
-  const bySlot = new Map(attestationDocs.map((item) => [item.slot_id, item]));
+  const bySlot = attestationBySlot;
   checked.requirement_aggregates.forEach((aggregate, index) => {
     const requiredSlotIds = plan.slots.filter((slot) => slot.requirement_ids.includes(aggregate.requirement_id)).map((slot) => slot.slot_id).sort(verificationTextCompare);
     const matched = [];
@@ -235,9 +260,9 @@ export async function verifyAttestationManifestContext(manifest, qualityPolicyPl
     verificationRequire(canonicalString(aggregate.attestation_ids) === canonicalString(matched), VERIFICATION_CONTEXT_INVALID, `$.requirement_aggregates[${index}].attestation_ids`);
     verificationRequire(aggregate.verdict === expectedVerdict, VERIFICATION_CONTEXT_INVALID, `$.requirement_aggregates[${index}].verdict`);
   });
-  const latest = Math.max(...attestationDocs.map((item) => verificationTimestampMillis(item.created_at)));
   const manifestTime = verificationTimestampMillis(checked.created_at);
-  verificationRequire(manifestTime !== null && latest !== null && latest <= manifestTime, VERIFICATION_CONTEXT_TIME_INVALID, "$.created_at");
+  verificationRequire(manifestTime !== null, VERIFICATION_CONTEXT_TIME_INVALID, "$.created_at");
+  attestationDocs.forEach((item, index) => verificationTimestampLeq(item.created_at, checked.created_at, `$.attestations[${index}].created_at`));
   return checked;
 }
 '''

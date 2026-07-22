@@ -108,17 +108,17 @@ def _verification_require_time_order(
     values: list[object],
     path: str,
 ) -> None:
-    epochs = [_timestamp_millis(item) for item in values if item is not None]
-    _verification_require(
-        len(epochs) == len([item for item in values if item is not None]),
-        _VERIFICATION_CONTEXT_TIME_INVALID,
-        path,
-    )
-    for index in range(1, len(epochs)):
+    _verification_require(bool(values), _VERIFICATION_CONTEXT_TIME_INVALID, path)
+    final_epoch = _timestamp_millis(values[-1])
+    _verification_require(final_epoch is not None, _VERIFICATION_CONTEXT_TIME_INVALID, path)
+    for index, predecessor in enumerate(values[:-1]):
+        if predecessor is None:
+            continue
+        predecessor_epoch = _timestamp_millis(predecessor)
         _verification_require(
-            epochs[index - 1] <= epochs[index],
+            predecessor_epoch is not None and predecessor_epoch <= final_epoch,
             _VERIFICATION_CONTEXT_TIME_INVALID,
-            path,
+            f"{path}[{index}]",
         )
 
 
@@ -196,13 +196,12 @@ def _verification_aggregate_result(
 ) -> tuple[list[str], str]:
     attestation_ids: list[str] = []
     verdicts: list[str] = []
-    missing_slot = False
+    missing_verdict = False
     for slot_id in required_slot_ids:
         document = attestation_by_slot.get(slot_id)
         if document is None:
-            missing_slot = True
+            missing_verdict = True
             continue
-        attestation_ids.append(document["attestation_id"])
         verdict = next(
             (
                 item["verdict"]
@@ -211,16 +210,16 @@ def _verification_aggregate_result(
             ),
             None,
         )
-        _verification_require(
-            verdict is not None,
-            _VERIFICATION_CONTEXT_INVALID,
-            "$.requirement_aggregates",
-        )
+        if verdict is None:
+            missing_verdict = True
+            continue
+        attestation_ids.append(document["attestation_id"])
         verdicts.append(verdict)
+    attestation_ids.sort()
+    if missing_verdict or "UNVERIFIABLE" in verdicts:
+        return attestation_ids, "UNVERIFIABLE"
     if any(item in {"POLICY_VIOLATION", "NEEDS_WORK"} for item in verdicts):
         return attestation_ids, "FAIL"
-    if missing_slot or "UNVERIFIABLE" in verdicts:
-        return attestation_ids, "UNVERIFIABLE"
     return attestation_ids, "PASS"
 
 

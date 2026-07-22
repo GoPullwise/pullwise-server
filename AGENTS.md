@@ -682,3 +682,8 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   ref to the actual pre-manifest bytes and reseal the final document.
 - Actor semantics accept the current `domain_reviewer` kind and must not
   restore `legacy_domain_reviewer`.
+
+## Agent-First Verification Semantics
+
+- The five verification context APIs accept supplied immutable direct documents and exact canonical refs/digests. They cannot prove live CAS presence, current lease/fence/authorization/model use, in-flight tools, or future source stability. Proposal/work lack transitive cryptographic manifest closure, and the final observation manifest lacks `created_at`.
+- With `oneOf` object roots and `additionalProperties: false`, declare the union of branch properties at the root while keeping every branch closed.
