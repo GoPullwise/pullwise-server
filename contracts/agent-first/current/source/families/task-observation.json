@@ -1,0 +1,194 @@
+{
+  "family_id": "task-observation",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "observation-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "manifest_digest", "domain": "pullwise:observation-manifest:v1"},
+      "x-pullwise-semantics": ["observation_manifest"],
+      "required": ["schema_id", "manifest_id", "task_id", "proposal_id", "attempt_id", "native_epoch", "pre_verifier_observation_manifest_ref", "entries", "entry_count", "manifest_digest"],
+      "properties": {
+        "schema_id": {"const": "observation-manifest/v1"},
+        "manifest_id": {"type": "string", "pattern": "^obsm_[0-9a-f]{32}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "proposal_id": {"type": "string", "pattern": "^proposal_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "pre_verifier_observation_manifest_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "pre-verifier-observation-manifest/v1"},
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000000,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["observation_id", "observation_seq", "observation_ref", "actor", "source_state_before_id", "source_state_after_id", "execution_state_id"],
+            "properties": {
+              "observation_id": {"type": "string", "pattern": "^obs_[0-9a-f]{32}$"},
+              "observation_seq": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+              "observation_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "observation/v1"},
+              "actor": {"$ref": "actor/v1"},
+              "source_state_before_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "source_state_after_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "execution_state_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "entry_count": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "observation/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "observation_digest", "domain": "pullwise:observation:v1"},
+      "x-pullwise-semantics": ["observation"],
+      "required": ["schema_id", "observation_id", "task_id", "attempt_id", "native_epoch", "actor", "tool_id", "tool_version", "tool_invocation_id", "idempotency_key", "input_digest", "status", "started_at", "completed_at", "duration_ms", "exit_code", "source_state_before_id", "source_state_after_id", "execution_state_id", "stdout_ref", "stderr_ref", "result_ref", "redaction_report_ref", "partial_side_effect", "observation_seq", "observation_digest"],
+      "properties": {
+        "schema_id": {"const": "observation/v1"},
+        "observation_id": {"type": "string", "pattern": "^obs_[0-9a-f]{32}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "actor": {"$ref": "actor/v1"},
+        "tool_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
+        "tool_version": {"type": "string", "minLength": 1, "maxLength": 160},
+        "tool_invocation_id": {"type": "string", "pattern": "^toolinv_[0-9a-f]{32}$"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[\\x21-\\x7e]+$"},
+        "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "status": {"enum": ["cancelled", "failed", "infrastructure_error", "policy_denied", "policy_violation", "succeeded", "timed_out"]},
+        "started_at": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"},
+        "completed_at": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"},
+        "duration_ms": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991},
+        "exit_code": {"type": ["integer", "null"], "minimum": -2147483648, "maximum": 2147483647},
+        "source_state_before_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_state_after_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "execution_state_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "stdout_ref": {"$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-id": "source-content/v1"},
+        "stderr_ref": {"$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-id": "source-content/v1"},
+        "result_ref": {"$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-ids": ["error-response/v1", "r0-read-result/v1"]},
+        "redaction_report_ref": {"$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-id": "source-content/v1"},
+        "partial_side_effect": {"const": false},
+        "observation_seq": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "observation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "pre-verifier-observation-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "manifest_digest", "domain": "pullwise:pre-verifier-observation-manifest:v1"},
+      "x-pullwise-semantics": ["pre_verifier_observation_manifest"],
+      "required": ["schema_id", "manifest_id", "task_id", "proposal_id", "attempt_id", "native_epoch", "entries", "entry_count", "manifest_digest"],
+      "properties": {
+        "schema_id": {"const": "pre-verifier-observation-manifest/v1"},
+        "manifest_id": {"type": "string", "pattern": "^obsm_[0-9a-f]{32}$"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "proposal_id": {"type": "string", "pattern": "^proposal_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000000,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["observation_id", "observation_seq", "observation_ref", "actor", "source_state_before_id", "source_state_after_id", "execution_state_id"],
+            "properties": {
+              "observation_id": {"type": "string", "pattern": "^obs_[0-9a-f]{32}$"},
+              "observation_seq": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+              "observation_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "observation/v1"},
+              "actor": {"$ref": "actor/v1"},
+              "source_state_before_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "source_state_after_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "execution_state_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "entry_count": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_observation_golden_final_manifest",
+      "fixture_class": "golden",
+      "schema_id": "observation-manifest/v1",
+      "document": {
+        "schema_id": "observation-manifest/v1", "manifest_id": "obsm_22222222222222222222222222222222", "task_id": "task_11111111111111111111111111111111", "proposal_id": "proposal_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1,
+        "pre_verifier_observation_manifest_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_55555555555555555555555555555555", "content_schema_id": "pre-verifier-observation-manifest/v1", "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"},
+        "entries": [
+          {"observation_id": "obs_11111111111111111111111111111111", "observation_seq": 1, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_44444444444444444444444444444444", "content_schema_id": "observation/v1", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null},
+          {"observation_id": "obs_22222222222222222222222222222222", "observation_seq": 2, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_66666666666666666666666666666666", "content_schema_id": "observation/v1", "sha256": "6666666666666666666666666666666666666666666666666666666666666666", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "quality_verifier", "id": "verifier_22222222222222222222222222222222", "session_id": "sess_22222222222222222222222222222222"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}
+        ],
+        "entry_count": 2, "manifest_digest": "079a6f07823bf813b50cde1de8bb6c7f4324c2c298fd9f2bb7e19d22a08cadcb"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_observation_golden_observation",
+      "fixture_class": "golden",
+      "schema_id": "observation/v1",
+      "document": {
+        "schema_id": "observation/v1", "observation_id": "obs_11111111111111111111111111111111", "task_id": "task_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1,
+        "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"},
+        "tool_id": "internal.read_source", "tool_version": "1.0.0", "tool_invocation_id": "toolinv_11111111111111111111111111111111", "idempotency_key": "read:README.md:1", "input_digest": "1111111111111111111111111111111111111111111111111111111111111111", "status": "succeeded", "started_at": "2026-01-01T00:00:00.000Z", "completed_at": "2026-01-01T00:00:00.005Z", "duration_ms": 5, "exit_code": null,
+        "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null,
+        "stdout_ref": {"availability": "not_applicable", "reason_code": "IN_PROCESS_TOOL"}, "stderr_ref": {"availability": "not_applicable", "reason_code": "IN_PROCESS_TOOL"},
+        "result_ref": {"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333", "content_schema_id": "r0-read-result/v1", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}},
+        "redaction_report_ref": {"availability": "not_applicable", "reason_code": "REDACTION_NOT_REQUIRED"}, "partial_side_effect": false, "observation_seq": 1, "observation_digest": "fbdde7bfb39a8953f08388590d2e760919ed596a28bbc7ca08cd1e1e3aadcb65"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_observation_golden_pre_manifest",
+      "fixture_class": "golden",
+      "schema_id": "pre-verifier-observation-manifest/v1",
+      "document": {
+        "schema_id": "pre-verifier-observation-manifest/v1", "manifest_id": "obsm_11111111111111111111111111111111", "task_id": "task_11111111111111111111111111111111", "proposal_id": "proposal_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1,
+        "entries": [{"observation_id": "obs_11111111111111111111111111111111", "observation_seq": 1, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_44444444444444444444444444444444", "content_schema_id": "observation/v1", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}],
+        "entry_count": 1, "manifest_digest": "2d3976d6cfaec0185290b0fc734addaf96d3ba6a174415f853f8c86bfc48d3bc"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_observation_idempotency_final_manifest", "fixture_class": "idempotency", "schema_id": "observation-manifest/v1",
+      "document": {"schema_id": "observation-manifest/v1", "manifest_id": "obsm_22222222222222222222222222222222", "task_id": "task_11111111111111111111111111111111", "proposal_id": "proposal_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1, "pre_verifier_observation_manifest_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_55555555555555555555555555555555", "content_schema_id": "pre-verifier-observation-manifest/v1", "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "entries": [{"observation_id": "obs_11111111111111111111111111111111", "observation_seq": 1, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_44444444444444444444444444444444", "content_schema_id": "observation/v1", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}, {"observation_id": "obs_22222222222222222222222222222222", "observation_seq": 2, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_66666666666666666666666666666666", "content_schema_id": "observation/v1", "sha256": "6666666666666666666666666666666666666666666666666666666666666666", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "quality_verifier", "id": "verifier_22222222222222222222222222222222", "session_id": "sess_22222222222222222222222222222222"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}], "entry_count": 2, "manifest_digest": "079a6f07823bf813b50cde1de8bb6c7f4324c2c298fd9f2bb7e19d22a08cadcb"},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_observation_idempotency_observation", "fixture_class": "idempotency", "schema_id": "observation/v1",
+      "document": {"schema_id": "observation/v1", "observation_id": "obs_11111111111111111111111111111111", "task_id": "task_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1, "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"}, "tool_id": "internal.read_source", "tool_version": "1.0.0", "tool_invocation_id": "toolinv_11111111111111111111111111111111", "idempotency_key": "read:README.md:1", "input_digest": "1111111111111111111111111111111111111111111111111111111111111111", "status": "succeeded", "started_at": "2026-01-01T00:00:00.000Z", "completed_at": "2026-01-01T00:00:00.005Z", "duration_ms": 5, "exit_code": null, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null, "stdout_ref": {"availability": "not_applicable", "reason_code": "IN_PROCESS_TOOL"}, "stderr_ref": {"availability": "not_applicable", "reason_code": "IN_PROCESS_TOOL"}, "result_ref": {"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333", "content_schema_id": "r0-read-result/v1", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}}, "redaction_report_ref": {"availability": "not_applicable", "reason_code": "REDACTION_NOT_REQUIRED"}, "partial_side_effect": false, "observation_seq": 1, "observation_digest": "fbdde7bfb39a8953f08388590d2e760919ed596a28bbc7ca08cd1e1e3aadcb65"},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_observation_idempotency_pre_manifest", "fixture_class": "idempotency", "schema_id": "pre-verifier-observation-manifest/v1",
+      "document": {"schema_id": "pre-verifier-observation-manifest/v1", "manifest_id": "obsm_11111111111111111111111111111111", "task_id": "task_11111111111111111111111111111111", "proposal_id": "proposal_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1, "entries": [{"observation_id": "obs_11111111111111111111111111111111", "observation_seq": 1, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_44444444444444444444444444444444", "content_schema_id": "observation/v1", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}], "entry_count": 1, "manifest_digest": "2d3976d6cfaec0185290b0fc734addaf96d3ba6a174415f853f8c86bfc48d3bc"},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_observation_negative_final_manifest_order", "fixture_class": "negative", "schema_id": "observation-manifest/v1",
+      "document": {"schema_id": "observation-manifest/v1", "manifest_id": "obsm_22222222222222222222222222222222", "task_id": "task_11111111111111111111111111111111", "proposal_id": "proposal_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1, "pre_verifier_observation_manifest_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_55555555555555555555555555555555", "content_schema_id": "pre-verifier-observation-manifest/v1", "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "entries": [{"observation_id": "obs_22222222222222222222222222222222", "observation_seq": 2, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_66666666666666666666666666666666", "content_schema_id": "observation/v1", "sha256": "6666666666666666666666666666666666666666666666666666666666666666", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "quality_verifier", "id": "verifier_22222222222222222222222222222222", "session_id": "sess_22222222222222222222222222222222"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}, {"observation_id": "obs_11111111111111111111111111111111", "observation_seq": 1, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_44444444444444444444444444444444", "content_schema_id": "observation/v1", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}], "entry_count": 2, "manifest_digest": "6ed8f8a7ffc45c4b9d2e71fd06da6039f12f47d7f1aad91c3a2018af76be5940"},
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "task_observation_negative_partial_side_effect", "fixture_class": "negative", "schema_id": "observation/v1",
+      "document": {"schema_id": "observation/v1", "observation_id": "obs_11111111111111111111111111111111", "task_id": "task_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1, "actor": {"schema_id": "actor/v1", "kind": "task_owner", "id": "owner_11111111111111111111111111111111", "session_id": "sess_11111111111111111111111111111111"}, "tool_id": "internal.read_source", "tool_version": "1.0.0", "tool_invocation_id": "toolinv_11111111111111111111111111111111", "idempotency_key": "read:README.md:1", "input_digest": "1111111111111111111111111111111111111111111111111111111111111111", "status": "succeeded", "started_at": "2026-01-01T00:00:00.000Z", "completed_at": "2026-01-01T00:00:00.005Z", "duration_ms": 5, "exit_code": null, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null, "stdout_ref": {"availability": "not_applicable", "reason_code": "IN_PROCESS_TOOL"}, "stderr_ref": {"availability": "not_applicable", "reason_code": "IN_PROCESS_TOOL"}, "result_ref": {"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333", "content_schema_id": "r0-read-result/v1", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}}, "redaction_report_ref": {"availability": "not_applicable", "reason_code": "REDACTION_NOT_REQUIRED"}, "partial_side_effect": true, "observation_seq": 1, "observation_digest": "3b2cc62884779f4a432a453052a9f6da4fbb334dac9d5e3beb10efda8f1c00c4"},
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "task_observation_negative_pre_manifest_actor", "fixture_class": "negative", "schema_id": "pre-verifier-observation-manifest/v1",
+      "document": {"schema_id": "pre-verifier-observation-manifest/v1", "manifest_id": "obsm_11111111111111111111111111111111", "task_id": "task_11111111111111111111111111111111", "proposal_id": "proposal_11111111111111111111111111111111", "attempt_id": "attempt_11111111111111111111111111111111", "native_epoch": 1, "entries": [{"observation_id": "obs_22222222222222222222222222222222", "observation_seq": 2, "observation_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_66666666666666666666666666666666", "content_schema_id": "observation/v1", "sha256": "6666666666666666666666666666666666666666666666666666666666666666", "size_bytes": 1, "media_type": "application/json", "encoding": "utf-8"}, "actor": {"schema_id": "actor/v1", "kind": "quality_verifier", "id": "verifier_22222222222222222222222222222222", "session_id": "sess_22222222222222222222222222222222"}, "source_state_before_id": "2222222222222222222222222222222222222222222222222222222222222222", "source_state_after_id": "2222222222222222222222222222222222222222222222222222222222222222", "execution_state_id": null}], "entry_count": 1, "manifest_digest": "72af1779e1cf607f6b5a2baa3a40a0b23e0ec43af59db7cf26110da79bc81bc0"},
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

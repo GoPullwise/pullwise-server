@@ -24,115 +24,15 @@ TERMINAL_BINDING_FAULT_POINTS = (
     "terminal.before_binding",
     "terminal.after_binding",
 )
-
-
-_TERMINAL_DDL = """
-CREATE TABLE IF NOT EXISTS agent_current_terminal_results (
-    transport_envelope_digest TEXT PRIMARY KEY CHECK(
-        length(transport_envelope_digest) = 64
-    ),
-    task_result_digest TEXT NOT NULL UNIQUE CHECK(length(task_result_digest) = 64),
-    task_result_core_digest TEXT NOT NULL CHECK(length(task_result_core_digest) = 64),
-    result_id TEXT NOT NULL UNIQUE,
-    task_id TEXT NOT NULL UNIQUE,
-    outcome TEXT NOT NULL,
-    published_from_version INTEGER NOT NULL CHECK(published_from_version >= 1),
-    terminal_task_version INTEGER NOT NULL CHECK(
-        terminal_task_version = published_from_version + 1
-    ),
-    diagnostics_state TEXT NOT NULL CHECK(
-        diagnostics_state IN ('uploaded','local_only','unavailable','not_applicable')
-    ),
-    receipt_digest TEXT UNIQUE,
-    receipt_ref_sha256 TEXT CHECK(
-        receipt_ref_sha256 IS NULL OR length(receipt_ref_sha256) = 64
-    ),
-    task_id_fence TEXT NOT NULL,
-    attempt_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    owner_id TEXT NOT NULL,
-    grant_id TEXT NOT NULL,
-    lease_id TEXT NOT NULL,
-    deletion_version INTEGER NOT NULL CHECK(deletion_version >= 0),
-    owner_epoch INTEGER NOT NULL CHECK(owner_epoch >= 1),
-    native_epoch INTEGER NOT NULL CHECK(native_epoch >= 1),
-    transport_epoch INTEGER NOT NULL CHECK(transport_epoch >= 1),
-    grant_digest TEXT NOT NULL CHECK(length(grant_digest) = 64),
-    authority_digest TEXT NOT NULL CHECK(length(authority_digest) = 64),
-    package_identity TEXT NOT NULL,
-    package_version TEXT NOT NULL,
-    content_sha256 TEXT NOT NULL CHECK(length(content_sha256) = 64),
-    root_sha256 TEXT NOT NULL CHECK(length(root_sha256) = 64),
-    task_result_bytes BLOB NOT NULL,
-    task_result_core_bytes BLOB NOT NULL,
-    worker_debug_descriptor_bytes BLOB,
-    envelope_bytes BLOB NOT NULL,
-    response_bytes BLOB NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-    CHECK(
-        (diagnostics_state='uploaded' AND receipt_digest IS NOT NULL
-         AND receipt_ref_sha256 IS NOT NULL)
-        OR
-        (diagnostics_state!='uploaded' AND receipt_digest IS NULL
-         AND receipt_ref_sha256 IS NULL)
-    ),
-    FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id),
-    FOREIGN KEY(receipt_digest)
-        REFERENCES agent_current_transport_receipts(receipt_digest)
-)
-"""
-
-
-def install_transport_envelope_tables(connection: sqlite3.Connection) -> None:
-    connection.execute(_TERMINAL_DDL)
-    connection.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS agent_current_terminal_results_update_immutable
-        BEFORE UPDATE ON agent_current_terminal_results
-        BEGIN
-            SELECT RAISE(ABORT, 'AGENT_CURRENT_TERMINAL_RESULTS_IMMUTABLE');
-        END
-        """
-    )
-    connection.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS agent_current_terminal_results_delete_immutable
-        BEFORE DELETE ON agent_current_terminal_results
-        BEGIN
-            SELECT RAISE(ABORT, 'AGENT_CURRENT_TERMINAL_RESULTS_IMMUTABLE');
-        END
-        """
-    )
-    connection.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS agent_current_task_head_monotonic
-        BEFORE UPDATE ON agent_current_task_heads
-        WHEN NEW.task_id IS NOT OLD.task_id
-          OR NEW.owner_id IS NOT OLD.owner_id
-          OR NEW.task_version != OLD.task_version + 1
-          OR NEW.deletion_version < OLD.deletion_version
-          OR NEW.owner_epoch < OLD.owner_epoch
-          OR NEW.native_epoch < OLD.native_epoch
-          OR NEW.transport_epoch < OLD.transport_epoch
-          OR OLD.lifecycle='TERMINAL'
-          OR (
-            OLD.current_authority_schema_id='agent-claim-abandon-response/v1'
-            AND NEW.lifecycle!='TERMINAL'
-          )
-        BEGIN
-            SELECT RAISE(ABORT, 'AGENT_CURRENT_TASK_HEAD_CAS_INVALID');
-        END
-        """
-    )
-    connection.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS agent_current_task_head_delete_immutable
-        BEFORE DELETE ON agent_current_task_heads
-        BEGIN
-            SELECT RAISE(ABORT, 'AGENT_CURRENT_TASK_HEAD_IMMUTABLE');
-        END
-        """
-    )
+_ATTEMPT_TERMINAL_STATES = {
+    "COMPLETED": "SUCCEEDED",
+    "NO_CHANGE_NEEDED": "SUCCEEDED",
+    "COMPLETED_WITH_WAIVERS": "SUCCEEDED",
+    "PARTIAL": "FAILED",
+    "BLOCKED": "FAILED",
+    "FAILED": "FAILED",
+    "CANCELLED": "CANCELLED",
+}
 
 
 class TransportEnvelopeStore(AgentFirstAuthorityStore):
@@ -158,10 +58,10 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
                 if not exact:
                     raise AuthorityStoreError("TERMINAL_RESULT_CONFLICT")
                 return self._blob(replay["response_bytes"])
-            receipt = self._receipt(connection, values)
             current = self._current_authority(connection, values["task_id"])
             if current is None:
                 raise AuthorityStoreError("AUTHORITY_FENCED")
+            receipt = self._receipt(connection, values)
             write = {**values, **build(current, receipt)}
             self._assert_exact_authority(current, write)
             self._insert_terminal_write_set(connection, current, receipt, write)
@@ -261,15 +161,15 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
                 transport_envelope_digest, task_result_digest,
                 task_result_core_digest, result_id, task_id, outcome,
                 published_from_version, terminal_task_version, diagnostics_state,
-                receipt_digest, receipt_ref_sha256, task_id_fence, attempt_id,
-                session_id, owner_id, grant_id, lease_id, deletion_version,
+                receipt_digest, receipt_ref_sha256, attempt_id, session_id,
+                owner_id, grant_id, lease_id, deletion_version,
                 owner_epoch, native_epoch, transport_epoch, grant_digest,
                 authority_digest, package_identity, package_version,
                 content_sha256, root_sha256, task_result_bytes,
                 task_result_core_bytes, worker_debug_descriptor_bytes,
                 envelope_bytes, response_bytes
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 values["transport_envelope_digest"], values["task_result_digest"],
@@ -278,9 +178,9 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
                 values["published_from_version"], values["terminal_task_version"],
                 values["diagnostics_state"],
                 None if receipt is None else receipt["receipt_digest"],
-                values["receipt_ref_sha256"], values["task_id"],
-                values["attempt_id"], values["session_id"], values["owner_id"],
-                values["grant_id"], values["lease_id"],
+                values["receipt_ref_sha256"], values["attempt_id"],
+                values["session_id"], values["owner_id"], values["grant_id"],
+                values["lease_id"],
                 values["deletion_version"], values["owner_epoch"],
                 values["native_epoch"], values["transport_epoch"],
                 values["grant_digest"], values["authority_digest"],
@@ -291,7 +191,7 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
             ),
         )
         self._fault("terminal.after_result")
-        self._fence_current_authority(connection, values)
+        self._close_current_authority(connection, values)
         self._commit_task_head(connection, current, values)
         if receipt is not None:
             self._bind_receipt(connection, receipt, values)
@@ -307,44 +207,41 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
         )
         self._fault("terminal.after_event")
 
-    def _fence_current_authority(
+    def _close_current_authority(
         self,
         connection: sqlite3.Connection,
         values: Mapping[str, object],
     ) -> None:
-        updates = (
-            (
-                "attempt",
-                "agent_current_attempts",
-                "attempt_id",
-                values["attempt_id"],
-                "CLAIMED",
-            ),
-            (
-                "owner",
-                "agent_current_owner_incarnations",
-                "session_id",
-                values["session_id"],
-                "STARTING",
-            ),
-        )
-        for stage, table, key, identity, state in updates:
-            self._fault(f"terminal.before_{stage}")
-            changed = connection.execute(
-                f"UPDATE {table} SET state='FENCED', "
-                "fenced_at=strftime('%s','now'), fence_reason='terminal_committed' "
-                f"WHERE {key}=? AND state=?",
-                (identity, state),
-            ).rowcount
-            if changed != 1:
-                raise AuthorityStoreError("AUTHORITY_FENCED")
-            self._fault(f"terminal.after_{stage}")
+        attempt_state = _ATTEMPT_TERMINAL_STATES.get(values["outcome"])
+        if attempt_state is None:
+            raise AuthorityStoreError("TERMINAL_OUTCOME_INVALID")
+        self._fault("terminal.before_attempt")
+        changed = connection.execute(
+            """
+            UPDATE agent_current_attempts SET state=?
+            WHERE attempt_id=? AND state='CLAIMED'
+            """,
+            (attempt_state, values["attempt_id"]),
+        ).rowcount
+        if changed != 1:
+            raise AuthorityStoreError("AUTHORITY_FENCED")
+        self._fault("terminal.after_attempt")
+        self._fault("terminal.before_owner")
+        changed = connection.execute(
+            """
+            UPDATE agent_current_owner_incarnations SET state='CLOSED'
+            WHERE session_id=? AND state='STARTING'
+            """,
+            (values["session_id"],),
+        ).rowcount
+        if changed != 1:
+            raise AuthorityStoreError("AUTHORITY_FENCED")
+        self._fault("terminal.after_owner")
         self._fault("terminal.before_grant_authority")
         changed = connection.execute(
             """
             UPDATE agent_current_grant_authority
-            SET state='FENCED', authority_version=authority_version+1,
-                fenced_at=strftime('%s','now'), fence_reason='terminal_committed'
+            SET state='REVOKED', authority_version=authority_version+1
             WHERE grant_id=? AND state='ACTIVE'
             """,
             (values["grant_id"],),
@@ -366,8 +263,8 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
             SET lifecycle='TERMINAL', task_version=?, terminal_kind='task_result',
                 result_ref=?, result_digest=?, outcome=?,
                 terminal_at=strftime('%s','now'),
-                current_authority_schema_id='task-result-transport-envelope/v1',
-                current_authority_digest=?, updated_at=strftime('%s','now')
+                current_authority_schema_id=NULL,
+                current_authority_digest=NULL, updated_at=strftime('%s','now')
             WHERE task_id=? AND task_version=? AND deletion_version=?
               AND current_attempt_id=? AND current_session_id=?
               AND current_grant_id=? AND current_lease_id=?
@@ -376,8 +273,7 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
             """,
             (
                 values["terminal_task_version"], values["transport_envelope_digest"],
-                values["task_result_digest"], values["outcome"],
-                values["transport_envelope_digest"], values["task_id"],
+                values["task_result_digest"], values["outcome"], values["task_id"],
                 values["published_from_version"], values["deletion_version"],
                 values["attempt_id"], values["session_id"], values["grant_id"],
                 values["lease_id"], current["current_authority_digest"],
@@ -402,7 +298,8 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
             WHERE receipt_digest=? AND transport_envelope_digest IS NULL
             """,
             (
-                values["transport_envelope_digest"], values["response_bytes"],
+                values["transport_envelope_digest"],
+                values["binding_response_bytes"],
                 receipt["receipt_digest"],
             ),
         ).rowcount
@@ -415,5 +312,4 @@ __all__ = [
     "TERMINAL_BINDING_FAULT_POINTS",
     "TERMINAL_COMMON_FAULT_POINTS",
     "TransportEnvelopeStore",
-    "install_transport_envelope_tables",
 ]

@@ -156,7 +156,7 @@ __all__ = [
     "root_manifest", "root_manifest_bytes", "schema", "schema_bytes", "schema_ids",
     "seal_document", "stable_error_registry", "tool_catalog", "validate_document",
     "verify_budget_transition", "verify_bundle", "verify_content_ref_set",
-    "verify_document_digest",
+    "verify_document_digest", "verify_waiver_authorization",
 ]
 '''
 

@@ -23,10 +23,6 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                 "WHERE receipt_digest = ?",
                 (values["receipt_digest"],),
             ).fetchone()
-            if existing is not None:
-                if self._blob(existing["receipt_bytes"]) != values["receipt_bytes"]:
-                    raise AuthorityStoreError("TRANSPORT_RECEIPT_CONFLICT")
-                return self._blob(existing["response_bytes"])
             historical = connection.execute(
                 """
                 SELECT a.state AS attempt_state, o.state AS owner_state,
@@ -48,10 +44,10 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                     "owner_epoch", "native_epoch", "transport_epoch", "grant_digest",
                 )),
             ).fetchone()
-            if historical is not None and any(
-                historical[name] == "FENCED"
+            if historical is not None and tuple(
+                historical[name]
                 for name in ("attempt_state", "owner_state", "grant_state")
-            ):
+            ) != ("CLAIMED", "STARTING", "ACTIVE"):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
             authority = connection.execute(
                 """
@@ -70,15 +66,17 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                 JOIN agent_current_grant_authority ga ON ga.grant_id=g.grant_id
                 WHERE h.task_id=?
                   AND h.current_authority_schema_id='server-authority-envelope/v1'
+                  AND h.lifecycle IN ('ACTIVE','FINALIZING')
                 """,
                 (values["task_id"],),
             ).fetchone()
             if authority is None:
-                raise AuthorityStoreError("AUTHORITY_NOT_FOUND")
-            if any(
-                authority[name] == "FENCED"
+                code = "AUTHORITY_FENCED" if historical is not None else "AUTHORITY_NOT_FOUND"
+                raise AuthorityStoreError(code)
+            if tuple(
+                authority[name]
                 for name in ("attempt_state", "owner_state", "grant_state")
-            ):
+            ) != ("CLAIMED", "STARTING", "ACTIVE"):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
             fields = (
                 "attempt_id",
@@ -113,6 +111,10 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
             )
             if not exact:
                 raise AuthorityStoreError("AUTHORITY_MISMATCH")
+            if existing is not None:
+                if self._blob(existing["receipt_bytes"]) != values["receipt_bytes"]:
+                    raise AuthorityStoreError("TRANSPORT_RECEIPT_CONFLICT")
+                return self._blob(existing["response_bytes"])
             self._fault("receipt.before_receipt")
             connection.execute(
                 """

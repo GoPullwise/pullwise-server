@@ -62,9 +62,50 @@
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "availability-reason-registry/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "registry_digest", "domain": "pullwise:availability-reason-registry:v1"},
+      "x-pullwise-semantics": ["availability_reason_registry"],
+      "required": ["schema_id", "reasons", "registry_digest"],
+      "properties": {
+        "schema_id": {"const": "availability-reason-registry/v1"},
+        "reasons": {
+          "type": "array",
+          "minItems": 17,
+          "maxItems": 17,
+          "uniqueItems": true,
+          "items": {"enum": ["ATTESTATIONS_NOT_CREATED", "CAPABILITY_NOT_IMPLEMENTED", "CAPABILITY_NOT_SELECTED", "CHANGE_SET_NOT_APPLICABLE", "CHARTER_NOT_CREATED", "DEBUG_LIMIT_EXCEEDED", "DEBUG_REDACTION_FAILED", "DEBUG_UNAVAILABLE", "DEBUG_UPLOAD_FAILED", "EXECUTION_STATE_UNAVAILABLE", "OBSERVATION_MANIFEST_NOT_CREATED", "PROPOSAL_NOT_CREATED", "REPORT_NOT_CREATED", "SOURCE_STATE_UNAVAILABLE", "TASK_CANCELLED", "TRANSPORT_RECEIPT_NOT_APPLICABLE", "VERIFICATION_NOT_RUN"]}
+        },
+        "registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "task-result-outcome-reason-registry/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "registry_digest", "domain": "pullwise:task-result-outcome-reason-registry:v1"},
+      "x-pullwise-semantics": ["task_result_outcome_reason_registry"],
+      "required": ["schema_id", "reasons", "registry_digest"],
+      "properties": {
+        "schema_id": {"const": "task-result-outcome-reason-registry/v1"},
+        "reasons": {
+          "type": "array",
+          "minItems": 23,
+          "maxItems": 23,
+          "uniqueItems": true,
+          "items": {"enum": ["ALREADY_SATISFIED", "APPROVAL_REQUIRED", "AUTHORIZED_WAIVER", "BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "CONTRACT_INVALID", "DEADLINE_REACHED", "ENVIRONMENT_UNAVAILABLE", "INPUT_REQUIRED", "INTERACTION_UNAVAILABLE", "LEASE_CANCELLED", "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED", "RUNTIME_FAILURE", "SAFE_PARTIAL_DELIVERY", "SERVER_CANCELLED", "SOURCE_MUTATION_FORBIDDEN", "STORAGE_FAILURE", "SUCCESS", "USER_CANCELLED", "VERIFICATION_INCOMPLETE"]}
+        },
+        "registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "availability-ref/v1",
       "type": "object",
       "additionalProperties": false,
+      "x-pullwise-semantics": ["availability_ref"],
       "oneOf": [
         {
           "type": "object",
@@ -81,7 +122,7 @@
           "required": ["availability", "reason_code"],
           "properties": {
             "availability": {"const": "unavailable"},
-            "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"}
+            "reason_code": {"enum": ["ATTESTATIONS_NOT_CREATED", "CAPABILITY_NOT_IMPLEMENTED", "CAPABILITY_NOT_SELECTED", "CHANGE_SET_NOT_APPLICABLE", "CHARTER_NOT_CREATED", "DEBUG_LIMIT_EXCEEDED", "DEBUG_REDACTION_FAILED", "DEBUG_UNAVAILABLE", "DEBUG_UPLOAD_FAILED", "EXECUTION_STATE_UNAVAILABLE", "OBSERVATION_MANIFEST_NOT_CREATED", "PROPOSAL_NOT_CREATED", "REPORT_NOT_CREATED", "SOURCE_STATE_UNAVAILABLE", "TASK_CANCELLED", "TRANSPORT_RECEIPT_NOT_APPLICABLE", "VERIFICATION_NOT_RUN"]}
           }
         },
         {
@@ -90,7 +131,7 @@
           "required": ["availability", "reason_code"],
           "properties": {
             "availability": {"const": "not_applicable"},
-            "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"}
+            "reason_code": {"enum": ["ATTESTATIONS_NOT_CREATED", "CAPABILITY_NOT_IMPLEMENTED", "CAPABILITY_NOT_SELECTED", "CHANGE_SET_NOT_APPLICABLE", "CHARTER_NOT_CREATED", "DEBUG_LIMIT_EXCEEDED", "DEBUG_REDACTION_FAILED", "DEBUG_UNAVAILABLE", "DEBUG_UPLOAD_FAILED", "EXECUTION_STATE_UNAVAILABLE", "OBSERVATION_MANIFEST_NOT_CREATED", "PROPOSAL_NOT_CREATED", "REPORT_NOT_CREATED", "SOURCE_STATE_UNAVAILABLE", "TASK_CANCELLED", "TRANSPORT_RECEIPT_NOT_APPLICABLE", "VERIFICATION_NOT_RUN"]}
           }
         }
       ]
@@ -187,7 +228,7 @@
         "requirement_id": {"type": "string", "pattern": "^req_(?:user_objective|user_acceptance|user_constraint|delivery|policy|interaction|derived)_[0-9a-f]{64}$"},
         "verdict": {"enum": ["PASS", "FAIL", "UNVERIFIABLE"]},
         "evidence_refs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "content-ref/v1", "x-pullwise-content-schema-ids": ["evidence-closure-manifest/v1", "observation/v1"]}},
-        "attestation_refs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "verification-attestation-manifest/v1"}},
+        "attestation_refs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "verification-attestation/v1"}},
         "waiver_refs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "waiver-event/v1"}}
       }
     },
@@ -231,7 +272,7 @@
         "blockers": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"$ref": "task-result-blocker/v1"}},
         "failures": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"$ref": "failure-item/v1"}},
         "request_id": {"type": "string", "pattern": "^cancel_[0-9a-f]{32}$"},
-        "linearized_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
+        "linearized_at": {"type": "string", "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"},
         "requested_by": {"$ref": "actor/v1"}
       },
       "oneOf": [
@@ -241,7 +282,7 @@
         {"type": "object", "additionalProperties": false, "required": ["kind", "delivered_scope", "gaps", "residual_risks"], "properties": {"kind": {"const": "partial"}, "delivered_scope": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "delivered-scope-item/v1"}}, "gaps": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "gap-item/v1"}}, "residual_risks": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "residual-risk/v1"}}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "blockers"], "properties": {"kind": {"const": "blocked"}, "blockers": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"$ref": "task-result-blocker/v1"}}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "failures"], "properties": {"kind": {"const": "failed"}, "failures": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"$ref": "failure-item/v1"}}}},
-        {"type": "object", "additionalProperties": false, "required": ["kind", "request_id", "linearized_at", "requested_by"], "properties": {"kind": {"const": "cancelled"}, "request_id": {"type": "string", "pattern": "^cancel_[0-9a-f]{32}$"}, "linearized_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"}, "requested_by": {"$ref": "actor/v1"}}}
+        {"type": "object", "additionalProperties": false, "required": ["kind", "request_id", "linearized_at", "requested_by"], "properties": {"kind": {"const": "cancelled"}, "request_id": {"type": "string", "pattern": "^cancel_[0-9a-f]{32}$"}, "linearized_at": {"type": "string", "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"}, "requested_by": {"$ref": "actor/v1"}}}
       ]
     },
     {
@@ -259,14 +300,14 @@
         "result_source": {"const": "worker"},
         "outcome": {"enum": ["COMPLETED", "NO_CHANGE_NEEDED", "COMPLETED_WITH_WAIVERS", "PARTIAL", "BLOCKED", "FAILED", "CANCELLED"]},
         "reason_code": {"enum": ["SUCCESS", "ALREADY_SATISFIED", "AUTHORIZED_WAIVER", "BUDGET_EXHAUSTED", "DEADLINE_REACHED", "VERIFICATION_INCOMPLETE", "CAPABILITY_UNAVAILABLE", "INTERACTION_UNAVAILABLE", "SAFE_PARTIAL_DELIVERY", "INPUT_REQUIRED", "APPROVAL_REQUIRED", "ENVIRONMENT_UNAVAILABLE", "POLICY_UNSUPPORTED", "RUNTIME_FAILURE", "STORAGE_FAILURE", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED", "POLICY_INVARIANT_BROKEN", "SOURCE_MUTATION_FORBIDDEN", "CONTRACT_INVALID", "USER_CANCELLED", "SERVER_CANCELLED", "LEASE_CANCELLED"]},
-        "summary": {"type": "string", "minLength": 1, "maxLength": 16384},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 4096},
         "outcome_details": {"$ref": "task-result-outcome-details/v1"},
         "published_from_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740990},
         "terminal_task_version": {"type": "integer", "minimum": 2, "maximum": 9007199254740991},
         "attempt_identity": {"$ref": "attempt-identity/v1"},
         "owner_identity": {"$ref": "owner-identity/v1"},
-        "request_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "agent-task-request/v1"},
-        "policy_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "agent-task-policy/v1"},
+        "request_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "task-request/v1"},
+        "policy_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "effective-execution-policy/v1"},
         "requirement_ledger_ref": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "requirement-ledger/v1"},
         "charter": {"$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-id": "task-charter/v1"},
         "requirement_results": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "requirement-result/v1"}},
@@ -308,8 +349,8 @@
           "required": ["worker_debug_fragment"],
           "properties": {"worker_debug_fragment": {"$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-id": "worker-debug-fragment-descriptor/v1"}}
         },
-        "created_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
-        "terminal_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"}
+        "created_at": {"type": "string", "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"},
+        "terminal_at": {"type": "string", "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"}
       },
       "oneOf": [
         {"type": "object", "properties": {"outcome": {"const": "COMPLETED"}, "reason_code": {"const": "SUCCESS"}, "outcome_details": {"type": "object", "properties": {"kind": {"const": "completed"}}}, "attempt_identity": {"type": "object", "properties": {"kind": {"const": "started"}}}, "owner_identity": {"type": "object", "properties": {"kind": {"const": "started"}}}, "charter": {"type": "object", "properties": {"availability": {"const": "available"}}}, "original_source_state": {"type": "object", "properties": {"availability": {"const": "available"}}}, "final_source_state": {"type": "object", "properties": {"availability": {"const": "available"}}}, "completion_proposal": {"type": "object", "properties": {"availability": {"const": "available"}}}, "observation_manifest": {"type": "object", "properties": {"availability": {"const": "available"}}}, "attestations": {"type": "object", "properties": {"availability": {"const": "available"}}}, "gate_decision": {"type": "object", "properties": {"availability": {"const": "available"}}}, "report": {"type": "object", "properties": {"availability": {"const": "available"}}}}},
@@ -323,6 +364,17 @@
     }
   ],
   "fixtures": [
+    {
+      "fixture_id": "task_result_golden_availability_reason_registry",
+      "fixture_class": "golden",
+      "schema_id": "availability-reason-registry/v1",
+      "document": {
+        "schema_id": "availability-reason-registry/v1",
+        "reasons": ["ATTESTATIONS_NOT_CREATED", "CAPABILITY_NOT_IMPLEMENTED", "CAPABILITY_NOT_SELECTED", "CHANGE_SET_NOT_APPLICABLE", "CHARTER_NOT_CREATED", "DEBUG_LIMIT_EXCEEDED", "DEBUG_REDACTION_FAILED", "DEBUG_UNAVAILABLE", "DEBUG_UPLOAD_FAILED", "EXECUTION_STATE_UNAVAILABLE", "OBSERVATION_MANIFEST_NOT_CREATED", "PROPOSAL_NOT_CREATED", "REPORT_NOT_CREATED", "SOURCE_STATE_UNAVAILABLE", "TASK_CANCELLED", "TRANSPORT_RECEIPT_NOT_APPLICABLE", "VERIFICATION_NOT_RUN"],
+        "registry_digest": "20220779fa66f0295ce4ac0e917e686cfb99305ef2d6b2dacc9ff79cbc5fe838"
+      },
+      "expected_code": null
+    },
     {
       "fixture_id": "task_result_golden_completed",
       "fixture_class": "golden",
@@ -341,11 +393,11 @@
         "terminal_task_version": 4,
         "attempt_identity": {"kind": "started", "attempt_id": "attempt_00000000000000000000000000000001", "native_epoch": 1},
         "owner_identity": {"kind": "started", "owner_id": "owner_00000000000000000000000000000001", "owner_epoch": 1},
-        "request_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000001", "content_schema_id": "agent-task-request/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000001", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
-        "policy_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000002", "content_schema_id": "agent-task-policy/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000002", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
+        "request_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000001", "content_schema_id": "task-request/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000001", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
+        "policy_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000002", "content_schema_id": "effective-execution-policy/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000002", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
         "requirement_ledger_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000003", "content_schema_id": "requirement-ledger/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000003", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
         "charter": {"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000004", "content_schema_id": "task-charter/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000004", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}},
-        "requirement_results": [{"requirement_id": "req_user_objective_0000000000000000000000000000000000000000000000000000000000000001", "verdict": "PASS", "evidence_refs": [{"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000005", "content_schema_id": "observation/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000005", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}], "attestation_refs": [{"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000006", "content_schema_id": "verification-attestation-manifest/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000006", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}], "waiver_refs": []}],
+        "requirement_results": [{"requirement_id": "req_user_objective_0000000000000000000000000000000000000000000000000000000000000001", "verdict": "PASS", "evidence_refs": [{"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000005", "content_schema_id": "observation/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000005", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}], "attestation_refs": [{"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000006", "content_schema_id": "verification-attestation/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000006", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}], "waiver_refs": []}],
         "original_source_state": {"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000007", "content_schema_id": "source-tree-manifest/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000007", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}},
         "final_source_state": {"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000008", "content_schema_id": "source-tree-manifest/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000008", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}},
         "execution_states": [{"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_00000000000000000000000000000009", "content_schema_id": "execution-state-manifest/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000009", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}}],
@@ -369,6 +421,17 @@
       "expected_code": null
     },
     {
+      "fixture_id": "task_result_golden_outcome_reason_registry",
+      "fixture_class": "golden",
+      "schema_id": "task-result-outcome-reason-registry/v1",
+      "document": {
+        "schema_id": "task-result-outcome-reason-registry/v1",
+        "reasons": ["ALREADY_SATISFIED", "APPROVAL_REQUIRED", "AUTHORIZED_WAIVER", "BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "CONTRACT_INVALID", "DEADLINE_REACHED", "ENVIRONMENT_UNAVAILABLE", "INPUT_REQUIRED", "INTERACTION_UNAVAILABLE", "LEASE_CANCELLED", "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED", "RUNTIME_FAILURE", "SAFE_PARTIAL_DELIVERY", "SERVER_CANCELLED", "SOURCE_MUTATION_FORBIDDEN", "STORAGE_FAILURE", "SUCCESS", "USER_CANCELLED", "VERIFICATION_INCOMPLETE"],
+        "registry_digest": "989d78edba0063b5b70feac5a19265137b707e7be3d6ce990d098fcb10bb91d4"
+      },
+      "expected_code": null
+    },
+    {
       "fixture_id": "task_result_negative_identity_matrix",
       "fixture_class": "negative",
       "schema_id": "task-result/v1",
@@ -386,8 +449,8 @@
         "terminal_task_version": 2,
         "attempt_identity": {"kind": "not_started", "attempt_id": null, "native_epoch": 0, "reason_code": "ATTEMPT_NOT_STARTED"},
         "owner_identity": {"kind": "not_started", "owner_id": "owner_00000000000000000000000000000002", "owner_epoch": 0, "reason_code": "OWNER_NOT_STARTED"},
-        "request_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_10000000000000000000000000000001", "content_schema_id": "agent-task-request/v1", "sha256": "1000000000000000000000000000000000000000000000000000000000000001", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
-        "policy_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_10000000000000000000000000000002", "content_schema_id": "agent-task-policy/v1", "sha256": "1000000000000000000000000000000000000000000000000000000000000002", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
+        "request_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_10000000000000000000000000000001", "content_schema_id": "task-request/v1", "sha256": "1000000000000000000000000000000000000000000000000000000000000001", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
+        "policy_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_10000000000000000000000000000002", "content_schema_id": "effective-execution-policy/v1", "sha256": "1000000000000000000000000000000000000000000000000000000000000002", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
         "requirement_ledger_ref": {"schema_id": "content-ref/v1", "artifact_id": "art_10000000000000000000000000000003", "content_schema_id": "requirement-ledger/v1", "sha256": "1000000000000000000000000000000000000000000000000000000000000003", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"},
         "charter": {"availability": "available", "ref": {"schema_id": "content-ref/v1", "artifact_id": "art_10000000000000000000000000000004", "content_schema_id": "task-charter/v1", "sha256": "1000000000000000000000000000000000000000000000000000000000000004", "size_bytes": 0, "media_type": "application/json", "encoding": "utf-8"}},
         "requirement_results": [{"requirement_id": "req_user_objective_0000000000000000000000000000000000000000000000000000000000000002", "verdict": "PASS", "evidence_refs": [], "attestation_refs": [], "waiver_refs": []}],

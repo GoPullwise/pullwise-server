@@ -1,0 +1,109 @@
+{
+  "family_id": "change-set-patch",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "change-set-patch/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "patch_digest",
+        "domain": "pullwise:change-set-patch/v1"
+      },
+      "x-pullwise-semantics": [
+        "change_set_patch"
+      ],
+      "required": [
+        "schema_id",
+        "format",
+        "media_type",
+        "encoding",
+        "data_base64",
+        "byte_sha256",
+        "size_bytes",
+        "patch_digest"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "change-set-patch/v1"
+        },
+        "format": {
+          "const": "unified_diff"
+        },
+        "media_type": {
+          "const": "text/x-diff"
+        },
+        "encoding": {
+          "const": "base64"
+        },
+        "data_base64": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        },
+        "byte_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "patch_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "source_evidence_golden_patch",
+      "fixture_class": "golden",
+      "schema_id": "change-set-patch/v1",
+      "document": {
+        "schema_id": "change-set-patch/v1",
+        "format": "unified_diff",
+        "media_type": "text/x-diff",
+        "encoding": "base64",
+        "data_base64": "LS0tIGEvUkVBRE1FLm1kCisrKyBiL1JFQURNRS5tZApAQCAtMSArMSBAQAotb2xkCituZXcK",
+        "byte_sha256": "95854dd34e753b4f4da3a505410a19587141d9bf0f717d43788f1fa155ec7ab9",
+        "size_bytes": 54,
+        "patch_digest": "d1daab9ffc036df9ad96ae6649fc896b98a107c045e741ab8b539b89989f344d"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_idempotency_patch",
+      "fixture_class": "idempotency",
+      "schema_id": "change-set-patch/v1",
+      "document": {
+        "schema_id": "change-set-patch/v1",
+        "format": "unified_diff",
+        "media_type": "text/x-diff",
+        "encoding": "base64",
+        "data_base64": "LS0tIGEvUkVBRE1FLm1kCisrKyBiL1JFQURNRS5tZApAQCAtMSArMSBAQAotb2xkCituZXcK",
+        "byte_sha256": "95854dd34e753b4f4da3a505410a19587141d9bf0f717d43788f1fa155ec7ab9",
+        "size_bytes": 54,
+        "patch_digest": "d1daab9ffc036df9ad96ae6649fc896b98a107c045e741ab8b539b89989f344d"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_negative_patch_bytes",
+      "fixture_class": "negative",
+      "schema_id": "change-set-patch/v1",
+      "document": {
+        "schema_id": "change-set-patch/v1",
+        "format": "unified_diff",
+        "media_type": "text/x-diff",
+        "encoding": "base64",
+        "data_base64": "LS0tIGEvUkVBRE1FLm1kCisrKyBiL1JFQURNRS5tZApAQCAtMSArMSBAQAotb2xkCituZXcK",
+        "byte_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "size_bytes": 54,
+        "patch_digest": "11851ddc3e2c65aa6fd777ffc740720a1221d3c815828e1d0c26707fd21857c0"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

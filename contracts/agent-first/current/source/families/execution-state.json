@@ -1,0 +1,532 @@
+{
+  "family_id": "execution-state",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "execution-state-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "manifest_digest",
+        "domain": "pullwise:execution-state-manifest/v1"
+      },
+      "x-pullwise-semantics": [
+        "execution_state_manifest"
+      ],
+      "required": [
+        "schema_id",
+        "source_state_id",
+        "execution_profile_ref",
+        "execution_profile_digest",
+        "toolchain",
+        "config_and_fixtures",
+        "services",
+        "environment",
+        "locale",
+        "timezone",
+        "execution_state_id",
+        "manifest_digest"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "execution-state-manifest/v1"
+        },
+        "source_state_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "execution_profile_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "execution-profile/v1"
+        },
+        "execution_profile_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "toolchain": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool_id",
+              "binary_identity",
+              "version",
+              "binary_sha256"
+            ],
+            "properties": {
+              "tool_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+              },
+              "binary_identity": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 4096,
+                "pattern": "^/[^\\x00]+$"
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "binary_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "config_and_fixtures": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "content-ref/v1",
+            "x-pullwise-content-schema-id": "source-content/v1"
+          }
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "service_id",
+              "version",
+              "endpoint_class",
+              "fingerprint"
+            ],
+            "properties": {
+              "service_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "endpoint_class": {
+                "enum": [
+                  "local_process",
+                  "loopback",
+                  "private_network",
+                  "public_network"
+                ]
+              },
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "environment": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "key"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "secret_ref",
+                  "value"
+                ]
+              },
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[A-Z_][A-Z0-9_]*$"
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "secret_key_id": {
+                "type": "string",
+                "pattern": "^secret_[0-9a-f]{32}$"
+              },
+              "secret_version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            }
+          }
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "execution_state_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "source_evidence_golden_execution_state",
+      "fixture_class": "golden",
+      "schema_id": "execution-state-manifest/v1",
+      "document": {
+        "schema_id": "execution-state-manifest/v1",
+        "source_state_id": "10c31b75976a655b01345ce4423e198e4e4e482049392e378870fd35803cbf4a",
+        "execution_profile_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "execution-profile/v1",
+          "sha256": "636866faa9fe11be0e1248e984b750bade0b52c0ac1d46df398bc9d97df5e85c",
+          "size_bytes": 297,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "execution_profile_digest": "d5051fec129d660b1bb0a9ed266cbf69eeb0854cb1e75ae33f26c58c7ea3e4c5",
+        "toolchain": [
+          {
+            "tool_id": "git",
+            "binary_identity": "/usr/bin/git",
+            "version": "2.43.0",
+            "binary_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          {
+            "tool_id": "python",
+            "binary_identity": "/usr/bin/python3",
+            "version": "3.10.12",
+            "binary_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        ],
+        "config_and_fixtures": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_44444444444444444444444444444444",
+            "content_schema_id": "source-content/v1",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+            "size_bytes": 123,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_55555555555555555555555555555555",
+            "content_schema_id": "source-content/v1",
+            "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+            "size_bytes": 456,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "services": [
+          {
+            "service_id": "codex-app-server",
+            "version": "1.0.0",
+            "endpoint_class": "local_process",
+            "fingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ],
+        "environment": [
+          {
+            "kind": "value",
+            "key": "LANG",
+            "value": "C.UTF-8"
+          },
+          {
+            "kind": "secret_ref",
+            "key": "MODEL_TOKEN",
+            "secret_key_id": "secret_77777777777777777777777777777777",
+            "secret_version": "v1"
+          },
+          {
+            "kind": "value",
+            "key": "TZ",
+            "value": "UTC"
+          }
+        ],
+        "locale": "C.UTF-8",
+        "timezone": "UTC",
+        "execution_state_id": "f78e3e31cc9928fca0bbc33569eb99c38b5967d58cacbf6c0b9ebed554a82813",
+        "manifest_digest": "a72730e46bf7c023fa6dc6dc23f545f389f622ccaa1816403d59db4e8ac8cb51"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_idempotency_execution_state",
+      "fixture_class": "idempotency",
+      "schema_id": "execution-state-manifest/v1",
+      "document": {
+        "schema_id": "execution-state-manifest/v1",
+        "source_state_id": "10c31b75976a655b01345ce4423e198e4e4e482049392e378870fd35803cbf4a",
+        "execution_profile_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "execution-profile/v1",
+          "sha256": "636866faa9fe11be0e1248e984b750bade0b52c0ac1d46df398bc9d97df5e85c",
+          "size_bytes": 297,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "execution_profile_digest": "d5051fec129d660b1bb0a9ed266cbf69eeb0854cb1e75ae33f26c58c7ea3e4c5",
+        "toolchain": [
+          {
+            "tool_id": "git",
+            "binary_identity": "/usr/bin/git",
+            "version": "2.43.0",
+            "binary_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          {
+            "tool_id": "python",
+            "binary_identity": "/usr/bin/python3",
+            "version": "3.10.12",
+            "binary_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        ],
+        "config_and_fixtures": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_44444444444444444444444444444444",
+            "content_schema_id": "source-content/v1",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+            "size_bytes": 123,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_55555555555555555555555555555555",
+            "content_schema_id": "source-content/v1",
+            "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+            "size_bytes": 456,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "services": [
+          {
+            "service_id": "codex-app-server",
+            "version": "1.0.0",
+            "endpoint_class": "local_process",
+            "fingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ],
+        "environment": [
+          {
+            "kind": "value",
+            "key": "LANG",
+            "value": "C.UTF-8"
+          },
+          {
+            "kind": "secret_ref",
+            "key": "MODEL_TOKEN",
+            "secret_key_id": "secret_77777777777777777777777777777777",
+            "secret_version": "v1"
+          },
+          {
+            "kind": "value",
+            "key": "TZ",
+            "value": "UTC"
+          }
+        ],
+        "locale": "C.UTF-8",
+        "timezone": "UTC",
+        "execution_state_id": "f78e3e31cc9928fca0bbc33569eb99c38b5967d58cacbf6c0b9ebed554a82813",
+        "manifest_digest": "a72730e46bf7c023fa6dc6dc23f545f389f622ccaa1816403d59db4e8ac8cb51"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_negative_execution_state_order",
+      "fixture_class": "negative",
+      "schema_id": "execution-state-manifest/v1",
+      "document": {
+        "schema_id": "execution-state-manifest/v1",
+        "source_state_id": "10c31b75976a655b01345ce4423e198e4e4e482049392e378870fd35803cbf4a",
+        "execution_profile_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "execution-profile/v1",
+          "sha256": "636866faa9fe11be0e1248e984b750bade0b52c0ac1d46df398bc9d97df5e85c",
+          "size_bytes": 297,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "execution_profile_digest": "d5051fec129d660b1bb0a9ed266cbf69eeb0854cb1e75ae33f26c58c7ea3e4c5",
+        "toolchain": [
+          {
+            "tool_id": "python",
+            "binary_identity": "/usr/bin/python3",
+            "version": "3.10.12",
+            "binary_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          {
+            "tool_id": "git",
+            "binary_identity": "/usr/bin/git",
+            "version": "2.43.0",
+            "binary_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          }
+        ],
+        "config_and_fixtures": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_44444444444444444444444444444444",
+            "content_schema_id": "source-content/v1",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+            "size_bytes": 123,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_55555555555555555555555555555555",
+            "content_schema_id": "source-content/v1",
+            "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+            "size_bytes": 456,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "services": [
+          {
+            "service_id": "codex-app-server",
+            "version": "1.0.0",
+            "endpoint_class": "local_process",
+            "fingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ],
+        "environment": [
+          {
+            "kind": "value",
+            "key": "LANG",
+            "value": "C.UTF-8"
+          },
+          {
+            "kind": "secret_ref",
+            "key": "MODEL_TOKEN",
+            "secret_key_id": "secret_77777777777777777777777777777777",
+            "secret_version": "v1"
+          },
+          {
+            "kind": "value",
+            "key": "TZ",
+            "value": "UTC"
+          }
+        ],
+        "locale": "C.UTF-8",
+        "timezone": "UTC",
+        "execution_state_id": "45a1b2e2f287ced27adc96f0599f68555dfb9cf8c90e40f835729475e3cbed89",
+        "manifest_digest": "74dfaf1bcdb7a5f6eabdbf5085a851106a49deb4a54d7ffca5c07274c546411c"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "source_evidence_negative_execution_state_wrong_target",
+      "fixture_class": "negative",
+      "schema_id": "execution-state-manifest/v1",
+      "document": {
+        "schema_id": "execution-state-manifest/v1",
+        "source_state_id": "10c31b75976a655b01345ce4423e198e4e4e482049392e378870fd35803cbf4a",
+        "execution_profile_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "execution-profile/v1",
+          "sha256": "636866faa9fe11be0e1248e984b750bade0b52c0ac1d46df398bc9d97df5e85c",
+          "size_bytes": 297,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "execution_profile_digest": "d5051fec129d660b1bb0a9ed266cbf69eeb0854cb1e75ae33f26c58c7ea3e4c5",
+        "toolchain": [
+          {
+            "tool_id": "git",
+            "binary_identity": "/usr/bin/git",
+            "version": "2.43.0",
+            "binary_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          {
+            "tool_id": "python",
+            "binary_identity": "/usr/bin/python3",
+            "version": "3.10.12",
+            "binary_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        ],
+        "config_and_fixtures": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_44444444444444444444444444444444",
+            "content_schema_id": "change-set-patch/v1",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+            "size_bytes": 123,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_55555555555555555555555555555555",
+            "content_schema_id": "source-content/v1",
+            "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+            "size_bytes": 456,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "services": [
+          {
+            "service_id": "codex-app-server",
+            "version": "1.0.0",
+            "endpoint_class": "local_process",
+            "fingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ],
+        "environment": [
+          {
+            "kind": "value",
+            "key": "LANG",
+            "value": "C.UTF-8"
+          },
+          {
+            "kind": "secret_ref",
+            "key": "MODEL_TOKEN",
+            "secret_key_id": "secret_77777777777777777777777777777777",
+            "secret_version": "v1"
+          },
+          {
+            "kind": "value",
+            "key": "TZ",
+            "value": "UTC"
+          }
+        ],
+        "locale": "C.UTF-8",
+        "timezone": "UTC",
+        "execution_state_id": "4b2489e760adf2535f6f8c0fe6d85c1bb3e8328dc3ea35bff7742cb3a7d9a903",
+        "manifest_digest": "210d0b2d42238a529f4ebe2e2cd8d4c3a71e04d927d3814854bcc45c91216a5e"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

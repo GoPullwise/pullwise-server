@@ -155,31 +155,32 @@
       "$id": "waiver-event/v1",
       "type": "object",
       "additionalProperties": false,
-      "x-pullwise-digest": {
-        "field": "waiver_digest",
-        "domain": "pullwise:waiver-event:v1"
-      },
       "x-pullwise-semantics": ["waiver_event"],
       "required": [
-        "schema_id", "waiver_id", "task_id", "requirement_ids", "issuer",
-        "reason", "authorized_at", "expires_at", "waiver_digest"
+        "schema_id", "waiver_id", "task_id", "requirement_id",
+        "waived_ledger_version", "ledger_digest", "policy_version", "scope",
+        "issuer", "key_id", "reason", "issued_at", "expires_at",
+        "revokes_waiver_id", "signature"
       ],
       "properties": {
         "schema_id": {"const": "waiver-event/v1"},
         "waiver_id": {"type": "string", "pattern": "^waiver_[0-9a-f]{32}$"},
         "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
-        "requirement_ids": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 256,
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1, "maxLength": 160}
-        },
+        "requirement_id": {"type": "string", "minLength": 1, "maxLength": 160},
+        "waived_ledger_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "ledger_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "policy_version": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "scope": {"const": "this_requirement_this_ledger_version"},
         "issuer": {"$ref": "actor/v1"},
+        "key_id": {"type": "string", "minLength": 1, "maxLength": 160},
         "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
-        "authorized_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
+        "issued_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
         "expires_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
-        "waiver_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "revokes_waiver_id": {
+          "type": ["string", "null"],
+          "pattern": "^waiver_[0-9a-f]{32}$"
+        },
+        "signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
       }
     }
   ],
@@ -252,23 +253,6 @@
       "expected_code": null
     },
     {
-      "fixture_id": "publication_golden_waiver",
-      "fixture_class": "golden",
-      "schema_id": "waiver-event/v1",
-      "document": {
-        "schema_id": "waiver-event/v1",
-        "waiver_id": "waiver_00000000000000000000000000000001",
-        "task_id": "task_00000000000000000000000000000001",
-        "requirement_ids": ["REQ-1"],
-        "issuer": {"schema_id": "actor/v1", "kind": "user_control", "id": "operator", "session_id": null},
-        "reason": "Explicitly authorized exception.",
-        "authorized_at": "2026-07-22T00:00:00Z",
-        "expires_at": "2026-07-23T00:00:00Z",
-        "waiver_digest": "cdc7559dd171ed74acbeac553efd2412f6152105b900d34ba29cd971d0e79e9c"
-      },
-      "expected_code": null
-    },
-    {
       "fixture_id": "publication_negative_artifact_tuple",
       "fixture_class": "negative",
       "schema_id": "artifact-content-ref/v1",
@@ -286,6 +270,29 @@
         }
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "publication_negative_waiver_unauthorized",
+      "fixture_class": "negative",
+      "schema_id": "waiver-event/v1",
+      "document": {
+        "schema_id": "waiver-event/v1",
+        "waiver_id": "waiver_00000000000000000000000000000001",
+        "task_id": "task_00000000000000000000000000000001",
+        "requirement_id": "REQ-1",
+        "waived_ledger_version": 1,
+        "ledger_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_version": 1,
+        "scope": "this_requirement_this_ledger_version",
+        "issuer": {"schema_id": "actor/v1", "kind": "user_control", "id": "operator", "session_id": null},
+        "key_id": "untrusted-key",
+        "reason": "Explicitly authorized exception.",
+        "issued_at": "2026-07-22T00:00:00Z",
+        "expires_at": "2026-07-23T00:00:00Z",
+        "revokes_waiver_id": null,
+        "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "expected_code": "WAIVER_INVALID"
     }
   ]
 }

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 
-
+from .agent_first_transport_envelope_migrations import (
+    TERMINAL_RESULT_TABLE,
+    install_transport_envelope_tables,
+)
 CURRENT_AUTHORITY_TABLES = (
     "agent_current_worker_registrations",
     "agent_current_worker_registration_heads",
@@ -18,6 +21,7 @@ CURRENT_AUTHORITY_TABLES = (
     "agent_current_control_events",
     "agent_current_transport_receipts",
     "agent_current_transport_receipt_bindings",
+    TERMINAL_RESULT_TABLE,
     "agent_current_abandonments",
     "agent_current_fences",
 )
@@ -32,10 +36,10 @@ IMMUTABLE_TABLES = (
     "agent_current_abandonments",
     "agent_current_fences",
 )
-FENCE_STATE_TABLES = (
-    "agent_current_attempts",
-    "agent_current_owner_incarnations",
-    "agent_current_grant_authority",
+AUTHORITY_STATE_TABLES = (
+    ("agent_current_attempts", "CLAIMED"),
+    ("agent_current_owner_incarnations", "STARTING"),
+    ("agent_current_grant_authority", "ACTIVE"),
 )
 
 _DDL = (
@@ -123,7 +127,12 @@ _DDL = (
         native_epoch INTEGER NOT NULL CHECK(native_epoch >= 1),
         transport_epoch INTEGER NOT NULL CHECK(transport_epoch >= 1),
         lease_id TEXT NOT NULL,
-        state TEXT NOT NULL CHECK(state IN ('CLAIMED', 'FENCED')),
+        state TEXT NOT NULL CHECK(
+            state IN (
+                'CLAIMED', 'SUCCEEDED', 'SUSPENDED',
+                'FAILED', 'CANCELLED', 'FENCED'
+            )
+        ),
         created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
         fenced_at INTEGER,
         fence_reason TEXT,
@@ -138,7 +147,7 @@ _DDL = (
         attempt_id TEXT NOT NULL UNIQUE,
         owner_id TEXT NOT NULL,
         owner_epoch INTEGER NOT NULL CHECK(owner_epoch >= 1),
-        state TEXT NOT NULL CHECK(state IN ('STARTING', 'FENCED')),
+        state TEXT NOT NULL CHECK(state IN ('STARTING', 'CLOSED', 'FENCED')),
         created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
         fenced_at INTEGER,
         fence_reason TEXT,
@@ -164,7 +173,7 @@ _DDL = (
     """
     CREATE TABLE IF NOT EXISTS agent_current_grant_authority (
         grant_id TEXT PRIMARY KEY,
-        state TEXT NOT NULL CHECK(state IN ('ACTIVE', 'FENCED')),
+        state TEXT NOT NULL CHECK(state IN ('ACTIVE', 'REVOKED', 'FENCED')),
         authority_version INTEGER NOT NULL DEFAULT 1 CHECK(authority_version >= 1),
         fenced_at INTEGER,
         fence_reason TEXT,
@@ -262,7 +271,9 @@ _DDL = (
             (transport_envelope_digest IS NOT NULL AND response_bytes IS NOT NULL AND bound_at IS NOT NULL)
         ),
         FOREIGN KEY(receipt_digest)
-            REFERENCES agent_current_transport_receipts(receipt_digest)
+            REFERENCES agent_current_transport_receipts(receipt_digest),
+        FOREIGN KEY(transport_envelope_digest)
+            REFERENCES agent_current_terminal_results(transport_envelope_digest)
     )
     """,
     """
@@ -335,32 +346,6 @@ _DDL = (
         SELECT RAISE(ABORT, 'TRANSPORT_RECEIPT_BINDING_IMMUTABLE');
     END
     """,
-    """
-    CREATE TRIGGER IF NOT EXISTS agent_current_task_head_monotonic
-    BEFORE UPDATE ON agent_current_task_heads
-    WHEN NEW.task_id IS NOT OLD.task_id
-      OR NEW.owner_id IS NOT OLD.owner_id
-      OR NEW.task_version != OLD.task_version + 1
-      OR NEW.deletion_version < OLD.deletion_version
-      OR NEW.owner_epoch < OLD.owner_epoch
-      OR NEW.native_epoch < OLD.native_epoch
-      OR NEW.transport_epoch < OLD.transport_epoch
-      OR OLD.lifecycle='TERMINAL'
-      OR (
-        OLD.current_authority_schema_id='agent-claim-abandon-response/v1'
-        AND NEW.lifecycle!='TERMINAL'
-      )
-    BEGIN
-        SELECT RAISE(ABORT, 'AGENT_CURRENT_TASK_HEAD_CAS_INVALID');
-    END
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS agent_current_task_head_delete_immutable
-    BEFORE DELETE ON agent_current_task_heads
-    BEGIN
-        SELECT RAISE(ABORT, 'AGENT_CURRENT_TASK_HEAD_IMMUTABLE');
-    END
-    """,
 )
 
 
@@ -372,6 +357,7 @@ def install_current_authority_tables(connection: sqlite3.Connection) -> None:
         connection.execute("PRAGMA journal_mode=WAL")
     for statement in _DDL:
         connection.execute(statement)
+    install_transport_envelope_tables(connection)
     for table in IMMUTABLE_TABLES:
         for operation in ("UPDATE", "DELETE"):
             trigger = f"{table}_{operation.lower()}_immutable"
@@ -384,14 +370,14 @@ def install_current_authority_tables(connection: sqlite3.Connection) -> None:
                 END
                 """
             )
-    for table in FENCE_STATE_TABLES:
+    for table, live_state in AUTHORITY_STATE_TABLES:
         connection.execute(
             f"""
-            CREATE TRIGGER IF NOT EXISTS {table}_fence_permanent
+            CREATE TRIGGER IF NOT EXISTS {table}_terminal_permanent
             BEFORE UPDATE ON {table}
-            WHEN OLD.state='FENCED'
+            WHEN OLD.state!='{live_state}'
             BEGIN
-                SELECT RAISE(ABORT, '{table.upper()}_FENCE_PERMANENT');
+                SELECT RAISE(ABORT, '{table.upper()}_TERMINAL_PERMANENT');
             END
             """
         )

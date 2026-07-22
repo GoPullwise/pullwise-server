@@ -188,6 +188,8 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
     def test_abandonment_fences_full_authority_and_preserves_task_fields(self) -> None:
         claim_request, envelope = self.prepare_claim()
         stale_receipt = self.receipt(envelope)
+        stored_receipt = self.authority.store_transport_receipt(stale_receipt)
+        self.assertEqual(stored_receipt, self.authority.store_transport_receipt(stale_receipt))
         request = {
             "schema_id": "agent-claim-abandon-request/v1",
             "package": package_tuple(),
@@ -234,11 +236,21 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
                     connection.execute(f"DELETE FROM agent_current_{table}")
             with self.assertRaises(sqlite3.DatabaseError):
                 connection.execute(
-                    "UPDATE agent_current_task_heads SET task_version=task_version+1, "
+                    "UPDATE agent_current_attempts SET state='SUCCEEDED'"
+                )
+            with self.assertRaises(sqlite3.DatabaseError):
+                connection.execute(
+                    "UPDATE agent_current_task_heads SET lifecycle='TERMINAL', "
+                    "task_version=task_version+1, "
                     "current_authority_schema_id='server-authority-envelope/v1', "
                     "current_authority_digest=?",
                     (envelope["authority_digest"],),
                 )
+        before_stale = self.counts(
+            "agent_current_control_events",
+            "agent_current_transport_receipts",
+            "agent_current_transport_receipt_bindings",
+        )
         self.assert_error(
             "AUTHORITY_FENCED",
             lambda: self.authority.claim_and_issue_current_grant(claim_request),
@@ -246,6 +258,14 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
         self.assert_error(
             "AUTHORITY_FENCED",
             lambda: self.authority.store_transport_receipt(stale_receipt),
+        )
+        self.assertEqual(
+            before_stale,
+            self.counts(
+                "agent_current_control_events",
+                "agent_current_transport_receipts",
+                "agent_current_transport_receipt_bindings",
+            ),
         )
         changed = {**request, "reason": "authority_revoked"}
         self.assert_error("IDEMPOTENCY_CONFLICT", lambda: self.authority.abandon_current_claim(changed))

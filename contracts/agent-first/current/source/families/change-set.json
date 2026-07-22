@@ -1,0 +1,582 @@
+{
+  "family_id": "change-set",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "change-set/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "change_set_digest",
+        "domain": "pullwise:change-set/v1"
+      },
+      "x-pullwise-semantics": [
+        "change_set"
+      ],
+      "required": [
+        "schema_id",
+        "original_source_state_id",
+        "final_source_state_id",
+        "added",
+        "modified",
+        "deleted",
+        "type_changed",
+        "patch_ref",
+        "change_set_digest"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "change-set/v1"
+        },
+        "original_source_state_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "final_source_state_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "added": {
+          "type": "array",
+          "maxItems": 1000000,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "after"
+            ],
+            "properties": {
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^[^\\x00\\\\]+$"
+                  },
+                  "type": {
+                    "enum": [
+                      "file",
+                      "gitlink",
+                      "symlink"
+                    ]
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "executable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "commit_sha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "modified": {
+          "type": "array",
+          "maxItems": 1000000,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "before",
+              "after"
+            ],
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^[^\\x00\\\\]+$"
+                  },
+                  "type": {
+                    "enum": [
+                      "file",
+                      "gitlink",
+                      "symlink"
+                    ]
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "executable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "commit_sha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^[^\\x00\\\\]+$"
+                  },
+                  "type": {
+                    "enum": [
+                      "file",
+                      "gitlink",
+                      "symlink"
+                    ]
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "executable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "commit_sha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deleted": {
+          "type": "array",
+          "maxItems": 1000000,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "before"
+            ],
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^[^\\x00\\\\]+$"
+                  },
+                  "type": {
+                    "enum": [
+                      "file",
+                      "gitlink",
+                      "symlink"
+                    ]
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "executable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "commit_sha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "type_changed": {
+          "type": "array",
+          "maxItems": 1000000,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "before",
+              "after"
+            ],
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^[^\\x00\\\\]+$"
+                  },
+                  "type": {
+                    "enum": [
+                      "file",
+                      "gitlink",
+                      "symlink"
+                    ]
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "executable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "commit_sha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "type"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^[^\\x00\\\\]+$"
+                  },
+                  "type": {
+                    "enum": [
+                      "file",
+                      "gitlink",
+                      "symlink"
+                    ]
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "executable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "commit_sha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "patch_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "change-set-patch/v1"
+        },
+        "change_set_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "source_evidence_golden_change_set",
+      "fixture_class": "golden",
+      "schema_id": "change-set/v1",
+      "document": {
+        "schema_id": "change-set/v1",
+        "original_source_state_id": "10c31b75976a655b01345ce4423e198e4e4e482049392e378870fd35803cbf4a",
+        "final_source_state_id": "2b6949a3ef6faf4c2f753ff00fc5cd25bd8631a0bb8a527f1114289f38a7a26c",
+        "added": [
+          {
+            "after": {
+              "path": "new.txt",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437",
+              "executable": false
+            }
+          }
+        ],
+        "modified": [
+          {
+            "before": {
+              "path": "README.md",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+              "executable": false
+            },
+            "after": {
+              "path": "README.md",
+              "type": "file",
+              "size_bytes": 4,
+              "sha256": "88d4266fd4e6338d13b845fcf289579d209c897823b9217da3e161936f031589",
+              "executable": false
+            }
+          }
+        ],
+        "deleted": [
+          {
+            "before": {
+              "path": "old.txt",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4",
+              "executable": false
+            }
+          }
+        ],
+        "type_changed": [
+          {
+            "before": {
+              "path": "run.sh",
+              "type": "symlink",
+              "target": "scripts/run.sh"
+            },
+            "after": {
+              "path": "run.sh",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+              "executable": true
+            }
+          }
+        ],
+        "patch_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "change-set-patch/v1",
+          "sha256": "46afd31e702b8cea911dac2711ead0b8c782bd70deb186854b205e22fc6ed35b",
+          "size_bytes": 374,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "change_set_digest": "32afed801da3673a3405ecc8a4a2388fb312fb4037ced40960a6aa860cb78ebf"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_idempotency_change_set",
+      "fixture_class": "idempotency",
+      "schema_id": "change-set/v1",
+      "document": {
+        "schema_id": "change-set/v1",
+        "original_source_state_id": "10c31b75976a655b01345ce4423e198e4e4e482049392e378870fd35803cbf4a",
+        "final_source_state_id": "2b6949a3ef6faf4c2f753ff00fc5cd25bd8631a0bb8a527f1114289f38a7a26c",
+        "added": [
+          {
+            "after": {
+              "path": "new.txt",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437",
+              "executable": false
+            }
+          }
+        ],
+        "modified": [
+          {
+            "before": {
+              "path": "README.md",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+              "executable": false
+            },
+            "after": {
+              "path": "README.md",
+              "type": "file",
+              "size_bytes": 4,
+              "sha256": "88d4266fd4e6338d13b845fcf289579d209c897823b9217da3e161936f031589",
+              "executable": false
+            }
+          }
+        ],
+        "deleted": [
+          {
+            "before": {
+              "path": "old.txt",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4",
+              "executable": false
+            }
+          }
+        ],
+        "type_changed": [
+          {
+            "before": {
+              "path": "run.sh",
+              "type": "symlink",
+              "target": "scripts/run.sh"
+            },
+            "after": {
+              "path": "run.sh",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+              "executable": true
+            }
+          }
+        ],
+        "patch_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "change-set-patch/v1",
+          "sha256": "46afd31e702b8cea911dac2711ead0b8c782bd70deb186854b205e22fc6ed35b",
+          "size_bytes": 374,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "change_set_digest": "32afed801da3673a3405ecc8a4a2388fb312fb4037ced40960a6aa860cb78ebf"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_negative_change_set_overlap",
+      "fixture_class": "negative",
+      "schema_id": "change-set/v1",
+      "document": {
+        "schema_id": "change-set/v1",
+        "original_source_state_id": "10c31b75976a655b01345ce4423e198e4e4e482049392e378870fd35803cbf4a",
+        "final_source_state_id": "2b6949a3ef6faf4c2f753ff00fc5cd25bd8631a0bb8a527f1114289f38a7a26c",
+        "added": [
+          {
+            "after": {
+              "path": "new.txt",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437",
+              "executable": false
+            }
+          }
+        ],
+        "modified": [],
+        "deleted": [
+          {
+            "before": {
+              "path": "new.txt",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437",
+              "executable": false
+            }
+          }
+        ],
+        "type_changed": [
+          {
+            "before": {
+              "path": "run.sh",
+              "type": "symlink",
+              "target": "scripts/run.sh"
+            },
+            "after": {
+              "path": "run.sh",
+              "type": "file",
+              "size_bytes": 3,
+              "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+              "executable": true
+            }
+          }
+        ],
+        "patch_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "change-set-patch/v1",
+          "sha256": "46afd31e702b8cea911dac2711ead0b8c782bd70deb186854b205e22fc6ed35b",
+          "size_bytes": 374,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "change_set_digest": "3a6abdcc4f4123b6d10fde9f573621a207a489e1e47c7f4b768585646b3cdf2c"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

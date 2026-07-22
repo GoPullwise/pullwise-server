@@ -171,7 +171,50 @@ function validateSemantics(schemaId, value) {
     }
     if (value.previous_task_version !== grant.task_version) fail("AUTHORITY_PREVIOUS_VERSION_MISMATCH");
     if (value.task_version !== value.previous_task_version + 1) fail("AUTHORITY_SUCCESSOR_VERSION_INVALID");
+  } else if (schemaId === "artifact-content-registry/v1") {
+    const expected = [
+      {artifact_kind: "change_set_patch", content_schema_id: "change-set-patch/v1", media_type: "application/json", encoding: "utf-8"},
+      {artifact_kind: "task_report", content_schema_id: "task-report/v1", media_type: "application/json", encoding: "utf-8"},
+    ];
+    if (JSON.stringify(value.entries) !== JSON.stringify(expected)) fail("ARTIFACT_CONTENT_REGISTRY_INVALID");
+  } else if (schemaId === "artifact-content-ref/v1") {
+    const registry = fixture("publication_golden_artifact_registry").document;
+    verifyEmbeddedDigestSync("artifact-content-registry/v1", registry);
+    const entry = registry.entries.find((item) => item.artifact_kind === value.artifact_kind);
+    const ref = value.ref;
+    if (!entry || ["content_schema_id", "media_type", "encoding"].some(
+      (key) => ref[key] !== entry[key],
+    )) fail("ARTIFACT_CONTENT_TUPLE_INVALID");
+  } else if (schemaId === "budget-summary/v1") {
+    if (value.consumed_ms > value.elapsed_limit_ms) {
+      throw new ContractValidationError("BUDGET_EXHAUSTED", "BUDGET_SUMMARY_ELAPSED_INVALID", "$");
+    }
+    if (value.calls_consumed > value.tool_call_limit) {
+      throw new ContractValidationError("BUDGET_EXHAUSTED", "BUDGET_SUMMARY_CALLS_INVALID", "$");
+    }
+  } else if (schemaId === "task-report/v1") {
+    const sectionIds = value.sections.map((item) => item.section_id);
+    if (JSON.stringify(sectionIds) !== JSON.stringify([...sectionIds].sort())) fail("TASK_REPORT_SECTION_ORDER_INVALID");
+    for (const field of ["title", "summary"]) {
+      const limit = field === "title" ? 512 : 4096;
+      if (encoder.encode(value[field]).length > limit) fail("TASK_REPORT_UTF8_LIMIT_INVALID", "$." + field);
+    }
+    value.sections.forEach((section, index) => {
+      if (encoder.encode(section.title).length > 512 || encoder.encode(section.body).length > 65536) {
+        fail("TASK_REPORT_UTF8_LIMIT_INVALID", "$.sections[" + index + "]");
+      }
+      verifyContentRefSet(section.evidence_refs);
+    });
+  } else if (schemaId === "waiver-event/v1") {
+    if (value.issued_at >= value.expires_at) {
+      throw new ContractValidationError("WAIVER_INVALID", "WAIVER_TIME_RANGE_INVALID", "$");
+    }
   }
+}
+
+export function verifyWaiverAuthorization(waiver, effectivePolicy, now) {
+  validateDocument("waiver-event/v1", waiver);
+  throw new ContractValidationError("WAIVER_INVALID", "WAIVER_ISSUER_NOT_AUTHORIZED", "$");
 }
 
 export async function verifyBudgetTransition(previousLedger, reservation, reservedLedger, settlement, resultingLedger) {

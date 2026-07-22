@@ -1,0 +1,98 @@
+{
+  "family_id": "execution-profile",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "execution-profile/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "profile_digest",
+        "domain": "pullwise:execution-profile/v1"
+      },
+      "x-pullwise-semantics": [
+        "execution_profile"
+      ],
+      "required": [
+        "schema_id",
+        "image_identity",
+        "operating_system",
+        "sandbox_identity",
+        "cpu_architecture",
+        "profile_digest"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "execution-profile/v1"
+        },
+        "image_identity": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "operating_system": {
+          "const": "linux"
+        },
+        "sandbox_identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+        },
+        "cpu_architecture": {
+          "enum": [
+            "aarch64",
+            "x86_64"
+          ]
+        },
+        "profile_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "source_evidence_golden_execution_profile",
+      "fixture_class": "golden",
+      "schema_id": "execution-profile/v1",
+      "document": {
+        "schema_id": "execution-profile/v1",
+        "image_identity": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "operating_system": "linux",
+        "sandbox_identity": "bwrap:1.0",
+        "cpu_architecture": "x86_64",
+        "profile_digest": "d5051fec129d660b1bb0a9ed266cbf69eeb0854cb1e75ae33f26c58c7ea3e4c5"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_idempotency_execution_profile",
+      "fixture_class": "idempotency",
+      "schema_id": "execution-profile/v1",
+      "document": {
+        "schema_id": "execution-profile/v1",
+        "image_identity": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "operating_system": "linux",
+        "sandbox_identity": "bwrap:1.0",
+        "cpu_architecture": "x86_64",
+        "profile_digest": "d5051fec129d660b1bb0a9ed266cbf69eeb0854cb1e75ae33f26c58c7ea3e4c5"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "source_evidence_negative_execution_profile_mutable_image",
+      "fixture_class": "negative",
+      "schema_id": "execution-profile/v1",
+      "document": {
+        "schema_id": "execution-profile/v1",
+        "image_identity": "mutable:latest",
+        "operating_system": "linux",
+        "sandbox_identity": "bwrap:1.0",
+        "cpu_architecture": "x86_64",
+        "profile_digest": "c68582126e2cbe0fbd43ec3921c95dba95c0d960d98812113de6e7ea78bfb9c2"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

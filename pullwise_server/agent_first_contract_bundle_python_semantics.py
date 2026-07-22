@@ -111,6 +111,71 @@ def _validate_semantics(schema_id: str, value: dict[str, object]) -> None:
             _fail("AUTHORITY_PREVIOUS_VERSION_MISMATCH")
         if value["task_version"] != value["previous_task_version"] + 1:
             _fail("AUTHORITY_SUCCESSOR_VERSION_INVALID")
+    elif schema_id == "artifact-content-registry/v1":
+        expected = [
+            {
+                "artifact_kind": "change_set_patch",
+                "content_schema_id": "change-set-patch/v1",
+                "media_type": "application/json",
+                "encoding": "utf-8",
+            },
+            {
+                "artifact_kind": "task_report",
+                "content_schema_id": "task-report/v1",
+                "media_type": "application/json",
+                "encoding": "utf-8",
+            },
+        ]
+        if value["entries"] != expected:
+            _fail("ARTIFACT_CONTENT_REGISTRY_INVALID")
+    elif schema_id == "artifact-content-ref/v1":
+        registry = verify_document_digest(
+            "artifact-content-registry/v1",
+            fixture("publication_golden_artifact_registry")["document"],
+        )
+        entry = next(
+            (
+                item
+                for item in registry["entries"]
+                if item["artifact_kind"] == value["artifact_kind"]
+            ),
+            None,
+        )
+        ref = value["ref"]
+        if entry is None or any(
+            ref[key] != entry[key]
+            for key in ("content_schema_id", "media_type", "encoding")
+        ):
+            _fail("ARTIFACT_CONTENT_TUPLE_INVALID")
+    elif schema_id == "budget-summary/v1":
+        if value["consumed_ms"] > value["elapsed_limit_ms"]:
+            _fail("BUDGET_SUMMARY_ELAPSED_INVALID", code="BUDGET_EXHAUSTED")
+        if value["calls_consumed"] > value["tool_call_limit"]:
+            _fail("BUDGET_SUMMARY_CALLS_INVALID", code="BUDGET_EXHAUSTED")
+    elif schema_id == "task-report/v1":
+        if [item["section_id"] for item in value["sections"]] != sorted(
+            item["section_id"] for item in value["sections"]
+        ):
+            _fail("TASK_REPORT_SECTION_ORDER_INVALID")
+        for field, limit in (("title", 512), ("summary", 4096)):
+            if len(value[field].encode("utf-8")) > limit:
+                _fail("TASK_REPORT_UTF8_LIMIT_INVALID", f"$.{field}")
+        for index, section in enumerate(value["sections"]):
+            if len(section["title"].encode("utf-8")) > 512 or len(
+                section["body"].encode("utf-8")
+            ) > 65536:
+                _fail("TASK_REPORT_UTF8_LIMIT_INVALID", f"$.sections[{index}]")
+            verify_content_ref_set(section["evidence_refs"])
+    elif schema_id == "waiver-event/v1":
+        if value["issued_at"] >= value["expires_at"]:
+            _fail("WAIVER_TIME_RANGE_INVALID", code="WAIVER_INVALID")
+
+
+def verify_waiver_authorization(
+    waiver: object, effective_policy: object, now: str
+) -> bool:
+    validate_document("waiver-event/v1", waiver)
+    _fail("WAIVER_ISSUER_NOT_AUTHORIZED", code="WAIVER_INVALID")
 
 
 def verify_budget_transition(

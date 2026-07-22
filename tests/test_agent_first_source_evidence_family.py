@@ -8,15 +8,16 @@ import unittest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FAMILY_PATH = (
-    REPO_ROOT
-    / 'contracts'
-    / 'agent-first'
-    / 'current'
-    / 'source'
-    / 'families'
-    / 'source-evidence.json'
+FAMILY_ROOT = (
+    REPO_ROOT / 'contracts' / 'agent-first' / 'current' / 'source' / 'families'
 )
+FAMILY_SCHEMAS = {
+    'change-set-patch': ('change-set-patch/v1',),
+    'change-set': ('change-set/v1',),
+    'execution-profile': ('execution-profile/v1',),
+    'execution-state': ('execution-state-manifest/v1',),
+    'source-state': ('source-selection-policy/v1', 'source-tree-manifest/v1'),
+}
 SCHEMAS = (
     'change-set-patch/v1',
     'change-set/v1',
@@ -213,12 +214,37 @@ def valid_document(document: dict[str, object], schema: dict[str, object]) -> bo
 class AgentFirstSourceEvidenceFamilyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.family = json.loads(FAMILY_PATH.read_text(encoding='utf-8'))
-        cls.schemas = {item['$id']: item for item in cls.family['schemas']}
+        cls.families = {
+            family_id: json.loads(
+                (FAMILY_ROOT / f'{family_id}.json').read_text(encoding='utf-8')
+            )
+            for family_id in FAMILY_SCHEMAS
+        }
+        cls.schemas = {
+            item['$id']: item
+            for family in cls.families.values()
+            for item in family['schemas']
+        }
+        cls.fixtures = sorted(
+            (
+                item
+                for family in cls.families.values()
+                for item in family['fixtures']
+            ),
+            key=lambda item: item['fixture_id'],
+        )
 
     def test_family_has_closed_sorted_schema_and_semantic_registry(self) -> None:
-        self.assertEqual('source-evidence', self.family['family_id'])
-        self.assertEqual(list(SCHEMAS), [item['$id'] for item in self.family['schemas']])
+        for family_id, expected_schemas in FAMILY_SCHEMAS.items():
+            family = self.families[family_id]
+            self.assertEqual(family_id, family['family_id'])
+            self.assertEqual(
+                list(expected_schemas), [item['$id'] for item in family['schemas']]
+            )
+            self.assertLessEqual(
+                len((FAMILY_ROOT / f'{family_id}.json').read_text().splitlines()),
+                600,
+            )
         self.assertEqual(set(SCHEMAS), set(self.schemas))
         for schema_id, semantic in SEMANTICS.items():
             schema = self.schemas[schema_id]
@@ -249,7 +275,7 @@ class AgentFirstSourceEvidenceFamilyTest(unittest.TestCase):
         )
 
     def test_full_fixtures_execute_and_idempotency_is_byte_exact(self) -> None:
-        fixtures = self.family['fixtures']
+        fixtures = self.fixtures
         self.assertEqual(
             sorted(item['fixture_id'] for item in fixtures),
             [item['fixture_id'] for item in fixtures],
@@ -281,7 +307,7 @@ class AgentFirstSourceEvidenceFamilyTest(unittest.TestCase):
                 )
 
     def test_adversarial_fixtures_cover_wrong_target_and_changed_tree(self) -> None:
-        fixtures = {item['fixture_id']: item for item in self.family['fixtures']}
+        fixtures = {item['fixture_id']: item for item in self.fixtures}
         wrong = fixtures['source_evidence_negative_source_tree_wrong_target']
         changed = fixtures['source_evidence_negative_source_tree_changed_state']
         self.assertEqual(
