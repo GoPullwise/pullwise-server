@@ -307,13 +307,28 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
     ) -> dict[str, object]:
         handlers = self.python._DOCUMENT_RULE_HANDLERS
         original = dict(handlers)
+        original_validate_semantics = self.python._validate_semantics
         hits: list[str] = []
         case_hits: list[list[str]] = []
         active_hits: list[str] = []
+        events: list[dict[str, str]] = []
+        case_events: list[list[dict[str, str]]] = []
+        active_events: list[dict[str, str]] = []
+        schema_stack: list[str] = []
         failures: list[str] = []
         case_failures: list[list[str]] = []
         active_failures: list[str] = []
         try:
+            def tracked_validate_semantics(
+                schema_id: str, value: dict[str, object]
+            ) -> None:
+                schema_stack.append(schema_id)
+                try:
+                    original_validate_semantics(schema_id, value)
+                finally:
+                    schema_stack.pop()
+
+            self.python._validate_semantics = tracked_validate_semantics
             for rule_id, handler in original.items():
                 def wrapped(
                     value: dict[str, object],
@@ -323,6 +338,9 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                 ) -> object:
                     hits.append(_rule_id)
                     active_hits.append(_rule_id)
+                    event = {"schemaId": schema_stack[-1], "ruleId": _rule_id}
+                    events.append(event)
+                    active_events.append(event)
                     try:
                         return _handler(value)
                     except BaseException:
@@ -334,6 +352,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             results = []
             for case in cases:
                 active_hits = []
+                active_events = []
                 active_failures = []
                 schema_id = case["schema_id"]
                 validator = (
@@ -349,14 +368,18 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                     )
                 )
                 case_hits.append(active_hits)
+                case_events.append(active_events)
                 case_failures.append(active_failures)
         finally:
+            self.python._validate_semantics = original_validate_semantics
             handlers.clear()
             handlers.update(original)
         return {
             "results": results,
             "hits": hits,
             "case_hits": case_hits,
+            "events": events,
+            "case_events": case_events,
             "failures": failures,
             "case_failures": case_failures,
         }
