@@ -642,3 +642,43 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   final EvidenceClosure cites GateDecision; this exception must never admit a
   TaskResult, TaskResultCore, transport, or debug artifact into either evidence
   closure.
+
+## Agent-First Task Control Semantics
+
+- Compose the specialized task-control rule/helper fragments after legacy
+  control fragments so their complete handlers own overlapping rule names.
+  Every declared rule must execute through both generated facades, and every
+  contextual helper must expose Python snake case plus Node camel and snake
+  names.
+- JSON Schema object keywords remain active when a subschema omits
+  `type: object`. The generated Python and Node evaluators must process
+  `properties`, `required`, and `additionalProperties` for object values;
+  otherwise conditional `oneOf` branches match vacuously.
+- A TaskRecord may carry terminal result fields only in `TERMINAL`; preterminal
+  result refs are invalid. Context helpers validate their owned TaskRecord
+  documents and bind bounded external documents directly without claiming the
+  external family's still-unimplemented semantic rules.
+- `waiver-event/v1` has a sealed `signature_contract` in addition to its
+  rule/helper lists. Both generated facades must require the exact Ed25519,
+  NUL-separated, base64url-no-padding contract before authority evaluation.
+
+## Agent-First Source, Execution, And Observation Semantics
+
+- Generated facades execute `change_set`, `execution_state_manifest`,
+  `source_selection_policy`, `source_tree_manifest`,
+  `observation_manifest`, and `pre_verifier_observation_manifest` in both
+  runtimes. Keep their embedded digest, ordering, identity, and shape checks in
+  parity.
+- The public direct-document helpers are
+  `verify_change_set_context`, `verify_execution_state_context`,
+  `verify_source_tree_context`, and
+  `verify_observation_manifest_extension`; Node also exposes camel-case names.
+  They bind exact document bytes and ContentRefs rather than accepting opaque
+  resolver callbacks.
+- A final observation manifest must strictly extend the exact pre-verifier
+  entry prefix, bind its pre-manifest ContentRef, and add only
+  `quality_verifier` entries. The source golden final fixture carries a
+  placeholder pre-manifest ref, so positive contextual tests must rebind that
+  ref to the actual pre-manifest bytes and reseal the final document.
+- Actor semantics accept the current `domain_reviewer` kind and must not
+  restore `legacy_domain_reviewer`.
