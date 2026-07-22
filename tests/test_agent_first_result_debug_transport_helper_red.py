@@ -253,6 +253,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
     def test_synthesized_documents_are_internally_consistent(self) -> None:
         documents = self.build_uploaded_documents()
         task_result = documents["task_result"]
+        transport_ack = documents["transport_ack"]
         task_result_core = documents["task_result_core"]
         transport_envelope = documents["task_result_transport_envelope"]
         transport_ack = documents["task_result_transport_ack"]
@@ -376,19 +377,18 @@ class AgentFirstResultDebugTransportHelperRedTest(
         worker_debug_redaction_report = documents["worker_debug_redaction_report"]
 
         invalid_core = deepcopy(task_result_core)
-        invalid_core["diagnostics"] = {
-            "worker_debug_fragment": {
-                "availability": "not_applicable",
-                "reason_code": "CAPABILITY_NOT_IMPLEMENTED",
-            }
-        }
+        invalid_core["summary"] = "Different but schema-valid core summary."
         invalid_task_result = deepcopy(task_result)
         invalid_task_result["diagnostics"]["worker_debug_fragment"]["ref"]["sha256"] = "0" * 64
         invalid_envelope = deepcopy(transport_envelope)
         invalid_envelope["task_result_core_digest"] = "0" * 64
-        invalid_ack = self.fixture_document("task_result_transport_ack_negative_binding_matrix")
+        invalid_ack = deepcopy(transport_ack)
+        invalid_ack["receipt_digest"] = "0" * 64
+        invalid_ack = self.reseal("task-result-transport-ack/v1", invalid_ack)
         invalid_descriptor = deepcopy(worker_debug_descriptor)
-        invalid_descriptor["server_fragment_ref"] = None
+        invalid_descriptor["fragment_ref"]["sha256"] = "0" * 64
+        invalid_descriptor["server_fragment_ref"]["sha256"] = "0" * 64
+        invalid_descriptor["source_sha256"] = "0" * 64
         invalid_fragment = deepcopy(worker_debug_fragment)
         invalid_fragment["last_server_acked_event_seq"] = invalid_fragment["local_event_seq"] + 1
 
@@ -402,11 +402,11 @@ class AgentFirstResultDebugTransportHelperRedTest(
         ]
         self.assertEqual(
             [
-                {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TASK_RESULT_CORE_DEBUG_FIELD_INVALID", "path": "$"},
+                {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TASK_RESULT_CORE_PROJECTION_INVALID", "path": "$"},
                 {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TASK_RESULT_CONTEXT_INVALID", "path": "$.diagnostics.worker_debug_fragment.ref"},
                 {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TRANSPORT_CORE_DIGEST_INVALID", "path": "$"},
-                {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "path": "$"},
-                {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "DEBUG_DESCRIPTOR_BINDING_INVALID", "path": "$"},
+                {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "path": "$.receipt_binding_state"},
+                {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "CAS_CORRUPT", "path": "$.fragment_ref"},
                 {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "DEBUG_EVENT_SEQUENCE_INVALID", "path": "$"},
             ],
             self.assert_helper_parity(operations),

@@ -147,9 +147,9 @@ class AgentFirstResultDebugTransportDocumentFacadesTest(
 
     def test_declared_rules_reject_resealed_semantic_drift(self) -> None:
         result = self.fixture_document("task_result_golden_completed")
-        result["provenance"]["attempt_ids"] = ["attempt_" + "2" * 32, "attempt_" + "1" * 32]
+        result["provenance"]["attempt_ids"] = ["attempt_00000000000000000000000000000002", "attempt_00000000000000000000000000000001"]
         core = self.fixture_document("task_result_core_golden_completed")
-        core["diagnostics"] = {"worker_debug_fragment": {"availability": "not_applicable", "reason_code": "CAPABILITY_NOT_IMPLEMENTED"}}
+        core["terminal_task_version"] += 1
         file_manifest = self.fixture_document("worker_debug_content_golden_file_manifest")
         file_manifest["entry_count"] = 2
         file_manifest = self.reseal("worker-debug-file-manifest/v1", file_manifest)
@@ -157,12 +157,11 @@ class AgentFirstResultDebugTransportDocumentFacadesTest(
         redaction["archive_rescan_detection_count"] = 1
         redaction = self.reseal("worker-debug-redaction-report/v1", redaction)
         descriptor = self.fixture_document("worker_debug_transport_descriptor_golden_uploaded")
-        descriptor["server_fragment_ref"] = None
+        descriptor["server_fragment_ref"]["sha256"] = "0" * 64
         fragment = self.fixture_document("worker_debug_transport_fragment_golden_terminal")
         fragment["last_server_acked_event_seq"] = 11
         ack = self.fixture_document("task_result_transport_ack_golden_bound")
-        ack["receipt_binding_state"] = "not_applicable"
-        ack["receipt_digest"] = None
+        ack["terminal_task_version"] += 1
         ack = self.reseal("task-result-transport-ack/v1", ack)
         envelope = self.fixture_document("task_result_transport_crash_uploaded_replay")
         envelope["task_result_digest"] = "0" * 64
@@ -180,12 +179,12 @@ class AgentFirstResultDebugTransportDocumentFacadesTest(
         self.assertEqual(
             [
                 ("TASK_RESULT_ATTEMPT_ORDER_INVALID", "$"),
-                ("TASK_RESULT_CORE_DEBUG_FIELD_INVALID", "$"),
+                ("TASK_RESULT_VERSION_SUCCESSOR_INVALID", "$"),
                 ("DEBUG_FILE_MANIFEST_COUNT_INVALID", "$"),
                 ("DEBUG_REDACTION_RESCAN_FAILED", "$"),
-                ("DEBUG_DESCRIPTOR_BINDING_INVALID", "$"),
+                ("DEBUG_DESCRIPTOR_FRAGMENT_MISMATCH", "$"),
                 ("DEBUG_EVENT_SEQUENCE_INVALID", "$"),
-                ("TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$"),
+                ("TRANSPORT_ACK_VERSION_INVALID", "$"),
                 ("TRANSPORT_ENVELOPE_DIGEST_INVALID", "$"),
             ],
             [
