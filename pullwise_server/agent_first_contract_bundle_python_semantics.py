@@ -11,6 +11,7 @@ from .agent_first_contract_bundle_python_gate_preparation import (
     PYTHON_GATE_PREPARATION,
 )
 from .agent_first_contract_bundle_python_pre_gate import PYTHON_PRE_GATE
+from .agent_first_contract_bundle_python_publication import PYTHON_PUBLICATION
 from .agent_first_contract_bundle_python_quality_policy import (
     PYTHON_QUALITY_POLICY,
 )
@@ -19,6 +20,7 @@ from .agent_first_contract_bundle_python_rules import PYTHON_RULES
 from .agent_first_contract_bundle_python_task_evidence import (
     PYTHON_TASK_EVIDENCE,
 )
+from .agent_first_contract_bundle_python_tool_evidence import PYTHON_TOOL_EVIDENCE
 
 
 PYTHON_SEMANTICS_BASE = r'''
@@ -237,9 +239,9 @@ def verify_budget_transition(
     if any(held[left] != before[right] for left, right in previous_fields):
         _fail("BUDGET_PREVIOUS_STATE_MISMATCH")
     if before["consumed_ms"] + before["reserved_ms"] + held["reserved_ms"] > before["elapsed_limit_ms"]:
-        _fail("BUDGET_ELAPSED_LIMIT_EXCEEDED")
+        _fail("BUDGET_ELAPSED_LIMIT_EXCEEDED", code="BUDGET_EXHAUSTED")
     if before["calls_consumed"] + before["calls_reserved"] + held["reserved_calls"] > before["tool_call_limit"]:
-        _fail("BUDGET_CALL_LIMIT_EXCEEDED")
+        _fail("BUDGET_CALL_LIMIT_EXCEEDED", code="BUDGET_EXHAUSTED")
     reserved_expected = {
         "task_id": before["task_id"],
         "grant_digest": before["grant_digest"],
@@ -301,6 +303,8 @@ PYTHON_SEMANTICS = "\n".join(
         PYTHON_RULES,
         PYTHON_BUDGET,
         PYTHON_CONTROL,
+        PYTHON_TOOL_EVIDENCE,
+        PYTHON_PUBLICATION,
         PYTHON_QUALITY_POLICY,
         PYTHON_RESULT,
         PYTHON_PRE_GATE,

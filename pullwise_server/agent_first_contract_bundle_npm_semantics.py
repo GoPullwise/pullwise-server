@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .agent_first_contract_bundle_npm_budget import NPM_BUDGET
 from .agent_first_contract_bundle_npm_change_set_patch import (
     NPM_CHANGE_SET_PATCH_RULE,
 )
@@ -16,8 +17,10 @@ from .agent_first_contract_bundle_npm_gate_input import NPM_GATE_INPUT
 from .agent_first_contract_bundle_npm_gate_preparation import NPM_GATE_PREPARATION
 from .agent_first_contract_bundle_npm_observation import NPM_OBSERVATION_RULE
 from .agent_first_contract_bundle_npm_pre_gate import NPM_PRE_GATE
+from .agent_first_contract_bundle_npm_publication import NPM_PUBLICATION
 from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
 from .agent_first_contract_bundle_npm_task_evidence import NPM_TASK_EVIDENCE
+from .agent_first_contract_bundle_npm_tool_evidence import NPM_TOOL_EVIDENCE
 
 
 NPM_SEMANTICS_BASE = r'''
@@ -150,7 +153,9 @@ function verifyEmbeddedDigestSync(schemaId, value) {
   const input = new Uint8Array(domain.length + 1 + document.length);
   input.set(domain);
   input.set(document, domain.length + 1);
-  if (sha256Sync(input) !== value[spec.field]) fail("CONTRACT_DIGEST_MISMATCH", spec.field);
+  if (sha256Sync(input) !== value[spec.field]) {
+    fail("CONTRACT_DIGEST_MISMATCH", "$." + spec.field);
+  }
 }
 
 function decodeBase64Canonical(value) {
@@ -250,8 +255,12 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
     ["previous_calls_consumed", "calls_consumed"], ["previous_calls_reserved", "calls_reserved"],
   ];
   if (previous.some(([left, right]) => held[left] !== before[right])) fail("BUDGET_PREVIOUS_STATE_MISMATCH");
-  if (before.consumed_ms + before.reserved_ms + held.reserved_ms > before.elapsed_limit_ms) fail("BUDGET_ELAPSED_LIMIT_EXCEEDED");
-  if (before.calls_consumed + before.calls_reserved + held.reserved_calls > before.tool_call_limit) fail("BUDGET_CALL_LIMIT_EXCEEDED");
+  if (before.consumed_ms + before.reserved_ms + held.reserved_ms > before.elapsed_limit_ms) {
+    budgetError("BUDGET_ELAPSED_LIMIT_EXCEEDED", "$", "BUDGET_EXHAUSTED");
+  }
+  if (before.calls_consumed + before.calls_reserved + held.reserved_calls > before.tool_call_limit) {
+    budgetError("BUDGET_CALL_LIMIT_EXCEEDED", "$", "BUDGET_EXHAUSTED");
+  }
   const reservedExpected = {
     task_id: before.task_id, grant_digest: before.grant_digest,
     elapsed_limit_ms: before.elapsed_limit_ms, tool_call_limit: before.tool_call_limit,
@@ -291,25 +300,43 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
 
 NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
+  agent_tool_request: ruleAgentToolRequest,
+  artifact_content_ref: ruleArtifactContentRef,
+  artifact_content_registry: ruleArtifactContentRegistry,
   budget_ceiling_consistency: rulePolicyBudgetCeilings,
+  budget_summary: ruleBudgetSummary,
   capability_sets_disjoint_sorted_unique: rulePolicyCapabilitySets,
   change_set_patch: ruleChangeSetPatch,
   debug_redaction_plan: ruleDebugRedactionPlan,
+  effect_ledger_snapshot: ruleEffectLedgerSnapshot,
+  elapsed_budget_ledger: ruleElapsedBudgetLedger,
+  elapsed_budget_reservation: ruleElapsedBudgetReservation,
+  elapsed_budget_settlement: ruleElapsedBudgetSettlement,
   evidence_closure_manifest: ruleEvidenceClosureManifest,
   execution_profile: ruleExecutionProfile,
   gate_decision: ruleGateDecision,
   gate_input_snapshot: ruleGateInputSnapshot,
   gate_predicate_registry: ruleGatePredicateRegistry,
+  local_tool_receipt: ruleLocalToolReceipt,
   observation: ruleObservation,
   policy_digest_exact: rulePolicyDigest,
   pre_gate_evidence_closure_manifest: rulePreGateEvidenceClosureManifest,
   pre_gate_root_set: rulePreGateRootSet,
   publication_content_manifest: rulePublicationContentManifest,
   quality_policy_plan: ruleQualityPolicyPlan,
+  r0_read_payload: ruleR0ReadPayload,
+  r0_read_result: ruleR0ReadResult,
   risk_ceiling_current_mvp: rulePolicyRiskCeiling,
   root_and_origin_sets_sorted_unique: rulePolicyRootsAndOrigins,
+  source_content: ruleSourceContent,
+  source_state: ruleSourceState,
+  task_report: ruleTaskReport,
   terminalization_fact: ruleTerminalizationFact,
   terminalization_input_snapshot: ruleTerminalizationInputSnapshot,
+  tool_catalog: ruleToolCatalog,
+  tool_dispatch_capability: ruleToolDispatchCapability,
+  tool_dispatch_intent: ruleToolDispatchIntent,
+  tool_invocation: ruleToolInvocation,
   utf8_nfc_byte_limits: ruleUtf8Fields,
 });
 
@@ -371,6 +398,9 @@ NPM_SEMANTICS = "\n".join(
         NPM_EFFECTIVE_POLICY_RULES,
         NPM_EXECUTION_PROFILE_RULE,
         NPM_OBSERVATION_RULE,
+        NPM_BUDGET,
+        NPM_TOOL_EVIDENCE,
+        NPM_PUBLICATION,
         NPM_QUALITY_POLICY,
         NPM_PRE_GATE,
         NPM_TASK_EVIDENCE,
