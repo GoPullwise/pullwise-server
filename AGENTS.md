@@ -620,3 +620,25 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 - Public `document_digest` / `documentDigest` helpers compute the digest first
   and validate the real sealed document. They must never validate a synthetic
   all-zero digest.
+
+## Agent-First Pre-Gate Input Semantics
+
+- Rendered pre-gate/gate-input helpers use direct-document APIs:
+  `(root_set, task_id, outcome_candidate)`, `(manifest, root_set)`,
+  `(snapshot, root_set, pre_gate_manifest)`, and the terminal variant plus
+  `terminalization_facts`. They verify canonical references, digests, and
+  projections; do not invent a resolver callback. Full transitive PreGate CAS
+  byte proof requires a future explicit ref-to-content binding contract.
+- `pre-gate-root-set/v1` currently has no `quality_policy_plan` field even
+  though gate input requires `quality_policy_plan_ref`. Until the schema adds
+  a direct projection, helpers can require that reference's closure membership
+  but cannot bind it to a root-set field.
+
+## Agent-First Bundle DAG
+
+- The root DAG records `task-record/v1 -> task-result/v1` at
+  `$.properties.result_ref.oneOf[0]` but excludes that optional post-gate edge
+  from cycle traversal. GateDecision may cite the pre-terminal TaskRecord while
+  final EvidenceClosure cites GateDecision; this exception must never admit a
+  TaskResult, TaskResultCore, transport, or debug artifact into either evidence
+  closure.

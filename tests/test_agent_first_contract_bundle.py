@@ -38,6 +38,23 @@ class AgentFirstContractBundleTest(unittest.TestCase):
         root = bundle.document["root_manifest"]
         families = bundle.document["families"]
 
+        self.assertEqual(
+            [
+                {
+                    "schema_id": "task-charter/v1",
+                    "kind": "content_ref_target",
+                    "path": "$.properties.previous_charter_ref.oneOf[0]",
+                    "target_schema_id": "task-charter/v1",
+                },
+                {
+                    "schema_id": "task-record/v1",
+                    "kind": "content_ref_target",
+                    "path": "$.properties.result_ref.oneOf[0]",
+                    "target_schema_id": "task-result/v1",
+                },
+            ],
+            root["semantic_cycle_exceptions"],
+        )
         self.assertEqual(list(REQUIRED_FAMILIES), root["required_families"])
         self.assertEqual(
             list(REQUIRED_FAMILIES),
@@ -60,7 +77,7 @@ class AgentFirstContractBundleTest(unittest.TestCase):
                 item["$id"]: item for item in family["schemas"]
             }
             registry = {
-                item["schema_id"]: item for item in family["registry"]
+                item["schema_id"]: item for item in family["schema_registry"]
             }
             self.assertEqual(set(schemas), set(registry))
             self.assertTrue(schemas)

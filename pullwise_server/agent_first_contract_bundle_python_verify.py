@@ -61,7 +61,13 @@ _SEMANTIC_CYCLE_EXCEPTIONS = [
         "kind": "content_ref_target",
         "path": "$.properties.previous_charter_ref.oneOf[0]",
         "target_schema_id": "task-charter/v1",
-    }
+    },
+    {
+        "schema_id": "task-record/v1",
+        "kind": "content_ref_target",
+        "path": "$.properties.result_ref.oneOf[0]",
+        "target_schema_id": "task-result/v1",
+    },
 ]
 
 
