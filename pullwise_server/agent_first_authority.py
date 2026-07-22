@@ -354,10 +354,15 @@ class AgentFirstAuthority:
 
     def abandon_current_claim(self, request: dict[str, object]) -> bytes:
         document = self._validate("agent-claim-abandon-request/v1", request)
-        task_version = document["expected_task_version"] + 1
-        response = seal_document(
-            "agent-claim-abandon-response/v1",
-            {
+        values = {
+            **document,
+            "package_tuple": PACKAGE_TUPLE,
+            "request_digest": canonical_document_sha256(document),
+        }
+
+        def build(head: sqlite3.Row, stored: sqlite3.Row) -> Mapping[str, object]:
+            task_version = head["task_version"] + 1
+            response = seal_document("agent-claim-abandon-response/v1", {
                 "schema_id": "agent-claim-abandon-response/v1",
                 "package": package_tuple(),
                 **{
@@ -378,22 +383,18 @@ class AgentFirstAuthority:
                 "task_version": task_version,
                 "state": "FENCED",
                 "abandoned_at": _now(),
-            },
-        )
-        response_bytes = canonical_validated_bytes(
-            "agent-claim-abandon-response/v1", response
-        )
-        values = {
-            **document,
-            "package_tuple": PACKAGE_TUPLE,
-            "task_version": task_version,
-            "request_digest": canonical_document_sha256(document),
-            "abandonment_id": f"abandonment_{secrets.token_hex(16)}",
-            "abandonment_digest": response["response_digest"],
-            "abandonment_bytes": response_bytes,
-            "response_bytes": response_bytes,
-        }
-        return self._store_call(lambda: self._claims.abandon_claim(values))
+            })
+            response_bytes = canonical_validated_bytes(
+                "agent-claim-abandon-response/v1", response
+            )
+            return {
+                "task_version": task_version,
+                "abandonment_id": f"abandonment_{secrets.token_hex(16)}",
+                "abandonment_digest": response["response_digest"],
+                "abandonment_bytes": response_bytes,
+                "response_bytes": response_bytes,
+            }
 
+        return self._store_call(lambda: self._claims.abandon_claim(values, build))
 
 __all__ = ["AgentFirstAuthority", "AuthorityError"]

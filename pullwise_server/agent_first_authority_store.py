@@ -11,6 +11,11 @@ from typing import Callable, Iterator, Mapping
 
 PackageTuple = tuple[str, str, str, str]
 FaultInjector = Callable[[str], None]
+REGISTER_FAULT_POINTS = tuple(
+    f"register.{side}_{stage}"
+    for stage in ("registration", "head")
+    for side in ("before", "after")
+)
 ACCEPT_FAULT_POINTS = (
     "accept.before_task_request",
     "accept.after_task_request",
@@ -153,13 +158,14 @@ class AgentFirstAuthorityStore:
                 """
                 SELECT * FROM agent_current_worker_registrations
                 WHERE worker_id=? AND package_identity=? AND package_version=?
-                  AND content_sha256=? AND root_sha256=?
+                  AND content_sha256=? AND root_sha256=? AND request_digest=?
                 """,
-                (values["worker_id"], *values["package_tuple"]),
+                (
+                    values["worker_id"], *values["package_tuple"],
+                    values["request_digest"],
+                ),
             ).fetchone()
             if existing is not None:
-                if existing["request_digest"] != values["request_digest"]:
-                    raise AuthorityStoreError("WORKER_REGISTRATION_CONFLICT")
                 registration_id = existing["registration_id"]
                 response = self._blob(existing["response_bytes"])
             else:
@@ -186,6 +192,7 @@ class AgentFirstAuthorityStore:
                     ),
                 )
                 self._fault("register.after_registration")
+            self._fault("register.before_head")
             connection.execute(
                 """
                 INSERT INTO agent_current_worker_registration_heads
@@ -197,6 +204,7 @@ class AgentFirstAuthorityStore:
                 """,
                 (values["worker_id"], registration_id),
             )
+            self._fault("register.after_head")
             return response  # type: ignore[return-value]
 
     def accept_task(self, values: Mapping[str, object]) -> bytes:
@@ -265,4 +273,5 @@ __all__ = [
     "AuthorityStoreError",
     "FaultInjector",
     "PackageTuple",
+    "REGISTER_FAULT_POINTS",
 ]

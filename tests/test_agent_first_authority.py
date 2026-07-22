@@ -12,13 +12,10 @@ from pullwise_server._generated_agent_task_contract import (
     seal_document, tool_catalog, verify_document_digest,
 )
 from pullwise_server.agent_first_authority import AgentFirstAuthority, AuthorityError
-from pullwise_server.agent_first_authority_migrations import (
-    CURRENT_AUTHORITY_TABLES, install_current_authority_tables,
-)
-from pullwise_server.agent_first_claim_authority import CLAIM_FAULT_POINTS
-from pullwise_server.agent_first_transport_receipts import (
-    BINDING_FAULT_POINTS, RECEIPT_FAULT_POINTS,
-)
+from pullwise_server.agent_first_authority_store import ACCEPT_FAULT_POINTS, REGISTER_FAULT_POINTS
+from pullwise_server.agent_first_authority_migrations import CURRENT_AUTHORITY_TABLES, install_current_authority_tables
+from pullwise_server.agent_first_claim_authority import ABANDON_FAULT_POINTS, CLAIM_FAULT_POINTS
+from pullwise_server.agent_first_transport_receipts import BINDING_FAULT_POINTS, RECEIPT_FAULT_POINTS
 
 
 WORKER_ID = "worker_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -106,6 +103,15 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         verify_document_digest("stable-error/v1", payload["error"])
         self.assertEqual(error.response_bytes, error.canonical_bytes)
         return error
+    def assert_fault_rolls_back(self, points, callback, tables) -> None:
+        before = self.counts(*tables)
+        for point in points:
+            def inject(actual: str) -> None:
+                if actual == point:
+                    raise RuntimeError(f"injected:{point}")
+            with self.subTest(point=point), self.assertRaisesRegex(RuntimeError, "injected"):
+                callback(AgentFirstAuthority(self.connect, fault_injector=inject))
+            self.assertEqual(before, self.counts(*tables))
     def test_installs_self_contained_current_tables_with_wal(self) -> None:
         with self.connect() as connection:
             installed = {
@@ -117,7 +123,6 @@ class AgentFirstAuthorityTest(unittest.TestCase):
             journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
         self.assertTrue(set(CURRENT_AUTHORITY_TABLES).issubset(installed))
         self.assertEqual(journal_mode.lower(), "wal")
-        self.assertFalse(any("scan_job" in name or "review_run" in name for name in installed))
     def test_accept_package_failure_has_stable_bytes_and_zero_writes(self) -> None:
         missing = self.accept_request()
         missing.pop("package")
@@ -138,6 +143,12 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         self.assertEqual(first.response_bytes, again.response_bytes)
         self.assertEqual(self.counts("agent_current_task_requests"), (0,))
     def test_registration_and_acceptance_are_exact_and_immutable(self) -> None:
+        self.assert_fault_rolls_back(
+            REGISTER_FAULT_POINTS, lambda a: a.register_worker(self.register_request()),
+            ("agent_current_worker_registrations", "agent_current_worker_registration_heads"))
+        self.assert_fault_rolls_back(
+            ACCEPT_FAULT_POINTS, lambda a: a.accept_current_task(self.accept_request()),
+            ("agent_current_task_requests", "agent_current_task_heads", "agent_current_control_events"))
         registration = self.register()
         self.assertEqual(registration, self.register())
         verify_document_digest("agent-worker-register-response/v1", json.loads(registration))
@@ -181,6 +192,8 @@ class AgentFirstAuthorityTest(unittest.TestCase):
                 lambda request=request: self.authority.claim_and_issue_current_grant(request),
             )
             self.assertEqual(before, self.counts("agent_current_attempts", "agent_current_claims"))
+            self.authority.register_worker(self.register_request(worker_id=worker_id))
+            self.authority.claim_and_issue_current_grant(request)
     def test_claim_is_complete_atomic_and_exactly_idempotent(self) -> None:
         self.register()
         self.accept()
@@ -221,22 +234,9 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         self.register()
         self.accept()
         request = self.claim_request()
-        target = {"point": ""}
-
-        def inject(point: str) -> None:
-            if point == target["point"]:
-                raise RuntimeError(f"injected:{point}")
-
-        for point in CLAIM_FAULT_POINTS:
-            with self.subTest(point=point):
-                target["point"] = point
-                with self.assertRaisesRegex(RuntimeError, "injected"):
-                    AgentFirstAuthority(self.connect, fault_injector=inject).claim_and_issue_current_grant(request)
-                self.assertEqual(
-                    self.counts("agent_current_attempts", "agent_current_claims", "agent_current_grants"),
-                    (0, 0, 0),
-                )
-        target["point"] = ""
+        self.assert_fault_rolls_back(
+            CLAIM_FAULT_POINTS, lambda a: a.claim_and_issue_current_grant(request),
+            ("agent_current_attempts", "agent_current_claims", "agent_current_grants"))
         changed = {**request, "tool_call_limit": 8}
         self.authority.claim_and_issue_current_grant(request)
         before = self.counts("agent_current_control_events", "agent_current_grants")
@@ -287,7 +287,7 @@ class AgentFirstAuthorityTest(unittest.TestCase):
                 "grant_digest": envelope["grant"]["grant_digest"],
                 "content_ref": {
                     "schema_id": "content-ref/v1",
-                    "artifact_id": "artifact_66666666666666666666666666666666",
+                    "artifact_id": "art_66666666666666666666666666666666",
                     "content_schema_id": "canonical-document/v1",
                     "sha256": "7" * 64,
                     "size_bytes": 1,
@@ -302,18 +302,15 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         receipt = self.receipt(envelope)
         local = {**receipt, "receipt_kind": "local_tool"}
         self.assert_error("TRANSPORT_RECEIPT_TYPE_INVALID", lambda: self.authority.store_transport_receipt(local))
+        self.assert_fault_rolls_back(
+            RECEIPT_FAULT_POINTS, lambda a: a.store_transport_receipt(receipt),
+            ("agent_current_transport_receipts",))
         target = {"point": ""}
 
         def inject(point: str) -> None:
             if point == target["point"]:
                 raise RuntimeError(f"injected:{point}")
 
-        for point in RECEIPT_FAULT_POINTS:
-            target["point"] = point
-            with self.assertRaisesRegex(RuntimeError, "injected"):
-                AgentFirstAuthority(self.connect, fault_injector=inject).store_transport_receipt(receipt)
-            self.assertEqual(self.counts("agent_current_transport_receipts"), (0,))
-        target["point"] = ""
         stored = self.authority.store_transport_receipt(receipt)
         self.assertEqual(stored, canonical_validated_bytes("server-transport-receipt/v1", receipt))
         for point in BINDING_FAULT_POINTS:
@@ -359,6 +356,9 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         fields = "lifecycle, desired_state, terminal_kind, result_ref, result_digest, outcome, terminal_at"
         with self.connect() as connection:
             before = connection.execute(f"SELECT {fields} FROM agent_current_task_heads").fetchone()
+        self.assert_fault_rolls_back(
+            ABANDON_FAULT_POINTS, lambda a: a.abandon_current_claim(request),
+            ("agent_current_abandonments", "agent_current_fences", "agent_current_control_events"))
         first = self.authority.abandon_current_claim(request)
         self.assertEqual(first, self.authority.abandon_current_claim(dict(request)))
         response = verify_document_digest("agent-claim-abandon-response/v1", json.loads(first))

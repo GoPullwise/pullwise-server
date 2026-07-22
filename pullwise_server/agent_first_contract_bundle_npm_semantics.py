@@ -4,6 +4,52 @@ from __future__ import annotations
 
 
 NPM_SEMANTICS = r'''
+function canonicalString(value) {
+  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return "[" + value.map(canonicalString).join(",") + "]";
+  return "{" + Object.keys(value).sort().map(
+    (key) => JSON.stringify(key) + ":" + canonicalString(value[key]),
+  ).join(",") + "}";
+}
+
+function validateOneOf(options, value, path) {
+  let matches = 0;
+  for (const option of options) {
+    try {
+      validateNode(option, value, path);
+      matches += 1;
+    } catch (error) {
+      if (!(error instanceof ContractValidationError)) throw error;
+    }
+  }
+  if (matches !== 1) fail("CONTRACT_ONE_OF_INVALID", path);
+}
+
+function patternMatches(pattern, value) {
+  const match = new RegExp(pattern).exec(value);
+  if (!match) return false;
+  if (pattern.startsWith("^") && pattern.endsWith("$")) {
+    return match.index === 0 && match[0].length === value.length;
+  }
+  return true;
+}
+
+export function verifyContentRefSet(refs) {
+  if (!Array.isArray(refs)) fail("CONTRACT_TYPE_INVALID");
+  const validated = refs.map((item) => validateDocument("content-ref/v1", item));
+  const identities = new Map();
+  const fields = ["content_schema_id", "sha256", "size_bytes", "media_type", "encoding"];
+  for (const item of validated) {
+    const identity = JSON.stringify(fields.map((field) => item[field]));
+    const previous = identities.get(item.artifact_id);
+    if (previous !== undefined && previous !== identity) fail("CONTENT_REF_CONFLICT", "$.artifact_id");
+    identities.set(item.artifact_id, identity);
+  }
+  return validated;
+}
+
 function sha256Sync(bytes) {
   const constants = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,

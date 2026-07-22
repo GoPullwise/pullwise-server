@@ -25,6 +25,7 @@ _RULE_KEYS = {
     "minItems",
     "maxItems",
     "uniqueItems",
+    "oneOf",
     "x-pullwise-digest",
     "x-pullwise-content-schema-id",
     "x-pullwise-content-schema-ids",
@@ -62,6 +63,14 @@ def validate_supported_schema(
         if not isinstance(items, dict):
             raise error_type(f"schema_items_invalid: {path}")
         validate_supported_schema(items, error_type, f"{path}[]")
+    if "oneOf" in schema:
+        options = schema["oneOf"]
+        if not isinstance(options, list) or not options:
+            raise error_type(f"schema_one_of_invalid: {path}")
+        for index, option in enumerate(options):
+            if not isinstance(option, dict):
+                raise error_type(f"schema_one_of_invalid: {path}")
+            validate_supported_schema(option, error_type, f"{path}.oneOf[{index}]")
 
 
 def validate_semantic_registries(

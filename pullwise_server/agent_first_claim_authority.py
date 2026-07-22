@@ -224,7 +224,11 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
         )
         self._fault("claim.after_event")
 
-    def abandon_claim(self, values: Mapping[str, object]) -> bytes:
+    def abandon_claim(
+        self,
+        values: Mapping[str, object],
+        build: Callable[[sqlite3.Row, sqlite3.Row], Mapping[str, object]],
+    ) -> bytes:
         with self._immediate() as connection:
             replay = self._event_replay(
                 connection,
@@ -257,18 +261,30 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 raise AuthorityStoreError("AUTHORITY_MISMATCH")
             states = connection.execute(
                 """
-                SELECT a.state, o.state, ga.state
-                FROM agent_current_attempts a
-                JOIN agent_current_owner_incarnations o ON o.attempt_id=a.attempt_id
-                JOIN agent_current_grant_authority ga ON ga.grant_id=?
-                WHERE a.attempt_id=? AND o.session_id=?
+                SELECT a.state AS attempt_state, o.state AS owner_state,
+                       ga.state AS grant_state, g.grant_bytes, g.grant_digest,
+                       c.authority_digest
+                FROM agent_current_claims c
+                JOIN agent_current_attempts a ON a.attempt_id=c.attempt_id
+                JOIN agent_current_owner_incarnations o ON o.session_id=c.session_id
+                JOIN agent_current_grants g ON g.grant_id=c.grant_id
+                JOIN agent_current_grant_authority ga ON ga.grant_id=c.grant_id
+                WHERE c.task_id=? AND c.attempt_id=? AND c.session_id=? AND c.grant_id=?
                 """,
-                (values["grant_id"], values["attempt_id"], values["session_id"]),
+                (
+                    values["task_id"], values["attempt_id"],
+                    values["session_id"], values["grant_id"],
+                ),
             ).fetchone()
-            if states is None or tuple(states) != ("CLAIMED", "STARTING", "ACTIVE"):
+            if (
+                states is None
+                or tuple(states)[:3] != ("CLAIMED", "STARTING", "ACTIVE")
+                or states["authority_digest"] != head["current_authority_digest"]
+            ):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
-            self._insert_abandon_write_set(connection, values)
-            return values["response_bytes"]  # type: ignore[return-value]
+            write = {**values, **build(head, states)}
+            self._insert_abandon_write_set(connection, write)
+            return write["response_bytes"]  # type: ignore[return-value]
 
     def _insert_abandon_write_set(
         self, connection: sqlite3.Connection, values: Mapping[str, object]

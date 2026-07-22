@@ -74,7 +74,8 @@ function canonicalValue(value, path = "$") {
 }
 
 export function canonicalDocumentBytes(value) {
-  return encoder.encode(JSON.stringify(canonicalValue(value)));
+  canonicalValue(value);
+  return encoder.encode(canonicalString(value));
 }
 
 export function bundleBytes() {
@@ -142,6 +143,7 @@ function typeMatches(typeName, value) {
 }
 
 function validateNode(rule, value, path) {
+  if (rule.oneOf !== undefined) validateOneOf(rule.oneOf, value, path);
   if (rule.$ref) {
     validateNode(schema(rule.$ref), value, path);
     const expectedSchema = rule["x-pullwise-content-schema-id"];
@@ -196,11 +198,12 @@ function validateNode(rule, value, path) {
     }
   }
   if (typeof value === "string") {
-    if (value.length < (rule.minLength ?? 0)) fail("CONTRACT_STRING_TOO_SHORT", path);
-    if (rule.maxLength !== undefined && value.length > rule.maxLength) {
+    const length = [...value].length;
+    if (length < (rule.minLength ?? 0)) fail("CONTRACT_STRING_TOO_SHORT", path);
+    if (rule.maxLength !== undefined && length > rule.maxLength) {
       fail("CONTRACT_STRING_TOO_LONG", path);
     }
-    if (rule.pattern && !(new RegExp(rule.pattern).test(value))) {
+    if (rule.pattern && !patternMatches(rule.pattern, value)) {
       fail("CONTRACT_PATTERN_INVALID", path);
     }
   }
@@ -394,5 +397,6 @@ export const seal_document = sealDocument;
 export const validate_document = validateDocument;
 export const verify_bundle = verifyBundle;
 export const verify_budget_transition = verifyBudgetTransition;
+export const verify_content_ref_set = verifyContentRefSet;
 export const verify_document_digest = verifyDocumentDigest;
 '''

@@ -53,7 +53,7 @@ _DDL = (
         request_bytes BLOB NOT NULL,
         response_bytes BLOB NOT NULL,
         created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-        UNIQUE(worker_id, package_identity, package_version, content_sha256, root_sha256)
+        UNIQUE(worker_id, request_digest)
     )
     """,
     """
@@ -329,7 +329,7 @@ def install_current_authority_tables(connection: sqlite3.Connection) -> None:
     """Install the clean current-only authority schema in the caller transaction."""
 
     connection.execute("PRAGMA foreign_keys=ON")
-    if not connection.in_transaction:
+    if not getattr(connection, "in_transaction", True):
         connection.execute("PRAGMA journal_mode=WAL")
     for statement in _DDL:
         connection.execute(statement)

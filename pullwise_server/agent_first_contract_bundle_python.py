@@ -154,6 +154,8 @@ def _type_matches(type_name: str, value: object) -> bool:
 
 
 def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
+    if "oneOf" in rule:
+        _validate_one_of(rule["oneOf"], value, path)
     if "$ref" in rule:
         _validate_node(schema(rule["$ref"]), value, path)
         expected_schema = rule.get("x-pullwise-content-schema-id")
@@ -208,7 +210,7 @@ def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
             _fail("CONTRACT_STRING_TOO_SHORT", path)
         if "maxLength" in rule and len(value) > rule["maxLength"]:
             _fail("CONTRACT_STRING_TOO_LONG", path)
-        if "pattern" in rule and re.search(rule["pattern"], value) is None:
+        if "pattern" in rule and not _pattern_matches(rule["pattern"], value):
             _fail("CONTRACT_PATTERN_INVALID", path)
     if isinstance(value, int) and not isinstance(value, bool):
         if "minimum" in rule and value < rule["minimum"]:
@@ -392,6 +394,6 @@ __all__ = [
     "fixture", "fixture_bytes", "package_tuple", "root_manifest",
     "root_manifest_bytes", "schema", "schema_bytes", "seal_document",
     "validate_document", "verify_budget_transition", "verify_bundle",
-    "verify_document_digest",
+    "verify_content_ref_set", "verify_document_digest",
 ]
 '''

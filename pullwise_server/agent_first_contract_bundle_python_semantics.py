@@ -4,6 +4,41 @@ from __future__ import annotations
 
 
 PYTHON_SEMANTICS = r'''
+def _validate_one_of(options: object, value: object, path: str) -> None:
+    matches = 0
+    for option in options:
+        try:
+            _validate_node(option, value, path)
+        except ContractValidationError:
+            continue
+        matches += 1
+    if matches != 1:
+        _fail("CONTRACT_ONE_OF_INVALID", path)
+
+
+def _pattern_matches(pattern: str, value: str) -> bool:
+    match = re.search(pattern, value)
+    if match is None:
+        return False
+    if pattern.startswith("^") and pattern.endswith("$"):
+        return match.start() == 0 and match.end() == len(value)
+    return True
+
+
+def verify_content_ref_set(refs: object) -> list[dict[str, object]]:
+    if not isinstance(refs, list):
+        _fail("CONTRACT_TYPE_INVALID")
+    validated = [validate_document("content-ref/v1", item) for item in refs]
+    identities: dict[str, tuple[object, ...]] = {}
+    fields = ("content_schema_id", "sha256", "size_bytes", "media_type", "encoding")
+    for item in validated:
+        identity = tuple(item[field] for field in fields)
+        previous = identities.setdefault(item["artifact_id"], identity)
+        if previous != identity:
+            _fail("CONTENT_REF_CONFLICT", "$.artifact_id")
+    return validated
+
+
 def _validate_semantics(schema_id: str, value: dict[str, object]) -> None:
     if schema_id == "source-content/v1":
         try:
