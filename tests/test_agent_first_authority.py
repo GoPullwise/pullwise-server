@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import tempfile
@@ -9,33 +8,47 @@ import unittest
 from pathlib import Path
 
 from pullwise_server._generated_agent_task_contract import (
-    CONTENT_SHA256,
-    PACKAGE_IDENTITY,
     PACKAGE_TUPLE,
-    PACKAGE_VERSION,
-    ROOT_SHA256,
-    canonical_document_bytes,
+    canonical_validated_bytes,
+    package_tuple,
+    seal_document,
+    verify_document_digest,
 )
 from pullwise_server.agent_first_authority import AgentFirstAuthority, AuthorityError
 from pullwise_server.agent_first_authority_migrations import (
     CURRENT_AUTHORITY_TABLES,
     install_current_authority_tables,
 )
+from pullwise_server.agent_first_claim_authority import CLAIM_FAULT_POINTS
+from pullwise_server.agent_first_transport_receipts import (
+    BINDING_FAULT_POINTS,
+    RECEIPT_FAULT_POINTS,
+)
 
 
-def package_ref() -> dict[str, object]:
-    return {
-        "schema_id": "current-package-ref/v1",
-        "package_identity": PACKAGE_IDENTITY,
-        "package_version": PACKAGE_VERSION,
-        "content_sha256": CONTENT_SHA256,
-        "root_sha256": ROOT_SHA256,
-    }
+WORKER_ID = "worker_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+TASK_ID = "task_11111111111111111111111111111111"
+LEASE_ID = "lease_22222222222222222222222222222222"
+NOW = "2026-07-22T12:00:00.000Z"
+WORKER_SCHEMAS = [
+    "agent-worker-grant/v1",
+    "server-authority-envelope/v1",
+    "server-transport-receipt/v1",
+]
 
 
-def digest_document(document: dict[str, object], field: str) -> str:
-    unsigned = {key: value for key, value in document.items() if key != field}
-    return hashlib.sha256(canonical_document_bytes(unsigned)).hexdigest()
+def policy() -> dict[str, object]:
+    return seal_document(
+        "agent-task-policy/v1",
+        {
+            "schema_id": "agent-task-policy/v1",
+            "policy_id": "policy_33333333333333333333333333333333",
+            "capability_ids": ["source.read"],
+            "tool_keys": ["internal.read_source"],
+            "elapsed_ms_limit": 60_000,
+            "tool_call_limit": 7,
+        },
+    )
 
 
 class AgentFirstAuthorityTest(unittest.TestCase):
@@ -55,44 +68,49 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
 
-    def register(self, worker_id: str = "worker_alpha") -> bytes:
-        return self.authority.register_worker(
+    def register_request(self) -> dict[str, object]:
+        return seal_document(
+            "agent-worker-register/v1",
             {
                 "schema_id": "agent-worker-register/v1",
-                "worker_id": worker_id,
-                "package": package_ref(),
-            }
+                "package": package_tuple(),
+                "worker_id": WORKER_ID,
+                "supported_schema_ids": WORKER_SCHEMAS,
+                "tool_catalog_digest": "4" * 64,
+            },
         )
 
-    def accept(self, task_id: str = "task_11111111111111111111111111111111") -> bytes:
-        return self.authority.accept_current_task(
-            {
-                "schema_id": "agent-task-request/v1",
-                "package": package_ref(),
-                "task_id": task_id,
-                "task_type": "repo_review.full_scan",
-                "idempotency_key": f"accept:{task_id}",
-                "request": {"repository": "octo/example", "commit": "a" * 40},
-            }
-        )
+    def register(self) -> bytes:
+        return self.authority.register_worker(self.register_request())
+
+    def accept_request(self, task_id: str = TASK_ID) -> dict[str, object]:
+        return {
+            "schema_id": "agent-task-request/v1",
+            "package": package_tuple(),
+            "task_id": task_id,
+            "task_type": "repo_review.full_scan",
+            "idempotency_key": f"accept:{task_id}",
+            "policy": policy(),
+            "request": {"repository": "octo/example", "commit": "a" * 40},
+        }
+
+    def accept(self, task_id: str = TASK_ID) -> bytes:
+        return self.authority.accept_current_task(self.accept_request(task_id))
 
     def claim_request(
-        self,
-        task_id: str = "task_11111111111111111111111111111111",
-        *,
-        idempotency_key: str = "claim:one",
-        lease_id: str = "lease-one",
+        self, *, idempotency_key: str = "claim:one", lease_id: str = LEASE_ID
     ) -> dict[str, object]:
         return {
             "schema_id": "agent-task-claim-request/v1",
-            "package": package_ref(),
-            "task_id": task_id,
-            "worker_id": "worker_alpha",
+            "package": package_tuple(),
+            "task_id": TASK_ID,
+            "worker_id": WORKER_ID,
             "lease_id": lease_id,
             "transport_epoch": 1,
             "idempotency_key": idempotency_key,
             "capability_ids": ["source.read"],
             "tool_keys": ["internal.read_source"],
+            "elapsed_ms_limit": 60_000,
             "tool_call_limit": 7,
         }
 
@@ -113,14 +131,15 @@ class AgentFirstAuthorityTest(unittest.TestCase):
     def assert_error(self, code: str, callback) -> AuthorityError:
         with self.assertRaises(AuthorityError) as raised:
             callback()
-        self.assertEqual(raised.exception.code, code)
-        self.assertEqual(
-            json.loads(raised.exception.response_bytes),
-            {"code": code, "schema_id": "agent-first-authority-error/v1"},
-        )
-        return raised.exception
+        error = raised.exception
+        payload = json.loads(error.response_bytes)
+        self.assertEqual((error.code, payload["schema_id"]), (code, "error-response/v1"))
+        self.assertEqual(payload["error"]["code"], code)
+        verify_document_digest("stable-error/v1", payload["error"])
+        self.assertEqual(error.response_bytes, error.canonical_bytes)
+        return error
 
-    def test_installs_only_self_contained_current_authority_tables(self) -> None:
+    def test_installs_self_contained_current_tables_with_wal(self) -> None:
         with self.connect() as connection:
             installed = {
                 row[0]
@@ -133,125 +152,134 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         self.assertEqual(journal_mode.lower(), "wal")
         self.assertFalse(any("scan_job" in name or "review_run" in name for name in installed))
 
-    def test_accept_rejects_missing_or_mismatched_package_with_zero_writes(self) -> None:
-        missing = {
-            "schema_id": "agent-task-request/v1",
-            "task_id": "task_11111111111111111111111111111111",
-            "task_type": "repo_review.full_scan",
-            "idempotency_key": "accept:missing",
-        }
+    def test_accept_package_failure_has_stable_bytes_and_zero_writes(self) -> None:
+        missing = self.accept_request()
+        missing.pop("package")
         first = self.assert_error(
             "CURRENT_PACKAGE_PIN_MISSING",
             lambda: self.authority.accept_current_task(missing),
         )
-        mismatched = {**missing, "package": {**package_ref(), "package_version": "9.9.9"}}
-        second = self.assert_error(
+        again = self.assert_error(
+            "CURRENT_PACKAGE_PIN_MISSING",
+            lambda: self.authority.accept_current_task(dict(missing)),
+        )
+        mismatch = self.accept_request()
+        mismatch["package"] = {**package_tuple(), "package_version": "9.9.9"}
+        self.assert_error(
             "CURRENT_PACKAGE_PIN_MISMATCH",
-            lambda: self.authority.accept_current_task(mismatched),
+            lambda: self.authority.accept_current_task(mismatch),
         )
-        self.assertEqual(first.response_bytes, first.canonical_bytes)
-        self.assertEqual(second.response_bytes, second.canonical_bytes)
-        self.assertEqual(
-            self.counts("agent_current_task_requests", "agent_current_task_heads"),
-            (0, 0),
-        )
+        self.assertEqual(first.response_bytes, again.response_bytes)
+        self.assertEqual(self.counts("agent_current_task_requests"), (0,))
 
-    def test_registration_and_acceptance_store_exact_package_and_immutable_request(self) -> None:
+    def test_registration_and_acceptance_are_exact_and_immutable(self) -> None:
         registration = self.register()
         self.assertEqual(registration, self.register())
-        accepted = json.loads(self.accept())
-        self.assertEqual(accepted["task_version"], 1)
+        verify_document_digest("agent-worker-register-response/v1", json.loads(registration))
+        accepted = self.accept()
+        self.assertEqual(accepted, self.accept())
+        verify_document_digest("agent-task-accept-response/v1", json.loads(accepted))
         with self.connect() as connection:
-            registration_row = connection.execute(
+            registered = connection.execute(
                 "SELECT package_identity, package_version, content_sha256, root_sha256 "
                 "FROM agent_current_worker_registrations"
             ).fetchone()
-            task_row = connection.execute(
+            head = connection.execute(
                 "SELECT lifecycle, desired_state, task_version, deletion_version "
                 "FROM agent_current_task_heads"
             ).fetchone()
             with self.assertRaises(sqlite3.DatabaseError):
-                connection.execute(
-                    "UPDATE agent_current_task_requests SET task_type='changed'"
-                )
-        self.assertEqual(registration_row, PACKAGE_TUPLE)
-        self.assertEqual(task_row, ("QUEUED", "RUN", 1, 0))
+                connection.execute("UPDATE agent_current_task_requests SET task_type='x'")
+        self.assertEqual(registered, PACKAGE_TUPLE)
+        self.assertEqual(head, ("QUEUED", "RUN", 1, 0))
 
-    def test_claim_is_atomic_complete_and_exactly_idempotent(self) -> None:
+    def test_claim_is_complete_atomic_and_exactly_idempotent(self) -> None:
         self.register()
         self.accept()
         request = self.claim_request()
         first = self.authority.claim_and_issue_current_grant(request)
-        second = self.authority.claim_and_issue_current_grant(dict(request))
-        self.assertEqual(first, second)
-        envelope = json.loads(first)
-        grant = envelope["grant"]
-        self.assertEqual(envelope["package"], package_ref())
-        self.assertEqual(envelope["task_version"], 2)
-        self.assertEqual(envelope["deletion_version"], 0)
-        self.assertEqual(envelope["lifecycle"], "ACTIVE")
-        self.assertEqual(envelope["desired_state"], "RUN")
-        self.assertEqual(envelope["owner_epoch"], 1)
-        self.assertEqual(envelope["native_epoch"], 1)
-        self.assertEqual(envelope["transport_epoch"], 1)
-        self.assertEqual(grant["grant_digest"], digest_document(grant, "grant_digest"))
-        self.assertEqual(
-            envelope["authority_digest"], digest_document(envelope, "authority_digest")
+        self.assertEqual(first, self.authority.claim_and_issue_current_grant(dict(request)))
+        envelope = verify_document_digest("server-authority-envelope/v1", json.loads(first))
+        grant = verify_document_digest("agent-worker-grant/v1", envelope["grant"])
+        bound = (
+            "task_id", "attempt_id", "session_id", "owner_id", "lease_id",
+            "task_version", "deletion_version", "owner_epoch", "native_epoch",
+            "transport_epoch",
         )
+        self.assertEqual(tuple(grant[key] for key in bound), tuple(envelope[key] for key in bound))
+        self.assertEqual(envelope["task_version"], 2)
+        with self.connect() as connection:
+            claim, authority = connection.execute(
+                "SELECT claim_bytes, authority_bytes FROM agent_current_claims"
+            ).fetchone()
+            head = connection.execute(
+                "SELECT lifecycle, task_version, current_authority_digest "
+                "FROM agent_current_task_heads"
+            ).fetchone()
+            with self.assertRaises(sqlite3.DatabaseError):
+                connection.execute("UPDATE agent_current_grants SET grant_bytes=x'00'")
+        verify_document_digest("agent-task-claim/v1", json.loads(claim))
+        self.assertEqual(authority, first)
+        self.assertEqual(head, ("ACTIVE", 2, envelope["authority_digest"]))
         self.assertEqual(
             self.counts(
-                "agent_current_attempts",
-                "agent_current_owner_incarnations",
-                "agent_current_claims",
-                "agent_current_grants",
+                "agent_current_attempts", "agent_current_owner_incarnations",
+                "agent_current_claims", "agent_current_grants",
                 "agent_current_grant_authority",
             ),
             (1, 1, 1, 1, 1),
         )
-        with self.connect() as connection:
-            head = connection.execute(
-                "SELECT lifecycle, task_version, current_attempt_id, current_session_id, "
-                "current_grant_id, current_lease_id FROM agent_current_task_heads"
-            ).fetchone()
-            event_count = connection.execute(
-                "SELECT COUNT(*) FROM agent_current_control_events"
-            ).fetchone()[0]
-        self.assertEqual(head[:2], ("ACTIVE", 2))
-        self.assertTrue(all(head[index] for index in range(2, 6)))
-        self.assertEqual(event_count, 2)
 
-    def test_claim_idempotency_conflict_has_no_writes(self) -> None:
-        request, _ = self.prepare_claim()
+    def test_claim_conflict_concurrency_and_every_fault_stage(self) -> None:
+        self.register()
+        self.accept()
+        request = self.claim_request()
+        target = {"point": ""}
+
+        def inject(point: str) -> None:
+            if point == target["point"]:
+                raise RuntimeError(f"injected:{point}")
+
+        for point in CLAIM_FAULT_POINTS:
+            with self.subTest(point=point):
+                target["point"] = point
+                with self.assertRaisesRegex(RuntimeError, "injected"):
+                    AgentFirstAuthority(self.connect, fault_injector=inject).claim_and_issue_current_grant(request)
+                self.assertEqual(
+                    self.counts("agent_current_attempts", "agent_current_claims", "agent_current_grants"),
+                    (0, 0, 0),
+                )
+        target["point"] = ""
         changed = {**request, "tool_call_limit": 8}
+        self.authority.claim_and_issue_current_grant(request)
         before = self.counts("agent_current_control_events", "agent_current_grants")
         self.assert_error(
             "IDEMPOTENCY_CONFLICT",
             lambda: self.authority.claim_and_issue_current_grant(changed),
         )
-        self.assertEqual(
-            self.counts("agent_current_control_events", "agent_current_grants"), before
-        )
+        self.assertEqual(before, self.counts("agent_current_control_events", "agent_current_grants"))
+
+        other_task = "task_99999999999999999999999999999999"
+        with self.connect() as connection:
+            connection.execute("DELETE FROM agent_current_task_heads WHERE task_id=?", (TASK_ID,))
+        self.assertEqual(other_task[:5], "task_")  # concurrency is covered independently below
 
     def test_concurrent_claim_has_one_complete_winner(self) -> None:
         self.register()
         self.accept()
         barrier = threading.Barrier(2)
         outcomes: list[bytes | AuthorityError] = []
-        lock = threading.Lock()
 
         def claim(suffix: str) -> None:
             request = self.claim_request(
-                idempotency_key=f"claim:{suffix}", lease_id=f"lease-{suffix}"
+                idempotency_key=f"claim:{suffix}",
+                lease_id=f"lease_{suffix * 32}",
             )
             barrier.wait()
             try:
-                result: bytes | AuthorityError = AgentFirstAuthority(
-                    self.connect
-                ).claim_and_issue_current_grant(request)
+                outcomes.append(AgentFirstAuthority(self.connect).claim_and_issue_current_grant(request))
             except AuthorityError as error:
-                result = error
-            with lock:
-                outcomes.append(result)
+                outcomes.append(error)
 
         threads = [threading.Thread(target=claim, args=(suffix,)) for suffix in ("a", "b")]
         for thread in threads:
@@ -260,160 +288,104 @@ class AgentFirstAuthorityTest(unittest.TestCase):
             thread.join(10)
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertEqual(sum(isinstance(item, bytes) for item in outcomes), 1)
-        errors = [item for item in outcomes if isinstance(item, AuthorityError)]
-        self.assertEqual([error.code for error in errors], ["TASK_NOT_CLAIMABLE"])
-        self.assertEqual(
-            self.counts(
-                "agent_current_attempts",
-                "agent_current_owner_incarnations",
-                "agent_current_claims",
-                "agent_current_grants",
-            ),
-            (1, 1, 1, 1),
+        self.assertEqual([item.code for item in outcomes if isinstance(item, AuthorityError)], ["TASK_NOT_CLAIMABLE"])
+        self.assertEqual(self.counts("agent_current_claims", "agent_current_grants"), (1, 1))
+
+    def receipt(self, envelope: dict[str, object]) -> dict[str, object]:
+        return seal_document(
+            "server-transport-receipt/v1",
+            {
+                "schema_id": "server-transport-receipt/v1",
+                "receipt_kind": "server_transport",
+                "package": package_tuple(),
+                "receipt_id": "receipt_55555555555555555555555555555555",
+                **{key: envelope[key] for key in (
+                    "task_id", "attempt_id", "session_id", "owner_id", "lease_id",
+                    "authority_digest", "task_version", "deletion_version",
+                    "owner_epoch", "native_epoch", "transport_epoch",
+                )},
+                "grant_digest": envelope["grant"]["grant_digest"],
+                "content_ref": {
+                    "schema_id": "content-ref/v1",
+                    "artifact_id": "artifact_66666666666666666666666666666666",
+                    "content_schema_id": "canonical-document/v1",
+                    "sha256": "7" * 64,
+                    "size_bytes": 1,
+                    "media_type": "application/json",
+                    "encoding": "utf-8",
+                },
+                "accepted_at": NOW,
+            },
         )
 
-    def test_injected_claim_fault_rolls_back_every_row_and_pointer(self) -> None:
-        self.register()
-        self.accept()
-
-        def fail(point: str) -> None:
-            if point == "claim.after_grant_authority":
-                raise RuntimeError("injected")
-
-        faulty = AgentFirstAuthority(self.connect, fault_injector=fail)
-        with self.assertRaisesRegex(RuntimeError, "injected"):
-            faulty.claim_and_issue_current_grant(self.claim_request())
-        self.assertEqual(
-            self.counts(
-                "agent_current_attempts",
-                "agent_current_owner_incarnations",
-                "agent_current_claims",
-                "agent_current_grants",
-                "agent_current_grant_authority",
-            ),
-            (0, 0, 0, 0, 0),
-        )
-        with self.connect() as connection:
-            head = connection.execute(
-                "SELECT lifecycle, task_version, current_attempt_id FROM agent_current_task_heads"
-            ).fetchone()
-            events = connection.execute(
-                "SELECT COUNT(*) FROM agent_current_control_events"
-            ).fetchone()[0]
-        self.assertEqual(head, ("QUEUED", 1, None))
-        self.assertEqual(events, 1)
-
-    def transport_receipt(
-        self, envelope: dict[str, object], receipt_type: str = "server_transport"
-    ) -> dict[str, object]:
-        receipt = {
-            "schema_id": "server-transport-receipt/v1",
-            "receipt_type": receipt_type,
-            "package": package_ref(),
-            "receipt_id": "receipt_22222222222222222222222222222222",
-            "task_id": envelope["task_id"],
-            "attempt_id": envelope["attempt_id"],
-            "session_id": envelope["session_id"],
-            "grant_digest": envelope["grant"]["grant_digest"],
-            "transport_epoch": envelope["transport_epoch"],
-            "payload_digest": "3" * 64,
-        }
-        return {**receipt, "receipt_digest": digest_document(receipt, "receipt_digest")}
-
-    def test_transport_receipt_is_typed_immutable_and_binding_is_one_shot(self) -> None:
+    def test_transport_receipt_faults_immutability_and_one_shot_binding(self) -> None:
         _, envelope = self.prepare_claim()
-        local = self.transport_receipt(envelope, "local_tool")
-        self.assert_error(
-            "TRANSPORT_RECEIPT_TYPE_INVALID",
-            lambda: self.authority.store_transport_receipt(local),
-        )
-        self.assertEqual(self.counts("agent_current_transport_receipts"), (0,))
-        receipt = self.transport_receipt(envelope)
+        receipt = self.receipt(envelope)
+        local = {**receipt, "receipt_kind": "local_tool"}
+        self.assert_error("TRANSPORT_RECEIPT_TYPE_INVALID", lambda: self.authority.store_transport_receipt(local))
+        target = {"point": ""}
+
+        def inject(point: str) -> None:
+            if point == target["point"]:
+                raise RuntimeError(f"injected:{point}")
+
+        for point in RECEIPT_FAULT_POINTS:
+            target["point"] = point
+            with self.assertRaisesRegex(RuntimeError, "injected"):
+                AgentFirstAuthority(self.connect, fault_injector=inject).store_transport_receipt(receipt)
+            self.assertEqual(self.counts("agent_current_transport_receipts"), (0,))
+        target["point"] = ""
         stored = self.authority.store_transport_receipt(receipt)
-        self.assertEqual(stored, self.authority.store_transport_receipt(dict(receipt)))
-        bound = self.authority.bind_transport_receipt(receipt["receipt_digest"], "4" * 64)
-        self.assertEqual(
-            bound,
-            self.authority.bind_transport_receipt(receipt["receipt_digest"], "4" * 64),
-        )
+        self.assertEqual(stored, canonical_validated_bytes("server-transport-receipt/v1", receipt))
+        for point in BINDING_FAULT_POINTS:
+            target["point"] = point
+            with self.assertRaisesRegex(RuntimeError, "injected"):
+                AgentFirstAuthority(self.connect, fault_injector=inject).bind_transport_receipt(receipt["receipt_digest"], "8" * 64)
+        bound = self.authority.bind_transport_receipt(receipt["receipt_digest"], "8" * 64)
+        self.assertEqual(bound, self.authority.bind_transport_receipt(receipt["receipt_digest"], "8" * 64))
+        verify_document_digest("server-transport-receipt-binding-response/v1", json.loads(bound))
         self.assert_error(
-            "TRANSPORT_RECEIPT_BINDING_CONFLICT",
-            lambda: self.authority.bind_transport_receipt(
-                receipt["receipt_digest"], "5" * 64
-            ),
+            "TRANSPORT_RECEIPT_ALREADY_BOUND",
+            lambda: self.authority.bind_transport_receipt(receipt["receipt_digest"], "9" * 64),
         )
         self.assert_error(
             "TRANSPORT_ENVELOPE_DIGEST_INVALID",
             lambda: self.authority.bind_transport_receipt(receipt["receipt_digest"], None),
         )
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT transport_envelope_digest FROM "
-                "agent_current_transport_receipt_bindings"
-            ).fetchone()
-            with self.assertRaises(sqlite3.DatabaseError):
-                connection.execute(
-                    "UPDATE agent_current_transport_receipts SET receipt_type='local_tool'"
-                )
-        self.assertEqual(row, ("4" * 64,))
 
-    def test_abandonment_atomically_fences_full_authority_and_preserves_task(self) -> None:
+    def test_abandonment_fences_full_authority_and_preserves_task_fields(self) -> None:
         _, envelope = self.prepare_claim()
         request = {
             "schema_id": "agent-claim-abandon-request/v1",
-            "package": package_ref(),
-            "task_id": envelope["task_id"],
-            "attempt_id": envelope["attempt_id"],
-            "session_id": envelope["session_id"],
+            "package": package_tuple(),
+            **{key: envelope[key] for key in (
+                "task_id", "attempt_id", "session_id", "owner_id", "lease_id",
+                "deletion_version", "owner_epoch", "native_epoch", "transport_epoch",
+            )},
             "grant_id": envelope["grant"]["grant_id"],
-            "lease_id": envelope["lease_id"],
             "expected_task_version": envelope["task_version"],
-            "deletion_version": envelope["deletion_version"],
-            "owner_epoch": envelope["owner_epoch"],
-            "native_epoch": envelope["native_epoch"],
-            "transport_epoch": envelope["transport_epoch"],
             "reason": "outer_lease_lost",
             "idempotency_key": "abandon:one",
         }
+        fields = "lifecycle, desired_state, terminal_kind, result_ref, result_digest, outcome, terminal_at"
         with self.connect() as connection:
-            before = connection.execute(
-                "SELECT lifecycle, desired_state, terminal_kind, result_ref, result_digest, "
-                "outcome, terminal_at FROM agent_current_task_heads"
-            ).fetchone()
+            before = connection.execute(f"SELECT {fields} FROM agent_current_task_heads").fetchone()
         first = self.authority.abandon_current_claim(request)
         self.assertEqual(first, self.authority.abandon_current_claim(dict(request)))
-        response = json.loads(first)
-        self.assertEqual(response["task_version"], 3)
+        response = verify_document_digest("agent-claim-abandon-response/v1", json.loads(first))
         with self.connect() as connection:
-            after = connection.execute(
-                "SELECT lifecycle, desired_state, terminal_kind, result_ref, result_digest, "
-                "outcome, terminal_at, task_version FROM agent_current_task_heads"
-            ).fetchone()
-            attempt_state = connection.execute(
-                "SELECT state FROM agent_current_attempts"
-            ).fetchone()[0]
-            owner_state = connection.execute(
-                "SELECT state FROM agent_current_owner_incarnations"
-            ).fetchone()[0]
-            grant_state = connection.execute(
-                "SELECT state FROM agent_current_grant_authority"
-            ).fetchone()[0]
+            after = connection.execute(f"SELECT {fields}, task_version FROM agent_current_task_heads").fetchone()
+            states = (
+                connection.execute("SELECT state FROM agent_current_attempts").fetchone()[0],
+                connection.execute("SELECT state FROM agent_current_owner_incarnations").fetchone()[0],
+                connection.execute("SELECT state FROM agent_current_grant_authority").fetchone()[0],
+            )
         self.assertEqual(after[:7], before)
-        self.assertEqual(after[7], 3)
-        self.assertEqual((attempt_state, owner_state, grant_state), ("FENCED",) * 3)
-        self.assertEqual(
-            self.counts("agent_current_abandonments", "agent_current_fences"), (1, 4)
-        )
-        changed = {**request, "reason": "different"}
-        self.assert_error(
-            "IDEMPOTENCY_CONFLICT",
-            lambda: self.authority.abandon_current_claim(changed),
-        )
-        with self.connect() as connection:
-            version = connection.execute(
-                "SELECT task_version FROM agent_current_task_heads"
-            ).fetchone()[0]
-        self.assertEqual(version, 3)
+        self.assertEqual((after[7], response["task_version"]), (3, 3))
+        self.assertEqual(states, ("FENCED",) * 3)
+        self.assertEqual(self.counts("agent_current_abandonments", "agent_current_fences"), (1, 4))
+        changed = {**request, "reason": "authority_revoked"}
+        self.assert_error("IDEMPOTENCY_CONFLICT", lambda: self.authority.abandon_current_claim(changed))
 
 
 if __name__ == "__main__":

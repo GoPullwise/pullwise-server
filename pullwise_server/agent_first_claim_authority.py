@@ -53,7 +53,12 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
             if replay is not None:
                 return replay
             worker = connection.execute(
-                "SELECT * FROM agent_current_worker_registrations WHERE worker_id = ?",
+                """
+                SELECT r.* FROM agent_current_worker_registration_heads h
+                JOIN agent_current_worker_registrations r
+                  ON r.registration_id=h.registration_id
+                WHERE h.worker_id=?
+                """,
                 (values["worker_id"],),
             ).fetchone()
             if worker is None:
@@ -96,7 +101,7 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
         connection.execute(
             "INSERT INTO agent_current_attempts "
             "(attempt_id, task_id, native_epoch, transport_epoch, lease_id, state) "
-            "VALUES (?, ?, ?, ?, ?, 'LEASED')",
+            "VALUES (?, ?, ?, ?, ?, 'CLAIMED')",
             (
                 write["attempt_id"], request["task_id"], write["native_epoch"],
                 request["transport_epoch"], request["lease_id"],
@@ -137,8 +142,9 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
             INSERT INTO agent_current_claims (
                 claim_id, task_id, attempt_id, session_id, grant_id, worker_id,
                 owner_id, lease_id, task_version, deletion_version, owner_epoch,
-                native_epoch, transport_epoch, claim_digest, claim_bytes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                native_epoch, transport_epoch, claim_digest, claim_bytes,
+                authority_digest, authority_bytes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 write["claim_id"], request["task_id"], write["attempt_id"],
@@ -147,6 +153,7 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 write["deletion_version"], write["owner_epoch"],
                 write["native_epoch"], request["transport_epoch"],
                 write["claim_digest"], write["claim_bytes"],
+                write["authority_digest"], write["authority_bytes"],
             ),
         )
         self._fault("claim.after_claim")
@@ -156,14 +163,16 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
             UPDATE agent_current_task_heads
             SET lifecycle='ACTIVE', task_version=?, native_epoch=?, owner_epoch=?,
                 transport_epoch=?, current_attempt_id=?, current_session_id=?,
-                current_grant_id=?, current_lease_id=?, updated_at=strftime('%s','now')
+                current_grant_id=?, current_authority_digest=?, current_lease_id=?,
+                updated_at=strftime('%s','now')
             WHERE task_id=? AND lifecycle='QUEUED' AND desired_state='RUN'
               AND task_version=? AND deletion_version=? AND current_attempt_id IS NULL
             """,
             (
                 write["task_version"], write["native_epoch"], write["owner_epoch"],
                 request["transport_epoch"], write["attempt_id"], write["session_id"],
-                write["grant_id"], request["lease_id"], request["task_id"],
+                write["grant_id"], write["authority_digest"], request["lease_id"],
+                request["task_id"],
                 write["previous_task_version"], write["deletion_version"],
             ),
         ).rowcount
@@ -223,7 +232,7 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 """,
                 (values["grant_id"], values["attempt_id"], values["session_id"]),
             ).fetchone()
-            if states is None or tuple(states) != ("LEASED", "STARTING", "ACTIVE"):
+            if states is None or tuple(states) != ("CLAIMED", "STARTING", "ACTIVE"):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
             self._insert_abandon_write_set(connection, values)
             return values["response_bytes"]  # type: ignore[return-value]
@@ -269,7 +278,7 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
         attempt = connection.execute(
             "UPDATE agent_current_attempts SET state='FENCED', "
             "fenced_at=strftime('%s','now'), fence_reason=? "
-            "WHERE attempt_id=? AND state='LEASED'",
+            "WHERE attempt_id=? AND state='CLAIMED'",
             (values["reason"], values["attempt_id"]),
         ).rowcount
         self._fault("abandon.after_attempt")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .agent_first_authority_store import AgentFirstAuthorityStore, AuthorityStoreError
 
@@ -30,7 +30,8 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                 return self._blob(existing["response_bytes"])
             authority = connection.execute(
                 """
-                SELECT h.current_attempt_id, h.current_session_id, h.task_version,
+                SELECT h.current_attempt_id, h.current_session_id, h.owner_id,
+                       h.current_lease_id, h.current_authority_digest, h.task_version,
                        h.deletion_version, h.owner_epoch, h.native_epoch,
                        h.transport_epoch, a.state AS attempt_state,
                        o.state AS owner_state, g.grant_digest,
@@ -56,6 +57,9 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
             fields = (
                 "attempt_id",
                 "session_id",
+                "owner_id",
+                "lease_id",
+                "authority_digest",
                 "task_version",
                 "deletion_version",
                 "owner_epoch",
@@ -66,6 +70,9 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
             columns = (
                 "current_attempt_id",
                 "current_session_id",
+                "owner_id",
+                "current_lease_id",
+                "current_authority_digest",
                 "task_version",
                 "deletion_version",
                 "owner_epoch",
@@ -85,16 +92,19 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                 """
                 INSERT INTO agent_current_transport_receipts (
                     receipt_digest, receipt_id, receipt_kind, task_id, attempt_id,
-                    session_id, grant_digest, task_version, deletion_version,
+                    session_id, owner_id, lease_id, authority_digest, grant_digest,
+                    task_version, deletion_version,
                     owner_epoch, native_epoch, transport_epoch, package_identity,
                     package_version, content_sha256, root_sha256, receipt_bytes,
                     response_bytes
-                ) VALUES (?, ?, 'server_transport', ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, 'server_transport', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["receipt_digest"], values["receipt_id"], values["task_id"],
-                    values["attempt_id"], values["session_id"], values["grant_digest"],
+                    values["attempt_id"], values["session_id"], values["owner_id"],
+                    values["lease_id"], values["authority_digest"],
+                    values["grant_digest"],
                     values["task_version"], values["deletion_version"],
                     values["owner_epoch"], values["native_epoch"],
                     values["transport_epoch"], *values["package_tuple"],
@@ -111,12 +121,15 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
             return values["response_bytes"]  # type: ignore[return-value]
 
     def bind_receipt(
-        self, receipt_digest: str, envelope_digest: str, response_bytes: bytes
+        self,
+        receipt_digest: str,
+        envelope_digest: str,
+        build: Callable[[str], bytes],
     ) -> bytes:
         with self._immediate() as connection:
             row = connection.execute(
                 """
-                SELECT b.transport_envelope_digest, b.response_bytes
+                SELECT r.receipt_id, b.transport_envelope_digest, b.response_bytes
                 FROM agent_current_transport_receipts r
                 JOIN agent_current_transport_receipt_bindings b USING (receipt_digest)
                 WHERE r.receipt_digest = ? AND r.receipt_kind = 'server_transport'
@@ -131,6 +144,7 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                     raise AuthorityStoreError("TRANSPORT_RECEIPT_ALREADY_BOUND")
                 return self._blob(row["response_bytes"])
             self._fault("binding.before_cas")
+            response_bytes = build(row["receipt_id"])
             changed = connection.execute(
                 """
                 UPDATE agent_current_transport_receipt_bindings

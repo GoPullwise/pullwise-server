@@ -13,6 +13,7 @@ import unicodedata
 
 from .agent_first_contract_bundle_npm import render_npm_wrapper
 from .agent_first_contract_bundle_python import render_python_wrapper
+from .agent_first_contract_bundle_registry import validate_semantic_registries
 
 
 PACKAGE_SOURCE_ID = "agent-task-contract-package-source/v1"
@@ -133,6 +134,7 @@ def build_bundle(source_root: Path) -> PublishedBundle:
     }
     if fixture_classes != set(FIXTURE_CLASSES):
         raise ContractBundleError("fixture_class_closure_invalid")
+    validate_semantic_registries(families, schema_owner, ContractBundleError)
 
     reference_dag = _reference_dag(families, schema_owner)
     schema_registry = [
@@ -229,7 +231,12 @@ def write_generated(
             Path(worker_root) / "pullwise_worker" / "_generated_agent_task_contract.py"
         ] = bundle.python_wrapper
     if web_root is not None:
-        npm_root = Path(web_root) / "vendor" / "agent-task-contract"
+        npm_root = (
+            Path(web_root)
+            / "vendor"
+            / "generated"
+            / "agent-task-contract-npm"
+        )
         outputs[npm_root / "index.js"] = bundle.npm_wrapper
         outputs[npm_root / "package.json"] = bundle.npm_package
     stale: list[str] = []
