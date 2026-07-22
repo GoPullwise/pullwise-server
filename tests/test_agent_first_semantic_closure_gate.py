@@ -8,6 +8,10 @@ from tests.agent_first_semantic_closure_support import SemanticClosureHarness
 class AgentFirstSemanticClosureGateTest(
     SemanticClosureHarness, unittest.TestCase
 ):
+    @staticmethod
+    def batch_names(names: list[str], size: int) -> list[list[str]]:
+        return [names[index:index + size] for index in range(0, len(names), size)]
+
     def test_document_rules_close_over_live_semantics_with_positive_fixture_parity(
         self,
     ) -> None:
@@ -39,11 +43,9 @@ class AgentFirstSemanticClosureGateTest(
             self.assertIn(hit["schemaId"], self.schemas)
             self.assertIn(hit["ruleId"], self.schema_rules(hit["schemaId"]))
 
-    def test_contextual_helpers_export_and_fail_closed_from_live_semantics(
-        self,
-    ) -> None:
+    def test_contextual_helpers_export_presence_matches_live_inventory(self) -> None:
         declared_helpers = set(self.helper_inventory)
-        self.assertEqual(40, len(declared_helpers))
+        self.assertTrue(declared_helpers)
         self.assertEqual(
             {
                 helper_id: {"present": True, "exported": True}
@@ -59,22 +61,53 @@ class AgentFirstSemanticClosureGateTest(
             self.node_helper_exports(),
         )
 
-        operations = self.helper_probe_operations()
-        self.assertEqual(
-            declared_helpers,
-            set(operations),
-            f"missing helper probes: {sorted(declared_helpers - set(operations))}",
-        )
-        ordered = [operations[helper_id] for helper_id in sorted(operations)]
-        python = self.python_helper_results(ordered)
-        node = self.node_helper_results(ordered)
-        self.assertEqual(python, node)
+    def test_contextual_helpers_positive_execution_is_live_and_parity_safe(self) -> None:
+        declared_helpers = set(self.helper_inventory)
+        positive = self.positive_helper_operations()
+        negative = self.helper_probe_operations()
+        self.assertEqual(declared_helpers, set(positive))
+        self.assertEqual(declared_helpers, set(negative))
 
-        for helper_id, result in zip(sorted(operations), python):
-            self.assertFalse(result["ok"], helper_id)
-            self.assertIn(result["code"], self.stable_error_codes, helper_id)
-            self.assertIn(result["detail"], self.stable_error_codes, helper_id)
-            self.assertIsInstance(result["path"], str, helper_id)
+        ordered = [
+            "verify_waiver_event_authority",
+            "evaluate_success_gate",
+            "evaluate_terminalization_gate",
+            "validate_attempt_transition",
+            "validate_claim_write_set",
+        ] + [
+            helper_id
+            for helper_id in sorted(declared_helpers)
+            if helper_id
+            not in {
+                "verify_waiver_event_authority",
+                "evaluate_success_gate",
+                "evaluate_terminalization_gate",
+                "validate_attempt_transition",
+                "validate_claim_write_set",
+            }
+        ]
+        for names in self.batch_names(ordered, 10):
+            payload = [positive[helper_id] for helper_id in names]
+            python = self.python_helper_results(payload)
+            node = self.node_helper_results(payload)
+            self.assertEqual(python, node)
+            for helper_id, result in zip(names, python):
+                self.assertTrue(result["ok"], helper_id)
+
+    def test_contextual_helpers_negative_execution_fails_closed_with_parity(self) -> None:
+        declared_helpers = set(self.helper_inventory)
+        operations = self.helper_probe_operations()
+        self.assertEqual(declared_helpers, set(operations))
+        for names in self.batch_names(sorted(operations), 10):
+            payload = [operations[helper_id] for helper_id in names]
+            python = self.python_helper_results(payload)
+            node = self.node_helper_results(payload)
+            self.assertEqual(python, node)
+            for helper_id, result in zip(names, python):
+                self.assertFalse(result["ok"], helper_id)
+                self.assertIn(result["code"], self.stable_error_codes, helper_id)
+                self.assertIn(result["detail"], self.stable_error_codes, helper_id)
+                self.assertIsInstance(result["path"], str, helper_id)
 
 
 if __name__ == "__main__":

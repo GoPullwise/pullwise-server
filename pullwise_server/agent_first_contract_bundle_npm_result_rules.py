@@ -114,7 +114,7 @@ function resultAvailabilityReasons() {
     canonicalString(unavailable) === canonicalString(notApplicable),
     "AVAILABILITY_REASON_REGISTRY_BIJECTION_INVALID",
   );
-  return [...unavailable];
+  return [...unavailable].sort(resultTextCompare);
 }
 
 function resultOutcomeReasons() {

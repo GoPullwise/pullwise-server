@@ -5,23 +5,105 @@ from __future__ import annotations
 
 PYTHON_RESULT_RULES = r'''
 def _result_availability_reasons() -> list[str]:
-    return schema("availability-ref/v1")["oneOf"][1]["properties"]["reason_code"]["enum"]
+    enums = [
+        branch["properties"]["reason_code"]["enum"]
+        for branch in schema("availability-ref/v1")["oneOf"]
+        if "reason_code" in branch.get("properties", {})
+    ]
+    _seo_require(
+        len(enums) == 2 and enums[0] == enums[1],
+        "AVAILABILITY_REASON_REGISTRY_BIJECTION_INVALID",
+        "$",
+    )
+    return sorted(enums[0])
 
 
 def _result_outcome_reasons() -> list[str]:
     reasons: set[str] = set()
-    for schema_id in (
-        "task-result-completed-variant/v1",
-        "task-result-no-change-needed-variant/v1",
-        "task-result-completed-with-waivers-variant/v1",
-        "task-result-partial-variant/v1",
-        "task-result-blocked-variant/v1",
-        "task-result-failed-variant/v1",
-        "task-result-cancelled-variant/v1",
-    ):
-        rule = schema(schema_id)["properties"]["reason_code"]
+    for branch in schema("task-result/v1")["oneOf"]:
+        rule = schema(branch["$ref"])["properties"]["reason_code"]
         reasons.update([rule["const"]] if "const" in rule else rule["enum"])
     return sorted(reasons)
+
+
+def _result_outcome_text_valid(value: object) -> bool:
+    if not isinstance(value, str) or unicodedata.normalize("NFC", value) != value:
+        return False
+    try:
+        size = len(value.encode("utf-8", errors="strict"))
+    except UnicodeEncodeError:
+        return False
+    return 1 <= size <= 4096
+
+
+def _result_outcome_order(valid: bool, path: str) -> None:
+    _seo_require(valid, "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", path)
+
+
+def _result_nondecreasing(values: list[object], key) -> bool:
+    keys = [key(item) for item in values]
+    return keys == sorted(keys)
+
+
+def _result_canonical_unique(values: list[object]) -> bool:
+    canonical = [canonical_document_bytes(item) for item in values]
+    return len(canonical) == len(set(canonical))
+
+
+def _result_nondecreasing_canonical_unique(values: list[object], key) -> bool:
+    return _result_nondecreasing(values, key) and _result_canonical_unique(values)
+
+
+def _result_validate_delivered_scope(items: list[dict[str, object]], path: str) -> None:
+    for index, item in enumerate(items):
+        _seo_require(_result_outcome_text_valid(item["statement"]), "TASK_RESULT_OUTCOME_TEXT_INVALID", f"{path}[{index}].statement")
+        _result_outcome_order(_sorted_unique(item["requirement_ids"]), f"{path}[{index}].requirement_ids")
+        _result_outcome_order(_ordered_unique(item["artifact_refs"], _artifact_ref_key), f"{path}[{index}].artifact_refs")
+    _result_outcome_order(
+        _result_nondecreasing_canonical_unique(items, lambda item: item["statement"].encode("utf-8", errors="strict")),
+        path,
+    )
+
+
+def _result_validate_outcome_details(details: dict[str, object]) -> None:
+    path = "$.outcome_details"
+    if "delivered_scope" in details:
+        _result_validate_delivered_scope(details["delivered_scope"], f"{path}.delivered_scope")
+    for field in ("satisfaction_observation_ids", "waiver_ids"):
+        if field in details:
+            _result_outcome_order(_sorted_unique(details[field]), f"{path}.{field}")
+    for field in ("original_verdicts", "gaps"):
+        if field in details:
+            _result_outcome_order(_ordered_unique(details[field], lambda item: item["requirement_id"]), f"{path}.{field}")
+    if "residual_risks" in details:
+        risks = details["residual_risks"]
+        for index, item in enumerate(risks):
+            _seo_require(_result_outcome_text_valid(item["statement"]), "TASK_RESULT_OUTCOME_TEXT_INVALID", f"{path}.residual_risks[{index}].statement")
+            _result_outcome_order(_sorted_unique(item["evidence_ids"]), f"{path}.residual_risks[{index}].evidence_ids")
+        _result_outcome_order(_ordered_unique(risks, lambda item: item["risk_id"]), f"{path}.residual_risks")
+    if "blockers" in details:
+        blockers = details["blockers"]
+        for index, item in enumerate(blockers):
+            _seo_require(_result_outcome_text_valid(item["unblock_condition"]), "TASK_RESULT_OUTCOME_TEXT_INVALID", f"{path}.blockers[{index}].unblock_condition")
+            _result_outcome_order(_sorted_unique(item["requirement_ids"]), f"{path}.blockers[{index}].requirement_ids")
+        _result_outcome_order(
+            _result_nondecreasing_canonical_unique(
+                blockers,
+                lambda item: (item["code"], item["requirement_ids"][0] if item["requirement_ids"] else "", item["unblock_condition"]),
+            ),
+            f"{path}.blockers",
+        )
+    if "failures" in details:
+        failures = details["failures"]
+        for index, item in enumerate(failures):
+            _result_outcome_order(_ordered_unique(item["evidence_refs"], _ref_key), f"{path}.failures[{index}].evidence_refs")
+        _result_outcome_order(
+            _result_nondecreasing_canonical_unique(
+                failures,
+                lambda item: (item["code"], item["evidence_refs"][0]["artifact_id"]),
+            ),
+            f"{path}.failures",
+        )
 
 
 def _result_instant(value: object) -> tuple[int, ...] | None:
@@ -54,16 +136,17 @@ def _rule_availability_ref(value: dict[str, object]) -> None:
 
 def _rule_availability_reason_registry(value: dict[str, object]) -> None:
     _seo_verify_embedded_digest("availability-reason-registry/v1", value)
-    _seo_require(value["reasons"] == _result_availability_reasons(), "AVAILABILITY_REASON_REGISTRY_BIJECTION_INVALID")
+    _seo_require(value["reasons"] == _result_availability_reasons(), "AVAILABILITY_REASON_REGISTRY_BIJECTION_INVALID", "$")
 
 
 def _rule_task_result_outcome_reason_registry(value: dict[str, object]) -> None:
     _seo_verify_embedded_digest("task-result-outcome-reason-registry/v1", value)
-    _seo_require(value["reasons"] == _result_outcome_reasons(), "TASK_RESULT_OUTCOME_REASON_REGISTRY_BIJECTION_INVALID")
+    _seo_require(value["reasons"] == _result_outcome_reasons(), "TASK_RESULT_OUTCOME_REASON_REGISTRY_BIJECTION_INVALID", "$")
 
 
 def _rule_task_result_complete(value: dict[str, object]) -> None:
     _seo_require(len(value["summary"].encode("utf-8")) <= 4096, "TASK_RESULT_SUMMARY_LIMIT_INVALID")
+    _result_validate_outcome_details(value["outcome_details"])
     _seo_require(value["terminal_task_version"] == value["published_from_version"] + 1, "TASK_RESULT_VERSION_SUCCESSOR_INVALID")
     started = value["attempt_identity"]["kind"] == "started"
     _seo_require(started == (value["owner_identity"]["kind"] == "started"), "TASK_RESULT_IDENTITY_MATRIX_INVALID")
@@ -145,20 +228,22 @@ def _rule_task_result_transport_envelope(value: dict[str, object]) -> None:
     _seo_require(value["task_result_core_digest"] == hashlib.sha256(core_bytes).hexdigest(), "TRANSPORT_CORE_DIGEST_INVALID")
     _seo_require(value["task_result_core_ref"]["sha256"] == value["task_result_core_digest"] and value["task_result_core_ref"]["size_bytes"] == len(core_bytes), "TRANSPORT_CORE_REF_INVALID")
     authority, fence = value["authority"], value["full_fence"]
-    exact = ("task_id", "attempt_id", "session_id", "owner_id", "lease_id", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch")
-    _seo_require(all(authority[key] == fence[key] for key in exact), "TRANSPORT_AUTHORITY_FENCE_INVALID")
-    _seo_require(authority["task_version"] == fence["task_version"] == result["published_from_version"], "TRANSPORT_RESULT_VERSION_INVALID")
+    exact = ("task_id", "attempt_id", "session_id", "owner_id", "lease_id", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch")
+    for key in exact:
+        _seo_require(authority[key] == fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", f"$.full_fence.{key}")
+    _seo_require(authority["task_version"] == result["published_from_version"], "TRANSPORT_RESULT_VERSION_INVALID", "$.task_result.published_from_version")
     _seo_require(authority["task_id"] == result["task_id"], "TRANSPORT_RESULT_TASK_INVALID")
     _seo_require(_json_equal(value["package"], authority["package"]), "TRANSPORT_PACKAGE_INVALID")
     debug = result["diagnostics"]["worker_debug_fragment"]
     descriptor, receipt = value["worker_debug_descriptor"], value["transport_receipt"]
+    not_applicable = {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}
     if debug["availability"] == "available":
         _seo_require(descriptor is not None, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED")
-        expected = {"availability": "available"} if descriptor["state"] == "uploaded" else {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}
-        _seo_require(all(receipt.get(key) == item for key, item in expected.items()), "TRANSPORT_RECEIPT_MATRIX_INVALID")
+        receipt_valid = receipt.get("availability") == "available" if descriptor["state"] == "uploaded" else receipt == not_applicable
+        _seo_require(receipt_valid, "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt")
     else:
         _seo_require(descriptor is None, "TRANSPORT_DEBUG_DESCRIPTOR_INVALID")
-        _seo_require(receipt == {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}, "TRANSPORT_RECEIPT_MATRIX_INVALID")
+        _seo_require(receipt == not_applicable, "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt")
 '''
 
 

@@ -281,6 +281,22 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             ]
         )
 
+    def test_task_result_context_default_options_match_across_runtimes(self) -> None:
+        result = self.task_result_branch("COMPLETED")
+        operations = [
+            {
+                "python": "verify_task_result_context",
+                "node": "verifyTaskResultContext",
+                "args": [result],
+            }
+        ]
+
+        self.assert_schema_only("task-result/v1", result)
+        python = self.facade.python_helper_results(operations)
+        node = self.facade.node_helper_results(operations)
+        self.assertEqual([{"ok": True, "value": result}], python)
+        self.assertEqual(python, node)
+
     def test_terminal_fragment_time_window_matches_across_runtimes(self) -> None:
         documents = self.uploaded_documents()
         invalid_fragment = deepcopy(documents["worker_debug_fragment"])

@@ -6,6 +6,7 @@ from __future__ import annotations
 NPM_RESULT_CONTEXT = r'''
 function resultContextOptions(value) {
   if (value === undefined || value === null) return {workerDebugDescriptor: null, transportReceipt: null};
+  if (!Array.isArray(value) && typeof value === "object" && Object.keys(value).length === 0) return {workerDebugDescriptor: null, transportReceipt: null};
   if (typeof value === "object" && !Array.isArray(value) && ("workerDebugDescriptor" in value || "worker_debug_descriptor" in value || "transportReceipt" in value || "transport_receipt" in value)) return {workerDebugDescriptor: value.workerDebugDescriptor ?? value.worker_debug_descriptor ?? null, transportReceipt: value.transportReceipt ?? value.transport_receipt ?? null};
   return {workerDebugDescriptor: value, transportReceipt: null};
 }

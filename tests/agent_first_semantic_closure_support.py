@@ -1370,6 +1370,344 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             ),
         }
 
+    def positive_helper_operations(self) -> dict[str, dict[str, object]]:
+        success_snapshot, success_context = self.gate_success_inputs()
+        terminal_snapshot, terminal_context = self.gate_terminal_inputs()
+
+        request = self.fixture_document("task_control_golden_task_request")
+        policy = self.fixture_document("task_control_golden_effective_policy")
+        waiver = self.fixture_document("requirements_negative_waiver_empty_issuer_profile")
+        ledger = self.fixture_document("requirements_golden_ledger")
+        charter = self.fixture_document("requirements_golden_charter")
+        valid_entry = self.fixture_document(
+            "requirements_negative_derived_mandatory_without_rationale"
+        )
+        valid_entry["rationale"] = "Required to preserve the accepted objective."
+        candidate_unsigned = deepcopy(ledger)
+        candidate_unsigned.pop("ledger_digest")
+        candidate_unsigned["ledger_version"] = 2
+        candidate_unsigned["entries"].append(valid_entry)
+        candidate_unsigned["active_requirement_ids"] = sorted(
+            candidate_unsigned["active_requirement_ids"]
+            + [valid_entry["requirement_id"]]
+        )
+        candidate = self.reseal("requirement-ledger/v1", candidate_unsigned)
+        charter_v2 = deepcopy(charter)
+        previous_bytes = canonical_bytes(charter)
+        charter_v2.pop("digest")
+        charter_v2["charter_version"] = 2
+        charter_v2["previous_charter_ref"] = {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_" + "9" * 32,
+            "content_schema_id": "task-charter/v1",
+            "sha256": hashlib.sha256(previous_bytes).hexdigest(),
+            "size_bytes": len(previous_bytes),
+            "media_type": "application/json",
+            "encoding": "utf-8",
+        }
+        charter_v2["created_at"] = "2026-07-22T00:01:00.000Z"
+        charter_v2 = self.reseal("task-charter/v1", charter_v2)
+        queued = self.fixture_document("task_control_golden_task_record")
+        attempt = self.fixture_document("task_control_golden_attempt_record")
+        owner = self.fixture_document("task_control_golden_task_owner")
+        claimed = deepcopy(queued)
+        claimed.update(
+            lifecycle="ACTIVE",
+            task_version=2,
+            native_epoch=1,
+            current_attempt_id=attempt["attempt_id"],
+            owner_epoch=1,
+            updated_at="2026-07-22T00:00:01.000Z",
+        )
+        preparing = deepcopy(attempt)
+        preparing.update(state="PREPARING", state_version=2)
+        active_owner = deepcopy(owner)
+        active_owner.update(state="ACTIVE", state_version=2)
+        finalizing = deepcopy(claimed)
+        finalizing.update(
+            lifecycle="FINALIZING",
+            task_version=3,
+            updated_at="2026-07-22T00:00:02.000Z",
+        )
+        result = {
+            "schema_id": "task-result/v1",
+            "task_id": finalizing["task_id"],
+            "task_type": finalizing["task_type"],
+            "outcome": "COMPLETED",
+            "published_from_version": 3,
+            "terminal_task_version": 4,
+            "request_ref": finalizing["request_ref"],
+            "policy_ref": finalizing["policy_ref"],
+            "attempt_identity": {
+                "kind": "started",
+                "attempt_id": attempt["attempt_id"],
+                "native_epoch": 1,
+            },
+            "owner_identity": {
+                "kind": "started",
+                "owner_id": finalizing["owner_id"],
+                "owner_epoch": 1,
+            },
+            "terminal_at": "2026-07-22T00:01:00Z",
+        }
+        result_bytes = canonical_bytes(result)
+        result_digest = hashlib.sha256(result_bytes).hexdigest()
+        terminal = deepcopy(finalizing)
+        terminal.update(
+            lifecycle="TERMINAL",
+            task_version=4,
+            terminal_kind="task_result",
+            result_digest=result_digest,
+            result_ref={
+                "schema_id": "content-ref/v1",
+                "artifact_id": "art_" + "8" * 32,
+                "content_schema_id": "task-result/v1",
+                "sha256": result_digest,
+                "size_bytes": len(result_bytes),
+                "media_type": "application/json",
+                "encoding": "utf-8",
+            },
+            outcome="COMPLETED",
+            updated_at="2026-07-22T00:01:00.000Z",
+            terminal_at="2026-07-22T00:01:00.000Z",
+        )
+
+        pre_gate_success = self.make_success_context()
+        pre_gate_terminal = self.make_terminal_context()
+        root = pre_gate_success[1]
+
+        graph = self.build_graph()
+        plan = self.fixture_document("quality_policy_golden_q2_plan")
+        quality_context = self.quality_policy_context(plan)
+        evidence_manifest = self.fixture_document("task_evidence_golden_manifest")
+        pre_gate_manifest = self.fixture_document("pre_gate_golden_evidence_closure")
+        budget_before = self.fixture_document("budget_golden_ledger_before")
+        budget_reservation = self.fixture_document("budget_golden_reservation")
+        budget_reserved = self.fixture_document("budget_golden_ledger_reserved")
+        budget_settlement = self.fixture_document("budget_golden_settlement")
+        budget_after = self.fixture_document("budget_golden_ledger_after_settlement")
+        fact = self.fixture_document("gate_preparation_golden_terminalization_fact")
+        uploaded = self.build_uploaded_documents()
+        tool_invocation = self.fixture_document("tool_golden_invocation")
+        tool_intent = self.fixture_document("tool_crash_after_intent")
+        tool_capability = self.fixture_document("tool_golden_dispatch_capability")
+        tool_request = self.synthetic_agent_tool_request()
+        tool_catalog = self.fixture_document("tool_golden_current_catalog")
+        tool_source = self.synthetic_source_state()
+
+        return {
+            "evaluate_success_gate": self.helper_operation(
+                "evaluate_success_gate", [success_snapshot, success_context]
+            ),
+            "evaluate_terminalization_gate": self.helper_operation(
+                "evaluate_terminalization_gate",
+                [terminal_snapshot, terminal_context],
+            ),
+            "validate_attempt_transition": self.helper_operation(
+                "validate_attempt_transition", [attempt, preparing]
+            ),
+            "validate_claim_write_set": self.helper_operation(
+                "validate_claim_write_set", [queued, claimed, attempt, owner]
+            ),
+            "validate_effective_policy_derivation": self.helper_operation(
+                "validate_effective_policy_derivation", [request, policy]
+            ),
+            "validate_requirement_entry_ingest": self.helper_operation(
+                "validate_requirement_entry_ingest", [valid_entry, ledger]
+            ),
+            "validate_requirement_ledger_transition": self.helper_operation(
+                "validate_requirement_ledger_transition", [ledger, candidate]
+            ),
+            "validate_task_charter_transition": self.helper_operation(
+                "validate_task_charter_transition", [charter, charter_v2, candidate]
+            ),
+            "validate_task_owner_transition": self.helper_operation(
+                "validate_task_owner_transition", [owner, active_owner]
+            ),
+            "validate_task_record_transition": self.helper_operation(
+                "validate_task_record_transition", [queued, claimed]
+            ),
+            "validate_task_request_acceptance": self.helper_operation(
+                "validate_task_request_acceptance", [request]
+            ),
+            "validate_task_result_publication": self.helper_operation(
+                "validate_task_result_publication", [finalizing, terminal, result]
+            ),
+            "validate_tool_capability_consumption": self.helper_operation(
+                "validate_tool_capability_consumption", [tool_intent, tool_capability, []]
+            ),
+            "validate_tool_invocation_binding": self.helper_operation(
+                "validate_tool_invocation_binding",
+                [tool_request, tool_invocation, tool_catalog],
+            ),
+            "validate_tool_journal_begin": self.helper_operation(
+                "validate_tool_journal_begin",
+                [tool_invocation, tool_intent, tool_capability],
+            ),
+            "validate_tool_journal_settlement": self.helper_operation(
+                "validate_tool_journal_settlement",
+                [
+                    tool_invocation,
+                    tool_intent,
+                    self.fixture_document("tool_golden_local_receipt"),
+                    self.fixture_document("tool_golden_r0_payload"),
+                    self.fixture_document("tool_golden_r0_result"),
+                    tool_source,
+                    tool_source,
+                ],
+            ),
+            "verify_attestation_context": self.helper_operation(
+                "verify_attestation_context",
+                [
+                    graph["attestation"],
+                    graph["input"],
+                    graph["work"],
+                    graph["proposal"],
+                    graph["plan"],
+                    graph["final_source"],
+                    graph["execution_states"],
+                    graph["final_manifest"],
+                ],
+            ),
+            "verify_attestation_manifest_context": self.helper_operation(
+                "verify_attestation_manifest_context",
+                [
+                    graph["aggregate"],
+                    graph["plan"],
+                    graph["final_manifest"],
+                    [graph["attestation"]],
+                ],
+            ),
+            "verify_budget_transition": self.helper_operation(
+                "verify_budget_transition",
+                [
+                    budget_before,
+                    budget_reservation,
+                    budget_reserved,
+                    budget_settlement,
+                    budget_after,
+                ],
+            ),
+            "verify_change_set_context": self.helper_operation(
+                "verify_change_set_context",
+                [graph["change_set"], graph["original_source"], graph["final_source"], graph["patch"]],
+            ),
+            "verify_completion_proposal_context": self.helper_operation(
+                "verify_completion_proposal_context",
+                [
+                    graph["proposal"],
+                    graph["task_snapshot"],
+                    graph["attempt"],
+                    graph["owner"],
+                    graph["request"],
+                    graph["policy"],
+                    graph["ledger"],
+                    graph["charter"],
+                    graph["original_source"],
+                    graph["final_source"],
+                    graph["execution_states"],
+                    graph["change_set"],
+                    graph["pre_manifest"],
+                ],
+            ),
+            "verify_evidence_closure_context": self.helper_operation(
+                "verify_evidence_closure_context", [evidence_manifest, pre_gate_manifest]
+            ),
+            "verify_execution_state_context": self.helper_operation(
+                "verify_execution_state_context",
+                [graph["execution_states"][0], graph["final_source"], graph["profile"]],
+            ),
+            "verify_gate_input_snapshot_context": self.helper_operation(
+                "verify_gate_input_snapshot_context", pre_gate_success
+            ),
+            "verify_observation_manifest_extension": self.helper_operation(
+                "verify_observation_manifest_extension",
+                [graph["final_manifest"], graph["pre_manifest"]],
+            ),
+            "verify_pre_gate_evidence_closure_context": self.helper_operation(
+                "verify_pre_gate_evidence_closure_context",
+                [pre_gate_success[2], pre_gate_success[1]],
+            ),
+            "verify_pre_gate_root_set_context": self.helper_operation(
+                "verify_pre_gate_root_set_context",
+                [root, root["task_id"], root["outcome_candidate"]],
+            ),
+            "verify_quality_policy_plan_context": self.helper_operation(
+                "verify_quality_policy_plan_context", quality_context
+            ),
+            "verify_source_tree_context": self.helper_operation(
+                "verify_source_tree_context",
+                [graph["original_source"], graph["selection_policy"]],
+            ),
+            "verify_task_result_context": self.helper_operation(
+                "verify_task_result_context",
+                [uploaded["task_result"]],
+                kwargs={"worker_debug_descriptor": uploaded["worker_debug_descriptor"]},
+            ),
+            "verify_task_result_core": self.helper_operation(
+                "verify_task_result_core",
+                [uploaded["task_result"], uploaded["task_result_core"]],
+            ),
+            "verify_task_result_transport_ack": self.helper_operation(
+                "verify_task_result_transport_ack",
+                [uploaded["task_result_transport_ack"], uploaded["task_result_transport_envelope"]],
+                kwargs={"transport_receipt": uploaded["transport_receipt"]},
+            ),
+            "verify_task_result_transport_envelope": self.helper_operation(
+                "verify_task_result_transport_envelope",
+                [uploaded["task_result_transport_envelope"], uploaded["task_result_core"]],
+                kwargs={
+                    "transport_receipt": uploaded["transport_receipt"],
+                    "worker_debug_descriptor": uploaded["worker_debug_descriptor"],
+                },
+            ),
+            "verify_terminalization_fact_context": self.helper_operation(
+                "verify_terminalization_fact_context",
+                [fact, "task_11111111111111111111111111111111", 7, "FINALIZING", fact],
+            ),
+            "verify_terminalization_input_snapshot_context": self.helper_operation(
+                "verify_terminalization_input_snapshot_context", pre_gate_terminal
+            ),
+            "verify_verifier_input_context": self.helper_operation(
+                "verify_verifier_input_context",
+                [
+                    graph["input"],
+                    graph["proposal"],
+                    graph["plan"],
+                    graph["request"],
+                    graph["policy"],
+                    graph["ledger"],
+                    graph["charter"],
+                    graph["original_source"],
+                    graph["final_source"],
+                    graph["change_set"],
+                    graph["pre_manifest"],
+                    graph["engineering_rules"],
+                ],
+            ),
+            "verify_verifier_work_context": self.helper_operation(
+                "verify_verifier_work_context",
+                [graph["work"], graph["input"], graph["proposal"], graph["final_manifest"]],
+            ),
+            "verify_waiver_event_authority": self.helper_operation(
+                "verify_waiver_event_authority", [waiver, policy, "2026-07-22T00:30:00.000Z"]
+            ),
+            "verify_worker_debug_descriptor_content": self.helper_operation(
+                "verify_worker_debug_descriptor_content",
+                [uploaded["worker_debug_descriptor"], uploaded["worker_debug_fragment"]],
+                kwargs={"transport_receipt": uploaded["transport_receipt"]},
+            ),
+            "verify_worker_debug_fragment_content": self.helper_operation(
+                "verify_worker_debug_fragment_content",
+                [
+                    uploaded["worker_debug_fragment"],
+                    uploaded["task_result_core"],
+                    uploaded["worker_debug_file_manifest"],
+                    uploaded["worker_debug_redaction_report"],
+                ],
+            ),
+        }
+
     def helper_probe_operations(self) -> dict[str, dict[str, object]]:
         operations: dict[str, dict[str, object]] = {}
         for group in (
