@@ -30,6 +30,7 @@ from .agent_first_contract_bundle_python_task_control_rules import (
     PYTHON_TASK_CONTROL_RULES,
 )
 from .agent_first_contract_bundle_python_tool_evidence import PYTHON_TOOL_EVIDENCE
+from .agent_first_contract_bundle_python_verification import PYTHON_VERIFICATION
 
 
 PYTHON_SEMANTICS_BASE = r'''
@@ -323,6 +324,7 @@ PYTHON_SEMANTICS = "\n".join(
         PYTHON_GATE_INPUT,
         PYTHON_GATE,
         PYTHON_GATE_PREPARATION,
+        PYTHON_VERIFICATION,
         PYTHON_DISPATCH,
     )
 )

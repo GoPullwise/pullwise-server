@@ -18,6 +18,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "capability_sets_disjoint_sorted_unique": _task_control_rule_policy_capabilities,
     "change_set": _rule_change_set_complete,
     "change_set_patch": _rule_change_set_patch,
+    "completion_proposal": _rule_completion_proposal,
     "charter_digest_exact": _task_control_rule_charter_digest,
     "debug_redaction_plan": _rule_debug_redaction_plan,
     "derived_requirement_shape": _task_control_rule_requirement_shape,
@@ -67,6 +68,10 @@ _DOCUMENT_RULE_HANDLERS = {
     "tool_dispatch_intent": _rule_tool_dispatch_intent,
     "tool_invocation": _rule_tool_invocation,
     "utf8_nfc_byte_limits": _task_control_rule_utf8,
+    "verification_attestation": _rule_attestation,
+    "verification_attestation_manifest": _rule_attestation_manifest,
+    "verifier_input_manifest": _rule_verifier_input,
+    "verifier_work_report": _rule_verifier_work,
     "waiver_time_order": _task_control_rule_waiver_time,
 }
 

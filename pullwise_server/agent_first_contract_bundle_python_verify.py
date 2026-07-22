@@ -267,6 +267,7 @@ __all__ = [
     "seal_document", "stable_error_registry", "tool_catalog", "validate_document",
     "verify_budget_transition", "verify_bundle", "verify_content_ref_set",
     "verify_change_set_context", "verify_document_digest",
+    "verify_completion_proposal_context",
     "verify_evidence_closure_context", "verify_execution_state_context",
     "verify_quality_policy_plan_context",
     "verify_gate_input_snapshot_context", "verify_pre_gate_evidence_closure_context",
@@ -274,6 +275,8 @@ __all__ = [
     "verify_source_tree_context", "verify_terminalization_fact_context",
     "verify_terminalization_input_snapshot_context", "verify_waiver_authorization",
     "verify_waiver_event_authority",
+    "verify_verifier_input_context", "verify_verifier_work_context",
+    "verify_attestation_context", "verify_attestation_manifest_context",
 ]
 '''
 

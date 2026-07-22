@@ -268,6 +268,9 @@ def verify_attestation_context(
     _verification_require(slot is not None, _VERIFICATION_CONTEXT_INVALID, "$.slot_id")
     _verification_require_ref(checked["verifier_input_manifest_ref"], "verifier-input-manifest/v1", input_value, "$.verifier_input_manifest_ref")
     _verification_require_ref(checked["verifier_work_report_ref"], "verifier-work-report/v1", work_value, "$.verifier_work_report_ref")
+    _verification_require_ref(input_value["completion_proposal_ref"], "completion-proposal/v1", proposal_value, "$.completion_proposal_ref")
+    _verification_require_ref(work_value["verifier_input_manifest_ref"], "verifier-input-manifest/v1", input_value, "$.verifier_input_manifest_ref")
+    _verification_require_companion_digest(work_value["verifier_input_manifest_digest"], "verifier-input-manifest/v1", input_value, "$.verifier_input_manifest_digest")
     _verification_require_ref(checked["quality_policy_plan_ref"], "quality-policy-plan/v1", plan_value, "$.quality_policy_plan_ref")
     _verification_require_ref(checked["final_observation_manifest_ref"], "observation-manifest/v1", final_manifest_value, "$.final_observation_manifest_ref")
     _verification_require_companion_digest(checked["verifier_input_manifest_digest"], "verifier-input-manifest/v1", input_value, "$.verifier_input_manifest_digest")
@@ -287,8 +290,6 @@ def verify_attestation_context(
     _verification_require_ref(input_value["quality_policy_plan_ref"], "quality-policy-plan/v1", plan_value, "$.completion_proposal_ref.quality_policy_plan_ref")
     _verification_require_companion_digest(input_value["quality_policy_plan_digest"], "quality-policy-plan/v1", plan_value, "$.completion_proposal_ref.quality_policy_plan_digest")
     _verification_require(plan_value["proposal_digest"] == proposal_value["proposal_digest"], _VERIFICATION_CONTEXT_DIGEST_INVALID, "$.proposal_digest")
-    _verification_require(final_manifest_value["attempt_id"] == proposal_value["attempt_id"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.attempt_id")
-    _verification_require(final_manifest_value["native_epoch"] == proposal_value["native_epoch"], _VERIFICATION_CONTEXT_INVALID, "$.final_observation_manifest.native_epoch")
     _verification_require(
         checked["execution_state_ids"] == [item["execution_state_id"] for item in state_values],
         _VERIFICATION_CONTEXT_INVALID,

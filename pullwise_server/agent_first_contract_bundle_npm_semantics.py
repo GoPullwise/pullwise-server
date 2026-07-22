@@ -30,6 +30,7 @@ from .agent_first_contract_bundle_npm_task_control_rules import (
     NPM_TASK_CONTROL_RULES,
 )
 from .agent_first_contract_bundle_npm_tool_evidence import NPM_TOOL_EVIDENCE
+from .agent_first_contract_bundle_npm_verification import NPM_VERIFICATION
 
 
 NPM_SEMANTICS_BASE = r'''
@@ -309,6 +310,7 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
 NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
   acceptance_source_ids_unique: taskControlRuleRequestAcceptanceSources,
+  actor: ruleObservationActor,
   agent_tool_request: ruleAgentToolRequest,
   artifact_content_ref: ruleArtifactContentRef,
   artifact_content_registry: ruleArtifactContentRegistry,
@@ -320,6 +322,7 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   capability_sets_disjoint_sorted_unique: taskControlRulePolicyCapabilities,
   change_set: ruleChangeSetComplete,
   change_set_patch: ruleChangeSetPatch,
+  completion_proposal: ruleCompletionProposal,
   charter_digest_exact: taskControlRuleCharterDigest,
   debug_redaction_plan: ruleDebugRedactionPlan,
   derived_requirement_shape: taskControlRuleRequirementShape,
@@ -369,6 +372,10 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   tool_dispatch_intent: ruleToolDispatchIntent,
   tool_invocation: ruleToolInvocation,
   utf8_nfc_byte_limits: taskControlRuleUtf8,
+  verification_attestation: ruleAttestation,
+  verification_attestation_manifest: ruleAttestationManifest,
+  verifier_input_manifest: ruleVerifierInput,
+  verifier_work_report: ruleVerifierWork,
   waiver_time_order: taskControlRuleWaiverTime,
 });
 
@@ -401,11 +408,7 @@ function sortedUniqueStrings(values, allowEmpty) {
 function validateDeclaredDocumentRules(schemaId, value) {
   const semantics = schema(schemaId)["x-pullwise-semantics"];
   const rules = semantics?.document_rules;
-  if (!Array.isArray(rules) || !rules.some(
-    (ruleId) => Object.prototype.hasOwnProperty.call(
-      DOCUMENT_RULE_HANDLERS, ruleId,
-    ),
-  )) return false;
+  if (semantics === undefined) return false;
   const expectedKeys = schemaId === "waiver-event/v1"
     ? ["contextual_helpers", "document_rules", "signature_contract"]
     : ["contextual_helpers", "document_rules"];
@@ -450,6 +453,7 @@ NPM_SEMANTICS = "\n".join(
         NPM_GATE_INPUT,
         NPM_GATE,
         NPM_GATE_PREPARATION,
+        NPM_VERIFICATION,
         NPM_DECLARED_DISPATCH,
     )
 )

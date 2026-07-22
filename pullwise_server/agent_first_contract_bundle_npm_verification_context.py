@@ -34,6 +34,7 @@ export async function verifyCompletionProposalContext(proposal, taskSnapshot, at
   verificationRequireCompanionDigest(checked.policy_digest, "effective-execution-policy/v1", policy, "$.policy_digest");
   verificationRequireCompanionDigest(snapshot.ledger_head_digest, "requirement-ledger/v1", ledger, "$.requirement_ledger_digest");
   verificationRequireCompanionDigest(checked.requirement_ledger_digest, "requirement-ledger/v1", ledger, "$.requirement_ledger_digest");
+  verificationRequire(snapshot.charter_ref !== null, VERIFICATION_CONTEXT_INVALID, "$.charter_ref");
   verificationRequireRef(snapshot.charter_ref, "task-charter/v1", charter, "$.charter_ref");
   if (snapshot.completion_proposal_ref !== null) verificationRequireRef(snapshot.completion_proposal_ref, "completion-proposal/v1", checked, "$.completion_proposal_ref");
   verificationRequireCompanionDigest(checked.charter_digest, "task-charter/v1", charter, "$.charter_digest");
@@ -89,6 +90,8 @@ export async function verifyVerifierInputContext(manifest, proposal, qualityPoli
   verificationRequireRef(checked.original_source_ref, "source-tree-manifest/v1", original, "$.original_source_ref");
   verificationRequireRef(checked.final_source_ref, "source-tree-manifest/v1", final, "$.final_source_ref");
   verificationRequireRef(checked.pre_verifier_observation_manifest_ref, "pre-verifier-observation-manifest/v1", pre, "$.pre_verifier_observation_manifest_ref");
+  verificationRequireCompanionDigest(proposalDoc.request_digest, "task-request/v1", request, "$.request_digest");
+  verificationRequireCompanionDigest(proposalDoc.charter_digest, "task-charter/v1", charter, "$.charter_digest");
   verificationRequire(canonicalString(checked.artifact_refs) === canonicalString(proposalDoc.artifact_refs), VERIFICATION_CONTEXT_INVALID, "$.artifact_refs");
   verificationRequire(checked.engineering_rule_refs.length === rules.length, VERIFICATION_CONTEXT_INVALID, "$.engineering_rule_refs");
   checked.engineering_rule_refs.forEach((ref, index) => {
@@ -139,6 +142,7 @@ export async function verifyVerifierWorkContext(report, verifierInput, proposal,
     const evidence = new Set(item.evidence_ids);
     verificationRequire([...evidence].every((id) => finalIds.has(id) && ownIds.has(id)), VERIFICATION_CONTEXT_INVALID, `$.provisional_requirement_assessments[${index}].evidence_ids`);
   });
+  verificationTimestampLeq(proposalDoc.created_at, checked.created_at, "$.created_at");
   verificationTimestampLeq(inputDoc.created_at, checked.created_at, "$.created_at");
   return checked;
 }
@@ -161,6 +165,9 @@ export async function verifyAttestationContext(attestation, verifierInput, verif
   verificationRequireCompanionDigest(checked.quality_policy_plan_digest, "quality-policy-plan/v1", plan, "$.quality_policy_plan_digest");
   verificationRequireRef(checked.final_observation_manifest_ref, "observation-manifest/v1", manifest, "$.final_observation_manifest_ref");
   verificationRequireCompanionDigest(checked.final_observation_manifest_digest, "observation-manifest/v1", manifest, "$.final_observation_manifest_digest");
+  verificationRequireRef(inputDoc.completion_proposal_ref, "completion-proposal/v1", proposalDoc, "$.completion_proposal_ref");
+  verificationRequireRef(work.verifier_input_manifest_ref, "verifier-input-manifest/v1", inputDoc, "$.verifier_input_manifest_ref");
+  verificationRequireCompanionDigest(work.verifier_input_manifest_digest, "verifier-input-manifest/v1", inputDoc, "$.verifier_input_manifest_digest");
   verificationRequire(checked.task_id === inputDoc.task_id && checked.task_id === work.task_id && checked.task_id === proposalDoc.task_id && checked.task_id === plan.task_id && checked.task_id === manifest.task_id, VERIFICATION_CONTEXT_INVALID, "$.task_id");
   verificationRequire(checked.proposal_id === inputDoc.proposal_id && checked.proposal_id === work.proposal_id && checked.proposal_id === proposalDoc.proposal_id && checked.proposal_id === plan.proposal_id && checked.proposal_id === manifest.proposal_id, VERIFICATION_CONTEXT_INVALID, "$.proposal_id");
   verificationRequire(checked.slot_id === inputDoc.slot_id && checked.slot_id === work.slot_id, VERIFICATION_CONTEXT_INVALID, "$.slot_id");
@@ -188,6 +195,8 @@ export async function verifyAttestationContext(attestation, verifierInput, verif
     const evidence = new Set(item.evidence_ids);
     verificationRequire([...evidence].every((id) => finalIds.has(id) && ownIds.has(id)), VERIFICATION_CONTEXT_INVALID, `$.requirement_verdicts[${index}].evidence_ids`);
   });
+  verificationTimestampLeq(proposalDoc.created_at, checked.created_at, "$.created_at");
+  verificationTimestampLeq(inputDoc.created_at, checked.created_at, "$.created_at");
   verificationTimestampLeq(work.created_at, checked.created_at, "$.created_at");
   return checked;
 }
