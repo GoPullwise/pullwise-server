@@ -20,6 +20,12 @@ from .agent_first_contract_bundle_npm_pre_gate import NPM_PRE_GATE
 from .agent_first_contract_bundle_npm_publication import NPM_PUBLICATION
 from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
 from .agent_first_contract_bundle_npm_task_evidence import NPM_TASK_EVIDENCE
+from .agent_first_contract_bundle_npm_task_control_helpers import (
+    NPM_TASK_CONTROL_HELPERS,
+)
+from .agent_first_contract_bundle_npm_task_control_rules import (
+    NPM_TASK_CONTROL_RULES,
+)
 from .agent_first_contract_bundle_npm_tool_evidence import NPM_TOOL_EVIDENCE
 
 
@@ -239,8 +245,7 @@ function validateSemantics(schemaId, value) {
 }
 
 export function verifyWaiverAuthorization(waiver, effectivePolicy, now) {
-  validateDocument("waiver-event/v1", waiver);
-  throw new ContractValidationError("WAIVER_INVALID", "WAIVER_ISSUER_NOT_AUTHORIZED", "$");
+  return verifyWaiverEventAuthority(waiver, effectivePolicy, now);
 }
 
 export async function verifyBudgetTransition(previousLedger, reservation, reservedLedger, settlement, resultingLedger) {
@@ -399,6 +404,8 @@ NPM_SEMANTICS = "\n".join(
         NPM_EXECUTION_PROFILE_RULE,
         NPM_OBSERVATION_RULE,
         NPM_BUDGET,
+        NPM_TASK_CONTROL_RULES,
+        NPM_TASK_CONTROL_HELPERS,
         NPM_TOOL_EVIDENCE,
         NPM_PUBLICATION,
         NPM_QUALITY_POLICY,

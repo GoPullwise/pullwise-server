@@ -184,6 +184,91 @@ export async function verifyChangeSetContext(
   );
   return checked;
 }
+
+function seoOrderedUnique(values, key) {
+  const keys = values.map(key);
+  const encoded = keys.map((item) => canonicalString(item));
+  return new Set(encoded).size === encoded.length &&
+    JSON.stringify(keys) === JSON.stringify([...keys].sort((left, right) => {
+      const a = Array.isArray(left) ? left : [left];
+      const b = Array.isArray(right) ? right : [right];
+      for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+        if (a[index] < b[index]) return -1;
+        if (a[index] > b[index]) return 1;
+      }
+      return a.length - b.length;
+    }));
+}
+
+function seoContentRefKey(value) {
+  return [value.content_schema_id, value.artifact_id, value.sha256];
+}
+
+function ruleExecutionStateManifest(value) {
+  seoRequire(
+    seoOrderedUnique(value.toolchain, (item) => item.tool_id),
+    "EXECUTION_TOOLCHAIN_ORDER_INVALID", "$.toolchain",
+  );
+  seoRequire(
+    seoOrderedUnique(value.config_and_fixtures, seoContentRefKey),
+    "EXECUTION_CONFIG_ORDER_INVALID", "$.config_and_fixtures",
+  );
+  seoRequire(
+    seoOrderedUnique(value.services, (item) => item.service_id),
+    "EXECUTION_SERVICE_ORDER_INVALID", "$.services",
+  );
+  seoRequire(
+    seoOrderedUnique(value.environment, (item) => item.key),
+    "EXECUTION_ENVIRONMENT_ORDER_INVALID", "$.environment",
+  );
+  value.environment.forEach((item, index) => {
+    const expected = item.kind === "value"
+      ? ["key", "kind", "value"]
+      : ["key", "kind", "secret_key_id", "secret_version"];
+    seoRequire(
+      JSON.stringify(Object.keys(item).sort()) === JSON.stringify(expected),
+      "EXECUTION_ENVIRONMENT_SHAPE_INVALID",
+      "$.environment[" + index + "]",
+    );
+  });
+  const unsigned = Object.fromEntries(Object.entries(value).filter(
+    ([key]) => key !== "execution_state_id" && key !== "manifest_digest",
+  ));
+  seoRequire(
+    value.execution_state_id === sha256Sync(canonicalDocumentBytes(unsigned)),
+    "EXECUTION_STATE_ID_INVALID", "$.execution_state_id",
+  );
+  seoVerifyEmbeddedDigest("execution-state-manifest/v1", value);
+}
+
+export async function verifyExecutionStateContext(
+  manifest, sourceTree, executionProfile,
+) {
+  const checked = await verifyDocumentDigest(
+    "execution-state-manifest/v1", manifest,
+  );
+  const source = await verifyDocumentDigest(
+    "source-tree-manifest/v1", sourceTree,
+  );
+  const profile = await verifyDocumentDigest(
+    "execution-profile/v1", executionProfile,
+  );
+  seoRequire(
+    checked.source_state_id === source.source_state_id,
+    "EXECUTION_STATE_CONTEXT_INVALID", "$.source_state_id",
+  );
+  seoRequire(
+    checked.execution_profile_digest === profile.profile_digest,
+    "EXECUTION_STATE_CONTEXT_INVALID", "$.execution_profile_digest",
+  );
+  seoRequire(
+    seoRefMatchesDocument(
+      checked.execution_profile_ref, "execution-profile/v1", profile,
+    ),
+    "CAS_CORRUPT", "$.execution_profile_ref",
+  );
+  return checked;
+}
 '''
 
 

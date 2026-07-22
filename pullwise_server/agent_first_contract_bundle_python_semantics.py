@@ -20,6 +20,12 @@ from .agent_first_contract_bundle_python_rules import PYTHON_RULES
 from .agent_first_contract_bundle_python_task_evidence import (
     PYTHON_TASK_EVIDENCE,
 )
+from .agent_first_contract_bundle_python_task_control_helpers import (
+    PYTHON_TASK_CONTROL_HELPERS,
+)
+from .agent_first_contract_bundle_python_task_control_rules import (
+    PYTHON_TASK_CONTROL_RULES,
+)
 from .agent_first_contract_bundle_python_tool_evidence import PYTHON_TOOL_EVIDENCE
 
 
@@ -211,9 +217,8 @@ def _validate_legacy_semantics(schema_id: str, value: dict[str, object]) -> None
 
 def verify_waiver_authorization(
     waiver: object, effective_policy: object, now: str
-) -> bool:
-    validate_document("waiver-event/v1", waiver)
-    _fail("WAIVER_ISSUER_NOT_AUTHORIZED", code="WAIVER_INVALID")
+) -> dict[str, object]:
+    return verify_waiver_event_authority(waiver, effective_policy, now)
 
 
 def verify_budget_transition(
@@ -303,6 +308,8 @@ PYTHON_SEMANTICS = "\n".join(
         PYTHON_RULES,
         PYTHON_BUDGET,
         PYTHON_CONTROL,
+        PYTHON_TASK_CONTROL_RULES,
+        PYTHON_TASK_CONTROL_HELPERS,
         PYTHON_TOOL_EVIDENCE,
         PYTHON_PUBLICATION,
         PYTHON_QUALITY_POLICY,

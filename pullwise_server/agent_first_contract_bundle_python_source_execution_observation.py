@@ -183,6 +183,81 @@ def verify_change_set_context(
         "$.patch_ref",
     )
     return checked
+
+
+def _seo_ordered_unique(values: list[object], key) -> bool:
+    keys = [key(item) for item in values]
+    return keys == sorted(keys) and len(keys) == len(set(keys))
+
+
+def _seo_content_ref_key(value: dict[str, object]) -> tuple[str, str, str]:
+    return (value["content_schema_id"], value["artifact_id"], value["sha256"])
+
+
+def _rule_execution_state_manifest(value: dict[str, object]) -> None:
+    _seo_require(
+        _seo_ordered_unique(value["toolchain"], lambda item: item["tool_id"]),
+        "EXECUTION_TOOLCHAIN_ORDER_INVALID", "$.toolchain",
+    )
+    _seo_require(
+        _seo_ordered_unique(value["config_and_fixtures"], _seo_content_ref_key),
+        "EXECUTION_CONFIG_ORDER_INVALID", "$.config_and_fixtures",
+    )
+    _seo_require(
+        _seo_ordered_unique(value["services"], lambda item: item["service_id"]),
+        "EXECUTION_SERVICE_ORDER_INVALID", "$.services",
+    )
+    _seo_require(
+        _seo_ordered_unique(value["environment"], lambda item: item["key"]),
+        "EXECUTION_ENVIRONMENT_ORDER_INVALID", "$.environment",
+    )
+    for index, item in enumerate(value["environment"]):
+        expected = (
+            {"kind", "key", "value"}
+            if item["kind"] == "value"
+            else {"kind", "key", "secret_key_id", "secret_version"}
+        )
+        _seo_require(
+            set(item) == expected,
+            "EXECUTION_ENVIRONMENT_SHAPE_INVALID",
+            f"$.environment[{index}]",
+        )
+    unsigned = {
+        key: item for key, item in value.items()
+        if key not in {"execution_state_id", "manifest_digest"}
+    }
+    _seo_require(
+        value["execution_state_id"]
+        == hashlib.sha256(canonical_document_bytes(unsigned)).hexdigest(),
+        "EXECUTION_STATE_ID_INVALID", "$.execution_state_id",
+    )
+    _seo_verify_embedded_digest("execution-state-manifest/v1", value)
+
+
+def verify_execution_state_context(
+    manifest: object,
+    source_tree: object,
+    execution_profile: object,
+) -> dict[str, object]:
+    """Bind execution state to its exact source state and runtime profile."""
+    checked = verify_document_digest("execution-state-manifest/v1", manifest)
+    source = verify_document_digest("source-tree-manifest/v1", source_tree)
+    profile = verify_document_digest("execution-profile/v1", execution_profile)
+    _seo_require(
+        checked["source_state_id"] == source["source_state_id"],
+        "EXECUTION_STATE_CONTEXT_INVALID", "$.source_state_id",
+    )
+    _seo_require(
+        checked["execution_profile_digest"] == profile["profile_digest"],
+        "EXECUTION_STATE_CONTEXT_INVALID", "$.execution_profile_digest",
+    )
+    _seo_require(
+        _seo_ref_matches_document(
+            checked["execution_profile_ref"], "execution-profile/v1", profile
+        ),
+        "CAS_CORRUPT", "$.execution_profile_ref",
+    )
+    return checked
 '''
 
 
