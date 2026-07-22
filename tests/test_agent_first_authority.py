@@ -7,7 +7,9 @@ import unittest
 
 from pullwise_server._generated_agent_task_contract import (
     PACKAGE_TUPLE,
+    canonical_document_sha256,
     package_tuple,
+    seal_document,
     schema_ids,
     tool_catalog,
     verify_document_digest,
@@ -56,6 +58,23 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             "CURRENT_PACKAGE_PIN_MISMATCH",
             lambda: self.authority.accept_current_task(mismatch),
         )
+        unexpected = self.accept_request()
+        unexpected["unexpected"] = True
+        self.assert_error(
+            "CONTRACT_DOCUMENT_INVALID",
+            lambda: self.authority.accept_current_task(unexpected),
+        )
+        unrepresentable = self.accept_request()
+        unrepresentable["effective_policy"]["budgets"]["tool_calls"] = 0
+        unrepresentable["effective_policy"].pop("digest")
+        unrepresentable["effective_policy"] = seal_document(
+            "effective-execution-policy/v1",
+            unrepresentable["effective_policy"],
+        )
+        self.assert_error(
+            "CONTRACT_DOCUMENT_INVALID",
+            lambda: self.authority.accept_current_task(unrepresentable),
+        )
         self.assertEqual(first.response_bytes, again.response_bytes)
         self.assertEqual(self.counts("agent_current_task_requests"), (0,))
 
@@ -92,20 +111,39 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
                 "SELECT lifecycle, desired_state, task_version, deletion_version "
                 "FROM agent_current_task_heads"
             ).fetchone()
-            request_row = connection.execute(
-                "SELECT request_bytes, policy_digest, policy_bytes "
+            (
+                request_bytes,
+                request_digest,
+                policy_digest,
+                policy_bytes,
+            ) = connection.execute(
+                "SELECT request_bytes, request_digest, policy_digest, policy_bytes "
                 "FROM agent_current_task_requests"
             ).fetchone()
             with self.assertRaises(sqlite3.DatabaseError):
                 connection.execute("UPDATE agent_current_task_requests SET task_type='x'")
-        request = json.loads(request_row["request_bytes"])
+        connection.close()
+        request = json.loads(request_bytes)
         policy = verify_document_digest(
-            "effective-execution-policy/v1", request_row["policy_bytes"]
+            "effective-execution-policy/v1", json.loads(policy_bytes)
         )
         self.assertEqual(registered, PACKAGE_TUPLE)
         self.assertEqual(head, ("QUEUED", "RUN", 1, 0))
         self.assertEqual(request["schema_id"], "task-request/v1")
-        self.assertEqual(policy["digest"], request_row["policy_digest"])
+        self.assertEqual(request_digest, canonical_document_sha256(request))
+        self.assertEqual(policy["digest"], policy_digest)
+        self.assertEqual(policy["schema_id"], "effective-execution-policy/v1")
+        replay = self.accept_request()
+        replay["effective_policy"]["budgets"]["tool_calls"] = 6
+        replay["effective_policy"].pop("digest")
+        replay["effective_policy"] = seal_document(
+            "effective-execution-policy/v1",
+            replay["effective_policy"],
+        )
+        self.assert_error(
+            "IDEMPOTENCY_CONFLICT",
+            lambda: self.authority.accept_current_task(replay),
+        )
 
     def test_claim_requires_package_bound_worker_registration(self) -> None:
         variants = (

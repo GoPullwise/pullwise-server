@@ -213,7 +213,7 @@ class AgentFirstAuthorityStore:
                 connection,
                 values["task_id"],  # type: ignore[arg-type]
                 values["idempotency_key"],  # type: ignore[arg-type]
-                values["request_digest"],  # type: ignore[arg-type]
+                values["event_request_digest"],  # type: ignore[arg-type]
             )
             if replay is not None:
                 return replay
@@ -259,7 +259,7 @@ class AgentFirstAuthorityStore:
                 task_id=values["task_id"],  # type: ignore[arg-type]
                 event_type="task.accepted",
                 idempotency_key=values["idempotency_key"],  # type: ignore[arg-type]
-                request_digest=values["request_digest"],  # type: ignore[arg-type]
+                request_digest=values["event_request_digest"],  # type: ignore[arg-type]
                 response_bytes=values["response_bytes"],  # type: ignore[arg-type]
                 task_version=1,
             )

@@ -27,9 +27,11 @@ NOW = "2026-07-22T12:00:00.000Z"
 
 
 def policy() -> dict[str, object]:
-    document = copy.deepcopy(fixture("task_control_golden_effective_policy")["document"])
+    document = copy.deepcopy(
+        fixture("task_control_golden_effective_policy")["document"]
+    )
     document["budgets"]["tool_calls"] = 7
-    document.pop("digest", None)
+    document.pop("digest")
     return seal_document("effective-execution-policy/v1", document)
 
 
@@ -82,7 +84,9 @@ class AuthorityHarness:
         return self.authority.register_worker(self.register_request())
 
     def accept_request(self, task_id: str = TASK_ID) -> dict[str, object]:
-        task_request = copy.deepcopy(fixture("task_control_golden_task_request")["document"])
+        task_request = copy.deepcopy(
+            fixture("task_control_golden_task_request")["document"]
+        )
         task_request["task_id"] = task_id
         return {
             "package": package_tuple(),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 import secrets
 import sqlite3
 from typing import Callable, Mapping
@@ -22,6 +23,8 @@ from ._generated_agent_task_contract import (
     schema_ids,
     seal_document,
     tool_catalog,
+    validate_effective_policy_derivation,
+    validate_task_request_acceptance,
     verify_bundle,
     verify_document_digest,
 )
@@ -57,6 +60,53 @@ _STORE_ERROR_MAP = {
     "WORKER_REGISTRATION_INVALID": "AGENT_GRANT_INVALID",
     "TASK_PACKAGE_MISMATCH": "CURRENT_PACKAGE_PIN_MISMATCH",
 }
+
+
+ACCEPTANCE_OPERATION_ENVELOPE_KEYS = (
+    "package",
+    "idempotency_key",
+    "task_request",
+    "effective_policy",
+)
+
+
+def _effective_policy_grant_fields(policy: Mapping[str, object]) -> dict[str, object]:
+    capability_ids = list(policy["granted_capabilities"])
+    catalog_tools = tool_catalog()["tools"]
+    tool_keys = sorted(
+        tool["tool_key"]
+        for tool in catalog_tools
+        if tool["capability_id"] in capability_ids
+    )
+    if not capability_ids or not tool_keys:
+        raise ValueError("effective policy has no representable grants")
+    if any(
+        not any(
+            tool["capability_id"] == capability_id for tool in catalog_tools
+        )
+        for capability_id in capability_ids
+    ):
+        raise ValueError("granted capability has no catalog tool")
+    budgets = policy["budgets"]
+    elapsed_limit_ms = budgets["wall_ms"]
+    tool_call_limit = budgets["tool_calls"]
+    if (
+        not isinstance(elapsed_limit_ms, (int, float))
+        or isinstance(elapsed_limit_ms, bool)
+        or not math.isfinite(elapsed_limit_ms)
+        or not elapsed_limit_ms >= 1
+        or not isinstance(tool_call_limit, (int, float))
+        or isinstance(tool_call_limit, bool)
+        or not math.isfinite(tool_call_limit)
+        or not tool_call_limit >= 1
+    ):
+        raise ValueError("effective policy has invalid representable budgets")
+    return {
+        "capability_ids": capability_ids,
+        "tool_keys": tool_keys,
+        "elapsed_limit_ms": elapsed_limit_ms,
+        "tool_call_limit": tool_call_limit,
+    }
 
 
 def _now() -> str:
@@ -198,10 +248,34 @@ class AgentFirstAuthority:
         return self._store_call(lambda: self._store.register_worker(values))
 
     def accept_current_task(self, request: dict[str, object]) -> bytes:
-        document = self._validate("agent-task-request/v1", request)
-        policy = self._verify_digest(
-            "agent-task-policy/v1", document["policy"], require_package=False
-        )
+        self._package(request)
+        try:
+            if (
+                set(request) != set(ACCEPTANCE_OPERATION_ENVELOPE_KEYS)
+                or not isinstance(request["idempotency_key"], str)
+                or not 1 <= len(request["idempotency_key"]) <= 160
+            ):
+                self._raise("CONTRACT_DOCUMENT_INVALID")
+            document = validate_task_request_acceptance(request["task_request"])
+            policy = validate_effective_policy_derivation(
+                document,
+                request["effective_policy"],
+            )
+            _effective_policy_grant_fields(policy)
+            request_bytes = canonical_validated_bytes("task-request/v1", document)
+            policy_bytes = canonical_validated_bytes(
+                "effective-execution-policy/v1", policy
+            )
+            event_request_digest = canonical_document_sha256(
+                {
+                    "package": request["package"],
+                    "idempotency_key": request["idempotency_key"],
+                    "task_request": document,
+                    "effective_policy": policy,
+                }
+            )
+        except (ContractValidationError, UnicodeError, ValueError, TypeError, KeyError):
+            self._raise("CONTRACT_DOCUMENT_INVALID")
         response = seal_document(
             "agent-task-accept-response/v1",
             {
@@ -219,11 +293,12 @@ class AgentFirstAuthority:
             "task_id": document["task_id"],
             "task_type": document["task_type"],
             "package_tuple": PACKAGE_TUPLE,
-            "policy_digest": policy["policy_digest"],
-            "policy_bytes": canonical_validated_bytes("agent-task-policy/v1", policy),
-            "idempotency_key": document["idempotency_key"],
+            "policy_digest": policy["digest"],
+            "policy_bytes": policy_bytes,
+            "idempotency_key": request["idempotency_key"],
             "request_digest": canonical_document_sha256(document),
-            "request_bytes": canonical_validated_bytes("agent-task-request/v1", document),
+            "event_request_digest": event_request_digest,
+            "request_bytes": request_bytes,
             "owner_id": f"owner_{secrets.token_hex(16)}",
             "response_bytes": canonical_validated_bytes(
                 "agent-task-accept-response/v1", response
@@ -243,14 +318,17 @@ class AgentFirstAuthority:
         }
 
         def build(head: sqlite3.Row) -> Mapping[str, object]:
-            policy = json.loads(self._store._blob(head["policy_bytes"]))
-            policy_fields = (
-                "capability_ids",
-                "tool_keys",
-                "elapsed_limit_ms",
-                "tool_call_limit",
-            )
-            if any(document[field] != policy[field] for field in policy_fields):
+            try:
+                policy = verify_document_digest(
+                    "effective-execution-policy/v1",
+                    json.loads(self._store._blob(head["policy_bytes"])),
+                )
+                if policy["digest"] != head["policy_digest"]:
+                    raise ValueError("stored policy digest mismatch")
+                policy_fields = _effective_policy_grant_fields(policy)
+            except (ContractValidationError, UnicodeError, ValueError, TypeError, KeyError):
+                raise AuthorityStoreError("AUTHORITY_STORAGE_CORRUPT") from None
+            if any(document[field] != value for field, value in policy_fields.items()):
                 raise AuthorityStoreError("AGENT_GRANT_INVALID")
             task_version = head["task_version"] + 1
             attempt_id = f"attempt_{secrets.token_hex(16)}"
@@ -276,7 +354,7 @@ class AgentFirstAuthority:
                     **common,
                     "grant_id": grant_id,
                     "policy_digest": head["policy_digest"],
-                    **{field: policy[field] for field in policy_fields},
+                    **policy_fields,
                 },
             )
             claim = seal_document(
