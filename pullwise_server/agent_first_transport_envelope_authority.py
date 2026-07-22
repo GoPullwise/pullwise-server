@@ -112,6 +112,15 @@ class TransportEnvelopeAuthority:
         envelope: dict[str, object],
     ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
         try:
+            transport_receipt = envelope.get("transport_receipt")
+            if (
+                isinstance(transport_receipt, dict)
+                and transport_receipt.get("availability") == "available"
+            ):
+                receipt_ref = transport_receipt.get("ref")
+                if isinstance(receipt_ref, dict) and "content_schema_id" in receipt_ref:
+                    if receipt_ref["content_schema_id"] != "server-transport-receipt/v1":
+                        raise AuthorityStoreError("TRANSPORT_RECEIPT_TYPE_INVALID")
             document = json.loads(
                 canonical_validated_bytes(
                     "task-result-transport-envelope/v1", envelope

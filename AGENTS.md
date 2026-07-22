@@ -643,6 +643,21 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   TaskResult, TaskResultCore, transport, or debug artifact into either evidence
   closure.
 
+## Agent-First Result, Debug, And Transport Semantics
+
+- `TaskResult.diagnostics.worker_debug_fragment.ref` targets the
+  `worker-debug-fragment-descriptor/v1` document, never the fragment document.
+- Derive a worker debug fragment id from the validated file manifest document's
+  `manifest_digest`; the manifest ContentRef's `sha256` is not that identity.
+- Keep exact descriptor and receipt contextual binding behind storage/replay
+  ordering so `IDEMPOTENCY_CONFLICT` and receipt-binding error precedence remain
+  stable.
+- The TaskResultCore projection removes only
+  `diagnostics.worker_debug_fragment`; preserve every other TaskResult field.
+- Semantic closure derives source-declared document rules/contextual helpers
+  dynamically (currently 79/40) and checks them against the supported registry
+  superset (currently 85/41). Never hard-code closure counts.
+
 ## Agent-First Task Control Semantics
 
 - Compose the specialized task-control rule/helper fragments after legacy
