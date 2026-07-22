@@ -9,15 +9,6 @@ from tests.agent_first_verification_direct_graph_support import (
 )
 
 
-ALLOWED_RED = {
-    "completion-proposal/v1": "completion_proposal",
-    "verifier-input-manifest/v1": "verifier_input_manifest",
-    "verifier-work-report/v1": "verifier_work_report",
-    "verification-attestation/v1": "verification_attestation",
-    "verification-attestation-manifest/v1": "verification_attestation_manifest",
-}
-
-
 class AgentFirstVerificationDirectGraphFacadesTest(
     VerificationDirectGraphHarness, unittest.TestCase
 ):
@@ -29,7 +20,7 @@ class AgentFirstVerificationDirectGraphFacadesTest(
             node,
         )
 
-    def test_01_graph_documents_are_intrinsically_valid_before_helper_wiring(self) -> None:
+    def test_01_graph_documents_are_intrinsically_valid(self) -> None:
         graph = self.build_graph()
         cases = [
             ("task-record/v1", graph["task_snapshot"]),
@@ -61,18 +52,7 @@ class AgentFirstVerificationDirectGraphFacadesTest(
         self.assertEqual(python, node)
         for (schema_id, document), result in zip(cases, python):
             with self.subTest(schema_id=schema_id):
-                if schema_id in ALLOWED_RED:
-                    self.assertEqual(
-                        {
-                            "ok": False,
-                            "code": "CONTRACT_DOCUMENT_INVALID",
-                            "detail": "CONTRACT_SEMANTIC_RULE_UNIMPLEMENTED",
-                            "path": ALLOWED_RED[schema_id],
-                        },
-                        result,
-                    )
-                else:
-                    self.assertEqual({"ok": True, "value": document}, result)
+                self.assertEqual({"ok": True, "value": document}, result)
 
     def test_02_helper_parity_and_targeted_outcomes(self) -> None:
         graph = self.build_graph()

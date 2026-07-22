@@ -9,18 +9,6 @@ import tempfile
 import types
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
-from pullwise_server.agent_first_contract_bundle_npm_verification_context import (
-    NPM_VERIFICATION_CONTEXT,
-)
-from pullwise_server.agent_first_contract_bundle_npm_verification_rules import (
-    NPM_VERIFICATION_RULES,
-)
-from pullwise_server.agent_first_contract_bundle_python_verification_context import (
-    PYTHON_VERIFICATION_CONTEXT,
-)
-from pullwise_server.agent_first_contract_bundle_python_verification_rules import (
-    PYTHON_VERIFICATION_RULES,
-)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,21 +44,9 @@ class VerificationDirectGraphHarness:
         }
         cls.python = types.ModuleType("_verification_direct_public_python")
         exec(built.python_wrapper, cls.python.__dict__)
-        cls.python_helpers = types.ModuleType("_verification_direct_helper_python")
-        cls.python_helpers.__dict__.update(cls.python.__dict__)
-        exec(PYTHON_VERIFICATION_RULES, cls.python_helpers.__dict__)
-        exec(PYTHON_VERIFICATION_CONTEXT, cls.python_helpers.__dict__)
+        cls.python_helpers = cls.python
         cls.npm_wrapper = built.npm_wrapper
-        helper_bytes = bytearray(cls.npm_wrapper)
-        helper_bytes.extend(NPM_VERIFICATION_RULES.encode("utf-8"))
-        helper_bytes.extend(NPM_VERIFICATION_CONTEXT.encode("utf-8"))
-        helper_bytes.extend(
-            "\n".join(
-                f"export const {snake} = {camel};"
-                for snake, camel in ALIASES.items()
-            ).encode("utf-8")
-        )
-        cls.npm_helper_wrapper = bytes(helper_bytes)
+        cls.npm_helper_wrapper = cls.npm_wrapper
 
     def fixture_document(self, fixture_id: str) -> dict[str, object]:
         for family in self.bundle["families"]:
