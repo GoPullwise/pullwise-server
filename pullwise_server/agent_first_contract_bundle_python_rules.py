@@ -41,8 +41,6 @@ def _verify_embedded_digest(schema_id: str, value: dict[str, object]) -> None:
         return
     field, domain = spec["field"], spec["domain"]
     presented = value[field]
-    if presented == "0" * 64:
-        return
     unsigned = {key: item for key, item in value.items() if key != field}
     raw = domain.encode("utf-8") + b"\0" + canonical_document_bytes(unsigned)
     _require(

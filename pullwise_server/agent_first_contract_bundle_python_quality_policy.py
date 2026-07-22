@@ -156,7 +156,8 @@ def verify_quality_policy_plan_context(
         policy_value, "quality_risk_floor", "$.policy"
     )
     _require(
-        floor in _QUALITY_RISK_RANK
+        isinstance(floor, str)
+        and floor in _QUALITY_RISK_RANK
         and _QUALITY_RISK_RANK[checked["quality_risk"]]
         >= _QUALITY_RISK_RANK[floor],
         "QUALITY_POLICY_RISK_FLOOR_INVALID",

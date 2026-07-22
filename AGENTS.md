@@ -582,3 +582,7 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   with calendar validation and platform-independent epoch arithmetic; valid
   pre-1970 instants must behave identically in Python and Node. Actor semantics
   use the current `domain_reviewer` kind and must not restore its legacy alias.
+- Rendered `change-set-patch/v1` facades must check canonical padded base64,
+  decoded size, and byte SHA-256 before `patch_digest`. Compute that digest over
+  `pullwise:change-set-patch/v1`, a NUL separator, and canonical unsigned
+  document bytes, with identical Python/Node error code, detail, and path.

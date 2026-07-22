@@ -80,7 +80,6 @@ const GATE_TERMINAL_REASONS = {
 
 function gateVerifyDigest(schemaId, value, field) {
   const presented = value[field];
-  if (presented === "0".repeat(64)) return;
   const spec = schema(schemaId)["x-pullwise-digest"];
   const unsigned = Object.fromEntries(
     Object.entries(value).filter(([key]) => key !== field),
@@ -181,6 +180,15 @@ function gateContext(context, expectedKeys) {
   return JSON.parse(decoder.decode(canonicalDocumentBytes(context)));
 }
 
+function gatePassed(predicateResults) {
+  if (!Array.isArray(predicateResults) || !predicateResults.every(
+    (item) => item && !Array.isArray(item) && typeof item === "object" &&
+      Object.getPrototypeOf(item) === Object.prototype &&
+      typeof item.passed === "boolean",
+  )) fail("GATE_EVALUATION_CONTEXT_INVALID", "$.context.predicate_results");
+  return predicateResults.every((item) => item.passed);
+}
+
 async function gateSnapshotAndRef(schemaId, snapshotValue, referenceValue) {
   const snapshot = await verifyDocumentDigest(schemaId, snapshotValue);
   const reference = validateDocument("content-ref/v1", referenceValue);
@@ -204,6 +212,7 @@ export async function evaluateSuccessGate(inputSnapshot, context) {
     "gate-input-snapshot/v1", inputSnapshot, evaluation.input_snapshot_ref,
   );
   const results = evaluation.predicate_results;
+  const passed = gatePassed(results);
   return sealDocument("gate-decision/v1", {
     schema_id: "gate-decision/v1",
     decision_kind: "success",
@@ -211,7 +220,7 @@ export async function evaluateSuccessGate(inputSnapshot, context) {
     input_digest: snapshot.input_digest,
     predicate_registry_digest: snapshot.predicate_registry_digest,
     requested_outcome: snapshot.requested_outcome,
-    passed: results.every((item) => item?.passed === true),
+    passed,
     predicate_results: results,
   });
 }
@@ -234,6 +243,7 @@ export async function evaluateTerminalizationGate(inputSnapshot, context) {
     fail("GATE_TERMINAL_AVAILABILITY_MISMATCH", "$.context.effect_availability");
   }
   const results = evaluation.predicate_results;
+  const passed = gatePassed(results);
   return sealDocument("gate-decision/v1", {
     schema_id: "gate-decision/v1",
     decision_kind: "terminalization",
@@ -246,7 +256,7 @@ export async function evaluateTerminalizationGate(inputSnapshot, context) {
     source_availability: evaluation.source_availability,
     evidence_availability: evaluation.evidence_availability,
     effect_availability: evaluation.effect_availability,
-    passed: results.every((item) => item?.passed === true),
+    passed,
     predicate_results: results,
   });
 }

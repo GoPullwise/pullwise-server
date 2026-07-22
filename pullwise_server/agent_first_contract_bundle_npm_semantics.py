@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from .agent_first_contract_bundle_npm_change_set_patch import (
+    NPM_CHANGE_SET_PATCH_RULE,
+)
 from .agent_first_contract_bundle_npm_effective_policy import (
     NPM_EFFECTIVE_POLICY_RULES,
 )
@@ -287,6 +290,7 @@ NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
   budget_ceiling_consistency: rulePolicyBudgetCeilings,
   capability_sets_disjoint_sorted_unique: rulePolicyCapabilitySets,
+  change_set_patch: ruleChangeSetPatch,
   debug_redaction_plan: ruleDebugRedactionPlan,
   execution_profile: ruleExecutionProfile,
   gate_decision: ruleGateDecision,
@@ -355,6 +359,7 @@ function validateDeclaredDocumentRules(schemaId, value) {
 NPM_SEMANTICS = "\n".join(
     (
         NPM_SEMANTICS_BASE,
+        NPM_CHANGE_SET_PATCH_RULE,
         NPM_EFFECTIVE_POLICY_RULES,
         NPM_EXECUTION_PROFILE_RULE,
         NPM_OBSERVATION_RULE,

@@ -267,6 +267,7 @@ export const verify_bundle = verifyBundle;
 export const verify_budget_transition = verifyBudgetTransition;
 export const verify_content_ref_set = verifyContentRefSet;
 export const verify_document_digest = verifyDocumentDigest;
+export const verify_quality_policy_plan_context = verifyQualityPolicyPlanContext;
 export const verify_terminalization_fact_context = verifyTerminalizationFactContext;
 export const verify_waiver_authorization = verifyWaiverAuthorization;
 '''

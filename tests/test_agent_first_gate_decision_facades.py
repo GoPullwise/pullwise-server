@@ -174,7 +174,7 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
                 value = self.python.validate_document(
                     operation["schema_id"], operation["value"]
                 )
-            elif operation["kind"] == "success":
+            elif operation["kind"] in {"success", "success_snake"}:
                 value = self.python.evaluate_success_gate(
                     operation["snapshot"], operation["context"]
                 )
@@ -212,6 +212,10 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
                         "      value = facade.validateDocument(operation.schema_id, operation.value);",
                         "    } else if (operation.kind === 'success') {",
                         "      value = await facade.evaluateSuccessGate(operation.snapshot, operation.context);",
+                        "    } else if (operation.kind === 'success_snake') {",
+                        "      value = await facade.evaluate_success_gate(operation.snapshot, operation.context);",
+                        "    } else if (operation.kind === 'terminal_snake') {",
+                        "      value = await facade.evaluate_terminalization_gate(operation.snapshot, operation.context);",
                         "    } else {",
                         "      value = await facade.evaluateTerminalizationGate(operation.snapshot, operation.context);",
                         "    }",
@@ -264,6 +268,11 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
         results = self.assert_operation_parity(operations)
 
         self.assertTrue(all(result["ok"] for result in results[:6]))
+        consumers: dict[str, set[str]] = {}
+        for entry in results[0]["value"]["predicates"]:
+            for code in entry["failure_codes"]:
+                consumers.setdefault(code, set()).add(entry["predicate_id"])
+        self.assertTrue(any(len(predicate_ids) > 1 for predicate_ids in consumers.values()))
         for fixture_id, result in zip(fixture_ids[6:], results[6:]):
             self.assertEqual(
                 self.fixtures[fixture_id]["expected_code"],
@@ -311,6 +320,9 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
         registry_digest["predicate_registry_digest"] = "0" * 64
         registry_digest = self.reseal(GATE_SCHEMA_ID, registry_digest)
 
+        decision_digest = deepcopy(self.success)
+        decision_digest["decision_digest"] = "0" * 64
+
         outcome_reason = deepcopy(self.terminal)
         outcome_reason["selected_outcome"] = "CANCELLED"
         outcome_reason["selected_reason"] = "RUNTIME_FAILURE"
@@ -324,6 +336,7 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
             (GATE_SCHEMA_ID, wrong_evidence, "GATE_PREDICATE_EVIDENCE_INVALID", "$.predicate_results[0].evidence_refs"),
             (GATE_SCHEMA_ID, aggregate, "GATE_DECISION_PASS_INVALID", "$.passed"),
             (GATE_SCHEMA_ID, registry_digest, "GATE_PREDICATE_REGISTRY_DIGEST_INVALID", "$.predicate_registry_digest"),
+            (GATE_SCHEMA_ID, decision_digest, "CONTRACT_DIGEST_MISMATCH", "$.decision_digest"),
             (GATE_SCHEMA_ID, outcome_reason, "CONTRACT_ONE_OF_INVALID", "$"),
         ]
         operations = [
@@ -390,11 +403,14 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
         )
         extra = deepcopy(context)
         extra["invented_live_predicate"] = True
+        malformed = deepcopy(context)
+        malformed["predicate_results"] = {}
         wrong_ref = deepcopy(context)
         wrong_ref["input_snapshot_ref"]["sha256"] = "0" * 64
         operations = [
             {"kind": "success", "snapshot": snapshot, "context": failed},
             {"kind": "success", "snapshot": snapshot, "context": extra},
+            {"kind": "success", "snapshot": snapshot, "context": malformed},
             {"kind": "success", "snapshot": snapshot, "context": wrong_ref},
         ]
 
@@ -419,18 +435,39 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
             {
                 "ok": False,
                 "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "GATE_EVALUATION_CONTEXT_INVALID",
+                "path": "$.context.predicate_results",
+            },
+            results[2],
+        )
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
                 "detail": "GATE_INPUT_SNAPSHOT_REF_MISMATCH",
                 "path": "$.context.input_snapshot_ref",
             },
-            results[2],
+            results[3],
         )
 
     def test_public_export_names_include_both_gate_helpers(self) -> None:
         self.assertIn("evaluate_success_gate", self.python.__all__)
         self.assertIn("evaluate_terminalization_gate", self.python.__all__)
-        snapshot, context = self.success_inputs()
-        operations = [{"kind": "success", "snapshot": snapshot, "context": context}]
-        self.assertTrue(self.node_operations(operations)[0]["ok"])
+        success_snapshot, success_context = self.success_inputs()
+        terminal_snapshot, terminal_context = self.terminal_inputs()
+        operations = [
+            {
+                "kind": "success_snake",
+                "snapshot": success_snapshot,
+                "context": success_context,
+            },
+            {
+                "kind": "terminal_snake",
+                "snapshot": terminal_snapshot,
+                "context": terminal_context,
+            },
+        ]
+        self.assertTrue(all(item["ok"] for item in self.node_operations(operations)))
 
 
 if __name__ == "__main__":

@@ -243,9 +243,10 @@ def document_digest(schema_id: str, unsigned_value: object) -> str:
     unsigned = json.loads(canonical_document_bytes(unsigned_value).decode("utf-8"))
     if field in unsigned:
         _fail("CONTRACT_DIGEST_FIELD_PRESENT", field)
-    validate_document(schema_id, {**unsigned, field: "0" * 64})
     digest_input = domain.encode("utf-8") + b"\\0" + canonical_document_bytes(unsigned)
-    return hashlib.sha256(digest_input).hexdigest()
+    digest = hashlib.sha256(digest_input).hexdigest()
+    validate_document(schema_id, {**unsigned, field: digest})
+    return digest
 
 
 def seal_document(schema_id: str, unsigned_value: object) -> dict[str, object]:

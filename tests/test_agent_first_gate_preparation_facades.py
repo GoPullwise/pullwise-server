@@ -321,7 +321,7 @@ class AgentFirstGatePreparationFacadesTest(unittest.TestCase):
             ),
             (
                 self.helper_operation(corrupt),
-                "CONTRACT_DIGEST_MISMATCH",
+                "CONTRACT_DOCUMENT_INVALID",
                 "CONTRACT_DIGEST_MISMATCH",
                 "fact_digest",
             ),

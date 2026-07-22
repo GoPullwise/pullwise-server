@@ -151,8 +151,6 @@ def _gate_verify_digest(
     schema_id: str, value: dict[str, object], field: str
 ) -> None:
     presented = value[field]
-    if presented == "0" * 64:
-        return
     spec = schema(schema_id)["x-pullwise-digest"]
     unsigned = {key: item for key, item in value.items() if key != field}
     expected = hashlib.sha256(
@@ -268,6 +266,21 @@ def _gate_context(
     return json.loads(canonical_document_bytes(context).decode("utf-8"))
 
 
+def _gate_passed(predicate_results: object) -> bool:
+    if (
+        not isinstance(predicate_results, list)
+        or not all(
+            isinstance(item, dict) and isinstance(item.get("passed"), bool)
+            for item in predicate_results
+        )
+    ):
+        _fail(
+            "GATE_EVALUATION_CONTEXT_INVALID",
+            "$.context.predicate_results",
+        )
+    return all(item["passed"] for item in predicate_results)
+
+
 def _gate_snapshot_and_ref(
     schema_id: str, snapshot_value: object, reference_value: object
 ) -> tuple[dict[str, object], dict[str, object]]:
@@ -305,6 +318,7 @@ def evaluate_success_gate(
         evaluation["input_snapshot_ref"],
     )
     results = evaluation["predicate_results"]
+    passed = _gate_passed(results)
     return seal_document(
         "gate-decision/v1",
         {
@@ -314,7 +328,7 @@ def evaluate_success_gate(
             "input_digest": snapshot["input_digest"],
             "predicate_registry_digest": snapshot["predicate_registry_digest"],
             "requested_outcome": snapshot["requested_outcome"],
-            "passed": all(item.get("passed") is True for item in results),
+            "passed": passed,
             "predicate_results": results,
         },
     )
@@ -351,6 +365,7 @@ def evaluate_terminalization_gate(
         "$.context.effect_availability",
     )
     results = evaluation["predicate_results"]
+    passed = _gate_passed(results)
     return seal_document(
         "gate-decision/v1",
         {
@@ -365,7 +380,7 @@ def evaluate_terminalization_gate(
             "source_availability": evaluation["source_availability"],
             "evidence_availability": evaluation["evidence_availability"],
             "effect_availability": evaluation["effect_availability"],
-            "passed": all(item.get("passed") is True for item in results),
+            "passed": passed,
             "predicate_results": results,
         },
     )

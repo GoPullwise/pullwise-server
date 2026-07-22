@@ -128,7 +128,8 @@ export async function verifyQualityPolicyPlanContext(
   }
 
   const floor = qualityContextField(policyValue, "quality_risk_floor", "$.policy");
-  if (typeof floor !== "string" || !(floor in QUALITY_RISK_RANK) ||
+  if (typeof floor !== "string" ||
+      !Object.prototype.hasOwnProperty.call(QUALITY_RISK_RANK, floor) ||
       QUALITY_RISK_RANK[checked.quality_risk] < QUALITY_RISK_RANK[floor]) {
     fail("QUALITY_POLICY_RISK_FLOOR_INVALID", "$.policy.quality_risk_floor");
   }

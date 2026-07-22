@@ -244,14 +244,15 @@ export async function documentDigest(schemaId, unsignedValue) {
   const {field, domain} = digestSpec(schemaId);
   const unsigned = JSON.parse(decoder.decode(canonicalDocumentBytes(unsignedValue)));
   if (field in unsigned) fail("CONTRACT_DIGEST_FIELD_PRESENT", field);
-  validateDocument(schemaId, {...unsigned, [field]: "0".repeat(64)});
   const domainBytes = encoder.encode(domain);
   const documentBytes = canonicalDocumentBytes(unsigned);
   const input = new Uint8Array(domainBytes.length + 1 + documentBytes.length);
   input.set(domainBytes);
   input[domainBytes.length] = 0;
   input.set(documentBytes, domainBytes.length + 1);
-  return sha256(input);
+  const digest = await sha256(input);
+  validateDocument(schemaId, {...unsigned, [field]: digest});
+  return digest;
 }
 
 export async function sealDocument(schemaId, unsignedValue) {
