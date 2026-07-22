@@ -6,7 +6,6 @@ from pathlib import Path
 import subprocess
 import tempfile
 import types
-from types import MappingProxyType
 import unittest
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
@@ -19,17 +18,6 @@ SOURCE_ROOT = (
     / "current"
     / "source"
 )
-
-STRUCTURAL_PREEMPTIONS = MappingProxyType(
-    {
-        "receipt_negative_transport_as_local": (
-            "CONTRACT_DOCUMENT_INVALID",
-            "CONTRACT_CONST_INVALID",
-            "$.receipt_kind",
-        )
-    }
-)
-
 
 def canonical_bytes(value: object) -> bytes:
     return json.dumps(
@@ -214,20 +202,7 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
                 self.assertEqual(result["kind"], "contract_error")
                 self.assertIn(result["code"], stable_codes)
                 if not digest_operation:
-                    preemption = STRUCTURAL_PREEMPTIONS.get(fixture["fixture_id"])
-                    if preemption is None:
-                        self.assertEqual(result["code"], fixture["expected_code"])
-                    else:
-                        code, detail, path = preemption
-                        self.assertEqual(
-                            result,
-                            {
-                                "kind": "contract_error",
-                                "code": code,
-                                "detail": detail,
-                                "path": path,
-                            },
-                        )
+                    self.assertEqual(result["code"], fixture["expected_code"])
 
     def test_integrity_and_metadata(self) -> None:
         self.assertTrue(self.python.verify_bundle())

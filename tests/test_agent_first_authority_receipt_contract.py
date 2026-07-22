@@ -172,7 +172,7 @@ class AgentFirstAuthorityReceiptContractTest(unittest.TestCase):
             key for key in receipt_document if receipt_document[key] != wrong_type["document"][key]
         }
         self.assertEqual({"receipt_kind", "receipt_digest"}, differences)
-        self.assertEqual("TRANSPORT_RECEIPT_TYPE_INVALID", wrong_type["expected_code"])
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", wrong_type["expected_code"])
 
     def test_fixture_package_pin_is_structural_and_current_pin_is_contextual(self) -> None:
         from pullwise_server import _generated_agent_task_contract as contract

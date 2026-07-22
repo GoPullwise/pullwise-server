@@ -554,6 +554,19 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "kwargs": kwargs or {},
         }
 
+    @staticmethod
+    def normalize_runtime_value(value: object) -> object:
+        def normalize(item: object) -> object:
+            if isinstance(item, (bytes, bytearray, memoryview)):
+                return {"__bytes_hex__": bytes(item).hex()}
+            if isinstance(item, list):
+                return [normalize(child) for child in item]
+            if isinstance(item, dict):
+                return {key: normalize(child) for key, child in item.items()}
+            return item
+
+        return normalize(value)
+
     def python_helper_results(
         self, operations: list[dict[str, object]]
     ) -> list[dict[str, object]]:
@@ -570,13 +583,14 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                     }
                 )
                 continue
-            results.append(
-                self._python_capture(
-                    lambda helper=helper, operation=operation: helper(
-                        *operation["args"], **operation["kwargs"]
-                    )
+            result = self._python_capture(
+                lambda helper=helper, operation=operation: helper(
+                    *operation["args"], **operation["kwargs"]
                 )
             )
+            if result["ok"]:
+                result["value"] = self.normalize_runtime_value(result["value"])
+            results.append(result)
         return results
 
     def node_helper_results(
@@ -591,6 +605,16 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                 "\n".join(
                     (
                         f"import * as facade from {json.dumps(facade_path.as_uri())};",
+                        "const normalize = (value) => {",
+                        "  if (value instanceof Uint8Array) {",
+                        "    return {__bytes_hex__: Buffer.from(value).toString('hex')};",
+                        "  }",
+                        "  if (Array.isArray(value)) return value.map(normalize);",
+                        "  if (value !== null && typeof value === 'object') {",
+                        "    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalize(item)]));",
+                        "  }",
+                        "  return value;",
+                        "};",
                         f"const operations = {json.dumps(operations, separators=(',', ':'))};",
                         "const results = [];",
                         "for (const operation of operations) {",
@@ -604,7 +628,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                         "    const extra = operation.kwargs && Object.keys(operation.kwargs).length",
                         "      ? [operation.kwargs] : [];",
                         "    const value = await camel(...operation.args, ...extra);",
-                        "    results.push({ok: true, value});",
+                        "    results.push({ok: true, value: normalize(value)});",
                         "  } catch (error) {",
                         "    results.push({ok: false, code: error.code ?? `__node_exception__:${error.name}`,",
                         "      detail: error.detail ?? String(error.message ?? error), path: error.path ?? '$'});",
