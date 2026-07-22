@@ -310,6 +310,9 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         hits: list[str] = []
         case_hits: list[list[str]] = []
         active_hits: list[str] = []
+        failures: list[str] = []
+        case_failures: list[list[str]] = []
+        active_failures: list[str] = []
         try:
             for rule_id, handler in original.items():
                 def wrapped(
@@ -320,12 +323,18 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                 ) -> object:
                     hits.append(_rule_id)
                     active_hits.append(_rule_id)
-                    return _handler(value)
+                    try:
+                        return _handler(value)
+                    except BaseException:
+                        failures.append(_rule_id)
+                        active_failures.append(_rule_id)
+                        raise
 
                 handlers[rule_id] = wrapped
             results = []
             for case in cases:
                 active_hits = []
+                active_failures = []
                 schema_id = case["schema_id"]
                 validator = (
                     self.python.verify_document_digest
@@ -340,10 +349,17 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                     )
                 )
                 case_hits.append(active_hits)
+                case_failures.append(active_failures)
         finally:
             handlers.clear()
             handlers.update(original)
-        return {"results": results, "hits": hits, "case_hits": case_hits}
+        return {
+            "results": results,
+            "hits": hits,
+            "case_hits": case_hits,
+            "failures": failures,
+            "case_failures": case_failures,
+        }
 
     def node_document_rule_results(
         self, cases: list[dict[str, object]]
@@ -361,13 +377,21 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                         "const hits = [];",
                         "const caseHits = [];",
                         "let activeHits = [];",
+                        "const failures = [];",
+                        "const caseFailures = [];",
+                        "let activeFailures = [];",
                         "globalThis.__PULLWISE_DOCUMENT_RULE_PROBE__ = (event) => {",
                         "  hits.push(event);",
                         "  activeHits.push(event);",
+                        "  if (event.rejected === true) {",
+                        "    failures.push(event.ruleId);",
+                        "    activeFailures.push(event.ruleId);",
+                        "  }",
                         "};",
                         "const results = [];",
                         "for (const item of cases) {",
                         "  activeHits = [];",
+                        "  activeFailures = [];",
                         "  try {",
                         "    const digest = facade.schema(item.schema_id)['x-pullwise-digest'];",
                         "    const value = digest",
@@ -379,9 +403,88 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                         "      detail: error.detail ?? String(error.message ?? error), path: error.path ?? '$'});",
                         "  }",
                         "  caseHits.push(activeHits);",
+                        "  caseFailures.push(activeFailures);",
                         "}",
                         "delete globalThis.__PULLWISE_DOCUMENT_RULE_PROBE__;",
-                        "process.stdout.write(JSON.stringify({results, hits, case_hits: caseHits}));",
+                        "process.stdout.write(JSON.stringify({results, hits, case_hits: caseHits, failures, case_failures: caseFailures}));",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["node", str(runner_path)],
+                check=True,
+                capture_output=True,
+                encoding="utf-8",
+            )
+        return json.loads(completed.stdout)
+
+    def python_document_rule_handler_results(
+        self, cases: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
+        results = []
+        for case in cases:
+            rule_id = case["rule_id"]
+            handler = self.python._DOCUMENT_RULE_HANDLERS.get(rule_id)
+            if handler is None:
+                results.append(
+                    {
+                        "ok": False,
+                        "code": "CONTRACT_SEMANTIC_RULE_UNIMPLEMENTED",
+                        "detail": rule_id,
+                        "path": "$",
+                    }
+                )
+                continue
+            results.append(
+                self._python_capture(
+                    lambda handler=handler, case=case: handler(
+                        case["semantic_document"]
+                    )
+                )
+            )
+        return results
+
+    def node_document_rule_handler_results(
+        self, cases: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
+        operations = [
+            {
+                "rule_id": case["rule_id"],
+                "semantic_document": case["semantic_document"],
+            }
+            for case in cases
+        ]
+        with tempfile.TemporaryDirectory(prefix="semantic-closure-rule-handlers-") as scratch:
+            scratch_path = Path(scratch)
+            facade_path = scratch_path / "facade.mjs"
+            runner_path = scratch_path / "runner.mjs"
+            facade_path.write_bytes(
+                self.npm_wrapper
+                + b'''\nexport function __semanticClosureInvokeDocumentRule(ruleId, value) {
+  const handler = DOCUMENT_RULE_HANDLERS[ruleId];
+  if (!handler) fail("CONTRACT_SEMANTIC_RULE_UNIMPLEMENTED", ruleId);
+  return handler(value);
+}
+'''
+            )
+            runner_path.write_text(
+                "\n".join(
+                    (
+                        f"import * as facade from {json.dumps(facade_path.as_uri())};",
+                        f"const operations = {json.dumps(operations, separators=(',', ':'))};",
+                        "const results = [];",
+                        "for (const operation of operations) {",
+                        "  try {",
+                        "    const value = await facade.__semanticClosureInvokeDocumentRule(",
+                        "      operation.rule_id, operation.semantic_document);",
+                        "    results.push({ok: true, value});",
+                        "  } catch (error) {",
+                        "    results.push({ok: false, code: error.code ?? `__node_exception__:${error.name}`,",
+                        "      detail: error.detail ?? String(error.message ?? error), path: error.path ?? '$'});",
+                        "  }",
+                        "}",
+                        "process.stdout.write(JSON.stringify(results));",
                     )
                 ),
                 encoding="utf-8",

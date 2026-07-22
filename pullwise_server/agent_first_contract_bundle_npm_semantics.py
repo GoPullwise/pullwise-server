@@ -441,7 +441,12 @@ function validateDeclaredDocumentRules(schemaId, value) {
     if (!handler) fail("CONTRACT_SEMANTIC_RULE_UNIMPLEMENTED", ruleId);
     const probe = globalThis.__PULLWISE_DOCUMENT_RULE_PROBE__;
     if (typeof probe === "function") probe({schemaId, ruleId});
-    handler(value);
+    try {
+      handler(value);
+    } catch (error) {
+      if (typeof probe === "function") probe({schemaId, ruleId, rejected: true});
+      throw error;
+    }
   }
   return true;
 }
