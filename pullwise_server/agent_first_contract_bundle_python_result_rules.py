@@ -45,6 +45,15 @@ def _result_nondecreasing(values: list[object], key) -> bool:
     return keys == sorted(keys)
 
 
+def _result_ordered_unique(values: list[object], key) -> bool:
+    keys = [key(item) for item in values]
+    return all(left < right for left, right in zip(keys, keys[1:]))
+
+
+def _result_sorted_unique(values: list[object]) -> bool:
+    return _result_ordered_unique(values, lambda item: item)
+
+
 def _result_canonical_unique(values: list[object]) -> bool:
     canonical = [canonical_document_bytes(item) for item in values]
     return len(canonical) == len(set(canonical))
@@ -57,8 +66,8 @@ def _result_nondecreasing_canonical_unique(values: list[object], key) -> bool:
 def _result_validate_delivered_scope(items: list[dict[str, object]], path: str) -> None:
     for index, item in enumerate(items):
         _seo_require(_result_outcome_text_valid(item["statement"]), "TASK_RESULT_OUTCOME_TEXT_INVALID", f"{path}[{index}].statement")
-        _result_outcome_order(_sorted_unique(item["requirement_ids"]), f"{path}[{index}].requirement_ids")
-        _result_outcome_order(_ordered_unique(item["artifact_refs"], _artifact_ref_key), f"{path}[{index}].artifact_refs")
+        _result_outcome_order(_result_sorted_unique(item["requirement_ids"]), f"{path}[{index}].requirement_ids")
+        _result_outcome_order(_result_ordered_unique(item["artifact_refs"], _artifact_ref_key), f"{path}[{index}].artifact_refs")
     _result_outcome_order(
         _result_nondecreasing_canonical_unique(items, lambda item: item["statement"].encode("utf-8", errors="strict")),
         path,
@@ -71,21 +80,21 @@ def _result_validate_outcome_details(details: dict[str, object]) -> None:
         _result_validate_delivered_scope(details["delivered_scope"], f"{path}.delivered_scope")
     for field in ("satisfaction_observation_ids", "waiver_ids"):
         if field in details:
-            _result_outcome_order(_sorted_unique(details[field]), f"{path}.{field}")
+            _result_outcome_order(_result_sorted_unique(details[field]), f"{path}.{field}")
     for field in ("original_verdicts", "gaps"):
         if field in details:
-            _result_outcome_order(_ordered_unique(details[field], lambda item: item["requirement_id"]), f"{path}.{field}")
+            _result_outcome_order(_result_ordered_unique(details[field], lambda item: item["requirement_id"]), f"{path}.{field}")
     if "residual_risks" in details:
         risks = details["residual_risks"]
         for index, item in enumerate(risks):
             _seo_require(_result_outcome_text_valid(item["statement"]), "TASK_RESULT_OUTCOME_TEXT_INVALID", f"{path}.residual_risks[{index}].statement")
-            _result_outcome_order(_sorted_unique(item["evidence_ids"]), f"{path}.residual_risks[{index}].evidence_ids")
-        _result_outcome_order(_ordered_unique(risks, lambda item: item["risk_id"]), f"{path}.residual_risks")
+            _result_outcome_order(_result_sorted_unique(item["evidence_ids"]), f"{path}.residual_risks[{index}].evidence_ids")
+        _result_outcome_order(_result_ordered_unique(risks, lambda item: item["risk_id"]), f"{path}.residual_risks")
     if "blockers" in details:
         blockers = details["blockers"]
         for index, item in enumerate(blockers):
             _seo_require(_result_outcome_text_valid(item["unblock_condition"]), "TASK_RESULT_OUTCOME_TEXT_INVALID", f"{path}.blockers[{index}].unblock_condition")
-            _result_outcome_order(_sorted_unique(item["requirement_ids"]), f"{path}.blockers[{index}].requirement_ids")
+            _result_outcome_order(_result_sorted_unique(item["requirement_ids"]), f"{path}.blockers[{index}].requirement_ids")
         _result_outcome_order(
             _result_nondecreasing_canonical_unique(
                 blockers,
@@ -96,7 +105,7 @@ def _result_validate_outcome_details(details: dict[str, object]) -> None:
     if "failures" in details:
         failures = details["failures"]
         for index, item in enumerate(failures):
-            _result_outcome_order(_ordered_unique(item["evidence_refs"], _ref_key), f"{path}.failures[{index}].evidence_refs")
+            _result_outcome_order(_result_ordered_unique(item["evidence_refs"], _ref_key), f"{path}.failures[{index}].evidence_refs")
         _result_outcome_order(
             _result_nondecreasing_canonical_unique(
                 failures,

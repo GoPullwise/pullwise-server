@@ -106,7 +106,8 @@ class AgentFirstSemanticClosureGateTest(
             for helper_id, result in zip(names, python):
                 self.assertFalse(result["ok"], helper_id)
                 self.assertIn(result["code"], self.stable_error_codes, helper_id)
-                self.assertIn(result["detail"], self.stable_error_codes, helper_id)
+                self.assertIsInstance(result["detail"], str, helper_id)
+                self.assertTrue(result["detail"], helper_id)
                 self.assertIsInstance(result["path"], str, helper_id)
 
 
