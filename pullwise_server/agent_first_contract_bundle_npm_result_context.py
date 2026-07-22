@@ -10,7 +10,6 @@ function resultContextOptions(value) {
   return {workerDebugDescriptor: value, transportReceipt: null};
 }
 
-function resultRefContentTuple(value) { return [value.content_schema_id, value.sha256, value.size_bytes, value.media_type, value.encoding]; }
 function resultCheckedReceipt(value) {
   seoRequire(value !== null && typeof value === "object" && !Array.isArray(value) && value.schema_id === "server-transport-receipt/v1" && value.receipt_kind === "server_transport", "TRANSPORT_RECEIPT_TYPE_INVALID");
   return verifyDocumentDigest("server-transport-receipt/v1", value);
@@ -82,22 +81,34 @@ export async function verifyWorkerDebugDescriptorContent(descriptor, fragment, o
 
 export async function verifyTaskResultTransportEnvelope(envelope, core, options = {}) {
   const checked = validateDocument("task-result-transport-envelope/v1", envelope), {transportReceipt, workerDebugDescriptor} = resultContextOptions(options);
-  const taskResult = await verifyTaskResultContext(checked.task_result, {workerDebugDescriptor}), checkedCore = await verifyTaskResultCore(taskResult, core);
+  const taskResult = validateDocument("task-result/v1", checked.task_result), checkedCore = await verifyTaskResultCore(taskResult, core);
   seoRequire(seoRefMatchesDocument(checked.task_result_core_ref, "task-result-core/v1", checkedCore), "CAS_CORRUPT", "$.task_result_core_ref");
-  seoRequire(checked.task_result_core_digest === sha256Sync(canonicalDocumentBytes(checkedCore)), "TRANSPORT_CORE_DIGEST_INVALID", "$.task_result_core_digest");
+  seoRequire(checked.task_result_core_digest === sha256Sync(canonicalDocumentBytes(checkedCore)), "TRANSPORT_CORE_DIGEST_INVALID", "$");
+  const authority = checked.authority, fence = checked.full_fence;
+  ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].forEach((key) => seoRequire(authority[key] === fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence." + key));
+  seoRequire(authority.task_version === taskResult.published_from_version, "TRANSPORT_RESULT_VERSION_INVALID", "$.task_result.published_from_version");
   const debug = taskResult.diagnostics.worker_debug_fragment;
+  let descriptor = null, receipt = null;
   if (debug.availability === "available") {
-    const descriptor = await verifyDocumentDigest("worker-debug-fragment-descriptor/v1", workerDebugDescriptor);
-    seoRequire(checked.worker_debug_descriptor !== null && canonicalString(checked.worker_debug_descriptor) === canonicalString(descriptor), "TRANSPORT_DEBUG_REF_INVALID", "$.worker_debug_descriptor");
+    seoRequire(workerDebugDescriptor !== null, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED", "$.worker_debug_descriptor");
+    descriptor = validateDocument("worker-debug-fragment-descriptor/v1", workerDebugDescriptor);
+    seoRequire(checked.worker_debug_descriptor !== null && canonicalString(checked.worker_debug_descriptor) === canonicalString(descriptor), "TRANSPORT_DEBUG_DESCRIPTOR_CONFLICT", "$.worker_debug_descriptor");
+    seoRequire(seoRefMatchesDocument(debug.ref, "worker-debug-fragment-descriptor/v1", descriptor), "TASK_RESULT_CONTEXT_INVALID", "$.task_result.diagnostics.worker_debug_fragment.ref");
     if (descriptor.state === "uploaded") {
-      const receipt = await verifyDocumentDigest("server-transport-receipt/v1", transportReceipt);
+      seoRequire(transportReceipt !== null, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt.ref");
+      receipt = await resultCheckedReceipt(transportReceipt);
       seoRequire(checked.transport_receipt.availability === "available", "TRANSPORT_RECEIPT_REQUIRED", "$.transport_receipt");
-      seoRequire(seoRefMatchesDocument(checked.transport_receipt.ref, "server-transport-receipt/v1", receipt), "CAS_CORRUPT", "$.transport_receipt.ref");
+      seoRequire(seoRefMatchesDocument(checked.transport_receipt.ref, "server-transport-receipt/v1", receipt), "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt.ref");
       seoRequire(seoRefMatchesDocument(descriptor.server_receipt_ref, "server-transport-receipt/v1", receipt), "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.worker_debug_descriptor.server_receipt_ref");
-    } else seoRequire(transportReceipt === null, "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");
+      seoRequire(resultRefContentTuple(receipt.content_ref).every((v, i) => v === resultRefContentTuple(descriptor.fragment_ref)[i]), "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt.content_ref");
+      seoRequire(canonicalString(receipt.package) === canonicalString(checked.package) && ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].every((key) => receipt[key] === authority[key]) && receipt.authority_digest === authority.authority_digest && receipt.grant_digest === authority.grant.grant_digest, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt");
+    } else {
+      seoRequire(transportReceipt === null, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt");
+      seoRequire(canonicalString(checked.transport_receipt) === canonicalString({availability: "not_applicable", reason_code: "TRANSPORT_RECEIPT_NOT_APPLICABLE"}), "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");
+    }
   } else {
     seoRequire(workerDebugDescriptor === null && checked.worker_debug_descriptor === null, "TRANSPORT_DEBUG_DESCRIPTOR_INVALID", "$.worker_debug_descriptor");
-    seoRequire(transportReceipt === null, "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");
+    seoRequire(transportReceipt === null && canonicalString(checked.transport_receipt) === canonicalString({availability: "not_applicable", reason_code: "TRANSPORT_RECEIPT_NOT_APPLICABLE"}), "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");
   }
   const canonicalBytes = canonicalValidatedBytes("task-result-transport-envelope/v1", checked);
   return {document: checked, canonical_bytes: canonicalBytes, transport_envelope_digest: sha256Sync(canonicalBytes)};
@@ -105,16 +116,16 @@ export async function verifyTaskResultTransportEnvelope(envelope, core, options 
 
 export async function verifyTaskResultTransportAck(ack, envelope, options = {}) {
   const checked = await verifyDocumentDigest("task-result-transport-ack/v1", ack), {transportReceipt} = resultContextOptions(options);
-  const verified = await verifyTaskResultTransportEnvelope(envelope, deriveTaskResultCore(envelope.task_result), {transportReceipt, workerDebugDescriptor: envelope.worker_debug_descriptor});
-  const taskResult = verified.document.task_result;
-  seoRequire(canonicalString(checked.package) === canonicalString(verified.document.package), "CURRENT_PACKAGE_PIN_MISMATCH", "$.package");
+  const document = validateDocument("task-result-transport-envelope/v1", envelope), taskResult = document.task_result, raw = canonicalDocumentBytes(document);
+  seoRequire(canonicalString(checked.package) === canonicalString(document.package), "TRANSPORT_ACK_PACKAGE_INVALID", "$.package");
   ["result_id", "task_id", "outcome", "published_from_version", "terminal_task_version"].forEach((field) => seoRequire(checked[field] === taskResult[field], "TRANSPORT_ACK_CONTEXT_INVALID", "$." + field));
-  seoRequire(checked.transport_envelope_digest === verified.transport_envelope_digest, "TRANSPORT_ENVELOPE_DIGEST_INVALID", "$.transport_envelope_digest");
-  if (checked.receipt_binding_state === "bound") {
-    const receipt = await verifyDocumentDigest("server-transport-receipt/v1", transportReceipt);
-    seoRequire(checked.receipt_digest === receipt.receipt_digest, "TRANSPORT_ACK_CONTEXT_INVALID", "$.receipt_digest");
+  seoRequire(checked.transport_envelope_digest === sha256Sync(raw), "TRANSPORT_ACK_DIGEST_INVALID", "$.transport_envelope_digest");
+  if (transportReceipt !== null) {
+    const receipt = await resultCheckedReceipt(transportReceipt);
+    seoRequire(seoRefMatchesDocument(document.transport_receipt.ref, "server-transport-receipt/v1", receipt), "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt.ref");
+    seoRequire(checked.receipt_binding_state === "bound" && checked.receipt_digest === receipt.receipt_digest, "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_binding_state");
     resultTimeLeq(receipt.accepted_at, checked.accepted_at, "$.accepted_at");
-  } else seoRequire(transportReceipt === null, "TRANSPORT_ACK_CONTEXT_INVALID", "$.receipt_digest");
+  } else seoRequire(checked.receipt_binding_state === "not_applicable" && checked.receipt_digest === null, "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_binding_state");
   resultTimeLeq(taskResult.terminal_at, checked.accepted_at, "$.accepted_at");
   return checked;
 }
