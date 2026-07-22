@@ -229,6 +229,188 @@
       "expected_code": null
     },
     {
+      "fixture_id": "quality_policy_idempotency_q2_plan",
+      "fixture_class": "idempotency",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
+        "quality_risk": "Q2",
+        "slots": [
+          {
+            "slot_id": "slot_11111111111111111111111111111111",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          },
+          {
+            "slot_id": "slot_22222222222222222222222222222222",
+            "concern": "security_and_concurrency",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          }
+        ],
+        "self_attestation_allowed": false,
+        "rationale": "Q2 requires two independent concern slots with mandatory requirement coverage.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "b57ab06fa458cb8e2b0716b98e412cc06724b1642422dcd091b38bdb0748da12"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "quality_policy_idempotency_q3_unsupported",
+      "fixture_class": "idempotency",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
+        "quality_risk": "Q3",
+        "slots": [],
+        "self_attestation_allowed": false,
+        "rationale": "Q3 is retained as unsupported evidence for deterministic terminalization.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "c0c41fa3f12099588bc01c0c463be6b0f578aca07ca5f44b10cbcfc053e04542"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "quality_policy_negative_q0_removed",
+      "fixture_class": "negative",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
+        "quality_risk": "Q0",
+        "slots": [],
+        "self_attestation_allowed": false,
+        "rationale": "Q0 is removed from the MVP success path.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "7d0329c4b38e217ec22348bd22c3ca2f0d95453538fff0340309d7c63e631102"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "quality_policy_negative_q1_missing_slot",
+      "fixture_class": "negative",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
+        "quality_risk": "Q1",
+        "slots": [],
+        "self_attestation_allowed": false,
+        "rationale": "Q1 incorrectly omits its independent verifier slot.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "97253014dd4849737b190762de77789026e2873ba3acb41f6fef94a80e2a9215"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "quality_policy_negative_q1_self_attestation",
+      "fixture_class": "negative",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
+        "quality_risk": "Q1",
+        "slots": [
+          {
+            "slot_id": "slot_11111111111111111111111111111111",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          }
+        ],
+        "self_attestation_allowed": true,
+        "rationale": "Owner self-attestation is not an MVP success path.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "a31d8ae9924f67379d9f471fad579177846ace41bae1bde06f4766b096b06fc8"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "quality_policy_negative_q2_duplicate_concern",
+      "fixture_class": "negative",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
+        "quality_risk": "Q2",
+        "slots": [
+          {
+            "slot_id": "slot_11111111111111111111111111111111",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          },
+          {
+            "slot_id": "slot_22222222222222222222222222222222",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          }
+        ],
+        "self_attestation_allowed": false,
+        "rationale": "Q2 incorrectly reuses the same concern for both slots.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "158497be33466ee168b5e1dcd60d31cd64f5e5d970c27649bc310eb3308d86da"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
       "fixture_id": "quality_policy_negative_q2_missing_slot",
       "fixture_class": "negative",
       "schema_id": "quality-policy-plan/v1",
@@ -242,7 +424,7 @@
         "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
         "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
         "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
-        "input_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
         "quality_risk": "Q2",
         "slots": [
           {
@@ -256,7 +438,39 @@
         "self_attestation_allowed": false,
         "rationale": "Q2 incorrectly omitted its second independent concern slot.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "plan_digest": "9d7dacc3f880660004ca8d100183df7f1c3837c169a92778c6d3ba11a9275ac1"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "quality_policy_negative_q3_has_slot",
+      "fixture_class": "negative",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "54cca1f2f369cd19a41cd8919dcbaee9f5a52d8f3c22918e42ea5093dc840806",
+        "quality_risk": "Q3",
+        "slots": [
+          {
+            "slot_id": "slot_11111111111111111111111111111111",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          }
+        ],
+        "self_attestation_allowed": false,
+        "rationale": "Q3 cannot schedule verifier slots in the MVP.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "0b2799773a053eaf98bf179a23f10be75acec5c5d0ddd40926e87cf06feeab96"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

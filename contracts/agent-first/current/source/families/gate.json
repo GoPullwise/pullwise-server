@@ -7,10 +7,8 @@
       "type": "object",
       "additionalProperties": false,
       "x-pullwise-digest": {"field": "decision_digest", "domain": "pullwise:gate-decision:v1"},
-      "x-pullwise-semantics": {
-        "document_rules": ["gate_decision"],
-        "contextual_helpers": ["evaluate_success_gate", "evaluate_terminalization_gate"]
-      },
+      "x-pullwise-semantics": {"document_rules":["gate_decision"],
+        "contextual_helpers":["evaluate_success_gate","evaluate_terminalization_gate"]},
       "required": [
         "schema_id", "decision_kind", "input_snapshot_ref", "input_digest", "predicate_registry_digest", "passed",
         "predicate_results", "decision_digest"
@@ -172,45 +170,29 @@
             "decision_digest": {}
           },
           "oneOf": [
-            {
-              "type": "object",
+            {"type": "object",
               "properties": {
                 "selected_outcome": {"const": "PARTIAL"},
-                "selected_reason": {
-                  "enum": [
-                    "BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "DEADLINE_REACHED", "INTERACTION_UNAVAILABLE",
-                    "SAFE_PARTIAL_DELIVERY", "VERIFICATION_INCOMPLETE"
-                  ]
-                }
+                "selected_reason": {"enum": ["BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "DEADLINE_REACHED",
+                  "INTERACTION_UNAVAILABLE", "SAFE_PARTIAL_DELIVERY", "VERIFICATION_INCOMPLETE"]}
               }
             },
-            {
-              "type": "object",
+            {"type": "object",
               "properties": {
                 "selected_outcome": {"const": "BLOCKED"},
-                "selected_reason": {
-                  "enum": [
-                    "APPROVAL_REQUIRED", "CAPABILITY_UNAVAILABLE", "ENVIRONMENT_UNAVAILABLE", "INPUT_REQUIRED",
-                    "INTERACTION_UNAVAILABLE", "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED"
-                  ]
-                }
+                "selected_reason": {"enum": ["APPROVAL_REQUIRED", "CAPABILITY_UNAVAILABLE", "ENVIRONMENT_UNAVAILABLE",
+                  "INPUT_REQUIRED", "INTERACTION_UNAVAILABLE", "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED"]}
               }
             },
-            {
-              "type": "object",
+            {"type": "object",
               "properties": {
                 "selected_outcome": {"const": "FAILED"},
-                "selected_reason": {
-                  "enum": [
-                    "BUDGET_EXHAUSTED", "CONTRACT_INVALID", "DEADLINE_REACHED", "POLICY_INVARIANT_BROKEN",
-                    "POLICY_UNSUPPORTED", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED", "RUNTIME_FAILURE",
-                    "SOURCE_MUTATION_FORBIDDEN", "STORAGE_FAILURE"
-                  ]
-                }
+                "selected_reason": {"enum": ["BUDGET_EXHAUSTED", "CONTRACT_INVALID", "DEADLINE_REACHED",
+                  "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED",
+                  "RUNTIME_FAILURE", "SOURCE_MUTATION_FORBIDDEN", "STORAGE_FAILURE"]}
               }
             },
-            {
-              "type": "object",
+            {"type": "object",
               "properties": {
                 "selected_outcome": {"const": "CANCELLED"},
                 "selected_reason": {"enum": ["LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"]}
@@ -226,10 +208,7 @@
       "type": "object",
       "additionalProperties": false,
       "x-pullwise-digest": {"field": "registry_digest", "domain": "pullwise:gate-predicate-registry:v1"},
-      "x-pullwise-semantics": {
-        "document_rules": ["gate_predicate_registry"],
-        "contextual_helpers": []
-      },
+      "x-pullwise-semantics": {"document_rules":["gate_predicate_registry"],"contextual_helpers":[]},
       "required": ["schema_id", "predicates", "registry_digest"],
       "properties": {
         "schema_id": {"const": "gate-predicate-registry/v1"},
@@ -329,9 +308,239 @@
            "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000005","content_schema_id":"publication-content-manifest/v1",
            "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]}
         ],
-        "decision_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+        "decision_digest":"c69e486263e273bf7ea29987721839274a9b5eb396dfdd5d4d66d81f98036f43"
       },
       "expected_code": null
+    },
+    {
+      "fixture_id": "gate_decision_fence_lease_invalid",
+      "fixture_class": "fence",
+      "schema_id": "gate-decision/v1",
+      "document": {
+        "schema_id":"gate-decision/v1", "decision_kind":"success",
+        "input_snapshot_ref":{"schema_id":"content-ref/v1","artifact_id":"art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_schema_id":"gate-input-snapshot/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes":1,"media_type":"x","encoding":"binary"},
+        "input_digest":"1111111111111111111111111111111111111111111111111111111111111111",
+        "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "requested_outcome":"NO_CHANGE_NEEDED", "passed":false,
+        "predicate_results": [
+          {"predicate_id":"GATE_TASK_STATE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001",
+           "content_schema_id":"attempt-record/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_LEASE_VALID","passed":false,"failure_code":"LEASE_INVALID","evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002",
+           "content_schema_id":"gate-input-snapshot/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_DEADLINE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003",
+           "content_schema_id":"budget-summary/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_POLICY","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004",
+           "content_schema_id":"effective-execution-policy/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_LEDGER","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005",
+           "content_schema_id":"requirement-ledger/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_SOURCE_FROZEN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006",
+           "content_schema_id":"source-tree-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_PROPOSAL_FRESH","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000007",
+           "content_schema_id":"completion-proposal/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_QUALITY_PLAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000008",
+           "content_schema_id":"quality-policy-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_ATTESTATIONS","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000009",
+           "content_schema_id":"observation-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_REQUIREMENTS","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000a",
+           "content_schema_id":"requirement-ledger/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_OUTCOME_SHAPE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000b",
+           "content_schema_id":"completion-proposal/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_EFFECTS_EMPTY","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000c",
+           "content_schema_id":"effect-ledger-snapshot/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_EVIDENCE_CLOSURE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000d",
+           "content_schema_id":"pre-gate-evidence-closure-manifest/v1",
+           "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_BUDGET","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000e",
+           "content_schema_id":"budget-summary/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_SECRET_SCAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f",
+           "content_schema_id":"debug-redaction-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false}
+        ],
+        "decision_digest":"342870811a5ab9265758400273bab375da23539e44b12eb628cf1c2f96680686"
+      },
+      "expected_code": "LEASE_INVALID"
+    },
+    {
+      "fixture_id": "gate_decision_golden_success",
+      "fixture_class": "golden",
+      "schema_id": "gate-decision/v1",
+      "document": {
+        "schema_id":"gate-decision/v1", "decision_kind":"success",
+        "input_snapshot_ref":{"schema_id":"content-ref/v1","artifact_id":"art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_schema_id":"gate-input-snapshot/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes":1,"media_type":"x","encoding":"binary"},
+        "input_digest":"1111111111111111111111111111111111111111111111111111111111111111",
+        "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "requested_outcome":"NO_CHANGE_NEEDED", "passed":true,
+        "predicate_results": [
+          {"predicate_id":"GATE_TASK_STATE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001",
+           "content_schema_id":"attempt-record/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_LEASE_VALID","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002",
+           "content_schema_id":"gate-input-snapshot/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_DEADLINE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003",
+           "content_schema_id":"budget-summary/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_POLICY","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004",
+           "content_schema_id":"effective-execution-policy/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_LEDGER","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005",
+           "content_schema_id":"requirement-ledger/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_SOURCE_FROZEN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006",
+           "content_schema_id":"source-tree-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_PROPOSAL_FRESH","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000007",
+           "content_schema_id":"completion-proposal/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_QUALITY_PLAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000008",
+           "content_schema_id":"quality-policy-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_ATTESTATIONS","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000009",
+           "content_schema_id":"observation-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_REQUIREMENTS","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000a",
+           "content_schema_id":"requirement-ledger/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_OUTCOME_SHAPE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000b",
+           "content_schema_id":"completion-proposal/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_EFFECTS_EMPTY","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000c",
+           "content_schema_id":"effect-ledger-snapshot/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_EVIDENCE_CLOSURE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000d",
+           "content_schema_id":"pre-gate-evidence-closure-manifest/v1",
+           "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_BUDGET","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000e",
+           "content_schema_id":"budget-summary/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_SECRET_SCAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f",
+           "content_schema_id":"debug-redaction-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false}
+        ],
+        "decision_digest":"af7b0427cb72e9eeb6c7bb61ad7e9608847fd03c2c315fb650c16a99794c4443"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "gate_decision_golden_terminalization",
+      "fixture_class": "golden",
+      "schema_id": "gate-decision/v1",
+      "document": {
+        "schema_id":"gate-decision/v1", "decision_kind":"terminalization",
+        "input_snapshot_ref":{"schema_id":"content-ref/v1","artifact_id":"art_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content_schema_id":"terminalization-input-snapshot/v1",
+          "sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size_bytes":1,"media_type":"x","encoding":"binary"},
+        "input_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "selected_outcome":"BLOCKED", "selected_reason":"CAPABILITY_UNAVAILABLE",
+        "authoritative_fact_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_cccccccccccccccccccccccccccccccc",
+          "content_schema_id":"terminalization-fact/v1","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}],
+        "source_availability":{"availability":"unavailable","reason_code":"SOURCE_STATE_UNAVAILABLE"},
+        "evidence_availability":{"availability":"unavailable","reason_code":"VERIFICATION_NOT_RUN"},
+        "effect_availability":{"availability":"available","ref":{
+          "schema_id":"content-ref/v1","artifact_id":"art_dddddddddddddddddddddddddddddddd",
+          "content_schema_id":"effect-ledger-snapshot/v1","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}},
+        "passed":true,
+        "predicate_results": [
+          {"predicate_id":"GATE_TERMINAL_AUTHORITY_FACT","passed":true,"failure_code":null,"repairable":false,
+           "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000001","content_schema_id":"terminalization-fact/v1",
+           "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]},
+          {"predicate_id":"GATE_TERMINAL_AVAILABILITY","passed":true,"failure_code":null,"repairable":false,
+           "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000002","content_schema_id":"terminalization-input-snapshot/v1",
+           "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]},
+          {"predicate_id":"GATE_TERMINAL_NO_ACTIVE_EFFECTS","passed":true,"failure_code":null,"repairable":false,
+           "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000003","content_schema_id":"effect-ledger-snapshot/v1",
+           "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]},
+          {"predicate_id":"GATE_TERMINAL_OUTCOME_CLASSIFICATION","passed":true,"failure_code":null,"repairable":false,
+           "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000004","content_schema_id":"terminalization-fact/v1",
+           "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]},
+          {"predicate_id":"GATE_TERMINAL_ARTIFACT_DELIVERY","passed":true,"failure_code":null,"repairable":false,
+           "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000005","content_schema_id":"publication-content-manifest/v1",
+           "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]}
+        ],
+        "decision_digest":"5218994eee155da7e7b03627eeddaef9522c86e91d5c28191cbfb1c4a25f377c"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "gate_decision_idempotency_success",
+      "fixture_class": "idempotency",
+      "schema_id": "gate-decision/v1",
+      "document": {
+        "schema_id":"gate-decision/v1", "decision_kind":"success",
+        "input_snapshot_ref":{"schema_id":"content-ref/v1","artifact_id":"art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_schema_id":"gate-input-snapshot/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes":1,"media_type":"x","encoding":"binary"},
+        "input_digest":"1111111111111111111111111111111111111111111111111111111111111111",
+        "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "requested_outcome":"NO_CHANGE_NEEDED", "passed":true,
+        "predicate_results": [
+          {"predicate_id":"GATE_TASK_STATE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001",
+           "content_schema_id":"attempt-record/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_LEASE_VALID","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002",
+           "content_schema_id":"gate-input-snapshot/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_DEADLINE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003",
+           "content_schema_id":"budget-summary/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_POLICY","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004",
+           "content_schema_id":"effective-execution-policy/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_LEDGER","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005",
+           "content_schema_id":"requirement-ledger/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_SOURCE_FROZEN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006",
+           "content_schema_id":"source-tree-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_PROPOSAL_FRESH","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000007",
+           "content_schema_id":"completion-proposal/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_QUALITY_PLAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000008",
+           "content_schema_id":"quality-policy-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_ATTESTATIONS","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000009",
+           "content_schema_id":"observation-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_REQUIREMENTS","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000a",
+           "content_schema_id":"requirement-ledger/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_OUTCOME_SHAPE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000b",
+           "content_schema_id":"completion-proposal/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_EFFECTS_EMPTY","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000c",
+           "content_schema_id":"effect-ledger-snapshot/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_EVIDENCE_CLOSURE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000d",
+           "content_schema_id":"pre-gate-evidence-closure-manifest/v1",
+           "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_BUDGET","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000e",
+           "content_schema_id":"budget-summary/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
+          {"predicate_id":"GATE_SECRET_SCAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f",
+           "content_schema_id":"debug-redaction-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false}
+        ],
+        "decision_digest":"af7b0427cb72e9eeb6c7bb61ad7e9608847fd03c2c315fb650c16a99794c4443"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "gate_decision_negative_cross_branch",
+      "fixture_class": "negative",
+      "schema_id": "gate-decision/v1",
+      "document": {
+        "schema_id":"gate-decision/v1", "decision_kind":"success",
+        "input_snapshot_ref":{"schema_id":"content-ref/v1","artifact_id":"art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_schema_id":"gate-input-snapshot/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes":1,"media_type":"x","encoding":"binary"},
+        "input_digest":"1111111111111111111111111111111111111111111111111111111111111111",
+        "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "requested_outcome":"NO_CHANGE_NEEDED", "selected_outcome":"FAILED",
+        "passed":false, "predicate_results":[],
+        "decision_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "gate_decision_negative_missing_predicate",
+      "fixture_class": "negative",
+      "schema_id": "gate-decision/v1",
+      "document": {
+        "schema_id":"gate-decision/v1", "decision_kind":"success",
+        "input_snapshot_ref":{"schema_id":"content-ref/v1","artifact_id":"art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "content_schema_id":"gate-input-snapshot/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes":1,"media_type":"x","encoding":"binary"},
+        "input_digest":"1111111111111111111111111111111111111111111111111111111111111111",
+        "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "requested_outcome":"NO_CHANGE_NEEDED", "passed":true,
+        "predicate_results":[{
+          "predicate_id":"GATE_TASK_STATE","passed":true,"failure_code":null,"repairable":false,
+          "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001",
+            "content_schema_id":"attempt-record/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes":1,"media_type":"x","encoding":"binary"}]
+        }],
+        "decision_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
     {
       "fixture_id": "gate_golden_independent_registry",
@@ -340,126 +549,50 @@
       "document": {
         "schema_id": "gate-predicate-registry/v1",
         "predicates": [
-          {
-            "predicate_id": "GATE_TASK_STATE", "decision_kind": "success",
-            "input_schema_ids": ["attempt-record/v1", "gate-input-snapshot/v1", "task-record/v1"],
-            "failure_codes": ["GATE_INPUT_STALE", "STATE_TRANSITION_INVALID", "TASK_VERSION_STALE"]
-          },
-          {
-            "predicate_id": "GATE_LEASE_VALID", "decision_kind": "success",
-            "input_schema_ids": ["gate-input-snapshot/v1"],
-            "failure_codes": ["LEASE_INVALID", "NATIVE_EPOCH_STALE", "OWNER_EPOCH_STALE"]
-          },
-          {
-            "predicate_id": "GATE_DEADLINE", "decision_kind": "success",
-            "input_schema_ids": ["budget-summary/v1", "gate-input-snapshot/v1"],
-            "failure_codes": ["ABSOLUTE_DEADLINE_EXCEEDED", "TERMINALIZATION_RESERVE_REACHED"]
-          },
-          {
-            "predicate_id": "GATE_POLICY", "decision_kind": "success",
-            "input_schema_ids": ["effective-execution-policy/v1"],
-            "failure_codes": ["POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED"]
-          },
-          {
-            "predicate_id": "GATE_LEDGER", "decision_kind": "success",
-            "input_schema_ids": ["requirement-ledger/v1"],
-            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "REQUIREMENT_ID_COLLISION"]
-          },
-          {
-            "predicate_id": "GATE_SOURCE_FROZEN", "decision_kind": "success",
-            "input_schema_ids": ["source-tree-manifest/v1"],
-            "failure_codes": ["SOURCE_STATE_CHANGED", "SOURCE_STATE_MISMATCH"]
-          },
-          {
-            "predicate_id": "GATE_PROPOSAL_FRESH", "decision_kind": "success",
-            "input_schema_ids": ["completion-proposal/v1", "gate-input-snapshot/v1"],
-            "failure_codes": ["GATE_INPUT_STALE", "SOURCE_STATE_MISMATCH"]
-          },
-          {
-            "predicate_id": "GATE_QUALITY_PLAN", "decision_kind": "success",
-            "input_schema_ids": ["quality-policy-plan/v1"],
-            "failure_codes": ["POLICY_INVARIANT_BROKEN", "ROLE_NOT_ENABLED"]
-          },
-          {
-            "predicate_id": "GATE_ATTESTATIONS", "decision_kind": "success",
-            "input_schema_ids": ["observation-manifest/v1", "verification-attestation-manifest/v1"],
-            "failure_codes": ["ATTESTATION_NOT_INDEPENDENT", "OBSERVATION_ACTOR_MISMATCH", "OBSERVATION_MISSING"]
-          },
-          {
-            "predicate_id": "GATE_REQUIREMENTS", "decision_kind": "success",
-            "input_schema_ids": ["requirement-ledger/v1", "verification-attestation-manifest/v1"],
-            "failure_codes": ["MANDATORY_REQUIREMENT_FAILED", "MANDATORY_REQUIREMENT_UNVERIFIABLE", "WAIVER_INVALID"]
-          },
-          {
-            "predicate_id": "GATE_OUTCOME_SHAPE", "decision_kind": "success",
-            "input_schema_ids": ["completion-proposal/v1"],
-            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "POLICY_INVARIANT_BROKEN"]
-          },
-          {
-            "predicate_id": "GATE_EFFECTS_EMPTY", "decision_kind": "success",
-            "input_schema_ids": ["effect-ledger-snapshot/v1"],
-            "failure_codes": ["EVENT_DELIVERY_UNKNOWN", "POLICY_INVARIANT_BROKEN"]
-          },
-          {
-            "predicate_id": "GATE_EVIDENCE_CLOSURE", "decision_kind": "success",
-            "input_schema_ids": ["pre-gate-evidence-closure-manifest/v1", "pre-gate-root-set/v1"],
-            "failure_codes": ["CAS_CORRUPT", "EVIDENCE_CLOSURE_INVALID"]
-          },
-          {
-            "predicate_id": "GATE_BUDGET", "decision_kind": "success",
-            "input_schema_ids": ["budget-summary/v1"],
-            "failure_codes": ["BUDGET_EXHAUSTED", "TERMINALIZATION_RESERVE_REACHED"]
-          },
-          {
-            "predicate_id": "GATE_SECRET_SCAN", "decision_kind": "success",
-            "input_schema_ids": [
-              "debug-redaction-plan/v1", "pre-gate-evidence-closure-manifest/v1", "publication-content-manifest/v1"
-            ],
-            "failure_codes": ["DEBUG_REDACTION_FAILED", "POLICY_INVARIANT_BROKEN"]
-          },
-          {
-            "predicate_id": "GATE_TERMINAL_AUTHORITY_FACT", "decision_kind": "terminalization",
-            "input_schema_ids": ["terminalization-fact/v1", "terminalization-input-snapshot/v1"],
-            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "GATE_INPUT_STALE"]
-          },
-          {
-            "predicate_id": "GATE_TERMINAL_AVAILABILITY", "decision_kind": "terminalization",
-            "input_schema_ids": ["terminalization-input-snapshot/v1"],
-            "failure_codes": ["EXECUTION_STATE_UNAVAILABLE", "OBSERVATION_MISSING", "SOURCE_STATE_MISMATCH"]
-          },
-          {
-            "predicate_id": "GATE_TERMINAL_NO_ACTIVE_EFFECTS", "decision_kind": "terminalization",
-            "input_schema_ids": ["effect-ledger-snapshot/v1", "terminalization-input-snapshot/v1"],
-            "failure_codes": ["EVENT_DELIVERY_UNKNOWN", "POLICY_INVARIANT_BROKEN"]
-          },
-          {
-            "predicate_id": "GATE_TERMINAL_OUTCOME_CLASSIFICATION", "decision_kind": "terminalization",
-            "input_schema_ids": ["terminalization-fact/v1", "terminalization-input-snapshot/v1"],
-            "failure_codes": ["CONTRACT_DOCUMENT_INVALID", "POLICY_INVARIANT_BROKEN"]
-          },
-          {
-            "predicate_id": "GATE_TERMINAL_ARTIFACT_DELIVERY", "decision_kind": "terminalization",
-            "input_schema_ids": ["publication-content-manifest/v1", "terminalization-fact/v1"],
-            "failure_codes": ["DEBUG_UPLOAD_FAILED", "EVENT_DELIVERY_UNKNOWN", "PROTOCOL_FAILURE"]
-          }
+          {"predicate_id":"GATE_TASK_STATE","decision_kind":"success","input_schema_ids":["attempt-record/v1","gate-input-snapshot/v1","task-record/v1"],
+           "failure_codes":["GATE_INPUT_STALE","STATE_TRANSITION_INVALID","TASK_VERSION_STALE"]},
+          {"predicate_id":"GATE_LEASE_VALID","decision_kind":"success","input_schema_ids":["gate-input-snapshot/v1"],
+           "failure_codes":["LEASE_INVALID","NATIVE_EPOCH_STALE","OWNER_EPOCH_STALE"]},
+          {"predicate_id":"GATE_DEADLINE","decision_kind":"success","input_schema_ids":["budget-summary/v1","gate-input-snapshot/v1"],
+           "failure_codes":["ABSOLUTE_DEADLINE_EXCEEDED","TERMINALIZATION_RESERVE_REACHED"]},
+          {"predicate_id":"GATE_POLICY","decision_kind":"success","input_schema_ids":["effective-execution-policy/v1"],
+           "failure_codes":["POLICY_INVARIANT_BROKEN","POLICY_UNSUPPORTED"]},
+          {"predicate_id":"GATE_LEDGER","decision_kind":"success","input_schema_ids":["requirement-ledger/v1"],
+           "failure_codes":["CONTRACT_DOCUMENT_INVALID","REQUIREMENT_ID_COLLISION"]},
+          {"predicate_id":"GATE_SOURCE_FROZEN","decision_kind":"success","input_schema_ids":["source-tree-manifest/v1"],
+           "failure_codes":["SOURCE_STATE_CHANGED","SOURCE_STATE_MISMATCH"]},
+          {"predicate_id":"GATE_PROPOSAL_FRESH","decision_kind":"success","input_schema_ids":["completion-proposal/v1","gate-input-snapshot/v1"],
+           "failure_codes":["GATE_INPUT_STALE","SOURCE_STATE_MISMATCH"]},
+          {"predicate_id":"GATE_QUALITY_PLAN","decision_kind":"success","input_schema_ids":["quality-policy-plan/v1"],
+           "failure_codes":["POLICY_INVARIANT_BROKEN","ROLE_NOT_ENABLED"]},
+          {"predicate_id":"GATE_ATTESTATIONS","decision_kind":"success","input_schema_ids":["observation-manifest/v1","verification-attestation-manifest/v1"],
+           "failure_codes":["ATTESTATION_NOT_INDEPENDENT","OBSERVATION_ACTOR_MISMATCH","OBSERVATION_MISSING"]},
+          {"predicate_id":"GATE_REQUIREMENTS","decision_kind":"success","input_schema_ids":["requirement-ledger/v1","verification-attestation-manifest/v1"],
+           "failure_codes":["MANDATORY_REQUIREMENT_FAILED","MANDATORY_REQUIREMENT_UNVERIFIABLE","WAIVER_INVALID"]},
+          {"predicate_id":"GATE_OUTCOME_SHAPE","decision_kind":"success","input_schema_ids":["completion-proposal/v1"],
+           "failure_codes":["CONTRACT_DOCUMENT_INVALID","POLICY_INVARIANT_BROKEN"]},
+          {"predicate_id":"GATE_EFFECTS_EMPTY","decision_kind":"success","input_schema_ids":["effect-ledger-snapshot/v1"],
+           "failure_codes":["EVENT_DELIVERY_UNKNOWN","POLICY_INVARIANT_BROKEN"]},
+          {"predicate_id":"GATE_EVIDENCE_CLOSURE","decision_kind":"success","input_schema_ids":["pre-gate-evidence-closure-manifest/v1","pre-gate-root-set/v1"],
+           "failure_codes":["CAS_CORRUPT","EVIDENCE_CLOSURE_INVALID"]},
+          {"predicate_id":"GATE_BUDGET","decision_kind":"success","input_schema_ids":["budget-summary/v1"],
+           "failure_codes":["BUDGET_EXHAUSTED","TERMINALIZATION_RESERVE_REACHED"]},
+          {"predicate_id":"GATE_SECRET_SCAN","decision_kind":"success","input_schema_ids":["debug-redaction-plan/v1","pre-gate-evidence-closure-manifest/v1","publication-content-manifest/v1"],
+           "failure_codes":["DEBUG_REDACTION_FAILED","POLICY_INVARIANT_BROKEN"]},
+          {"predicate_id":"GATE_TERMINAL_AUTHORITY_FACT","decision_kind":"terminalization","input_schema_ids":["terminalization-fact/v1","terminalization-input-snapshot/v1"],
+           "failure_codes":["CONTRACT_DOCUMENT_INVALID","GATE_INPUT_STALE"]},
+          {"predicate_id":"GATE_TERMINAL_AVAILABILITY","decision_kind":"terminalization","input_schema_ids":["terminalization-input-snapshot/v1"],
+           "failure_codes":["EXECUTION_STATE_UNAVAILABLE","OBSERVATION_MISSING","SOURCE_STATE_MISMATCH"]},
+          {"predicate_id":"GATE_TERMINAL_NO_ACTIVE_EFFECTS","decision_kind":"terminalization","input_schema_ids":["effect-ledger-snapshot/v1","terminalization-input-snapshot/v1"],
+           "failure_codes":["EVENT_DELIVERY_UNKNOWN","POLICY_INVARIANT_BROKEN"]},
+          {"predicate_id":"GATE_TERMINAL_OUTCOME_CLASSIFICATION","decision_kind":"terminalization","input_schema_ids":["terminalization-fact/v1","terminalization-input-snapshot/v1"],
+           "failure_codes":["CONTRACT_DOCUMENT_INVALID","POLICY_INVARIANT_BROKEN"]},
+          {"predicate_id":"GATE_TERMINAL_ARTIFACT_DELIVERY","decision_kind":"terminalization","input_schema_ids":["publication-content-manifest/v1","terminalization-fact/v1"],
+           "failure_codes":["DEBUG_UPLOAD_FAILED","EVENT_DELIVERY_UNKNOWN","PROTOCOL_FAILURE"]}
         ],
         "registry_digest": "dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0"
       },
       "expected_code": null
-    },
-    {
-      "fixture_id": "gate_idempotency_exact_decision",
-      "fixture_class": "idempotency",
-      "schema_id": "gate-decision/v1",
-      "document": {"same_input_digest": true, "same_decision_bytes": true},
-      "expected_code": null
-    },
-    {
-      "fixture_id": "gate_negative_final_closure_reference",
-      "fixture_class": "negative",
-      "schema_id": "gate-input/v1",
-      "document": {"final_closure_ref": "forbidden"},
-      "expected_code": "GATE_INPUT_CLOSURE_DIRECTION_INVALID"
     }
   ]
 }

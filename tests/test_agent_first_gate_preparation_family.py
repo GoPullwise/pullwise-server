@@ -54,12 +54,10 @@ TERMINAL_EVIDENCE_SCHEMA_IDS = {
 AUTHORITATIVE_ACTOR_KINDS = {
     "server_control",
     "system_reconciler",
-    "user_control",
     "worker_control",
 }
 TERMINAL_REASON_CODES = {
     "BUDGET_EXHAUSTED",
-    "CANCELLATION_REQUESTED",
     "CAPABILITY_UNAVAILABLE",
     "DEADLINE_REACHED",
     "INTERACTION_UNAVAILABLE",
@@ -125,6 +123,14 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
         ):
             return False
         for entry in entries:
+            if set(entry) != {
+                "json_pointer",
+                "content_kind",
+                "source_ref",
+                "inline_digest",
+                "redaction_receipt",
+            }:
+                return False
             source_ref = entry["source_ref"]
             inline_digest = entry["inline_digest"]
             if entry["content_kind"] == "artifact_bytes":
@@ -138,13 +144,18 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
                 original_sha256 = (
                     source_ref["sha256"] if source_valid else None
                 )
-            else:
+            elif entry["content_kind"] in {
+                "diagnostic_summary",
+                "unstructured_string",
+            }:
                 source_valid = (
                     source_ref is None
                     and isinstance(inline_digest, str)
                     and HEX64.fullmatch(inline_digest) is not None
                 )
                 original_sha256 = inline_digest if source_valid else None
+            else:
+                return False
             receipt = entry["redaction_receipt"]
             if not (
                 source_valid
@@ -178,13 +189,10 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
             set(document)
             == set(self.schemas["terminalization-fact/v1"]["required"])
             and sealed(document, self.schemas["terminalization-fact/v1"])
+            and reason_code in TERMINAL_REASON_CODES
             and document["idempotency_key"] == expected_idempotency_key
             and valid_actor(source)
             and source["kind"] in AUTHORITATIVE_ACTOR_KINDS
-            and (
-                source["kind"] != "user_control"
-                or reason_code == "CANCELLATION_REQUESTED"
-            )
             and ordered_unique(evidence_refs, self.ref_key)
             and all(
                 valid_content_ref(ref, TERMINAL_EVIDENCE_SCHEMA_IDS)
@@ -205,12 +213,31 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
             [schema["$id"] for schema in self.family["schemas"]],
         )
 
+    def test_debug_plan_requires_a_typed_rfc6901_allowlist(self) -> None:
+        properties = self.schemas["debug-redaction-plan/v1"]["properties"]
+        pointers = properties["allowed_json_pointers"]
+        inputs = properties["debug_input_refs"]
+
+        self.assertEqual(1, pointers.get("minItems"))
+        self.assertEqual(
+            "^(?:/(?:[^~/]|~0|~1)*)+$",
+            pointers["items"]["pattern"],
+        )
+        self.assertEqual(
+            DEBUG_INPUT_SCHEMA_IDS,
+            set(inputs["items"]["x-pullwise-content-schema-ids"]),
+        )
+
     def test_publication_entries_discriminate_artifact_and_inline_content(self) -> None:
         entry_schema = self.schemas["publication-content-manifest/v1"][
             "properties"
         ]["entries"]["items"]
         artifact_branch, inline_branch = entry_schema["oneOf"]
 
+        self.assertEqual(
+            "^(?:/(?:[^~/]|~0|~1)*)+$",
+            entry_schema["properties"]["json_pointer"]["pattern"],
+        )
         self.assertEqual(
             ["object", "object"],
             [artifact_branch.get("type"), inline_branch.get("type")],
@@ -238,7 +265,7 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
             inline_branch["properties"]["source_ref"]["const"]
         )
 
-    def test_terminalization_schema_covers_cancel_and_deterministic_replay_keys(self) -> None:
+    def test_terminalization_schema_matches_authoritative_triggers_and_replay_keys(self) -> None:
         properties = self.schemas["terminalization-fact/v1"]["properties"]
 
         self.assertEqual(
@@ -248,6 +275,82 @@ class AgentFirstGatePreparationFamilyTest(unittest.TestCase):
         self.assertEqual(
             "^terminalize:[a-z][a-z0-9_]{2,95}:[1-9][0-9]{0,15}$",
             properties["idempotency_key"]["pattern"],
+        )
+
+    def test_schemas_are_closed_and_keep_typed_reference_annotations(self) -> None:
+        helpers = {
+            "debug-redaction-plan/v1": [],
+            "publication-content-manifest/v1": [],
+            "terminalization-fact/v1": [
+                "verify_terminalization_fact_context"
+            ],
+        }
+        for schema_id, schema in self.schemas.items():
+            with self.subTest(schema_id=schema_id):
+                self.assertIs(False, schema["additionalProperties"])
+                self.assertEqual(
+                    set(schema["required"]),
+                    set(schema["properties"]),
+                )
+                self.assertEqual(
+                    {
+                        "document_rules": [
+                            schema_id.removesuffix("/v1").replace("-", "_")
+                        ],
+                        "contextual_helpers": helpers[schema_id],
+                    },
+                    schema["x-pullwise-semantics"],
+                )
+
+        publication_entry = self.schemas[
+            "publication-content-manifest/v1"
+        ]["properties"]["entries"]["items"]
+        self.assertIs(False, publication_entry["additionalProperties"])
+        self.assertIs(
+            False,
+            publication_entry["properties"]["redaction_receipt"][
+                "additionalProperties"
+            ],
+        )
+        self.assertEqual(
+            PUBLICATION_SOURCE_SCHEMA_IDS,
+            set(
+                publication_entry["properties"]["source_ref"]["oneOf"][0][
+                    "x-pullwise-content-schema-ids"
+                ]
+            ),
+        )
+        self.assertEqual(
+            TERMINAL_EVIDENCE_SCHEMA_IDS,
+            set(
+                self.schemas["terminalization-fact/v1"]["properties"][
+                    "evidence_refs"
+                ]["items"]["x-pullwise-content-schema-ids"]
+            ),
+        )
+
+    def test_fixture_matrix_is_full_and_documents_keep_the_closed_shape(self) -> None:
+        classes = {schema_id: set() for schema_id in SCHEMA_IDS}
+        for fixture in self.family["fixtures"]:
+            schema_id = fixture["schema_id"]
+            classes[schema_id].add(fixture["fixture_class"])
+            self.assertEqual(
+                set(self.schemas[schema_id]["required"]),
+                set(fixture["document"]),
+                fixture["fixture_id"],
+            )
+            expected_code = (
+                "CONTRACT_DOCUMENT_INVALID"
+                if fixture["fixture_class"] == "negative"
+                else None
+            )
+            self.assertEqual(expected_code, fixture["expected_code"])
+        self.assertEqual(
+            {
+                schema_id: {"golden", "idempotency", "negative"}
+                for schema_id in SCHEMA_IDS
+            },
+            classes,
         )
 
     def test_debug_plan_golden_and_retry_are_sealed_and_output_free(self) -> None:

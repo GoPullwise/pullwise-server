@@ -64,6 +64,9 @@ class AgentFirstContractBundlePythonFixturesTest(unittest.TestCase):
     def test_task_request_fixtures_execute(self) -> None:
         self.assert_family_fixtures_execute('task-request')
 
+    def test_effective_execution_policy_fixtures_execute(self) -> None:
+        self.assert_family_fixtures_execute('effective-execution-policy')
+
 
 if __name__ == '__main__':
     unittest.main()

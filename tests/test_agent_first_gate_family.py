@@ -532,6 +532,12 @@ class GateFamilyTest(unittest.TestCase):
                 self.valid_decision(fixtures[fixture_id]["document"]), fixture_id
             )
 
+    def test_owned_contract_sources_stay_within_readability_limits(self) -> None:
+        for path in (GATE_PATH, ERROR_PATH, Path(__file__)):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertLessEqual(len(lines), 600, path.name)
+            self.assertLessEqual(max(map(len, lines), default=0), 200, path.name)
+
 
 if __name__ == "__main__":
     unittest.main()

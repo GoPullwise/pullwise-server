@@ -247,7 +247,7 @@
             "media_type":"application/json","encoding":"utf-8"}},
         "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012",
           "content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
-        "root_set_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+        "root_set_digest":"61c183d73ae0492ac4117274fd8e3603e632ca57d4c9242928cbcc7f32e279ae"
       },
       "expected_code": null
     },
