@@ -68,7 +68,8 @@ def verify_worker_debug_fragment_content(fragment: object, task_result_core: obj
         _result_require_ref(checked["task_result_core"]["ref"], "task-result-core/v1", core, "$.task_result_core.ref")
         attempt = core["attempt_identity"]
         _seo_require(checked["task_id"] == core["task_id"] and attempt["kind"] == "started", "DEBUG_TERMINAL_CORE_INVALID", "$.task_result_core")
-        _seo_require(checked["native_attempt_id"] == attempt["attempt_id"] and checked["native_epoch"] == attempt["native_epoch"], "DEBUG_TERMINAL_CORE_INVALID", "$.native_epoch")
+        _seo_require(checked["native_attempt_id"] == attempt["attempt_id"], "DEBUG_TERMINAL_CORE_INVALID", "$.native_attempt_id")
+        _seo_require(checked["native_epoch"] == attempt["native_epoch"], "DEBUG_TERMINAL_CORE_INVALID", "$.native_epoch")
         _seo_require(checked["task_version"] == core["published_from_version"], "DEBUG_TERMINAL_CORE_INVALID", "$.task_version")
         _seo_require(checked["checkpoint_generation"] == core["provenance"]["checkpoint_generation"], "DEBUG_TERMINAL_CORE_INVALID", "$.checkpoint_generation")
         _seo_require(core["final_source_state"]["availability"] == "available" and checked["source_state_id"] == core["final_source_state"]["ref"]["sha256"], "DEBUG_TERMINAL_CORE_INVALID", "$.source_state_id")

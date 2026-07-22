@@ -13,6 +13,14 @@ function resultTextCompare(left, right) {
   return a.length - b.length;
 }
 
+function resultUtf8Compare(left, right) {
+  const a = encoder.encode(String(left)), b = encoder.encode(String(right));
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
+
 function resultCompareKey(left, right) {
   const a = Array.isArray(left) ? left : [left], b = Array.isArray(right) ? right : [right];
   for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
@@ -28,12 +36,43 @@ function resultOrderedUnique(values, key) {
   return true;
 }
 
+function resultOrdered(values, key, compare = resultCompareKey) {
+  const keys = values.map(key);
+  for (let i = 1; i < keys.length; i += 1) if (compare(keys[i - 1], keys[i]) > 0) return false;
+  return true;
+}
+
+function resultCanonicalUnique(values) {
+  const canonical = values.map((item) => canonicalString(item));
+  return new Set(canonical).size === canonical.length;
+}
+
+function resultOrderedCanonicalUnique(values, key, compare = resultCompareKey) {
+  return resultOrdered(values, key, compare) && resultCanonicalUnique(values);
+}
+
 function resultSortedUnique(values) { return resultOrderedUnique(values, (item) => item); }
 function resultRefKey(value) { return [value.content_schema_id, value.artifact_id, value.sha256]; }
 function resultArtifactKey(value) { const ref = value.ref ?? value; return ref.artifact_id; }
 function resultRefContentTuple(value) { return [value.content_schema_id, value.sha256, value.size_bytes, value.media_type, value.encoding]; }
 function resultAvailabilityKey(value) { return value.availability === "available" ? ["available", ...resultRefKey(value.ref)] : [value.availability, value.reason_code]; }
 function resultUtf8Bytes(value) { return encoder.encode(value).length; }
+function resultOutcomeTextValid(value) {
+  if (typeof value !== "string" || value.normalize("NFC") !== value) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      index += 1;
+      if (index >= value.length) return false;
+      const next = value.charCodeAt(index);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  const bytes = resultUtf8Bytes(value);
+  return bytes >= 1 && bytes <= 4096;
+}
 function resultLeap(year) { return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0); }
 function resultDaysInMonth(year, month) { return [31, resultLeap(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]; }
 
@@ -44,7 +83,7 @@ function resultRfc3339Parts(value) {
   const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
   const hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6]);
   const nanos = Number((match[7] ?? "").padEnd(9, "0"));
-  if (month < 1 || month > 12 || day < 1 || day > resultDaysInMonth(year, month)) return null;
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > resultDaysInMonth(year, month)) return null;
   if (hour > 23 || minute > 59 || second > 59) return null;
   return [year, month, day, hour, minute, second, nanos];
 }
@@ -67,9 +106,77 @@ function resultTaskResultCoreProjection(value) {
   return projected;
 }
 
+function resultAvailabilityReasons() {
+  const branches = schema("availability-ref/v1").oneOf;
+  const unavailable = branches[1].properties.reason_code.enum;
+  const notApplicable = branches[2].properties.reason_code.enum;
+  seoRequire(
+    canonicalString(unavailable) === canonicalString(notApplicable),
+    "AVAILABILITY_REASON_REGISTRY_BIJECTION_INVALID",
+  );
+  return [...unavailable];
+}
+
+function resultOutcomeReasons() {
+  const reasons = new Set();
+  schema("task-result/v1").oneOf.forEach((branch) => {
+    const rule = schema(branch.$ref).properties.reason_code;
+    (Object.hasOwn(rule, "const") ? [rule.const] : rule.enum).forEach((reason) => reasons.add(reason));
+  });
+  return [...reasons].sort(resultTextCompare);
+}
+
+function resultValidateDeliveredScope(items, path) {
+  items.forEach((item, index) => {
+    seoRequire(resultOutcomeTextValid(item.statement), "TASK_RESULT_OUTCOME_TEXT_INVALID", `${path}[${index}].statement`);
+    seoRequire(resultSortedUnique(item.requirement_ids), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}[${index}].requirement_ids`);
+    seoRequire(resultOrderedUnique(item.artifact_refs, resultArtifactKey), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}[${index}].artifact_refs`);
+  });
+  seoRequire(
+    resultOrderedCanonicalUnique(items, (item) => item.statement, resultUtf8Compare),
+    "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID",
+    path,
+  );
+}
+
+function resultValidateOutcomeDetails(details) {
+  const path = "$.outcome_details";
+  if (details.delivered_scope !== undefined) resultValidateDeliveredScope(details.delivered_scope, `${path}.delivered_scope`);
+  if (details.satisfaction_observation_ids !== undefined) seoRequire(resultSortedUnique(details.satisfaction_observation_ids), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.satisfaction_observation_ids`);
+  if (details.waiver_ids !== undefined) seoRequire(resultSortedUnique(details.waiver_ids), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.waiver_ids`);
+  if (details.original_verdicts !== undefined) seoRequire(resultOrderedUnique(details.original_verdicts, (item) => item.requirement_id), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.original_verdicts`);
+  if (details.gaps !== undefined) seoRequire(resultOrderedUnique(details.gaps, (item) => item.requirement_id), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.gaps`);
+  if (details.residual_risks !== undefined) {
+    details.residual_risks.forEach((item, index) => {
+      seoRequire(resultOutcomeTextValid(item.statement), "TASK_RESULT_OUTCOME_TEXT_INVALID", `${path}.residual_risks[${index}].statement`);
+      seoRequire(resultSortedUnique(item.evidence_ids), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.residual_risks[${index}].evidence_ids`);
+    });
+    seoRequire(resultOrderedUnique(details.residual_risks, (item) => item.risk_id), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.residual_risks`);
+  }
+  if (details.blockers !== undefined) {
+    details.blockers.forEach((item, index) => {
+      seoRequire(resultOutcomeTextValid(item.unblock_condition), "TASK_RESULT_OUTCOME_TEXT_INVALID", `${path}.blockers[${index}].unblock_condition`);
+      seoRequire(resultSortedUnique(item.requirement_ids), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.blockers[${index}].requirement_ids`);
+    });
+    seoRequire(
+      resultOrderedCanonicalUnique(details.blockers, (item) => [item.code, item.requirement_ids[0] ?? "", item.unblock_condition]),
+      "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID",
+      `${path}.blockers`,
+    );
+  }
+  if (details.failures !== undefined) {
+    details.failures.forEach((item, index) => seoRequire(resultOrderedUnique(item.evidence_refs, resultRefKey), "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", `${path}.failures[${index}].evidence_refs`));
+    seoRequire(
+      resultOrderedCanonicalUnique(details.failures, (item) => [item.code, item.evidence_refs[0].artifact_id]),
+      "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID",
+      `${path}.failures`,
+    );
+  }
+}
+
 function ruleAvailabilityReasonRegistry(value) {
   seoVerifyEmbeddedDigest("availability-reason-registry/v1", value);
-  seoRequire(resultSortedUnique(value.reasons), "REASON_REGISTRY_ORDER_INVALID");
+  seoRequire(canonicalString(value.reasons) === canonicalString(resultAvailabilityReasons()), "AVAILABILITY_REASON_REGISTRY_BIJECTION_INVALID");
 }
 
 function ruleAvailabilityRef(value) {
@@ -81,11 +188,12 @@ function ruleAvailabilityRef(value) {
 
 function ruleTaskResultOutcomeReasonRegistry(value) {
   seoVerifyEmbeddedDigest("task-result-outcome-reason-registry/v1", value);
-  seoRequire(resultSortedUnique(value.reasons), "REASON_REGISTRY_ORDER_INVALID");
+  seoRequire(canonicalString(value.reasons) === canonicalString(resultOutcomeReasons()), "TASK_RESULT_OUTCOME_REASON_REGISTRY_BIJECTION_INVALID");
 }
 
 function ruleTaskResult(value) {
   seoRequire(resultUtf8Bytes(value.summary) <= 4096, "TASK_RESULT_SUMMARY_LIMIT_INVALID");
+  resultValidateOutcomeDetails(value.outcome_details);
   seoRequire(value.terminal_task_version === value.published_from_version + 1, "TASK_RESULT_VERSION_SUCCESSOR_INVALID");
   const started = value.attempt_identity.kind === "started", ownerStarted = value.owner_identity.kind === "started";
   seoRequire(started === ownerStarted, "TASK_RESULT_IDENTITY_MATRIX_INVALID");
@@ -115,7 +223,7 @@ function ruleWorkerDebugFileManifest(value) {
   seoRequire(value.entry_count === value.entries.length, "DEBUG_FILE_MANIFEST_COUNT_INVALID");
   seoRequire(value.total_size_bytes === value.entries.reduce((sum, item) => sum + item.size_bytes, 0), "DEBUG_FILE_MANIFEST_SIZE_INVALID");
   const ndjson = new Set(["agent-events.jsonl", "codex-events.jsonl", "gateway-events.jsonl", "progress.log.jsonl", "task-events.jsonl", "worker.log.jsonl"]);
-  value.entries.forEach((item, index) => seoRequire(item.media_type === (ndjson.has(item.path) ? "application/x-ndjson" : "application/json"), "DEBUG_FILE_MEDIA_TYPE_INVALID", `$.entries[${index}]`));
+  value.entries.forEach((item, index) => seoRequire(item.media_type === (ndjson.has(item.path) ? "application/x-ndjson" : "application/json"), "DEBUG_FILE_MEDIA_TYPE_INVALID", `$.entries[${index}].media_type`));
 }
 
 function ruleWorkerDebugRedactionReport(value) {
@@ -155,15 +263,16 @@ function ruleTaskResultTransportEnvelope(value) {
   seoRequire(value.task_result_core_digest === coreDigest, "TRANSPORT_CORE_DIGEST_INVALID", "$");
   seoRequire(value.task_result_core_ref.sha256 === coreDigest && value.task_result_core_ref.size_bytes === coreBytes.length, "TRANSPORT_CORE_REF_INVALID", "$.task_result_core_ref");
   const authority = value.authority, fence = value.full_fence;
-  ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].forEach((key) => seoRequire(authority[key] === fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence"));
+  ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].forEach((key) => seoRequire(authority[key] === fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", `$.full_fence.${key}`));
+  seoRequire(authority.task_version === fence.task_version, "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence.task_version");
   seoRequire(authority.task_id === result.task_id, "TRANSPORT_RESULT_TASK_INVALID", "$.authority.task_id");
-  seoRequire(authority.task_version === result.published_from_version, "TRANSPORT_RESULT_VERSION_INVALID", "$.authority.task_version");
+  seoRequire(authority.task_version === result.published_from_version, "TRANSPORT_RESULT_VERSION_INVALID", "$.task_result.published_from_version");
   seoRequire(canonicalString(value.package) === canonicalString(authority.package), "TRANSPORT_PACKAGE_INVALID", "$.package");
   const debug = result.diagnostics.worker_debug_fragment, descriptor = value.worker_debug_descriptor, receipt = value.transport_receipt;
   if (debug.availability === "available") {
     seoRequire(descriptor !== null, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED", "$.worker_debug_descriptor");
     validateDocument("worker-debug-fragment-descriptor/v1", descriptor);
-    seoRequire(descriptor.state === "uploaded" ? receipt.availability === "available" : canonicalString(receipt) === canonicalString({availability: "not_applicable", reason_code: "TRANSPORT_RECEIPT_NOT_APPLICABLE"}), descriptor.state === "uploaded" ? "TRANSPORT_RECEIPT_REQUIRED" : "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");
+    seoRequire(descriptor.state === "uploaded" ? receipt.availability === "available" : canonicalString(receipt) === canonicalString({availability: "not_applicable", reason_code: "TRANSPORT_RECEIPT_NOT_APPLICABLE"}), "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");
   } else {
     seoRequire(descriptor === null, "TRANSPORT_DEBUG_DESCRIPTOR_INVALID", "$.worker_debug_descriptor");
     seoRequire(canonicalString(receipt) === canonicalString({availability: "not_applicable", reason_code: "TRANSPORT_RECEIPT_NOT_APPLICABLE"}), "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");

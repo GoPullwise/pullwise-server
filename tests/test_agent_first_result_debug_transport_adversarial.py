@@ -364,11 +364,11 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
 
     def test_file_manifest_media_type_paths_match_across_runtimes(self) -> None:
         invalid_manifest = self.document("worker_debug_content_golden_file_manifest")
-        invalid_manifest["entries"][0]["path"] = "worker.log.jsonl"
+        invalid_manifest["entries"][0]["media_type"] = "application/x-ndjson"
         invalid_manifest = self.facade.reseal(
             "worker-debug-file-manifest/v1", invalid_manifest
         )
-        self.assert_schema_valid("worker-debug-file-manifest/v1", invalid_manifest)
+        self.assert_schema_only("worker-debug-file-manifest/v1", invalid_manifest)
 
         self.assertEqual(
             self.facade.python_document_results(
