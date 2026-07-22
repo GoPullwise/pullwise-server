@@ -114,8 +114,26 @@ def _validate_semantics(schema_id: str, value: dict[str, object]) -> None:
     elif schema_id == "artifact-content-registry/v1":
         expected = [
             {
+                "artifact_kind": "change_set",
+                "content_schema_id": "change-set/v1",
+                "media_type": "application/json",
+                "encoding": "utf-8",
+            },
+            {
                 "artifact_kind": "change_set_patch",
                 "content_schema_id": "change-set-patch/v1",
+                "media_type": "application/json",
+                "encoding": "utf-8",
+            },
+            {
+                "artifact_kind": "r0_read_result",
+                "content_schema_id": "r0-read-result/v1",
+                "media_type": "application/json",
+                "encoding": "utf-8",
+            },
+            {
+                "artifact_kind": "source_content",
+                "content_schema_id": "source-content/v1",
                 "media_type": "application/json",
                 "encoding": "utf-8",
             },

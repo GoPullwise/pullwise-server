@@ -1,0 +1,446 @@
+{
+  "family_id": "task-attempt-owner",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "attempt-record/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-semantics": {
+        "document_rules": [
+          "attempt_state_nullability",
+          "attempt_transport_binding_all_or_none",
+          "fenced_reason_ownership_loss"
+        ],
+        "contextual_helpers": [
+          "validate_attempt_transition",
+          "validate_claim_write_set"
+        ]
+      },
+      "required": [
+        "schema_id",
+        "attempt_id",
+        "task_id",
+        "native_epoch",
+        "transport_binding",
+        "state",
+        "state_version",
+        "predecessor_checkpoint_generation",
+        "owner_session_id",
+        "lease_acquired_at",
+        "started_at",
+        "ended_at",
+        "termination_reason",
+        "budget_reservation_id"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "attempt-record/v1"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^attempt_[0-9a-f]{32}$"
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^task_[0-9a-f]{32}$"
+        },
+        "native_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "transport_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_mode",
+            "outer_job_id",
+            "run_id",
+            "lease_id",
+            "transport_epoch"
+          ],
+          "properties": {
+            "protocol_mode": {
+              "const": "agent_task_v1"
+            },
+            "outer_job_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "run_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "lease_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "transport_epoch": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "outer_job_id": {
+                  "type": "string"
+                },
+                "run_id": {
+                  "type": "string"
+                },
+                "lease_id": {
+                  "type": "string"
+                },
+                "transport_epoch": {
+                  "type": "integer"
+                }
+              }
+            },
+            {
+              "properties": {
+                "outer_job_id": {
+                  "const": null
+                },
+                "run_id": {
+                  "const": null
+                },
+                "lease_id": {
+                  "const": null
+                },
+                "transport_epoch": {
+                  "const": null
+                }
+              }
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "CREATED",
+            "LEASED",
+            "PREPARING",
+            "RUNNING",
+            "VERIFYING",
+            "SUSPENDING",
+            "PUBLISHING",
+            "SUCCEEDED",
+            "SUSPENDED",
+            "FAILED",
+            "CANCELLED",
+            "FENCED"
+          ]
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "predecessor_checkpoint_generation": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "owner_session_id": {
+          "type": "string",
+          "pattern": "^sess_[0-9a-f]{32}$"
+        },
+        "lease_acquired_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "termination_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+        },
+        "budget_reservation_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^reserve_[0-9a-f]{32}$"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "enum": [
+                "CREATED",
+                "LEASED",
+                "PREPARING",
+                "RUNNING",
+                "VERIFYING",
+                "SUSPENDING",
+                "PUBLISHING"
+              ]
+            },
+            "ended_at": {
+              "const": null
+            },
+            "termination_reason": {
+              "const": null
+            }
+          }
+        },
+        {
+          "properties": {
+            "state": {
+              "enum": [
+                "SUCCEEDED",
+                "SUSPENDED",
+                "FAILED",
+                "CANCELLED"
+              ]
+            },
+            "ended_at": {
+              "type": "string"
+            },
+            "termination_reason": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "FENCED"
+            },
+            "ended_at": {
+              "type": "string"
+            },
+            "termination_reason": {
+              "const": "OWNERSHIP_LOST"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "task-owner/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-semantics": {
+        "document_rules": [
+          "fenced_reason_ownership_loss",
+          "owner_state_nullability"
+        ],
+        "contextual_helpers": [
+          "validate_claim_write_set",
+          "validate_task_owner_transition"
+        ]
+      },
+      "required": [
+        "schema_id",
+        "task_id",
+        "owner_id",
+        "owner_epoch",
+        "session_id",
+        "attempt_id",
+        "native_epoch",
+        "state",
+        "state_version",
+        "started_at",
+        "ended_at",
+        "termination_reason"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "task-owner/v1"
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^task_[0-9a-f]{32}$"
+        },
+        "owner_id": {
+          "type": "string",
+          "pattern": "^owner_[0-9a-f]{32}$"
+        },
+        "owner_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^sess_[0-9a-f]{32}$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^attempt_[0-9a-f]{32}$"
+        },
+        "native_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "enum": [
+            "STARTING",
+            "ACTIVE",
+            "CLOSED",
+            "FENCED"
+          ]
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "started_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "termination_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "enum": [
+                "STARTING",
+                "ACTIVE"
+              ]
+            },
+            "ended_at": {
+              "const": null
+            },
+            "termination_reason": {
+              "const": null
+            }
+          }
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "CLOSED"
+            },
+            "ended_at": {
+              "type": "string"
+            },
+            "termination_reason": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "FENCED"
+            },
+            "ended_at": {
+              "type": "string"
+            },
+            "termination_reason": {
+              "const": "OWNERSHIP_LOST"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_control_golden_attempt_record",
+      "fixture_class": "golden",
+      "schema_id": "attempt-record/v1",
+      "document": {
+        "schema_id": "attempt-record/v1",
+        "attempt_id": "attempt_00000000000000000000000000000001",
+        "task_id": "task_00000000000000000000000000000001",
+        "native_epoch": 1,
+        "transport_binding": {
+          "protocol_mode": "agent_task_v1",
+          "outer_job_id": "job-1",
+          "run_id": "run-1",
+          "lease_id": "lease-1",
+          "transport_epoch": 1
+        },
+        "state": "LEASED",
+        "state_version": 1,
+        "predecessor_checkpoint_generation": null,
+        "owner_session_id": "sess_00000000000000000000000000000001",
+        "lease_acquired_at": "2026-07-22T00:00:01.000Z",
+        "started_at": null,
+        "ended_at": null,
+        "termination_reason": null,
+        "budget_reservation_id": "reserve_00000000000000000000000000000001"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_control_golden_task_owner",
+      "fixture_class": "golden",
+      "schema_id": "task-owner/v1",
+      "document": {
+        "schema_id": "task-owner/v1",
+        "task_id": "task_00000000000000000000000000000001",
+        "owner_id": "owner_00000000000000000000000000000001",
+        "owner_epoch": 1,
+        "session_id": "sess_00000000000000000000000000000001",
+        "attempt_id": "attempt_00000000000000000000000000000001",
+        "native_epoch": 1,
+        "state": "STARTING",
+        "state_version": 1,
+        "started_at": "2026-07-22T00:00:01.000Z",
+        "ended_at": null,
+        "termination_reason": null
+      },
+      "expected_code": null
+    }
+  ]
+}

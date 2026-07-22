@@ -10,9 +10,10 @@
         "field": "policy_digest",
         "domain": "pullwise:source-selection-policy/v1"
       },
-      "x-pullwise-semantics": [
-        "source_selection_policy"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": ["source_selection_policy"],
+        "contextual_helpers": []
+      },
       "required": [
         "schema_id",
         "root_identity",
@@ -76,9 +77,10 @@
         "field": "manifest_digest",
         "domain": "pullwise:source-tree-manifest/v1"
       },
-      "x-pullwise-semantics": [
-        "source_tree_manifest"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": ["source_tree_manifest"],
+        "contextual_helpers": ["verify_source_tree_context"]
+      },
       "required": [
         "schema_id",
         "base_revision",

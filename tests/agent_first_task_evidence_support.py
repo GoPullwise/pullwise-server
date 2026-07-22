@@ -137,6 +137,16 @@ def timestamp_millis(value: object) -> int | None:
     return int(parsed.timestamp() * 1000)
 
 
+def object_nodes(value: object):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from object_nodes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from object_nodes(child)
+
+
 class FamilyAssertions:
     family: dict[str, object]
     schemas: dict[str, dict[str, object]]
@@ -171,6 +181,9 @@ class FamilyAssertions:
                 schema["x-pullwise-semantics"],
             )
             self.assertEqual(set(schema["required"]), set(schema["properties"]))
+            for node in object_nodes(schema):
+                if "pattern" in node:
+                    self.assertIsInstance(node["pattern"], str, schema_id)
 
     def assert_fixture_matrix(
         self: unittest.TestCase,

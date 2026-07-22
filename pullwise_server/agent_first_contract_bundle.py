@@ -56,6 +56,7 @@ REQUIRED_FAMILIES = (
     "task-result-outcome-stop-variants",
     "task-result",
     "task-result-core",
+    "worker-debug-content",
     "task-result-transport",
 )
 

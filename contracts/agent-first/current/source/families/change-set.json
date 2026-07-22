@@ -10,9 +10,10 @@
         "field": "change_set_digest",
         "domain": "pullwise:change-set/v1"
       },
-      "x-pullwise-semantics": [
-        "change_set"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": ["change_set"],
+        "contextual_helpers": ["verify_change_set_context"]
+      },
       "required": [
         "schema_id",
         "original_source_state_id",

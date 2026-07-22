@@ -121,9 +121,13 @@ class TransportEnvelopeHarness:
             "schema_id": "worker-debug-fragment-descriptor/v1",
             "state": state,
             "fragment_ref": fragment_ref,
+            "sealed": True,
+            "snapshot_seq": 1,
+            "source_sha256": fragment_ref["sha256"],
             "server_fragment_ref": fragment_ref if state == "uploaded" else None,
             "server_receipt_ref": receipt_ref,
             "transport_kind": "server_transport" if state == "uploaded" else "none",
+            "reason_code": None if state == "uploaded" else "DEBUG_UPLOAD_FAILED",
         }
 
     def _debug_availability(

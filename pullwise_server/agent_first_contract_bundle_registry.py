@@ -34,6 +34,128 @@ _RULE_KEYS = {
     "x-pullwise-semantics",
 }
 _TYPES = {"object", "array", "string", "integer", "boolean", "null"}
+DOCUMENT_RULE_IDS = frozenset(
+    {
+        "acceptance_source_ids_unique",
+        "actor",
+        "agent_claim_abandon_response",
+        "artifact_content_ref",
+        "artifact_content_registry",
+        "attempt_record",
+        "attempt_state_nullability",
+        "attempt_transport_binding_all_or_none",
+        "availability_reason_registry",
+        "availability_ref",
+        "budget_ceiling_consistency",
+        "budget_summary",
+        "capability_and_delivery_sets_sorted_unique",
+        "capability_sets_disjoint_sorted_unique",
+        "change_set",
+        "change_set_patch",
+        "charter_digest_exact",
+        "completion_proposal",
+        "debug_redaction_plan",
+        "derived_requirement_shape",
+        "effect_ledger_snapshot",
+        "effective_execution_policy",
+        "elapsed_budget_ledger",
+        "elapsed_budget_settlement",
+        "entries_normative_ingest_then_append_order",
+        "evidence_closure_entry",
+        "evidence_closure_manifest",
+        "execution_profile",
+        "execution_state_manifest",
+        "fenced_reason_ownership_loss",
+        "gate_decision",
+        "gate_input_snapshot",
+        "gate_predicate_registry",
+        "head_version_ref_pairs",
+        "ledger_digest_exact",
+        "observation",
+        "observation_manifest",
+        "owner_state_nullability",
+        "policy_digest_exact",
+        "pre_gate_evidence_closure_manifest",
+        "pre_gate_root_set",
+        "pre_verifier_observation_manifest",
+        "publication_content_manifest",
+        "quality_policy_plan",
+        "requirement_id_source_kind_match",
+        "risk_ceiling_current_mvp",
+        "root_and_origin_sets_sorted_unique",
+        "sorted_unique_active_requirement_ids",
+        "sorted_unique_charter_sets",
+        "sorted_unique_requirement_links",
+        "source_content",
+        "source_selection_policy",
+        "source_tree_manifest",
+        "task_owner",
+        "task_record",
+        "task_record_transport_binding_all_or_none",
+        "task_report",
+        "task_request",
+        "task_result",
+        "task_result_core",
+        "task_result_outcome_reason_registry",
+        "task_result_transport_ack",
+        "task_result_transport_envelope",
+        "terminal_result_shape",
+        "terminalization_input_snapshot",
+        "utf8_nfc_byte_limits",
+        "verification_attestation",
+        "verification_attestation_manifest",
+        "verifier_input_manifest",
+        "verifier_work_report",
+        "waiver_time_order",
+        "worker_debug_descriptor",
+        "worker_debug_file_manifest",
+        "worker_debug_fragment",
+        "worker_debug_redaction_report",
+    }
+)
+CONTEXTUAL_HELPER_IDS = frozenset(
+    {
+        "evaluate_success_gate",
+        "evaluate_terminalization_gate",
+        "validate_attempt_transition",
+        "validate_claim_write_set",
+        "validate_effective_policy_derivation",
+        "validate_requirement_entry_ingest",
+        "validate_requirement_ledger_transition",
+        "validate_task_charter_transition",
+        "validate_task_owner_transition",
+        "validate_task_record_transition",
+        "validate_task_request_acceptance",
+        "validate_task_result_publication",
+        "verify_attestation_context",
+        "verify_attestation_manifest_context",
+        "verify_budget_transition",
+        "verify_change_set_context",
+        "verify_completion_proposal_context",
+        "verify_content_ref_content",
+        "verify_evidence_closure_context",
+        "verify_evidence_closure_entry_context",
+        "verify_execution_state_context",
+        "verify_observation_manifest_extension",
+        "verify_source_tree_context",
+        "verify_task_result_context",
+        "verify_task_result_core",
+        "verify_task_result_transport_ack",
+        "verify_task_result_transport_envelope",
+        "verify_verifier_input_context",
+        "verify_verifier_work_context",
+        "verify_waiver_event_authority",
+        "verify_worker_debug_descriptor_content",
+        "verify_worker_debug_fragment_content",
+    }
+)
+WAIVER_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-waiver-event/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "event_without_signature",
+}
 
 
 def validate_supported_schema(
@@ -51,6 +173,42 @@ def validate_supported_schema(
             or any(item not in _TYPES for item in choices)
         ):
             raise error_type(f"schema_type_unsupported: {path}")
+    if "pattern" in schema and not isinstance(schema["pattern"], str):
+        raise error_type(f"schema_pattern_invalid: {path}")
+    if "enum" in schema and (
+        not isinstance(schema["enum"], list) or not schema["enum"]
+    ):
+        raise error_type(f"schema_enum_invalid: {path}")
+    for key in ("minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"):
+        if key in schema and (
+            not isinstance(schema[key], int)
+            or isinstance(schema[key], bool)
+            or (
+                key in {"minLength", "maxLength", "minItems", "maxItems"}
+                and schema[key] < 0
+            )
+        ):
+            raise error_type(f"schema_limit_invalid: {path}.{key}")
+    if "required" in schema:
+        required = schema["required"]
+        if (
+            not isinstance(required, list)
+            or any(not isinstance(item, str) for item in required)
+            or len(required) != len(set(required))
+        ):
+            raise error_type(f"schema_required_invalid: {path}")
+    if "x-pullwise-digest" in schema:
+        digest = schema["x-pullwise-digest"]
+        if (
+            not isinstance(digest, dict)
+            or set(digest) != {"field", "domain"}
+            or any(not isinstance(item, str) or not item for item in digest.values())
+        ):
+            raise error_type(f"schema_digest_invalid: {path}")
+    if "x-pullwise-semantics" in schema:
+        _validate_semantic_metadata(
+            schema["x-pullwise-semantics"], error_type, path
+        )
     if "additionalProperties" in schema and schema["additionalProperties"] is not False:
         raise error_type(f"schema_additional_properties_unsupported: {path}")
     properties = schema.get("properties", {})
@@ -74,6 +232,44 @@ def validate_supported_schema(
             if not isinstance(option, dict):
                 raise error_type(f"schema_one_of_invalid: {path}")
             validate_supported_schema(option, error_type, f"{path}.oneOf[{index}]")
+
+
+def _validate_semantic_metadata(
+    metadata: object, error_type: type[Exception], path: str
+) -> None:
+    if not isinstance(metadata, dict):
+        raise error_type(f"schema_semantics_shape_invalid: {path}")
+    allowed = {"document_rules", "contextual_helpers", "signature_contract"}
+    if set(metadata).difference(allowed) or not {
+        "document_rules",
+        "contextual_helpers",
+    }.issubset(metadata):
+        raise error_type(f"schema_semantics_shape_invalid: {path}")
+    for key, supported in (
+        ("document_rules", DOCUMENT_RULE_IDS),
+        ("contextual_helpers", CONTEXTUAL_HELPER_IDS),
+    ):
+        values = metadata[key]
+        if (
+            not isinstance(values, list)
+            or values != sorted(set(values))
+            or any(not isinstance(item, str) for item in values)
+        ):
+            raise error_type(f"schema_semantics_order_invalid: {path}.{key}")
+        unknown = set(values).difference(supported)
+        if unknown:
+            raise error_type(
+                f"schema_semantics_unknown: {path}.{key}: {sorted(unknown)[0]}"
+            )
+    signature = metadata.get("signature_contract")
+    if signature is not None and signature != WAIVER_SIGNATURE_CONTRACT:
+        raise error_type(f"schema_signature_contract_invalid: {path}")
+    if (
+        not metadata["document_rules"]
+        and not metadata["contextual_helpers"]
+        and signature is None
+    ):
+        raise error_type(f"schema_semantics_empty: {path}")
 
 
 def validate_semantic_registries(
@@ -112,6 +308,27 @@ def validate_semantic_registries(
         "gate_golden_independent_registry",
         error_type,
     )
+    availability_registry = _sealed_document(
+        schemas,
+        fixtures,
+        "availability-reason-registry/v1",
+        "task_result_golden_availability_reason_registry",
+        error_type,
+    )
+    outcome_registry = _sealed_document(
+        schemas,
+        fixtures,
+        "task-result-outcome-reason-registry/v1",
+        "task_result_golden_outcome_reason_registry",
+        error_type,
+    )
+    artifact_registry = _sealed_document(
+        schemas,
+        fixtures,
+        "artifact-content-registry/v1",
+        "publication_golden_artifact_registry",
+        error_type,
+    )
 
     stable_codes = _unique_sorted(
         [entry["code"] for entry in stable_registry["entries"]],
@@ -131,6 +348,16 @@ def validate_semantic_registries(
     }
     if not expected_codes.issubset(stable_codes):
         raise error_type("fixture_error_code_unregistered")
+
+    _validate_reason_registries(
+        schemas,
+        fixtures,
+        availability_registry,
+        outcome_registry,
+        error_type,
+    )
+    _validate_artifact_registry(schemas, artifact_registry, error_type)
+    _validate_task_result_variants(schemas, error_type)
 
     predicates = _unique_sorted(
         [entry["predicate_id"] for entry in gate_registry["predicates"]],
@@ -189,6 +416,136 @@ def validate_semantic_registries(
                     raise error_type("typed_content_ref_target_invalid")
                 if any(item not in schema_owner for item in expected):
                     raise error_type("typed_content_ref_target_unregistered")
+
+
+def _validate_reason_registries(
+    schemas: dict[str, dict[str, object]],
+    fixtures: dict[str, dict[str, object]],
+    availability_registry: dict[str, object],
+    outcome_registry: dict[str, object],
+    error_type: type[Exception],
+) -> None:
+    availability_reasons = _unique_sorted(
+        availability_registry["reasons"],
+        "availability_reason_registry_order_invalid",
+        error_type,
+    )
+    availability_schema = schemas["availability-ref/v1"]
+    branch_enums = [
+        option["properties"]["reason_code"]["enum"]
+        for option in availability_schema["oneOf"]
+        if "reason_code" in option.get("properties", {})
+    ]
+    if not branch_enums or any(item != availability_reasons for item in branch_enums):
+        raise error_type("availability_reason_registry_bijection_invalid")
+    used_fixture_reasons: set[str] = set()
+    for fixture in fixtures.values():
+        for item in _walk(fixture["document"]):
+            if (
+                isinstance(item, dict)
+                and item.get("availability") in {"unavailable", "not_applicable"}
+                and isinstance(item.get("reason_code"), str)
+            ):
+                used_fixture_reasons.add(item["reason_code"])
+    if not used_fixture_reasons.issubset(availability_reasons):
+        raise error_type("availability_reason_fixture_unregistered")
+
+    outcome_reasons = _unique_sorted(
+        outcome_registry["reasons"],
+        "task_result_outcome_reason_registry_order_invalid",
+        error_type,
+    )
+    variant_ids = (
+        "task-result-completed-variant/v1",
+        "task-result-no-change-needed-variant/v1",
+        "task-result-completed-with-waivers-variant/v1",
+        "task-result-partial-variant/v1",
+        "task-result-blocked-variant/v1",
+        "task-result-failed-variant/v1",
+        "task-result-cancelled-variant/v1",
+    )
+    declared: set[str] = set()
+    for schema_id in variant_ids:
+        rule = schemas[schema_id]["properties"]["reason_code"]
+        if "const" in rule:
+            declared.add(rule["const"])
+        else:
+            declared.update(rule["enum"])
+    if sorted(declared) != outcome_reasons:
+        raise error_type("task_result_outcome_reason_registry_bijection_invalid")
+
+
+def _validate_artifact_registry(
+    schemas: dict[str, dict[str, object]],
+    registry: dict[str, object],
+    error_type: type[Exception],
+) -> None:
+    entries = registry["entries"]
+    keys = [item["artifact_kind"] for item in entries]
+    if keys != sorted(set(keys)):
+        raise error_type("artifact_content_registry_order_invalid")
+    schema_ids = [item["content_schema_id"] for item in entries]
+    if len(schema_ids) != len(set(schema_ids)):
+        raise error_type("artifact_content_registry_schema_duplicate")
+    artifact_ref = schemas["artifact-content-ref/v1"]["properties"]
+    registry_item = schemas["artifact-content-registry/v1"]["properties"][
+        "entries"
+    ]["items"]["properties"]
+    if (
+        artifact_ref["artifact_kind"]["enum"] != keys
+        or artifact_ref["ref"]["x-pullwise-content-schema-ids"]
+        != sorted(schema_ids)
+        or registry_item["artifact_kind"]["enum"] != keys
+        or registry_item["content_schema_id"]["enum"] != sorted(schema_ids)
+    ):
+        raise error_type("artifact_content_registry_bijection_invalid")
+    for entry in entries:
+        if entry["media_type"] != "application/json" or entry["encoding"] != "utf-8":
+            raise error_type("artifact_content_registry_tuple_invalid")
+    for schema in schemas.values():
+        for rule in _walk(schema):
+            if not isinstance(rule, dict):
+                continue
+            properties = rule.get("properties")
+            if not isinstance(properties, dict) or "artifact_refs" not in properties:
+                continue
+            artifact_refs = properties["artifact_refs"]
+            if (
+                not isinstance(artifact_refs, dict)
+                or artifact_refs.get("type") != "array"
+                or artifact_refs.get("items") != {"$ref": "artifact-content-ref/v1"}
+            ):
+                raise error_type("artifact_refs_shape_invalid")
+
+
+def _validate_task_result_variants(
+    schemas: dict[str, dict[str, object]], error_type: type[Exception]
+) -> None:
+    expected_order = [
+        "task-result-completed-variant/v1",
+        "task-result-no-change-needed-variant/v1",
+        "task-result-completed-with-waivers-variant/v1",
+        "task-result-partial-variant/v1",
+        "task-result-blocked-variant/v1",
+        "task-result-failed-variant/v1",
+        "task-result-cancelled-variant/v1",
+    ]
+    main = schemas["task-result/v1"]
+    core = schemas["task-result-core/v1"]
+    main_keys = set(main["properties"])
+    if len(main_keys) != 37 or set(core["properties"]) != main_keys:
+        raise error_type("task_result_core_property_parity_invalid")
+    for schema_id in expected_order:
+        variant = schemas[schema_id]
+        if (
+            set(variant["properties"]) != main_keys
+            or set(variant["required"]) != main_keys
+            or variant.get("additionalProperties") is not False
+        ):
+            raise error_type(f"task_result_variant_property_parity_invalid: {schema_id}")
+    expected_refs = [{"$ref": item} for item in expected_order]
+    if main.get("oneOf") != expected_refs or core.get("oneOf") != expected_refs:
+        raise error_type("task_result_variant_order_invalid")
 
 
 def _sealed_document(

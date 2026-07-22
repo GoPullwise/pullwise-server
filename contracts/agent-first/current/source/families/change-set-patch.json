@@ -10,9 +10,10 @@
         "field": "patch_digest",
         "domain": "pullwise:change-set-patch/v1"
       },
-      "x-pullwise-semantics": [
-        "change_set_patch"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": ["change_set_patch"],
+        "contextual_helpers": []
+      },
       "required": [
         "schema_id",
         "format",

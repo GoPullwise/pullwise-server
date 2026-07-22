@@ -12,14 +12,14 @@ from pullwise_server.agent_first_contract_bundle_source import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FAMILY_PATH = (
-    REPO_ROOT
-    / "contracts"
-    / "agent-first"
-    / "current"
-    / "source"
-    / "families"
-    / "task-control.json"
+FAMILY_DIRECTORY = (
+    REPO_ROOT / "contracts" / "agent-first" / "current" / "source" / "families"
+)
+FAMILY_FILES = (
+    ("effective-execution-policy", "effective-execution-policy.json"),
+    ("task-attempt-owner", "task-attempt-owner.json"),
+    ("task-record", "task-record.json"),
+    ("task-request", "task-request.json"),
 )
 TERMINAL_ATTEMPT_STATES = {
     "SUCCEEDED",
@@ -32,9 +32,47 @@ TERMINAL_ATTEMPT_STATES = {
 
 class AgentFirstTaskControlContractTest(unittest.TestCase):
     def test_exact_task_control_shapes_and_contextual_transitions(self) -> None:
-        family = load_family(FAMILY_PATH, "task-control", {}, set())
-        schemas = {item["$id"]: item for item in family["schemas"]}
-        fixtures = {item["fixture_id"]: item for item in family["fixtures"]}
+        schema_owner: dict[str, str] = {}
+        fixture_ids: set[str] = set()
+        families = [
+            load_family(
+                FAMILY_DIRECTORY / filename,
+                family_id,
+                schema_owner,
+                fixture_ids,
+            )
+            for family_id, filename in FAMILY_FILES
+        ]
+        schemas = {
+            item["$id"]: item
+            for item in sorted(
+                (
+                    item
+                    for family in families
+                    for item in family["schemas"]
+                ),
+                key=lambda item: item["$id"],
+            )
+        }
+        fixtures = {
+            item["fixture_id"]: item
+            for family in families
+            for item in family["fixtures"]
+        }
+        self.assertEqual(
+            {
+                "effective-execution-policy": ["effective-execution-policy/v1"],
+                "task-attempt-owner": ["attempt-record/v1", "task-owner/v1"],
+                "task-record": ["task-record/v1"],
+                "task-request": ["task-request/v1"],
+            },
+            {
+                family["family_id"]: [
+                    item["$id"] for item in family["schemas"]
+                ]
+                for family in families
+            },
+        )
 
         self.assertEqual(
             [

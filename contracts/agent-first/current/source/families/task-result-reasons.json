@@ -13,8 +13,8 @@
         "schema_id": {"const":"availability-reason-registry/v1"},
         "reasons": {
           "type": "array",
-          "minItems": 19,
-          "maxItems": 19,
+          "minItems": 20,
+          "maxItems": 20,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -35,6 +35,7 @@
               "REPORT_NOT_CREATED",
               "SOURCE_STATE_UNAVAILABLE",
               "TASK_CANCELLED",
+              "TASK_RESULT_CORE_NOT_APPLICABLE",
               "TRANSPORT_RECEIPT_NOT_APPLICABLE",
               "VERIFICATION_NOT_RUN"
             ]
@@ -76,6 +77,7 @@
                 "REPORT_NOT_CREATED",
                 "SOURCE_STATE_UNAVAILABLE",
                 "TASK_CANCELLED",
+                "TASK_RESULT_CORE_NOT_APPLICABLE",
                 "TRANSPORT_RECEIPT_NOT_APPLICABLE",
                 "VERIFICATION_NOT_RUN"
               ]
@@ -107,6 +109,7 @@
                 "REPORT_NOT_CREATED",
                 "SOURCE_STATE_UNAVAILABLE",
                 "TASK_CANCELLED",
+                "TASK_RESULT_CORE_NOT_APPLICABLE",
                 "TRANSPORT_RECEIPT_NOT_APPLICABLE",
                 "VERIFICATION_NOT_RUN"
               ]
@@ -187,10 +190,11 @@
           "REPORT_NOT_CREATED",
           "SOURCE_STATE_UNAVAILABLE",
           "TASK_CANCELLED",
+          "TASK_RESULT_CORE_NOT_APPLICABLE",
           "TRANSPORT_RECEIPT_NOT_APPLICABLE",
           "VERIFICATION_NOT_RUN"
         ],
-        "registry_digest": "82bbb04f8d8e17466fccaa217efd70c0d96ae5cc3bb65412905a82a4c9957c17"
+        "registry_digest": "a39969bfe464ee7888d8ce7eea65a8b6cacd8cc18fad7600399ec3bfb1fa9ba9"
       },
       "expected_code": null
     },

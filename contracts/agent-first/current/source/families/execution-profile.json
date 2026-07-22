@@ -10,9 +10,10 @@
         "field": "profile_digest",
         "domain": "pullwise:execution-profile/v1"
       },
-      "x-pullwise-semantics": [
-        "execution_profile"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": ["execution_profile"],
+        "contextual_helpers": []
+      },
       "required": [
         "schema_id",
         "image_identity",

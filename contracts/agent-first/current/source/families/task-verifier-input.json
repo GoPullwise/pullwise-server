@@ -1,0 +1,433 @@
+{
+  "family_id": "task-verifier-input",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "verifier-input-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"input_manifest_digest","domain":"pullwise:verifier-input-manifest:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["verifier_input_manifest"],
+        "contextual_helpers": ["verify_verifier_input_context"]
+      },
+      "required": [
+        "schema_id",
+        "input_manifest_id",
+        "task_id",
+        "proposal_id",
+        "slot_id",
+        "task_request_ref",
+        "effective_policy_ref",
+        "requirement_ledger_ref",
+        "charter_ref",
+        "completion_proposal_ref",
+        "quality_policy_plan_ref",
+        "quality_policy_plan_digest",
+        "original_source_ref",
+        "final_source_ref",
+        "change_set",
+        "pre_verifier_observation_manifest_ref",
+        "artifact_refs",
+        "engineering_rule_refs",
+        "slot_concern",
+        "requirement_ids",
+        "owner_conclusion_excluded",
+        "created_at",
+        "input_manifest_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"verifier-input-manifest/v1"},
+        "input_manifest_id": {"type":"string","pattern":"^vinput_[0-9a-f]{32}$"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "proposal_id": {"type":"string","pattern":"^proposal_[0-9a-f]{32}$"},
+        "slot_id": {"type":"string","pattern":"^slot_[0-9a-f]{32}$"},
+        "task_request_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"agent-task-request/v1"},
+        "effective_policy_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"agent-task-policy/v1"},
+        "requirement_ledger_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"requirement-ledger/v1"},
+        "charter_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"task-charter/v1"},
+        "completion_proposal_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"completion-proposal/v1"},
+        "quality_policy_plan_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"quality-policy-plan/v1"},
+        "quality_policy_plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "original_source_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"source-tree-manifest/v1"},
+        "final_source_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"source-tree-manifest/v1"},
+        "change_set": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"change-set/v1"},
+        "pre_verifier_observation_manifest_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "pre-verifier-observation-manifest/v1"
+        },
+        "artifact_refs": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {"$ref":"artifact-content-ref/v1"}
+        },
+        "engineering_rule_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"source-content/v1"}
+        },
+        "slot_concern": {"type":"string","minLength":1,"maxLength":4096},
+        "requirement_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^req_(?:user_objective|user_acceptance|user_constraint|delivery|policy|interaction|derived)_[0-9a-f]{64}$"
+          }
+        },
+        "owner_conclusion_excluded": {"const":true},
+        "created_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "input_manifest_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_verifier_input_golden_input",
+      "fixture_class": "golden",
+      "schema_id": "verifier-input-manifest/v1",
+      "document": {
+        "schema_id": "verifier-input-manifest/v1",
+        "input_manifest_id": "vinput_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "slot_id": "slot_11111111111111111111111111111111",
+        "task_request_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "agent-task-request/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "effective_policy_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "agent-task-policy/v1",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "requirement_ledger_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "requirement-ledger/v1",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "charter_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_44444444444444444444444444444444",
+          "content_schema_id": "task-charter/v1",
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "completion_proposal_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_55555555555555555555555555555555",
+          "content_schema_id": "completion-proposal/v1",
+          "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_66666666666666666666666666666666",
+          "content_schema_id": "quality-policy-plan/v1",
+          "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "original_source_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_77777777777777777777777777777777",
+          "content_schema_id": "source-tree-manifest/v1",
+          "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "final_source_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_88888888888888888888888888888888",
+          "content_schema_id": "source-tree-manifest/v1",
+          "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "change_set": {"availability":"not_applicable","reason_code":"CHANGE_SET_NOT_APPLICABLE"},
+        "pre_verifier_observation_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999999",
+          "content_schema_id": "pre-verifier-observation-manifest/v1",
+          "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "artifact_refs": [],
+        "engineering_rule_refs": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "content_schema_id": "source-content/v1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "slot_concern": "independent current behavior verification",
+        "requirement_ids": ["req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
+        "owner_conclusion_excluded": true,
+        "created_at": "2026-01-01T00:00:01.000Z",
+        "input_manifest_digest": "4d6ef14ae14e13cd81344b4c78c03349994180542435ed17e177e5fd56568647"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_verifier_input_idempotency_input",
+      "fixture_class": "idempotency",
+      "schema_id": "verifier-input-manifest/v1",
+      "document": {
+        "schema_id": "verifier-input-manifest/v1",
+        "input_manifest_id": "vinput_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "slot_id": "slot_11111111111111111111111111111111",
+        "task_request_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "agent-task-request/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "effective_policy_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "agent-task-policy/v1",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "requirement_ledger_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "requirement-ledger/v1",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "charter_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_44444444444444444444444444444444",
+          "content_schema_id": "task-charter/v1",
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "completion_proposal_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_55555555555555555555555555555555",
+          "content_schema_id": "completion-proposal/v1",
+          "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_66666666666666666666666666666666",
+          "content_schema_id": "quality-policy-plan/v1",
+          "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "original_source_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_77777777777777777777777777777777",
+          "content_schema_id": "source-tree-manifest/v1",
+          "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "final_source_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_88888888888888888888888888888888",
+          "content_schema_id": "source-tree-manifest/v1",
+          "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "change_set": {"availability":"not_applicable","reason_code":"CHANGE_SET_NOT_APPLICABLE"},
+        "pre_verifier_observation_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999999",
+          "content_schema_id": "pre-verifier-observation-manifest/v1",
+          "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "artifact_refs": [],
+        "engineering_rule_refs": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "content_schema_id": "source-content/v1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "slot_concern": "independent current behavior verification",
+        "requirement_ids": ["req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
+        "owner_conclusion_excluded": true,
+        "created_at": "2026-01-01T00:00:01.000Z",
+        "input_manifest_digest": "4d6ef14ae14e13cd81344b4c78c03349994180542435ed17e177e5fd56568647"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_verifier_input_negative_owner_conclusion",
+      "fixture_class": "negative",
+      "schema_id": "verifier-input-manifest/v1",
+      "document": {
+        "schema_id": "verifier-input-manifest/v1",
+        "input_manifest_id": "vinput_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "slot_id": "slot_11111111111111111111111111111111",
+        "task_request_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "agent-task-request/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "effective_policy_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "agent-task-policy/v1",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "requirement_ledger_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "requirement-ledger/v1",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "charter_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_44444444444444444444444444444444",
+          "content_schema_id": "task-charter/v1",
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "completion_proposal_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_55555555555555555555555555555555",
+          "content_schema_id": "completion-proposal/v1",
+          "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_66666666666666666666666666666666",
+          "content_schema_id": "quality-policy-plan/v1",
+          "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "original_source_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_77777777777777777777777777777777",
+          "content_schema_id": "source-tree-manifest/v1",
+          "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "final_source_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_88888888888888888888888888888888",
+          "content_schema_id": "source-tree-manifest/v1",
+          "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "change_set": {"availability":"not_applicable","reason_code":"CHANGE_SET_NOT_APPLICABLE"},
+        "pre_verifier_observation_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999999",
+          "content_schema_id": "pre-verifier-observation-manifest/v1",
+          "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "artifact_refs": [],
+        "engineering_rule_refs": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "content_schema_id": "source-content/v1",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "slot_concern": "independent current behavior verification",
+        "requirement_ids": ["req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
+        "owner_conclusion_excluded": false,
+        "created_at": "2026-01-01T00:00:01.000Z",
+        "input_manifest_digest": "dbc6f5280b5ef1bfc59b321a1eecfb9f9542ed2fae22edbd63e4756d04156648"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

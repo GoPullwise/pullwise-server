@@ -1,0 +1,220 @@
+{
+  "family_id": "task-verifier-work",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "verifier-work-report/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"report_digest","domain":"pullwise:verifier-work-report:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["verifier_work_report"],
+        "contextual_helpers": ["verify_verifier_work_context"]
+      },
+      "required": [
+        "schema_id",
+        "report_id",
+        "task_id",
+        "proposal_id",
+        "slot_id",
+        "verifier_session_id",
+        "model_identity",
+        "sandbox_mode",
+        "verifier_input_manifest_ref",
+        "verifier_input_manifest_digest",
+        "counterexamples_searched",
+        "own_observation_ids",
+        "limitations",
+        "provisional_requirement_assessments",
+        "created_at",
+        "report_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"verifier-work-report/v1"},
+        "report_id": {"type":"string","pattern":"^vwork_[0-9a-f]{32}$"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "proposal_id": {"type":"string","pattern":"^proposal_[0-9a-f]{32}$"},
+        "slot_id": {"type":"string","pattern":"^slot_[0-9a-f]{32}$"},
+        "verifier_session_id": {"type":"string","pattern":"^sess_[0-9a-f]{32}$"},
+        "model_identity": {"type":"string","minLength":1,"maxLength":256},
+        "sandbox_mode": {"const":"read_only_or_cow"},
+        "verifier_input_manifest_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"verifier-input-manifest/v1"},
+        "verifier_input_manifest_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "counterexamples_searched": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"type":"string","minLength":1,"maxLength":4096}
+        },
+        "own_observation_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"type":"string","pattern":"^obs_[0-9a-f]{32}$"}
+        },
+        "limitations": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"type":"string","minLength":1,"maxLength":4096}
+        },
+        "provisional_requirement_assessments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requirement_id","verdict","evidence_ids","limitations"],
+            "properties": {
+              "requirement_id": {
+                "type": "string",
+                "pattern": "^req_(?:user_objective|user_acceptance|user_constraint|delivery|policy|interaction|derived)_[0-9a-f]{64}$"
+              },
+              "verdict": {"enum":["NEEDS_WORK","PASS","POLICY_VIOLATION","UNVERIFIABLE"]},
+              "evidence_ids": {
+                "type": "array",
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {"type":"string","pattern":"^obs_[0-9a-f]{32}$"}
+              },
+              "limitations": {
+                "type": "array",
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {"type":"string","minLength":1,"maxLength":4096}
+              }
+            }
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "report_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_verifier_work_golden_work",
+      "fixture_class": "golden",
+      "schema_id": "verifier-work-report/v1",
+      "document": {
+        "schema_id": "verifier-work-report/v1",
+        "report_id": "vwork_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "slot_id": "slot_11111111111111111111111111111111",
+        "verifier_session_id": "sess_22222222222222222222222222222222",
+        "model_identity": "gpt-test-1",
+        "sandbox_mode": "read_only_or_cow",
+        "verifier_input_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content_schema_id": "verifier-input-manifest/v1",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "verifier_input_manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "counterexamples_searched": ["current behavior regression"],
+        "own_observation_ids": ["obs_22222222222222222222222222222222"],
+        "limitations": [],
+        "provisional_requirement_assessments": [
+          {
+            "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+            "verdict": "PASS",
+            "evidence_ids": ["obs_22222222222222222222222222222222"],
+            "limitations": []
+          }
+        ],
+        "created_at": "2026-01-01T00:00:01.500Z",
+        "report_digest": "727c8658c589a4c27c5b33f79686f18d2329305120fd111fc7a0bb735f9c5cb7"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_verifier_work_idempotency_work",
+      "fixture_class": "idempotency",
+      "schema_id": "verifier-work-report/v1",
+      "document": {
+        "schema_id": "verifier-work-report/v1",
+        "report_id": "vwork_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "slot_id": "slot_11111111111111111111111111111111",
+        "verifier_session_id": "sess_22222222222222222222222222222222",
+        "model_identity": "gpt-test-1",
+        "sandbox_mode": "read_only_or_cow",
+        "verifier_input_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content_schema_id": "verifier-input-manifest/v1",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "verifier_input_manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "counterexamples_searched": ["current behavior regression"],
+        "own_observation_ids": ["obs_22222222222222222222222222222222"],
+        "limitations": [],
+        "provisional_requirement_assessments": [
+          {
+            "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+            "verdict": "PASS",
+            "evidence_ids": ["obs_22222222222222222222222222222222"],
+            "limitations": []
+          }
+        ],
+        "created_at": "2026-01-01T00:00:01.500Z",
+        "report_digest": "727c8658c589a4c27c5b33f79686f18d2329305120fd111fc7a0bb735f9c5cb7"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_verifier_work_negative_without_observation",
+      "fixture_class": "negative",
+      "schema_id": "verifier-work-report/v1",
+      "document": {
+        "schema_id": "verifier-work-report/v1",
+        "report_id": "vwork_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "slot_id": "slot_11111111111111111111111111111111",
+        "verifier_session_id": "sess_22222222222222222222222222222222",
+        "model_identity": "gpt-test-1",
+        "sandbox_mode": "read_only_or_cow",
+        "verifier_input_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content_schema_id": "verifier-input-manifest/v1",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "verifier_input_manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "counterexamples_searched": ["current behavior regression"],
+        "own_observation_ids": [],
+        "limitations": [],
+        "provisional_requirement_assessments": [
+          {
+            "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+            "verdict": "UNVERIFIABLE",
+            "evidence_ids": [],
+            "limitations": ["no independent observation"]
+          }
+        ],
+        "created_at": "2026-01-01T00:00:01.500Z",
+        "report_digest": "7a5bc9c59231b4314c60d08f170a5e445c6fe37c54b1917c77eb6e21cd3af71f"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

@@ -173,7 +173,10 @@ function validateSemantics(schemaId, value) {
     if (value.task_version !== value.previous_task_version + 1) fail("AUTHORITY_SUCCESSOR_VERSION_INVALID");
   } else if (schemaId === "artifact-content-registry/v1") {
     const expected = [
+      {artifact_kind: "change_set", content_schema_id: "change-set/v1", media_type: "application/json", encoding: "utf-8"},
       {artifact_kind: "change_set_patch", content_schema_id: "change-set-patch/v1", media_type: "application/json", encoding: "utf-8"},
+      {artifact_kind: "r0_read_result", content_schema_id: "r0-read-result/v1", media_type: "application/json", encoding: "utf-8"},
+      {artifact_kind: "source_content", content_schema_id: "source-content/v1", media_type: "application/json", encoding: "utf-8"},
       {artifact_kind: "task_report", content_schema_id: "task-report/v1", media_type: "application/json", encoding: "utf-8"},
     ];
     if (JSON.stringify(value.entries) !== JSON.stringify(expected)) fail("ARTIFACT_CONTENT_REGISTRY_INVALID");

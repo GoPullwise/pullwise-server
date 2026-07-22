@@ -1,0 +1,195 @@
+{
+  "family_id": "worker-debug-content",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "worker-debug-file-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"manifest_digest","domain":"pullwise:worker-debug-file-manifest:v1"},
+      "x-pullwise-semantics": {"document_rules":["worker_debug_file_manifest"],"contextual_helpers":[]},
+      "required": ["schema_id","entries","entry_count","total_size_bytes","manifest_digest"],
+      "properties": {
+        "schema_id": {"const":"worker-debug-file-manifest/v1"},
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 15,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path","sha256","size_bytes","media_type","encoding"],
+            "properties": {
+              "path": {
+                "enum": [
+                  "agent-events.jsonl",
+                  "agent-task-summary.json",
+                  "artifact-manifest.json",
+                  "checkpoint-index.json",
+                  "codex-events.jsonl",
+                  "codex-runtime.json",
+                  "debug-summary.json",
+                  "error-report.json",
+                  "evidence-index.json",
+                  "gateway-events.jsonl",
+                  "progress.log.jsonl",
+                  "qa.json",
+                  "redaction-report.json",
+                  "task-events.jsonl",
+                  "worker.log.jsonl"
+                ]
+              },
+              "sha256": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+              "size_bytes": {"type":"integer","minimum":0,"maximum":9007199254740991},
+              "media_type": {"enum":["application/json","application/x-ndjson"]},
+              "encoding": {"const":"utf-8"}
+            }
+          }
+        },
+        "entry_count": {"type":"integer","minimum":1,"maximum":15},
+        "total_size_bytes": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "manifest_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "worker-debug-redaction-report/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"report_digest","domain":"pullwise:worker-debug-redaction-report:v1"},
+      "x-pullwise-semantics": {"document_rules":["worker_debug_redaction_report"],"contextual_helpers":[]},
+      "required": ["schema_id","policy_digest","structured_pass_detection_count","archive_rescan_detection_count","redacted_value_count","status","report_digest"],
+      "properties": {
+        "schema_id": {"const":"worker-debug-redaction-report/v1"},
+        "policy_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "structured_pass_detection_count": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "archive_rescan_detection_count": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "redacted_value_count": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "status": {"enum":["clean","redacted"]},
+        "report_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      },
+      "oneOf": [
+        {"type":"object","properties":{"structured_pass_detection_count":{"const":0},"redacted_value_count":{"const":0},"status":{"const":"clean"}}},
+        {
+          "type": "object",
+          "properties": {
+            "structured_pass_detection_count": {"type":"integer","minimum":1,"maximum":9007199254740991},
+            "redacted_value_count": {"type":"integer","minimum":1,"maximum":9007199254740991},
+            "status": {"const":"redacted"}
+          }
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "worker_debug_content_golden_file_manifest",
+      "fixture_class": "golden",
+      "schema_id": "worker-debug-file-manifest/v1",
+      "document": {
+        "schema_id": "worker-debug-file-manifest/v1",
+        "entries": [
+          {
+            "path": "redaction-report.json",
+            "sha256": "d15372bc7f5ea019c43e5e532e8b13c10bc4d8713d5c21045410f37be0772715",
+            "size_bytes": 330,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "entry_count": 1,
+        "total_size_bytes": 330,
+        "manifest_digest": "684bf1041b1c9cad441442afe62addb79d68d2243e1b0e04ce491c3538ef2bc8"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "worker_debug_content_golden_redaction_report",
+      "fixture_class": "golden",
+      "schema_id": "worker-debug-redaction-report/v1",
+      "document": {
+        "schema_id": "worker-debug-redaction-report/v1",
+        "policy_digest": "1000000000000000000000000000000000000000000000000000000000000001",
+        "structured_pass_detection_count": 1,
+        "archive_rescan_detection_count": 0,
+        "redacted_value_count": 1,
+        "status": "redacted",
+        "report_digest": "5b47cf4744b9635ea06ce92d8df49dd15a1b53d5fe7db7e202b0209e1ebfc7dd"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "worker_debug_content_idempotency_file_manifest",
+      "fixture_class": "idempotency",
+      "schema_id": "worker-debug-file-manifest/v1",
+      "document": {
+        "schema_id": "worker-debug-file-manifest/v1",
+        "entries": [
+          {
+            "path": "redaction-report.json",
+            "sha256": "d15372bc7f5ea019c43e5e532e8b13c10bc4d8713d5c21045410f37be0772715",
+            "size_bytes": 330,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "entry_count": 1,
+        "total_size_bytes": 330,
+        "manifest_digest": "684bf1041b1c9cad441442afe62addb79d68d2243e1b0e04ce491c3538ef2bc8"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "worker_debug_content_idempotency_redaction_report",
+      "fixture_class": "idempotency",
+      "schema_id": "worker-debug-redaction-report/v1",
+      "document": {
+        "schema_id": "worker-debug-redaction-report/v1",
+        "policy_digest": "1000000000000000000000000000000000000000000000000000000000000001",
+        "structured_pass_detection_count": 1,
+        "archive_rescan_detection_count": 0,
+        "redacted_value_count": 1,
+        "status": "redacted",
+        "report_digest": "5b47cf4744b9635ea06ce92d8df49dd15a1b53d5fe7db7e202b0209e1ebfc7dd"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "worker_debug_content_negative_file_manifest_count",
+      "fixture_class": "negative",
+      "schema_id": "worker-debug-file-manifest/v1",
+      "document": {
+        "schema_id": "worker-debug-file-manifest/v1",
+        "entries": [
+          {
+            "path": "redaction-report.json",
+            "sha256": "d15372bc7f5ea019c43e5e532e8b13c10bc4d8713d5c21045410f37be0772715",
+            "size_bytes": 330,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "entry_count": 2,
+        "total_size_bytes": 330,
+        "manifest_digest": "f04453735fdb5ed206ca956335a3d98a35af053883cf8e631625d2a328de9cec"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "worker_debug_content_negative_redaction_report_matrix",
+      "fixture_class": "negative",
+      "schema_id": "worker-debug-redaction-report/v1",
+      "document": {
+        "schema_id": "worker-debug-redaction-report/v1",
+        "policy_digest": "1000000000000000000000000000000000000000000000000000000000000001",
+        "structured_pass_detection_count": 1,
+        "archive_rescan_detection_count": 1,
+        "redacted_value_count": 0,
+        "status": "redacted",
+        "report_digest": "f0302f2696b2489eb026d61ee8f3c97c374c825c9de69832b3d40eb33bd3f775"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

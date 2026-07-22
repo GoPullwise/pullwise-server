@@ -10,9 +10,10 @@
         "field": "manifest_digest",
         "domain": "pullwise:execution-state-manifest/v1"
       },
-      "x-pullwise-semantics": [
-        "execution_state_manifest"
-      ],
+      "x-pullwise-semantics": {
+        "document_rules": ["execution_state_manifest"],
+        "contextual_helpers": ["verify_execution_state_context"]
+      },
       "required": [
         "schema_id",
         "source_state_id",
