@@ -69,7 +69,7 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
                     "  ).map((schema) => schema.$id));",
                     "  for (const fixture of family.fixtures) {",
                     "    documents.push(await capture(() => facade.validateDocument(fixture.schema_id, fixture.document)));",
-                    "    if (schemaRoles.get(fixture.schema_id) === 'internal_constraint') {",
+                    "    if (schemaRoles.get(fixture.schema_id) === 'internal_constraint' && typeof fixture.document.schema_id === 'string') {",
                     "      internalParents.push(await capture(() => facade.validateDocument(",
                     "        fixture.document.schema_id, fixture.document,",
                     "      )));",
@@ -219,11 +219,23 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
             for fixture in fixtures
             if schema_roles[fixture["schema_id"]] == "internal_constraint"
         ]
+        internal_parent_fixtures = []
         python_internal_parents = []
         for fixture in internal_fixtures:
-            parent_id = fixture["document"].get("schema_id")
+            if "schema_id" not in fixture["document"]:
+                with self.subTest(
+                    fixture_id=fixture["fixture_id"],
+                    operation="internal_parent_absent",
+                ):
+                    self.assertEqual(fixture["fixture_class"], "negative")
+                    self.assertEqual(
+                        fixture["expected_code"], "CONTRACT_DOCUMENT_INVALID"
+                    )
+                continue
+            parent_id = fixture["document"]["schema_id"]
             self.assertIsInstance(parent_id, str)
             self.assertEqual(schema_roles[parent_id], "public_document")
+            internal_parent_fixtures.append(fixture)
             python_internal_parents.append(
                 self.capture_python(
                     lambda fixture=fixture, parent_id=parent_id: (
@@ -233,7 +245,7 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
             )
         self.assertEqual(python_internal_parents, self.node["internalParents"])
         self._assert_public_parent_results(
-            internal_fixtures,
+            internal_parent_fixtures,
             python_internal_parents,
             stable_codes,
         )
