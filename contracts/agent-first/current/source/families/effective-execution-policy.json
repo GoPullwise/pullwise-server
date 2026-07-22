@@ -180,13 +180,16 @@
           ]
         },
         "command_policy_ref": {
-          "$ref": "content-ref/v1"
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "canonical-document/v1"
         },
         "secret_policy_ref": {
-          "$ref": "content-ref/v1"
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "canonical-document/v1"
         },
         "redaction_policy_ref": {
-          "$ref": "content-ref/v1"
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "canonical-document/v1"
         },
         "budgets": {
           "type": "object",
@@ -370,7 +373,7 @@
         "max_attempts": 1,
         "interaction_mode": "unavailable",
         "authorized_waiver_issuers": [],
-        "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "digest": "920320ffbe212e1f6a9c665e54417a2102e9356151576c373b86620a14a15083"
       },
       "expected_code": null
     }

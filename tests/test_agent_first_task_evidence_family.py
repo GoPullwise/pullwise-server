@@ -14,7 +14,10 @@ from tests.agent_first_task_evidence_support import (
 
 ROOT = Path(__file__).resolve().parents[1]
 FAMILY_PATH = ROOT / "contracts/agent-first/current/source/families/task-evidence.json"
-SCHEMAS = ("evidence-closure-entry/v1", "evidence-closure-manifest/v1")
+SCHEMAS = ("evidence-closure-manifest/v1",)
+HELPERS = {
+    "evidence-closure-manifest/v1": ["verify_evidence_closure_context"],
+}
 FORBIDDEN = {
     "evidence-closure-manifest/v1",
     "task-result-core/v1",
@@ -49,6 +52,11 @@ class TaskEvidenceFamilyTest(FamilyAssertions, unittest.TestCase):
             (item["content_schema_id"], item["artifact_id"], item["sha256"])
             for item in entries
         }
+        artifact_digests: dict[str, set[str]] = {}
+        for item in entries:
+            artifact_digests.setdefault(item["artifact_id"], set()).add(
+                item["sha256"]
+            )
         return (
             sealed(document, self.schemas["evidence-closure-manifest/v1"])
             and valid_content_ref(
@@ -70,12 +78,20 @@ class TaskEvidenceFamilyTest(FamilyAssertions, unittest.TestCase):
                 ),
             )
             and all(self.valid_entry(item) for item in entries)
+            and all(len(digests) == 1 for digests in artifact_digests.values())
             and additions.issubset(entry_keys)
             and document["evidence_closure_digest"] == digest(entries)
         )
 
     def test_closed_sorted_schema_and_semantic_registry(self) -> None:
-        self.assert_family_contract("task-evidence", SCHEMAS)
+        self.assert_family_contract("task-evidence", SCHEMAS, HELPERS)
+
+    def test_entries_use_native_content_refs_without_an_alias_schema(self) -> None:
+        schema = self.schemas["evidence-closure-manifest/v1"]
+        self.assertEqual(
+            {"$ref": "content-ref/v1"},
+            schema["properties"]["entries"]["items"],
+        )
 
     def test_final_closure_has_exact_typed_gate_edges(self) -> None:
         props = self.schemas["evidence-closure-manifest/v1"]["properties"]
@@ -91,17 +107,26 @@ class TaskEvidenceFamilyTest(FamilyAssertions, unittest.TestCase):
             "gate-decision/v1",
             props["gate_decision_ref"]["x-pullwise-content-schema-id"],
         )
-        self.assertEqual(
-            "evidence-closure-entry/v1", props["entries"]["items"]["$ref"]
-        )
+        self.assertEqual("content-ref/v1", props["entries"]["items"]["$ref"])
 
     def test_complete_fixtures_execute_and_retry_byte_exactly(self) -> None:
         self.assert_fixture_matrix(
             {
-                "evidence-closure-entry/v1": self.valid_entry,
                 "evidence-closure-manifest/v1": self.valid_manifest,
             }
         )
+
+    def test_negative_same_artifact_cannot_claim_two_digests(self) -> None:
+        fixtures = {item["fixture_id"]: item for item in self.family["fixtures"]}
+        entries = fixtures[
+            "task_evidence_negative_artifact_digest_conflict"
+        ]["document"]["entries"]
+        by_artifact: dict[str, set[str]] = {}
+        for entry in entries:
+            by_artifact.setdefault(entry["artifact_id"], set()).add(
+                entry["sha256"]
+            )
+        self.assertIn(2, {len(digests) for digests in by_artifact.values()})
 
     def test_negative_closure_cannot_point_back_to_result(self) -> None:
         fixtures = {item["fixture_id"]: item for item in self.family["fixtures"]}

@@ -18,7 +18,16 @@
     "task-observation",
     "task-observation-manifests",
     "task-requirements",
+    "effective-execution-policy",
+    "task-request",
+    "task-record",
+    "task-attempt-owner",
     "task-completion-proposal",
+    "task-verifier-input",
+    "task-verifier-work",
+    "task-attestation",
+    "task-verification",
+    "task-evidence",
     "budget",
     "task-publication",
     "receipt-error",
@@ -32,6 +41,7 @@
     "task-result",
     "task-result-core",
     "worker-debug-content",
+    "worker-debug-transport",
     "task-result-transport"
   ]
 }

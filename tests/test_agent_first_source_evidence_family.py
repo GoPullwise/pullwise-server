@@ -6,6 +6,11 @@ import json
 from pathlib import Path
 import unittest
 
+from pullwise_server.agent_first_contract_bundle_registry import (
+    CONTEXTUAL_HELPER_IDS,
+    DOCUMENT_RULE_IDS,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FAMILY_ROOT = (
@@ -27,12 +32,30 @@ SCHEMAS = (
     'source-tree-manifest/v1',
 )
 SEMANTICS = {
-    'change-set-patch/v1': 'change_set_patch',
-    'change-set/v1': 'change_set',
-    'execution-profile/v1': 'execution_profile',
-    'execution-state-manifest/v1': 'execution_state_manifest',
-    'source-selection-policy/v1': 'source_selection_policy',
-    'source-tree-manifest/v1': 'source_tree_manifest',
+    'change-set-patch/v1': {
+        'document_rules': ['change_set_patch'],
+        'contextual_helpers': [],
+    },
+    'change-set/v1': {
+        'document_rules': ['change_set'],
+        'contextual_helpers': ['verify_change_set_context'],
+    },
+    'execution-profile/v1': {
+        'document_rules': ['execution_profile'],
+        'contextual_helpers': [],
+    },
+    'execution-state-manifest/v1': {
+        'document_rules': ['execution_state_manifest'],
+        'contextual_helpers': ['verify_execution_state_context'],
+    },
+    'source-selection-policy/v1': {
+        'document_rules': ['source_selection_policy'],
+        'contextual_helpers': [],
+    },
+    'source-tree-manifest/v1': {
+        'document_rules': ['source_tree_manifest'],
+        'contextual_helpers': ['verify_source_tree_context'],
+    },
 }
 
 
@@ -246,11 +269,17 @@ class AgentFirstSourceEvidenceFamilyTest(unittest.TestCase):
                 600,
             )
         self.assertEqual(set(SCHEMAS), set(self.schemas))
-        for schema_id, semantic in SEMANTICS.items():
+        for schema_id, semantics in SEMANTICS.items():
             schema = self.schemas[schema_id]
             self.assertEqual('object', schema['type'])
             self.assertIs(False, schema['additionalProperties'])
-            self.assertEqual([semantic], schema['x-pullwise-semantics'])
+            self.assertEqual(semantics, schema['x-pullwise-semantics'])
+            self.assertLessEqual(
+                set(semantics['document_rules']), DOCUMENT_RULE_IDS
+            )
+            self.assertLessEqual(
+                set(semantics['contextual_helpers']), CONTEXTUAL_HELPER_IDS
+            )
             self.assertEqual(set(schema['required']), set(schema['properties']))
 
     def test_content_references_have_finite_registered_targets(self) -> None:

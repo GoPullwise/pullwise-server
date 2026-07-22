@@ -1,0 +1,346 @@
+{
+  "family_id": "task-evidence",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "evidence-closure-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"manifest_digest","domain":"pullwise:evidence-closure-manifest:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["evidence_closure_manifest"],
+        "contextual_helpers": ["verify_evidence_closure_context"]
+      },
+      "required": [
+        "schema_id",
+        "task_id",
+        "pre_gate_evidence_closure_ref",
+        "input_snapshot_ref",
+        "gate_decision_ref",
+        "entries",
+        "entry_count",
+        "evidence_closure_digest",
+        "manifest_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"evidence-closure-manifest/v1"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "pre_gate_evidence_closure_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "pre-gate-evidence-closure-manifest/v1"
+        },
+        "input_snapshot_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-ids": ["gate-input-snapshot/v1","terminalization-input-snapshot/v1"]
+        },
+        "gate_decision_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"gate-decision/v1"},
+        "entries": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {"$ref":"content-ref/v1"}
+        },
+        "entry_count": {"type":"integer","minimum":3,"maximum":4096},
+        "evidence_closure_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "manifest_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_evidence_golden_manifest",
+      "fixture_class": "golden",
+      "schema_id": "evidence-closure-manifest/v1",
+      "document": {
+        "schema_id": "evidence-closure-manifest/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "pre_gate_evidence_closure_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "input_snapshot_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "gate-input-snapshot/v1",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "gate_decision_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "gate-decision/v1",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "entries": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_33333333333333333333333333333333",
+            "content_schema_id": "gate-decision/v1",
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_22222222222222222222222222222222",
+            "content_schema_id": "gate-input-snapshot/v1",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_11111111111111111111111111111111",
+            "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "entry_count": 3,
+        "evidence_closure_digest": "3e1e5c35de357b05dbd92dbb28283522d828cfc735b51e1b0599f105feebfa8f",
+        "manifest_digest": "3f61150bd5e5e711862d47a1aa92cdb16b13d4cb1ce0012b5f4909ccf1504b20"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_evidence_idempotency_manifest",
+      "fixture_class": "idempotency",
+      "schema_id": "evidence-closure-manifest/v1",
+      "document": {
+        "schema_id": "evidence-closure-manifest/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "pre_gate_evidence_closure_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "input_snapshot_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "gate-input-snapshot/v1",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "gate_decision_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "gate-decision/v1",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "entries": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_33333333333333333333333333333333",
+            "content_schema_id": "gate-decision/v1",
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_22222222222222222222222222222222",
+            "content_schema_id": "gate-input-snapshot/v1",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_11111111111111111111111111111111",
+            "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "entry_count": 3,
+        "evidence_closure_digest": "3e1e5c35de357b05dbd92dbb28283522d828cfc735b51e1b0599f105feebfa8f",
+        "manifest_digest": "3f61150bd5e5e711862d47a1aa92cdb16b13d4cb1ce0012b5f4909ccf1504b20"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_evidence_negative_artifact_digest_conflict",
+      "fixture_class": "negative",
+      "schema_id": "evidence-closure-manifest/v1",
+      "document": {
+        "schema_id": "evidence-closure-manifest/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "pre_gate_evidence_closure_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "input_snapshot_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "gate-input-snapshot/v1",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "gate_decision_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "gate-decision/v1",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "entries": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_33333333333333333333333333333333",
+            "content_schema_id": "gate-decision/v1",
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_33333333333333333333333333333333",
+            "content_schema_id": "gate-decision/v1",
+            "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_22222222222222222222222222222222",
+            "content_schema_id": "gate-input-snapshot/v1",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_11111111111111111111111111111111",
+            "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "entry_count": 4,
+        "evidence_closure_digest": "439f064973a0af353b648105d591b583feed575b2f1a50b133bf745921dade4e",
+        "manifest_digest": "06abda7ec226edcd4a9ac3a940a53c67ded2a821900cbd52c688d78efc3d9b99"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "task_evidence_negative_result_back_edge",
+      "fixture_class": "negative",
+      "schema_id": "evidence-closure-manifest/v1",
+      "document": {
+        "schema_id": "evidence-closure-manifest/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "pre_gate_evidence_closure_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "input_snapshot_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "gate-input-snapshot/v1",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "gate_decision_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "gate-decision/v1",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "entries": [
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_33333333333333333333333333333333",
+            "content_schema_id": "gate-decision/v1",
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_22222222222222222222222222222222",
+            "content_schema_id": "gate-input-snapshot/v1",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_11111111111111111111111111111111",
+            "content_schema_id": "pre-gate-evidence-closure-manifest/v1",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_44444444444444444444444444444444",
+            "content_schema_id": "task-result/v1",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        ],
+        "entry_count": 4,
+        "evidence_closure_digest": "02bde2ba6db825e672eef17865a511bcc885e19ffb27cef92f0308eea70a2983",
+        "manifest_digest": "7f803aba6df10e1cc6cde8e70af1f99f0f953f390445ed8cc00acacf678ead5f"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

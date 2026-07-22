@@ -1,0 +1,322 @@
+{
+  "family_id": "worker-debug-transport",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "worker-debug-fragment-descriptor/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-semantics": {"document_rules":["worker_debug_descriptor"],"contextual_helpers":["verify_worker_debug_descriptor_content"]},
+      "required": ["schema_id","state","fragment_ref","sealed","snapshot_seq","source_sha256","transport_kind","server_fragment_ref","server_receipt_ref","reason_code"],
+      "properties": {
+        "schema_id": {"const":"worker-debug-fragment-descriptor/v1"},
+        "state": {"enum":["uploaded","local_only"]},
+        "fragment_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"worker-debug-fragment/v1"},
+        "sealed": {"const":true},
+        "snapshot_seq": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "source_sha256": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "transport_kind": {"enum":["server_transport","none"]},
+        "server_fragment_ref": {"oneOf":[{"$ref":"content-ref/v1","x-pullwise-content-schema-id":"worker-debug-fragment/v1"},{"type":"null"}]},
+        "server_receipt_ref": {"oneOf":[{"$ref":"content-ref/v1","x-pullwise-content-schema-id":"server-transport-receipt/v1"},{"type":"null"}]},
+        "reason_code": {"enum":[null,"DEBUG_UPLOAD_FAILED"]}
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {"const":"uploaded"},
+            "transport_kind": {"const":"server_transport"},
+            "server_fragment_ref": {"type":"object"},
+            "server_receipt_ref": {"type":"object"},
+            "reason_code": {"const":null}
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {"const":"local_only"},
+            "transport_kind": {"const":"none"},
+            "server_fragment_ref": {"type":"null"},
+            "server_receipt_ref": {"type":"null"},
+            "reason_code": {"const":"DEBUG_UPLOAD_FAILED"}
+          }
+        }
+      ]
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "worker-debug-fragment/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-semantics": {"document_rules":["worker_debug_fragment"],"contextual_helpers":["verify_worker_debug_fragment_content"]},
+      "required": [
+        "schema_id", "fragment_id", "task_id", "job_id", "run_id", "lease_id", "transport_attempt_id", "transport_epoch", "native_attempt_id", "native_epoch", "protocol_mode",
+        "capture_kind", "snapshot_seq", "captured_at", "sealed", "task_version", "checkpoint_generation", "local_event_seq", "last_server_acked_event_seq", "task_result_core",
+        "source_state_id", "file_manifest_ref", "redaction_report_ref", "status", "reason_code"
+      ],
+      "properties": {
+        "schema_id": {"const":"worker-debug-fragment/v1"},
+        "fragment_id": {"type":"string","pattern":"^frag_[0-9a-f]{64}$"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "job_id": {"type":"string","pattern":"^job_[0-9a-f]{32}$"},
+        "run_id": {"type":"string","pattern":"^run_[0-9a-f]{32}$"},
+        "lease_id": {"type":"string","pattern":"^lease_[0-9a-f]{32}$"},
+        "transport_attempt_id": {"type":"string","pattern":"^transport_attempt_[0-9a-f]{32}$"},
+        "transport_epoch": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "native_attempt_id": {"type":"string","pattern":"^attempt_[0-9a-f]{32}$"},
+        "native_epoch": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "protocol_mode": {"const":"agent_task_v1"},
+        "capture_kind": {"enum":["startup","checkpoint","terminal","crash"]},
+        "snapshot_seq": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "captured_at": {"type":"string","pattern":"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"},
+        "sealed": {"const":true},
+        "task_version": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "checkpoint_generation": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "local_event_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "last_server_acked_event_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "task_result_core": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"task-result-core/v1"},
+        "source_state_id": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "file_manifest_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"worker-debug-file-manifest/v1"},
+        "redaction_report_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"worker-debug-redaction-report/v1"},
+        "status": {"enum":["complete","partial"]},
+        "reason_code": {"enum":[null,"DEBUG_LIMIT_EXCEEDED","DEBUG_UNAVAILABLE"]}
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "capture_kind": {"const":"terminal"},
+            "task_result_core": {"type":"object","properties":{"availability":{"const":"available"}}},
+            "status": {"const":"complete"},
+            "reason_code": {"const":null}
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "capture_kind": {"const":"terminal"},
+            "task_result_core": {"type":"object","properties":{"availability":{"const":"available"}}},
+            "status": {"const":"partial"},
+            "reason_code": {"enum":["DEBUG_LIMIT_EXCEEDED","DEBUG_UNAVAILABLE"]}
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "capture_kind": {"enum":["startup","checkpoint","crash"]},
+            "task_result_core": {"type":"object","properties":{"availability":{"const":"not_applicable"},"reason_code":{"const":"TASK_RESULT_CORE_NOT_APPLICABLE"}}},
+            "status": {"const":"complete"},
+            "reason_code": {"const":null}
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "capture_kind": {"enum":["startup","checkpoint","crash"]},
+            "task_result_core": {"type":"object","properties":{"availability":{"const":"not_applicable"},"reason_code":{"const":"TASK_RESULT_CORE_NOT_APPLICABLE"}}},
+            "status": {"const":"partial"},
+            "reason_code": {"enum":["DEBUG_LIMIT_EXCEEDED","DEBUG_UNAVAILABLE"]}
+          }
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "worker_debug_transport_descriptor_golden_uploaded",
+      "fixture_class": "golden",
+      "schema_id": "worker-debug-fragment-descriptor/v1",
+      "document": {
+        "schema_id": "worker-debug-fragment-descriptor/v1",
+        "state": "uploaded",
+        "fragment_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999991",
+          "content_schema_id": "worker-debug-fragment/v1",
+          "sha256": "e3555b3ce0479618dc20e8cf20e6eb41b620ea6b044a9c900cf8a4567fee6cca",
+          "size_bytes": 1777,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "sealed": true,
+        "snapshot_seq": 1,
+        "source_sha256": "e3555b3ce0479618dc20e8cf20e6eb41b620ea6b044a9c900cf8a4567fee6cca",
+        "transport_kind": "server_transport",
+        "server_fragment_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999997",
+          "content_schema_id": "worker-debug-fragment/v1",
+          "sha256": "e3555b3ce0479618dc20e8cf20e6eb41b620ea6b044a9c900cf8a4567fee6cca",
+          "size_bytes": 1777,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "server_receipt_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999993",
+          "content_schema_id": "server-transport-receipt/v1",
+          "sha256": "7438785cbff4403848c5db2c4e1f76a60f4e8e0668a9387aa638da65c55721f7",
+          "size_bytes": 21,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "reason_code": null
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "worker_debug_transport_descriptor_negative_uploaded_binding",
+      "fixture_class": "negative",
+      "schema_id": "worker-debug-fragment-descriptor/v1",
+      "document": {
+        "schema_id": "worker-debug-fragment-descriptor/v1",
+        "state": "uploaded",
+        "fragment_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999991",
+          "content_schema_id": "worker-debug-fragment/v1",
+          "sha256": "e3555b3ce0479618dc20e8cf20e6eb41b620ea6b044a9c900cf8a4567fee6cca",
+          "size_bytes": 1777,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "sealed": true,
+        "snapshot_seq": 1,
+        "source_sha256": "e3555b3ce0479618dc20e8cf20e6eb41b620ea6b044a9c900cf8a4567fee6cca",
+        "transport_kind": "server_transport",
+        "server_fragment_ref": null,
+        "server_receipt_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999993",
+          "content_schema_id": "server-transport-receipt/v1",
+          "sha256": "7438785cbff4403848c5db2c4e1f76a60f4e8e0668a9387aa638da65c55721f7",
+          "size_bytes": 21,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "reason_code": null
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "worker_debug_transport_fragment_golden_terminal",
+      "fixture_class": "golden",
+      "schema_id": "worker-debug-fragment/v1",
+      "document": {
+        "schema_id": "worker-debug-fragment/v1",
+        "fragment_id": "frag_f07e0cd8b74f66ddd2e7b3cfebbfc45d66038b3f6dee9dcba4df5b570f42741b",
+        "task_id": "task_00000000000000000000000000000001",
+        "job_id": "job_11111111111111111111111111111111",
+        "run_id": "run_11111111111111111111111111111111",
+        "lease_id": "lease_11111111111111111111111111111111",
+        "transport_attempt_id": "transport_attempt_11111111111111111111111111111111",
+        "transport_epoch": 1,
+        "native_attempt_id": "attempt_00000000000000000000000000000001",
+        "native_epoch": 1,
+        "protocol_mode": "agent_task_v1",
+        "capture_kind": "terminal",
+        "snapshot_seq": 1,
+        "captured_at": "2026-07-22T00:00:30Z",
+        "sealed": true,
+        "task_version": 3,
+        "checkpoint_generation": 1,
+        "local_event_seq": 10,
+        "last_server_acked_event_seq": 9,
+        "task_result_core": {
+          "availability": "available",
+          "ref": {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_99999999999999999999999999999992",
+            "content_schema_id": "task-result-core/v1",
+            "sha256": "4ab85555c45270aa79929f0dd4308d756b5385e6c1d8fe6832cc6295cbad1038",
+            "size_bytes": 6874,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        },
+        "source_state_id": "0000000000000000000000000000000000000000000000000000000000000008",
+        "file_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999996",
+          "content_schema_id": "worker-debug-file-manifest/v1",
+          "sha256": "4f363524ae162c60158d6dff10cd858e42bebc43a5a00296e2ee4b8545484a66",
+          "size_bytes": 358,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "redaction_report_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999995",
+          "content_schema_id": "worker-debug-redaction-report/v1",
+          "sha256": "d15372bc7f5ea019c43e5e532e8b13c10bc4d8713d5c21045410f37be0772715",
+          "size_bytes": 330,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "status": "complete",
+        "reason_code": null
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "worker_debug_transport_fragment_idempotency_exact_bytes",
+      "fixture_class": "idempotency",
+      "schema_id": "worker-debug-fragment/v1",
+      "document": {
+        "schema_id": "worker-debug-fragment/v1",
+        "fragment_id": "frag_f07e0cd8b74f66ddd2e7b3cfebbfc45d66038b3f6dee9dcba4df5b570f42741b",
+        "task_id": "task_00000000000000000000000000000001",
+        "job_id": "job_11111111111111111111111111111111",
+        "run_id": "run_11111111111111111111111111111111",
+        "lease_id": "lease_11111111111111111111111111111111",
+        "transport_attempt_id": "transport_attempt_11111111111111111111111111111111",
+        "transport_epoch": 1,
+        "native_attempt_id": "attempt_00000000000000000000000000000001",
+        "native_epoch": 1,
+        "protocol_mode": "agent_task_v1",
+        "capture_kind": "terminal",
+        "snapshot_seq": 1,
+        "captured_at": "2026-07-22T00:00:30Z",
+        "sealed": true,
+        "task_version": 3,
+        "checkpoint_generation": 1,
+        "local_event_seq": 10,
+        "last_server_acked_event_seq": 9,
+        "task_result_core": {
+          "availability": "available",
+          "ref": {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_99999999999999999999999999999992",
+            "content_schema_id": "task-result-core/v1",
+            "sha256": "4ab85555c45270aa79929f0dd4308d756b5385e6c1d8fe6832cc6295cbad1038",
+            "size_bytes": 6874,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          }
+        },
+        "source_state_id": "0000000000000000000000000000000000000000000000000000000000000008",
+        "file_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999996",
+          "content_schema_id": "worker-debug-file-manifest/v1",
+          "sha256": "4f363524ae162c60158d6dff10cd858e42bebc43a5a00296e2ee4b8545484a66",
+          "size_bytes": 358,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "redaction_report_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_99999999999999999999999999999995",
+          "content_schema_id": "worker-debug-redaction-report/v1",
+          "sha256": "d15372bc7f5ea019c43e5e532e8b13c10bc4d8713d5c21045410f37be0772715",
+          "size_bytes": 330,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "status": "complete",
+        "reason_code": null
+      },
+      "expected_code": null
+    }
+  ]
+}

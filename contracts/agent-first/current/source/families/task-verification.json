@@ -1,0 +1,275 @@
+{
+  "family_id": "task-verification",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "verification-attestation-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"manifest_digest","domain":"pullwise:verification-attestation-manifest:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["verification_attestation_manifest"],
+        "contextual_helpers": ["verify_attestation_manifest_context"]
+      },
+      "required": [
+        "schema_id",
+        "manifest_id",
+        "task_id",
+        "proposal_id",
+        "quality_policy_plan_ref",
+        "quality_policy_plan_digest",
+        "final_observation_manifest_ref",
+        "final_observation_manifest_digest",
+        "attestations",
+        "attestation_count",
+        "requirement_aggregates",
+        "created_at",
+        "manifest_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"verification-attestation-manifest/v1"},
+        "manifest_id": {"type":"string","pattern":"^vmanifest_[0-9a-f]{32}$"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "proposal_id": {"type":"string","pattern":"^proposal_[0-9a-f]{32}$"},
+        "quality_policy_plan_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"quality-policy-plan/v1"},
+        "quality_policy_plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "final_observation_manifest_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"observation-manifest/v1"},
+        "final_observation_manifest_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "attestations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["attestation_id","slot_id","attestation_ref","run_status"],
+            "properties": {
+              "attestation_id": {"type":"string","pattern":"^attest_[0-9a-f]{32}$"},
+              "slot_id": {"type":"string","pattern":"^slot_[0-9a-f]{32}$"},
+              "attestation_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"verification-attestation/v1"},
+              "run_status": {"enum":["NEEDS_WORK","PASS","POLICY_VIOLATION","UNVERIFIABLE"]}
+            }
+          }
+        },
+        "attestation_count": {"type":"integer","minimum":1,"maximum":256},
+        "requirement_aggregates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requirement_id","required_slot_ids","attestation_ids","verdict"],
+            "properties": {
+              "requirement_id": {
+                "type": "string",
+                "pattern": "^req_(?:user_objective|user_acceptance|user_constraint|delivery|policy|interaction|derived)_[0-9a-f]{64}$"
+              },
+              "required_slot_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {"type":"string","pattern":"^slot_[0-9a-f]{32}$"}
+              },
+              "attestation_ids": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {"type":"string","pattern":"^attest_[0-9a-f]{32}$"}
+              },
+              "verdict": {"enum":["FAIL","PASS","UNVERIFIABLE"]}
+            }
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "manifest_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_verification_golden_attestation_manifest",
+      "fixture_class": "golden",
+      "schema_id": "verification-attestation-manifest/v1",
+      "document": {
+        "schema_id": "verification-attestation-manifest/v1",
+        "manifest_id": "vmanifest_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "quality_policy_plan_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_dddddddddddddddddddddddddddddddd",
+          "content_schema_id": "quality-policy-plan/v1",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "final_observation_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "content_schema_id": "observation-manifest/v1",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "final_observation_manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "attestations": [
+          {
+            "attestation_id": "attest_11111111111111111111111111111111",
+            "slot_id": "slot_11111111111111111111111111111111",
+            "attestation_ref": {
+              "schema_id": "content-ref/v1",
+              "artifact_id": "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content_schema_id": "verification-attestation/v1",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size_bytes": 1,
+              "media_type": "application/json",
+              "encoding": "utf-8"
+            },
+            "run_status": "PASS"
+          }
+        ],
+        "attestation_count": 1,
+        "requirement_aggregates": [
+          {
+            "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+            "required_slot_ids": ["slot_11111111111111111111111111111111"],
+            "attestation_ids": ["attest_11111111111111111111111111111111"],
+            "verdict": "PASS"
+          }
+        ],
+        "created_at": "2026-01-01T00:00:02.500Z",
+        "manifest_digest": "c0ce07df7ec754418e210de9ed161fac381a09473febb887cabe027c85dff3b7"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_verification_idempotency_attestation_manifest",
+      "fixture_class": "idempotency",
+      "schema_id": "verification-attestation-manifest/v1",
+      "document": {
+        "schema_id": "verification-attestation-manifest/v1",
+        "manifest_id": "vmanifest_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "quality_policy_plan_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_dddddddddddddddddddddddddddddddd",
+          "content_schema_id": "quality-policy-plan/v1",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "final_observation_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "content_schema_id": "observation-manifest/v1",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "final_observation_manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "attestations": [
+          {
+            "attestation_id": "attest_11111111111111111111111111111111",
+            "slot_id": "slot_11111111111111111111111111111111",
+            "attestation_ref": {
+              "schema_id": "content-ref/v1",
+              "artifact_id": "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content_schema_id": "verification-attestation/v1",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size_bytes": 1,
+              "media_type": "application/json",
+              "encoding": "utf-8"
+            },
+            "run_status": "PASS"
+          }
+        ],
+        "attestation_count": 1,
+        "requirement_aggregates": [
+          {
+            "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+            "required_slot_ids": ["slot_11111111111111111111111111111111"],
+            "attestation_ids": ["attest_11111111111111111111111111111111"],
+            "verdict": "PASS"
+          }
+        ],
+        "created_at": "2026-01-01T00:00:02.500Z",
+        "manifest_digest": "c0ce07df7ec754418e210de9ed161fac381a09473febb887cabe027c85dff3b7"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_verification_negative_missing_slot",
+      "fixture_class": "negative",
+      "schema_id": "verification-attestation-manifest/v1",
+      "document": {
+        "schema_id": "verification-attestation-manifest/v1",
+        "manifest_id": "vmanifest_11111111111111111111111111111111",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "quality_policy_plan_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_dddddddddddddddddddddddddddddddd",
+          "content_schema_id": "quality-policy-plan/v1",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "quality_policy_plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "final_observation_manifest_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "content_schema_id": "observation-manifest/v1",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size_bytes": 1,
+          "media_type": "application/json",
+          "encoding": "utf-8"
+        },
+        "final_observation_manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "attestations": [
+          {
+            "attestation_id": "attest_11111111111111111111111111111111",
+            "slot_id": "slot_11111111111111111111111111111111",
+            "attestation_ref": {
+              "schema_id": "content-ref/v1",
+              "artifact_id": "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content_schema_id": "verification-attestation/v1",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size_bytes": 1,
+              "media_type": "application/json",
+              "encoding": "utf-8"
+            },
+            "run_status": "PASS"
+          }
+        ],
+        "attestation_count": 1,
+        "requirement_aggregates": [
+          {
+            "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+            "required_slot_ids": ["slot_11111111111111111111111111111111","slot_22222222222222222222222222222222"],
+            "attestation_ids": ["attest_11111111111111111111111111111111"],
+            "verdict": "PASS"
+          }
+        ],
+        "created_at": "2026-01-01T00:00:02.500Z",
+        "manifest_digest": "67310686cf741afcdf2a6989ea8de5dcbd99fe0c4b5b8f47d30f9acd61baaade"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

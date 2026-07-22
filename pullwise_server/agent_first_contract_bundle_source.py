@@ -73,7 +73,10 @@ def load_family(
             raise ContractBundleError(f"schema_closed_object_required: {schema_id}")
         validate_supported_schema(schema, ContractBundleError)
         if schema_id in schema_owner:
-            raise ContractBundleError(f"schema_duplicate: {schema_id}")
+            raise ContractBundleError(
+                f"schema_duplicate: {schema_id}: "
+                f"{schema_owner[schema_id]}: {expected_id}"
+            )
         schema_owner[schema_id] = expected_id
         edges = schema_edges(schema)
         schema_registry.append(

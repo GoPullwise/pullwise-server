@@ -152,6 +152,18 @@ class AgentFirstTaskControlContractTest(unittest.TestCase):
             "agent_task_v1",
             schemas["task-record/v1"]["properties"]["protocol_mode"]["const"],
         )
+        for field in (
+            "command_policy_ref",
+            "secret_policy_ref",
+            "redaction_policy_ref",
+        ):
+            with self.subTest(policy_ref=field):
+                self.assertEqual(
+                    "canonical-document/v1",
+                    schemas["effective-execution-policy/v1"]["properties"][
+                        field
+                    ]["x-pullwise-content-schema-id"],
+                )
 
         request = fixtures["task_control_golden_task_request"]["document"]
         policy = fixtures["task_control_golden_effective_policy"]["document"]
@@ -171,6 +183,17 @@ class AgentFirstTaskControlContractTest(unittest.TestCase):
             queued["policy_ref"]["sha256"],
         )
         self._validate_pullwise_policy(policy)
+        self.assertEqual(
+            {"canonical-document/v1"},
+            {
+                policy[field]["content_schema_id"]
+                for field in (
+                    "command_policy_ref",
+                    "secret_policy_ref",
+                    "redaction_policy_ref",
+                )
+            },
+        )
         self._validate_transport_binding(attempt["transport_binding"])
 
         claimed = deepcopy(queued)
