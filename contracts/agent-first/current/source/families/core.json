@@ -97,6 +97,19 @@
   ],
   "fixtures": [
     {
+      "fixture_id": "core_golden_canonical_document",
+      "fixture_class": "golden",
+      "schema_id": "canonical-document/v1",
+      "document": {
+        "schema_id": "canonical-document/v1",
+        "content_schema_id": "source-content/v1",
+        "canonicalization": "pullwise-canonical-json/v1",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "size_bytes": 42
+      },
+      "expected_code": null
+    },
+    {
       "fixture_id": "core_golden_canonical_profile",
       "fixture_class": "golden",
       "schema_id": "canonical-json-profile/v1",
@@ -116,25 +129,171 @@
       "fixture_class": "golden",
       "schema_id": "content-ref/v1",
       "document": {
-        "artifact_id": "artifact_00000000000000000000000000000001",
-        "encoding": "utf-8",
-        "size_bytes": 0
+        "schema_id": "content-ref/v1",
+        "artifact_id": "art_00000000000000000000000000000001",
+        "content_schema_id": "source-content/v1",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "size_bytes": 42,
+        "media_type": "application/json",
+        "encoding": "utf-8"
       },
       "expected_code": null
     },
     {
-      "fixture_id": "core_idempotency_canonical_key_order",
+      "fixture_id": "core_golden_current_package",
+      "fixture_class": "golden",
+      "schema_id": "current-package-ref/v1",
+      "document": {
+        "schema_id": "current-package-ref/v1",
+        "package_identity": "@pullwise/agent-task-contract",
+        "package_version": "0.1.0",
+        "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "root_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "core_idempotency_canonical_document",
       "fixture_class": "idempotency",
       "schema_id": "canonical-document/v1",
-      "document": { "left": { "a": 1, "b": 2 }, "right": { "b": 2, "a": 1 }, "same_bytes": true },
+      "document": {
+        "size_bytes": 42,
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "canonicalization": "pullwise-canonical-json/v1",
+        "content_schema_id": "source-content/v1",
+        "schema_id": "canonical-document/v1"
+      },
       "expected_code": null
+    },
+    {
+      "fixture_id": "core_idempotency_canonical_profile",
+      "fixture_class": "idempotency",
+      "schema_id": "canonical-json-profile/v1",
+      "document": {
+        "whitespace": "none",
+        "number_domain": "safe_integer_only",
+        "object_key_order": "ascii_lexicographic",
+        "unicode_normalization": "NFC",
+        "encoding": "utf-8",
+        "profile_id": "pullwise-canonical-json/v1",
+        "schema_id": "canonical-json-profile/v1"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "core_idempotency_content_ref",
+      "fixture_class": "idempotency",
+      "schema_id": "content-ref/v1",
+      "document": {
+        "encoding": "utf-8",
+        "media_type": "application/json",
+        "size_bytes": 42,
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "content_schema_id": "source-content/v1",
+        "artifact_id": "art_00000000000000000000000000000001",
+        "schema_id": "content-ref/v1"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "core_idempotency_current_package",
+      "fixture_class": "idempotency",
+      "schema_id": "current-package-ref/v1",
+      "document": {
+        "root_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "package_version": "0.1.0",
+        "package_identity": "@pullwise/agent-task-contract",
+        "schema_id": "current-package-ref/v1"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "core_negative_canonical_document_profile",
+      "fixture_class": "negative",
+      "schema_id": "canonical-document/v1",
+      "document": {
+        "schema_id": "canonical-document/v1",
+        "content_schema_id": "source-content/v1",
+        "canonicalization": "json",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "size_bytes": 42
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "core_negative_canonical_profile_order",
+      "fixture_class": "negative",
+      "schema_id": "canonical-json-profile/v1",
+      "document": {
+        "schema_id": "canonical-json-profile/v1",
+        "profile_id": "pullwise-canonical-json/v1",
+        "encoding": "utf-8",
+        "unicode_normalization": "NFC",
+        "object_key_order": "insertion",
+        "number_domain": "safe_integer_only",
+        "whitespace": "none"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "core_negative_content_ref_artifact_prefix",
+      "fixture_class": "negative",
+      "schema_id": "content-ref/v1",
+      "document": {
+        "schema_id": "content-ref/v1",
+        "artifact_id": "artifact_00000000000000000000000000000001",
+        "content_schema_id": "source-content/v1",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "size_bytes": 42,
+        "media_type": "application/json",
+        "encoding": "utf-8"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "core_negative_content_ref_extra_field",
+      "fixture_class": "negative",
+      "schema_id": "content-ref/v1",
+      "document": {
+        "schema_id": "content-ref/v1",
+        "artifact_id": "art_00000000000000000000000000000001",
+        "content_schema_id": "source-content/v1",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "size_bytes": 42,
+        "media_type": "application/json",
+        "encoding": "utf-8",
+        "location": "repo/README.md"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "core_negative_content_ref_media_type",
+      "fixture_class": "negative",
+      "schema_id": "content-ref/v1",
+      "document": {
+        "schema_id": "content-ref/v1",
+        "artifact_id": "art_00000000000000000000000000000001",
+        "content_schema_id": "source-content/v1",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "size_bytes": 42,
+        "media_type": "application/json\n",
+        "encoding": "utf-8"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
     {
       "fixture_id": "core_negative_package_mismatch",
       "fixture_class": "negative",
       "schema_id": "current-package-ref/v1",
-      "document": { "package_version": "0.1.1" },
-      "expected_code": "CURRENT_PACKAGE_PIN_MISMATCH"
+      "document": {
+        "schema_id": "current-package-ref/v1",
+        "package_identity": "@pullwise/agent-task-contract",
+        "package_version": "0.1.1",
+        "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "root_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }
   ]
 }

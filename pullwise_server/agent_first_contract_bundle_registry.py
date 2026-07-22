@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+from .agent_first_contract_bundle_closure import validate_cross_family_closure
+
 
 _RULE_KEYS = {
     "$schema",
@@ -61,7 +63,6 @@ DOCUMENT_RULE_IDS = frozenset(
         "elapsed_budget_ledger",
         "elapsed_budget_settlement",
         "entries_normative_ingest_then_append_order",
-        "evidence_closure_entry",
         "evidence_closure_manifest",
         "execution_profile",
         "execution_state_manifest",
@@ -134,7 +135,6 @@ CONTEXTUAL_HELPER_IDS = frozenset(
         "verify_completion_proposal_context",
         "verify_content_ref_content",
         "verify_evidence_closure_context",
-        "verify_evidence_closure_entry_context",
         "verify_execution_state_context",
         "verify_observation_manifest_extension",
         "verify_source_tree_context",
@@ -349,15 +349,14 @@ def validate_semantic_registries(
     if not expected_codes.issubset(stable_codes):
         raise error_type("fixture_error_code_unregistered")
 
-    _validate_reason_registries(
+    validate_cross_family_closure(
         schemas,
         fixtures,
         availability_registry,
         outcome_registry,
+        artifact_registry,
         error_type,
     )
-    _validate_artifact_registry(schemas, artifact_registry, error_type)
-    _validate_task_result_variants(schemas, error_type)
 
     predicates = _unique_sorted(
         [entry["predicate_id"] for entry in gate_registry["predicates"]],
@@ -416,136 +415,6 @@ def validate_semantic_registries(
                     raise error_type("typed_content_ref_target_invalid")
                 if any(item not in schema_owner for item in expected):
                     raise error_type("typed_content_ref_target_unregistered")
-
-
-def _validate_reason_registries(
-    schemas: dict[str, dict[str, object]],
-    fixtures: dict[str, dict[str, object]],
-    availability_registry: dict[str, object],
-    outcome_registry: dict[str, object],
-    error_type: type[Exception],
-) -> None:
-    availability_reasons = _unique_sorted(
-        availability_registry["reasons"],
-        "availability_reason_registry_order_invalid",
-        error_type,
-    )
-    availability_schema = schemas["availability-ref/v1"]
-    branch_enums = [
-        option["properties"]["reason_code"]["enum"]
-        for option in availability_schema["oneOf"]
-        if "reason_code" in option.get("properties", {})
-    ]
-    if not branch_enums or any(item != availability_reasons for item in branch_enums):
-        raise error_type("availability_reason_registry_bijection_invalid")
-    used_fixture_reasons: set[str] = set()
-    for fixture in fixtures.values():
-        for item in _walk(fixture["document"]):
-            if (
-                isinstance(item, dict)
-                and item.get("availability") in {"unavailable", "not_applicable"}
-                and isinstance(item.get("reason_code"), str)
-            ):
-                used_fixture_reasons.add(item["reason_code"])
-    if not used_fixture_reasons.issubset(availability_reasons):
-        raise error_type("availability_reason_fixture_unregistered")
-
-    outcome_reasons = _unique_sorted(
-        outcome_registry["reasons"],
-        "task_result_outcome_reason_registry_order_invalid",
-        error_type,
-    )
-    variant_ids = (
-        "task-result-completed-variant/v1",
-        "task-result-no-change-needed-variant/v1",
-        "task-result-completed-with-waivers-variant/v1",
-        "task-result-partial-variant/v1",
-        "task-result-blocked-variant/v1",
-        "task-result-failed-variant/v1",
-        "task-result-cancelled-variant/v1",
-    )
-    declared: set[str] = set()
-    for schema_id in variant_ids:
-        rule = schemas[schema_id]["properties"]["reason_code"]
-        if "const" in rule:
-            declared.add(rule["const"])
-        else:
-            declared.update(rule["enum"])
-    if sorted(declared) != outcome_reasons:
-        raise error_type("task_result_outcome_reason_registry_bijection_invalid")
-
-
-def _validate_artifact_registry(
-    schemas: dict[str, dict[str, object]],
-    registry: dict[str, object],
-    error_type: type[Exception],
-) -> None:
-    entries = registry["entries"]
-    keys = [item["artifact_kind"] for item in entries]
-    if keys != sorted(set(keys)):
-        raise error_type("artifact_content_registry_order_invalid")
-    schema_ids = [item["content_schema_id"] for item in entries]
-    if len(schema_ids) != len(set(schema_ids)):
-        raise error_type("artifact_content_registry_schema_duplicate")
-    artifact_ref = schemas["artifact-content-ref/v1"]["properties"]
-    registry_item = schemas["artifact-content-registry/v1"]["properties"][
-        "entries"
-    ]["items"]["properties"]
-    if (
-        artifact_ref["artifact_kind"]["enum"] != keys
-        or artifact_ref["ref"]["x-pullwise-content-schema-ids"]
-        != sorted(schema_ids)
-        or registry_item["artifact_kind"]["enum"] != keys
-        or registry_item["content_schema_id"]["enum"] != sorted(schema_ids)
-    ):
-        raise error_type("artifact_content_registry_bijection_invalid")
-    for entry in entries:
-        if entry["media_type"] != "application/json" or entry["encoding"] != "utf-8":
-            raise error_type("artifact_content_registry_tuple_invalid")
-    for schema in schemas.values():
-        for rule in _walk(schema):
-            if not isinstance(rule, dict):
-                continue
-            properties = rule.get("properties")
-            if not isinstance(properties, dict) or "artifact_refs" not in properties:
-                continue
-            artifact_refs = properties["artifact_refs"]
-            if (
-                not isinstance(artifact_refs, dict)
-                or artifact_refs.get("type") != "array"
-                or artifact_refs.get("items") != {"$ref": "artifact-content-ref/v1"}
-            ):
-                raise error_type("artifact_refs_shape_invalid")
-
-
-def _validate_task_result_variants(
-    schemas: dict[str, dict[str, object]], error_type: type[Exception]
-) -> None:
-    expected_order = [
-        "task-result-completed-variant/v1",
-        "task-result-no-change-needed-variant/v1",
-        "task-result-completed-with-waivers-variant/v1",
-        "task-result-partial-variant/v1",
-        "task-result-blocked-variant/v1",
-        "task-result-failed-variant/v1",
-        "task-result-cancelled-variant/v1",
-    ]
-    main = schemas["task-result/v1"]
-    core = schemas["task-result-core/v1"]
-    main_keys = set(main["properties"])
-    if len(main_keys) != 37 or set(core["properties"]) != main_keys:
-        raise error_type("task_result_core_property_parity_invalid")
-    for schema_id in expected_order:
-        variant = schemas[schema_id]
-        if (
-            set(variant["properties"]) != main_keys
-            or set(variant["required"]) != main_keys
-            or variant.get("additionalProperties") is not False
-        ):
-            raise error_type(f"task_result_variant_property_parity_invalid: {schema_id}")
-    expected_refs = [{"$ref": item} for item in expected_order]
-    if main.get("oneOf") != expected_refs or core.get("oneOf") != expected_refs:
-        raise error_type("task_result_variant_order_invalid")
 
 
 def _sealed_document(

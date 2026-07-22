@@ -42,8 +42,8 @@
         "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
         "proposal_id": {"type":"string","pattern":"^proposal_[0-9a-f]{32}$"},
         "slot_id": {"type":"string","pattern":"^slot_[0-9a-f]{32}$"},
-        "task_request_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"agent-task-request/v1"},
-        "effective_policy_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"agent-task-policy/v1"},
+        "task_request_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"task-request/v1"},
+        "effective_policy_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"effective-execution-policy/v1"},
         "requirement_ledger_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"requirement-ledger/v1"},
         "charter_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"task-charter/v1"},
         "completion_proposal_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"completion-proposal/v1"},
@@ -103,7 +103,7 @@
         "task_request_ref": {
           "schema_id": "content-ref/v1",
           "artifact_id": "art_11111111111111111111111111111111",
-          "content_schema_id": "agent-task-request/v1",
+          "content_schema_id": "task-request/v1",
           "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "size_bytes": 1,
           "media_type": "application/json",
@@ -112,7 +112,7 @@
         "effective_policy_ref": {
           "schema_id": "content-ref/v1",
           "artifact_id": "art_22222222222222222222222222222222",
-          "content_schema_id": "agent-task-policy/v1",
+          "content_schema_id": "effective-execution-policy/v1",
           "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
           "size_bytes": 1,
           "media_type": "application/json",
@@ -199,7 +199,7 @@
         "requirement_ids": ["req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
         "owner_conclusion_excluded": true,
         "created_at": "2026-01-01T00:00:01.000Z",
-        "input_manifest_digest": "4d6ef14ae14e13cd81344b4c78c03349994180542435ed17e177e5fd56568647"
+        "input_manifest_digest": "443b13e1ae763260ccb23a1c2655a887f9aa7e3fd4fe3f7f1cd4f431843519e1"
       },
       "expected_code": null
     },
@@ -216,7 +216,7 @@
         "task_request_ref": {
           "schema_id": "content-ref/v1",
           "artifact_id": "art_11111111111111111111111111111111",
-          "content_schema_id": "agent-task-request/v1",
+          "content_schema_id": "task-request/v1",
           "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "size_bytes": 1,
           "media_type": "application/json",
@@ -225,7 +225,7 @@
         "effective_policy_ref": {
           "schema_id": "content-ref/v1",
           "artifact_id": "art_22222222222222222222222222222222",
-          "content_schema_id": "agent-task-policy/v1",
+          "content_schema_id": "effective-execution-policy/v1",
           "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
           "size_bytes": 1,
           "media_type": "application/json",
@@ -312,7 +312,7 @@
         "requirement_ids": ["req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
         "owner_conclusion_excluded": true,
         "created_at": "2026-01-01T00:00:01.000Z",
-        "input_manifest_digest": "4d6ef14ae14e13cd81344b4c78c03349994180542435ed17e177e5fd56568647"
+        "input_manifest_digest": "443b13e1ae763260ccb23a1c2655a887f9aa7e3fd4fe3f7f1cd4f431843519e1"
       },
       "expected_code": null
     },
@@ -329,7 +329,7 @@
         "task_request_ref": {
           "schema_id": "content-ref/v1",
           "artifact_id": "art_11111111111111111111111111111111",
-          "content_schema_id": "agent-task-request/v1",
+          "content_schema_id": "task-request/v1",
           "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "size_bytes": 1,
           "media_type": "application/json",
@@ -338,7 +338,7 @@
         "effective_policy_ref": {
           "schema_id": "content-ref/v1",
           "artifact_id": "art_22222222222222222222222222222222",
-          "content_schema_id": "agent-task-policy/v1",
+          "content_schema_id": "effective-execution-policy/v1",
           "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
           "size_bytes": 1,
           "media_type": "application/json",
@@ -425,7 +425,7 @@
         "requirement_ids": ["req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
         "owner_conclusion_excluded": false,
         "created_at": "2026-01-01T00:00:01.000Z",
-        "input_manifest_digest": "dbc6f5280b5ef1bfc59b321a1eecfb9f9542ed2fae22edbd63e4756d04156648"
+        "input_manifest_digest": "7a71104a1acb1f782c6c9368ecb4b69eeb549f669566b6b9dc6f0ea7420dcc77"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

@@ -39,7 +39,15 @@
           "minItems": 3,
           "maxItems": 4096,
           "uniqueItems": true,
-          "items": {"$ref":"content-ref/v1"}
+          "items": {
+            "$ref": "content-ref/v1",
+            "x-pullwise-content-schema-ids": [
+              "gate-decision/v1",
+              "gate-input-snapshot/v1",
+              "pre-gate-evidence-closure-manifest/v1",
+              "terminalization-input-snapshot/v1"
+            ]
+          }
         },
         "entry_count": {"type":"integer","minimum":3,"maximum":4096},
         "evidence_closure_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},

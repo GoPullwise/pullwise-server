@@ -30,10 +30,11 @@ class TaskVerifierInputFamilyTest(FamilyAssertions, unittest.TestCase):
             sealed(document, self.schemas["verifier-input-manifest/v1"])
             and document["owner_conclusion_excluded"] is True
             and valid_content_ref(
-                document["task_request_ref"], {"agent-task-request/v1"}
+                document["task_request_ref"], {"task-request/v1"}
             )
             and valid_content_ref(
-                document["effective_policy_ref"], {"agent-task-policy/v1"}
+                document["effective_policy_ref"],
+                {"effective-execution-policy/v1"},
             )
             and valid_content_ref(
                 document["requirement_ledger_ref"], {"requirement-ledger/v1"}
@@ -73,6 +74,14 @@ class TaskVerifierInputFamilyTest(FamilyAssertions, unittest.TestCase):
     def test_input_edges_are_finite_and_typed(self) -> None:
         props = self.schemas["verifier-input-manifest/v1"]["properties"]
         self.assertEqual(
+            "task-request/v1",
+            props["task_request_ref"]["x-pullwise-content-schema-id"],
+        )
+        self.assertEqual(
+            "effective-execution-policy/v1",
+            props["effective_policy_ref"]["x-pullwise-content-schema-id"],
+        )
+        self.assertEqual(
             "pre-verifier-observation-manifest/v1",
             props["pre_verifier_observation_manifest_ref"][
                 "x-pullwise-content-schema-id"
@@ -85,6 +94,9 @@ class TaskVerifierInputFamilyTest(FamilyAssertions, unittest.TestCase):
         self.assertEqual(
             "artifact-content-ref/v1", props["artifact_refs"]["items"]["$ref"]
         )
+        encoded = FAMILY_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("agent-task-request/v1", encoded)
+        self.assertNotIn("agent-task-policy/v1", encoded)
 
     def test_complete_fixtures_execute_and_retry_byte_exactly(self) -> None:
         self.assert_fixture_matrix(

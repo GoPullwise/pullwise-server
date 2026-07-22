@@ -197,7 +197,8 @@
                   "TRANSPORT_ENVELOPE_DIGEST_INVALID",
                   "TRANSPORT_RECEIPT_ALREADY_BOUND",
                   "TRANSPORT_RECEIPT_BINDING_CONFLICT",
-                  "TRANSPORT_RECEIPT_TYPE_INVALID"
+                  "TRANSPORT_RECEIPT_TYPE_INVALID",
+                  "WAIVER_INVALID"
                 ]
               },
               "retryable": { "type": "boolean" },
@@ -251,7 +252,8 @@
             "TRANSPORT_ENVELOPE_DIGEST_INVALID",
             "TRANSPORT_RECEIPT_ALREADY_BOUND",
             "TRANSPORT_RECEIPT_BINDING_CONFLICT",
-            "TRANSPORT_RECEIPT_TYPE_INVALID"
+            "TRANSPORT_RECEIPT_TYPE_INVALID",
+            "WAIVER_INVALID"
           ]
         },
         "message": { "type": "string", "minLength": 1, "maxLength": 512 },
@@ -419,9 +421,15 @@
             "retryable": false,
             "retry_scope": "none",
             "outcome": "rejected"
+          },
+          {
+            "code": "WAIVER_INVALID",
+            "retryable": false,
+            "retry_scope": "none",
+            "outcome": "rejected"
           }
         ],
-        "registry_digest": "a7517b90457848fcd2ab919db4635b2d67aeb103dbb7b77ab69858351ea64647"
+        "registry_digest": "b2716a4a12cc2ee60a6021bb52bbc5ed8a93c28dd097785d230d83a7f059a62c"
       },
       "expected_code": null
     },

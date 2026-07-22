@@ -90,10 +90,10 @@
         "predicates": [
           {"predicate_id": "GATE_BUDGET_SETTLED", "input_schema_ids": ["elapsed-budget-settlement/v1"], "failure_code": "GATE_BUDGET_UNSETTLED"},
           {"predicate_id": "GATE_EVIDENCE_COMPLETE", "input_schema_ids": ["observation/v1"], "failure_code": "GATE_EVIDENCE_INCOMPLETE"},
-          {"predicate_id": "GATE_POLICY_SATISFIED", "input_schema_ids": ["agent-task-policy/v1"], "failure_code": "GATE_POLICY_UNSATISFIED"},
+          {"predicate_id": "GATE_POLICY_SATISFIED", "input_schema_ids": ["effective-execution-policy/v1"], "failure_code": "GATE_POLICY_UNSATISFIED"},
           {"predicate_id": "GATE_SOURCE_STABLE", "input_schema_ids": ["source-state/v1"], "failure_code": "GATE_SOURCE_UNSTABLE"}
         ],
-        "registry_digest": "6e90827fe0d8445a09461dc9a508e05690b606c77e7a88db6e9b5715c9d04c45"
+        "registry_digest": "31252a7c9498b84632305c6fc205826a5084194e1e807c1e81006e47e1c0ddfe"
       },
       "expected_code": null
     },
