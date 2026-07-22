@@ -315,6 +315,8 @@ class AgentFirstAuthority:
         values = {
             **document,
             "package_tuple": PACKAGE_TUPLE,
+            "receipt_bytes_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+            "receipt_size_bytes": len(receipt_bytes),
             "receipt_bytes": receipt_bytes,
             "response_bytes": receipt_bytes,
         }

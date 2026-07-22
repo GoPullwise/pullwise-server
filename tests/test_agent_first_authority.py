@@ -363,7 +363,10 @@ class AgentFirstAuthorityTest(unittest.TestCase):
         self.assertEqual(first, self.authority.abandon_current_claim(dict(request)))
         response = verify_document_digest("agent-claim-abandon-response/v1", json.loads(first))
         with self.connect() as connection:
-            after = connection.execute(f"SELECT {fields}, task_version FROM agent_current_task_heads").fetchone()
+            after = connection.execute(
+                f"SELECT {fields}, task_version, current_authority_schema_id, "
+                "current_authority_digest FROM agent_current_task_heads"
+            ).fetchone()
             states = (
                 connection.execute("SELECT state FROM agent_current_attempts").fetchone()[0],
                 connection.execute("SELECT state FROM agent_current_owner_incarnations").fetchone()[0],
@@ -371,12 +374,24 @@ class AgentFirstAuthorityTest(unittest.TestCase):
             )
         self.assertEqual(after[:7], before)
         self.assertEqual((after[7], response["task_version"]), (3, 3))
+        self.assertEqual(
+            after[8:], ("agent-claim-abandon-response/v1", response["response_digest"])
+        )
+        self.assertEqual(response["grant"], envelope["grant"])
+        self.assertEqual(response["superseded_authority_digest"], envelope["authority_digest"])
         self.assertEqual(states, ("FENCED",) * 3)
         self.assertEqual(self.counts("agent_current_abandonments", "agent_current_fences"), (1, 4))
         with self.connect() as connection:
             for table in ("attempts", "owner_incarnations", "grant_authority"):
                 with self.assertRaises(sqlite3.DatabaseError):
                     connection.execute(f"DELETE FROM agent_current_{table}")
+            with self.assertRaises(sqlite3.DatabaseError):
+                connection.execute(
+                    "UPDATE agent_current_task_heads SET task_version=task_version+1, "
+                    "current_authority_schema_id='server-authority-envelope/v1', "
+                    "current_authority_digest=?",
+                    (envelope["authority_digest"],),
+                )
         self.assert_error(
             "AUTHORITY_FENCED",
             lambda: self.authority.claim_and_issue_current_grant(claim_request),

@@ -236,6 +236,10 @@ _DDL = (
         package_version TEXT NOT NULL,
         content_sha256 TEXT NOT NULL CHECK(length(content_sha256) = 64),
         root_sha256 TEXT NOT NULL CHECK(length(root_sha256) = 64),
+        receipt_bytes_sha256 TEXT NOT NULL UNIQUE CHECK(
+            length(receipt_bytes_sha256) = 64
+        ),
+        receipt_size_bytes INTEGER NOT NULL CHECK(receipt_size_bytes > 0),
         receipt_bytes BLOB NOT NULL,
         response_bytes BLOB NOT NULL,
         created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -329,6 +333,32 @@ _DDL = (
     BEFORE DELETE ON agent_current_transport_receipt_bindings
     BEGIN
         SELECT RAISE(ABORT, 'TRANSPORT_RECEIPT_BINDING_IMMUTABLE');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS agent_current_task_head_monotonic
+    BEFORE UPDATE ON agent_current_task_heads
+    WHEN NEW.task_id IS NOT OLD.task_id
+      OR NEW.owner_id IS NOT OLD.owner_id
+      OR NEW.task_version != OLD.task_version + 1
+      OR NEW.deletion_version < OLD.deletion_version
+      OR NEW.owner_epoch < OLD.owner_epoch
+      OR NEW.native_epoch < OLD.native_epoch
+      OR NEW.transport_epoch < OLD.transport_epoch
+      OR OLD.lifecycle='TERMINAL'
+      OR (
+        OLD.current_authority_schema_id='agent-claim-abandon-response/v1'
+        AND NEW.lifecycle!='TERMINAL'
+      )
+    BEGIN
+        SELECT RAISE(ABORT, 'AGENT_CURRENT_TASK_HEAD_CAS_INVALID');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS agent_current_task_head_delete_immutable
+    BEFORE DELETE ON agent_current_task_heads
+    BEGIN
+        SELECT RAISE(ABORT, 'AGENT_CURRENT_TASK_HEAD_IMMUTABLE');
     END
     """,
 )

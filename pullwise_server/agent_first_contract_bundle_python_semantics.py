@@ -4,6 +4,19 @@ from __future__ import annotations
 
 
 PYTHON_SEMANTICS = r'''
+def _public_error_code(detail: str, explicit: str | None) -> str:
+    document = json.loads(base64.b64decode(BUNDLE_BASE64).decode("utf-8"))
+    codes = {
+        entry["code"]
+        for family in document["families"]
+        for item in family["fixtures"]
+        if item["fixture_id"] == "error_golden_current_registry"
+        for entry in item["document"]["entries"]
+    }
+    candidate = explicit or detail
+    return candidate if candidate in codes else "CONTRACT_DOCUMENT_INVALID"
+
+
 def _validate_one_of(options: object, value: object, path: str) -> None:
     matches = 0
     for option in options:
@@ -67,8 +80,8 @@ def _validate_semantics(schema_id: str, value: dict[str, object]) -> None:
     if schema_id == "source-content/v1":
         try:
             raw = base64.b64decode(value["data_base64"], validate=True)
-        except (ValueError, TypeError) as exc:
-            raise ContractValidationError("SOURCE_CONTENT_BASE64_INVALID: $.data_base64") from exc
+        except (ValueError, TypeError):
+            _fail("SOURCE_CONTENT_BASE64_INVALID", "$.data_base64")
         if base64.b64encode(raw).decode("ascii") != value["data_base64"]:
             _fail("SOURCE_CONTENT_BASE64_NONCANONICAL", "$.data_base64")
         if len(raw) != value["size_bytes"]:
@@ -77,9 +90,9 @@ def _validate_semantics(schema_id: str, value: dict[str, object]) -> None:
             _fail("SOURCE_CONTENT_SHA256_MISMATCH", "$.byte_sha256")
     elif schema_id == "elapsed-budget-ledger/v1":
         if value["consumed_ms"] + value["reserved_ms"] > value["elapsed_limit_ms"]:
-            _fail("BUDGET_ELAPSED_LIMIT_EXCEEDED")
+            _fail("BUDGET_ELAPSED_LIMIT_EXCEEDED", code="BUDGET_EXHAUSTED")
         if value["calls_consumed"] + value["calls_reserved"] > value["tool_call_limit"]:
-            _fail("BUDGET_CALL_LIMIT_EXCEEDED")
+            _fail("BUDGET_CALL_LIMIT_EXCEEDED", code="BUDGET_EXHAUSTED")
     elif schema_id == "elapsed-budget-settlement/v1":
         if value["consumed_calls"] + value["released_calls"] != 1:
             _fail("BUDGET_CALL_CONSERVATION_INVALID")

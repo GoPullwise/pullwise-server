@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from .agent_first_contract_bundle_npm_semantics import NPM_SEMANTICS
+from .agent_first_contract_bundle_npm_verify import NPM_VERIFY
 
 def render_npm_wrapper(
     identity: str,
@@ -21,6 +22,7 @@ def render_npm_wrapper(
         "@@PAYLOAD@@": json.dumps(base64.b64encode(canonical).decode("ascii")),
     }
     rendered = _TEMPLATE.replace("@@SEMANTICS@@", NPM_SEMANTICS)
+    rendered = rendered.replace("@@VERIFY@@", NPM_VERIFY)
     for marker, value in replacements.items():
         rendered = rendered.replace(marker, value)
     return rendered.encode("utf-8")
@@ -39,10 +41,17 @@ const SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export class ContractValidationError extends Error {}
+export class ContractValidationError extends Error {
+  constructor(code, detail, path) {
+    super(code + ": " + detail + ": " + path);
+    this.code = code;
+    this.detail = detail;
+    this.path = path;
+  }
+}
 
 function fail(code, path = "$") {
-  throw new ContractValidationError(`${code}: ${path}`);
+  throw new ContractValidationError(publicErrorCode(code, null), code, path);
 }
 
 function canonicalValue(value, path = "$") {
@@ -265,126 +274,5 @@ export async function verifyDocumentDigest(schemaId, completeValue) {
   return complete;
 }
 
-function references(value) {
-  const found = new Set();
-  if (Array.isArray(value)) {
-    for (const item of value) for (const ref of references(item)) found.add(ref);
-  } else if (value && typeof value === "object") {
-    for (const [key, item] of Object.entries(value)) {
-      if (key === "$ref" && typeof item === "string") found.add(item);
-      for (const ref of references(item)) found.add(ref);
-    }
-  }
-  return found;
-}
-
-export async function verifyBundle() {
-  const raw = bundleBytes();
-  if (await sha256(raw) !== CONTENT_SHA256) fail("CONTRACT_BUNDLE_DIGEST_MISMATCH");
-  const document = bundle();
-  if (
-    document.package_identity !== PACKAGE_IDENTITY ||
-    document.package_version !== PACKAGE_VERSION
-  ) fail("CURRENT_PACKAGE_PIN_MISMATCH");
-  const root = document.root_manifest;
-  const {root_sha256: presentedRoot, ...rootBody} = root;
-  if (presentedRoot !== ROOT_SHA256 || await sha256(canonicalDocumentBytes(rootBody)) !== ROOT_SHA256) {
-    fail("CONTRACT_ROOT_DIGEST_MISMATCH");
-  }
-  if (JSON.stringify(document.families.map((item) => item.family_id)) !==
-      JSON.stringify(root.required_families)) fail("CONTRACT_FAMILY_CLOSURE_INVALID");
-
-  const schemas = [];
-  const fixtures = [];
-  const familyEntries = [];
-  const known = new Set();
-  for (const family of document.families) {
-    const localSchemas = [];
-    const localFixtures = [];
-    for (const item of family.schemas) {
-      const entry = {
-        schema_id: item.$id,
-        family_id: family.family_id,
-        references: [...references(item)].sort(),
-        sha256: await sha256(canonicalDocumentBytes(item)),
-      };
-      localSchemas.push(entry);
-      known.add(item.$id);
-    }
-    for (const item of family.fixtures) {
-      localFixtures.push({
-        fixture_id: item.fixture_id,
-        family_id: family.family_id,
-        schema_id: item.schema_id,
-        fixture_class: item.fixture_class,
-        expected_code: item.expected_code,
-        sha256: await sha256(canonicalDocumentBytes(item)),
-      });
-    }
-    if (JSON.stringify(localSchemas) !== JSON.stringify(family.schema_registry)) {
-      fail("CONTRACT_SCHEMA_REGISTRY_INVALID");
-    }
-    if (JSON.stringify(localFixtures) !== JSON.stringify(family.fixture_registry)) {
-      fail("CONTRACT_FIXTURE_REGISTRY_INVALID");
-    }
-    schemas.push(...localSchemas);
-    fixtures.push(...localFixtures);
-    familyEntries.push({
-      family_id: family.family_id,
-      schema_ids: family.schemas.map((item) => item.$id),
-      fixture_ids: family.fixtures.map((item) => item.fixture_id),
-      sha256: await sha256(canonicalDocumentBytes(family)),
-    });
-  }
-  if (JSON.stringify(schemas) !== JSON.stringify(root.schema_registry) ||
-      JSON.stringify(fixtures) !== JSON.stringify(root.fixture_registry)) {
-    fail("CONTRACT_ROOT_REGISTRY_INVALID");
-  }
-  if (JSON.stringify(familyEntries) !== JSON.stringify(root.families)) {
-    fail("CONTRACT_FAMILY_DIGEST_INVALID");
-  }
-  for (const item of schemas) {
-    for (const ref of item.references) if (!known.has(ref)) fail("CONTRACT_REFERENCE_UNKNOWN");
-  }
-  const expectedDag = schemas.map((item) => ({
-    schema_id: item.schema_id,
-    family_id: item.family_id,
-    references: item.references,
-  })).sort((left, right) => left.schema_id.localeCompare(right.schema_id));
-  if (JSON.stringify(expectedDag) !== JSON.stringify(root.reference_dag)) {
-    fail("CONTRACT_REFERENCE_DAG_INVALID");
-  }
-  const classes = new Set(fixtures.map((item) => item.fixture_class));
-  if (classes.size !== root.fixture_classes.length ||
-      root.fixture_classes.some((item) => !classes.has(item))) {
-    fail("CONTRACT_FIXTURE_CLASS_INVALID");
-  }
-  validateDocument("canonical-json-profile/v1", fixture("core_golden_canonical_profile").document);
-  return true;
-}
-
-export function assertPin(identity, version, contentSha256, rootSha256 = null) {
-  if (
-    identity !== PACKAGE_IDENTITY ||
-    version !== PACKAGE_VERSION ||
-    contentSha256 !== CONTENT_SHA256 ||
-    (rootSha256 !== null && rootSha256 !== ROOT_SHA256)
-  ) throw new Error("CURRENT_PACKAGE_PIN_MISMATCH");
-}
-
-export const bundle_bytes = bundleBytes;
-export const canonical_document_bytes = canonicalDocumentBytes;
-export const canonical_validated_bytes = canonicalValidatedBytes;
-export const document_digest = documentDigest;
-export const fixture_bytes = fixtureBytes;
-export const package_tuple = packageTuple;
-export const root_manifest = rootManifest;
-export const root_manifest_bytes = rootManifestBytes;
-export const schema_bytes = schemaBytes;
-export const seal_document = sealDocument;
-export const validate_document = validateDocument;
-export const verify_bundle = verifyBundle;
-export const verify_budget_transition = verifyBudgetTransition;
-export const verify_content_ref_set = verifyContentRefSet;
-export const verify_document_digest = verifyDocumentDigest;
+@@VERIFY@@
 '''

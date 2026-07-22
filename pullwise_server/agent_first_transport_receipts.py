@@ -122,10 +122,11 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                     session_id, owner_id, lease_id, authority_digest, grant_digest,
                     task_version, deletion_version,
                     owner_epoch, native_epoch, transport_epoch, package_identity,
-                    package_version, content_sha256, root_sha256, receipt_bytes,
+                    package_version, content_sha256, root_sha256,
+                    receipt_bytes_sha256, receipt_size_bytes, receipt_bytes,
                     response_bytes
                 ) VALUES (?, ?, 'server_transport', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?, ?)
+                          ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["receipt_digest"], values["receipt_id"], values["task_id"],
@@ -135,6 +136,7 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                     values["task_version"], values["deletion_version"],
                     values["owner_epoch"], values["native_epoch"],
                     values["transport_epoch"], *values["package_tuple"],
+                    values["receipt_bytes_sha256"], values["receipt_size_bytes"],
                     values["receipt_bytes"], values["response_bytes"],
                 ),
             )

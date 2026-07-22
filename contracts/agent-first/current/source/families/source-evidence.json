@@ -1,0 +1,193 @@
+{
+  "family_id": "source-evidence",
+  schemas: [
+    {
+      $schema: https://json-schema.org/draft/2020-12/schema,
+      $id: change-set-patch/v1,
+      type: object,
+      additionalProperties: false,
+      x-pullwise-digest: {field: patch_digest, domain: pullwise:change-set-patch:v1},
+      x-pullwise-semantics: [change_set_patch],
+      required: [schema_id, format, media_type, encoding, data_base64, byte_sha256, size_bytes, patch_digest],
+      properties: {
+        schema_id: {const: change-set-patch/v1},
+        format: {const: unified_diff},
+        media_type: {const: text/x-diff},
+        encoding: {const: base64},
+        data_base64: {type: string, pattern: ^[A-Za-z0-9+/]*={0,2}$},
+        byte_sha256: {type: string, pattern: ^[0-9a-f]{64}$},
+        size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991},
+        patch_digest: {type: string, pattern: ^[0-9a-f]{64}$}
+      }
+    },
+    {
+      $schema: https://json-schema.org/draft/2020-12/schema,
+      $id: change-set/v1,
+      type: object,
+      additionalProperties: false,
+      x-pullwise-digest: {field: change_set_digest, domain: pullwise:change-set:v1},
+      x-pullwise-semantics: [change_set],
+      required: [schema_id, original_source_state_id, final_source_state_id, added, modified, deleted, type_changed, patch_ref, change_set_digest],
+      properties: {
+        schema_id: {const: change-set/v1},
+        original_source_state_id: {type: string, pattern: ^[0-9a-f]{64}$},
+        final_source_state_id: {type: string, pattern: ^[0-9a-f]{64}$},
+        added: {
+          type: array, maxItems: 1000000, uniqueItems: true,
+          items: {
+            type: object, additionalProperties: false, required: [],
+            properties: {
+              before: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}},
+              after: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}}
+            }
+          }
+        },
+        modified: {
+          type: array, maxItems: 1000000, uniqueItems: true,
+          items: {
+            type: object, additionalProperties: false, required: [],
+            properties: {
+              before: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}},
+              after: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}}
+            }
+          }
+        },
+        deleted: {
+          type: array, maxItems: 1000000, uniqueItems: true,
+          items: {
+            type: object, additionalProperties: false, required: [],
+            properties: {
+              before: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}},
+              after: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}}
+            }
+          }
+        },
+        type_changed: {
+          type: array, maxItems: 1000000, uniqueItems: true,
+          items: {
+            type: object, additionalProperties: false, required: [],
+            properties: {
+              before: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}},
+              after: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}}
+            }
+          }
+        },
+        patch_ref: {$ref: content-ref/v1, x-pullwise-content-schema-id: change-set-patch/v1},
+        change_set_digest: {type: string, pattern: ^[0-9a-f]{64}$}
+      }
+    },
+    {
+      $schema: https://json-schema.org/draft/2020-12/schema,
+      $id: execution-profile/v1,
+      type: object,
+      additionalProperties: false,
+      x-pullwise-digest: {field: profile_digest, domain: pullwise:execution-profile:v1},
+      x-pullwise-semantics: [execution_profile],
+      required: [schema_id, image_identity, operating_system, sandbox_identity, cpu_architecture, profile_digest],
+      properties: {
+        schema_id: {const: execution-profile/v1},
+        image_identity: {type: string, pattern: ^sha256:[0-9a-f]{64}$},
+        operating_system: {const: linux},
+        sandbox_identity: {type: string, minLength: 1, maxLength: 160, pattern: ^[A-Za-z0-9][A-Za-z0-9._:/-]*$},
+        cpu_architecture: {enum: [aarch64, x86_64]},
+        profile_digest: {type: string, pattern: ^[0-9a-f]{64}$}
+      }
+    },
+    {
+      $schema: https://json-schema.org/draft/2020-12/schema,
+      $id: execution-state-manifest/v1,
+      type: object,
+      additionalProperties: false,
+      x-pullwise-digest: {field: manifest_digest, domain: pullwise:execution-state-manifest:v1},
+      x-pullwise-semantics: [execution_state_manifest],
+      required: [schema_id, source_state_id, execution_profile_ref, execution_profile_digest, toolchain, config_and_fixtures, services, environment, locale, timezone, execution_state_id, manifest_digest],
+      properties: {
+        schema_id: {const: execution-state-manifest/v1},
+        source_state_id: {type: string, pattern: ^[0-9a-f]{64}$},
+        execution_profile_ref: {$ref: content-ref/v1, x-pullwise-content-schema-id: execution-profile/v1},
+        execution_profile_digest: {type: string, pattern: ^[0-9a-f]{64}$},
+        toolchain: {
+          type: array, maxItems: 4096, uniqueItems: true,
+          items: {type: object, additionalProperties: false, required: [tool_id, binary_identity, version, binary_sha256], properties: {tool_id: {type: string, minLength: 1, maxLength: 160, pattern: ^[A-Za-z0-9][A-Za-z0-9._:/-]*$}, binary_identity: {type: string, minLength: 2, maxLength: 4096, pattern: ^/[^\\x00]+$}, version: {type: string, minLength: 1, maxLength: 160}, binary_sha256: {type: string, pattern: ^[0-9a-f]{64}$}}}
+        },
+        config_and_fixtures: {type: array, maxItems: 4096, uniqueItems: true, items: {$ref: content-ref/v1, x-pullwise-content-schema-id: source-content/v1}},
+        services: {
+          type: array, maxItems: 4096, uniqueItems: true,
+          items: {type: object, additionalProperties: false, required: [service_id, version, endpoint_class, fingerprint], properties: {service_id: {type: string, minLength: 1, maxLength: 160, pattern: ^[A-Za-z0-9][A-Za-z0-9._:/-]*$}, version: {type: string, minLength: 1, maxLength: 160}, endpoint_class: {enum: [local_process, loopback, private_network, public_network]}, fingerprint: {type: string, pattern: ^[0-9a-f]{64}$}}}
+        },
+        environment: {
+          type: array, maxItems: 4096, uniqueItems: true,
+          items: {type: object, additionalProperties: false, required: [kind, key], properties: {kind: {enum: [secret_ref, value]}, key: {type: string, minLength: 1, maxLength: 160, pattern: ^[A-Z_][A-Z0-9_]*$}, value: {type: string, maxLength: 4096}, secret_key_id: {type: string, pattern: ^secret_[0-9a-f]{32}$}, secret_version: {type: string, minLength: 1, maxLength: 160}}}
+        },
+        locale: {type: string, minLength: 1, maxLength: 64},
+        timezone: {type: string, minLength: 1, maxLength: 64},
+        execution_state_id: {type: string, pattern: ^[0-9a-f]{64}$},
+        manifest_digest: {type: string, pattern: ^[0-9a-f]{64}$}
+      }
+    },
+    {
+      $schema: https://json-schema.org/draft/2020-12/schema,
+      $id: source-selection-policy/v1,
+      type: object,
+      additionalProperties: false,
+      x-pullwise-digest: {field: policy_digest, domain: pullwise:source-selection-policy:v1},
+      x-pullwise-semantics: [source_selection_policy],
+      required: [schema_id, root_identity, include, excluded_control_roots, ephemeral_patterns, symlink_policy, case_collision_policy, policy_digest],
+      properties: {
+        schema_id: {const: source-selection-policy/v1},
+        root_identity: {type: string, pattern: ^root_[0-9a-f]{32}$},
+        include: {const: all_repository_regular_files},
+        excluded_control_roots: {type: array, minItems: 1, maxItems: 128, uniqueItems: true, items: {type: string, minLength: 2, maxLength: 4096}},
+        ephemeral_patterns: {type: array, maxItems: 128, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 4096}},
+        symlink_policy: {const: record_target_no_follow},
+        case_collision_policy: {const: reject},
+        policy_digest: {type: string, pattern: ^[0-9a-f]{64}$}
+      }
+    },
+    {
+      $schema: https://json-schema.org/draft/2020-12/schema,
+      $id: source-tree-manifest/v1,
+      type: object,
+      additionalProperties: false,
+      x-pullwise-digest: {field: manifest_digest, domain: pullwise:source-tree-manifest:v1},
+      x-pullwise-semantics: [source_tree_manifest],
+      required: [schema_id, base_revision, selection_policy_ref, selection_policy_digest, entries, entry_count, total_bytes, source_state_id, manifest_digest],
+      properties: {
+        schema_id: {const: source-tree-manifest/v1},
+        base_revision: {type: string, pattern: ^(?:[0-9a-f]{40}|unversioned:[0-9a-f]{64})$},
+        selection_policy_ref: {$ref: content-ref/v1, x-pullwise-content-schema-id: source-selection-policy/v1},
+        selection_policy_digest: {type: string, pattern: ^[0-9a-f]{64}$},
+        entries: {
+          type: array, maxItems: 1000000, uniqueItems: true,
+          items: {type: object, additionalProperties: false, required: [path, type], properties: {path: {type: string, minLength: 1, maxLength: 4096, pattern: ^[^\\x00\\\\]+$}, type: {enum: [file, gitlink, symlink]}, size_bytes: {type: integer, minimum: 0, maximum: 9007199254740991}, sha256: {type: string, pattern: ^[0-9a-f]{64}$}, executable: {type: boolean}, target: {type: string, maxLength: 4096}, commit_sha: {type: string, pattern: ^[0-9a-f]{40}$}}}
+        },
+        entry_count: {type: integer, minimum: 0, maximum: 9007199254740991},
+        total_bytes: {type: integer, minimum: 0, maximum: 9007199254740991},
+        source_state_id: {type: string, pattern: ^[0-9a-f]{64}$},
+        manifest_digest: {type: string, pattern: ^[0-9a-f]{64}$}
+      }
+    }
+  ],
+  fixtures: [
+    {fixture_id:source_evidence_golden_change_set,fixture_class:golden,schema_id:change-set/v1,document:{schema_id:change-set/v1,original_source_state_id:0000000000000000000000000000000000000000000000000000000000000000,final_source_state_id:1111111111111111111111111111111111111111111111111111111111111111,added:[],modified:[{before:{path:README.md,type:file,size_bytes:3,sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad,executable:false},after:{path:README.md,type:file,size_bytes:4,sha256:88d4266fd4e6338d13b845fcf289579d209c897823b9217da3e161936f031589,executable:false}}],deleted:[],type_changed:[],patch_ref:{schema_id:content-ref/v1,artifact_id:art_22222222222222222222222222222222,content_schema_id:change-set-patch/v1,sha256:2222222222222222222222222222222222222222222222222222222222222222,size_bytes:1,media_type:application/json,encoding:utf-8},change_set_digest:0000000000000000000000000000000000000000000000000000000000000000},expected_code:null},
+    {fixture_id:source_evidence_golden_execution_profile,fixture_class:golden,schema_id:execution-profile/v1,document:{schema_id:execution-profile/v1,image_identity:sha256:1111111111111111111111111111111111111111111111111111111111111111,operating_system:linux,sandbox_identity:bwrap:1.0,cpu_architecture:x86_64,profile_digest:0000000000000000000000000000000000000000000000000000000000000000},expected_code:null},
+    {fixture_id:source_evidence_golden_execution_state,fixture_class:golden,schema_id:execution-state-manifest/v1,document:{schema_id:execution-state-manifest/v1,source_state_id:0000000000000000000000000000000000000000000000000000000000000000,execution_profile_ref:{schema_id:content-ref/v1,artifact_id:art_33333333333333333333333333333333,content_schema_id:execution-profile/v1,sha256:3333333333333333333333333333333333333333333333333333333333333333,size_bytes:1,media_type:application/json,encoding:utf-8},execution_profile_digest:0000000000000000000000000000000000000000000000000000000000000000,toolchain:[{tool_id:git,binary_identity:/usr/bin/git,version:2.43.0,binary_sha256:2222222222222222222222222222222222222222222222222222222222222222},{tool_id:python,binary_identity:/usr/bin/python3,version:3.10.12,binary_sha256:3333333333333333333333333333333333333333333333333333333333333333}],config_and_fixtures:[{schema_id:content-ref/v1,artifact_id:art_44444444444444444444444444444444,content_schema_id:source-content/v1,sha256:4444444444444444444444444444444444444444444444444444444444444444,size_bytes:123,media_type:application/json,encoding:utf-8}],services:[],environment:[{kind:value,key:LANG,value:C.UTF-8},{kind:value,key:TZ,value:UTC}],locale:C.UTF-8,timezone:UTC,execution_state_id:0000000000000000000000000000000000000000000000000000000000000000,manifest_digest:0000000000000000000000000000000000000000000000000000000000000000},expected_code:null},
+    {fixture_id:source_evidence_golden_patch,fixture_class:golden,schema_id:change-set-patch/v1,document:{schema_id:change-set-patch/v1,format:unified_diff,media_type:text/x-diff,encoding:base64,data_base64:LS0tIGEvUkVBRE1FLm1kCisrKyBiL1JFQURNRS5tZApAQCAtMSArMSBAQAotb2xkCituZXcK,byte_sha256:95854dd34e753b4f4da3a505410a19587141d9bf0f717d43788f1fa155ec7ab9,size_bytes:54,patch_digest:0000000000000000000000000000000000000000000000000000000000000000},expected_code:null},
+    {fixture_id:source_evidence_golden_selection_policy,fixture_class:golden,schema_id:source-selection-policy/v1,document:{schema_id:source-selection-policy/v1,root_identity:root_11111111111111111111111111111111,include:all_repository_regular_files,excluded_control_roots:[.git/,.pullwise-worker/],ephemeral_patterns:[*.swp,*.tmp],symlink_policy:record_target_no_follow,case_collision_policy:reject,policy_digest:0000000000000000000000000000000000000000000000000000000000000000},expected_code:null},
+    {fixture_id:source_evidence_golden_source_tree,fixture_class:golden,schema_id:source-tree-manifest/v1,document:{schema_id:source-tree-manifest/v1,base_revision:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,selection_policy_ref:{schema_id:content-ref/v1,artifact_id:art_11111111111111111111111111111111,content_schema_id:source-selection-policy/v1,sha256:1111111111111111111111111111111111111111111111111111111111111111,size_bytes:1,media_type:application/json,encoding:utf-8},selection_policy_digest:0000000000000000000000000000000000000000000000000000000000000000,entries:[{path:README.md,type:file,size_bytes:3,sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad,executable:false},{path:docs-link,type:symlink,target:docs},{path:vendor/lib,type:gitlink,commit_sha:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}],entry_count:3,total_bytes:3,source_state_id:0000000000000000000000000000000000000000000000000000000000000000,manifest_digest:0000000000000000000000000000000000000000000000000000000000000000},expected_code:null},
+    {fixture_id:source_evidence_idempotency_change_set,fixture_class:idempotency,schema_id:change-set/v1,document:{},expected_code:null},
+    {fixture_id:source_evidence_idempotency_execution_profile,fixture_class:idempotency,schema_id:execution-profile/v1,document:{},expected_code:null},
+    {fixture_id:source_evidence_idempotency_execution_state,fixture_class:idempotency,schema_id:execution-state-manifest/v1,document:{},expected_code:null},
+    {fixture_id:source_evidence_idempotency_patch,fixture_class:idempotency,schema_id:change-set-patch/v1,document:{},expected_code:null},
+    {fixture_id:source_evidence_idempotency_selection_policy,fixture_class:idempotency,schema_id:source-selection-policy/v1,document:{},expected_code:null},
+    {fixture_id:source_evidence_idempotency_source_tree,fixture_class:idempotency,schema_id:source-tree-manifest/v1,document:{},expected_code:null},
+    {fixture_id:source_evidence_negative_change_set_overlap,fixture_class:negative,schema_id:change-set/v1,document:{},expected_code:CHANGE_SET_INVALID},
+    {fixture_id:source_evidence_negative_execution_profile_mutable_image,fixture_class:negative,schema_id:execution-profile/v1,document:{},expected_code:EXECUTION_PROFILE_INVALID},
+    {fixture_id:source_evidence_negative_execution_state_order,fixture_class:negative,schema_id:execution-state-manifest/v1,document:{},expected_code:EXECUTION_STATE_MANIFEST_INVALID},
+    {fixture_id:source_evidence_negative_execution_state_wrong_target,fixture_class:negative,schema_id:execution-state-manifest/v1,document:{},expected_code:CONTENT_REF_SCHEMA_INVALID},
+    {fixture_id:source_evidence_negative_patch_bytes,fixture_class:negative,schema_id:change-set-patch/v1,document:{},expected_code:CHANGE_SET_PATCH_INVALID},
+    {fixture_id:source_evidence_negative_selection_missing_git,fixture_class:negative,schema_id:source-selection-policy/v1,document:{},expected_code:SOURCE_SELECTION_POLICY_INVALID},
+    {fixture_id:source_evidence_negative_source_tree_changed_state,fixture_class:negative,schema_id:source-tree-manifest/v1,document:{},expected_code:SOURCE_STATE_ID_INVALID},
+    {fixture_id:source_evidence_negative_source_tree_wrong_target,fixture_class:negative,schema_id:source-tree-manifest/v1,document:{},expected_code:CONTENT_REF_SCHEMA_INVALID}
+  ]
+}

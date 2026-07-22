@@ -260,7 +260,11 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 values["deletion_version"], values["owner_epoch"],
                 values["native_epoch"], values["transport_epoch"],
             )
-            if head["lifecycle"] not in ("ACTIVE", "FINALIZING"):
+            if (
+                head["lifecycle"] not in ("ACTIVE", "FINALIZING")
+                or head["current_authority_schema_id"]
+                != "server-authority-envelope/v1"
+            ):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
             if tuple(head[key] for key in keys) != expected:
                 raise AuthorityStoreError("AUTHORITY_MISMATCH")

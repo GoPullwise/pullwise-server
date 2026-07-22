@@ -4,6 +4,16 @@ from __future__ import annotations
 
 
 NPM_SEMANTICS = r'''
+function publicErrorCode(detail, explicit) {
+  const codes = new Set(bundle().families.flatMap(
+    (family) => family.fixtures
+      .filter((item) => item.fixture_id === "error_golden_current_registry")
+      .flatMap((item) => item.document.entries.map((entry) => entry.code)),
+  ));
+  const candidate = explicit ?? detail;
+  return codes.has(candidate) ? candidate : "CONTRACT_DOCUMENT_INVALID";
+}
+
 function canonicalString(value) {
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
     return JSON.stringify(value);
@@ -143,8 +153,12 @@ function validateSemantics(schemaId, value) {
     if (raw.length !== value.size_bytes) fail("SOURCE_CONTENT_SIZE_MISMATCH", "$.size_bytes");
     if (sha256Sync(raw) !== value.byte_sha256) fail("SOURCE_CONTENT_SHA256_MISMATCH", "$.byte_sha256");
   } else if (schemaId === "elapsed-budget-ledger/v1") {
-    if (value.consumed_ms + value.reserved_ms > value.elapsed_limit_ms) fail("BUDGET_ELAPSED_LIMIT_EXCEEDED");
-    if (value.calls_consumed + value.calls_reserved > value.tool_call_limit) fail("BUDGET_CALL_LIMIT_EXCEEDED");
+    if (value.consumed_ms + value.reserved_ms > value.elapsed_limit_ms) {
+      throw new ContractValidationError("BUDGET_EXHAUSTED", "BUDGET_ELAPSED_LIMIT_EXCEEDED", "$");
+    }
+    if (value.calls_consumed + value.calls_reserved > value.tool_call_limit) {
+      throw new ContractValidationError("BUDGET_EXHAUSTED", "BUDGET_CALL_LIMIT_EXCEEDED", "$");
+    }
   } else if (schemaId === "elapsed-budget-settlement/v1") {
     if (value.consumed_calls + value.released_calls !== 1) fail("BUDGET_CALL_CONSERVATION_INVALID");
   } else if (schemaId === "agent-claim-abandon-response/v1") {
