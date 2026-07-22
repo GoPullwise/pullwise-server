@@ -104,18 +104,19 @@ def _rule_worker_debug_file_manifest(value: dict[str, object]) -> None:
 def _rule_worker_debug_redaction_report(value: dict[str, object]) -> None:
     _seo_verify_embedded_digest("worker-debug-redaction-report/v1", value)
     structured, rescanned, redacted = value["structured_pass_detection_count"], value["archive_rescan_detection_count"], value["redacted_value_count"]
-    _seo_require(rescanned == 0, "DEBUG_REDACTION_RESCAN_FAILED", code="DEBUG_REDACTION_FAILED")
-    _seo_require(structured == redacted, "DEBUG_REDACTION_COUNT_INVALID", code="DEBUG_REDACTION_FAILED")
+    _seo_require(rescanned == 0, "DEBUG_REDACTION_RESCAN_FAILED")
+    _seo_require(structured == redacted, "DEBUG_REDACTION_COUNT_INVALID")
     _seo_require((value["status"] == "clean" and structured == 0) or (value["status"] == "redacted" and structured >= 1), "DEBUG_REDACTION_STATUS_INVALID")
 
 
 def _rule_worker_debug_descriptor(value: dict[str, object]) -> None:
     uploaded = value["state"] == "uploaded"
     _seo_require(uploaded == (value["transport_kind"] == "server_transport"), "DEBUG_DESCRIPTOR_BINDING_INVALID")
-    _seo_require(uploaded == (value["server_fragment_ref"] is not None == (value["server_receipt_ref"] is not None)), "DEBUG_DESCRIPTOR_BINDING_INVALID")
+    _seo_require((value["server_fragment_ref"] is not None) == uploaded, "DEBUG_DESCRIPTOR_BINDING_INVALID")
+    _seo_require((value["server_receipt_ref"] is not None) == uploaded, "DEBUG_DESCRIPTOR_BINDING_INVALID")
     _seo_require((value["reason_code"] is None) == uploaded, "DEBUG_DESCRIPTOR_BINDING_INVALID")
     if uploaded:
-        _seo_require(value["server_fragment_ref"]["sha256"] == value["fragment_ref"]["sha256"], "DEBUG_DESCRIPTOR_FRAGMENT_MISMATCH")
+        _seo_require(value["server_fragment_ref"]["sha256"] == value["fragment_ref"]["sha256"] and value["server_fragment_ref"]["size_bytes"] == value["fragment_ref"]["size_bytes"], "DEBUG_DESCRIPTOR_FRAGMENT_MISMATCH")
     _seo_require(value["source_sha256"] == value["fragment_ref"]["sha256"], "DEBUG_DESCRIPTOR_SOURCE_DIGEST_INVALID")
 
 
@@ -153,7 +154,8 @@ def _rule_task_result_transport_envelope(value: dict[str, object]) -> None:
     descriptor, receipt = value["worker_debug_descriptor"], value["transport_receipt"]
     if debug["availability"] == "available":
         _seo_require(descriptor is not None, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED")
-        _seo_require(receipt["availability"] == ("available" if descriptor["state"] == "uploaded" else "not_applicable"), "TRANSPORT_RECEIPT_MATRIX_INVALID")
+        expected = {"availability": "available"} if descriptor["state"] == "uploaded" else {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}
+        _seo_require(all(receipt.get(key) == item for key, item in expected.items()), "TRANSPORT_RECEIPT_MATRIX_INVALID")
     else:
         _seo_require(descriptor is None, "TRANSPORT_DEBUG_DESCRIPTOR_INVALID")
         _seo_require(receipt == {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}, "TRANSPORT_RECEIPT_MATRIX_INVALID")

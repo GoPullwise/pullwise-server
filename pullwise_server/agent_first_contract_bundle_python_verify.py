@@ -262,6 +262,7 @@ __all__ = [
     "validate_requirement_ledger_transition", "validate_task_charter_transition",
     "validate_task_owner_transition", "validate_task_record_transition",
     "validate_task_request_acceptance", "validate_task_result_publication",
+    "derive_task_result_core",
     "fixture", "fixture_bytes", "gate_predicate_registry", "package_tuple",
     "root_manifest", "root_manifest_bytes", "schema", "schema_bytes", "schema_ids",
     "seal_document", "stable_error_registry", "tool_catalog", "validate_document",
@@ -270,12 +271,15 @@ __all__ = [
     "verify_completion_proposal_context",
     "verify_evidence_closure_context", "verify_execution_state_context",
     "verify_quality_policy_plan_context",
+    "verify_task_result_context", "verify_task_result_core",
+    "verify_task_result_transport_ack", "verify_task_result_transport_envelope",
     "verify_gate_input_snapshot_context", "verify_pre_gate_evidence_closure_context",
     "verify_observation_manifest_extension", "verify_pre_gate_root_set_context",
     "verify_source_tree_context", "verify_terminalization_fact_context",
     "verify_terminalization_input_snapshot_context", "verify_waiver_authorization",
     "verify_waiver_event_authority",
     "verify_verifier_input_context", "verify_verifier_work_context",
+    "verify_worker_debug_descriptor_content", "verify_worker_debug_fragment_content",
     "verify_attestation_context", "verify_attestation_manifest_context",
 ]
 '''

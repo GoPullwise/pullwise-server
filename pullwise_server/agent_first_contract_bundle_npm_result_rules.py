@@ -31,6 +31,7 @@ function resultOrderedUnique(values, key) {
 function resultSortedUnique(values) { return resultOrderedUnique(values, (item) => item); }
 function resultRefKey(value) { return [value.content_schema_id, value.artifact_id, value.sha256]; }
 function resultArtifactKey(value) { const ref = value.ref ?? value; return ref.artifact_id; }
+function resultRefContentTuple(value) { return [value.content_schema_id, value.sha256, value.size_bytes, value.media_type, value.encoding]; }
 function resultAvailabilityKey(value) { return value.availability === "available" ? ["available", ...resultRefKey(value.ref)] : [value.availability, value.reason_code]; }
 function resultUtf8Bytes(value) { return encoder.encode(value).length; }
 function resultLeap(year) { return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0); }
@@ -127,7 +128,7 @@ function ruleWorkerDebugRedactionReport(value) {
 function ruleWorkerDebugDescriptor(value) {
   if (value.state === "uploaded") {
     seoRequire(value.transport_kind === "server_transport" && value.server_fragment_ref !== null && value.server_receipt_ref !== null && value.reason_code === null, "DEBUG_DESCRIPTOR_BINDING_INVALID");
-    seoRequire(value.server_fragment_ref.sha256 === value.fragment_ref.sha256, "DEBUG_DESCRIPTOR_FRAGMENT_MISMATCH");
+    seoRequire(value.server_fragment_ref.sha256 === value.fragment_ref.sha256 && value.server_fragment_ref.size_bytes === value.fragment_ref.size_bytes, "DEBUG_DESCRIPTOR_FRAGMENT_MISMATCH");
   } else {
     seoRequire(value.transport_kind === "none" && value.server_fragment_ref === null && value.server_receipt_ref === null && value.reason_code === "DEBUG_UPLOAD_FAILED", "DEBUG_DESCRIPTOR_BINDING_INVALID");
   }
@@ -149,18 +150,19 @@ function ruleTaskResultTransportAck(value) {
 
 function ruleTaskResultTransportEnvelope(value) {
   const result = validateDocument("task-result/v1", value.task_result), resultBytes = canonicalDocumentBytes(result), resultDigest = sha256Sync(resultBytes);
-  seoRequire(value.task_result_digest === resultDigest, "TRANSPORT_ENVELOPE_DIGEST_INVALID", "$.task_result_digest");
+  seoRequire(value.task_result_digest === resultDigest, "TRANSPORT_ENVELOPE_DIGEST_INVALID", "$");
   const core = validateDocument("task-result-core/v1", resultTaskResultCoreProjection(result)), coreBytes = canonicalDocumentBytes(core), coreDigest = sha256Sync(coreBytes);
-  seoRequire(value.task_result_core_digest === coreDigest, "TRANSPORT_CORE_DIGEST_INVALID", "$.task_result_core_digest");
+  seoRequire(value.task_result_core_digest === coreDigest, "TRANSPORT_CORE_DIGEST_INVALID", "$");
   seoRequire(value.task_result_core_ref.sha256 === coreDigest && value.task_result_core_ref.size_bytes === coreBytes.length, "TRANSPORT_CORE_REF_INVALID", "$.task_result_core_ref");
   const authority = value.authority, fence = value.full_fence;
-  ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].forEach((key) => seoRequire(authority[key] === fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence"));
+  ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].forEach((key) => seoRequire(authority[key] === fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence"));
   seoRequire(authority.task_id === result.task_id, "TRANSPORT_RESULT_TASK_INVALID", "$.authority.task_id");
   seoRequire(authority.task_version === result.published_from_version, "TRANSPORT_RESULT_VERSION_INVALID", "$.authority.task_version");
   seoRequire(canonicalString(value.package) === canonicalString(authority.package), "TRANSPORT_PACKAGE_INVALID", "$.package");
   const debug = result.diagnostics.worker_debug_fragment, descriptor = value.worker_debug_descriptor, receipt = value.transport_receipt;
   if (debug.availability === "available") {
     seoRequire(descriptor !== null, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED", "$.worker_debug_descriptor");
+    validateDocument("worker-debug-fragment-descriptor/v1", descriptor);
     seoRequire(descriptor.state === "uploaded" ? receipt.availability === "available" : canonicalString(receipt) === canonicalString({availability: "not_applicable", reason_code: "TRANSPORT_RECEIPT_NOT_APPLICABLE"}), descriptor.state === "uploaded" ? "TRANSPORT_RECEIPT_REQUIRED" : "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt");
   } else {
     seoRequire(descriptor === null, "TRANSPORT_DEBUG_DESCRIPTOR_INVALID", "$.worker_debug_descriptor");

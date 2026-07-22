@@ -6,8 +6,14 @@ from __future__ import annotations
 NPM_RESULT_CONTEXT = r'''
 function resultContextOptions(value) {
   if (value === undefined || value === null) return {workerDebugDescriptor: null, transportReceipt: null};
-  if (typeof value === "object" && !Array.isArray(value) && ("workerDebugDescriptor" in value || "transportReceipt" in value)) return {workerDebugDescriptor: value.workerDebugDescriptor ?? null, transportReceipt: value.transportReceipt ?? null};
+  if (typeof value === "object" && !Array.isArray(value) && ("workerDebugDescriptor" in value || "worker_debug_descriptor" in value || "transportReceipt" in value || "transport_receipt" in value)) return {workerDebugDescriptor: value.workerDebugDescriptor ?? value.worker_debug_descriptor ?? null, transportReceipt: value.transportReceipt ?? value.transport_receipt ?? null};
   return {workerDebugDescriptor: value, transportReceipt: null};
+}
+
+function resultRefContentTuple(value) { return [value.content_schema_id, value.sha256, value.size_bytes, value.media_type, value.encoding]; }
+function resultCheckedReceipt(value) {
+  seoRequire(value !== null && typeof value === "object" && !Array.isArray(value) && value.schema_id === "server-transport-receipt/v1" && value.receipt_kind === "server_transport", "TRANSPORT_RECEIPT_TYPE_INVALID");
+  return verifyDocumentDigest("server-transport-receipt/v1", value);
 }
 
 function resultIdentityBytes(identity) {
@@ -24,26 +30,28 @@ export function deriveTaskResultCore(taskResult) {
 export async function verifyTaskResultContext(taskResult, options = {}) {
   const checked = validateDocument("task-result/v1", taskResult), {workerDebugDescriptor} = resultContextOptions(options), debug = checked.diagnostics.worker_debug_fragment;
   if (debug.availability === "available") {
-    const descriptor = await verifyDocumentDigest("worker-debug-fragment-descriptor/v1", workerDebugDescriptor);
-    seoRequire(seoRefMatchesDocument(debug.ref, "worker-debug-fragment-descriptor/v1", descriptor), "CAS_CORRUPT", "$.diagnostics.worker_debug_fragment.ref");
-  } else seoRequire(workerDebugDescriptor === null, "TASK_RESULT_DEBUG_DESCRIPTOR_INVALID", "$.diagnostics.worker_debug_fragment");
+    const descriptor = validateDocument("worker-debug-fragment-descriptor/v1", workerDebugDescriptor);
+    seoRequire(seoRefMatchesDocument(debug.ref, "worker-debug-fragment-descriptor/v1", descriptor), "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment.ref");
+  } else seoRequire(workerDebugDescriptor === null, "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment");
   return checked;
 }
 
 export async function verifyTaskResultCore(taskResult, core) {
-  const expected = deriveTaskResultCore(await verifyTaskResultContext(taskResult)), checked = validateDocument("task-result-core/v1", core);
-  seoRequire(canonicalString(checked) === canonicalString(expected), "TASK_RESULT_CORE_CONTEXT_INVALID");
+  const checkedResult = validateDocument("task-result/v1", taskResult), expected = deriveTaskResultCore(checkedResult), checked = validateDocument("task-result-core/v1", core);
+  seoRequire(canonicalString(checked) === canonicalString(expected), "TASK_RESULT_CORE_PROJECTION_INVALID");
   return checked;
 }
 
 export async function verifyWorkerDebugFragmentContent(fragment, taskResultCore, fileManifest, redactionReport) {
-  const checked = validateDocument("worker-debug-fragment/v1", fragment), core = await verifyDocumentDigest("task-result-core/v1", taskResultCore);
+  const checked = validateDocument("worker-debug-fragment/v1", fragment);
   const manifest = await verifyDocumentDigest("worker-debug-file-manifest/v1", fileManifest), report = await verifyDocumentDigest("worker-debug-redaction-report/v1", redactionReport);
   seoRequire(seoRefMatchesDocument(checked.file_manifest_ref, "worker-debug-file-manifest/v1", manifest), "CAS_CORRUPT", "$.file_manifest_ref");
   seoRequire(seoRefMatchesDocument(checked.redaction_report_ref, "worker-debug-redaction-report/v1", report), "CAS_CORRUPT", "$.redaction_report_ref");
   const identity = {task_id: checked.task_id, job_id: checked.job_id, run_id: checked.run_id, lease_id: checked.lease_id, transport_attempt_id: checked.transport_attempt_id, transport_epoch: checked.transport_epoch, native_attempt_id: checked.native_attempt_id, native_epoch: checked.native_epoch, capture_kind: checked.capture_kind, snapshot_seq: checked.snapshot_seq, file_manifest_digest: manifest.manifest_digest};
   seoRequire(checked.fragment_id === "frag_" + sha256Sync(resultIdentityBytes(identity)), "DEBUG_FRAGMENT_ID_INVALID", "$.fragment_id");
   if (checked.task_result_core.availability === "available") {
+    seoRequire(taskResultCore !== null, "DEBUG_TERMINAL_CORE_REQUIRED", "$.task_result_core");
+    const core = validateDocument("task-result-core/v1", taskResultCore);
     seoRequire(seoRefMatchesDocument(checked.task_result_core.ref, "task-result-core/v1", core), "CAS_CORRUPT", "$.task_result_core.ref");
     seoRequire(checked.task_id === core.task_id && checked.native_attempt_id === core.attempt_identity.attempt_id && checked.native_epoch === core.attempt_identity.native_epoch, "DEBUG_FRAGMENT_CONTEXT_INVALID", "$.task_result_core");
     seoRequire(core.final_source_state.availability === "available" && core.final_source_state.ref.sha256 === checked.source_state_id, "DEBUG_FRAGMENT_CONTEXT_INVALID", "$.source_state_id");
@@ -51,23 +59,24 @@ export async function verifyWorkerDebugFragmentContent(fragment, taskResultCore,
     seoRequire(checked.checkpoint_generation === core.provenance.checkpoint_generation, "DEBUG_FRAGMENT_CONTEXT_INVALID", "$.checkpoint_generation");
     resultTimeLeq(core.created_at, checked.captured_at, "$.captured_at");
     resultTimeLeq(checked.captured_at, core.terminal_at, "$.captured_at");
-  }
+  } else seoRequire(taskResultCore === null, "DEBUG_NONTERMINAL_CORE_INVALID", "$.task_result_core");
   return checked;
 }
 
 export async function verifyWorkerDebugDescriptorContent(descriptor, fragment, options = {}) {
-  const checked = await verifyDocumentDigest("worker-debug-fragment-descriptor/v1", descriptor), {transportReceipt} = resultContextOptions(options);
+  const checked = validateDocument("worker-debug-fragment-descriptor/v1", descriptor), {transportReceipt} = resultContextOptions(options);
   const fragmentDoc = validateDocument("worker-debug-fragment/v1", fragment), fragmentBytes = canonicalDocumentBytes(fragmentDoc);
   seoRequire(seoRefMatchesDocument(checked.fragment_ref, "worker-debug-fragment/v1", fragmentDoc), "CAS_CORRUPT", "$.fragment_ref");
   seoRequire(checked.source_sha256 === sha256Sync(fragmentBytes), "DEBUG_DESCRIPTOR_SOURCE_DIGEST_INVALID", "$.source_sha256");
   seoRequire(checked.snapshot_seq === fragmentDoc.snapshot_seq, "DEBUG_DESCRIPTOR_CONTEXT_INVALID", "$.snapshot_seq");
   if (checked.state === "uploaded") {
-    const receipt = await verifyDocumentDigest("server-transport-receipt/v1", transportReceipt);
+    seoRequire(transportReceipt !== null, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.server_receipt_ref");
+    const receipt = await resultCheckedReceipt(transportReceipt);
     seoRequire(seoRefMatchesDocument(checked.server_fragment_ref, "worker-debug-fragment/v1", fragmentDoc), "CAS_CORRUPT", "$.server_fragment_ref");
     seoRequire(seoRefMatchesDocument(checked.server_receipt_ref, "server-transport-receipt/v1", receipt), "CAS_CORRUPT", "$.server_receipt_ref");
-    seoRequire(seoRefMatchesDocument(receipt.content_ref, "worker-debug-fragment/v1", fragmentDoc), "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.server_receipt_ref");
+    seoRequire(resultRefContentTuple(receipt.content_ref).every((v, i) => v === resultRefContentTuple(checked.fragment_ref)[i]), "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.content_ref");
     resultTimeLeq(fragmentDoc.captured_at, receipt.accepted_at, "$.server_receipt_ref");
-  } else seoRequire(transportReceipt === null, "DEBUG_DESCRIPTOR_BINDING_INVALID", "$.transportReceipt");
+  } else seoRequire(transportReceipt === null, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.server_receipt_ref");
   return checked;
 }
 

@@ -22,6 +22,7 @@ from .agent_first_contract_bundle_npm_source_execution_observation import (
 from .agent_first_contract_bundle_npm_pre_gate import NPM_PRE_GATE
 from .agent_first_contract_bundle_npm_publication import NPM_PUBLICATION
 from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
+from .agent_first_contract_bundle_npm_result import NPM_RESULT
 from .agent_first_contract_bundle_npm_task_evidence import NPM_TASK_EVIDENCE
 from .agent_first_contract_bundle_npm_task_control_helpers import (
     NPM_TASK_CONTROL_HELPERS,
@@ -316,6 +317,8 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   artifact_content_registry: ruleArtifactContentRegistry,
   attempt_state_nullability: taskControlRuleAttemptNullability,
   attempt_transport_binding_all_or_none: taskControlRuleAttemptTransport,
+  availability_reason_registry: ruleAvailabilityReasonRegistry,
+  availability_ref: ruleAvailabilityRef,
   budget_ceiling_consistency: taskControlRulePolicyBudgets,
   budget_summary: ruleBudgetSummary,
   capability_and_delivery_sets_sorted_unique: taskControlRuleRequestSets,
@@ -364,6 +367,11 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   source_state: ruleSourceState,
   task_record_transport_binding_all_or_none: taskControlRuleRecordTransport,
   task_report: ruleTaskReport,
+  task_result: ruleTaskResult,
+  task_result_core: ruleTaskResultCore,
+  task_result_outcome_reason_registry: ruleTaskResultOutcomeReasonRegistry,
+  task_result_transport_ack: ruleTaskResultTransportAck,
+  task_result_transport_envelope: ruleTaskResultTransportEnvelope,
   terminal_result_shape: taskControlRuleRecordTerminal,
   terminalization_fact: ruleTerminalizationFact,
   terminalization_input_snapshot: ruleTerminalizationInputSnapshot,
@@ -377,6 +385,10 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   verifier_input_manifest: ruleVerifierInput,
   verifier_work_report: ruleVerifierWork,
   waiver_time_order: taskControlRuleWaiverTime,
+  worker_debug_descriptor: ruleWorkerDebugDescriptor,
+  worker_debug_file_manifest: ruleWorkerDebugFileManifest,
+  worker_debug_fragment: ruleWorkerDebugFragment,
+  worker_debug_redaction_report: ruleWorkerDebugRedactionReport,
 });
 
 function ruleUtf8Fields(value) {
@@ -453,6 +465,7 @@ NPM_SEMANTICS = "\n".join(
         NPM_GATE_INPUT,
         NPM_GATE,
         NPM_GATE_PREPARATION,
+        NPM_RESULT,
         NPM_VERIFICATION,
         NPM_DECLARED_DISPATCH,
     )

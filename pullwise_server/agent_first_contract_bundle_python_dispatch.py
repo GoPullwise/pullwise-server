@@ -12,6 +12,8 @@ _DOCUMENT_RULE_HANDLERS = {
     "artifact_content_registry": _rule_artifact_content_registry,
     "attempt_state_nullability": _task_control_rule_attempt_nullability,
     "attempt_transport_binding_all_or_none": _task_control_rule_attempt_transport,
+    "availability_reason_registry": _rule_availability_reason_registry,
+    "availability_ref": _rule_availability_ref,
     "budget_ceiling_consistency": _task_control_rule_policy_budgets,
     "budget_summary": _rule_budget_summary,
     "capability_and_delivery_sets_sorted_unique": _task_control_rule_request_sets,
@@ -60,6 +62,11 @@ _DOCUMENT_RULE_HANDLERS = {
     "source_state": _rule_source_state,
     "task_record_transport_binding_all_or_none": _task_control_rule_record_transport,
     "task_report": _rule_task_report,
+    "task_result": _rule_task_result_complete,
+    "task_result_core": _rule_task_result_core,
+    "task_result_outcome_reason_registry": _rule_task_result_outcome_reason_registry,
+    "task_result_transport_ack": _rule_task_result_transport_ack,
+    "task_result_transport_envelope": _rule_task_result_transport_envelope,
     "terminal_result_shape": _task_control_rule_record_terminal,
     "terminalization_fact": _rule_terminalization_fact,
     "terminalization_input_snapshot": _rule_terminalization_input_snapshot,
@@ -73,6 +80,10 @@ _DOCUMENT_RULE_HANDLERS = {
     "verifier_input_manifest": _rule_verifier_input,
     "verifier_work_report": _rule_verifier_work,
     "waiver_time_order": _task_control_rule_waiver_time,
+    "worker_debug_descriptor": _rule_worker_debug_descriptor,
+    "worker_debug_file_manifest": _rule_worker_debug_file_manifest,
+    "worker_debug_fragment": _rule_worker_debug_fragment,
+    "worker_debug_redaction_report": _rule_worker_debug_redaction_report,
 }
 
 
