@@ -52,9 +52,9 @@ class AgentFirstResultDebugTransportDocumentFacadesTest(
                 "availability-ref/v1",
                 {
                     "availability": "available",
-                    "ref": self.fixture_document("task_result_golden_completed")[
-                        "diagnostics"
-                    ]["worker_debug_fragment"]["ref"],
+                    "ref": self.fixture_document("task_result_transport_crash_uploaded_replay")[
+                        "task_result"
+                    ]["diagnostics"]["worker_debug_fragment"]["ref"],
                 },
             ),
             (
