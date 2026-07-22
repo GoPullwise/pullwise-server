@@ -11,11 +11,17 @@ _DOCUMENT_RULE_HANDLERS = {
     "capability_and_delivery_sets_sorted_unique": _rule_task_request_sets,
     "capability_sets_disjoint_sorted_unique": _rule_policy_capability_sets,
     "change_set_patch": _rule_change_set_patch,
+    "debug_redaction_plan": _rule_debug_redaction_plan,
     "execution_profile": _rule_execution_profile,
+    "gate_decision": _rule_gate_decision,
+    "gate_predicate_registry": _rule_gate_predicate_registry,
     "observation": _rule_observation,
     "policy_digest_exact": _rule_policy_digest,
+    "publication_content_manifest": _rule_publication_content_manifest,
+    "quality_policy_plan": _rule_quality_policy_plan,
     "risk_ceiling_current_mvp": _rule_policy_risk_ceiling,
     "root_and_origin_sets_sorted_unique": _rule_policy_roots_and_origins,
+    "terminalization_fact": _rule_terminalization_fact,
     "utf8_nfc_byte_limits": _utf8_fields,
 }
 

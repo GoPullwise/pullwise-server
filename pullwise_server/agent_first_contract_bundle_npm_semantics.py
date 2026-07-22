@@ -8,7 +8,10 @@ from .agent_first_contract_bundle_npm_effective_policy import (
 from .agent_first_contract_bundle_npm_execution_profile import (
     NPM_EXECUTION_PROFILE_RULE,
 )
+from .agent_first_contract_bundle_npm_gate import NPM_GATE
+from .agent_first_contract_bundle_npm_gate_preparation import NPM_GATE_PREPARATION
 from .agent_first_contract_bundle_npm_observation import NPM_OBSERVATION_RULE
+from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
 
 
 NPM_SEMANTICS_BASE = r'''
@@ -284,11 +287,17 @@ NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
   budget_ceiling_consistency: rulePolicyBudgetCeilings,
   capability_sets_disjoint_sorted_unique: rulePolicyCapabilitySets,
+  debug_redaction_plan: ruleDebugRedactionPlan,
   execution_profile: ruleExecutionProfile,
+  gate_decision: ruleGateDecision,
+  gate_predicate_registry: ruleGatePredicateRegistry,
   observation: ruleObservation,
   policy_digest_exact: rulePolicyDigest,
+  publication_content_manifest: rulePublicationContentManifest,
+  quality_policy_plan: ruleQualityPolicyPlan,
   risk_ceiling_current_mvp: rulePolicyRiskCeiling,
   root_and_origin_sets_sorted_unique: rulePolicyRootsAndOrigins,
+  terminalization_fact: ruleTerminalizationFact,
   utf8_nfc_byte_limits: ruleUtf8Fields,
 });
 
@@ -349,6 +358,9 @@ NPM_SEMANTICS = "\n".join(
         NPM_EFFECTIVE_POLICY_RULES,
         NPM_EXECUTION_PROFILE_RULE,
         NPM_OBSERVATION_RULE,
+        NPM_QUALITY_POLICY,
+        NPM_GATE,
+        NPM_GATE_PREPARATION,
         NPM_DECLARED_DISPATCH,
     )
 )

@@ -250,6 +250,8 @@ export const all_schema_ids = allSchemaIds;
 export const canonical_document_bytes = canonicalDocumentBytes;
 export const canonical_validated_bytes = canonicalValidatedBytes;
 export const document_digest = documentDigest;
+export const evaluate_success_gate = evaluateSuccessGate;
+export const evaluate_terminalization_gate = evaluateTerminalizationGate;
 export const fixture_bytes = fixtureBytes;
 export const gate_predicate_registry = gatePredicateRegistry;
 export const package_tuple = packageTuple;
@@ -265,6 +267,7 @@ export const verify_bundle = verifyBundle;
 export const verify_budget_transition = verifyBudgetTransition;
 export const verify_content_ref_set = verifyContentRefSet;
 export const verify_document_digest = verifyDocumentDigest;
+export const verify_terminalization_fact_context = verifyTerminalizationFactContext;
 export const verify_waiver_authorization = verifyWaiverAuthorization;
 '''
 

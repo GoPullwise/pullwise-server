@@ -248,11 +248,13 @@ __all__ = [
     "PACKAGE_IDENTITY", "PACKAGE_TUPLE", "PACKAGE_VERSION", "ROOT_SHA256",
     "all_schema_ids", "assert_pin", "bundle", "bundle_bytes", "canonical_document_bytes",
     "canonical_document_sha256", "canonical_validated_bytes", "document_digest",
+    "evaluate_success_gate", "evaluate_terminalization_gate",
     "fixture", "fixture_bytes", "gate_predicate_registry", "package_tuple",
     "root_manifest", "root_manifest_bytes", "schema", "schema_bytes", "schema_ids",
     "seal_document", "stable_error_registry", "tool_catalog", "validate_document",
     "verify_budget_transition", "verify_bundle", "verify_content_ref_set",
-    "verify_document_digest", "verify_waiver_authorization",
+    "verify_document_digest", "verify_terminalization_fact_context",
+    "verify_waiver_authorization",
 ]
 '''
 

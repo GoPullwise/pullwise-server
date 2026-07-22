@@ -297,26 +297,31 @@ class AgentFirstGatePreparationFacadesTest(unittest.TestCase):
                 self.helper_operation(
                     fact, task_id="task_22222222222222222222222222222222"
                 ),
+                "CONTRACT_DOCUMENT_INVALID",
                 "TASK_ID_COLLISION",
                 "$.task_id",
             ),
             (
                 self.helper_operation(fact, current_task_version=8),
                 "TASK_VERSION_STALE",
+                "TASK_VERSION_STALE",
                 "$.observed_task_version",
             ),
             (
                 self.helper_operation(fact, lifecycle_state="TERMINAL"),
+                "STATE_TRANSITION_INVALID",
                 "STATE_TRANSITION_INVALID",
                 "$.lifecycle_state",
             ),
             (
                 self.helper_operation(fact, fact=conflict),
                 "IDEMPOTENCY_CONFLICT",
+                "IDEMPOTENCY_CONFLICT",
                 "$.idempotency_key",
             ),
             (
                 self.helper_operation(corrupt),
+                "CONTRACT_DIGEST_MISMATCH",
                 "CONTRACT_DIGEST_MISMATCH",
                 "fact_digest",
             ),
@@ -331,11 +336,11 @@ class AgentFirstGatePreparationFacadesTest(unittest.TestCase):
             [{"ok": True, "value": fact}] * len(valid_operations),
             python_results[: len(valid_operations)],
         )
-        for result, (_, detail, path) in zip(
+        for result, (_, code, detail, path) in zip(
             python_results[len(valid_operations) :], invalid_cases
         ):
             self.assertEqual(
-                {"ok": False, "code": detail, "detail": detail, "path": path},
+                {"ok": False, "code": code, "detail": detail, "path": path},
                 result,
             )
 
