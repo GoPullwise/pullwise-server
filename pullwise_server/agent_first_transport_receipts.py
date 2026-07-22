@@ -28,6 +28,32 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
                 if self._blob(existing["receipt_bytes"]) != values["receipt_bytes"]:
                     raise AuthorityStoreError("TRANSPORT_RECEIPT_CONFLICT")
                 return self._blob(existing["response_bytes"])
+            historical = connection.execute(
+                """
+                SELECT a.state AS attempt_state, o.state AS owner_state,
+                       ga.state AS grant_state
+                FROM agent_current_claims c
+                JOIN agent_current_attempts a ON a.attempt_id=c.attempt_id
+                JOIN agent_current_owner_incarnations o ON o.session_id=c.session_id
+                JOIN agent_current_grants g ON g.grant_id=c.grant_id
+                JOIN agent_current_grant_authority ga ON ga.grant_id=c.grant_id
+                WHERE c.task_id=? AND c.attempt_id=? AND c.session_id=?
+                  AND c.owner_id=? AND c.lease_id=? AND c.authority_digest=?
+                  AND c.task_version=? AND c.deletion_version=?
+                  AND c.owner_epoch=? AND c.native_epoch=? AND c.transport_epoch=?
+                  AND g.grant_digest=?
+                """,
+                tuple(values[key] for key in (
+                    "task_id", "attempt_id", "session_id", "owner_id", "lease_id",
+                    "authority_digest", "task_version", "deletion_version",
+                    "owner_epoch", "native_epoch", "transport_epoch", "grant_digest",
+                )),
+            ).fetchone()
+            if historical is not None and any(
+                historical[name] == "FENCED"
+                for name in ("attempt_state", "owner_state", "grant_state")
+            ):
+                raise AuthorityStoreError("AUTHORITY_FENCED")
             authority = connection.execute(
                 """
                 SELECT h.current_attempt_id, h.current_session_id, h.owner_id,

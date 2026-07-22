@@ -7,14 +7,17 @@
       "type": "object",
       "additionalProperties": false,
       "x-pullwise-digest": {"field": "ledger_digest", "domain": "pullwise:elapsed-budget-ledger:v1"},
-      "required": ["schema_id", "task_id", "grant_digest", "hard_limit_ms", "consumed_ms", "active_reserved_ms", "ledger_digest"],
+      "required": ["schema_id", "task_id", "grant_digest", "elapsed_limit_ms", "consumed_ms", "reserved_ms", "tool_call_limit", "calls_consumed", "calls_reserved", "ledger_digest"],
       "properties": {
         "schema_id": {"const": "elapsed-budget-ledger/v1"},
         "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
         "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "hard_limit_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "elapsed_limit_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-        "active_reserved_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "reserved_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "tool_call_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "calls_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "calls_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "ledger_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
@@ -24,7 +27,7 @@
       "type": "object",
       "additionalProperties": false,
       "x-pullwise-digest": {"field": "reservation_digest", "domain": "pullwise:elapsed-budget-reservation:v1"},
-      "required": ["schema_id", "reservation_id", "task_id", "attempt_id", "invocation_digest", "reserved_ms", "previous_consumed_ms", "previous_reserved_ms", "started_at", "reservation_digest"],
+      "required": ["schema_id", "reservation_id", "task_id", "attempt_id", "invocation_digest", "reserved_ms", "reserved_calls", "previous_consumed_ms", "previous_reserved_ms", "previous_calls_consumed", "previous_calls_reserved", "started_at", "reservation_digest"],
       "properties": {
         "schema_id": {"const": "elapsed-budget-reservation/v1"},
         "reservation_id": {"type": "string", "pattern": "^reserve_[0-9a-f]{32}$"},
@@ -32,8 +35,11 @@
         "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
         "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "reserved_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "reserved_calls": {"const": 1},
         "previous_consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "previous_reserved_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "previous_calls_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "previous_calls_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "started_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
         "reservation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
@@ -44,7 +50,7 @@
       "type": "object",
       "additionalProperties": false,
       "x-pullwise-digest": {"field": "settlement_digest", "domain": "pullwise:elapsed-budget-settlement:v1"},
-      "required": ["schema_id", "reservation_id", "invocation_digest", "elapsed_ms", "consumed_ms", "released_ms", "resulting_consumed_ms", "resulting_reserved_ms", "outcome", "settlement_digest"],
+      "required": ["schema_id", "reservation_id", "invocation_digest", "elapsed_ms", "consumed_ms", "released_ms", "consumed_calls", "released_calls", "resulting_consumed_ms", "resulting_reserved_ms", "resulting_calls_consumed", "resulting_calls_reserved", "outcome", "settlement_digest"],
       "properties": {
         "schema_id": {"const": "elapsed-budget-settlement/v1"},
         "reservation_id": {"type": "string", "pattern": "^reserve_[0-9a-f]{32}$"},
@@ -52,8 +58,12 @@
         "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "released_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "consumed_calls": {"type": "integer", "minimum": 0, "maximum": 1},
+        "released_calls": {"type": "integer", "minimum": 0, "maximum": 1},
         "resulting_consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "resulting_reserved_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "resulting_calls_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "resulting_calls_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "outcome": {"enum": ["settled", "abandoned"]},
         "settlement_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
@@ -64,21 +74,21 @@
       "fixture_id": "budget_crash_after_reservation",
       "fixture_class": "crash",
       "schema_id": "elapsed-budget-reservation/v1",
-      "document": {"reservation_persisted": true, "intent_persisted": true, "dispatch_started": false},
+      "document": {"elapsed_reserved": true, "call_reserved": true, "intent_persisted": true, "dispatch_started": false},
       "expected_code": "INVOCATION_PENDING"
     },
     {
       "fixture_id": "budget_golden_settlement",
       "fixture_class": "golden",
       "schema_id": "elapsed-budget-settlement/v1",
-      "document": {"elapsed_ms": 7, "consumed_ms": 7, "released_ms": 93, "outcome": "settled"},
+      "document": {"elapsed_ms": 7, "consumed_ms": 7, "released_ms": 93, "consumed_calls": 1, "released_calls": 0, "outcome": "settled"},
       "expected_code": null
     },
     {
       "fixture_id": "budget_negative_over_limit",
       "fixture_class": "negative",
       "schema_id": "elapsed-budget-ledger/v1",
-      "document": {"hard_limit_ms": 100, "consumed_ms": 80, "active_reserved_ms": 30},
+      "document": {"elapsed_limit_ms": 100, "consumed_ms": 80, "reserved_ms": 30, "tool_call_limit": 1, "calls_consumed": 1, "calls_reserved": 1},
       "expected_code": "BUDGET_EXHAUSTED"
     }
   ]

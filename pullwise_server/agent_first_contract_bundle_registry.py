@@ -6,6 +6,64 @@ import hashlib
 import json
 
 
+_RULE_KEYS = {
+    "$schema",
+    "$id",
+    "$ref",
+    "type",
+    "additionalProperties",
+    "required",
+    "properties",
+    "items",
+    "const",
+    "enum",
+    "pattern",
+    "minimum",
+    "maximum",
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "uniqueItems",
+    "x-pullwise-digest",
+    "x-pullwise-content-schema-id",
+    "x-pullwise-content-schema-ids",
+}
+_TYPES = {"object", "array", "string", "integer", "boolean", "null"}
+
+
+def validate_supported_schema(
+    schema: dict[str, object], error_type: type[Exception], path: str = "$"
+) -> None:
+    unknown = sorted(set(schema).difference(_RULE_KEYS))
+    if unknown:
+        raise error_type(f"schema_keyword_unsupported: {path}: {unknown[0]}")
+    declared = schema.get("type")
+    if declared is not None:
+        choices = declared if isinstance(declared, list) else [declared]
+        if (
+            not isinstance(choices, list)
+            or not choices
+            or any(item not in _TYPES for item in choices)
+        ):
+            raise error_type(f"schema_type_unsupported: {path}")
+    if "additionalProperties" in schema and schema["additionalProperties"] is not False:
+        raise error_type(f"schema_additional_properties_unsupported: {path}")
+    properties = schema.get("properties", {})
+    if properties:
+        if not isinstance(properties, dict):
+            raise error_type(f"schema_properties_invalid: {path}")
+        for key, rule in properties.items():
+            if not isinstance(rule, dict):
+                raise error_type(f"schema_rule_invalid: {path}.{key}")
+            validate_supported_schema(rule, error_type, f"{path}.{key}")
+    if "items" in schema:
+        items = schema["items"]
+        if not isinstance(items, dict):
+            raise error_type(f"schema_items_invalid: {path}")
+        validate_supported_schema(items, error_type, f"{path}[]")
+
+
 def validate_semantic_registries(
     families: list[dict[str, object]],
     schema_owner: dict[str, str],

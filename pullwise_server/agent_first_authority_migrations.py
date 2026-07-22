@@ -242,6 +242,11 @@ _DDL = (
         ),
         response_bytes BLOB,
         bound_at INTEGER,
+        CHECK(
+            (transport_envelope_digest IS NULL AND response_bytes IS NULL AND bound_at IS NULL)
+            OR
+            (transport_envelope_digest IS NOT NULL AND response_bytes IS NOT NULL AND bound_at IS NOT NULL)
+        ),
         FOREIGN KEY(receipt_digest)
             REFERENCES agent_current_transport_receipts(receipt_digest)
     )
@@ -295,10 +300,19 @@ _DDL = (
     """,
     """
     CREATE TRIGGER IF NOT EXISTS agent_current_binding_one_shot
-    BEFORE UPDATE OF transport_envelope_digest
+    BEFORE UPDATE
     ON agent_current_transport_receipt_bindings
     WHEN OLD.transport_envelope_digest IS NOT NULL
       OR NEW.transport_envelope_digest IS NULL
+      OR NEW.response_bytes IS NULL
+      OR NEW.bound_at IS NULL
+    BEGIN
+        SELECT RAISE(ABORT, 'TRANSPORT_RECEIPT_BINDING_IMMUTABLE');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS agent_current_binding_delete_immutable
+    BEFORE DELETE ON agent_current_transport_receipt_bindings
     BEGIN
         SELECT RAISE(ABORT, 'TRANSPORT_RECEIPT_BINDING_IMMUTABLE');
     END

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import sqlite3
 from typing import Callable, Mapping
@@ -65,10 +66,20 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 raise AuthorityStoreError("WORKER_NOT_REGISTERED")
             if self._row_package(worker) != values["package_tuple"]:
                 raise AuthorityStoreError("WORKER_PACKAGE_MISMATCH")
+            try:
+                supported = set(json.loads(self._blob(worker["supported_schema_ids"])))
+            except (TypeError, ValueError):
+                raise AuthorityStoreError("WORKER_REGISTRATION_INVALID") from None
+            if (
+                worker["tool_catalog_digest"] != values["expected_tool_catalog_digest"]
+                or not set(values["required_schema_ids"]).issubset(supported)
+            ):
+                raise AuthorityStoreError("WORKER_REGISTRATION_INVALID")
             head = connection.execute(
                 """
                 SELECT h.*, r.package_identity, r.package_version,
-                       r.content_sha256, r.root_sha256, r.policy_digest
+                       r.content_sha256, r.root_sha256, r.policy_digest,
+                       r.policy_bytes
                 FROM agent_current_task_heads h
                 JOIN agent_current_task_requests r USING (task_id)
                 WHERE h.task_id = ?

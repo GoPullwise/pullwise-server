@@ -20,7 +20,9 @@ from ._generated_agent_task_contract import (
     fixture,
     package_tuple,
     schema,
+    schema_ids,
     seal_document,
+    tool_catalog,
     verify_bundle,
     verify_document_digest,
 )
@@ -43,6 +45,10 @@ _STORE_ERROR_MAP = {
     "TRANSPORT_RECEIPT_ALREADY_BOUND": "TRANSPORT_RECEIPT_ALREADY_BOUND",
     "TRANSPORT_RECEIPT_BINDING_CONFLICT": "TRANSPORT_RECEIPT_BINDING_CONFLICT",
     "TRANSPORT_RECEIPT_CONFLICT": "TRANSPORT_RECEIPT_BINDING_CONFLICT",
+    "WORKER_NOT_REGISTERED": "AUTHORITY_INPUT_UNTRUSTED",
+    "WORKER_PACKAGE_MISMATCH": "CURRENT_PACKAGE_PIN_MISMATCH",
+    "WORKER_REGISTRATION_INVALID": "AGENT_GRANT_INVALID",
+    "TASK_PACKAGE_MISMATCH": "CURRENT_PACKAGE_PIN_MISMATCH",
 }
 
 
@@ -127,8 +133,11 @@ class AgentFirstAuthority:
         raise AssertionError("unreachable")
 
     @classmethod
-    def _verify_digest(cls, schema_id: str, request: object) -> dict[str, object]:
-        cls._package(request)
+    def _verify_digest(
+        cls, schema_id: str, request: object, *, require_package: bool = True
+    ) -> dict[str, object]:
+        if require_package:
+            cls._package(request)
         try:
             return verify_document_digest(schema_id, request)
         except (ContractValidationError, UnicodeError, ValueError, TypeError):
@@ -179,7 +188,9 @@ class AgentFirstAuthority:
 
     def accept_current_task(self, request: dict[str, object]) -> bytes:
         document = self._validate("agent-task-request/v1", request)
-        policy = self._verify_digest("agent-task-policy/v1", document["policy"])
+        policy = self._verify_digest(
+            "agent-task-policy/v1", document["policy"], require_package=False
+        )
         response = seal_document(
             "agent-task-accept-response/v1",
             {
@@ -216,6 +227,8 @@ class AgentFirstAuthority:
             **document,
             "package_tuple": PACKAGE_TUPLE,
             "request_digest": request_digest,
+            "required_schema_ids": tuple(schema_ids()),
+            "expected_tool_catalog_digest": tool_catalog()["catalog_digest"],
         }
 
         def build(head: sqlite3.Row) -> Mapping[str, object]:
@@ -223,7 +236,7 @@ class AgentFirstAuthority:
             policy_fields = (
                 "capability_ids",
                 "tool_keys",
-                "elapsed_ms_limit",
+                "elapsed_limit_ms",
                 "tool_call_limit",
             )
             if any(document[field] != policy[field] for field in policy_fields):

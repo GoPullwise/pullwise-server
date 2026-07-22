@@ -93,7 +93,7 @@
           {"predicate_id": "GATE_POLICY_SATISFIED", "input_schema_ids": ["agent-task-policy/v1"], "failure_code": "GATE_POLICY_UNSATISFIED"},
           {"predicate_id": "GATE_SOURCE_STABLE", "input_schema_ids": ["source-state/v1"], "failure_code": "GATE_SOURCE_UNSTABLE"}
         ],
-        "registry_digest": "7dcb33950352cf1cbd51362a57a04c5058774ab1c3c4fa1dbd677ed9c59e645b"
+        "registry_digest": "6e90827fe0d8445a09461dc9a508e05690b606c77e7a88db6e9b5715c9d04c45"
       },
       "expected_code": null
     },
