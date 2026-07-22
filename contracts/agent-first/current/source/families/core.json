@@ -1,0 +1,72 @@
+{
+  "family_id": "core",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "canonical-document/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "content_schema_id", "canonicalization", "sha256", "size_bytes"],
+      "properties": {
+        "schema_id": {"const": "canonical-document/v1"},
+        "content_schema_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$"},
+        "canonicalization": {"const": "pullwise-canonical-json/v1"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "content-ref/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "artifact_id", "content_schema_id", "sha256", "size_bytes", "media_type", "encoding"],
+      "properties": {
+        "schema_id": {"const": "content-ref/v1"},
+        "artifact_id": {"type": "string", "pattern": "^artifact_[0-9a-f]{32}$"},
+        "content_schema_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 128},
+        "encoding": {"enum": ["utf-8", "binary"]}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "contract-package-tuple/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "package_identity", "package_version", "content_sha256", "root_sha256"],
+      "properties": {
+        "schema_id": {"const": "contract-package-tuple/v1"},
+        "package_identity": {"const": "@pullwise/agent-task-contract"},
+        "package_version": {"const": "0.1.0"},
+        "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "core_golden_content_ref",
+      "fixture_class": "golden",
+      "schema_id": "content-ref/v1",
+      "document": {"artifact_id": "artifact_00000000000000000000000000000001", "encoding": "utf-8", "size_bytes": 0},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "core_idempotency_canonical_key_order",
+      "fixture_class": "idempotency",
+      "schema_id": "canonical-document/v1",
+      "document": {"left": {"a": 1, "b": 2}, "right": {"b": 2, "a": 1}, "same_bytes": true},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "core_negative_package_mismatch",
+      "fixture_class": "negative",
+      "schema_id": "contract-package-tuple/v1",
+      "document": {"package_version": "0.1.1"},
+      "expected_code": "CURRENT_PACKAGE_PIN_MISMATCH"
+    }
+  ]
+}

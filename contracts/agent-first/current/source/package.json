@@ -2,10 +2,16 @@
   "schema_id": "agent-task-contract-package-source/v1",
   "package_identity": "@pullwise/agent-task-contract",
   "package_version": "0.1.0",
+  "source_authority": "server_owned_package",
+  "publication_model": "logical_bundle_generated_wrappers",
+  "root_kind": "exhaustive_layered_atomic_root",
+  "canonicalization": "pullwise-canonical-json/v1",
   "required_families": [
+    "core",
     "authority-control",
     "tool-evidence",
     "budget",
-    "receipt-error"
+    "receipt-error",
+    "gate"
   ]
 }

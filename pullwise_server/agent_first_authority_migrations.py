@@ -1,0 +1,309 @@
+"""Self-contained SQLite schema for the current Agent-First Server authority."""
+
+from __future__ import annotations
+
+import sqlite3
+
+
+CURRENT_AUTHORITY_TABLES = (
+    "agent_current_worker_registrations",
+    "agent_current_task_requests",
+    "agent_current_task_heads",
+    "agent_current_attempts",
+    "agent_current_owner_incarnations",
+    "agent_current_claims",
+    "agent_current_grants",
+    "agent_current_grant_authority",
+    "agent_current_control_events",
+    "agent_current_transport_receipts",
+    "agent_current_transport_receipt_bindings",
+    "agent_current_abandonments",
+    "agent_current_fences",
+)
+
+IMMUTABLE_TABLES = (
+    "agent_current_worker_registrations",
+    "agent_current_task_requests",
+    "agent_current_claims",
+    "agent_current_grants",
+    "agent_current_control_events",
+    "agent_current_transport_receipts",
+    "agent_current_abandonments",
+    "agent_current_fences",
+)
+
+_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_worker_registrations (
+        worker_id TEXT PRIMARY KEY,
+        package_identity TEXT NOT NULL,
+        package_version TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL CHECK(length(content_sha256) = 64),
+        root_sha256 TEXT NOT NULL CHECK(length(root_sha256) = 64),
+        request_digest TEXT NOT NULL CHECK(length(request_digest) = 64),
+        request_bytes BLOB NOT NULL,
+        response_bytes BLOB NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_task_requests (
+        task_id TEXT PRIMARY KEY,
+        task_type TEXT NOT NULL,
+        package_identity TEXT NOT NULL,
+        package_version TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL CHECK(length(content_sha256) = 64),
+        root_sha256 TEXT NOT NULL CHECK(length(root_sha256) = 64),
+        idempotency_key TEXT NOT NULL,
+        request_digest TEXT NOT NULL CHECK(length(request_digest) = 64),
+        request_bytes BLOB NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_task_heads (
+        task_id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        lifecycle TEXT NOT NULL CHECK(
+            lifecycle IN ('QUEUED', 'ACTIVE', 'FINALIZING', 'TERMINAL')
+        ),
+        desired_state TEXT NOT NULL CHECK(desired_state IN ('RUN', 'CANCEL')),
+        task_version INTEGER NOT NULL CHECK(task_version >= 1),
+        deletion_version INTEGER NOT NULL DEFAULT 0 CHECK(deletion_version >= 0),
+        native_epoch INTEGER NOT NULL DEFAULT 0 CHECK(native_epoch >= 0),
+        owner_epoch INTEGER NOT NULL DEFAULT 0 CHECK(owner_epoch >= 0),
+        transport_epoch INTEGER NOT NULL DEFAULT 0 CHECK(transport_epoch >= 0),
+        current_attempt_id TEXT,
+        current_session_id TEXT,
+        current_grant_id TEXT,
+        current_lease_id TEXT,
+        terminal_kind TEXT,
+        result_ref TEXT,
+        result_digest TEXT,
+        outcome TEXT,
+        terminal_at INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_requests(task_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        native_epoch INTEGER NOT NULL CHECK(native_epoch >= 1),
+        transport_epoch INTEGER NOT NULL CHECK(transport_epoch >= 1),
+        lease_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('LEASED', 'FENCED')),
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        fenced_at INTEGER,
+        fence_reason TEXT,
+        UNIQUE(task_id, native_epoch),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_owner_incarnations (
+        session_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        attempt_id TEXT NOT NULL UNIQUE,
+        owner_id TEXT NOT NULL,
+        owner_epoch INTEGER NOT NULL CHECK(owner_epoch >= 1),
+        state TEXT NOT NULL CHECK(state IN ('STARTING', 'FENCED')),
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        fenced_at INTEGER,
+        fence_reason TEXT,
+        UNIQUE(task_id, owner_epoch),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id),
+        FOREIGN KEY(attempt_id) REFERENCES agent_current_attempts(attempt_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_claims (
+        claim_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL UNIQUE,
+        attempt_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL UNIQUE,
+        grant_id TEXT NOT NULL UNIQUE,
+        worker_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        task_version INTEGER NOT NULL CHECK(task_version >= 2),
+        deletion_version INTEGER NOT NULL CHECK(deletion_version >= 0),
+        owner_epoch INTEGER NOT NULL CHECK(owner_epoch >= 1),
+        native_epoch INTEGER NOT NULL CHECK(native_epoch >= 1),
+        transport_epoch INTEGER NOT NULL CHECK(transport_epoch >= 1),
+        claim_digest TEXT NOT NULL UNIQUE CHECK(length(claim_digest) = 64),
+        claim_bytes BLOB NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id),
+        FOREIGN KEY(attempt_id) REFERENCES agent_current_attempts(attempt_id),
+        FOREIGN KEY(session_id) REFERENCES agent_current_owner_incarnations(session_id),
+        FOREIGN KEY(worker_id) REFERENCES agent_current_worker_registrations(worker_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_grants (
+        grant_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL UNIQUE,
+        package_identity TEXT NOT NULL,
+        package_version TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL CHECK(length(content_sha256) = 64),
+        root_sha256 TEXT NOT NULL CHECK(length(root_sha256) = 64),
+        grant_digest TEXT NOT NULL UNIQUE CHECK(length(grant_digest) = 64),
+        grant_bytes BLOB NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_grant_authority (
+        grant_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK(state IN ('ACTIVE', 'FENCED')),
+        authority_version INTEGER NOT NULL DEFAULT 1 CHECK(authority_version >= 1),
+        fenced_at INTEGER,
+        fence_reason TEXT,
+        FOREIGN KEY(grant_id) REFERENCES agent_current_grants(grant_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_control_events (
+        event_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        event_seq INTEGER NOT NULL CHECK(event_seq >= 1),
+        event_type TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        request_digest TEXT NOT NULL CHECK(length(request_digest) = 64),
+        response_digest TEXT NOT NULL CHECK(length(response_digest) = 64),
+        response_bytes BLOB NOT NULL,
+        applied_task_version INTEGER NOT NULL CHECK(applied_task_version >= 1),
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        UNIQUE(task_id, event_seq),
+        UNIQUE(task_id, idempotency_key),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_transport_receipts (
+        receipt_digest TEXT PRIMARY KEY CHECK(length(receipt_digest) = 64),
+        receipt_id TEXT NOT NULL UNIQUE,
+        receipt_type TEXT NOT NULL CHECK(receipt_type = 'server_transport'),
+        task_id TEXT NOT NULL,
+        attempt_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        grant_digest TEXT NOT NULL CHECK(length(grant_digest) = 64),
+        transport_epoch INTEGER NOT NULL CHECK(transport_epoch >= 1),
+        package_identity TEXT NOT NULL,
+        package_version TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL CHECK(length(content_sha256) = 64),
+        root_sha256 TEXT NOT NULL CHECK(length(root_sha256) = 64),
+        receipt_bytes BLOB NOT NULL,
+        response_bytes BLOB NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id),
+        FOREIGN KEY(attempt_id) REFERENCES agent_current_attempts(attempt_id),
+        FOREIGN KEY(session_id) REFERENCES agent_current_owner_incarnations(session_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_transport_receipt_bindings (
+        receipt_digest TEXT PRIMARY KEY,
+        transport_envelope_digest TEXT CHECK(
+            transport_envelope_digest IS NULL OR length(transport_envelope_digest) = 64
+        ),
+        response_bytes BLOB,
+        bound_at INTEGER,
+        FOREIGN KEY(receipt_digest)
+            REFERENCES agent_current_transport_receipts(receipt_digest)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_abandonments (
+        abandonment_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL UNIQUE,
+        attempt_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL UNIQUE,
+        grant_id TEXT NOT NULL UNIQUE,
+        owner_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        previous_task_version INTEGER NOT NULL CHECK(previous_task_version >= 1),
+        abandoned_task_version INTEGER NOT NULL CHECK(
+            abandoned_task_version = previous_task_version + 1
+        ),
+        deletion_version INTEGER NOT NULL CHECK(deletion_version >= 0),
+        owner_epoch INTEGER NOT NULL CHECK(owner_epoch >= 1),
+        native_epoch INTEGER NOT NULL CHECK(native_epoch >= 1),
+        transport_epoch INTEGER NOT NULL CHECK(transport_epoch >= 1),
+        reason TEXT NOT NULL,
+        abandonment_digest TEXT NOT NULL UNIQUE CHECK(length(abandonment_digest) = 64),
+        abandonment_bytes BLOB NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(task_id) REFERENCES agent_current_task_heads(task_id),
+        FOREIGN KEY(attempt_id) REFERENCES agent_current_attempts(attempt_id),
+        FOREIGN KEY(session_id) REFERENCES agent_current_owner_incarnations(session_id),
+        FOREIGN KEY(grant_id) REFERENCES agent_current_grants(grant_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_current_fences (
+        fence_id TEXT PRIMARY KEY,
+        abandonment_id TEXT NOT NULL,
+        target_type TEXT NOT NULL CHECK(
+            target_type IN ('transport', 'attempt', 'owner', 'grant')
+        ),
+        target_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        UNIQUE(abandonment_id, target_type),
+        UNIQUE(target_type, target_id),
+        FOREIGN KEY(abandonment_id)
+            REFERENCES agent_current_abandonments(abandonment_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_agent_current_events_task_version
+    ON agent_current_control_events(task_id, applied_task_version)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_agent_current_receipts_task
+    ON agent_current_transport_receipts(task_id, attempt_id)
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS agent_current_binding_one_shot
+    BEFORE UPDATE OF transport_envelope_digest
+    ON agent_current_transport_receipt_bindings
+    WHEN OLD.transport_envelope_digest IS NOT NULL
+      OR NEW.transport_envelope_digest IS NULL
+    BEGIN
+        SELECT RAISE(ABORT, 'TRANSPORT_RECEIPT_BINDING_IMMUTABLE');
+    END
+    """,
+)
+
+
+def install_current_authority_tables(connection: sqlite3.Connection) -> None:
+    """Install the clean current-only authority schema in the caller transaction."""
+
+    connection.execute("PRAGMA foreign_keys=ON")
+    if not connection.in_transaction:
+        connection.execute("PRAGMA journal_mode=WAL")
+    for statement in _DDL:
+        connection.execute(statement)
+    for table in IMMUTABLE_TABLES:
+        for operation in ("UPDATE", "DELETE"):
+            trigger = f"{table}_{operation.lower()}_immutable"
+            connection.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS {trigger}
+                BEFORE {operation} ON {table}
+                BEGIN
+                    SELECT RAISE(ABORT, '{table.upper()}_IMMUTABLE');
+                END
+                """
+            )
+
+
+__all__ = [
+    "CURRENT_AUTHORITY_TABLES",
+    "IMMUTABLE_TABLES",
+    "install_current_authority_tables",
+]

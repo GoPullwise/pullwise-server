@@ -16,6 +16,7 @@ from pullwise_server.agent_first_contract_bundle import (
     ContractBundleError,
     build_bundle,
     generated_paths,
+    write_generated,
 )
 from pullwise_server import _generated_agent_task_contract as python_wrapper
 
