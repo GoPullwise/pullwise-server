@@ -185,7 +185,7 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         root_set = self.document("pre_gate_golden_root_set")
         snapshot = self.document("gate_input_golden_success_snapshot")
         quality_ref = deepcopy(snapshot["quality_policy_plan_ref"])
-        quality_ref["artifact_id"] = "art_fefefefefefefefefefefefefefefe"
+        quality_ref["artifact_id"] = "art_deadbeefdeadbeefdeadbeefdeadbeef"
         manifest = self.make_manifest(root_set, extra_refs=[quality_ref])
         mapping = {
             "request_ref": "request",
@@ -365,14 +365,14 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
                 "kind": "root_context",
                 "args": [root, root["task_id"], root["outcome_candidate"]],
             },
-            {"kind": "closure_context", "args": success[1:]},
+            {"kind": "closure_context", "args": [success[2], success[1]]},
             {"kind": "success_context", "args": success},
             {"kind": "terminal_context", "args": terminal},
         ]
         invalid = []
 
         stale_root = deepcopy(success)
-        stale_root[0]["request_ref"] = deepcopy(stale_root[0]["policy_ref"])
+        stale_root[0]["request_ref"]["sha256"] = "0" * 64
         stale_root[0] = reseal(
             stale_root[0], "input_digest", "pullwise:gate-input-snapshot:v1"
         )
@@ -411,7 +411,10 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         )
         invalid.append(
             (
-                {"kind": "closure_context", "args": missing_root[1:]},
+                {
+                    "kind": "closure_context",
+                    "args": [missing_root[2], missing_root[1]],
+                },
                 "EVIDENCE_CLOSURE_INVALID",
                 "$.entries",
             )
