@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from copy import deepcopy
 import base64
@@ -208,6 +208,44 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         )
 
     @classmethod
+    def synthetic_artifact_content_ref(cls) -> dict[str, object]:
+        document = cls.fixture_document("source_evidence_golden_change_set")
+        return {
+            "schema_id": "artifact-content-ref/v1",
+            "artifact_kind": "change_set",
+            "ref": cls.content_ref(
+                "art_" + "3" * 32, "change-set/v1", document
+            ),
+        }
+
+    @classmethod
+    def synthetic_availability_ref(cls) -> dict[str, object]:
+        document = cls.fixture_document("source_evidence_golden_source_tree")
+        return {
+            "schema_id": "availability-ref/v1",
+            "availability": "available",
+            "ref": cls.content_ref(
+                "art_" + "4" * 32, "source-tree-manifest/v1", document
+            ),
+        }
+
+    @classmethod
+    def synthetic_requirement_entry(cls) -> dict[str, object]:
+        entry = cls.fixture_document(
+            "requirements_negative_derived_mandatory_without_rationale"
+        )
+        entry["rationale"] = "Required to preserve the accepted objective."
+        return entry
+
+    @classmethod
+    def synthetic_waiver_event(cls) -> dict[str, object]:
+        return cls.fixture_document("requirements_negative_waiver_empty_issuer_profile")
+
+    @classmethod
+    def synthetic_tool_dispatch_intent(cls) -> dict[str, object]:
+        return cls.fixture_document("tool_crash_after_intent")
+
+    @classmethod
     def positive_document_cases(cls) -> list[dict[str, object]]:
         cases = cls._positive_fixture_cases()
         covered = {
@@ -217,8 +255,13 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         }
         synthetic_builders = {
             "agent-tool-request/v1": cls.synthetic_agent_tool_request,
+            "artifact-content-ref/v1": cls.synthetic_artifact_content_ref,
+            "availability-ref/v1": cls.synthetic_availability_ref,
+            "requirement-entry/v1": cls.synthetic_requirement_entry,
             "source-content/v1": cls.synthetic_source_content,
             "source-state/v1": cls.synthetic_source_state,
+            "tool-dispatch-intent/v1": cls.synthetic_tool_dispatch_intent,
+            "waiver-event/v1": cls.synthetic_waiver_event,
         }
         for schema_id, builder in synthetic_builders.items():
             schema_rules = set(cls.schema_rules(schema_id))
