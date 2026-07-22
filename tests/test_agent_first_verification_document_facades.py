@@ -94,11 +94,17 @@ class AgentFirstVerificationDocumentFacadesTest(
         proposal = self.reseal("completion-proposal/v1", proposal)
 
         verifier_input = self.fixture_document("task_verifier_input_golden_input")
-        verifier_input["owner_conclusion_excluded"] = False
+        verifier_input["requirement_ids"] = [
+            "req_user_objective_" + "2" * 64,
+            "req_user_objective_" + "1" * 64,
+        ]
         verifier_input = self.reseal("verifier-input-manifest/v1", verifier_input)
 
         verifier_work = self.fixture_document("task_verifier_work_golden_work")
-        verifier_work["own_observation_ids"] = []
+        verifier_work["own_observation_ids"] = [
+            "obs_" + "2" * 32,
+            "obs_" + "1" * 32,
+        ]
         verifier_work = self.reseal("verifier-work-report/v1", verifier_work)
 
         attestation = self.fixture_document("task_attestation_golden_attestation")
@@ -126,8 +132,8 @@ class AgentFirstVerificationDocumentFacadesTest(
         self.assertEqual(
             [
                 ("PROPOSAL_NO_CHANGE_STATE_INVALID", "$"),
-                ("VERIFIER_OWNER_CONCLUSION_INCLUDED", "$"),
-                ("VERIFIER_OBSERVATION_REQUIRED", "$"),
+                ("VERIFIER_REQUIREMENT_ORDER_INVALID", "$"),
+                ("VERIFIER_WORK_ORDER_INVALID", "$.own_observation_ids"),
                 ("ATTESTATION_RUN_STATUS_INVALID", "$"),
                 ("ATTESTATION_MISSING_SLOT_INVALID", "$"),
             ],

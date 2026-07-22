@@ -31,7 +31,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "attempt-identity/v1",
       "type": "object",
-      "additionalProperties": false,
       "oneOf": [
         {
           "type": "object",
@@ -55,7 +54,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "owner-identity/v1",
       "type": "object",
-      "additionalProperties": false,
       "oneOf": [
         {
           "type": "object",

@@ -48,7 +48,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "availability-ref/v1",
       "type": "object",
-      "additionalProperties": false,
       "x-pullwise-semantics": {"document_rules":["availability_ref"],"contextual_helpers":[]},
       "oneOf": [
         {"type":"object","additionalProperties":false,"required":["availability","ref"],"properties":{"availability":{"const":"available"},"ref":{"$ref":"content-ref/v1"}}},
