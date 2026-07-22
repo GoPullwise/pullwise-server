@@ -41,6 +41,7 @@ def verify_task_result_context(task_result: object, *, worker_debug_descriptor: 
     checked = validate_document("task-result/v1", task_result)
     debug = checked["diagnostics"]["worker_debug_fragment"]
     if debug["availability"] == "available":
+        _seo_require(isinstance(worker_debug_descriptor, dict), "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment.ref")
         descriptor = validate_document("worker-debug-fragment-descriptor/v1", worker_debug_descriptor)
         _seo_require(_seo_ref_matches_document(debug["ref"], "worker-debug-fragment-descriptor/v1", descriptor), "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment.ref")
     else:
@@ -113,14 +114,14 @@ def verify_task_result_transport_envelope(envelope: object, core: object, *, tra
     descriptor = checked["worker_debug_descriptor"]
     if debug["availability"] == "available":
         _seo_require(descriptor is not None, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED", "$.worker_debug_descriptor")
-        _seo_require(worker_debug_descriptor is not None, "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED", "$.worker_debug_descriptor")
+        _seo_require(isinstance(worker_debug_descriptor, dict), "TRANSPORT_DEBUG_DESCRIPTOR_REQUIRED", "$.worker_debug_descriptor")
         descriptor = validate_document("worker-debug-fragment-descriptor/v1", worker_debug_descriptor)
         _seo_require(_json_equal(descriptor, checked["worker_debug_descriptor"]), "TRANSPORT_DEBUG_DESCRIPTOR_CONFLICT", "$.worker_debug_descriptor")
         _result_require_ref(debug["ref"], "worker-debug-fragment-descriptor/v1", descriptor, "$.task_result.diagnostics.worker_debug_fragment.ref", "TASK_RESULT_CONTEXT_INVALID")
     else:
         _seo_require(descriptor is None and worker_debug_descriptor is None, "TRANSPORT_DEBUG_DESCRIPTOR_INVALID", "$.worker_debug_descriptor")
     if checked["transport_receipt"]["availability"] == "available":
-        _seo_require(transport_receipt is not None, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt.ref", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
+        _seo_require(transport_receipt is not None, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
         receipt = _result_checked_receipt(transport_receipt)
         _result_require_ref(checked["transport_receipt"]["ref"], "server-transport-receipt/v1", receipt, "$.transport_receipt.ref", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
         _seo_require(descriptor is not None, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.worker_debug_descriptor", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
@@ -130,7 +131,7 @@ def verify_task_result_transport_envelope(envelope: object, core: object, *, tra
         _seo_require(receipt["authority_digest"] == authority["authority_digest"] and receipt["grant_digest"] == authority["grant"]["grant_digest"], "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
         _seo_require(_result_ref_tuple(receipt["content_ref"]) == _result_ref_tuple(descriptor["fragment_ref"]), "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt.content_ref", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
     else:
-        _seo_require(transport_receipt is None, "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt")
+        _seo_require(transport_receipt is None, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
         _seo_require(checked["transport_receipt"] == {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}, "TRANSPORT_RECEIPT_MATRIX_INVALID", "$.transport_receipt")
     raw = canonical_document_bytes(checked)
     return {"document": checked, "canonical_bytes": raw, "transport_envelope_digest": hashlib.sha256(raw).hexdigest()}
@@ -145,13 +146,13 @@ def verify_task_result_transport_ack(ack: object, envelope: object, *, transport
         _seo_require(checked[field] == result[field], "TRANSPORT_ACK_CONTEXT_INVALID", f"$.{field}")
     _seo_require(checked["transport_envelope_digest"] == hashlib.sha256(raw).hexdigest(), "TRANSPORT_ACK_DIGEST_INVALID", "$.transport_envelope_digest")
     if document["transport_receipt"]["availability"] == "available":
-        _seo_require(transport_receipt is not None, "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_binding_state")
+        _seo_require(transport_receipt is not None, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
         receipt = _result_checked_receipt(transport_receipt)
         _result_require_ref(document["transport_receipt"]["ref"], "server-transport-receipt/v1", receipt, "$.transport_receipt.ref", "TRANSPORT_RECEIPT_BINDING_CONFLICT", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
         _seo_require(checked["receipt_binding_state"] == "bound" and checked["receipt_digest"] == receipt["receipt_digest"], "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_binding_state")
         _seo_require(_result_time_leq(receipt["accepted_at"], checked["accepted_at"]), "TASK_RESULT_TIME_ORDER_INVALID", "$.accepted_at")
     else:
-        _seo_require(transport_receipt is None, "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_binding_state")
+        _seo_require(transport_receipt is None, "TRANSPORT_RECEIPT_BINDING_CONFLICT", "$.transport_receipt", "TRANSPORT_RECEIPT_BINDING_CONFLICT")
         _seo_require(checked["receipt_binding_state"] == "not_applicable" and checked["receipt_digest"] is None, "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "$.receipt_binding_state")
     _seo_require(_result_time_leq(result["terminal_at"], checked["accepted_at"]), "TASK_RESULT_TIME_ORDER_INVALID", "$.accepted_at")
     return checked

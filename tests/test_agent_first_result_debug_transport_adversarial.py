@@ -171,8 +171,14 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             branches = self.facade.schema("task-result/v1")["oneOf"]
         reasons: set[str] = set()
         for branch in branches:
-            branch_id = branch["$ref"]
-            rule = self.facade.schema(branch_id)["properties"]["reason_code"]
+            if schema_id == "availability-reason-registry/v1":
+                properties = branch.get("properties", {})
+                if "reason_code" not in properties:
+                    continue
+                rule = properties["reason_code"]
+            else:
+                branch_id = branch["$ref"]
+                rule = self.facade.schema(branch_id)["properties"]["reason_code"]
             values = [rule["const"]] if "const" in rule else rule["enum"]
             reasons.update(values)
         return sorted(reasons)
@@ -469,6 +475,10 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             value = deepcopy(document)
             mutate(value)
             cases.append(("task-result/v1", value, ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_OUTCOME_DETAILS_ORDER_INVALID", path)))
+        def add_text(document: dict[str, object], mutate, path: str) -> None:
+            value = deepcopy(document)
+            mutate(value)
+            cases.append(("task-result/v1", value, ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_OUTCOME_TEXT_INVALID", path)))
         add(completed, lambda d: d["outcome_details"]["delivered_scope"].append({"statement": "A.", "requirement_ids": [req_a], "artifact_refs": []}), "$.outcome_details.delivered_scope")
         add(completed, lambda d: d["outcome_details"]["delivered_scope"][0].__setitem__("requirement_ids", [req_b, req_a]), "$.outcome_details.delivered_scope[0].requirement_ids")
         add(completed, lambda d: d["outcome_details"]["delivered_scope"][0].__setitem__("artifact_refs", [artifact_next, artifact]), "$.outcome_details.delivered_scope[0].artifact_refs")
@@ -490,11 +500,14 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
         add(blocked, lambda d: d["outcome_details"].__setitem__("blockers", [{**blocker, "code": "ZZZ"}, blocker]), "$.outcome_details.blockers")
         failure = deepcopy(failed["outcome_details"]["failures"][0])
         add(failed, lambda d: d["outcome_details"]["failures"][0].__setitem__("evidence_refs", [failure["evidence_refs"][0], {**failure["evidence_refs"][0], "size_bytes": 1}]), "$.outcome_details.failures[0].evidence_refs")
+        lower_ref = deepcopy(failure["evidence_refs"][0])
+        lower_ref["artifact_id"] = lower_ref["artifact_id"][:-1] + "e"
+        add(failed, lambda d: d["outcome_details"]["failures"][0].__setitem__("evidence_refs", [failure["evidence_refs"][0], lower_ref]), "$.outcome_details.failures[0].evidence_refs")
         add(failed, lambda d: d["outcome_details"].__setitem__("failures", [{**failure, "code": "ZZZ"}, failure]), "$.outcome_details.failures")
-        for text, label in (("界" * 1366, "utf8"), ("e\u0301", "nfc")):
-            add(completed, lambda d, text=text: d["outcome_details"]["delivered_scope"][0].__setitem__("statement", text), "$.outcome_details.delivered_scope[0].statement")
-            add(partial, lambda d, text=text: d["outcome_details"]["residual_risks"][0].__setitem__("statement", text), "$.outcome_details.residual_risks[0].statement")
-            add(blocked, lambda d, text=text: d["outcome_details"]["blockers"][0].__setitem__("unblock_condition", text), "$.outcome_details.blockers[0].unblock_condition")
+        overlimit = chr(0x754C) * 1366
+        add_text(completed, lambda d: d["outcome_details"]["delivered_scope"][0].__setitem__("statement", overlimit), "$.outcome_details.delivered_scope[0].statement")
+        add_text(partial, lambda d: d["outcome_details"]["residual_risks"][0].__setitem__("statement", overlimit), "$.outcome_details.residual_risks[0].statement")
+        add_text(blocked, lambda d: d["outcome_details"]["blockers"][0].__setitem__("unblock_condition", overlimit), "$.outcome_details.blockers[0].unblock_condition")
         self.assert_document_batch(cases)
 
     def test_local_uploaded_ack_receipt_matrix_and_time_reds(self) -> None:

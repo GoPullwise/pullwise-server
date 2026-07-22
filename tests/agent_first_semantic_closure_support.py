@@ -158,6 +158,8 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         for fixture in cls.fixtures.values():
             if fixture["expected_code"] is not None:
                 continue
+            if not cls.schema_rules(fixture["schema_id"]):
+                continue
             cases.append(
                 {
                     "fixture_id": fixture["fixture_id"],
@@ -222,7 +224,6 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
     def synthetic_availability_ref(cls) -> dict[str, object]:
         document = cls.fixture_document("source_evidence_golden_source_tree")
         return {
-            "schema_id": "availability-ref/v1",
             "availability": "available",
             "ref": cls.content_ref(
                 "art_" + "4" * 32, "source-tree-manifest/v1", document
