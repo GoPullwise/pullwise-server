@@ -89,6 +89,7 @@ class AgentFirstTransportEnvelopeTest(
         self.assertEqual(ack["receipt_digest"], receipt_document["receipt_digest"])
 
         with self.connect() as connection:
+            connection.row_factory = sqlite3.Row
             head = connection.execute(
                 """
                 SELECT lifecycle, task_version, result_ref, result_digest, outcome,
@@ -147,7 +148,7 @@ class AgentFirstTransportEnvelopeTest(
             with self.assertRaises(sqlite3.DatabaseError):
                 connection.execute("DELETE FROM agent_current_terminal_results")
         self.assertEqual(
-            head,
+            tuple(head),
             (
                 "TERMINAL",
                 envelope["task_result"]["terminal_task_version"],

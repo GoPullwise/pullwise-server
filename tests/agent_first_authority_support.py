@@ -39,15 +39,20 @@ class AuthorityHarness:
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temporary.name) / "authority.sqlite3"
+        self.connections: list[sqlite3.Connection] = []
         with self.connect() as connection:
             install_current_authority_tables(connection)
         self.authority = AgentFirstAuthority(self.connect)
 
     def tearDown(self) -> None:
+        for connection in reversed(self.connections):
+            connection.close()
+        self.connections.clear()
         self.temporary.cleanup()
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path, timeout=10)
+        self.connections.append(connection)
         connection.execute("PRAGMA busy_timeout=10000")
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
