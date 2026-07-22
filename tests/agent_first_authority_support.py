@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 import tempfile
@@ -9,6 +10,7 @@ from pullwise_server._generated_agent_task_contract import (
     package_tuple,
     schema_ids,
     seal_document,
+    fixture,
     tool_catalog,
     verify_document_digest,
 )
@@ -202,6 +204,104 @@ class AuthorityHarness:
                 "accepted_at": NOW,
             },
         )
+
+    def task_result(
+        self,
+        envelope: dict[str, object],
+        *,
+        outcome: str = "COMPLETED",
+    ) -> dict[str, object]:
+        result = copy.deepcopy(fixture("task_result_golden_completed")["document"])
+        result.update(
+            {
+                "result_id": "result_77777777777777777777777777777777",
+                "task_id": envelope["task_id"],
+                "published_from_version": envelope["task_version"],
+                "terminal_task_version": envelope["task_version"] + 1,
+                "attempt_identity": {
+                    "kind": "started",
+                    "attempt_id": envelope["attempt_id"],
+                    "native_epoch": envelope["native_epoch"],
+                },
+                "owner_identity": {
+                    "kind": "started",
+                    "owner_id": envelope["owner_id"],
+                    "owner_epoch": envelope["owner_epoch"],
+                },
+            }
+        )
+        result["provenance"]["attempt_ids"] = [envelope["attempt_id"]]
+        if outcome == "FAILED":
+            self._make_failed_result(result)
+        elif outcome == "CANCELLED":
+            self._make_cancelled_result(result)
+        elif outcome != "COMPLETED":
+            raise AssertionError(f"unsupported test outcome: {outcome}")
+        return result
+
+    @staticmethod
+    def _make_failed_result(result: dict[str, object]) -> None:
+        result.update(
+            {
+                "outcome": "FAILED",
+                "reason_code": "RUNTIME_FAILURE",
+                "outcome_details": {
+                    "kind": "failed",
+                    "failures": [
+                        {
+                            "code": "RUNTIME_FAILURE",
+                            "evidence_refs": [result["evidence_closure_ref"]],
+                        }
+                    ],
+                },
+                "completion_proposal": {
+                    "availability": "unavailable",
+                    "reason_code": "PROPOSAL_NOT_CREATED",
+                },
+                "attestations": {
+                    "availability": "unavailable",
+                    "reason_code": "ATTESTATIONS_NOT_CREATED",
+                },
+                "report": {
+                    "availability": "unavailable",
+                    "reason_code": "REPORT_NOT_CREATED",
+                },
+            }
+        )
+        result["requirement_results"][0]["verdict"] = "FAIL"
+
+    @staticmethod
+    def _make_cancelled_result(result: dict[str, object]) -> None:
+        result.update(
+            {
+                "outcome": "CANCELLED",
+                "reason_code": "USER_CANCELLED",
+                "outcome_details": {
+                    "kind": "cancelled",
+                    "request_id": "cancel_88888888888888888888888888888888",
+                    "linearized_at": NOW,
+                    "requested_by": {
+                        "schema_id": "actor/v1",
+                        "kind": "user_control",
+                        "id": "operator",
+                        "session_id": None,
+                    },
+                },
+                "completion_proposal": {
+                    "availability": "unavailable",
+                    "reason_code": "TASK_CANCELLED",
+                },
+                "attestations": {
+                    "availability": "unavailable",
+                    "reason_code": "TASK_CANCELLED",
+                },
+                "report": {
+                    "availability": "unavailable",
+                    "reason_code": "TASK_CANCELLED",
+                },
+            }
+        )
+        result["requirement_results"][0]["verdict"] = "UNVERIFIABLE"
 
 
 __all__ = [

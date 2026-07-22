@@ -130,7 +130,10 @@ def valid_actor(value: object) -> bool:
 def timestamp_millis(value: object) -> int | None:
     if not isinstance(value, str) or TIMESTAMP.fullmatch(value) is None:
         return None
-    parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError:
+        return None
     return int(parsed.timestamp() * 1000)
 
 
@@ -147,7 +150,9 @@ class FamilyAssertions:
         self: unittest.TestCase,
         family_id: str,
         schema_ids: tuple[str, ...],
+        contextual_helpers: dict[str, list[str]] | None = None,
     ) -> None:
+        contextual_helpers = contextual_helpers or {}
         self.assertEqual(family_id, self.family["family_id"])
         self.assertEqual(list(schema_ids), [item["$id"] for item in self.family["schemas"]])
         self.assertEqual(set(schema_ids), set(self.schemas))
@@ -157,7 +162,12 @@ class FamilyAssertions:
             self.assertEqual("object", schema["type"])
             self.assertIs(False, schema["additionalProperties"])
             self.assertEqual(
-                [schema_id.removesuffix("/v1").replace("-", "_")],
+                {
+                    "document_rules": [
+                        schema_id.removesuffix("/v1").replace("-", "_")
+                    ],
+                    "contextual_helpers": contextual_helpers.get(schema_id, []),
+                },
                 schema["x-pullwise-semantics"],
             )
             self.assertEqual(set(schema["required"]), set(schema["properties"]))

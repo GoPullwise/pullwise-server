@@ -16,6 +16,16 @@ FIXTURE_CLASSES = ("golden", "negative", "idempotency", "fence", "crash")
 SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 SCHEMA_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$")
 SAFE_INTEGER = (1 << 53) - 1
+MAX_FAMILY_LINES = 600
+MAX_FAMILY_LINE_LENGTH = 200
+SEMANTIC_CYCLE_EXCEPTIONS = (
+    {
+        "schema_id": "task-charter/v1",
+        "kind": "content_ref_target",
+        "path": "$.properties.previous_charter_ref.oneOf[0]",
+        "target_schema_id": "task-charter/v1",
+    },
+)
 
 
 class ContractBundleError(RuntimeError):
@@ -28,6 +38,7 @@ def load_family(
     schema_owner: dict[str, str],
     fixture_ids: set[str],
 ) -> dict[str, object]:
+    _validate_family_readability(path)
     source = load_json(path)
     require_fields(source, {"family_id", "schemas", "fixtures"}, "family_fields_invalid")
     if source["family_id"] != expected_id:
@@ -53,11 +64,13 @@ def load_family(
         if schema_id in schema_owner:
             raise ContractBundleError(f"schema_duplicate: {schema_id}")
         schema_owner[schema_id] = expected_id
+        edges = schema_edges(schema)
         schema_registry.append(
             {
                 "schema_id": schema_id,
                 "family_id": expected_id,
-                "references": sorted(references(schema)),
+                "references": sorted({item["target_schema_id"] for item in edges}),
+                "edges": edges,
                 "sha256": sha256(canonical_bytes(schema)),
             }
         )
@@ -110,10 +123,14 @@ def load_family(
 def reference_dag(
     families: list[dict[str, object]], schema_owner: dict[str, str]
 ) -> list[dict[str, object]]:
-    graph = {
-        schema["$id"]: references(schema)
+    edge_graph = {
+        schema["$id"]: schema_edges(schema)
         for family in families
         for schema in family["schemas"]
+    }
+    graph = {
+        schema_id: {item["target_schema_id"] for item in edges}
+        for schema_id, edges in edge_graph.items()
     }
     for schema_id, refs in graph.items():
         unknown = refs.difference(schema_owner)
@@ -130,7 +147,11 @@ def reference_dag(
         if schema_id in visited:
             return
         visiting.add(schema_id)
-        for target in graph[schema_id]:
+        for edge in edge_graph[schema_id]:
+            target = edge["target_schema_id"]
+            exception = {"schema_id": schema_id, **edge}
+            if exception in SEMANTIC_CYCLE_EXCEPTIONS:
+                continue
             visit(target)
         visiting.remove(schema_id)
         visited.add(schema_id)
@@ -142,25 +163,78 @@ def reference_dag(
             "schema_id": schema_id,
             "family_id": schema_owner[schema_id],
             "references": sorted(graph[schema_id]),
+            "edges": edge_graph[schema_id],
         }
         for schema_id in sorted(graph)
     ]
 
 
+def schema_edges(value: object) -> list[dict[str, str]]:
+    found: list[dict[str, str]] = []
+
+    def visit(item: object, path: str) -> None:
+        if isinstance(item, dict):
+            target = item.get("$ref")
+            if isinstance(target, str):
+                found.append(
+                    {"kind": "schema_ref", "path": path, "target_schema_id": target}
+                )
+            annotations = (
+                (
+                    "x-pullwise-content-schema-id",
+                    "x-pullwise-content-schema-ids",
+                    "content_ref_target",
+                ),
+                (
+                    "x-pullwise-availability-content-schema-id",
+                    "x-pullwise-availability-content-schema-ids",
+                    "availability_ref_target",
+                ),
+            )
+            for singular, plural, kind in annotations:
+                targets: list[object] = []
+                if singular in item:
+                    targets.append(item[singular])
+                if plural in item and isinstance(item[plural], list):
+                    targets.extend(item[plural])
+                for annotated in targets:
+                    if isinstance(annotated, str):
+                        found.append(
+                            {
+                                "kind": kind,
+                                "path": path,
+                                "target_schema_id": annotated,
+                            }
+                        )
+            for key, child in item.items():
+                visit(child, f"{path}.{key}")
+        elif isinstance(item, list):
+            for index, child in enumerate(item):
+                visit(child, f"{path}[{index}]")
+
+    visit(value, "$")
+    return sorted(
+        {canonical_bytes(item): item for item in found}.values(),
+        key=lambda item: (item["path"], item["kind"], item["target_schema_id"]),
+    )
+
+
 def references(value: object) -> set[str]:
-    if isinstance(value, dict):
-        found = {
-            item for key, item in value.items() if key == "$ref" and isinstance(item, str)
-        }
-        for item in value.values():
-            found.update(references(item))
-        return found
-    if isinstance(value, list):
-        found: set[str] = set()
-        for item in value:
-            found.update(references(item))
-        return found
-    return set()
+    return {item["target_schema_id"] for item in schema_edges(value)}
+
+
+def _validate_family_readability(path: Path) -> None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise ContractBundleError(f"source_json_invalid: {path.name}") from exc
+    if len(lines) > MAX_FAMILY_LINES:
+        raise ContractBundleError(f"family_line_count_invalid: {path.stem}")
+    for line_number, line in enumerate(lines, 1):
+        if len(line) > MAX_FAMILY_LINE_LENGTH:
+            raise ContractBundleError(
+                f"family_line_length_invalid: {path.stem}:{line_number}"
+            )
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -233,3 +307,8 @@ def nonempty_ascii(value: object, code: str) -> str:
 
 def sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+SEMANTIC_CYCLE_EXCEPTIONS_SHA256 = sha256(
+    canonical_bytes(list(SEMANTIC_CYCLE_EXCEPTIONS))
+)

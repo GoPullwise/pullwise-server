@@ -1,0 +1,233 @@
+{
+  "family_id": "task-result-reasons",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "availability-reason-registry/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"registry_digest","domain":"pullwise:availability-reason-registry:v1"},
+      "x-pullwise-semantics": {"document_rules":["availability_reason_registry"],"contextual_helpers":[]},
+      "required": ["schema_id","reasons","registry_digest"],
+      "properties": {
+        "schema_id": {"const":"availability-reason-registry/v1"},
+        "reasons": {
+          "type": "array",
+          "minItems": 19,
+          "maxItems": 19,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "ATTESTATIONS_NOT_CREATED",
+              "CAPABILITY_NOT_IMPLEMENTED",
+              "CAPABILITY_NOT_SELECTED",
+              "CHANGE_SET_NOT_APPLICABLE",
+              "CHARTER_NOT_CREATED",
+              "DEBUG_LIMIT_EXCEEDED",
+              "DEBUG_REDACTION_FAILED",
+              "DEBUG_UNAVAILABLE",
+              "DEBUG_UPLOAD_FAILED",
+              "EXECUTION_STATE_UNAVAILABLE",
+              "IN_PROCESS_TOOL",
+              "OBSERVATION_MANIFEST_NOT_CREATED",
+              "PROPOSAL_NOT_CREATED",
+              "REDACTION_NOT_REQUIRED",
+              "REPORT_NOT_CREATED",
+              "SOURCE_STATE_UNAVAILABLE",
+              "TASK_CANCELLED",
+              "TRANSPORT_RECEIPT_NOT_APPLICABLE",
+              "VERIFICATION_NOT_RUN"
+            ]
+          }
+        },
+        "registry_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "availability-ref/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-semantics": {"document_rules":["availability_ref"],"contextual_helpers":[]},
+      "oneOf": [
+        {"type":"object","additionalProperties":false,"required":["availability","ref"],"properties":{"availability":{"const":"available"},"ref":{"$ref":"content-ref/v1"}}},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["availability","reason_code"],
+          "properties": {
+            "availability": {"const":"unavailable"},
+            "reason_code": {
+              "enum": [
+                "ATTESTATIONS_NOT_CREATED",
+                "CAPABILITY_NOT_IMPLEMENTED",
+                "CAPABILITY_NOT_SELECTED",
+                "CHANGE_SET_NOT_APPLICABLE",
+                "CHARTER_NOT_CREATED",
+                "DEBUG_LIMIT_EXCEEDED",
+                "DEBUG_REDACTION_FAILED",
+                "DEBUG_UNAVAILABLE",
+                "DEBUG_UPLOAD_FAILED",
+                "EXECUTION_STATE_UNAVAILABLE",
+                "IN_PROCESS_TOOL",
+                "OBSERVATION_MANIFEST_NOT_CREATED",
+                "PROPOSAL_NOT_CREATED",
+                "REDACTION_NOT_REQUIRED",
+                "REPORT_NOT_CREATED",
+                "SOURCE_STATE_UNAVAILABLE",
+                "TASK_CANCELLED",
+                "TRANSPORT_RECEIPT_NOT_APPLICABLE",
+                "VERIFICATION_NOT_RUN"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["availability","reason_code"],
+          "properties": {
+            "availability": {"const":"not_applicable"},
+            "reason_code": {
+              "enum": [
+                "ATTESTATIONS_NOT_CREATED",
+                "CAPABILITY_NOT_IMPLEMENTED",
+                "CAPABILITY_NOT_SELECTED",
+                "CHANGE_SET_NOT_APPLICABLE",
+                "CHARTER_NOT_CREATED",
+                "DEBUG_LIMIT_EXCEEDED",
+                "DEBUG_REDACTION_FAILED",
+                "DEBUG_UNAVAILABLE",
+                "DEBUG_UPLOAD_FAILED",
+                "EXECUTION_STATE_UNAVAILABLE",
+                "IN_PROCESS_TOOL",
+                "OBSERVATION_MANIFEST_NOT_CREATED",
+                "PROPOSAL_NOT_CREATED",
+                "REDACTION_NOT_REQUIRED",
+                "REPORT_NOT_CREATED",
+                "SOURCE_STATE_UNAVAILABLE",
+                "TASK_CANCELLED",
+                "TRANSPORT_RECEIPT_NOT_APPLICABLE",
+                "VERIFICATION_NOT_RUN"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "task-result-outcome-reason-registry/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"registry_digest","domain":"pullwise:task-result-outcome-reason-registry:v1"},
+      "x-pullwise-semantics": {"document_rules":["task_result_outcome_reason_registry"],"contextual_helpers":[]},
+      "required": ["schema_id","reasons","registry_digest"],
+      "properties": {
+        "schema_id": {"const":"task-result-outcome-reason-registry/v1"},
+        "reasons": {
+          "type": "array",
+          "minItems": 23,
+          "maxItems": 23,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "ALREADY_SATISFIED",
+              "APPROVAL_REQUIRED",
+              "AUTHORIZED_WAIVER",
+              "BUDGET_EXHAUSTED",
+              "CAPABILITY_UNAVAILABLE",
+              "CONTRACT_INVALID",
+              "DEADLINE_REACHED",
+              "ENVIRONMENT_UNAVAILABLE",
+              "INPUT_REQUIRED",
+              "INTERACTION_UNAVAILABLE",
+              "LEASE_CANCELLED",
+              "POLICY_INVARIANT_BROKEN",
+              "POLICY_UNSUPPORTED",
+              "PROTOCOL_FAILURE",
+              "QUALITY_GATE_FAILED",
+              "RUNTIME_FAILURE",
+              "SAFE_PARTIAL_DELIVERY",
+              "SERVER_CANCELLED",
+              "SOURCE_MUTATION_FORBIDDEN",
+              "STORAGE_FAILURE",
+              "SUCCESS",
+              "USER_CANCELLED",
+              "VERIFICATION_INCOMPLETE"
+            ]
+          }
+        },
+        "registry_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_result_golden_availability_reason_registry",
+      "fixture_class": "golden",
+      "schema_id": "availability-reason-registry/v1",
+      "document": {
+        "schema_id": "availability-reason-registry/v1",
+        "reasons": [
+          "ATTESTATIONS_NOT_CREATED",
+          "CAPABILITY_NOT_IMPLEMENTED",
+          "CAPABILITY_NOT_SELECTED",
+          "CHANGE_SET_NOT_APPLICABLE",
+          "CHARTER_NOT_CREATED",
+          "DEBUG_LIMIT_EXCEEDED",
+          "DEBUG_REDACTION_FAILED",
+          "DEBUG_UNAVAILABLE",
+          "DEBUG_UPLOAD_FAILED",
+          "EXECUTION_STATE_UNAVAILABLE",
+          "IN_PROCESS_TOOL",
+          "OBSERVATION_MANIFEST_NOT_CREATED",
+          "PROPOSAL_NOT_CREATED",
+          "REDACTION_NOT_REQUIRED",
+          "REPORT_NOT_CREATED",
+          "SOURCE_STATE_UNAVAILABLE",
+          "TASK_CANCELLED",
+          "TRANSPORT_RECEIPT_NOT_APPLICABLE",
+          "VERIFICATION_NOT_RUN"
+        ],
+        "registry_digest": "82bbb04f8d8e17466fccaa217efd70c0d96ae5cc3bb65412905a82a4c9957c17"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_result_golden_outcome_reason_registry",
+      "fixture_class": "golden",
+      "schema_id": "task-result-outcome-reason-registry/v1",
+      "document": {
+        "schema_id": "task-result-outcome-reason-registry/v1",
+        "reasons": [
+          "ALREADY_SATISFIED",
+          "APPROVAL_REQUIRED",
+          "AUTHORIZED_WAIVER",
+          "BUDGET_EXHAUSTED",
+          "CAPABILITY_UNAVAILABLE",
+          "CONTRACT_INVALID",
+          "DEADLINE_REACHED",
+          "ENVIRONMENT_UNAVAILABLE",
+          "INPUT_REQUIRED",
+          "INTERACTION_UNAVAILABLE",
+          "LEASE_CANCELLED",
+          "POLICY_INVARIANT_BROKEN",
+          "POLICY_UNSUPPORTED",
+          "PROTOCOL_FAILURE",
+          "QUALITY_GATE_FAILED",
+          "RUNTIME_FAILURE",
+          "SAFE_PARTIAL_DELIVERY",
+          "SERVER_CANCELLED",
+          "SOURCE_MUTATION_FORBIDDEN",
+          "STORAGE_FAILURE",
+          "SUCCESS",
+          "USER_CANCELLED",
+          "VERIFICATION_INCOMPLETE"
+        ],
+        "registry_digest": "989d78edba0063b5b70feac5a19265137b707e7be3d6ce990d098fcb10bb91d4"
+      },
+      "expected_code": null
+    }
+  ]
+}

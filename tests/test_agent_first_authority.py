@@ -27,6 +27,7 @@ from tests.agent_first_authority_support import AuthorityHarness
 
 class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
     def test_installs_self_contained_current_tables_with_wal(self) -> None:
+        self.assertFalse(hasattr(self.authority, "bind_transport_receipt"))
         with self.connect() as connection:
             installed = {
                 row[0]
@@ -37,6 +38,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
         self.assertTrue(set(CURRENT_AUTHORITY_TABLES).issubset(installed))
         self.assertEqual(journal_mode.lower(), "wal")
+
     def test_accept_package_failure_has_stable_bytes_and_zero_writes(self) -> None:
         missing = self.accept_request()
         missing.pop("package")
@@ -56,13 +58,25 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
         )
         self.assertEqual(first.response_bytes, again.response_bytes)
         self.assertEqual(self.counts("agent_current_task_requests"), (0,))
+
     def test_registration_and_acceptance_are_exact_and_immutable(self) -> None:
         self.assert_fault_rolls_back(
-            REGISTER_FAULT_POINTS, lambda a: a.register_worker(self.register_request()),
-            ("agent_current_worker_registrations", "agent_current_worker_registration_heads"))
+            REGISTER_FAULT_POINTS,
+            lambda authority: authority.register_worker(self.register_request()),
+            (
+                "agent_current_worker_registrations",
+                "agent_current_worker_registration_heads",
+            ),
+        )
         self.assert_fault_rolls_back(
-            ACCEPT_FAULT_POINTS, lambda a: a.accept_current_task(self.accept_request()),
-            ("agent_current_task_requests", "agent_current_task_heads", "agent_current_control_events"))
+            ACCEPT_FAULT_POINTS,
+            lambda authority: authority.accept_current_task(self.accept_request()),
+            (
+                "agent_current_task_requests",
+                "agent_current_task_heads",
+                "agent_current_control_events",
+            ),
+        )
         registration = self.register()
         self.assertEqual(registration, self.register())
         verify_document_digest("agent-worker-register-response/v1", json.loads(registration))
@@ -82,6 +96,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
                 connection.execute("UPDATE agent_current_task_requests SET task_type='x'")
         self.assertEqual(registered, PACKAGE_TUPLE)
         self.assertEqual(head, ("QUEUED", "RUN", 1, 0))
+
     def test_claim_requires_package_bound_worker_registration(self) -> None:
         variants = (
             (list(schema_ids()), "0" * 64),
@@ -108,6 +123,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             self.assertEqual(before, self.counts("agent_current_attempts", "agent_current_claims"))
             self.authority.register_worker(self.register_request(worker_id=worker_id))
             self.authority.claim_and_issue_current_grant(request)
+
     def test_claim_is_complete_atomic_and_exactly_idempotent(self) -> None:
         self.register()
         self.accept()
@@ -144,6 +160,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             ),
             (1, 1, 1, 1, 1),
         )
+
     def test_claim_conflict_concurrency_and_every_fault_stage(self) -> None:
         self.register()
         self.accept()
@@ -158,7 +175,11 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             "IDEMPOTENCY_CONFLICT",
             lambda: self.authority.claim_and_issue_current_grant(changed),
         )
-        self.assertEqual(before, self.counts("agent_current_control_events", "agent_current_grants"))
+        self.assertEqual(
+            before,
+            self.counts("agent_current_control_events", "agent_current_grants"),
+        )
+
     def test_concurrent_claim_has_one_complete_winner(self) -> None:
         self.register()
         self.accept()
@@ -172,7 +193,8 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             )
             barrier.wait()
             try:
-                outcomes.append(AgentFirstAuthority(self.connect).claim_and_issue_current_grant(request))
+                authority = AgentFirstAuthority(self.connect)
+                outcomes.append(authority.claim_and_issue_current_grant(request))
             except AuthorityError as error:
                 outcomes.append(error)
 
@@ -183,8 +205,15 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             thread.join(10)
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertEqual(sum(isinstance(item, bytes) for item in outcomes), 1)
-        self.assertEqual([item.code for item in outcomes if isinstance(item, AuthorityError)], ["TASK_NOT_CLAIMABLE"])
-        self.assertEqual(self.counts("agent_current_claims", "agent_current_grants"), (1, 1))
+        failures = [
+            item.code for item in outcomes if isinstance(item, AuthorityError)
+        ]
+        self.assertEqual(failures, ["TASK_NOT_CLAIMABLE"])
+        self.assertEqual(
+            self.counts("agent_current_claims", "agent_current_grants"),
+            (1, 1),
+        )
+
     def test_abandonment_fences_full_authority_and_preserves_task_fields(self) -> None:
         claim_request, envelope = self.prepare_claim()
         stale_receipt = self.receipt(envelope)
@@ -202,9 +231,14 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             "reason": "outer_lease_lost",
             "idempotency_key": "abandon:one",
         }
-        fields = "lifecycle, desired_state, terminal_kind, result_ref, result_digest, outcome, terminal_at"
+        fields = (
+            "lifecycle, desired_state, terminal_kind, result_ref, "
+            "result_digest, outcome, terminal_at"
+        )
         with self.connect() as connection:
-            before = connection.execute(f"SELECT {fields} FROM agent_current_task_heads").fetchone()
+            before = connection.execute(
+                f"SELECT {fields} FROM agent_current_task_heads"
+            ).fetchone()
         self.assert_fault_rolls_back(
             ABANDON_FAULT_POINTS, lambda a: a.abandon_current_claim(request),
             ("agent_current_abandonments", "agent_current_fences", "agent_current_control_events"))
@@ -218,8 +252,12 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             ).fetchone()
             states = (
                 connection.execute("SELECT state FROM agent_current_attempts").fetchone()[0],
-                connection.execute("SELECT state FROM agent_current_owner_incarnations").fetchone()[0],
-                connection.execute("SELECT state FROM agent_current_grant_authority").fetchone()[0],
+                connection.execute(
+                    "SELECT state FROM agent_current_owner_incarnations"
+                ).fetchone()[0],
+                connection.execute(
+                    "SELECT state FROM agent_current_grant_authority"
+                ).fetchone()[0],
             )
         self.assertEqual(after[:7], before)
         self.assertEqual((after[7], response["task_version"]), (3, 3))
@@ -268,7 +306,10 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             ),
         )
         changed = {**request, "reason": "authority_revoked"}
-        self.assert_error("IDEMPOTENCY_CONFLICT", lambda: self.authority.abandon_current_claim(changed))
+        self.assert_error(
+            "IDEMPOTENCY_CONFLICT",
+            lambda: self.authority.abandon_current_claim(changed),
+        )
 
 
 if __name__ == "__main__":

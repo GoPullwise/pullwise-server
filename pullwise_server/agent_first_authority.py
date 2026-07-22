@@ -31,6 +31,7 @@ from .agent_first_authority_store import (
     FaultInjector,
 )
 from .agent_first_claim_authority import ClaimAuthorityStore
+from .agent_first_transport_envelope_authority import TransportEnvelopeAuthority
 from .agent_first_transport_receipts import TransportReceiptStore
 
 
@@ -40,9 +41,14 @@ _STORE_ERROR_MAP = {
     "IDEMPOTENCY_CONFLICT": "IDEMPOTENCY_CONFLICT",
     "TASK_ALREADY_EXISTS": "IDEMPOTENCY_CONFLICT",
     "TASK_NOT_CLAIMABLE": "TASK_NOT_CLAIMABLE",
+    "TERMINAL_ENVELOPE_INVALID": "CONTRACT_DOCUMENT_INVALID",
+    "TERMINAL_OUTCOME_INVALID": "CONTRACT_DOCUMENT_INVALID",
+    "TERMINAL_RESULT_CONFLICT": "IDEMPOTENCY_CONFLICT",
+    "AUTHORITY_MISMATCH": "AUTHORITY_INPUT_UNTRUSTED",
     "TRANSPORT_RECEIPT_ALREADY_BOUND": "TRANSPORT_RECEIPT_ALREADY_BOUND",
     "TRANSPORT_RECEIPT_BINDING_CONFLICT": "TRANSPORT_RECEIPT_BINDING_CONFLICT",
     "TRANSPORT_RECEIPT_CONFLICT": "TRANSPORT_RECEIPT_BINDING_CONFLICT",
+    "TRANSPORT_RECEIPT_NOT_FOUND": "TRANSPORT_RECEIPT_BINDING_CONFLICT",
     "WORKER_NOT_REGISTERED": "AUTHORITY_INPUT_UNTRUSTED",
     "WORKER_PACKAGE_MISMATCH": "CURRENT_PACKAGE_PIN_MISMATCH",
     "WORKER_REGISTRATION_INVALID": "AGENT_GRANT_INVALID",
@@ -106,6 +112,10 @@ class AgentFirstAuthority:
         self._store = AgentFirstAuthorityStore(connect_factory, fault_injector)
         self._claims = ClaimAuthorityStore(connect_factory, fault_injector)
         self._receipts = TransportReceiptStore(connect_factory, fault_injector)
+        self._transport_envelopes = TransportEnvelopeAuthority(
+            connect_factory,
+            fault_injector,
+        )
 
     @staticmethod
     def _raise(code: str) -> None:
@@ -319,6 +329,15 @@ class AgentFirstAuthority:
             "response_bytes": receipt_bytes,
         }
         return self._store_call(lambda: self._receipts.store_receipt(values))
+
+    def commit_current_transport_envelope(
+        self,
+        envelope: dict[str, object],
+    ) -> bytes:
+        self._package(envelope)
+        return self._store_call(
+            lambda: self._transport_envelopes.commit(envelope)
+        )
 
     def abandon_current_claim(self, request: dict[str, object]) -> bytes:
         document = self._validate("agent-claim-abandon-request/v1", request)

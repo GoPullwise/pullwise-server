@@ -1,0 +1,93 @@
+{
+  "family_id": "task-result-identities",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "actor/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-semantics": {"document_rules":["actor"],"contextual_helpers":[]},
+      "required": ["schema_id","kind","id","session_id"],
+      "properties": {
+        "schema_id": {"const":"actor/v1"},
+        "kind": {
+          "enum": ["task_owner","quality_verifier","domain_reviewer","explorer","troubleshooter","implementer","worker_control","server_control","user_control","system_reconciler"]
+        },
+        "id": {"type":"string","minLength":1,"maxLength":160},
+        "session_id": {"type":["string","null"],"pattern":"^sess_[0-9a-f]{32}$"}
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {"enum":["task_owner","quality_verifier","domain_reviewer","explorer","troubleshooter","implementer"]},
+            "session_id": {"type":"string","pattern":"^sess_[0-9a-f]{32}$"}
+          }
+        },
+        {"type":"object","properties":{"kind":{"enum":["worker_control","server_control","user_control","system_reconciler"]},"session_id":{"type":"null"}}}
+      ]
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "attempt-identity/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind","attempt_id","native_epoch"],
+          "properties": {
+            "kind": {"const":"started"},
+            "attempt_id": {"type":"string","pattern":"^attempt_[0-9a-f]{32}$"},
+            "native_epoch": {"type":"integer","minimum":1,"maximum":9007199254740991}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind","attempt_id","native_epoch","reason_code"],
+          "properties": {"kind":{"const":"not_started"},"attempt_id":{"type":"null"},"native_epoch":{"const":0},"reason_code":{"const":"ATTEMPT_NOT_STARTED"}}
+        }
+      ]
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "owner-identity/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind","owner_id","owner_epoch"],
+          "properties": {
+            "kind": {"const":"started"},
+            "owner_id": {"type":"string","pattern":"^owner_[0-9a-f]{32}$"},
+            "owner_epoch": {"type":"integer","minimum":1,"maximum":9007199254740991}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind","owner_id","owner_epoch","reason_code"],
+          "properties": {
+            "kind": {"const":"not_started"},
+            "owner_id": {"type":"string","pattern":"^owner_[0-9a-f]{32}$"},
+            "owner_epoch": {"const":0},
+            "reason_code": {"const":"OWNER_NOT_STARTED"}
+          }
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_result_identity_golden_actor",
+      "fixture_class": "golden",
+      "schema_id": "actor/v1",
+      "document": {"schema_id":"actor/v1","kind":"task_owner","id":"owner_00000000000000000000000000000001","session_id":"sess_00000000000000000000000000000001"},
+      "expected_code": null
+    }
+  ]
+}
