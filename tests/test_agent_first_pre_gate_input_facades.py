@@ -185,6 +185,7 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         root_set = self.document("pre_gate_golden_root_set")
         snapshot = self.document("gate_input_golden_success_snapshot")
         quality_ref = deepcopy(snapshot["quality_policy_plan_ref"])
+        quality_ref["artifact_id"] = "art_fefefefefefefefefefefefefefefe"
         manifest = self.make_manifest(root_set, extra_refs=[quality_ref])
         mapping = {
             "request_ref": "request",
@@ -213,6 +214,7 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         snapshot["pre_gate_closure_digest"] = manifest[
             "pre_gate_closure_digest"
         ]
+        snapshot["quality_policy_plan_ref"] = deepcopy(quality_ref)
         snapshot = reseal(
             snapshot, "input_digest", "pullwise:gate-input-snapshot:v1"
         )
@@ -417,6 +419,9 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
 
         bad_fact = deepcopy(terminal)
         bad_fact[3][0]["observed_task_version"] = terminal[0]["task_version"]
+        bad_fact[3][0]["idempotency_key"] = (
+            f"terminalize:budget_exhausted:{terminal[0]['task_version']}"
+        )
         bad_fact[3][0] = reseal(
             bad_fact[3][0],
             "fact_digest",

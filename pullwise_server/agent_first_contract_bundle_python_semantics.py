@@ -5,14 +5,19 @@ from __future__ import annotations
 from .agent_first_contract_bundle_python_control import PYTHON_CONTROL
 from .agent_first_contract_bundle_python_dispatch import PYTHON_DISPATCH
 from .agent_first_contract_bundle_python_gate import PYTHON_GATE
+from .agent_first_contract_bundle_python_gate_input import PYTHON_GATE_INPUT
 from .agent_first_contract_bundle_python_gate_preparation import (
     PYTHON_GATE_PREPARATION,
 )
+from .agent_first_contract_bundle_python_pre_gate import PYTHON_PRE_GATE
 from .agent_first_contract_bundle_python_quality_policy import (
     PYTHON_QUALITY_POLICY,
 )
 from .agent_first_contract_bundle_python_result import PYTHON_RESULT
 from .agent_first_contract_bundle_python_rules import PYTHON_RULES
+from .agent_first_contract_bundle_python_task_evidence import (
+    PYTHON_TASK_EVIDENCE,
+)
 
 
 PYTHON_SEMANTICS_BASE = r'''
@@ -296,6 +301,9 @@ PYTHON_SEMANTICS = "\n".join(
         PYTHON_CONTROL,
         PYTHON_QUALITY_POLICY,
         PYTHON_RESULT,
+        PYTHON_PRE_GATE,
+        PYTHON_TASK_EVIDENCE,
+        PYTHON_GATE_INPUT,
         PYTHON_GATE,
         PYTHON_GATE_PREPARATION,
         PYTHON_DISPATCH,

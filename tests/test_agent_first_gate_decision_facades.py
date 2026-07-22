@@ -215,9 +215,15 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
                         "    } else if (operation.kind === 'success_snake') {",
                         "      value = await facade.evaluate_success_gate(operation.snapshot, operation.context);",
                         "    } else if (operation.kind === 'terminal_snake') {",
-                        "      value = await facade.evaluate_terminalization_gate(operation.snapshot, operation.context);",
+                        (
+                            "      value = await facade.evaluate_terminalization_gate("
+                            "operation.snapshot, operation.context);"
+                        ),
                         "    } else {",
-                        "      value = await facade.evaluateTerminalizationGate(operation.snapshot, operation.context);",
+                        (
+                            "      value = await facade.evaluateTerminalizationGate("
+                            "operation.snapshot, operation.context);"
+                        ),
                         "    }",
                         "    results.push({ok: true, value});",
                         "  } catch (error) {",

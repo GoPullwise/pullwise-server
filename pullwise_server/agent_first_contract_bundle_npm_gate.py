@@ -48,7 +48,11 @@ const GATE_PREDICATE_ENTRIES = [
     input_schema_ids: ["budget-summary/v1"],
     failure_codes: ["BUDGET_EXHAUSTED", "TERMINALIZATION_RESERVE_REACHED"]},
   {predicate_id: "GATE_SECRET_SCAN", decision_kind: "success",
-    input_schema_ids: ["debug-redaction-plan/v1", "pre-gate-evidence-closure-manifest/v1", "publication-content-manifest/v1"],
+    input_schema_ids: [
+      "debug-redaction-plan/v1",
+      "pre-gate-evidence-closure-manifest/v1",
+      "publication-content-manifest/v1",
+    ],
     failure_codes: ["DEBUG_REDACTION_FAILED", "POLICY_INVARIANT_BROKEN"]},
   {predicate_id: "GATE_TERMINAL_AUTHORITY_FACT", decision_kind: "terminalization",
     input_schema_ids: ["terminalization-fact/v1", "terminalization-input-snapshot/v1"],

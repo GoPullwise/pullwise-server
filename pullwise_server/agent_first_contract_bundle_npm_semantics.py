@@ -12,9 +12,12 @@ from .agent_first_contract_bundle_npm_execution_profile import (
     NPM_EXECUTION_PROFILE_RULE,
 )
 from .agent_first_contract_bundle_npm_gate import NPM_GATE
+from .agent_first_contract_bundle_npm_gate_input import NPM_GATE_INPUT
 from .agent_first_contract_bundle_npm_gate_preparation import NPM_GATE_PREPARATION
 from .agent_first_contract_bundle_npm_observation import NPM_OBSERVATION_RULE
+from .agent_first_contract_bundle_npm_pre_gate import NPM_PRE_GATE
 from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
+from .agent_first_contract_bundle_npm_task_evidence import NPM_TASK_EVIDENCE
 
 
 NPM_SEMANTICS_BASE = r'''
@@ -292,16 +295,21 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   capability_sets_disjoint_sorted_unique: rulePolicyCapabilitySets,
   change_set_patch: ruleChangeSetPatch,
   debug_redaction_plan: ruleDebugRedactionPlan,
+  evidence_closure_manifest: ruleEvidenceClosureManifest,
   execution_profile: ruleExecutionProfile,
   gate_decision: ruleGateDecision,
+  gate_input_snapshot: ruleGateInputSnapshot,
   gate_predicate_registry: ruleGatePredicateRegistry,
   observation: ruleObservation,
   policy_digest_exact: rulePolicyDigest,
+  pre_gate_evidence_closure_manifest: rulePreGateEvidenceClosureManifest,
+  pre_gate_root_set: rulePreGateRootSet,
   publication_content_manifest: rulePublicationContentManifest,
   quality_policy_plan: ruleQualityPolicyPlan,
   risk_ceiling_current_mvp: rulePolicyRiskCeiling,
   root_and_origin_sets_sorted_unique: rulePolicyRootsAndOrigins,
   terminalization_fact: ruleTerminalizationFact,
+  terminalization_input_snapshot: ruleTerminalizationInputSnapshot,
   utf8_nfc_byte_limits: ruleUtf8Fields,
 });
 
@@ -364,6 +372,9 @@ NPM_SEMANTICS = "\n".join(
         NPM_EXECUTION_PROFILE_RULE,
         NPM_OBSERVATION_RULE,
         NPM_QUALITY_POLICY,
+        NPM_PRE_GATE,
+        NPM_TASK_EVIDENCE,
+        NPM_GATE_INPUT,
         NPM_GATE,
         NPM_GATE_PREPARATION,
         NPM_DECLARED_DISPATCH,

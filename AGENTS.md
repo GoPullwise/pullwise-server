@@ -586,3 +586,37 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   decoded size, and byte SHA-256 before `patch_digest`. Compute that digest over
   `pullwise:change-set-patch/v1`, a NUL separator, and canonical unsigned
   document bytes, with identical Python/Node error code, detail, and path.
+- Generated GatePreparation facades expose
+  `verify_terminalization_fact_context(fact, task_id, current_task_version,
+  lifecycle_state, existing_fact=None)`; Node also exports
+  `verifyTerminalizationFactContext` plus the snake alias. It verifies the
+  fact digest, exact task/version binding, a nonterminal request lifecycle, and
+  canonical equality for a reused idempotency key.
+
+## Agent-First Gate Decision Semantics
+
+- Generated GateDecision facades treat the sealed
+  `gate-predicate-registry/v1` fixture as the exact ordered contract. Every
+  predicate result occurs in branch order, uses only that predicate's failure
+  codes and input-schema evidence, satisfies
+  `passed == (failure_code is null)`, and contributes to the decision-wide
+  conjunction.
+- `evaluate_success_gate(snapshot, context)` and
+  `evaluate_terminalization_gate(snapshot, context)` are closed-world,
+  deterministic aggregators. They bind an exact validated snapshot ContentRef
+  and seal supplied predicate results; they must not invent live predicate
+  booleans. Full live evaluation requires a typed predicate-evaluation input or
+  resolver contract carrying resolved reference content plus clock, lease,
+  writer, and tool facts, which the current source schemas do not define.
+
+## Agent-First Quality Policy Semantics
+
+- Generated QualityPolicy facades enforce the exact six-field input digest,
+  fixed Q1/Q2/Q3 slot table, strict `plan_digest`, and opaque rationale. The
+  context helper binds a plan to proposal, policy, request, ledger, and change
+  set; enforces the risk floor; permits only active ledger requirement ids; and
+  requires every active mandatory id in every Q1/Q2 slot while Q3 remains
+  zero-slot unsupported evidence.
+- Public `document_digest` / `documentDigest` helpers compute the digest first
+  and validate the real sealed document. They must never validate a synthetic
+  all-zero digest.

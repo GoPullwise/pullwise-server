@@ -267,8 +267,13 @@ export const verify_bundle = verifyBundle;
 export const verify_budget_transition = verifyBudgetTransition;
 export const verify_content_ref_set = verifyContentRefSet;
 export const verify_document_digest = verifyDocumentDigest;
+export const verify_evidence_closure_context = verifyEvidenceClosureContext;
+export const verify_gate_input_snapshot_context = verifyGateInputSnapshotContext;
+export const verify_pre_gate_evidence_closure_context = verifyPreGateEvidenceClosureContext;
+export const verify_pre_gate_root_set_context = verifyPreGateRootSetContext;
 export const verify_quality_policy_plan_context = verifyQualityPolicyPlanContext;
 export const verify_terminalization_fact_context = verifyTerminalizationFactContext;
+export const verify_terminalization_input_snapshot_context = verifyTerminalizationInputSnapshotContext;
 export const verify_waiver_authorization = verifyWaiverAuthorization;
 '''
 
