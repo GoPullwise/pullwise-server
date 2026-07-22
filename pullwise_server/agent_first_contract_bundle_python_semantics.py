@@ -17,6 +17,9 @@ from .agent_first_contract_bundle_python_quality_policy import (
 )
 from .agent_first_contract_bundle_python_result import PYTHON_RESULT
 from .agent_first_contract_bundle_python_rules import PYTHON_RULES
+from .agent_first_contract_bundle_python_source_execution_observation import (
+    PYTHON_SOURCE_EXECUTION_OBSERVATION,
+)
 from .agent_first_contract_bundle_python_task_evidence import (
     PYTHON_TASK_EVIDENCE,
 )
@@ -306,6 +309,7 @@ PYTHON_SEMANTICS = "\n".join(
     (
         PYTHON_SEMANTICS_BASE,
         PYTHON_RULES,
+        PYTHON_SOURCE_EXECUTION_OBSERVATION,
         PYTHON_BUDGET,
         PYTHON_CONTROL,
         PYTHON_TASK_CONTROL_RULES,

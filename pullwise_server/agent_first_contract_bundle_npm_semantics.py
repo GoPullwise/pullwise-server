@@ -16,6 +16,9 @@ from .agent_first_contract_bundle_npm_gate import NPM_GATE
 from .agent_first_contract_bundle_npm_gate_input import NPM_GATE_INPUT
 from .agent_first_contract_bundle_npm_gate_preparation import NPM_GATE_PREPARATION
 from .agent_first_contract_bundle_npm_observation import NPM_OBSERVATION_RULE
+from .agent_first_contract_bundle_npm_source_execution_observation import (
+    NPM_SOURCE_EXECUTION_OBSERVATION,
+)
 from .agent_first_contract_bundle_npm_pre_gate import NPM_PRE_GATE
 from .agent_first_contract_bundle_npm_publication import NPM_PUBLICATION
 from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
@@ -425,6 +428,7 @@ function validateDeclaredDocumentRules(schemaId, value) {
 NPM_SEMANTICS = "\n".join(
     (
         NPM_SEMANTICS_BASE,
+        NPM_SOURCE_EXECUTION_OBSERVATION,
         NPM_CHANGE_SET_PATCH_RULE,
         NPM_EFFECTIVE_POLICY_RULES,
         NPM_EXECUTION_PROFILE_RULE,

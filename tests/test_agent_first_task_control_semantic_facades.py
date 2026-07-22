@@ -191,6 +191,140 @@ class AgentFirstTaskControlSemanticFacadesTest(unittest.TestCase):
         self.assertEqual(python_charter, node_charter)
         self.assertTrue(python_charter["ok"])
 
+    def test_claim_attempt_owner_and_task_record_transitions_have_parity(self) -> None:
+        queued = self.python.fixture("task_control_golden_task_record")["document"]
+        attempt = self.python.fixture("task_control_golden_attempt_record")["document"]
+        owner = self.python.fixture("task_control_golden_task_owner")["document"]
+        claimed = deepcopy(queued)
+        claimed.update(
+            lifecycle="ACTIVE",
+            task_version=2,
+            native_epoch=1,
+            current_attempt_id=attempt["attempt_id"],
+            owner_epoch=1,
+            updated_at="2026-07-22T00:00:01.000Z",
+        )
+        transition_args = [queued, claimed]
+        self.assertEqual(
+            self.python_call("validate_task_record_transition", transition_args),
+            self.node_call("validateTaskRecordTransition", transition_args),
+        )
+        claim_args = [queued, claimed, attempt, owner]
+        python_claim = self.python_call("validate_claim_write_set", claim_args)
+        node_claim = self.node_call("validateClaimWriteSet", claim_args)
+        self.assertEqual(python_claim, node_claim)
+        self.assertTrue(python_claim["ok"])
+
+        preparing = deepcopy(attempt)
+        preparing.update(state="PREPARING", state_version=2)
+        attempt_args = [attempt, preparing]
+        self.assertEqual(
+            self.python_call("validate_attempt_transition", attempt_args),
+            self.node_call("validateAttemptTransition", attempt_args),
+        )
+        active_owner = deepcopy(owner)
+        active_owner.update(state="ACTIVE", state_version=2)
+        owner_args = [owner, active_owner]
+        self.assertEqual(
+            self.python_call("validate_task_owner_transition", owner_args),
+            self.node_call("validateTaskOwnerTransition", owner_args),
+        )
+
+        version_jump = deepcopy(claimed)
+        version_jump["task_version"] = 3
+        stale_args = [queued, version_jump]
+        python_stale = self.python_call("validate_task_record_transition", stale_args)
+        node_stale = self.node_call("validateTaskRecordTransition", stale_args)
+        self.assertEqual(python_stale, node_stale)
+        self.assertEqual("TASK_VERSION_STALE", python_stale["code"])
+
+        orphan_owner = deepcopy(owner)
+        orphan_owner["attempt_id"] = "attempt_ffffffffffffffffffffffffffffffff"
+        orphan_args = [queued, claimed, attempt, orphan_owner]
+        python_orphan = self.python_call("validate_claim_write_set", orphan_args)
+        node_orphan = self.node_call("validateClaimWriteSet", orphan_args)
+        self.assertEqual(python_orphan, node_orphan)
+        self.assertEqual("AUTHORITY_FENCED", python_orphan["code"])
+
+        preterminal_result = deepcopy(claimed)
+        preterminal_result["result_ref"] = {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_00000000000000000000000000000098",
+            "content_schema_id": "task-result/v1",
+            "sha256": "9" * 64,
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8",
+        }
+        python_preterminal = self.python_validation("task-record/v1", preterminal_result)
+        node_preterminal = self.node_validation("task-record/v1", preterminal_result)
+        self.assertEqual(python_preterminal, node_preterminal)
+        self.assertFalse(python_preterminal["ok"])
+        self.assertEqual("TASK_RECORD_TERMINAL_RESULT_INVALID", python_preterminal["detail"])
+
+    def test_task_result_publication_binds_only_the_terminal_successor(self) -> None:
+        queued = self.python.fixture("task_control_golden_task_record")["document"]
+        attempt = self.python.fixture("task_control_golden_attempt_record")["document"]
+        claimed = deepcopy(queued)
+        claimed.update(
+            lifecycle="ACTIVE", task_version=2, native_epoch=1,
+            current_attempt_id=attempt["attempt_id"], owner_epoch=1,
+            updated_at="2026-07-22T00:00:01.000Z",
+        )
+        finalizing = deepcopy(claimed)
+        finalizing.update(
+            lifecycle="FINALIZING", task_version=3,
+            updated_at="2026-07-22T00:00:02.000Z",
+        )
+        result = {
+            "schema_id": "task-result/v1",
+            "task_id": finalizing["task_id"],
+            "task_type": finalizing["task_type"],
+            "outcome": "COMPLETED",
+            "published_from_version": 3,
+            "terminal_task_version": 4,
+            "request_ref": finalizing["request_ref"],
+            "policy_ref": finalizing["policy_ref"],
+            "attempt_identity": {
+                "kind": "started", "attempt_id": attempt["attempt_id"],
+                "native_epoch": 1,
+            },
+            "owner_identity": {
+                "kind": "started", "owner_id": finalizing["owner_id"],
+                "owner_epoch": 1,
+            },
+            "terminal_at": "2026-07-22T00:01:00Z",
+        }
+        result_bytes = self.python.canonical_document_bytes(result)
+        result_digest = self.python.canonical_document_sha256(result)
+        terminal = deepcopy(finalizing)
+        terminal.update(
+            lifecycle="TERMINAL", task_version=4,
+            terminal_kind="task_result", result_digest=result_digest,
+            result_ref={
+                "schema_id": "content-ref/v1",
+                "artifact_id": "art_00000000000000000000000000000097",
+                "content_schema_id": "task-result/v1",
+                "sha256": result_digest, "size_bytes": len(result_bytes),
+                "media_type": "application/json", "encoding": "utf-8",
+            },
+            outcome="COMPLETED", updated_at="2026-07-22T00:01:00.000Z",
+            terminal_at="2026-07-22T00:01:00.000Z",
+        )
+        args = [finalizing, terminal, result]
+        python_ok = self.python_call("validate_task_result_publication", args)
+        node_ok = self.node_call("validateTaskResultPublication", args)
+        self.assertEqual(python_ok, node_ok)
+        self.assertTrue(python_ok["ok"])
+
+        wrong_result = deepcopy(result)
+        wrong_result["task_id"] = "task_ffffffffffffffffffffffffffffffff"
+        bad_args = [finalizing, terminal, wrong_result]
+        python_bad = self.python_call("validate_task_result_publication", bad_args)
+        node_bad = self.node_call("validateTaskResultPublication", bad_args)
+        self.assertEqual(python_bad, node_bad)
+        self.assertEqual("TASK_RESULT_PUBLICATION_IDENTITY_INVALID", python_bad["detail"])
+
     def python_validation(
         self, schema_id: str, document: dict[str, object]
     ) -> dict[str, object]:
