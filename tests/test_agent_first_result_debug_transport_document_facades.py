@@ -10,6 +10,7 @@ from tests.agent_first_result_debug_transport_facade_support import (
 SCHEMA_IDS = (
     "actor/v1",
     "availability-reason-registry/v1",
+    "task-result-outcome-reason-registry/v1",
     "task-result/v1",
     "task-result-core/v1",
     "worker-debug-file-manifest/v1",
@@ -90,6 +91,10 @@ class AgentFirstResultDebugTransportDocumentFacadesTest(
                 "availability-reason-registry/v1",
             ),
             (
+                "task_result_golden_outcome_reason_registry",
+                "task-result-outcome-reason-registry/v1",
+            ),
+            (
                 "worker_debug_content_golden_file_manifest",
                 "worker-debug-file-manifest/v1",
             ),
@@ -106,6 +111,12 @@ class AgentFirstResultDebugTransportDocumentFacadesTest(
 
         self.assertEqual(
             [
+                {
+                    "ok": False,
+                    "code": "CONTRACT_DOCUMENT_INVALID",
+                    "detail": "CONTRACT_DIGEST_MISMATCH",
+                    "path": "$.registry_digest",
+                },
                 {
                     "ok": False,
                     "code": "CONTRACT_DOCUMENT_INVALID",
