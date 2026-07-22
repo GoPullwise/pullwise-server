@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from .agent_first_contract_bundle_npm_effective_policy import (
+    NPM_EFFECTIVE_POLICY_RULES,
+)
 from .agent_first_contract_bundle_npm_execution_profile import (
     NPM_EXECUTION_PROFILE_RULE,
 )
@@ -278,8 +281,33 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
 
 NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
+  budget_ceiling_consistency: rulePolicyBudgetCeilings,
+  capability_sets_disjoint_sorted_unique: rulePolicyCapabilitySets,
   execution_profile: ruleExecutionProfile,
+  policy_digest_exact: rulePolicyDigest,
+  risk_ceiling_current_mvp: rulePolicyRiskCeiling,
+  root_and_origin_sets_sorted_unique: rulePolicyRootsAndOrigins,
+  utf8_nfc_byte_limits: ruleUtf8Fields,
 });
+
+function ruleUtf8Fields(value) {
+  const limits = {
+    objective: 16384,
+    statement: 16384,
+    rationale: 16384,
+    objective_restated: 16384,
+    reason: 16384,
+  };
+  for (const [field, limit] of Object.entries(limits)) {
+    if (!(field in value)) continue;
+    if (value[field].normalize("NFC") !== value[field]) {
+      fail("UTF8_NFC_INVALID", "$." + field);
+    }
+    if (encoder.encode(value[field]).length > limit) {
+      fail("UTF8_BYTE_LIMIT_INVALID", "$." + field);
+    }
+  }
+}
 
 function sortedUniqueStrings(values, allowEmpty) {
   return Array.isArray(values) && (allowEmpty || values.length > 0) &&
@@ -316,6 +344,7 @@ function validateDeclaredDocumentRules(schemaId, value) {
 NPM_SEMANTICS = "\n".join(
     (
         NPM_SEMANTICS_BASE,
+        NPM_EFFECTIVE_POLICY_RULES,
         NPM_EXECUTION_PROFILE_RULE,
         NPM_DECLARED_DISPATCH,
     )

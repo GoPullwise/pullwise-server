@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 from pathlib import Path
 import subprocess
@@ -8,10 +7,10 @@ import tempfile
 import types
 import unittest
 
-from pullwise_server.agent_first_contract_bundle import build_bundle
 from pullwise_server.agent_first_contract_bundle_npm import render_npm_wrapper
 from pullwise_server.agent_first_contract_bundle_python import render_python_wrapper
 from pullwise_server.agent_first_contract_bundle_source import (
+    SEMANTIC_CYCLE_EXCEPTIONS,
     canonical_bytes,
     reference_dag,
     schema_edges,
@@ -19,20 +18,17 @@ from pullwise_server.agent_first_contract_bundle_source import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_ROOT = REPO_ROOT / "contracts" / "agent-first" / "current" / "source"
 OWNER_SCHEMA_ID = "\ud7ff/v1"
 BMP_SCHEMA_ID = "\ue000/v1"
 NON_BMP_SCHEMA_ID = "\U0001f600/v1"
+MISSING_FIXTURE_ID = "core_golden_canonical_profile"
 
 
 class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        published = build_bundle(SOURCE_ROOT)
-        document = deepcopy(published.document)
-        family = document["families"][-1]
-        added_schemas = [
+        family_id = "unicode-code-point-order-probe"
+        schemas = [
             {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "$id": OWNER_SCHEMA_ID,
@@ -47,13 +43,13 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
             cls._empty_schema(BMP_SCHEMA_ID),
             cls._empty_schema(NON_BMP_SCHEMA_ID),
         ]
-        family["schemas"].extend(added_schemas)
-        for schema in added_schemas:
+        registry = []
+        for schema in schemas:
             edges = schema_edges(schema)
-            family["schema_registry"].append(
+            registry.append(
                 {
                     "schema_id": schema["$id"],
-                    "family_id": family["family_id"],
+                    "family_id": family_id,
                     "role": "public_document",
                     "references": sorted(
                         {edge["target_schema_id"] for edge in edges}
@@ -62,42 +58,47 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
                     "sha256": sha256(canonical_bytes(schema)),
                 }
             )
-
-        schema_owner = {
-            schema["$id"]: item["family_id"]
-            for item in document["families"]
-            for schema in item["schemas"]
+        family = {
+            "family_id": family_id,
+            "schemas": schemas,
+            "schema_registry": registry,
+            "fixtures": [],
+            "fixture_registry": [],
         }
-        root = document["root_manifest"]
-        root["schema_registry"] = [
-            entry
-            for item in document["families"]
-            for entry in item["schema_registry"]
-        ]
-        root["fixture_registry"] = [
-            entry
-            for item in document["families"]
-            for entry in item["fixture_registry"]
-        ]
-        root["reference_dag"] = reference_dag(document["families"], schema_owner)
-        root["families"] = [
-            {
-                "family_id": item["family_id"],
-                "schema_ids": [schema["$id"] for schema in item["schemas"]],
-                "fixture_ids": [fixture["fixture_id"] for fixture in item["fixtures"]],
-                "sha256": sha256(canonical_bytes(item)),
-            }
-            for item in document["families"]
-        ]
-        root.pop("root_sha256", None)
-        root_sha256 = sha256(canonical_bytes(root))
-        root["root_sha256"] = root_sha256
+        root_body = {
+            "required_families": [family_id],
+            "fixture_classes": [],
+            "semantic_cycle_exceptions": list(SEMANTIC_CYCLE_EXCEPTIONS),
+            "semantic_cycle_exceptions_sha256": sha256(
+                canonical_bytes(list(SEMANTIC_CYCLE_EXCEPTIONS))
+            ),
+            "families": [
+                {
+                    "family_id": family_id,
+                    "schema_ids": [schema["$id"] for schema in schemas],
+                    "fixture_ids": [],
+                    "sha256": sha256(canonical_bytes(family)),
+                }
+            ],
+            "schema_registry": registry,
+            "fixture_registry": [],
+            "reference_dag": reference_dag(
+                [family], {schema["$id"]: family_id for schema in schemas}
+            ),
+        }
+        root_sha256 = sha256(canonical_bytes(root_body))
+        document = {
+            "package_identity": "@pullwise/unicode-order-probe",
+            "package_version": "0.0.0",
+            "root_manifest": {**root_body, "root_sha256": root_sha256},
+            "families": [family],
+        }
         payload = canonical_bytes(document)
         content_sha256 = sha256(payload)
 
         python_wrapper = render_python_wrapper(
-            published.package_identity,
-            published.package_version,
+            document["package_identity"],
+            document["package_version"],
             root_sha256,
             content_sha256,
             payload,
@@ -105,8 +106,8 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
         cls.python_facade = types.ModuleType("_contract_bundle_ordering_python_facade")
         exec(python_wrapper, cls.python_facade.__dict__)
         cls.npm_wrapper = render_npm_wrapper(
-            published.package_identity,
-            published.package_version,
+            document["package_identity"],
+            document["package_version"],
             root_sha256,
             content_sha256,
             payload,
@@ -123,34 +124,64 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
         }
 
     def test_public_verify_bundle_matches_python_code_point_order(self) -> None:
-        self.assertTrue(self.python_facade.verify_bundle())
+        python_result = self._python_result()
+        node_result = self._node_result()
 
-        result = self._node_result()
+        expected_python_order = [BMP_SCHEMA_ID, NON_BMP_SCHEMA_ID]
+        self.assertEqual(expected_python_order, python_result["reference_order"])
+        self.assertEqual(
+            [NON_BMP_SCHEMA_ID, BMP_SCHEMA_ID], node_result["native_utf16_order"]
+        )
+        self.assertEqual(expected_python_order, node_result["reference_order"])
+        self.assertEqual("post_reference_dag", python_result["stage"])
+        self.assertEqual(python_result["stage"], node_result["stage"])
 
-        self.assertEqual([NON_BMP_SCHEMA_ID, BMP_SCHEMA_ID], result["native_order"])
-        self.assertEqual({"ok": True, "value": True}, result["verification"])
+    def _python_result(self) -> dict[str, object]:
+        root = self.python_facade.root_manifest()
+        owner = next(
+            item
+            for item in root["reference_dag"]
+            if item["schema_id"] == OWNER_SCHEMA_ID
+        )
+        try:
+            self.python_facade.verify_bundle()
+        except KeyError as error:
+            if error.args == (MISSING_FIXTURE_ID,):
+                return {
+                    "stage": "post_reference_dag",
+                    "reference_order": owner["references"],
+                }
+            raise
+        self.fail("minimal ordering probe unexpectedly passed full bundle verification")
 
     def _node_result(self) -> dict[str, object]:
         with tempfile.TemporaryDirectory(prefix="contract-bundle-ordering-") as scratch:
             scratch_path = Path(scratch)
             facade_path = scratch_path / "facade.mjs"
             runner_path = scratch_path / "runner.mjs"
-            facade_path.write_bytes(self.npm_wrapper)
+            facade_path.write_bytes(self.npm_wrapper + b"\nexport { schemaEdges };\n")
             runner_path.write_text(
                 "\n".join(
                     (
                         f"import * as facade from {json.dumps(facade_path.as_uri())};",
-                        "let verification;",
+                        "const owner = facade.bundle().families[0].schemas[0];",
+                        "const reference_order = facade.schemaEdges(owner)",
+                        "  .map((edge) => edge.target_schema_id);",
+                        "let stage;",
                         "try {",
-                        "  verification = {ok: true, value: await facade.verifyBundle()};",
+                        "  await facade.verifyBundle();",
+                        "  stage = 'verified';",
                         "} catch (error) {",
-                        "  verification = {",
-                        "    ok: false, code: error.code, detail: error.detail, path: error.path,",
-                        "  };",
+                        f"  if (error.message === {json.dumps('UNKNOWN_CONTRACT_DOCUMENT: ' + MISSING_FIXTURE_ID)}) {{",
+                        "    stage = 'post_reference_dag';",
+                        "  } else {",
+                        "    stage = error.detail ?? error.message;",
+                        "  }",
                         "}",
                         "process.stdout.write(JSON.stringify({",
-                        f"  native_order: [{json.dumps(BMP_SCHEMA_ID)}, {json.dumps(NON_BMP_SCHEMA_ID)}].sort(),",
-                        "  verification,",
+                        "  stage,",
+                        "  reference_order,",
+                        f"  native_utf16_order: [{json.dumps(BMP_SCHEMA_ID)}, {json.dumps(NON_BMP_SCHEMA_ID)}].sort(),",
                         "}));",
                     )
                 ),

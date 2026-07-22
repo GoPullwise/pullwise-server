@@ -92,6 +92,7 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
     }
     FORBIDDEN_CLOSURE_TARGETS = {
         "evidence-closure-manifest/v1",
+        "error-response/v1",
         "gate-decision/v1",
         "gate-input-snapshot/v1",
         "server-debug-assembly/v1",
@@ -152,6 +153,12 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
             )
             self.assertTrue(targets, node)
             self.assertEqual(sorted(set(targets)), targets, node)
+        closure_targets = closure["properties"]["entries"]["items"][
+            "x-pullwise-content-schema-ids"
+        ]
+        self.assertFalse(
+            self.FORBIDDEN_CLOSURE_TARGETS.intersection(closure_targets)
+        )
 
     @staticmethod
     def _availability_branch(document: dict[str, object], field: str) -> str:

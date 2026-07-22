@@ -24,7 +24,7 @@
             "$ref": "content-ref/v1",
             "x-pullwise-content-schema-ids": [
               "budget-summary/v1", "canonical-document/v1", "change-set-patch/v1", "change-set/v1", "completion-proposal/v1",
-              "debug-redaction-plan/v1", "effect-ledger-snapshot/v1", "effective-execution-policy/v1", "error-response/v1",
+              "debug-redaction-plan/v1", "effect-ledger-snapshot/v1", "effective-execution-policy/v1",
               "execution-profile/v1", "execution-state-manifest/v1", "local-tool-receipt/v1", "observation-manifest/v1", "observation/v1",
               "pre-gate-root-set/v1", "pre-verifier-observation-manifest/v1", "publication-content-manifest/v1", "quality-policy-plan/v1",
               "r0-read-payload/v1", "r0-read-result/v1", "requirement-ledger/v1", "source-content/v1", "source-selection-policy/v1",

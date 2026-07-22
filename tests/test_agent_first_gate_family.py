@@ -234,6 +234,21 @@ class GateFamilyTest(unittest.TestCase):
                 consumers.setdefault(code, set()).add(entry["predicate_id"])
         self.assertTrue(any(len(value) > 1 for value in consumers.values()))
         self.assertTrue(any(len(item["failure_codes"]) > 1 for item in entries))
+        registry_schema = self.schemas["gate-predicate-registry/v1"]
+        entry_schema = registry_schema["properties"]["predicates"]["items"]
+        self.assertEqual(
+            list(expected_ids), entry_schema["properties"]["predicate_id"]["enum"]
+        )
+        self.assertEqual(
+            sorted(consumers),
+            entry_schema["properties"]["failure_codes"]["items"]["enum"],
+        )
+        decision_result = self.schemas["gate-decision/v1"]["properties"]
+        decision_result = decision_result["predicate_results"]["items"]["properties"]
+        self.assertEqual(list(expected_ids), decision_result["predicate_id"]["enum"])
+        self.assertEqual(
+            [None, *sorted(consumers)], decision_result["failure_code"]["enum"]
+        )
         stable = next(
             item
             for item in self.error_family["fixtures"]
@@ -241,6 +256,19 @@ class GateFamilyTest(unittest.TestCase):
         )["document"]["entries"]
         stable_codes = {item["code"] for item in stable}
         self.assertLessEqual(set(consumers), stable_codes)
+        all_schema_ids = {
+            schema["$id"]
+            for path in GATE_PATH.parent.glob("*.json")
+            for schema in json.loads(path.read_text(encoding="utf-8"))["schemas"]
+        }
+        self.assertLessEqual(
+            {
+                schema_id
+                for entry in entries
+                for schema_id in entry["input_schema_ids"]
+            },
+            all_schema_ids,
+        )
 
     def test_registries_are_sealed_and_stable_code_views_are_bijective(self) -> None:
         gate_fixture = next(

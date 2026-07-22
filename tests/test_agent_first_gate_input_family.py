@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 from pathlib import Path
 import unittest
@@ -230,10 +231,26 @@ class AgentFirstGateInputFamilyTest(unittest.TestCase):
         )
         facts = document["terminalization_fact_refs"]
         fact_keys = [self._ref_key(item) for item in facts]
+        has_attempt = document["attempt_id"] is not None
+        attempt_binding_valid = (
+            has_attempt
+            and document["native_epoch"] >= 1
+            and document["owner_epoch"] >= 1
+            and document["lease_id"] is not None
+            and document["outer_lease_expires_at"] is not None
+            and document["outer_lease_grace_expires_at"] is not None
+            or not has_attempt
+            and document["native_epoch"] == 0
+            and document["owner_epoch"] == 0
+            and document["lease_id"] is None
+            and document["outer_lease_expires_at"] is None
+            and document["outer_lease_grace_expires_at"] is None
+        )
         return (
             document["schema_id"] == "terminalization-input-snapshot/v1"
             and document["lifecycle"] == "FINALIZING"
             and document["desired_state"] in {"CANCEL", "RUN"}
+            and attempt_binding_valid
             and all(
                 valid_availability(document[field], targets)
                 for field, targets in availability
@@ -244,9 +261,77 @@ class AgentFirstGateInputFamilyTest(unittest.TestCase):
             )
             and (allow_empty_facts or bool(facts))
             and fact_keys == sorted(set(fact_keys))
-            and document["trusted_wall_time_at"]
-            >= document["absolute_deadline_at"]
         )
+
+    def _seal_input(
+        self, schema_id: str, document: dict[str, object]
+    ) -> dict[str, object]:
+        result = copy.deepcopy(document)
+        result.pop("input_digest", None)
+        domain = self.schemas[schema_id]["x-pullwise-digest"]["domain"]
+        result["input_digest"] = hashlib.sha256(
+            domain.encode("utf-8") + b"\0" + canonical_bytes(result)
+        ).hexdigest()
+        return result
+
+    def test_success_and_terminalization_matrices_remain_disjoint(self) -> None:
+        fixtures = {
+            item["fixture_id"]: item for item in self.family["fixtures"]
+        }
+        success = fixtures["gate_input_golden_success_snapshot"]["document"]
+        terminal = fixtures[
+            "gate_input_golden_terminalization_snapshot"
+        ]["document"]
+        self.assertTrue(self._valid_success(success))
+        self.assertTrue(self._valid_terminal(terminal))
+        self.assertEqual(
+            "unavailable", terminal["final_observation_manifest"]["availability"]
+        )
+
+        cancelled = copy.deepcopy(terminal)
+        cancelled["desired_state"] = "CANCEL"
+        cancelled["trusted_wall_time_at"] = "2026-01-01T00:08:00.000Z"
+        cancelled = self._seal_input(
+            "terminalization-input-snapshot/v1", cancelled
+        )
+        self.assertTrue(self._valid_terminal(cancelled))
+
+        before_attempt = copy.deepcopy(terminal)
+        before_attempt.update(
+            {
+                "attempt_id": None,
+                "native_epoch": 0,
+                "owner_epoch": 0,
+                "lease_id": None,
+                "outer_lease_expires_at": None,
+                "outer_lease_grace_expires_at": None,
+            }
+        )
+        before_attempt = self._seal_input(
+            "terminalization-input-snapshot/v1", before_attempt
+        )
+        self.assertTrue(self._valid_terminal(before_attempt))
+
+        inconsistent = copy.deepcopy(before_attempt)
+        inconsistent["lease_id"] = "stale-lease"
+        inconsistent = self._seal_input(
+            "terminalization-input-snapshot/v1", inconsistent
+        )
+        self.assertFalse(self._valid_terminal(inconsistent))
+
+        partial_success = copy.deepcopy(success)
+        partial_success["requested_outcome"] = "PARTIAL"
+        partial_success = self._seal_input(
+            "gate-input-snapshot/v1", partial_success
+        )
+        self.assertFalse(self._valid_success(partial_success))
+
+        cancelled_success = copy.deepcopy(success)
+        cancelled_success["authoritative_cancel_received"] = True
+        cancelled_success = self._seal_input(
+            "gate-input-snapshot/v1", cancelled_success
+        )
+        self.assertFalse(self._valid_success(cancelled_success))
 
     def test_fixtures_are_complete_sealed_and_byte_exact_on_retry(self) -> None:
         fixtures = {

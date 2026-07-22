@@ -5,6 +5,7 @@ from __future__ import annotations
 
 PYTHON_RULES = r'''
 from datetime import datetime
+import unicodedata
 
 
 def _require(condition: bool, detail: str, path: str = "$", code: str | None = None) -> None:

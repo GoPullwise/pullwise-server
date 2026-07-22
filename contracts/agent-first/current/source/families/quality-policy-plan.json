@@ -129,7 +129,7 @@
         "self_attestation_allowed": false,
         "rationale": "Full-scan output requires one independent verifier slot.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "d1ae34bb9909dd603566940ef454c21e1e69abf14be22fc4bccfef934d41317c"
+        "plan_digest": "19989552c2bd6b57e6bbd199e3030c1a6fa3f6e5da6c06d81e9371c37d9b50ef"
       },
       "expected_code": null
     },
@@ -168,7 +168,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q2 requires two independent concern slots with mandatory requirement coverage.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "b57ab06fa458cb8e2b0716b98e412cc06724b1642422dcd091b38bdb0748da12"
+        "plan_digest": "b27deccb6cf8f4b3e51e1ff381219c9f4f4829acfd1319d44df57b36e23793e3"
       },
       "expected_code": null
     },
@@ -192,7 +192,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q3 is retained as unsupported evidence for deterministic terminalization.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "c0c41fa3f12099588bc01c0c463be6b0f578aca07ca5f44b10cbcfc053e04542"
+        "plan_digest": "ab0c0057184719f997a8268169d080375b77ccb80e60abf7599670ffe22058ee"
       },
       "expected_code": null
     },
@@ -224,7 +224,7 @@
         "self_attestation_allowed": false,
         "rationale": "Full-scan output requires one independent verifier slot.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "d1ae34bb9909dd603566940ef454c21e1e69abf14be22fc4bccfef934d41317c"
+        "plan_digest": "19989552c2bd6b57e6bbd199e3030c1a6fa3f6e5da6c06d81e9371c37d9b50ef"
       },
       "expected_code": null
     },
@@ -263,7 +263,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q2 requires two independent concern slots with mandatory requirement coverage.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "b57ab06fa458cb8e2b0716b98e412cc06724b1642422dcd091b38bdb0748da12"
+        "plan_digest": "b27deccb6cf8f4b3e51e1ff381219c9f4f4829acfd1319d44df57b36e23793e3"
       },
       "expected_code": null
     },
@@ -287,7 +287,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q3 is retained as unsupported evidence for deterministic terminalization.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "c0c41fa3f12099588bc01c0c463be6b0f578aca07ca5f44b10cbcfc053e04542"
+        "plan_digest": "ab0c0057184719f997a8268169d080375b77ccb80e60abf7599670ffe22058ee"
       },
       "expected_code": null
     },
@@ -311,7 +311,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q0 is removed from the MVP success path.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "7d0329c4b38e217ec22348bd22c3ca2f0d95453538fff0340309d7c63e631102"
+        "plan_digest": "18be3875cb9977d03a638539dbc0b840f470a2adfbfda8ffac641833e33ab7ff"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -335,7 +335,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q1 incorrectly omits its independent verifier slot.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "97253014dd4849737b190762de77789026e2873ba3acb41f6fef94a80e2a9215"
+        "plan_digest": "cfc10bdfbcfc3716b91d1a7d987a2d4cf756e1ce6e0ae6a573b3add5cbf0bb6a"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -367,7 +367,7 @@
         "self_attestation_allowed": true,
         "rationale": "Owner self-attestation is not an MVP success path.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "a31d8ae9924f67379d9f471fad579177846ace41bae1bde06f4766b096b06fc8"
+        "plan_digest": "389faaa20831b1d6e5da3473ef8da01c7f5a62f27e32903e86c217b030889851"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -406,7 +406,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q2 incorrectly reuses the same concern for both slots.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "158497be33466ee168b5e1dcd60d31cd64f5e5d970c27649bc310eb3308d86da"
+        "plan_digest": "e8ce30968b40d6d06cfef6adbb9fb41358964703dfe09e1096f115622b268301"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -438,7 +438,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q2 incorrectly omitted its second independent concern slot.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "9d7dacc3f880660004ca8d100183df7f1c3837c169a92778c6d3ba11a9275ac1"
+        "plan_digest": "c11d9462921c2127c6d146fa0e03ecb9c11c18a9ce656fc6df46896cc35b157e"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -470,7 +470,7 @@
         "self_attestation_allowed": false,
         "rationale": "Q3 cannot schedule verifier slots in the MVP.",
         "policy_implementation_version": "pullwise-quality-policy/v1",
-        "plan_digest": "0b2799773a053eaf98bf179a23f10be75acec5c5d0ddd40926e87cf06feeab96"
+        "plan_digest": "3c18437bb3f7ff2fe04d484bfc027f29e027516003b2173da2d93faa9da14d84"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

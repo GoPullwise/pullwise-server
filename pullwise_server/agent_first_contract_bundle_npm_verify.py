@@ -54,6 +54,27 @@ const SEMANTIC_CYCLE_EXCEPTIONS = [{
   target_schema_id: "task-charter/v1",
 }];
 
+function compareUnicodeCodePointStrings(left, right) {
+  const leftCodePoints = [...left];
+  const rightCodePoints = [...right];
+  const length = Math.min(leftCodePoints.length, rightCodePoints.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = leftCodePoints[index].codePointAt(0) -
+      rightCodePoints[index].codePointAt(0);
+    if (difference !== 0) return difference;
+  }
+  return leftCodePoints.length - rightCodePoints.length;
+}
+
+function compareUnicodeCodePointTuples(left, right) {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = compareUnicodeCodePointStrings(left[index], right[index]);
+    if (difference !== 0) return difference;
+  }
+  return left.length - right.length;
+}
+
 function schemaEdges(value) {
   const found = [];
   function visit(item, path) {
@@ -88,7 +109,7 @@ function schemaEdges(value) {
   return [...unique.values()].sort((left, right) => {
     const a = [left.path, left.kind, left.target_schema_id];
     const b = [right.path, right.kind, right.target_schema_id];
-    return canonicalString(a).localeCompare(canonicalString(b));
+    return compareUnicodeCodePointTuples(a, b);
   });
 }
 
@@ -108,7 +129,7 @@ function verifySchemaEdgeDag(edgesBySchema) {
     visiting.delete(schemaId);
     visited.add(schemaId);
   }
-  [...edgesBySchema.keys()].sort().forEach(visit);
+  [...edgesBySchema.keys()].sort(compareUnicodeCodePointStrings).forEach(visit);
 }
 
 export async function verifyBundle() {
@@ -147,7 +168,8 @@ export async function verifyBundle() {
         schema_id: item.$id,
         family_id: family.family_id,
         role: schemaRole(item.$id),
-        references: [...new Set(edges.map((edge) => edge.target_schema_id))].sort(),
+        references: [...new Set(edges.map((edge) => edge.target_schema_id))]
+          .sort(compareUnicodeCodePointStrings),
         edges,
         sha256: await sha256(canonicalDocumentBytes(item)),
       };
@@ -196,7 +218,9 @@ export async function verifyBundle() {
     family_id: item.family_id,
     references: item.references,
     edges: item.edges,
-  })).sort((left, right) => left.schema_id.localeCompare(right.schema_id));
+  })).sort((left, right) => compareUnicodeCodePointStrings(
+    left.schema_id, right.schema_id,
+  ));
   if (JSON.stringify(expectedDag) !== JSON.stringify(root.reference_dag)) {
     fail("CONTRACT_REFERENCE_DAG_INVALID");
   }

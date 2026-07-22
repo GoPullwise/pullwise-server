@@ -14,6 +14,11 @@ def _utf8_fields(value: dict[str, object]) -> None:
     }
     for field, limit in limits.items():
         if field in value:
+            _require(
+                unicodedata.normalize("NFC", value[field]) == value[field],
+                "UTF8_NFC_INVALID",
+                f"$.{field}",
+            )
             _require(len(value[field].encode("utf-8")) <= limit, "UTF8_BYTE_LIMIT_INVALID", f"$.{field}")
 
 
@@ -36,27 +41,59 @@ def _rule_task_request(value: dict[str, object]) -> None:
     _rule_task_request_sets(value)
 
 
-def _rule_effective_policy(value: dict[str, object]) -> None:
+def _rule_policy_capability_sets(value: dict[str, object]) -> None:
     granted = value["granted_capabilities"]
     denied = value["denied_capabilities"]
     denied_ids = [item["id"] for item in denied]
     _require(_sorted_unique(granted), "POLICY_CAPABILITY_ORDER_INVALID")
     _require(_ordered_unique(denied, lambda item: item["id"]), "POLICY_CAPABILITY_ORDER_INVALID")
     _require(not set(granted).intersection(denied_ids), "POLICY_CAPABILITY_OVERLAP")
+
+
+def _rule_policy_roots_and_origins(value: dict[str, object]) -> None:
     _require(_sorted_unique(value["allowed_read_roots"]), "POLICY_ROOT_ORDER_INVALID")
     _require(_sorted_unique(value["allowed_write_roots"]), "POLICY_ROOT_ORDER_INVALID")
     origins = value["agent_tool_network"]["origins"]
     _require(_sorted_unique(origins), "POLICY_ORIGIN_ORDER_INVALID")
+
+
+def _rule_policy_risk_ceiling(value: dict[str, object]) -> None:
     _require(value["capability_risk_ceiling"] in {"R0", "R1"}, "POLICY_RISK_CEILING_INVALID")
+    _require(value["quality_risk_floor"] == "Q1", "POLICY_QUALITY_RISK_FLOOR_INVALID")
     _require(value["source_write_mode"] == "read_only", "POLICY_SOURCE_WRITE_INVALID")
     _require(value["agent_tool_network"] == {"mode": "deny", "origins": []}, "POLICY_NETWORK_INVALID")
     _require(value["dependency_install"] == "deny", "POLICY_DEPENDENCY_INSTALL_INVALID")
     _require(value["interaction_mode"] == "unavailable", "POLICY_INTERACTION_INVALID")
     _require(value["authorized_waiver_issuers"] == [], "POLICY_WAIVER_ISSUER_INVALID")
+
+
+def _rule_policy_budget_ceilings(value: dict[str, object]) -> None:
     budgets = value["budgets"]
     _require(value["terminalization_reserve_ms"] <= budgets["wall_ms"], "POLICY_RESERVE_INVALID")
     _require(value["max_agent_sessions_total"] <= budgets["agent_sessions"], "POLICY_SESSION_CEILING_INVALID")
     _require(value["max_attempts"] <= budgets["attempts"], "POLICY_ATTEMPT_CEILING_INVALID")
+    _require(value["max_agents"] <= value["max_agent_sessions_total"], "POLICY_AGENT_CEILING_INVALID")
+
+
+def _rule_policy_digest(value: dict[str, object]) -> None:
+    unsigned = {key: item for key, item in value.items() if key != "digest"}
+    raw = (
+        b"pullwise:effective-execution-policy/v1\0"
+        + canonical_document_bytes(unsigned)
+    )
+    _require(
+        value["digest"] == hashlib.sha256(raw).hexdigest(),
+        "CONTRACT_DIGEST_MISMATCH",
+        "$.digest",
+    )
+
+
+def _rule_effective_policy(value: dict[str, object]) -> None:
+    _rule_policy_capability_sets(value)
+    _rule_policy_roots_and_origins(value)
+    _rule_policy_risk_ceiling(value)
+    _rule_policy_budget_ceilings(value)
+    _rule_policy_digest(value)
 
 
 _REQUIREMENT_KIND_RANK = {
