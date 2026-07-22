@@ -308,6 +308,8 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         handlers = self.python._DOCUMENT_RULE_HANDLERS
         original = dict(handlers)
         hits: list[str] = []
+        case_hits: list[list[str]] = []
+        active_hits: list[str] = []
         try:
             for rule_id, handler in original.items():
                 def wrapped(
@@ -317,11 +319,13 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                     _rule_id=rule_id,
                 ) -> object:
                     hits.append(_rule_id)
+                    active_hits.append(_rule_id)
                     return _handler(value)
 
                 handlers[rule_id] = wrapped
             results = []
             for case in cases:
+                active_hits = []
                 schema_id = case["schema_id"]
                 validator = (
                     self.python.verify_document_digest
@@ -335,10 +339,11 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                         )
                     )
                 )
+                case_hits.append(active_hits)
         finally:
             handlers.clear()
             handlers.update(original)
-        return {"results": results, "hits": hits}
+        return {"results": results, "hits": hits, "case_hits": case_hits}
 
     def node_document_rule_results(
         self, cases: list[dict[str, object]]
@@ -354,11 +359,15 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                         f"import * as facade from {json.dumps(facade_path.as_uri())};",
                         f"const cases = {json.dumps(cases, separators=(',', ':'))};",
                         "const hits = [];",
+                        "const caseHits = [];",
+                        "let activeHits = [];",
                         "globalThis.__PULLWISE_DOCUMENT_RULE_PROBE__ = (event) => {",
                         "  hits.push(event);",
+                        "  activeHits.push(event);",
                         "};",
                         "const results = [];",
                         "for (const item of cases) {",
+                        "  activeHits = [];",
                         "  try {",
                         "    const digest = facade.schema(item.schema_id)['x-pullwise-digest'];",
                         "    const value = digest",
@@ -369,9 +378,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                         "    results.push({ok: false, code: error.code ?? `__node_exception__:${error.name}`,",
                         "      detail: error.detail ?? String(error.message ?? error), path: error.path ?? '$'});",
                         "  }",
+                        "  caseHits.push(activeHits);",
                         "}",
                         "delete globalThis.__PULLWISE_DOCUMENT_RULE_PROBE__;",
-                        "process.stdout.write(JSON.stringify({results, hits}));",
+                        "process.stdout.write(JSON.stringify({results, hits, case_hits: caseHits}));",
                     )
                 ),
                 encoding="utf-8",
@@ -989,7 +999,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             ),
             "verify_waiver_event_authority": self.helper_operation(
                 "verify_waiver_event_authority",
-                [waiver, policy, "2026-07-22T00:30:00.000Z"],
+                [waiver, policy, "2026-07-22T02:00:00.000Z"],
             ),
             "validate_requirement_entry_ingest": self.helper_operation(
                 "validate_requirement_entry_ingest",

@@ -92,6 +92,18 @@ class AgentFirstSemanticClosureGateTest(
             node = self.node_helper_results(payload)
             self.assertEqual(python, node)
             for helper_id, result in zip(names, python):
+                if helper_id == "verify_waiver_event_authority":
+                    # authorized_waiver_issuers is fixed empty; authority material is not modeled.
+                    self.assertEqual(
+                        result,
+                        {
+                            "ok": False,
+                            "code": "WAIVER_INVALID",
+                            "detail": "WAIVER_ISSUER_NOT_AUTHORIZED",
+                            "path": "$",
+                        },
+                    )
+                    continue
                 self.assertTrue(result["ok"], helper_id)
 
     def assert_negative_helper_batch(self, batch_index: int) -> None:
@@ -104,6 +116,16 @@ class AgentFirstSemanticClosureGateTest(
         node = self.node_helper_results(payload)
         self.assertEqual(python, node)
         for helper_id, result in zip(names, python):
+            if helper_id == "verify_waiver_event_authority":
+                self.assertEqual(
+                    result,
+                    {
+                        "ok": False,
+                        "code": "WAIVER_INVALID",
+                        "detail": "WAIVER_TIME_INVALID",
+                        "path": "$",
+                    },
+                )
             self.assertFalse(result["ok"], helper_id)
             self.assertIn(result["code"], self.stable_error_codes, helper_id)
             self.assertIsInstance(result["detail"], str, helper_id)
