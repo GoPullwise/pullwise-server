@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from .agent_first_contract_bundle_python_control import PYTHON_CONTROL
+from .agent_first_contract_bundle_python_result import PYTHON_RESULT
+from .agent_first_contract_bundle_python_rules import PYTHON_RULES
 
-PYTHON_SEMANTICS = r'''
+
+PYTHON_SEMANTICS_BASE = r'''
 def _public_error_code(detail: str, explicit: str | None) -> str:
     document = json.loads(base64.b64decode(BUNDLE_BASE64).decode("utf-8"))
     codes = {
@@ -80,7 +84,7 @@ def verify_content_ref_set(refs: object) -> list[dict[str, object]]:
     return validated
 
 
-def _validate_semantics(schema_id: str, value: dict[str, object]) -> None:
+def _validate_legacy_semantics(schema_id: str, value: dict[str, object]) -> None:
     if schema_id == "source-content/v1":
         try:
             raw = base64.b64decode(value["data_base64"], validate=True)
@@ -276,6 +280,10 @@ def verify_budget_transition(
         _fail("BUDGET_RESULTING_LEDGER_MISMATCH")
     return True
 '''
+
+PYTHON_SEMANTICS = "\n".join(
+    (PYTHON_SEMANTICS_BASE, PYTHON_RULES, PYTHON_CONTROL, PYTHON_RESULT)
+)
 
 
 __all__ = ["PYTHON_SEMANTICS"]

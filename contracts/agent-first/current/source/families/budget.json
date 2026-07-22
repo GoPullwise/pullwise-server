@@ -6,10 +6,7 @@
       "$id": "elapsed-budget-ledger/v1",
       "type": "object",
       "additionalProperties": false,
-      "x-pullwise-digest": {
-        "field": "ledger_digest",
-        "domain": "pullwise:elapsed-budget-ledger:v1"
-      },
+      "x-pullwise-digest": {"field":"ledger_digest","domain":"pullwise:elapsed-budget-ledger:v1"},
       "required": [
         "schema_id",
         "task_id",
@@ -23,27 +20,25 @@
         "ledger_digest"
       ],
       "properties": {
-        "schema_id": { "const": "elapsed-budget-ledger/v1" },
-        "task_id": { "type": "string", "pattern": "^task_[0-9a-f]{32}$" },
-        "grant_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "elapsed_limit_ms": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-        "consumed_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "reserved_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "tool_call_limit": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-        "calls_consumed": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "calls_reserved": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "ledger_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
-      }
+        "schema_id": {"const":"elapsed-budget-ledger/v1"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "grant_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "elapsed_limit_ms": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "consumed_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "reserved_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "tool_call_limit": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "calls_consumed": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "calls_reserved": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "ledger_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      },
+      "x-pullwise-semantics": {"document_rules":["elapsed_budget_ledger"],"contextual_helpers":["verify_budget_transition"]}
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "elapsed-budget-reservation/v1",
       "type": "object",
       "additionalProperties": false,
-      "x-pullwise-digest": {
-        "field": "reservation_digest",
-        "domain": "pullwise:elapsed-budget-reservation:v1"
-      },
+      "x-pullwise-digest": {"field":"reservation_digest","domain":"pullwise:elapsed-budget-reservation:v1"},
       "required": [
         "schema_id",
         "reservation_id",
@@ -60,19 +55,23 @@
         "reservation_digest"
       ],
       "properties": {
-        "schema_id": { "const": "elapsed-budget-reservation/v1" },
-        "reservation_id": { "type": "string", "pattern": "^reserve_[0-9a-f]{32}$" },
-        "task_id": { "type": "string", "pattern": "^task_[0-9a-f]{32}$" },
-        "attempt_id": { "type": "string", "pattern": "^attempt_[0-9a-f]{32}$" },
-        "invocation_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "reserved_ms": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-        "reserved_calls": { "const": 1 },
-        "previous_consumed_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "previous_reserved_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "previous_calls_consumed": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "previous_calls_reserved": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "started_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$" },
-        "reservation_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "schema_id": {"const":"elapsed-budget-reservation/v1"},
+        "reservation_id": {"type":"string","pattern":"^reserve_[0-9a-f]{32}$"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type":"string","pattern":"^attempt_[0-9a-f]{32}$"},
+        "invocation_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "reserved_ms": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "reserved_calls": {"const":1},
+        "previous_consumed_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "previous_reserved_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "previous_calls_consumed": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "previous_calls_reserved": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "started_at": {"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
+        "reservation_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["elapsed_budget_reservation"],
+        "contextual_helpers": ["verify_budget_transition"]
       }
     },
     {
@@ -80,10 +79,7 @@
       "$id": "elapsed-budget-settlement/v1",
       "type": "object",
       "additionalProperties": false,
-      "x-pullwise-digest": {
-        "field": "settlement_digest",
-        "domain": "pullwise:elapsed-budget-settlement:v1"
-      },
+      "x-pullwise-digest": {"field":"settlement_digest","domain":"pullwise:elapsed-budget-settlement:v1"},
       "required": [
         "schema_id",
         "reservation_id",
@@ -101,71 +97,400 @@
         "settlement_digest"
       ],
       "properties": {
-        "schema_id": { "const": "elapsed-budget-settlement/v1" },
-        "reservation_id": { "type": "string", "pattern": "^reserve_[0-9a-f]{32}$" },
-        "invocation_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "elapsed_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "consumed_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "released_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "consumed_calls": { "type": "integer", "minimum": 0, "maximum": 1 },
-        "released_calls": { "type": "integer", "minimum": 0, "maximum": 1 },
-        "resulting_consumed_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "resulting_reserved_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "resulting_calls_consumed": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "resulting_calls_reserved": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "outcome": { "enum": ["settled", "abandoned"] },
-        "settlement_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "schema_id": {"const":"elapsed-budget-settlement/v1"},
+        "reservation_id": {"type":"string","pattern":"^reserve_[0-9a-f]{32}$"},
+        "invocation_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "elapsed_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "consumed_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "released_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "consumed_calls": {"type":"integer","minimum":0,"maximum":1},
+        "released_calls": {"type":"integer","minimum":0,"maximum":1},
+        "resulting_consumed_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "resulting_reserved_ms": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "resulting_calls_consumed": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "resulting_calls_reserved": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "outcome": {"enum":["settled","abandoned"]},
+        "settlement_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["elapsed_budget_settlement"],
+        "contextual_helpers": ["verify_budget_transition"]
       }
     }
   ],
   "fixtures": [
     {
-      "fixture_id": "budget_crash_after_reservation",
+      "fixture_id": "budget_crash_reservation",
       "fixture_class": "crash",
       "schema_id": "elapsed-budget-reservation/v1",
       "document": {
-        "elapsed_reserved": true,
-        "call_reserved": true,
-        "intent_persisted": true,
-        "dispatch_started": false
+        "schema_id": "elapsed-budget-reservation/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "task_id": "task_11111111111111111111111111111111",
+        "attempt_id": "attempt_11111111111111111111111111111111",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "reserved_ms": 100,
+        "reserved_calls": 1,
+        "previous_consumed_ms": 0,
+        "previous_reserved_ms": 0,
+        "previous_calls_consumed": 0,
+        "previous_calls_reserved": 0,
+        "started_at": "2026-07-22T12:34:55.000Z",
+        "reservation_digest": "ab99e6b64c96a31db3cabe960810fc6c649ff2bca5ff5e23cc07df86309ec40e"
       },
       "expected_code": "INVOCATION_PENDING"
+    },
+    {
+      "fixture_id": "budget_crash_reserved_ledger",
+      "fixture_class": "crash",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 0,
+        "reserved_ms": 100,
+        "tool_call_limit": 2,
+        "calls_consumed": 0,
+        "calls_reserved": 1,
+        "ledger_digest": "818cfaf63946a993ea84702eeb1b5a1e52105e0fcd23e98e7bd5364fb263c011"
+      },
+      "expected_code": "INVOCATION_PENDING"
+    },
+    {
+      "fixture_id": "budget_golden_fenced_recovery_abandonment",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-settlement/v1",
+      "document": {
+        "schema_id": "elapsed-budget-settlement/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "elapsed_ms": 0,
+        "consumed_ms": 0,
+        "released_ms": 100,
+        "consumed_calls": 0,
+        "released_calls": 1,
+        "resulting_consumed_ms": 0,
+        "resulting_reserved_ms": 0,
+        "resulting_calls_consumed": 0,
+        "resulting_calls_reserved": 0,
+        "outcome": "abandoned",
+        "settlement_digest": "d6646cbbdda907e10d3e7c08d69a22265fd0d21c79d4ba2684b8b173c32e6111"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_golden_ledger_after_abandonment",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 0,
+        "reserved_ms": 0,
+        "tool_call_limit": 2,
+        "calls_consumed": 0,
+        "calls_reserved": 0,
+        "ledger_digest": "9be2e0dd8251f2255ab99a074e3316ab3d68f40cfee2532c9afc77f30191744a"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_golden_ledger_after_settlement",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 7,
+        "reserved_ms": 0,
+        "tool_call_limit": 2,
+        "calls_consumed": 1,
+        "calls_reserved": 0,
+        "ledger_digest": "fcb14a3debe94cb2bb4cb4ed53883c4a526ead936396b23d0e186124d1b1230d"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_golden_ledger_before",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 0,
+        "reserved_ms": 0,
+        "tool_call_limit": 2,
+        "calls_consumed": 0,
+        "calls_reserved": 0,
+        "ledger_digest": "9be2e0dd8251f2255ab99a074e3316ab3d68f40cfee2532c9afc77f30191744a"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_golden_ledger_call_limit_reached",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 0,
+        "reserved_ms": 0,
+        "tool_call_limit": 1,
+        "calls_consumed": 1,
+        "calls_reserved": 0,
+        "ledger_digest": "cc4ee35f4aad1339407aa5b3d06bdd46333776b049358b479391db4246dfdd8b"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_golden_ledger_elapsed_near_limit",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 80,
+        "reserved_ms": 0,
+        "tool_call_limit": 2,
+        "calls_consumed": 0,
+        "calls_reserved": 0,
+        "ledger_digest": "6337f74ac35bc3398bcc78c5e5276f4d49a0ecb8a78b640977fb1d81844efecf"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_golden_ledger_reserved",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 0,
+        "reserved_ms": 100,
+        "tool_call_limit": 2,
+        "calls_consumed": 0,
+        "calls_reserved": 1,
+        "ledger_digest": "818cfaf63946a993ea84702eeb1b5a1e52105e0fcd23e98e7bd5364fb263c011"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_golden_reservation",
+      "fixture_class": "golden",
+      "schema_id": "elapsed-budget-reservation/v1",
+      "document": {
+        "schema_id": "elapsed-budget-reservation/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "task_id": "task_11111111111111111111111111111111",
+        "attempt_id": "attempt_11111111111111111111111111111111",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "reserved_ms": 100,
+        "reserved_calls": 1,
+        "previous_consumed_ms": 0,
+        "previous_reserved_ms": 0,
+        "previous_calls_consumed": 0,
+        "previous_calls_reserved": 0,
+        "started_at": "2026-07-22T12:34:55.000Z",
+        "reservation_digest": "ab99e6b64c96a31db3cabe960810fc6c649ff2bca5ff5e23cc07df86309ec40e"
+      },
+      "expected_code": null
     },
     {
       "fixture_id": "budget_golden_settlement",
       "fixture_class": "golden",
       "schema_id": "elapsed-budget-settlement/v1",
       "document": {
+        "schema_id": "elapsed-budget-settlement/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
         "elapsed_ms": 7,
         "consumed_ms": 7,
         "released_ms": 93,
         "consumed_calls": 1,
         "released_calls": 0,
-        "outcome": "settled"
+        "resulting_consumed_ms": 7,
+        "resulting_reserved_ms": 0,
+        "resulting_calls_consumed": 1,
+        "resulting_calls_reserved": 0,
+        "outcome": "settled",
+        "settlement_digest": "c97e9f98f6b181d253f29d6becf6b49506f8540d3264db90cfee37f32e426131"
       },
       "expected_code": null
     },
     {
-      "fixture_id": "budget_negative_over_limit",
+      "fixture_id": "budget_idempotency_ledger_after_settlement",
+      "fixture_class": "idempotency",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 7,
+        "reserved_ms": 0,
+        "tool_call_limit": 2,
+        "calls_consumed": 1,
+        "calls_reserved": 0,
+        "ledger_digest": "fcb14a3debe94cb2bb4cb4ed53883c4a526ead936396b23d0e186124d1b1230d"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_idempotency_reservation",
+      "fixture_class": "idempotency",
+      "schema_id": "elapsed-budget-reservation/v1",
+      "document": {
+        "schema_id": "elapsed-budget-reservation/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "task_id": "task_11111111111111111111111111111111",
+        "attempt_id": "attempt_11111111111111111111111111111111",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "reserved_ms": 100,
+        "reserved_calls": 1,
+        "previous_consumed_ms": 0,
+        "previous_reserved_ms": 0,
+        "previous_calls_consumed": 0,
+        "previous_calls_reserved": 0,
+        "started_at": "2026-07-22T12:34:55.000Z",
+        "reservation_digest": "ab99e6b64c96a31db3cabe960810fc6c649ff2bca5ff5e23cc07df86309ec40e"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_idempotency_settlement",
+      "fixture_class": "idempotency",
+      "schema_id": "elapsed-budget-settlement/v1",
+      "document": {
+        "schema_id": "elapsed-budget-settlement/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "elapsed_ms": 7,
+        "consumed_ms": 7,
+        "released_ms": 93,
+        "consumed_calls": 1,
+        "released_calls": 0,
+        "resulting_consumed_ms": 7,
+        "resulting_reserved_ms": 0,
+        "resulting_calls_consumed": 1,
+        "resulting_calls_reserved": 0,
+        "outcome": "settled",
+        "settlement_digest": "c97e9f98f6b181d253f29d6becf6b49506f8540d3264db90cfee37f32e426131"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "budget_negative_ledger_call_limit",
       "fixture_class": "negative",
       "schema_id": "elapsed-budget-ledger/v1",
       "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "elapsed_limit_ms": 100,
+        "consumed_ms": 0,
+        "reserved_ms": 0,
+        "tool_call_limit": 1,
+        "calls_consumed": 1,
+        "calls_reserved": 1,
+        "ledger_digest": "34e88f208b74dd38b8640919c3d3cfcb990b926d613c5a308fe9d48860f1f0da"
+      },
+      "expected_code": "BUDGET_EXHAUSTED"
+    },
+    {
+      "fixture_id": "budget_negative_ledger_elapsed_limit",
+      "fixture_class": "negative",
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {
+        "schema_id": "elapsed-budget-ledger/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "grant_digest": "3333333333333333333333333333333333333333333333333333333333333333",
         "elapsed_limit_ms": 100,
         "consumed_ms": 80,
         "reserved_ms": 30,
-        "tool_call_limit": 1,
-        "calls_consumed": 1,
-        "calls_reserved": 1
+        "tool_call_limit": 2,
+        "calls_consumed": 0,
+        "calls_reserved": 0,
+        "ledger_digest": "adc42ce1e3985a2fea218cbaa505a2bc242c7c9800049ad309f783b8763a1948"
       },
       "expected_code": "BUDGET_EXHAUSTED"
+    },
+    {
+      "fixture_id": "budget_negative_reservation_call_limit",
+      "fixture_class": "negative",
+      "schema_id": "elapsed-budget-reservation/v1",
+      "document": {
+        "schema_id": "elapsed-budget-reservation/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "task_id": "task_11111111111111111111111111111111",
+        "attempt_id": "attempt_11111111111111111111111111111111",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "reserved_ms": 100,
+        "reserved_calls": 1,
+        "previous_consumed_ms": 0,
+        "previous_reserved_ms": 0,
+        "previous_calls_consumed": 1,
+        "previous_calls_reserved": 0,
+        "started_at": "2026-07-22T12:34:55.000Z",
+        "reservation_digest": "2a4e5ff57cb2eb34d73b2c6de8c164daf934b5639b3aced56a3f1e4e6ca490b2"
+      },
+      "expected_code": "BUDGET_EXHAUSTED"
+    },
+    {
+      "fixture_id": "budget_negative_reservation_elapsed_limit",
+      "fixture_class": "negative",
+      "schema_id": "elapsed-budget-reservation/v1",
+      "document": {
+        "schema_id": "elapsed-budget-reservation/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "task_id": "task_11111111111111111111111111111111",
+        "attempt_id": "attempt_11111111111111111111111111111111",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "reserved_ms": 30,
+        "reserved_calls": 1,
+        "previous_consumed_ms": 80,
+        "previous_reserved_ms": 0,
+        "previous_calls_consumed": 0,
+        "previous_calls_reserved": 0,
+        "started_at": "2026-07-22T12:34:55.000Z",
+        "reservation_digest": "499b0e33fd0934f966c57d219c0dcabadef92519a6c5213b2c1a4277e5db227d"
+      },
+      "expected_code": "BUDGET_EXHAUSTED"
+    },
+    {
+      "fixture_id": "budget_negative_settlement_conservation",
+      "fixture_class": "negative",
+      "schema_id": "elapsed-budget-settlement/v1",
+      "document": {
+        "schema_id": "elapsed-budget-settlement/v1",
+        "reservation_id": "reserve_44444444444444444444444444444444",
+        "invocation_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "elapsed_ms": 7,
+        "consumed_ms": 7,
+        "released_ms": 92,
+        "consumed_calls": 1,
+        "released_calls": 0,
+        "resulting_consumed_ms": 7,
+        "resulting_reserved_ms": 0,
+        "resulting_calls_consumed": 1,
+        "resulting_calls_reserved": 0,
+        "outcome": "settled",
+        "settlement_digest": "cb4e040accf782da3182a84e3cde13ee6ffc3b146f78ea706d713dfbd5a1dfd5"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }
   ]
 }

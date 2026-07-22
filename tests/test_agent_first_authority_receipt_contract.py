@@ -99,6 +99,18 @@ class AgentFirstAuthorityReceiptContractTest(unittest.TestCase):
                 with self.subTest(fixture_id=item["fixture_id"]):
                     self.assertEqual(expected, item["document"][field])
 
+    def test_family_sources_pass_closed_loader(self) -> None:
+        from pullwise_server.agent_first_contract_bundle_source import load_family
+
+        owners: dict[str, str] = {}
+        fixture_ids: set[str] = set()
+        for path, family_id in (
+            (AUTHORITY_PATH, "authority-control"),
+            (RECEIPT_PATH, "receipt-error"),
+        ):
+            loaded = load_family(path, family_id, owners, fixture_ids)
+            self.assertEqual(family_id, loaded["family_id"])
+
     def test_authority_fixtures_execute_full_fence_and_successor_semantics(self) -> None:
         crash = _fixture(self.authority_family, "authority_crash_after_claim")
         stale = _fixture(self.authority_family, "authority_fence_stale_deletion_version")

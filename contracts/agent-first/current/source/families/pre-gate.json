@@ -1,0 +1,280 @@
+{
+  "family_id": "pre-gate",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "pre-gate-evidence-closure-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"manifest_digest","domain":"pullwise:pre-gate-evidence-closure-manifest:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["pre_gate_evidence_closure_manifest"],
+        "contextual_helpers": ["verify_pre_gate_evidence_closure_context"]
+      },
+      "required": [
+        "schema_id", "task_id", "pre_gate_root_set_ref", "entries", "entry_count", "pre_gate_closure_digest", "manifest_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"pre-gate-evidence-closure-manifest/v1"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "pre_gate_root_set_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"pre-gate-root-set/v1"},
+        "entries": {
+          "type": "array", "minItems":6, "maxItems":4096, "uniqueItems":true,
+          "items": {
+            "$ref": "content-ref/v1",
+            "x-pullwise-content-schema-ids": [
+              "budget-summary/v1", "canonical-document/v1", "change-set-patch/v1", "change-set/v1", "completion-proposal/v1",
+              "debug-redaction-plan/v1", "effective-execution-policy/v1", "effect-ledger-snapshot/v1", "error-response/v1",
+              "execution-profile/v1", "execution-state-manifest/v1", "local-tool-receipt/v1", "observation-manifest/v1", "observation/v1",
+              "pre-gate-root-set/v1", "pre-verifier-observation-manifest/v1", "publication-content-manifest/v1", "quality-policy-plan/v1",
+              "r0-read-payload/v1", "r0-read-result/v1", "requirement-ledger/v1", "source-content/v1", "source-selection-policy/v1",
+              "source-tree-manifest/v1", "stable-error/v1", "task-charter/v1", "task-report/v1", "task-request/v1",
+              "terminalization-fact/v1", "verification-attestation-manifest/v1", "verification-attestation/v1", "verifier-input-manifest/v1",
+              "verifier-work-report/v1", "waiver-event/v1"
+            ]
+          }
+        },
+        "entry_count": {"type":"integer","minimum":6,"maximum":4096},
+        "pre_gate_closure_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "manifest_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "pre-gate-root-set/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"root_set_digest","domain":"pullwise:pre-gate-root-set:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["pre_gate_root_set"],
+        "contextual_helpers": ["verify_pre_gate_root_set_context"]
+      },
+      "required": [
+        "schema_id", "task_id", "outcome_candidate", "request", "policy", "charter", "ledger", "waiver_events", "proposal",
+        "original_source", "final_source", "execution_states", "change_set", "pre_observation_manifest", "final_observation_manifest",
+        "verifier_inputs", "verifier_work", "attestations", "artifacts", "report", "effect_ledger", "budget_summary",
+        "termination_facts", "publication_content_manifest", "debug_redaction_plan", "root_set_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"pre-gate-root-set/v1"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "outcome_candidate": {
+          "enum":["BLOCKED","CANCELLED","COMPLETED","COMPLETED_WITH_WAIVERS","FAILED","NO_CHANGE_NEEDED","PARTIAL"]
+        },
+        "request": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"task-request/v1"},
+        "policy": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"effective-execution-policy/v1"},
+        "charter": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"task-charter/v1"},
+        "ledger": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"requirement-ledger/v1"},
+        "waiver_events": {
+          "type":"array", "maxItems":256, "uniqueItems":true,
+          "items":{"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"waiver-event/v1"}
+        },
+        "proposal": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"completion-proposal/v1"},
+        "original_source": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"source-tree-manifest/v1"},
+        "final_source": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"source-tree-manifest/v1"},
+        "execution_states": {
+          "type":"array", "maxItems":256, "uniqueItems":true,
+          "items":{"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"execution-state-manifest/v1"}
+        },
+        "change_set": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"change-set/v1"},
+        "pre_observation_manifest": {
+          "$ref":"availability-ref/v1", "x-pullwise-availability-content-schema-id":"pre-verifier-observation-manifest/v1"
+        },
+        "final_observation_manifest": {
+          "$ref":"availability-ref/v1", "x-pullwise-availability-content-schema-id":"observation-manifest/v1"
+        },
+        "verifier_inputs": {
+          "type":"array", "maxItems":256, "uniqueItems":true,
+          "items":{"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"verifier-input-manifest/v1"}
+        },
+        "verifier_work": {
+          "type":"array", "maxItems":256, "uniqueItems":true,
+          "items":{"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"verifier-work-report/v1"}
+        },
+        "attestations": {
+          "$ref":"availability-ref/v1", "x-pullwise-availability-content-schema-id":"verification-attestation-manifest/v1"
+        },
+        "artifacts": {
+          "type":"array", "maxItems":4096, "uniqueItems":true,
+          "items": {
+            "$ref": "availability-ref/v1",
+            "x-pullwise-availability-content-schema-ids": [
+              "change-set-patch/v1", "change-set/v1", "r0-read-result/v1", "source-content/v1", "task-report/v1"
+            ]
+          }
+        },
+        "report": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"task-report/v1"},
+        "effect_ledger": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"effect-ledger-snapshot/v1"},
+        "budget_summary": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"budget-summary/v1"},
+        "termination_facts": {
+          "type":"array", "maxItems":256, "uniqueItems":true,
+          "items":{"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"terminalization-fact/v1"}
+        },
+        "publication_content_manifest": {
+          "$ref":"availability-ref/v1", "x-pullwise-availability-content-schema-id":"publication-content-manifest/v1"
+        },
+        "debug_redaction_plan": {
+          "$ref":"availability-ref/v1", "x-pullwise-availability-content-schema-id":"debug-redaction-plan/v1"
+        },
+        "root_set_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "pre_gate_golden_evidence_closure",
+      "fixture_class": "golden",
+      "schema_id": "pre-gate-evidence-closure-manifest/v1",
+      "document": {
+        "schema_id":"pre-gate-evidence-closure-manifest/v1", "task_id":"task_11111111111111111111111111111111",
+        "pre_gate_root_set_ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"pre-gate-root-set/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+        "entries": [
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001","content_schema_id":"budget-summary/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002","content_schema_id":"effective-execution-policy/v1","sha256":"2222222222222222222222222222222222222222222222222222222222222222","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003","content_schema_id":"effect-ledger-snapshot/v1","sha256":"3333333333333333333333333333333333333333333333333333333333333333","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"pre-gate-root-set/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004","content_schema_id":"requirement-ledger/v1","sha256":"4444444444444444444444444444444444444444444444444444444444444444","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006","content_schema_id":"task-request/v1","sha256":"6666666666666666666666666666666666666666666666666666666666666666","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}
+        ],
+        "entry_count":6,
+        "pre_gate_closure_digest":"0000000000000000000000000000000000000000000000000000000000000000",
+        "manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "pre_gate_golden_root_set",
+      "fixture_class": "golden",
+      "schema_id": "pre-gate-root-set/v1",
+      "document": {
+        "schema_id":"pre-gate-root-set/v1", "task_id":"task_11111111111111111111111111111111", "outcome_candidate":"NO_CHANGE_NEEDED",
+        "request":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001","content_schema_id":"task-request/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "policy":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002","content_schema_id":"effective-execution-policy/v1","sha256":"2222222222222222222222222222222222222222222222222222222222222222","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "charter":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003","content_schema_id":"task-charter/v1","sha256":"3333333333333333333333333333333333333333333333333333333333333333","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "ledger":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004","content_schema_id":"requirement-ledger/v1","sha256":"4444444444444444444444444444444444444444444444444444444444444444","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "waiver_events":[],
+        "proposal":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"completion-proposal/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "original_source":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006","content_schema_id":"source-tree-manifest/v1","sha256":"6666666666666666666666666666666666666666666666666666666666666666","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "final_source":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000007","content_schema_id":"source-tree-manifest/v1","sha256":"7777777777777777777777777777777777777777777777777777777777777777","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "execution_states":[{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000008","content_schema_id":"execution-state-manifest/v1","sha256":"8888888888888888888888888888888888888888888888888888888888888888","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}}],
+        "change_set":{"availability":"not_applicable","reason_code":"CHANGE_SET_NOT_APPLICABLE"},
+        "pre_observation_manifest":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000009","content_schema_id":"pre-verifier-observation-manifest/v1","sha256":"9999999999999999999999999999999999999999999999999999999999999999","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "final_observation_manifest":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000a","content_schema_id":"observation-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "verifier_inputs":[{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000b","content_schema_id":"verifier-input-manifest/v1","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}}],
+        "verifier_work":[{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000c","content_schema_id":"verifier-work-report/v1","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}}],
+        "attestations":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000d","content_schema_id":"verification-attestation-manifest/v1","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "artifacts":[],
+        "report":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000e","content_schema_id":"task-report/v1","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "effect_ledger":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f","content_schema_id":"effect-ledger-snapshot/v1","sha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "budget_summary":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000010","content_schema_id":"budget-summary/v1","sha256":"1010101010101010101010101010101010101010101010101010101010101010","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "termination_facts":[],
+        "publication_content_manifest":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000011","content_schema_id":"publication-content-manifest/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012","content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "root_set_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "pre_gate_idempotency_evidence_closure",
+      "fixture_class": "idempotency",
+      "schema_id": "pre-gate-evidence-closure-manifest/v1",
+      "document": {
+        "schema_id":"pre-gate-evidence-closure-manifest/v1", "task_id":"task_11111111111111111111111111111111",
+        "pre_gate_root_set_ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"pre-gate-root-set/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+        "entries": [
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001","content_schema_id":"budget-summary/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002","content_schema_id":"effective-execution-policy/v1","sha256":"2222222222222222222222222222222222222222222222222222222222222222","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003","content_schema_id":"effect-ledger-snapshot/v1","sha256":"3333333333333333333333333333333333333333333333333333333333333333","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"pre-gate-root-set/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004","content_schema_id":"requirement-ledger/v1","sha256":"4444444444444444444444444444444444444444444444444444444444444444","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006","content_schema_id":"task-request/v1","sha256":"6666666666666666666666666666666666666666666666666666666666666666","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}
+        ],
+        "entry_count":6,
+        "pre_gate_closure_digest":"0000000000000000000000000000000000000000000000000000000000000000",
+        "manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "pre_gate_idempotency_root_set",
+      "fixture_class": "idempotency",
+      "schema_id": "pre-gate-root-set/v1",
+      "document": {
+        "schema_id":"pre-gate-root-set/v1", "task_id":"task_11111111111111111111111111111111", "outcome_candidate":"NO_CHANGE_NEEDED",
+        "request":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001","content_schema_id":"task-request/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "policy":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002","content_schema_id":"effective-execution-policy/v1","sha256":"2222222222222222222222222222222222222222222222222222222222222222","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "charter":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003","content_schema_id":"task-charter/v1","sha256":"3333333333333333333333333333333333333333333333333333333333333333","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "ledger":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004","content_schema_id":"requirement-ledger/v1","sha256":"4444444444444444444444444444444444444444444444444444444444444444","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "waiver_events":[],
+        "proposal":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"completion-proposal/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "original_source":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006","content_schema_id":"source-tree-manifest/v1","sha256":"6666666666666666666666666666666666666666666666666666666666666666","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "final_source":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000007","content_schema_id":"source-tree-manifest/v1","sha256":"7777777777777777777777777777777777777777777777777777777777777777","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "execution_states":[{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000008","content_schema_id":"execution-state-manifest/v1","sha256":"8888888888888888888888888888888888888888888888888888888888888888","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}}],
+        "change_set":{"availability":"not_applicable","reason_code":"CHANGE_SET_NOT_APPLICABLE"},
+        "pre_observation_manifest":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000009","content_schema_id":"pre-verifier-observation-manifest/v1","sha256":"9999999999999999999999999999999999999999999999999999999999999999","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "final_observation_manifest":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000a","content_schema_id":"observation-manifest/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "verifier_inputs":[{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000b","content_schema_id":"verifier-input-manifest/v1","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}}],
+        "verifier_work":[{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000c","content_schema_id":"verifier-work-report/v1","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}}],
+        "attestations":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000d","content_schema_id":"verification-attestation-manifest/v1","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "artifacts":[],
+        "report":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000e","content_schema_id":"task-report/v1","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "effect_ledger":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f","content_schema_id":"effect-ledger-snapshot/v1","sha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "budget_summary":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000010","content_schema_id":"budget-summary/v1","sha256":"1010101010101010101010101010101010101010101010101010101010101010","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "termination_facts":[],
+        "publication_content_manifest":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000011","content_schema_id":"publication-content-manifest/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012","content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "root_set_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "pre_gate_negative_evidence_reverse_edge",
+      "fixture_class": "negative",
+      "schema_id": "pre-gate-evidence-closure-manifest/v1",
+      "document": {
+        "schema_id":"pre-gate-evidence-closure-manifest/v1", "task_id":"task_11111111111111111111111111111111",
+        "pre_gate_root_set_ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"pre-gate-root-set/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+        "entries": [
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001","content_schema_id":"budget-summary/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000002","content_schema_id":"effective-execution-policy/v1","sha256":"2222222222222222222222222222222222222222222222222222222222222222","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000003","content_schema_id":"effect-ledger-snapshot/v1","sha256":"3333333333333333333333333333333333333333333333333333333333333333","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000007","content_schema_id":"gate-input-snapshot/v1","sha256":"7777777777777777777777777777777777777777777777777777777777777777","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000005","content_schema_id":"pre-gate-root-set/v1","sha256":"5555555555555555555555555555555555555555555555555555555555555555","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004","content_schema_id":"requirement-ledger/v1","sha256":"4444444444444444444444444444444444444444444444444444444444444444","size_bytes":1,"media_type":"application/json","encoding":"utf-8"},
+          {"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006","content_schema_id":"task-request/v1","sha256":"6666666666666666666666666666666666666666666666666666666666666666","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}
+        ],
+        "entry_count":7,
+        "pre_gate_closure_digest":"0000000000000000000000000000000000000000000000000000000000000000",
+        "manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": "GATE_INPUT_CLOSURE_DIRECTION_INVALID"
+    },
+    {
+      "fixture_id": "pre_gate_negative_required_policy_unavailable",
+      "fixture_class": "negative",
+      "schema_id": "pre-gate-root-set/v1",
+      "document": {
+        "schema_id":"pre-gate-root-set/v1", "task_id":"task_11111111111111111111111111111111", "outcome_candidate":"BLOCKED",
+        "request":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001","content_schema_id":"task-request/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "policy":{"availability":"unavailable","reason_code":"CAPABILITY_NOT_IMPLEMENTED"},
+        "charter":{"availability":"unavailable","reason_code":"CHARTER_NOT_CREATED"},
+        "ledger":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000004","content_schema_id":"requirement-ledger/v1","sha256":"4444444444444444444444444444444444444444444444444444444444444444","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "waiver_events":[], "proposal":{"availability":"not_applicable","reason_code":"PROPOSAL_NOT_CREATED"},
+        "original_source":{"availability":"unavailable","reason_code":"SOURCE_STATE_UNAVAILABLE"},
+        "final_source":{"availability":"unavailable","reason_code":"SOURCE_STATE_UNAVAILABLE"}, "execution_states":[],
+        "change_set":{"availability":"not_applicable","reason_code":"CHANGE_SET_NOT_APPLICABLE"},
+        "pre_observation_manifest":{"availability":"unavailable","reason_code":"OBSERVATION_MANIFEST_NOT_CREATED"},
+        "final_observation_manifest":{"availability":"unavailable","reason_code":"OBSERVATION_MANIFEST_NOT_CREATED"},
+        "verifier_inputs":[], "verifier_work":[], "attestations":{"availability":"not_applicable","reason_code":"ATTESTATIONS_NOT_CREATED"},
+        "artifacts":[], "report":{"availability":"not_applicable","reason_code":"REPORT_NOT_CREATED"},
+        "effect_ledger":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f","content_schema_id":"effect-ledger-snapshot/v1","sha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "budget_summary":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000010","content_schema_id":"budget-summary/v1","sha256":"1010101010101010101010101010101010101010101010101010101010101010","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "termination_facts":[],
+        "publication_content_manifest":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000011","content_schema_id":"publication-content-manifest/v1","sha256":"1111111111111111111111111111111111111111111111111111111111111111","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012","content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
+        "root_set_digest":"0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}
