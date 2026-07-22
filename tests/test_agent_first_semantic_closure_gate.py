@@ -31,8 +31,24 @@ class AgentFirstSemanticClosureGateTest(
         python = self.python_document_rule_results(cases)
         node = self.node_document_rule_results(cases)
         self.assertEqual(python["results"], node["results"])
-        for case, result in zip(cases, python["results"]):
-            self.assertTrue(result["ok"], case["fixture_id"])
+        for index, (case, result) in enumerate(zip(cases, python["results"])):
+            fixture_id = case["fixture_id"]
+        declared_rule_sequence = list(self.schema_rules(case["schema_id"]))
+        validation_passes = 2 if "x-pullwise-digest" in self.schemas[case["schema_id"]] else 1
+        expected_rules = declared_rule_sequence * validation_passes
+            python_case_hits = python["case_hits"][index]
+            node_case_hits = node["case_hits"][index]
+            self.assertTrue(result["ok"], fixture_id)
+            self.assertEqual(expected_rules, python_case_hits, fixture_id)
+            self.assertEqual(
+                expected_rules,
+                [event["ruleId"] for event in node_case_hits],
+                fixture_id,
+            )
+            self.assertFalse(python["case_failures"][index], fixture_id)
+            self.assertFalse(node["case_failures"][index], fixture_id)
+            for event in node_case_hits:
+                self.assertEqual(event["schemaId"], case["schema_id"], fixture_id)
 
         python_hits = set(python["hits"])
         node_hits = {item["ruleId"] for item in node["hits"]}

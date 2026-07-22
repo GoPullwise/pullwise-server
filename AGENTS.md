@@ -657,6 +657,21 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 - Semantic closure derives source-declared document rules/contextual helpers
   dynamically (currently 79/40) and checks them against the supported registry
   superset (currently 85/41). Never hard-code closure counts.
+- Closure is two-layer: each positive schema hits exactly its declared rule
+  sequence in Python and Node, and test-only direct probes invoke every rule
+  handler because structural validation can preempt semantic dispatch. Never
+  publish probes as exports.
+- Test parity may recursively normalize Python bytes and Node `Uint8Array` to a
+  hex marker only in the harness.
+- Source-fixture `expected_code` is the raw-document expectation only when raw
+  validation rejects. Explicitly enumerate schema-valid contextual negatives
+  that are raw/digest-valid; specialized authority/context entrypoints own
+  their stable codes. For example,
+  `receipt_negative_transport_as_local` is raw `CONTRACT_DOCUMENT_INVALID` but
+  authority validation returns `TRANSPORT_RECEIPT_TYPE_INVALID`.
+- Internal-constraint fixtures must reject exactly through the internal schema
+  ID, and every golden document must also execute successfully through its
+  public parent schema.
 
 ## Agent-First Task Control Semantics
 
@@ -676,6 +691,10 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 - `waiver-event/v1` has a sealed `signature_contract` in addition to its
   rule/helper lists. Both generated facades must require the exact Ed25519,
   NUL-separated, base64url-no-padding contract before authority evaluation.
+- `authorized_waiver_issuers` is currently empty and no keyring/authority
+  material is modeled. Keep waiver authority fail-closed: use
+  `WAIVER_ISSUER_NOT_AUTHORIZED` for an otherwise current event and
+  `WAIVER_TIME_INVALID` for an out-of-window event; do not invent an issuer.
 
 ## Agent-First Source, Execution, And Observation Semantics
 

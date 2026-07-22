@@ -19,6 +19,17 @@ SOURCE_ROOT = (
     / "source"
 )
 
+CONTEXTUAL_NEGATIVE_FIXTURE_IDS = frozenset(
+    {
+        "authority_negative_agent_selected_fence",
+        "budget_negative_reservation_call_limit",
+        "budget_negative_reservation_elapsed_limit",
+        "budget_negative_settlement_conservation",
+        "receipt_negative_rebinding",
+        "requirements_negative_waiver_empty_issuer_profile",
+    }
+)
+
 
 def canonical_bytes(value: object) -> bytes:
     return json.dumps(
@@ -58,9 +69,9 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
                     "const schemaRoles = new Map(document.root_manifest.schema_registry.map(",
                     "  (item) => [item.schema_id, item.role],",
                     "));",
-                    "const documents = [];",
-                    "const digests = [];",
-                    "const internalParents = [];",
+                    "const fixtures = [];",
+                    "const digestFixtures = [];",
+                    "const internalParentFixtures = [];",
                     "for (const family of document.families) {",
                     "  const digestSchemas = new Set(family.schemas.filter(",
                     "    (schema) => Object.prototype.hasOwnProperty.call(",
@@ -68,17 +79,31 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
                     "    ),",
                     "  ).map((schema) => schema.$id));",
                     "  for (const fixture of family.fixtures) {",
-                    "    documents.push(await capture(() => facade.validateDocument(fixture.schema_id, fixture.document)));",
-                    "    if (schemaRoles.get(fixture.schema_id) === 'internal_constraint' && typeof fixture.document.schema_id === 'string') {",
-                    "      internalParents.push(await capture(() => facade.validateDocument(",
-                    "        fixture.document.schema_id, fixture.document,",
-                    "      )));",
-                    "    }",
+                    "    fixtures.push(fixture);",
                     "    if (digestSchemas.has(fixture.schema_id)) {",
-                    "      digests.push(await capture(() => facade.verifyDocumentDigest(fixture.schema_id, fixture.document)));",
+                    "      digestFixtures.push(fixture);",
+                    "    }",
+                    "    if (schemaRoles.get(fixture.schema_id) === 'internal_constraint'",
+                    "        && typeof fixture.document.schema_id === 'string') {",
+                    "      internalParentFixtures.push(fixture);",
                     "    }",
                     "  }",
                     "}",
+                    "const documents = await Promise.all(fixtures.map((fixture) =>",
+                    "  capture(() => facade.validateDocument(",
+                    "    fixture.schema_id, fixture.document,",
+                    "  )),",
+                    "));",
+                    "const digests = await Promise.all(digestFixtures.map((fixture) =>",
+                    "  capture(() => facade.verifyDocumentDigest(",
+                    "    fixture.schema_id, fixture.document,",
+                    "  )),",
+                    "));",
+                    "const internalParents = await Promise.all(internalParentFixtures.map((fixture) =>",
+                    "  capture(() => facade.validateDocument(",
+                    "    fixture.document.schema_id, fixture.document,",
+                    "  )),",
+                    "));",
                     "const metadata = {",
                     "  verifyBundle: await capture(() => facade.verifyBundle()),",
                     "  rootManifest: await capture(() => facade.rootManifest()),",
@@ -173,11 +198,21 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
         )
         self.assertEqual(computed_registry, root["fixture_registry"])
 
+        self.assertEqual(
+            {
+                fixture["fixture_id"]
+                for fixture in fixtures
+                if fixture["fixture_class"] == "negative"
+                and fixture["fixture_id"] in CONTEXTUAL_NEGATIVE_FIXTURE_IDS
+            },
+            set(CONTEXTUAL_NEGATIVE_FIXTURE_IDS),
+        )
+
         stable_codes = {
             entry["code"] for entry in self.python.stable_error_registry()["entries"]
         }
         for fixture in fixtures:
-            if fixture["fixture_class"] == "negative":
+            if fixture["expected_code"] is not None:
                 self.assertIn(fixture["expected_code"], stable_codes)
 
         python_documents = [
@@ -280,15 +315,14 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
                     self.assertEqual(
                         result, {"kind": "ok", "value": fixture["document"]}
                     )
-                elif result["kind"] == "ok":
+                elif fixture["fixture_id"] in CONTEXTUAL_NEGATIVE_FIXTURE_IDS:
                     self.assertEqual(
                         result, {"kind": "ok", "value": fixture["document"]}
                     )
                 else:
                     self.assertEqual(result["kind"], "contract_error")
                     self.assertIn(result["code"], stable_codes)
-                    if not digest_operation:
-                        self.assertEqual(result["code"], fixture["expected_code"])
+                    self.assertEqual(result["code"], fixture["expected_code"])
 
     def _assert_public_parent_results(
         self,
@@ -306,7 +340,7 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
                     self.assertEqual(
                         result, {"kind": "ok", "value": fixture["document"]}
                     )
-                elif result["kind"] == "ok":
+                elif fixture["fixture_id"] in CONTEXTUAL_NEGATIVE_FIXTURE_IDS:
                     self.assertEqual(
                         result, {"kind": "ok", "value": fixture["document"]}
                     )
