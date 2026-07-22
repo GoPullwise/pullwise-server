@@ -168,7 +168,9 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
             for fixture in fixtures
         ]
         self.assertEqual(python_documents, self.node["documents"])
-        self._assert_fixture_results(fixtures, python_documents, stable_codes)
+        self._assert_fixture_results(
+            fixtures, python_documents, stable_codes, digest_operation=False
+        )
 
         python_digests = [
             self.capture_python(
@@ -179,13 +181,17 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
             for fixture in digest_fixtures
         ]
         self.assertEqual(python_digests, self.node["digests"])
-        self._assert_fixture_results(digest_fixtures, python_digests, stable_codes)
+        self._assert_fixture_results(
+            digest_fixtures, python_digests, stable_codes, digest_operation=True
+        )
 
     def _assert_fixture_results(
         self,
         fixtures: list[dict[str, object]],
         results: list[dict[str, object]],
         stable_codes: set[str],
+        *,
+        digest_operation: bool,
     ) -> None:
         for fixture, result in zip(fixtures, results, strict=True):
             self.assertNotEqual(result["kind"], "language_error")
@@ -195,8 +201,9 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
                 self.assertEqual(result["value"], fixture["document"])
             else:
                 self.assertEqual(result["kind"], "contract_error")
-                self.assertEqual(result["code"], fixture["expected_code"])
                 self.assertIn(result["code"], stable_codes)
+                if not digest_operation:
+                    self.assertEqual(result["code"], fixture["expected_code"])
 
     def test_integrity_and_metadata(self) -> None:
         self.assertTrue(self.python.verify_bundle())

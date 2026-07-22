@@ -702,10 +702,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         snapshot["change_set"] = deepcopy(root_set["change_set"])
         snapshot["requested_outcome"] = root_set["outcome_candidate"]
         snapshot["pre_gate_root_set_ref"] = self.content_ref(
-            "art_" + "b" * 32, "pre-gate-root-set/v1", root_set
+            "art_" + "a" * 32, "pre-gate-root-set/v1", root_set
         )
         snapshot["pre_gate_evidence_closure_ref"] = self.content_ref(
-            "art_" + "c" * 32, "pre-gate-evidence-closure-manifest/v1", manifest
+            "art_" + "b" * 32, "pre-gate-evidence-closure-manifest/v1", manifest
         )
         snapshot["pre_gate_closure_digest"] = manifest["pre_gate_closure_digest"]
         snapshot["quality_policy_plan_ref"] = deepcopy(quality_ref)
@@ -745,10 +745,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             )
         snapshot["terminalization_fact_refs"] = [fact_ref]
         snapshot["pre_gate_root_set_ref"] = self.content_ref(
-            "art_" + "e" * 32, "pre-gate-root-set/v1", root_set
+            "art_" + "a" * 32, "pre-gate-root-set/v1", root_set
         )
         snapshot["pre_gate_evidence_closure_ref"] = self.content_ref(
-            "art_" + "f" * 32, "pre-gate-evidence-closure-manifest/v1", manifest
+            "art_" + "b" * 32, "pre-gate-evidence-closure-manifest/v1", manifest
         )
         snapshot["pre_gate_closure_digest"] = manifest["pre_gate_closure_digest"]
         snapshot = self.reseal("terminalization-input-snapshot/v1", snapshot)
