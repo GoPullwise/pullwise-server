@@ -502,7 +502,17 @@ def validate_task_result_publication(
 ) -> dict[str, object]:
     previous = validate_document("task-record/v1", previous_record)
     terminal = validate_task_record_transition(previous, terminal_record)
-    result = validate_document("task-result/v1", task_result)
+    _require(isinstance(task_result, dict), "TASK_RESULT_CONTEXT_INVALID")
+    result = json.loads(canonical_document_bytes(task_result).decode("utf-8"))
+    required = {
+        "schema_id", "task_id", "task_type", "outcome",
+        "published_from_version", "terminal_task_version", "request_ref",
+        "policy_ref", "attempt_identity", "owner_identity", "terminal_at",
+    }
+    _require(
+        required.issubset(result) and result.get("schema_id") == "task-result/v1",
+        "TASK_RESULT_CONTEXT_INVALID",
+    )
     result_bytes = canonical_document_bytes(result)
     result_digest = hashlib.sha256(result_bytes).hexdigest()
     _require(

@@ -257,6 +257,11 @@ __all__ = [
     "validate_tool_capability_consumption", "validate_tool_invocation_binding",
     "validate_tool_journal_begin", "validate_tool_journal_settlement",
     "evaluate_success_gate", "evaluate_terminalization_gate",
+    "validate_attempt_transition", "validate_claim_write_set",
+    "validate_effective_policy_derivation", "validate_requirement_entry_ingest",
+    "validate_requirement_ledger_transition", "validate_task_charter_transition",
+    "validate_task_owner_transition", "validate_task_record_transition",
+    "validate_task_request_acceptance", "validate_task_result_publication",
     "fixture", "fixture_bytes", "gate_predicate_registry", "package_tuple",
     "root_manifest", "root_manifest_bytes", "schema", "schema_bytes", "schema_ids",
     "seal_document", "stable_error_registry", "tool_catalog", "validate_document",
@@ -266,6 +271,7 @@ __all__ = [
     "verify_gate_input_snapshot_context", "verify_pre_gate_evidence_closure_context",
     "verify_pre_gate_root_set_context", "verify_terminalization_fact_context",
     "verify_terminalization_input_snapshot_context", "verify_waiver_authorization",
+    "verify_waiver_event_authority",
 ]
 '''
 

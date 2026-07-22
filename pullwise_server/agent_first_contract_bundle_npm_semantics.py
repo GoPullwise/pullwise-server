@@ -305,44 +305,62 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
 
 NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
+  acceptance_source_ids_unique: taskControlRuleRequestAcceptanceSources,
   agent_tool_request: ruleAgentToolRequest,
   artifact_content_ref: ruleArtifactContentRef,
   artifact_content_registry: ruleArtifactContentRegistry,
-  budget_ceiling_consistency: rulePolicyBudgetCeilings,
+  attempt_state_nullability: taskControlRuleAttemptNullability,
+  attempt_transport_binding_all_or_none: taskControlRuleAttemptTransport,
+  budget_ceiling_consistency: taskControlRulePolicyBudgets,
   budget_summary: ruleBudgetSummary,
-  capability_sets_disjoint_sorted_unique: rulePolicyCapabilitySets,
+  capability_and_delivery_sets_sorted_unique: taskControlRuleRequestSets,
+  capability_sets_disjoint_sorted_unique: taskControlRulePolicyCapabilities,
   change_set_patch: ruleChangeSetPatch,
+  charter_digest_exact: taskControlRuleCharterDigest,
   debug_redaction_plan: ruleDebugRedactionPlan,
+  derived_requirement_shape: taskControlRuleRequirementShape,
   effect_ledger_snapshot: ruleEffectLedgerSnapshot,
   elapsed_budget_ledger: ruleElapsedBudgetLedger,
   elapsed_budget_reservation: ruleElapsedBudgetReservation,
   elapsed_budget_settlement: ruleElapsedBudgetSettlement,
+  entries_normative_ingest_then_append_order: taskControlRuleLedgerEntries,
   evidence_closure_manifest: ruleEvidenceClosureManifest,
   execution_profile: ruleExecutionProfile,
+  fenced_reason_ownership_loss: taskControlRuleFencedReason,
   gate_decision: ruleGateDecision,
   gate_input_snapshot: ruleGateInputSnapshot,
   gate_predicate_registry: ruleGatePredicateRegistry,
+  head_version_ref_pairs: taskControlRuleRecordHeads,
+  ledger_digest_exact: taskControlRuleLedgerDigest,
   local_tool_receipt: ruleLocalToolReceipt,
   observation: ruleObservation,
-  policy_digest_exact: rulePolicyDigest,
+  owner_state_nullability: taskControlRuleOwnerNullability,
+  policy_digest_exact: taskControlRulePolicyDigest,
   pre_gate_evidence_closure_manifest: rulePreGateEvidenceClosureManifest,
   pre_gate_root_set: rulePreGateRootSet,
   publication_content_manifest: rulePublicationContentManifest,
   quality_policy_plan: ruleQualityPolicyPlan,
   r0_read_payload: ruleR0ReadPayload,
   r0_read_result: ruleR0ReadResult,
-  risk_ceiling_current_mvp: rulePolicyRiskCeiling,
-  root_and_origin_sets_sorted_unique: rulePolicyRootsAndOrigins,
+  requirement_id_source_kind_match: taskControlRuleRequirementId,
+  risk_ceiling_current_mvp: taskControlRulePolicyMvp,
+  root_and_origin_sets_sorted_unique: taskControlRulePolicyRoots,
+  sorted_unique_active_requirement_ids: taskControlRuleLedgerActive,
+  sorted_unique_charter_sets: taskControlRuleCharterSets,
+  sorted_unique_requirement_links: taskControlRuleRequirementLinks,
   source_content: ruleSourceContent,
   source_state: ruleSourceState,
+  task_record_transport_binding_all_or_none: taskControlRuleRecordTransport,
   task_report: ruleTaskReport,
+  terminal_result_shape: taskControlRuleRecordTerminal,
   terminalization_fact: ruleTerminalizationFact,
   terminalization_input_snapshot: ruleTerminalizationInputSnapshot,
   tool_catalog: ruleToolCatalog,
   tool_dispatch_capability: ruleToolDispatchCapability,
   tool_dispatch_intent: ruleToolDispatchIntent,
   tool_invocation: ruleToolInvocation,
-  utf8_nfc_byte_limits: ruleUtf8Fields,
+  utf8_nfc_byte_limits: taskControlRuleUtf8,
+  waiver_time_order: taskControlRuleWaiverTime,
 });
 
 function ruleUtf8Fields(value) {
@@ -379,11 +397,19 @@ function validateDeclaredDocumentRules(schemaId, value) {
       DOCUMENT_RULE_HANDLERS, ruleId,
     ),
   )) return false;
+  const expectedKeys = schemaId === "waiver-event/v1"
+    ? ["contextual_helpers", "document_rules", "signature_contract"]
+    : ["contextual_helpers", "document_rules"];
   if (!semantics || typeof semantics !== "object" || Array.isArray(semantics) ||
-      JSON.stringify(Object.keys(semantics).sort()) !==
-        JSON.stringify(["contextual_helpers", "document_rules"]) ||
+      JSON.stringify(Object.keys(semantics).sort()) !== JSON.stringify(expectedKeys) ||
       !sortedUniqueStrings(rules, false) ||
       !sortedUniqueStrings(semantics.contextual_helpers, true)) {
+    fail("CONTRACT_SEMANTICS_INVALID", schemaId);
+  }
+  if (schemaId === "waiver-event/v1" && canonicalString(semantics.signature_contract) !==
+      canonicalString({algorithm: "Ed25519", domain: "pullwise-waiver-event/v1",
+        domain_separator: "NUL", encoding: "base64url_no_padding",
+        signed_projection: "event_without_signature"})) {
     fail("CONTRACT_SEMANTICS_INVALID", schemaId);
   }
   for (const ruleId of rules) {

@@ -269,6 +269,181 @@ export async function verifyExecutionStateContext(
   );
   return checked;
 }
+
+function seoUtf8OrderedUnique(values) {
+  return new Set(values).size === values.length &&
+    JSON.stringify(values) === JSON.stringify([...values].sort(seoCompareUtf8));
+}
+
+function ruleSourceSelectionPolicyComplete(value) {
+  const excluded = value.excluded_control_roots;
+  const ephemeral = value.ephemeral_patterns;
+  seoRequire(
+    value.include === "all_repository_regular_files",
+    "SOURCE_SELECTION_INCLUDE_INVALID", "$.include",
+  );
+  seoRequire(
+    excluded.includes(".git/") && excluded.includes(".pullwise-worker/"),
+    "SOURCE_SELECTION_CONTROL_ROOT_MISSING", "$.excluded_control_roots",
+  );
+  seoRequire(
+    seoUtf8OrderedUnique(excluded),
+    "SOURCE_SELECTION_ORDER_INVALID", "$.excluded_control_roots",
+  );
+  seoRequire(
+    seoUtf8OrderedUnique(ephemeral),
+    "SOURCE_SELECTION_ORDER_INVALID", "$.ephemeral_patterns",
+  );
+  seoVerifyEmbeddedDigest("source-selection-policy/v1", value);
+}
+
+function seoCaseCollisionKey(value) {
+  return value.toUpperCase().toLowerCase();
+}
+
+function ruleSourceTreeManifest(value) {
+  const entries = value.entries;
+  seoRequire(
+    seoUtf8OrderedUnique(entries.map((item) => item.path)),
+    "SOURCE_TREE_ORDER_INVALID", "$.entries",
+  );
+  entries.forEach((entry, index) => {
+    seoRequire(
+      seoTreeEntryValid(entry),
+      "SOURCE_TREE_ENTRY_INVALID", "$.entries[" + index + "]",
+    );
+  });
+  const folded = entries.map((item) => seoCaseCollisionKey(item.path));
+  seoRequire(
+    new Set(folded).size === folded.length,
+    "SOURCE_TREE_CASE_COLLISION", "$.entries",
+  );
+  const total = entries
+    .filter((item) => item.type === "file")
+    .reduce((sum, item) => sum + BigInt(item.size_bytes), 0n);
+  seoRequire(
+    value.entry_count === entries.length,
+    "SOURCE_TREE_COUNT_INVALID", "$.entry_count",
+  );
+  seoRequire(
+    BigInt(value.total_bytes) === total,
+    "SOURCE_TREE_SIZE_INVALID", "$.total_bytes",
+  );
+  const identity = {
+    base_revision: value.base_revision,
+    selection_policy_digest: value.selection_policy_digest,
+    entries,
+  };
+  seoRequire(
+    value.source_state_id === sha256Sync(canonicalDocumentBytes(identity)),
+    "SOURCE_STATE_ID_INVALID", "$.source_state_id",
+  );
+  seoVerifyEmbeddedDigest("source-tree-manifest/v1", value);
+}
+
+export async function verifySourceTreeContext(manifest, selectionPolicy) {
+  const checked = await verifyDocumentDigest(
+    "source-tree-manifest/v1", manifest,
+  );
+  const policy = await verifyDocumentDigest(
+    "source-selection-policy/v1", selectionPolicy,
+  );
+  seoRequire(
+    checked.selection_policy_digest === policy.policy_digest,
+    "SOURCE_TREE_CONTEXT_INVALID", "$.selection_policy_digest",
+  );
+  seoRequire(
+    seoRefMatchesDocument(
+      checked.selection_policy_ref, "source-selection-policy/v1", policy,
+    ),
+    "CAS_CORRUPT", "$.selection_policy_ref",
+  );
+  return checked;
+}
+
+function seoObservationManifestCommon(value, preVerifier) {
+  const entries = value.entries;
+  seoRequire(
+    value.entry_count === entries.length,
+    "OBSERVATION_MANIFEST_COUNT_INVALID", "$.entry_count",
+  );
+  seoRequire(
+    seoOrderedUnique(
+      entries, (item) => [item.observation_seq, item.observation_id],
+    ),
+    "OBSERVATION_MANIFEST_ORDER_INVALID", "$.entries",
+  );
+  if (preVerifier) {
+    const allowed = new Set(["task_owner", "domain_reviewer"]);
+    entries.forEach((entry, index) => {
+      seoRequire(
+        allowed.has(entry.actor.kind),
+        "OBSERVATION_MANIFEST_ACTOR_INVALID",
+        "$.entries[" + index + "].actor.kind",
+      );
+    });
+  } else {
+    seoRequire(
+      entries.some((entry) => entry.actor.kind === "quality_verifier"),
+      "OBSERVATION_MANIFEST_VERIFIER_MISSING", "$.entries",
+    );
+  }
+}
+
+function ruleObservationManifestComplete(value) {
+  seoObservationManifestCommon(value, false);
+  seoVerifyEmbeddedDigest("observation-manifest/v1", value);
+}
+
+function rulePreVerifierObservationManifest(value) {
+  seoObservationManifestCommon(value, true);
+  seoVerifyEmbeddedDigest("pre-verifier-observation-manifest/v1", value);
+}
+
+export async function verifyObservationManifestExtension(
+  manifest, preVerifierManifest,
+) {
+  const final = await verifyDocumentDigest("observation-manifest/v1", manifest);
+  const pre = await verifyDocumentDigest(
+    "pre-verifier-observation-manifest/v1", preVerifierManifest,
+  );
+  for (const field of ["task_id", "proposal_id", "attempt_id", "native_epoch"]) {
+    seoRequire(
+      final[field] === pre[field],
+      "OBSERVATION_MANIFEST_IDENTITY_INVALID", "$." + field,
+    );
+  }
+  seoRequire(
+    final.manifest_id !== pre.manifest_id,
+    "OBSERVATION_MANIFEST_IDENTITY_INVALID", "$.manifest_id",
+  );
+  seoRequire(
+    seoRefMatchesDocument(
+      final.pre_verifier_observation_manifest_ref,
+      "pre-verifier-observation-manifest/v1",
+      pre,
+    ),
+    "CAS_CORRUPT", "$.pre_verifier_observation_manifest_ref",
+  );
+  const prefixLength = pre.entries.length;
+  seoRequire(
+    final.entries.length > prefixLength,
+    "OBSERVATION_MANIFEST_EXTENSION_INVALID", "$.entries",
+  );
+  seoRequire(
+    canonicalString(final.entries.slice(0, prefixLength)) ===
+      canonicalString(pre.entries),
+    "OBSERVATION_MANIFEST_EXTENSION_INVALID", "$.entries",
+  );
+  final.entries.slice(prefixLength).forEach((entry, offset) => {
+    seoRequire(
+      entry.actor.kind === "quality_verifier",
+      "OBSERVATION_MANIFEST_EXTENSION_INVALID",
+      "$.entries[" + (prefixLength + offset) + "].actor.kind",
+    );
+  });
+  return final;
+}
 '''
 
 

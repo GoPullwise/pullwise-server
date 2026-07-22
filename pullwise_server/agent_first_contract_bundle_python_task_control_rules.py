@@ -100,12 +100,10 @@ def _task_control_rule_policy_roots(value: dict[str, object]) -> None:
         _require(
             _sorted_unique(value[field]),
             "POLICY_ROOT_ORDER_INVALID",
-            f"$.{field}",
         )
     _require(
         _sorted_unique(value["agent_tool_network"]["origins"]),
         "POLICY_ORIGIN_ORDER_INVALID",
-        "$.agent_tool_network.origins",
     )
 
 

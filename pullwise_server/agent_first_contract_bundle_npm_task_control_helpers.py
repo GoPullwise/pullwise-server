@@ -436,7 +436,19 @@ export function validateTaskResultPublication(
 ) {
   const previous = validateDocument("task-record/v1", previousRecord);
   const terminal = validateTaskRecordTransition(previous, terminalRecord);
-  const result = validateDocument("task-result/v1", taskResult);
+  if (!taskResult || typeof taskResult !== "object" || Array.isArray(taskResult)) {
+    taskControlFail("TASK_RESULT_CONTEXT_INVALID");
+  }
+  const result = JSON.parse(decoder.decode(canonicalDocumentBytes(taskResult)));
+  const required = [
+    "schema_id", "task_id", "task_type", "outcome",
+    "published_from_version", "terminal_task_version", "request_ref",
+    "policy_ref", "attempt_identity", "owner_identity", "terminal_at",
+  ];
+  if (result.schema_id !== "task-result/v1" ||
+      required.some((field) => !(field in result))) {
+    taskControlFail("TASK_RESULT_CONTEXT_INVALID");
+  }
   const resultBytes = canonicalDocumentBytes(result);
   const resultDigest = sha256Sync(resultBytes);
   if (previous.lifecycle !== "FINALIZING" ||

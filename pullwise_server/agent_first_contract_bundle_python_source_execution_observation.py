@@ -258,6 +258,190 @@ def verify_execution_state_context(
         "CAS_CORRUPT", "$.execution_profile_ref",
     )
     return checked
+
+
+def _rule_source_selection_policy_complete(value: dict[str, object]) -> None:
+    excluded = value["excluded_control_roots"]
+    ephemeral = value["ephemeral_patterns"]
+    _seo_require(
+        value["include"] == "all_repository_regular_files",
+        "SOURCE_SELECTION_INCLUDE_INVALID", "$.include",
+    )
+    _seo_require(
+        ".git/" in excluded and ".pullwise-worker/" in excluded,
+        "SOURCE_SELECTION_CONTROL_ROOT_MISSING", "$.excluded_control_roots",
+    )
+    _seo_require(
+        _seo_ordered_unique(excluded, lambda item: item.encode("utf-8")),
+        "SOURCE_SELECTION_ORDER_INVALID", "$.excluded_control_roots",
+    )
+    _seo_require(
+        _seo_ordered_unique(ephemeral, lambda item: item.encode("utf-8")),
+        "SOURCE_SELECTION_ORDER_INVALID", "$.ephemeral_patterns",
+    )
+    _seo_verify_embedded_digest("source-selection-policy/v1", value)
+
+
+def _seo_case_collision_key(value: str) -> str:
+    return value.upper().lower()
+
+
+def _rule_source_tree_manifest(value: dict[str, object]) -> None:
+    entries = value["entries"]
+    _seo_require(
+        _seo_ordered_unique(entries, lambda item: item["path"].encode("utf-8")),
+        "SOURCE_TREE_ORDER_INVALID", "$.entries",
+    )
+    for index, entry in enumerate(entries):
+        _seo_require(
+            _seo_tree_entry_valid(entry),
+            "SOURCE_TREE_ENTRY_INVALID", f"$.entries[{index}]",
+        )
+    folded = [_seo_case_collision_key(entry["path"]) for entry in entries]
+    _seo_require(
+        len(folded) == len(set(folded)),
+        "SOURCE_TREE_CASE_COLLISION", "$.entries",
+    )
+    total = sum(
+        entry["size_bytes"] for entry in entries if entry["type"] == "file"
+    )
+    _seo_require(
+        value["entry_count"] == len(entries),
+        "SOURCE_TREE_COUNT_INVALID", "$.entry_count",
+    )
+    _seo_require(
+        value["total_bytes"] == total,
+        "SOURCE_TREE_SIZE_INVALID", "$.total_bytes",
+    )
+    identity = {
+        "base_revision": value["base_revision"],
+        "selection_policy_digest": value["selection_policy_digest"],
+        "entries": entries,
+    }
+    _seo_require(
+        value["source_state_id"]
+        == hashlib.sha256(canonical_document_bytes(identity)).hexdigest(),
+        "SOURCE_STATE_ID_INVALID", "$.source_state_id",
+    )
+    _seo_verify_embedded_digest("source-tree-manifest/v1", value)
+
+
+def verify_source_tree_context(
+    manifest: object,
+    selection_policy: object,
+) -> dict[str, object]:
+    """Bind a source tree to the exact selection policy used to build it."""
+    checked = verify_document_digest("source-tree-manifest/v1", manifest)
+    policy = verify_document_digest(
+        "source-selection-policy/v1", selection_policy
+    )
+    _seo_require(
+        checked["selection_policy_digest"] == policy["policy_digest"],
+        "SOURCE_TREE_CONTEXT_INVALID", "$.selection_policy_digest",
+    )
+    _seo_require(
+        _seo_ref_matches_document(
+            checked["selection_policy_ref"],
+            "source-selection-policy/v1",
+            policy,
+        ),
+        "CAS_CORRUPT", "$.selection_policy_ref",
+    )
+    return checked
+
+
+def _seo_observation_manifest_common(
+    value: dict[str, object], *, pre_verifier: bool
+) -> None:
+    entries = value["entries"]
+    _seo_require(
+        value["entry_count"] == len(entries),
+        "OBSERVATION_MANIFEST_COUNT_INVALID", "$.entry_count",
+    )
+    _seo_require(
+        _seo_ordered_unique(
+            entries,
+            lambda item: (item["observation_seq"], item["observation_id"]),
+        ),
+        "OBSERVATION_MANIFEST_ORDER_INVALID", "$.entries",
+    )
+    if pre_verifier:
+        allowed = {"task_owner", "domain_reviewer"}
+        for index, entry in enumerate(entries):
+            _seo_require(
+                entry["actor"]["kind"] in allowed,
+                "OBSERVATION_MANIFEST_ACTOR_INVALID",
+                f"$.entries[{index}].actor.kind",
+            )
+    else:
+        _seo_require(
+            any(
+                entry["actor"]["kind"] == "quality_verifier"
+                for entry in entries
+            ),
+            "OBSERVATION_MANIFEST_VERIFIER_MISSING", "$.entries",
+        )
+
+
+def _rule_observation_manifest_complete(value: dict[str, object]) -> None:
+    _seo_observation_manifest_common(value, pre_verifier=False)
+    _seo_verify_embedded_digest("observation-manifest/v1", value)
+
+
+def _rule_pre_verifier_observation_manifest(
+    value: dict[str, object]
+) -> None:
+    _seo_observation_manifest_common(value, pre_verifier=True)
+    _seo_verify_embedded_digest(
+        "pre-verifier-observation-manifest/v1", value
+    )
+
+
+def verify_observation_manifest_extension(
+    manifest: object,
+    pre_verifier_manifest: object,
+) -> dict[str, object]:
+    """Verify that final observations strictly and exactly extend the pre-set."""
+    final = verify_document_digest("observation-manifest/v1", manifest)
+    pre = verify_document_digest(
+        "pre-verifier-observation-manifest/v1", pre_verifier_manifest
+    )
+    for field in ("task_id", "proposal_id", "attempt_id", "native_epoch"):
+        _seo_require(
+            final[field] == pre[field],
+            "OBSERVATION_MANIFEST_IDENTITY_INVALID", f"$.{field}",
+        )
+    _seo_require(
+        final["manifest_id"] != pre["manifest_id"],
+        "OBSERVATION_MANIFEST_IDENTITY_INVALID", "$.manifest_id",
+    )
+    _seo_require(
+        _seo_ref_matches_document(
+            final["pre_verifier_observation_manifest_ref"],
+            "pre-verifier-observation-manifest/v1",
+            pre,
+        ),
+        "CAS_CORRUPT", "$.pre_verifier_observation_manifest_ref",
+    )
+    prefix_length = len(pre["entries"])
+    _seo_require(
+        len(final["entries"]) > prefix_length,
+        "OBSERVATION_MANIFEST_EXTENSION_INVALID", "$.entries",
+    )
+    _seo_require(
+        canonical_document_bytes(final["entries"][:prefix_length])
+        == canonical_document_bytes(pre["entries"]),
+        "OBSERVATION_MANIFEST_EXTENSION_INVALID", "$.entries",
+    )
+    for index, entry in enumerate(
+        final["entries"][prefix_length:], prefix_length
+    ):
+        _seo_require(
+            entry["actor"]["kind"] == "quality_verifier",
+            "OBSERVATION_MANIFEST_EXTENSION_INVALID",
+            f"$.entries[{index}].actor.kind",
+        )
+    return final
 '''
 
 

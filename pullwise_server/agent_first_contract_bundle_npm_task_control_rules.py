@@ -106,11 +106,11 @@ function taskControlRulePolicyCapabilities(value) {
 function taskControlRulePolicyRoots(value) {
   for (const field of ["allowed_read_roots", "allowed_write_roots"]) {
     if (!taskControlSortedUnique(value[field])) {
-      fail("POLICY_ROOT_ORDER_INVALID", `$.${field}`);
+      fail("POLICY_ROOT_ORDER_INVALID");
     }
   }
   if (!taskControlSortedUnique(value.agent_tool_network.origins)) {
-    fail("POLICY_ORIGIN_ORDER_INVALID", "$.agent_tool_network.origins");
+    fail("POLICY_ORIGIN_ORDER_INVALID");
   }
 }
 

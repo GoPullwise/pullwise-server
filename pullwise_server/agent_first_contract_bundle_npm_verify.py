@@ -268,6 +268,16 @@ export const seal_document = sealDocument;
 export const stable_error_registry = stableErrorRegistry;
 export const tool_catalog = toolCatalog;
 export const validate_document = validateDocument;
+export const validate_attempt_transition = validateAttemptTransition;
+export const validate_claim_write_set = validateClaimWriteSet;
+export const validate_effective_policy_derivation = validateEffectivePolicyDerivation;
+export const validate_requirement_entry_ingest = validateRequirementEntryIngest;
+export const validate_requirement_ledger_transition = validateRequirementLedgerTransition;
+export const validate_task_charter_transition = validateTaskCharterTransition;
+export const validate_task_owner_transition = validateTaskOwnerTransition;
+export const validate_task_record_transition = validateTaskRecordTransition;
+export const validate_task_request_acceptance = validateTaskRequestAcceptance;
+export const validate_task_result_publication = validateTaskResultPublication;
 export const validate_tool_capability_consumption = validateToolCapabilityConsumption;
 export const validate_tool_invocation_binding = validateToolInvocationBinding;
 export const validate_tool_journal_begin = validateToolJournalBegin;
@@ -284,6 +294,7 @@ export const verify_quality_policy_plan_context = verifyQualityPolicyPlanContext
 export const verify_terminalization_fact_context = verifyTerminalizationFactContext;
 export const verify_terminalization_input_snapshot_context = verifyTerminalizationInputSnapshotContext;
 export const verify_waiver_authorization = verifyWaiverAuthorization;
+export const verify_waiver_event_authority = verifyWaiverEventAuthority;
 '''
 
 

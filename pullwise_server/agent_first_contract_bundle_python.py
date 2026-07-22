@@ -173,7 +173,12 @@ def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
         choices = declared if isinstance(declared, list) else [declared]
         if not any(_type_matches(choice, value) for choice in choices):
             _fail("CONTRACT_TYPE_INVALID", path)
-    if isinstance(value, dict) and declared == "object":
+    if isinstance(value, dict) and (
+        declared == "object"
+        or "properties" in rule
+        or "required" in rule
+        or "additionalProperties" in rule
+    ):
         required = rule.get("required", [])
         missing = [key for key in required if key not in value]
         if missing:

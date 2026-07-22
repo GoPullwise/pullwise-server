@@ -167,7 +167,9 @@ function validateNode(rule, value, path) {
       fail("CONTRACT_TYPE_INVALID", path);
     }
   }
-  if (rule.type === "object" && typeMatches("object", value)) {
+  if (typeMatches("object", value) &&
+      (rule.type === "object" || rule.properties !== undefined ||
+       rule.required !== undefined || rule.additionalProperties !== undefined)) {
     for (const key of rule.required ?? []) {
       if (!(key in value)) fail("CONTRACT_REQUIRED_MISSING", `${path}.${key}`);
     }
