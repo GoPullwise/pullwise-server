@@ -101,7 +101,7 @@ def valid_actor(value: object) -> bool:
     sessions = {
         "task_owner",
         "quality_verifier",
-        "legacy_domain_reviewer",
+        "domain_reviewer",
         "explorer",
         "troubleshooter",
         "implementer",

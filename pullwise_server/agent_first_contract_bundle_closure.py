@@ -114,6 +114,10 @@ def _validate_artifact_registry(
             if not isinstance(properties, dict) or "artifact_refs" not in properties:
                 continue
             artifact_refs = properties["artifact_refs"]
+            # Outcome variants deliberately leave inherited fields unconstrained.
+            # Enforce the typed wrapper only where this node defines the field.
+            if artifact_refs == {}:
+                continue
             if (
                 not isinstance(artifact_refs, dict)
                 or artifact_refs.get("type") != "array"

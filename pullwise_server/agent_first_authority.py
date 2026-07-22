@@ -1,4 +1,4 @@
-"""Direct current-only Server authority facade; no legacy route or dispatch path."""
+"""Current-only Server authority facade; dispatch execution is Worker-owned."""
 
 from __future__ import annotations
 

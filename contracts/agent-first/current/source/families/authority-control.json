@@ -441,7 +441,7 @@
         "attempt_id": "attempt_44444444444444444444444444444444", "session_id": "sess_55555555555555555555555555555555",
         "owner_id": "owner_66666666666666666666666666666666", "lease_id": "lease_22222222222222222222222222222222",
         "task_version": 2, "deletion_version": 1, "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1,
-        "fence_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "fence_digest": "dee198600c4ac79cb93a79b3bb853459b6eeb46933dc7138a89226963698a619"
       },
       "expected_code": "AUTHORITY_FENCED"
     },
@@ -475,11 +475,11 @@
           "policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
           "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
           "elapsed_limit_ms": 60000, "tool_call_limit": 7,
-          "grant_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143"
         },
         "superseded_authority_digest": "8888888888888888888888888888888888888888888888888888888888888888",
         "reason": "outer_lease_lost", "abandoned_at": "2026-07-22T12:00:00.000Z",
-        "response_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "response_digest": "2036b281021ecaab4b08fc0daed8c2fe860773978e0d9c18722ab7399dad6f70"
       },
       "expected_code": null
     },
@@ -501,7 +501,7 @@
         "policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
         "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
         "elapsed_limit_ms": 60000, "tool_call_limit": 7,
-        "grant_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143"
       },
       "expected_code": null
     },
@@ -534,9 +534,9 @@
           "policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
           "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
           "elapsed_limit_ms": 60000, "tool_call_limit": 7,
-          "grant_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143"
         },
-        "authority_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "authority_digest": "04e1eb247bc94763af865887932eb00b283155dd99649d93d29cb4edf40fe73d"
       },
       "expected_code": "AUTHORITY_INPUT_UNTRUSTED"
     }

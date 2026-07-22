@@ -1,0 +1,160 @@
+{
+  "family_id": "quality-policy-plan",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "quality-policy-plan/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field":"plan_digest","domain":"pullwise:quality-policy-plan:v1"},
+      "x-pullwise-semantics": {
+        "document_rules": ["quality_policy_plan"],
+        "contextual_helpers": ["verify_quality_policy_plan_context"]
+      },
+      "required": [
+        "schema_id", "task_id", "proposal_id", "proposal_digest", "policy_digest", "task_type", "requirement_ledger_digest",
+        "change_set_classification_digest", "capability_usage_digest", "input_digest", "quality_risk", "slots",
+        "self_attestation_allowed", "rationale", "policy_implementation_version", "plan_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"quality-policy-plan/v1"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "proposal_id": {"type":"string","pattern":"^proposal_[0-9a-f]{32}$"},
+        "proposal_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "policy_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "task_type": {"const":"pullwise.repo-review.full-scan/v1"},
+        "requirement_ledger_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "change_set_classification_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "capability_usage_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "input_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "quality_risk": {"enum":["Q1","Q2","Q3"]},
+        "slots": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slot_id","concern","requirement_ids"],
+            "properties": {
+              "slot_id": {"type":"string","pattern":"^slot_[0-9a-f]{32}$"},
+              "concern": {"type":"string","minLength":1,"maxLength":160,"pattern":"^[a-z0-9]+(?:[._-][a-z0-9]+)*$"},
+              "requirement_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^req_(?:user_objective|user_acceptance|user_constraint|delivery|policy|interaction|derived)_[0-9a-f]{64}$"
+                }
+              }
+            }
+          }
+        },
+        "self_attestation_allowed": {"const":false},
+        "rationale": {"type":"string","minLength":1,"maxLength":4096},
+        "policy_implementation_version": {"const":"pullwise-quality-policy/v1"},
+        "plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "quality_policy_golden_q1_plan",
+      "fixture_class": "golden",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "quality_risk": "Q1",
+        "slots": [
+          {
+            "slot_id": "slot_11111111111111111111111111111111",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          }
+        ],
+        "self_attestation_allowed": false,
+        "rationale": "Full-scan output requires one independent verifier slot.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "quality_policy_idempotency_q1_plan",
+      "fixture_class": "idempotency",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "quality_risk": "Q1",
+        "slots": [
+          {
+            "slot_id": "slot_11111111111111111111111111111111",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          }
+        ],
+        "self_attestation_allowed": false,
+        "rationale": "Full-scan output requires one independent verifier slot.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "quality_policy_negative_q2_missing_slot",
+      "fixture_class": "negative",
+      "schema_id": "quality-policy-plan/v1",
+      "document": {
+        "schema_id": "quality-policy-plan/v1",
+        "task_id": "task_11111111111111111111111111111111",
+        "proposal_id": "proposal_11111111111111111111111111111111",
+        "proposal_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "task_type": "pullwise.repo-review.full-scan/v1",
+        "requirement_ledger_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "change_set_classification_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capability_usage_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "input_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "quality_risk": "Q2",
+        "slots": [
+          {
+            "slot_id": "slot_11111111111111111111111111111111",
+            "concern": "contract_and_data",
+            "requirement_ids": [
+              "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"
+            ]
+          }
+        ],
+        "self_attestation_allowed": false,
+        "rationale": "Q2 incorrectly omitted its second independent concern slot.",
+        "policy_implementation_version": "pullwise-quality-policy/v1",
+        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

@@ -91,6 +91,17 @@ class TaskObservationFamilyTest(FamilyAssertions, unittest.TestCase):
     def test_complete_fixtures_execute_and_retry_byte_exactly(self) -> None:
         self.assert_fixture_matrix({"observation/v1": self.valid_observation})
 
+    def test_current_domain_reviewer_actor_has_no_legacy_alias(self) -> None:
+        actor = {
+            "schema_id": "actor/v1",
+            "kind": "domain_reviewer",
+            "id": "reviewer_11111111111111111111111111111111",
+            "session_id": "sess_11111111111111111111111111111111",
+        }
+        self.assertTrue(valid_actor(actor))
+        actor["kind"] = "legacy_domain_reviewer"
+        self.assertFalse(valid_actor(actor))
+
     def test_adversarial_fixtures_cover_full_execution_matrix(self) -> None:
         fixtures = {item["fixture_id"]: item for item in self.family["fixtures"]}
         self.assertIs(

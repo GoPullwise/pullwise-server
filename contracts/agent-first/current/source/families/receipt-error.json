@@ -437,21 +437,53 @@
       "fixture_id": "receipt_crash_binding_rollback",
       "fixture_class": "crash",
       "schema_id": "server-transport-receipt-binding/v1",
-      "document": { "crash_point": "after_binding_cas_before_commit", "expected_state": "unbound" },
+      "document": {
+        "schema_id": "server-transport-receipt-binding/v1",
+        "receipt_id": "receipt_99999999999999999999999999999999",
+        "receipt_digest": "291a133c27b99ccf9f41434570284970dd60b0a9d46a7abb259c262ad0c33da8",
+        "state": "unbound", "bound_transport_envelope_digest": null
+      },
       "expected_code": "TRANSPORT_BINDING_ROLLED_BACK"
     },
     {
       "fixture_id": "receipt_golden_immutable_transport",
       "fixture_class": "golden",
       "schema_id": "server-transport-receipt/v1",
-      "document": { "receipt_kind": "server_transport", "binding_is_separate": true },
+      "document": {
+        "schema_id": "server-transport-receipt/v1", "receipt_kind": "server_transport",
+        "package": {
+          "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "receipt_id": "receipt_99999999999999999999999999999999", "task_id": "task_11111111111111111111111111111111",
+        "attempt_id": "attempt_44444444444444444444444444444444", "session_id": "sess_55555555555555555555555555555555",
+        "owner_id": "owner_66666666666666666666666666666666", "lease_id": "lease_22222222222222222222222222222222",
+        "authority_digest": "8888888888888888888888888888888888888888888888888888888888888888",
+        "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143",
+        "task_version": 2, "deletion_version": 2, "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1,
+        "content_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_cccccccccccccccccccccccccccccccc",
+          "content_schema_id": "worker-debug-fragment/v1",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size_bytes": 128, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "accepted_at": "2026-07-22T12:00:00.000Z",
+        "receipt_digest": "291a133c27b99ccf9f41434570284970dd60b0a9d46a7abb259c262ad0c33da8"
+      },
       "expected_code": null
     },
     {
       "fixture_id": "receipt_idempotency_exact_binding",
       "fixture_class": "idempotency",
       "schema_id": "server-transport-receipt-binding/v1",
-      "document": { "same_receipt_digest": true, "same_transport_envelope_digest": true },
+      "document": {
+        "schema_id": "server-transport-receipt-binding/v1",
+        "receipt_id": "receipt_99999999999999999999999999999999",
+        "receipt_digest": "291a133c27b99ccf9f41434570284970dd60b0a9d46a7abb259c262ad0c33da8",
+        "state": "bound",
+        "bound_transport_envelope_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
       "expected_code": null
     },
     {
@@ -459,8 +491,11 @@
       "fixture_class": "negative",
       "schema_id": "server-transport-receipt-binding/v1",
       "document": {
-        "existing_transport_envelope_digest": "a",
-        "presented_transport_envelope_digest": "b"
+        "schema_id": "server-transport-receipt-binding/v1",
+        "receipt_id": "receipt_99999999999999999999999999999999",
+        "receipt_digest": "291a133c27b99ccf9f41434570284970dd60b0a9d46a7abb259c262ad0c33da8",
+        "state": "bound",
+        "bound_transport_envelope_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
       "expected_code": "TRANSPORT_RECEIPT_ALREADY_BOUND"
     },
@@ -468,7 +503,28 @@
       "fixture_id": "receipt_negative_transport_as_local",
       "fixture_class": "negative",
       "schema_id": "server-transport-receipt/v1",
-      "document": { "receipt_kind": "local_tool" },
+      "document": {
+        "schema_id": "server-transport-receipt/v1", "receipt_kind": "local_tool",
+        "package": {
+          "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "receipt_id": "receipt_99999999999999999999999999999999", "task_id": "task_11111111111111111111111111111111",
+        "attempt_id": "attempt_44444444444444444444444444444444", "session_id": "sess_55555555555555555555555555555555",
+        "owner_id": "owner_66666666666666666666666666666666", "lease_id": "lease_22222222222222222222222222222222",
+        "authority_digest": "8888888888888888888888888888888888888888888888888888888888888888",
+        "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143",
+        "task_version": 2, "deletion_version": 2, "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1,
+        "content_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_cccccccccccccccccccccccccccccccc",
+          "content_schema_id": "worker-debug-fragment/v1",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size_bytes": 128, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "accepted_at": "2026-07-22T12:00:00.000Z",
+        "receipt_digest": "87df73cfebe509c2f6367acc8feaf60f40f9a56d3f5b503a0ad92895c7ea8837"
+      },
       "expected_code": "TRANSPORT_RECEIPT_TYPE_INVALID"
     }
   ]
