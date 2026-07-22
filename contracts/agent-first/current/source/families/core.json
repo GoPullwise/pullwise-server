@@ -17,6 +17,22 @@
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "canonical-json-profile/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "profile_id", "encoding", "unicode_normalization", "object_key_order", "number_domain", "whitespace"],
+      "properties": {
+        "schema_id": {"const": "canonical-json-profile/v1"},
+        "profile_id": {"const": "pullwise-canonical-json/v1"},
+        "encoding": {"const": "utf-8"},
+        "unicode_normalization": {"const": "NFC"},
+        "object_key_order": {"const": "ascii_lexicographic"},
+        "number_domain": {"const": "safe_integer_only"},
+        "whitespace": {"const": "none"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "content-ref/v1",
       "type": "object",
       "additionalProperties": false,
@@ -33,12 +49,12 @@
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "contract-package-tuple/v1",
+      "$id": "current-package-ref/v1",
       "type": "object",
       "additionalProperties": false,
       "required": ["schema_id", "package_identity", "package_version", "content_sha256", "root_sha256"],
       "properties": {
-        "schema_id": {"const": "contract-package-tuple/v1"},
+        "schema_id": {"const": "current-package-ref/v1"},
         "package_identity": {"const": "@pullwise/agent-task-contract"},
         "package_version": {"const": "0.1.0"},
         "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -47,6 +63,13 @@
     }
   ],
   "fixtures": [
+    {
+      "fixture_id": "core_golden_canonical_profile",
+      "fixture_class": "golden",
+      "schema_id": "canonical-json-profile/v1",
+      "document": {"schema_id": "canonical-json-profile/v1", "profile_id": "pullwise-canonical-json/v1", "encoding": "utf-8", "unicode_normalization": "NFC", "object_key_order": "ascii_lexicographic", "number_domain": "safe_integer_only", "whitespace": "none"},
+      "expected_code": null
+    },
     {
       "fixture_id": "core_golden_content_ref",
       "fixture_class": "golden",
@@ -64,7 +87,7 @@
     {
       "fixture_id": "core_negative_package_mismatch",
       "fixture_class": "negative",
-      "schema_id": "contract-package-tuple/v1",
+      "schema_id": "current-package-ref/v1",
       "document": {"package_version": "0.1.1"},
       "expected_code": "CURRENT_PACKAGE_PIN_MISMATCH"
     }

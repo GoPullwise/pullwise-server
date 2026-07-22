@@ -135,7 +135,7 @@
       "required": ["schema_id", "package", "intent_id", "authority_digest", "grant_digest", "invocation_digest", "reservation_id", "capability_digest", "state", "created_at", "intent_digest"],
       "properties": {
         "schema_id": {"const": "tool-dispatch-intent/v1"},
-        "package": {"$ref": "contract-package-tuple/v1"},
+        "package": {"$ref": "current-package-ref/v1"},
         "intent_id": {"type": "string", "pattern": "^intent_[0-9a-f]{32}$"},
         "authority_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -156,7 +156,7 @@
       "required": ["schema_id", "package", "authority_digest", "grant_digest", "task_id", "attempt_id", "session_id", "owner_id", "lease_id", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch", "idempotency_key", "tool_key", "tool_input", "invocation_digest"],
       "properties": {
         "schema_id": {"const": "tool-invocation/v1"},
-        "package": {"$ref": "contract-package-tuple/v1"},
+        "package": {"$ref": "current-package-ref/v1"},
         "authority_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},

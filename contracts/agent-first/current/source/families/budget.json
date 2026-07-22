@@ -3,52 +3,58 @@
   "schemas": [
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "tool-call-budget/v1",
+      "$id": "elapsed-budget-ledger/v1",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_id", "task_id", "grant_digest", "hard_limit", "consumed", "active_reserved", "budget_digest"],
+      "x-pullwise-digest": {"field": "ledger_digest", "domain": "pullwise:elapsed-budget-ledger:v1"},
+      "required": ["schema_id", "task_id", "grant_digest", "hard_limit_ms", "consumed_ms", "active_reserved_ms", "ledger_digest"],
       "properties": {
-        "schema_id": {"const": "tool-call-budget/v1"},
+        "schema_id": {"const": "elapsed-budget-ledger/v1"},
         "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
         "grant_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "hard_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-        "consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-        "active_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-        "budget_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "hard_limit_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "active_reserved_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "ledger_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "tool-call-reservation/v1",
+      "$id": "elapsed-budget-reservation/v1",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_id", "reservation_id", "task_id", "attempt_id", "invocation_digest", "amount", "previous_consumed", "previous_reserved", "reservation_digest"],
+      "x-pullwise-digest": {"field": "reservation_digest", "domain": "pullwise:elapsed-budget-reservation:v1"},
+      "required": ["schema_id", "reservation_id", "task_id", "attempt_id", "invocation_digest", "reserved_ms", "previous_consumed_ms", "previous_reserved_ms", "started_at", "reservation_digest"],
       "properties": {
-        "schema_id": {"const": "tool-call-reservation/v1"},
+        "schema_id": {"const": "elapsed-budget-reservation/v1"},
         "reservation_id": {"type": "string", "pattern": "^reserve_[0-9a-f]{32}$"},
         "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
         "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
         "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "amount": {"const": 1},
-        "previous_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-        "previous_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "reserved_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "previous_consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "previous_reserved_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "started_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"},
         "reservation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "tool-call-settlement/v1",
+      "$id": "elapsed-budget-settlement/v1",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_id", "reservation_id", "invocation_digest", "consumed_amount", "released_amount", "resulting_consumed", "resulting_reserved", "settlement_digest"],
+      "x-pullwise-digest": {"field": "settlement_digest", "domain": "pullwise:elapsed-budget-settlement:v1"},
+      "required": ["schema_id", "reservation_id", "invocation_digest", "elapsed_ms", "consumed_ms", "released_ms", "resulting_consumed_ms", "resulting_reserved_ms", "outcome", "settlement_digest"],
       "properties": {
-        "schema_id": {"const": "tool-call-settlement/v1"},
+        "schema_id": {"const": "elapsed-budget-settlement/v1"},
         "reservation_id": {"type": "string", "pattern": "^reserve_[0-9a-f]{32}$"},
         "invocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "consumed_amount": {"type": "integer", "minimum": 0, "maximum": 1},
-        "released_amount": {"type": "integer", "minimum": 0, "maximum": 1},
-        "resulting_consumed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-        "resulting_reserved": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "elapsed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "released_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "resulting_consumed_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "resulting_reserved_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "outcome": {"enum": ["settled", "abandoned"]},
         "settlement_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     }
@@ -57,22 +63,22 @@
     {
       "fixture_id": "budget_crash_after_reservation",
       "fixture_class": "crash",
-      "schema_id": "tool-call-reservation/v1",
+      "schema_id": "elapsed-budget-reservation/v1",
       "document": {"reservation_persisted": true, "intent_persisted": true, "dispatch_started": false},
       "expected_code": "INVOCATION_PENDING"
     },
     {
       "fixture_id": "budget_golden_settlement",
       "fixture_class": "golden",
-      "schema_id": "tool-call-settlement/v1",
-      "document": {"consumed_amount": 1, "released_amount": 0},
+      "schema_id": "elapsed-budget-settlement/v1",
+      "document": {"elapsed_ms": 7, "consumed_ms": 7, "released_ms": 93, "outcome": "settled"},
       "expected_code": null
     },
     {
       "fixture_id": "budget_negative_over_limit",
       "fixture_class": "negative",
-      "schema_id": "tool-call-budget/v1",
-      "document": {"hard_limit": 1, "consumed": 1, "active_reserved": 1},
+      "schema_id": "elapsed-budget-ledger/v1",
+      "document": {"hard_limit_ms": 100, "consumed_ms": 80, "active_reserved_ms": 30},
       "expected_code": "BUDGET_EXHAUSTED"
     }
   ]

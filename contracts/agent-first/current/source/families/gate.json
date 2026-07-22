@@ -1,0 +1,106 @@
+{
+  "family_id": "gate",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "gate-decision/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "decision_digest", "domain": "pullwise:gate-decision:v1"},
+      "required": ["schema_id", "input_digest", "predicate_registry_digest", "requested_outcome", "passed", "predicate_results", "decision_digest"],
+      "properties": {
+        "schema_id": {"const": "gate-decision/v1"},
+        "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "predicate_registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "requested_outcome": {"enum": ["COMPLETED", "NO_CHANGE_NEEDED", "PARTIAL", "BLOCKED", "FAILED", "CANCELLED"]},
+        "passed": {"type": "boolean"},
+        "predicate_results": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["predicate_id", "passed", "failure_code", "repairable", "evidence_refs"],
+            "properties": {
+              "predicate_id": {"type": "string", "pattern": "^GATE_[A-Z0-9_]+$"},
+              "passed": {"type": "boolean"},
+              "failure_code": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{2,95}$"},
+              "repairable": {"type": "boolean"},
+              "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"$ref": "content-ref/v1"}}
+            }
+          }
+        },
+        "decision_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "gate-input/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "input_digest", "domain": "pullwise:gate-input:v1"},
+      "required": ["schema_id", "task_id", "attempt_id", "native_epoch", "predicate_registry_digest", "pre_gate_evidence_ref", "requested_outcome", "input_digest"],
+      "properties": {
+        "schema_id": {"const": "gate-input/v1"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^attempt_[0-9a-f]{32}$"},
+        "native_epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "predicate_registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "pre_gate_evidence_ref": {"$ref": "content-ref/v1"},
+        "requested_outcome": {"enum": ["COMPLETED", "NO_CHANGE_NEEDED", "PARTIAL", "BLOCKED", "FAILED", "CANCELLED"]},
+        "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "gate-predicate-registry/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {"field": "registry_digest", "domain": "pullwise:gate-predicate-registry:v1"},
+      "required": ["schema_id", "predicates", "registry_digest"],
+      "properties": {
+        "schema_id": {"const": "gate-predicate-registry/v1"},
+        "predicates": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["predicate_id", "input_schema_ids", "failure_code"],
+            "properties": {
+              "predicate_id": {"type": "string", "pattern": "^GATE_[A-Z0-9_]+$"},
+              "input_schema_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/v[1-9][0-9]*$"}},
+              "failure_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"}
+            }
+          }
+        },
+        "registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "gate_golden_independent_registry",
+      "fixture_class": "golden",
+      "schema_id": "gate-predicate-registry/v1",
+      "document": {"references_final_closure": false, "predicate_ids": ["GATE_SOURCE_STABLE", "GATE_POLICY_SATISFIED"]},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "gate_idempotency_exact_decision",
+      "fixture_class": "idempotency",
+      "schema_id": "gate-decision/v1",
+      "document": {"same_input_digest": true, "same_decision_bytes": true},
+      "expected_code": null
+    },
+    {
+      "fixture_id": "gate_negative_final_closure_reference",
+      "fixture_class": "negative",
+      "schema_id": "gate-input/v1",
+      "document": {"final_closure_ref": "forbidden"},
+      "expected_code": "GATE_INPUT_CLOSURE_DIRECTION_INVALID"
+    }
+  ]
+}
