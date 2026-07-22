@@ -253,7 +253,6 @@ class AgentFirstResultDebugTransportHelperRedTest(
     def test_synthesized_documents_are_internally_consistent(self) -> None:
         documents = self.build_uploaded_documents()
         task_result = documents["task_result"]
-        transport_ack = documents["transport_ack"]
         task_result_core = documents["task_result_core"]
         transport_envelope = documents["task_result_transport_envelope"]
         transport_ack = documents["task_result_transport_ack"]
@@ -368,6 +367,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
     def test_negative_helper_bindings_have_exact_parity(self) -> None:
         documents = self.build_uploaded_documents()
         task_result = documents["task_result"]
+        transport_ack = documents["task_result_transport_ack"]
         task_result_core = documents["task_result_core"]
         transport_envelope = documents["task_result_transport_envelope"]
         transport_receipt = documents["transport_receipt"]
@@ -406,7 +406,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
                 {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TASK_RESULT_CONTEXT_INVALID", "path": "$.diagnostics.worker_debug_fragment.ref"},
                 {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TRANSPORT_CORE_DIGEST_INVALID", "path": "$"},
                 {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "TRANSPORT_ACK_RECEIPT_MATRIX_INVALID", "path": "$.receipt_binding_state"},
-                {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "CAS_CORRUPT", "path": "$.fragment_ref"},
+                {"ok": False, "code": "CAS_CORRUPT", "detail": "CAS_CORRUPT", "path": "$.fragment_ref"},
                 {"ok": False, "code": "CONTRACT_DOCUMENT_INVALID", "detail": "DEBUG_EVENT_SEQUENCE_INVALID", "path": "$"},
             ],
             self.assert_helper_parity(operations),
