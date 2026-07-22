@@ -94,21 +94,33 @@ class AgentFirstSemanticClosureGateTest(
             for helper_id, result in zip(names, python):
                 self.assertTrue(result["ok"], helper_id)
 
-    def test_contextual_helpers_negative_execution_fails_closed_with_parity(self) -> None:
+    def assert_negative_helper_batch(self, batch_index: int) -> None:
         declared_helpers = set(self.helper_inventory)
         operations = self.helper_probe_operations()
         self.assertEqual(declared_helpers, set(operations))
-        for names in self.batch_names(sorted(operations), 10):
-            payload = [operations[helper_id] for helper_id in names]
-            python = self.python_helper_results(payload)
-            node = self.node_helper_results(payload)
-            self.assertEqual(python, node)
-            for helper_id, result in zip(names, python):
-                self.assertFalse(result["ok"], helper_id)
-                self.assertIn(result["code"], self.stable_error_codes, helper_id)
-                self.assertIsInstance(result["detail"], str, helper_id)
-                self.assertTrue(result["detail"], helper_id)
-                self.assertIsInstance(result["path"], str, helper_id)
+        names = self.batch_names(sorted(operations), 10)[batch_index]
+        payload = [operations[helper_id] for helper_id in names]
+        python = self.python_helper_results(payload)
+        node = self.node_helper_results(payload)
+        self.assertEqual(python, node)
+        for helper_id, result in zip(names, python):
+            self.assertFalse(result["ok"], helper_id)
+            self.assertIn(result["code"], self.stable_error_codes, helper_id)
+            self.assertIsInstance(result["detail"], str, helper_id)
+            self.assertTrue(result["detail"], helper_id)
+            self.assertIsInstance(result["path"], str, helper_id)
+
+    def test_contextual_helpers_negative_execution_batch_1(self) -> None:
+        self.assert_negative_helper_batch(0)
+
+    def test_contextual_helpers_negative_execution_batch_2(self) -> None:
+        self.assert_negative_helper_batch(1)
+
+    def test_contextual_helpers_negative_execution_batch_3(self) -> None:
+        self.assert_negative_helper_batch(2)
+
+    def test_contextual_helpers_negative_execution_batch_4(self) -> None:
+        self.assert_negative_helper_batch(3)
 
 
 if __name__ == "__main__":
