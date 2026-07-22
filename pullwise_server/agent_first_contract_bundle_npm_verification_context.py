@@ -56,8 +56,8 @@ export async function verifyCompletionProposalContext(proposal, taskSnapshot, at
   checked.requirement_claims.forEach((item, index) => {
     verificationRequire(item.evidence_ids.every((id) => preIds.has(id)), VERIFICATION_CONTEXT_INVALID, `$.requirement_claims[${index}].evidence_ids`);
   });
-  for (const [path, timestamp] of [["$.task_snapshot.created_at", snapshot.created_at], ["$.task_snapshot.updated_at", snapshot.updated_at], ["$.attempt.lease_acquired_at", currentAttempt.lease_acquired_at], ["$.attempt.started_at", currentAttempt.started_at], ["$.attempt.ended_at", currentAttempt.ended_at], ["$.owner.started_at", ownerDoc.started_at], ["$.owner.ended_at", ownerDoc.ended_at], ["$.task_request.submitted_at", request.submitted_at], ["$.effective_policy.issued_at", policy.issued_at], ["$.execution_charter.created_at", charter.created_at]]) {
-    verificationTimestampLeq(timestamp, checked.created_at, path);
+  for (const [, timestamp] of [["$.task_snapshot.created_at", snapshot.created_at], ["$.task_snapshot.updated_at", snapshot.updated_at], ["$.attempt.lease_acquired_at", currentAttempt.lease_acquired_at], ["$.attempt.started_at", currentAttempt.started_at], ["$.attempt.ended_at", currentAttempt.ended_at], ["$.owner.started_at", ownerDoc.started_at], ["$.owner.ended_at", ownerDoc.ended_at], ["$.task_request.submitted_at", request.submitted_at], ["$.effective_policy.issued_at", policy.issued_at], ["$.execution_charter.created_at", charter.created_at]]) {
+    verificationTimestampLeq(timestamp, checked.created_at, "$.created_at");
   }
   return checked;
 }
@@ -185,9 +185,9 @@ export async function verifyAttestationContext(attestation, verifierInput, verif
   verificationRequire(canonicalString(checked.own_observation_ids) === canonicalString(work.own_observation_ids), VERIFICATION_CONTEXT_INVALID, "$.own_observation_ids");
   const finalIds = new Set(Object.keys(entries));
   const ownIds = new Set(checked.own_observation_ids);
-  checked.own_observation_ids.forEach((id) => {
+  checked.own_observation_ids.forEach((id, index) => {
     const actor = entries[id]?.actor;
-    verificationRequire(actor !== undefined && actor.kind === "quality_verifier" && actor.session_id === checked.verifier_session_id, VERIFICATION_CONTEXT_INVALID, "$.own_observation_ids");
+    verificationRequire(actor !== undefined && actor.kind === "quality_verifier" && actor.session_id === checked.verifier_session_id, VERIFICATION_CONTEXT_INVALID, `$.own_observation_ids[${index}]`);
   });
   manifest.entries.forEach((entry, index) => verificationRequire(entry.actor.session_id !== checked.verifier_session_id || entry.actor.kind === "quality_verifier", VERIFICATION_CONTEXT_INVALID, `$.final_observation_manifest.entries[${index}].actor`));
   verificationRequireIdList(verificationAssessmentIds(checked.requirement_verdicts), inputDoc.requirement_ids, "$.requirement_verdicts");
@@ -271,7 +271,7 @@ export async function verifyAttestationManifestContext(manifest, qualityPolicyPl
   });
   const manifestTime = verificationTimestampMillis(checked.created_at);
   verificationRequire(manifestTime !== null, VERIFICATION_CONTEXT_TIME_INVALID, "$.created_at");
-  attestationDocs.forEach((item, index) => verificationTimestampLeq(item.created_at, checked.created_at, `$.attestations[${index}].created_at`));
+  attestationDocs.forEach((item) => verificationTimestampLeq(item.created_at, checked.created_at, "$.created_at"));
   return checked;
 }
 '''

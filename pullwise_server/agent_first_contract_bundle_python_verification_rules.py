@@ -111,14 +111,14 @@ def _verification_require_time_order(
     _verification_require(bool(values), _VERIFICATION_CONTEXT_TIME_INVALID, path)
     final_epoch = _timestamp_millis(values[-1])
     _verification_require(final_epoch is not None, _VERIFICATION_CONTEXT_TIME_INVALID, path)
-    for index, predecessor in enumerate(values[:-1]):
+    for predecessor in values[:-1]:
         if predecessor is None:
             continue
         predecessor_epoch = _timestamp_millis(predecessor)
         _verification_require(
             predecessor_epoch is not None and predecessor_epoch <= final_epoch,
             _VERIFICATION_CONTEXT_TIME_INVALID,
-            f"{path}[{index}]",
+            path,
         )
 
 
@@ -127,7 +127,14 @@ def _verification_change_binding(
     change_set: dict[str, object] | None,
     path: str,
 ) -> dict[str, object]:
-    checked = validate_document("availability-ref/v1", availability)
+    if not isinstance(availability, dict):
+        _verification_require(
+            False,
+            _VERIFICATION_CONTEXT_INVALID,
+            path,
+        )
+        return {}
+    checked = availability
     if change_set is None:
         _verification_require(
             checked["availability"] == "not_applicable",

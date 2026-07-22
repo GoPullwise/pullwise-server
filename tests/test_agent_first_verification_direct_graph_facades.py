@@ -74,6 +74,16 @@ class AgentFirstVerificationDirectGraphFacadesTest(
             "observation-manifest/v1",
             {**deepcopy(graph["final_manifest"]), "entries": [deepcopy(graph["final_manifest"]["entries"][0]), {**deepcopy(graph["final_manifest"]["entries"][1]), "actor": {**graph["final_manifest"]["entries"][1]["actor"], "session_id": "sess_" + "3" * 32}}]},
         )
+        bad_attestation = self.reseal(
+            "verification-attestation/v1",
+            {
+                **deepcopy(graph["attestation"]),
+                "final_observation_manifest_ref": self.content_ref(
+                    "art_" + "3" * 31 + "c", "observation-manifest/v1", bad_manifest
+                ),
+                "final_observation_manifest_digest": bad_manifest["manifest_digest"],
+            },
+        )
         bad_aggregate = self.reseal(
             "verification-attestation-manifest/v1",
             {**deepcopy(graph["aggregate"]), "created_at": "2026-07-22T00:00:03.400Z"},
@@ -88,7 +98,7 @@ class AgentFirstVerificationDirectGraphFacadesTest(
             {"python": "verify_verifier_input_context", "node": "verifyVerifierInputContext", "args": [bad_sha, graph["proposal"], graph["plan"], graph["request"], graph["policy"], graph["ledger"], graph["charter"], graph["original_source"], graph["final_source"], graph["change_set"], graph["pre_manifest"], graph["engineering_rules"]]},
             {"python": "verify_verifier_input_context", "node": "verifyVerifierInputContext", "args": [bad_digest, graph["proposal"], graph["plan"], graph["request"], graph["policy"], graph["ledger"], graph["charter"], graph["original_source"], graph["final_source"], graph["change_set"], graph["pre_manifest"], graph["engineering_rules"]]},
             {"python": "verify_verifier_work_context", "node": "verifyVerifierWorkContext", "args": [bad_work, graph["input"], graph["proposal"], graph["final_manifest"]]},
-            {"python": "verify_attestation_context", "node": "verifyAttestationContext", "args": [graph["attestation"], graph["input"], graph["work"], graph["proposal"], graph["plan"], graph["final_source"], graph["execution_states"], bad_manifest]},
+            {"python": "verify_attestation_context", "node": "verifyAttestationContext", "args": [bad_attestation, graph["input"], graph["work"], graph["proposal"], graph["plan"], graph["final_source"], graph["execution_states"], bad_manifest]},
             {"python": "verify_attestation_manifest_context", "node": "verifyAttestationManifestContext", "args": [bad_aggregate, graph["plan"], graph["final_manifest"], [graph["attestation"]]]},
         ]
         python, node = self.helper_results(operations)
