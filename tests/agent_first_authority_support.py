@@ -27,17 +27,10 @@ NOW = "2026-07-22T12:00:00.000Z"
 
 
 def policy() -> dict[str, object]:
-    return seal_document(
-        "agent-task-policy/v1",
-        {
-            "schema_id": "agent-task-policy/v1",
-            "policy_id": "policy_33333333333333333333333333333333",
-            "capability_ids": ["source.read"],
-            "tool_keys": ["internal.read_source"],
-            "elapsed_limit_ms": 60_000,
-            "tool_call_limit": 7,
-        },
-    )
+    document = copy.deepcopy(fixture("task_control_golden_effective_policy")["document"])
+    document["budgets"]["tool_calls"] = 7
+    document.pop("digest", None)
+    return seal_document("effective-execution-policy/v1", document)
 
 
 class AuthorityHarness:
@@ -89,14 +82,13 @@ class AuthorityHarness:
         return self.authority.register_worker(self.register_request())
 
     def accept_request(self, task_id: str = TASK_ID) -> dict[str, object]:
+        task_request = copy.deepcopy(fixture("task_control_golden_task_request")["document"])
+        task_request["task_id"] = task_id
         return {
-            "schema_id": "agent-task-request/v1",
             "package": package_tuple(),
-            "task_id": task_id,
-            "task_type": "repo_review.full_scan",
             "idempotency_key": f"accept:{task_id}",
-            "policy": policy(),
-            "request": {"repository": "octo/example", "commit": "a" * 40},
+            "task_request": task_request,
+            "effective_policy": policy(),
         }
 
     def accept(self, task_id: str = TASK_ID) -> bytes:

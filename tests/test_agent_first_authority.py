@@ -92,10 +92,20 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
                 "SELECT lifecycle, desired_state, task_version, deletion_version "
                 "FROM agent_current_task_heads"
             ).fetchone()
+            request_row = connection.execute(
+                "SELECT request_bytes, policy_digest, policy_bytes "
+                "FROM agent_current_task_requests"
+            ).fetchone()
             with self.assertRaises(sqlite3.DatabaseError):
                 connection.execute("UPDATE agent_current_task_requests SET task_type='x'")
+        request = json.loads(request_row["request_bytes"])
+        policy = verify_document_digest(
+            "effective-execution-policy/v1", request_row["policy_bytes"]
+        )
         self.assertEqual(registered, PACKAGE_TUPLE)
         self.assertEqual(head, ("QUEUED", "RUN", 1, 0))
+        self.assertEqual(request["schema_id"], "task-request/v1")
+        self.assertEqual(policy["digest"], request_row["policy_digest"])
 
     def test_claim_requires_package_bound_worker_registration(self) -> None:
         variants = (
