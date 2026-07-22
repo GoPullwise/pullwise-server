@@ -225,7 +225,7 @@ def _rule_local_receipt(value: dict[str, object]) -> None:
 def _normalized_relative_path(value: str) -> bool:
     return (
         value != ""
-        and "\" not in value
+        and "\\" not in value
         and not value.startswith("/")
         and all(item not in {"", ".", ".."} for item in value.split("/"))
     )
