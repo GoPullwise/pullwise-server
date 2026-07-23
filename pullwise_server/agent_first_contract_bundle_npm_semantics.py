@@ -22,6 +22,7 @@ from .agent_first_contract_bundle_npm_source_execution_observation import (
 from .agent_first_contract_bundle_npm_pre_gate import NPM_PRE_GATE
 from .agent_first_contract_bundle_npm_publication import NPM_PUBLICATION
 from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
+from .agent_first_contract_bundle_npm_release_gate import NPM_RELEASE_GATE
 from .agent_first_contract_bundle_npm_result import NPM_RESULT
 from .agent_first_contract_bundle_npm_task_evidence import NPM_TASK_EVIDENCE
 from .agent_first_contract_bundle_npm_task_control_helpers import (
@@ -377,6 +378,10 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   pre_verifier_observation_manifest: rulePreVerifierObservationManifest,
   publication_content_manifest: rulePublicationContentManifest,
   quality_policy_plan: ruleQualityPolicyPlan,
+  benchmark_bundle: ruleBenchmarkBundle,
+  release_gate_attestation: ruleReleaseGateAttestation,
+  release_gate_policy: ruleReleaseGatePolicy,
+  release_gate_report: ruleReleaseGateReport,
   r0_read_payload: ruleR0ReadPayload,
   r0_read_result: ruleR0ReadResult,
   requirement_id_source_kind_match: taskControlRuleRequirementId,
@@ -493,6 +498,7 @@ NPM_SEMANTICS = "\n".join(
         NPM_TOOL_EVIDENCE,
         NPM_PUBLICATION,
         NPM_QUALITY_POLICY,
+        NPM_RELEASE_GATE,
         NPM_PRE_GATE,
         NPM_TASK_EVIDENCE,
         NPM_GATE_INPUT,

@@ -277,6 +277,8 @@ __all__ = [
     "verify_task_result_transport_ack", "verify_task_result_transport_envelope",
     "verify_gate_input_snapshot_context", "verify_pre_gate_evidence_closure_context",
     "verify_observation_manifest_extension", "verify_pre_gate_root_set_context",
+    "verify_release_gate_attestation_context",
+    "verify_release_gate_policy_context", "verify_release_gate_report_context",
     "verify_source_tree_context", "verify_terminalization_fact_context",
     "verify_terminalization_input_snapshot_context", "verify_waiver_authorization",
     "verify_waiver_event_authority",
