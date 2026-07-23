@@ -126,13 +126,24 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             detail, reason = {"kind": "partial", "delivered_scope": [{"statement": "Delivered.", "requirement_ids": reqs, "artifact_refs": [artifact_ref]}], "gaps": [{"requirement_id": reqs[0], "verdict": "FAIL", "reason_code": "GAP"}], "residual_risks": [{"risk_id": "risk_00000000000000000000000000000001", "statement": "Risk.", "evidence_ids": ["evidence_a"]}]}, "SAFE_PARTIAL_DELIVERY"
         elif outcome == "BLOCKED":
             detail, reason = {"kind": "blocked", "blockers": [{"code": "WAITING", "requirement_ids": reqs, "unblock_condition": "Approve."}]}, "INPUT_REQUIRED"
+        elif outcome in {"CANCELLED", "CANCELLED_WITH_EFFECTS"}:
+            detail, reason = {"kind": outcome.lower(), "request_id": "cancel_00000000000000000000000000000001", "linearized_at": result["terminal_at"], "requested_by": {"schema_id": "actor/v1", "kind": "user_control", "id": "user", "session_id": None}}, "USER_CANCELLED"
+        elif outcome == "TERMINATED_WITH_UNKNOWN_EFFECTS":
+            detail, reason = {"kind": "terminated_with_unknown_effects"}, "DEADLINE_REACHED"
         else:
             detail, reason = {"kind": "failed", "failures": [{"code": "FAILED", "evidence_refs": [ref]}]}, "RUNTIME_FAILURE"
         result["outcome"], result["reason_code"], result["outcome_details"] = outcome, reason, detail
+        if outcome in {"PARTIAL", "CANCELLED_WITH_EFFECTS"}:
+            result["effects"]["committed"] = 1
+        elif outcome == "TERMINATED_WITH_UNKNOWN_EFFECTS":
+            result["effects"]["unknown"] = 1
         if outcome == "NO_CHANGE_NEEDED":
             result["change_set_ref"] = None
             result["final_source_state"] = deepcopy(result["original_source_state"])
-        if outcome in {"BLOCKED", "FAILED"}:
+        if outcome in {
+            "BLOCKED", "FAILED", "CANCELLED", "CANCELLED_WITH_EFFECTS",
+            "TERMINATED_WITH_UNKNOWN_EFFECTS",
+        }:
             result["change_set_ref"] = None
             for field in ("completion_proposal", "attestations", "report"):
                 result[field] = {"availability": "not_applicable", "reason_code": "CAPABILITY_NOT_IMPLEMENTED"}
@@ -281,21 +292,25 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             ]
         )
 
-    def test_task_result_context_default_options_match_across_runtimes(self) -> None:
-        result = self.task_result_branch("COMPLETED")
+    def test_all_nine_task_result_outcomes_match_across_runtimes(self) -> None:
+        outcomes = (
+            "COMPLETED", "NO_CHANGE_NEEDED", "COMPLETED_WITH_WAIVERS",
+            "PARTIAL", "BLOCKED", "FAILED", "CANCELLED",
+            "CANCELLED_WITH_EFFECTS", "TERMINATED_WITH_UNKNOWN_EFFECTS",
+        )
+        results = [self.task_result_branch(outcome) for outcome in outcomes]
+        cases = [("task-result/v1", result) for result in results]
+        expected = [{"ok": True, "value": result} for result in results]
         operations = [
-            {
-                "python": "verify_task_result_context",
-                "node": "verifyTaskResultContext",
-                "args": [result],
-            }
+            {"python": "verify_task_result_context", "node": "verifyTaskResultContext",
+             "args": [result]}
+            for result in results
         ]
 
-        self.assert_schema_only("task-result/v1", result)
-        python = self.facade.python_helper_results(operations)
-        node = self.facade.node_helper_results(operations)
-        self.assertEqual([{"ok": True, "value": result}], python)
-        self.assertEqual(python, node)
+        self.assertEqual(expected, self.facade.python_document_results(cases))
+        self.assertEqual(expected, self.facade.node_document_results(cases))
+        self.assertEqual(expected, self.facade.python_helper_results(operations))
+        self.assertEqual(expected, self.facade.node_helper_results(operations))
 
     def test_terminal_fragment_time_window_matches_across_runtimes(self) -> None:
         documents = self.uploaded_documents()
