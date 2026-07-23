@@ -373,7 +373,8 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
               AND lifecycle IN ('ACTIVE','FINALIZING')
             """,
             (
-                values["task_version"], values["abandonment_digest"], values["task_id"],
+                values["task_version"], values["successor_authority_digest"],
+                values["task_id"],
                 values["expected_task_version"], values["deletion_version"],
                 values["owner_id"], values["owner_epoch"], values["native_epoch"],
                 values["transport_epoch"], values["attempt_id"], values["session_id"],

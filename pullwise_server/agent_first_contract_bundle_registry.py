@@ -113,6 +113,7 @@ DOCUMENT_RULE_IDS = frozenset(
         "tool_dispatch_capability",
         "tool_dispatch_intent",
         "tool_invocation",
+        "transport_abandonment_record",
         "utf8_nfc_byte_limits",
         "verification_attestation",
         "verification_attestation_manifest",

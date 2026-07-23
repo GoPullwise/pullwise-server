@@ -180,6 +180,15 @@ function ruleServerAuthorityEnvelope(value) {
   }
 }
 
+function ruleTransportAbandonmentRecord(value) {
+  if (value.abandoned_task_version !== value.previous_task_version + 1) {
+    throw new ContractValidationError(
+      "AUTHORITY_INPUT_UNTRUSTED", "AUTHORITY_SUCCESSOR_VERSION_INVALID",
+      "$.abandoned_task_version",
+    );
+  }
+}
+
 function decodeBase64Canonical(value) {
   try {
     const binary = globalThis.atob(value);
@@ -391,6 +400,7 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   tool_dispatch_capability: ruleToolDispatchCapability,
   tool_dispatch_intent: ruleToolDispatchIntent,
   tool_invocation: ruleToolInvocation,
+  transport_abandonment_record: ruleTransportAbandonmentRecord,
   utf8_nfc_byte_limits: taskControlRuleUtf8,
   verification_attestation: ruleAttestation,
   verification_attestation_manifest: ruleAttestationManifest,

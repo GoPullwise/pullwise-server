@@ -34,6 +34,7 @@ CANONICALIZATION = "pullwise-canonical-json/v1"
 REQUIRED_FAMILIES = (
     "core",
     "authority-control",
+    "transport-abandonment",
     "tool-evidence",
     "change-set-patch",
     "change-set",

@@ -484,6 +484,9 @@ class AgentFirstAuthority:
                 json.loads(self._store._blob(stored["grant_bytes"])),
             )
             task_version = head["task_version"] + 1
+            abandonment_id = f"abandonment_{secrets.token_hex(16)}"
+            abandoned_at = _now()
+            superseded_authority_digest = head["current_authority_digest"]
             response = seal_document("agent-claim-abandon-response/v1", {
                 "schema_id": "agent-claim-abandon-response/v1",
                 "package": package_tuple(),
@@ -506,20 +509,50 @@ class AgentFirstAuthority:
                 "task_version": task_version,
                 "state": "FENCED",
                 "grant": grant,
-                "superseded_authority_digest": head["current_authority_digest"],
+                "superseded_authority_digest": superseded_authority_digest,
                 "reason": document["reason"],
-                "abandoned_at": _now(),
+                "abandoned_at": abandoned_at,
             })
             response_bytes = canonical_validated_bytes(
                 "agent-claim-abandon-response/v1", response
             )
+            abandonment = seal_document("transport-abandonment-record/v1", {
+                "schema_id": "transport-abandonment-record/v1",
+                "package": package_tuple(),
+                "abandonment_id": abandonment_id,
+                **{
+                    key: document[key]
+                    for key in (
+                        "task_id",
+                        "attempt_id",
+                        "session_id",
+                        "owner_id",
+                        "grant_id",
+                        "lease_id",
+                        "deletion_version",
+                        "owner_epoch",
+                        "native_epoch",
+                        "transport_epoch",
+                    )
+                },
+                "previous_task_version": head["task_version"],
+                "abandoned_task_version": task_version,
+                "grant_digest": stored["grant_digest"],
+                "superseded_authority_digest": superseded_authority_digest,
+                "reason": document["reason"],
+                "abandoned_at": abandoned_at,
+            })
+            abandonment_bytes = canonical_validated_bytes(
+                "transport-abandonment-record/v1", abandonment
+            )
             return {
                 "task_version": task_version,
-                "abandonment_id": f"abandonment_{secrets.token_hex(16)}",
-                "abandonment_digest": response["response_digest"],
-                "abandonment_bytes": response_bytes,
+                "abandonment_id": abandonment_id,
+                "abandonment_digest": abandonment["abandonment_digest"],
+                "abandonment_bytes": abandonment_bytes,
                 "grant_digest": stored["grant_digest"],
-                "superseded_authority_digest": head["current_authority_digest"],
+                "superseded_authority_digest": superseded_authority_digest,
+                "successor_authority_digest": response["response_digest"],
                 "response_bytes": response_bytes,
             }
 

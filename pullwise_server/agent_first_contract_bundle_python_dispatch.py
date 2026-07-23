@@ -75,6 +75,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "tool_dispatch_capability": _rule_tool_dispatch_capability,
     "tool_dispatch_intent": _rule_tool_dispatch_intent,
     "tool_invocation": _rule_tool_invocation,
+    "transport_abandonment_record": _rule_transport_abandonment_record,
     "utf8_nfc_byte_limits": _task_control_rule_utf8,
     "verification_attestation": _rule_attestation,
     "verification_attestation_manifest": _rule_attestation_manifest,

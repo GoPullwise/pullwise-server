@@ -61,6 +61,15 @@ def _rule_server_authority_envelope(value: dict[str, object]) -> None:
     )
 
 
+def _rule_transport_abandonment_record(value: dict[str, object]) -> None:
+    _require(
+        value["abandoned_task_version"] == value["previous_task_version"] + 1,
+        "AUTHORITY_SUCCESSOR_VERSION_INVALID",
+        "$.abandoned_task_version",
+        "AUTHORITY_INPUT_UNTRUSTED",
+    )
+
+
 def _decode_canonical_base64(value: str, path: str) -> bytes:
     try:
         raw = base64.b64decode(value, validate=True)
