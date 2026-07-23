@@ -5,10 +5,10 @@ from __future__ import annotations
 
 NPM_RESULT_CONTEXT = r'''
 function resultContextOptions(value) {
-  if (value === undefined || value === null) return {workerDebugDescriptor: null, transportReceipt: null};
-  if (!Array.isArray(value) && typeof value === "object" && Object.keys(value).length === 0) return {workerDebugDescriptor: null, transportReceipt: null};
-  if (typeof value === "object" && !Array.isArray(value) && ("workerDebugDescriptor" in value || "worker_debug_descriptor" in value || "transportReceipt" in value || "transport_receipt" in value)) return {workerDebugDescriptor: value.workerDebugDescriptor ?? value.worker_debug_descriptor ?? null, transportReceipt: value.transportReceipt ?? value.transport_receipt ?? null};
-  return {workerDebugDescriptor: value, transportReceipt: null};
+  if (value === undefined || value === null) return {terminalGateDecision: null, workerDebugDescriptor: null, transportReceipt: null};
+  if (!Array.isArray(value) && typeof value === "object" && Object.keys(value).length === 0) return {terminalGateDecision: null, workerDebugDescriptor: null, transportReceipt: null};
+  if (typeof value === "object" && !Array.isArray(value) && ("terminalGateDecision" in value || "terminal_gate_decision" in value || "workerDebugDescriptor" in value || "worker_debug_descriptor" in value || "transportReceipt" in value || "transport_receipt" in value)) return {terminalGateDecision: value.terminalGateDecision ?? value.terminal_gate_decision ?? null, workerDebugDescriptor: value.workerDebugDescriptor ?? value.worker_debug_descriptor ?? null, transportReceipt: value.transportReceipt ?? value.transport_receipt ?? null};
+  return {terminalGateDecision: null, workerDebugDescriptor: value, transportReceipt: null};
 }
 
 function resultCheckedReceipt(value) {
@@ -30,7 +30,17 @@ export function deriveTaskResultCore(taskResult) {
 }
 
 export async function verifyTaskResultContext(taskResult, options = {}) {
-  const checked = validateDocument("task-result/v1", taskResult), {workerDebugDescriptor} = resultContextOptions(options), debug = checked.diagnostics.worker_debug_fragment;
+  const checked = validateDocument("task-result/v1", taskResult), {terminalGateDecision, workerDebugDescriptor} = resultContextOptions(options);
+  seoRequire(terminalGateDecision !== null && typeof terminalGateDecision === "object" && !Array.isArray(terminalGateDecision), "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.ref");
+  const decision = await verifyDocumentDigest("gate-decision/v1", terminalGateDecision);
+  seoRequire(seoRefMatchesDocument(checked.gate_decision.ref, "gate-decision/v1", decision), "CAS_CORRUPT", "$.gate_decision.ref");
+  seoRequire(decision.decision_kind === "terminalization" && decision.selected_lifecycle === "TERMINAL" && decision.passed, "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision");
+  seoRequire(decision.task_id === checked.task_id, "TASK_RESULT_CONTEXT_INVALID", "$.task_id");
+  seoRequire(decision.task_version === checked.published_from_version, "TASK_RESULT_CONTEXT_INVALID", "$.published_from_version");
+  seoRequire(decision.selected_outcome === checked.outcome, "TASK_RESULT_CONTEXT_INVALID", "$.outcome");
+  seoRequire(decision.selected_reason === checked.reason_code, "TASK_RESULT_CONTEXT_INVALID", "$.reason_code");
+  seoRequire(decision.selector_input_digest === checked.selector_input_digest, "TASK_RESULT_CONTEXT_INVALID", "$.selector_input_digest");
+  const debug = checked.diagnostics.worker_debug_fragment;
   if (debug.availability === "available") {
     seoRequire(workerDebugDescriptor !== null && typeof workerDebugDescriptor === "object" && !Array.isArray(workerDebugDescriptor), "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment.ref");
     const descriptor = validateDocument("worker-debug-fragment-descriptor/v1", workerDebugDescriptor);

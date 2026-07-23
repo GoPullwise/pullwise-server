@@ -36,8 +36,17 @@ def derive_task_result_core(task_result: object) -> dict[str, object]:
     )
 
 
-def verify_task_result_context(task_result: object, *, worker_debug_descriptor: object = None) -> dict[str, object]:
+def verify_task_result_context(task_result: object, *, terminal_gate_decision: object = None, worker_debug_descriptor: object = None) -> dict[str, object]:
     checked = validate_document("task-result/v1", task_result)
+    _seo_require(isinstance(terminal_gate_decision, dict), "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.ref")
+    decision = verify_document_digest("gate-decision/v1", terminal_gate_decision)
+    _result_require_ref(checked["gate_decision"]["ref"], "gate-decision/v1", decision, "$.gate_decision.ref")
+    _seo_require(decision["decision_kind"] == "terminalization" and decision["selected_lifecycle"] == "TERMINAL" and decision["passed"], "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision")
+    _seo_require(decision["task_id"] == checked["task_id"], "TASK_RESULT_CONTEXT_INVALID", "$.task_id")
+    _seo_require(decision["task_version"] == checked["published_from_version"], "TASK_RESULT_CONTEXT_INVALID", "$.published_from_version")
+    _seo_require(decision["selected_outcome"] == checked["outcome"], "TASK_RESULT_CONTEXT_INVALID", "$.outcome")
+    _seo_require(decision["selected_reason"] == checked["reason_code"], "TASK_RESULT_CONTEXT_INVALID", "$.reason_code")
+    _seo_require(decision["selector_input_digest"] == checked["selector_input_digest"], "TASK_RESULT_CONTEXT_INVALID", "$.selector_input_digest")
     debug = checked["diagnostics"]["worker_debug_fragment"]
     if debug["availability"] == "available":
         _seo_require(isinstance(worker_debug_descriptor, dict), "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment.ref")
