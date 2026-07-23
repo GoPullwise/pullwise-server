@@ -6,48 +6,25 @@ from __future__ import annotations
 NPM_RELEASE_GATE = r'''
 const RELEASE_GATE_PUBLIC_CODE = "CONTRACT_DOCUMENT_INVALID";
 const RELEASE_CANARY_STAGE_IDS = Object.freeze([
-  "CAPACITY_5",
-  "CAPACITY_25",
-  "FULL_CAPACITY",
+  "CAPACITY_5", "CAPACITY_25", "FULL_CAPACITY",
 ]);
 const RELEASE_ATTESTATION_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const RELEASE_POLICY_BENCHMARK_FIELDS = Object.freeze([
-  "benchmark_version",
-  "task_inventory_digest",
-  "oracle_rubric_digest",
-  "environment_image_digest",
-  "control_plane_digest",
-  "evaluation_runtime_digest",
-  "statistical_implementation_version",
+  "benchmark_version", "task_inventory_digest", "oracle_rubric_digest",
+  "environment_image_digest", "control_plane_digest",
+  "evaluation_runtime_digest", "statistical_implementation_version",
 ]);
 const RELEASE_REPORT_POLICY_FIELDS = Object.freeze([
-  "package",
-  "candidate_build_id",
-  "candidate_digest",
-  "release_mode",
-  "stable_package",
-  "stable_candidate_digest",
-  "stable_control_plane_digest",
-  "benchmark_digest",
-  "benchmark_version",
-  "task_inventory_digest",
-  "oracle_rubric_digest",
-  "environment_image_digest",
-  "control_plane_digest",
-  "evaluation_runtime_digest",
-  "statistical_implementation_version",
-  "threshold_table_digest",
-  "profile_budget_digest",
-  "canary_plan_digest",
+  "package", "candidate_build_id", "candidate_digest", "release_mode",
+  "stable_package", "stable_candidate_digest", "stable_control_plane_digest",
+  "benchmark_digest", "benchmark_version", "task_inventory_digest",
+  "oracle_rubric_digest", "environment_image_digest", "control_plane_digest",
+  "evaluation_runtime_digest", "statistical_implementation_version",
+  "threshold_table_digest", "profile_budget_digest", "canary_plan_digest",
 ]);
 const RELEASE_ATTESTATION_IDENTITY_FIELDS = Object.freeze([
-  "package",
-  "candidate_build_id",
-  "candidate_digest",
-  "release_mode",
-  "stable_package",
-  "stable_candidate_digest",
-  "stable_control_plane_digest",
+  "package", "candidate_build_id", "candidate_digest", "release_mode",
+  "stable_package", "stable_candidate_digest", "stable_control_plane_digest",
 ]);
 
 function releaseRequire(condition, detail, path = "$") {
@@ -88,11 +65,7 @@ function releaseRequireTimeOrder(value, detail) {
   const issued = releaseTimestampMillis(value.issued_at);
   releaseRequire(issued !== null, detail, "$.issued_at");
   const expires = releaseTimestampMillis(value.expires_at);
-  releaseRequire(
-    expires !== null && issued < expires,
-    detail,
-    "$.expires_at",
-  );
+  releaseRequire(expires !== null && issued < expires, detail, "$.expires_at");
   return [issued, expires];
 }
 

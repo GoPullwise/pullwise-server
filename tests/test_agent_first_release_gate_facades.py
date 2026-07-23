@@ -71,6 +71,18 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
     def document(self, fixture_id: str) -> dict[str, object]:
         return deepcopy(self.fixtures[fixture_id]["document"])
 
+    def test_release_gate_semantic_fragments_stay_reviewable(self) -> None:
+        for filename in (
+            "agent_first_contract_bundle_python_release_gate.py",
+            "agent_first_contract_bundle_npm_release_gate.py",
+        ):
+            lines = (ROOT / "pullwise_server" / filename).read_text(
+                encoding="utf-8"
+            ).splitlines()
+            with self.subTest(filename=filename):
+                self.assertLessEqual(len(lines), 600)
+                self.assertLessEqual(max(map(len, lines)), 200)
+
     def test_all_source_fixtures_have_python_node_parity(self) -> None:
         operations = [
             {
