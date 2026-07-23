@@ -231,6 +231,8 @@
         "native_epoch",
         "transport_epoch",
         "policy_digest",
+        "absolute_deadline_at",
+        "terminalization_reserve_ms",
         "capability_ids",
         "tool_keys",
         "elapsed_limit_ms",
@@ -252,6 +254,10 @@
         "native_epoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
         "transport_epoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
         "policy_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "absolute_deadline_at": {
+          "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "terminalization_reserve_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "capability_ids": {
           "type": "array",
           "minItems": 1,
@@ -353,6 +359,8 @@
         "owner_epoch",
         "native_epoch",
         "transport_epoch",
+        "absolute_deadline_at",
+        "terminalization_reserve_ms",
         "lifecycle",
         "desired_state",
         "grant",
@@ -371,6 +379,10 @@
         "owner_epoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
         "native_epoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
         "transport_epoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "absolute_deadline_at": {
+          "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "terminalization_reserve_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "lifecycle": { "const": "ACTIVE" },
         "desired_state": { "const": "RUN" },
         "grant": { "$ref": "agent-worker-grant/v1" },
@@ -473,13 +485,14 @@
           "owner_id": "owner_66666666666666666666666666666666", "lease_id": "lease_22222222222222222222222222222222",
           "task_version": 2, "deletion_version": 2, "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1,
           "policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "absolute_deadline_at": "2026-07-22T12:01:00.000Z", "terminalization_reserve_ms": 1000,
           "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
           "elapsed_limit_ms": 60000, "tool_call_limit": 7,
-          "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143"
+          "grant_digest": "9ea7319678583b0ba7d8d69479ac6e2d73bee1b0339facab40e0480e922b3825"
         },
         "superseded_authority_digest": "8888888888888888888888888888888888888888888888888888888888888888",
         "reason": "outer_lease_lost", "abandoned_at": "2026-07-22T12:00:00.000Z",
-        "response_digest": "2036b281021ecaab4b08fc0daed8c2fe860773978e0d9c18722ab7399dad6f70"
+        "response_digest": "c75f7bb5ae1c3375af0c74eed9a39699e5978994d1e63c93642ba30191797aa4"
       },
       "expected_code": null
     },
@@ -499,9 +512,10 @@
         "owner_id": "owner_66666666666666666666666666666666", "lease_id": "lease_22222222222222222222222222222222",
         "task_version": 2, "deletion_version": 2, "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1,
         "policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "absolute_deadline_at": "2026-07-22T12:01:00.000Z", "terminalization_reserve_ms": 1000,
         "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
         "elapsed_limit_ms": 60000, "tool_call_limit": 7,
-        "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143"
+        "grant_digest": "9ea7319678583b0ba7d8d69479ac6e2d73bee1b0339facab40e0480e922b3825"
       },
       "expected_code": null
     },
@@ -520,6 +534,7 @@
         "session_id": "sess_55555555555555555555555555555555", "owner_id": "owner_66666666666666666666666666666666",
         "lease_id": "lease_22222222222222222222222222222222", "task_version": 2, "deletion_version": 2,
         "owner_epoch": 9, "native_epoch": 1, "transport_epoch": 1, "lifecycle": "ACTIVE", "desired_state": "RUN",
+        "absolute_deadline_at": "2026-07-22T12:01:00.000Z", "terminalization_reserve_ms": 1000,
         "grant": {
           "schema_id": "agent-worker-grant/v1",
           "package": {
@@ -532,13 +547,51 @@
           "owner_id": "owner_66666666666666666666666666666666", "lease_id": "lease_22222222222222222222222222222222",
           "task_version": 2, "deletion_version": 2, "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1,
           "policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "absolute_deadline_at": "2026-07-22T12:01:00.000Z", "terminalization_reserve_ms": 1000,
           "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
           "elapsed_limit_ms": 60000, "tool_call_limit": 7,
-          "grant_digest": "b4d3a3c278397b5b6c6df7ee4f6aa1764efff621c6c695d672c77db96f496143"
+          "grant_digest": "9ea7319678583b0ba7d8d69479ac6e2d73bee1b0339facab40e0480e922b3825"
         },
-        "authority_digest": "04e1eb247bc94763af865887932eb00b283155dd99649d93d29cb4edf40fe73d"
+        "authority_digest": "3d4dd0ff3e70ae20e1919682dc0b01a56f631c186def1725c1fd0237fbb67bb4"
       },
       "expected_code": "AUTHORITY_INPUT_UNTRUSTED"
+    },
+    {
+      "fixture_id": "authority_negative_deadline_grant_drift",
+      "fixture_class": "negative",
+      "schema_id": "server-authority-envelope/v1",
+      "document": {
+        "schema_id": "server-authority-envelope/v1",
+        "package": {
+          "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "task_id": "task_11111111111111111111111111111111", "attempt_id": "attempt_44444444444444444444444444444444",
+        "session_id": "sess_55555555555555555555555555555555", "owner_id": "owner_66666666666666666666666666666666",
+        "lease_id": "lease_22222222222222222222222222222222", "task_version": 2, "deletion_version": 2,
+        "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1, "lifecycle": "ACTIVE", "desired_state": "RUN",
+        "absolute_deadline_at": "2026-07-22T12:02:00.000Z", "terminalization_reserve_ms": 1000,
+        "grant": {
+          "schema_id": "agent-worker-grant/v1",
+          "package": {
+            "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+            "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "grant_id": "grant_33333333333333333333333333333333", "task_id": "task_11111111111111111111111111111111",
+          "attempt_id": "attempt_44444444444444444444444444444444", "session_id": "sess_55555555555555555555555555555555",
+          "owner_id": "owner_66666666666666666666666666666666", "lease_id": "lease_22222222222222222222222222222222",
+          "task_version": 2, "deletion_version": 2, "owner_epoch": 1, "native_epoch": 1, "transport_epoch": 1,
+          "policy_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+          "absolute_deadline_at": "2026-07-22T12:01:00.000Z", "terminalization_reserve_ms": 1000,
+          "capability_ids": ["source.read"], "tool_keys": ["internal.read_source"],
+          "elapsed_limit_ms": 60000, "tool_call_limit": 7,
+          "grant_digest": "9ea7319678583b0ba7d8d69479ac6e2d73bee1b0339facab40e0480e922b3825"
+        },
+        "authority_digest": "7d6e7f80d20ba41e4a768561b0b7cbfa411e90fc9134f8d0d84be1c2fe02d514"
+      },
+      "expected_code": "AUTHORITY_GRANT_BINDING_MISMATCH"
     }
   ]
 }

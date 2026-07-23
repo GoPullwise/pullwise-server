@@ -195,6 +195,13 @@ function validateSemantics(schemaId, value) {
     }
   } else if (schemaId === "elapsed-budget-settlement/v1") {
     if (value.consumed_calls + value.released_calls !== 1) fail("BUDGET_CALL_CONSERVATION_INVALID");
+  } else if (schemaId === "server-authority-envelope/v1") {
+    const grant = value.grant;
+    verifyEmbeddedDigestSync("agent-worker-grant/v1", grant);
+    const deadlineFields = ["absolute_deadline_at", "terminalization_reserve_ms"];
+    if (deadlineFields.some((key) => value[key] !== grant[key])) {
+      fail("AUTHORITY_GRANT_BINDING_MISMATCH");
+    }
   } else if (schemaId === "agent-claim-abandon-response/v1") {
     const grant = value.grant;
     verifyEmbeddedDigestSync("agent-worker-grant/v1", grant);
