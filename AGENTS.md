@@ -593,6 +593,38 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   fact digest, exact task/version binding, a nonterminal request lifecycle, and
   canonical equality for a reused idempotency key.
 
+## Agent-First Current Candidate Boundary
+
+- D31 (`d6fe7e5184e410aa6d034be1b593c8bf83126d5af300ea489a3d077642b42254`)
+  makes Server acceptance the sole deadline authority. Persist `accepted_at`,
+  compute `absolute_deadline_at` exactly once as
+  `accepted_at + effective_policy.budgets.wall_ms`, and persist the accepted
+  `terminalization_reserve_ms`. Claim must copy both values verbatim into
+  `agent-worker-grant/v1` and `server-authority-envelope/v1`; neither Server
+  claim time nor Worker recovery may recompute or extend them.
+- D32 (`11794116e7db5fdb330e001fa1ab7b7039ff1f1f04bc3283b9cddbc30bf3995e`)
+  requires an independent `transport-abandonment-record/v1`. Its canonical
+  bytes/digest are distinct from `agent-claim-abandon-response/v1`, which stays
+  the fenced successor authority response. The same idempotent transaction
+  seals both; abandonment never terminalizes a Task/TaskResult or binds a
+  transport receipt.
+- D33 (`8bf9ed4ac35fdd2f0bfd790c1a8f8879776a44711683152921c9ae330e105fb4`)
+  requires one mechanical terminal selector over exactly `profile`,
+  `gate_mode`, `cancel_state`, `effect_state`, `cause_family`, and
+  `delivery_state`. Reject caller-selected outcomes/reasons and tombstoned or
+  delete-fenced inputs. Unknown effects stay `RECONCILING` before deadline and
+  become `TERMINATED_WITH_UNKNOWN_EFFECTS` at/after it; cancel plus committed
+  effects becomes `CANCELLED_WITH_EFFECTS`. TaskResult CAS binds the complete
+  selector-input digest.
+- D34 (`2be5b5752b65714204fa6f41a0a126eb30e82bafcdeb38b5ece426938561158c`)
+  limits this cycle to one unactivated candidate. Add only the Server-owned
+  contract/storage/facade/test closure, including the minimum D22 benchmark and
+  release-gate schema families. Do not connect production current-task/operator
+  HTTP or auth, switch the production Worker loop, enable D24, deploy, or start
+  canary. Run Generate exactly once only after every source, fixture, semantic
+  closure, DAG, registry, digest, and Python/Node parity pre-generation gate is
+  green; then exact-pin the same canonical bytes in Server, Worker, and Web.
+
 ## Agent-First Gate Decision Semantics
 
 - Generated GateDecision facades treat the sealed
