@@ -178,7 +178,8 @@ def build_source_tool_negative_cases(
         "publication_golden_effect_ledger",
         effect_ledger,
         "CONTRACT_DOCUMENT_INVALID",
-        "EFFECT_LEDGER_NOT_EMPTY",
+        "EFFECT_LEDGER_WATERMARK_INVALID",
+        "$.watermark",
     )
 
     add(

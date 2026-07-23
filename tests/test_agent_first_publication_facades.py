@@ -157,6 +157,68 @@ class AgentFirstPublicationFacadesTest(unittest.TestCase):
             [item["code"] for item in results[:3]],
         )
 
+    def test_effect_ledger_rows_recount_and_order_with_runtime_parity(self) -> None:
+        schema = self.schemas["effect-ledger-snapshot/v1"]
+
+        def ledger(states: list[str]) -> dict[str, object]:
+            value = self.document("publication_golden_effect_ledger")
+            value["rows"] = [
+                {
+                    "effect_id": f"effect_{index:032x}",
+                    "state": state,
+                }
+                for index, state in enumerate(states, start=1)
+            ]
+            value["watermark"] = len(value["rows"])
+            value["state_counts"] = {
+                state: states.count(state.upper())
+                for state in (
+                    "prepared",
+                    "dispatched",
+                    "committed",
+                    "not_applied",
+                    "rejected",
+                    "unknown",
+                )
+            }
+            return seal(schema, value)
+
+        committed = ledger(["COMMITTED"])
+        unknown = ledger(["UNKNOWN"])
+        mixed = ledger(["COMMITTED", "NOT_APPLIED", "REJECTED", "UNKNOWN"])
+        bad_count = deepcopy(mixed)
+        bad_count["state_counts"]["committed"] = 0
+        bad_count = seal(schema, bad_count)
+        bad_order = deepcopy(mixed)
+        bad_order["rows"].reverse()
+        bad_order = seal(schema, bad_order)
+        bad_watermark = deepcopy(mixed)
+        bad_watermark["watermark"] += 1
+        bad_watermark = seal(schema, bad_watermark)
+        results = self.assert_parity(
+            [
+                {"schema_id": "effect-ledger-snapshot/v1", "document": item}
+                for item in (
+                    committed,
+                    unknown,
+                    mixed,
+                    bad_count,
+                    bad_order,
+                    bad_watermark,
+                )
+            ]
+        )
+
+        self.assertTrue(all(item["ok"] for item in results[:3]), results)
+        self.assertEqual(
+            [
+                ("EFFECT_LEDGER_STATE_COUNTS_INVALID", "$.state_counts"),
+                ("EFFECT_LEDGER_ROW_ORDER_INVALID", "$.rows"),
+                ("EFFECT_LEDGER_WATERMARK_INVALID", "$.watermark"),
+            ],
+            [(item["detail"], item["path"]) for item in results[3:]],
+        )
+
     def test_report_evidence_refs_are_ordered_and_globally_consistent(self) -> None:
         reference = deepcopy(
             next(

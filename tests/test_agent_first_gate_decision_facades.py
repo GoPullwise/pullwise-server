@@ -119,6 +119,27 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
         }
 
     @classmethod
+    def effect_ledger(
+        cls,
+        task_id: str,
+        states: list[str],
+    ) -> dict[str, object]:
+        ledger = deepcopy(
+            cls.fixtures["publication_golden_effect_ledger"]["document"]
+        )
+        ledger["task_id"] = task_id
+        ledger["rows"] = [
+            {"effect_id": f"effect_{index:032x}", "state": state}
+            for index, state in enumerate(states, start=1)
+        ]
+        ledger["watermark"] = len(ledger["rows"])
+        ledger["state_counts"] = {
+            state: states.count(state.upper())
+            for state in ledger["state_counts"]
+        }
+        return cls.reseal("effect-ledger-snapshot/v1", ledger)
+
+    @classmethod
     def success_inputs(cls) -> tuple[dict[str, object], dict[str, object]]:
         snapshot = deepcopy(
             cls.fixtures["gate_input_golden_success_snapshot"]["document"]
@@ -138,6 +159,11 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
         snapshot = deepcopy(
             cls.fixtures["gate_input_golden_terminalization_snapshot"]["document"]
         )
+        ledger = cls.effect_ledger(snapshot["task_id"], [])
+        snapshot["effect_ledger_ref"] = cls.snapshot_ref(
+            ledger,
+            "art_f2000000000000000000000000000003",
+        )
         snapshot["predicate_registry_digest"] = cls.registry["registry_digest"]
         snapshot = cls.reseal("terminalization-input-snapshot/v1", snapshot)
         context = {
@@ -156,6 +182,7 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
                 "availability": "available",
                 "ref": deepcopy(snapshot["effect_ledger_ref"]),
             },
+            "effect_ledger": ledger,
             "predicate_results": deepcopy(cls.terminal["predicate_results"]),
         }
         return snapshot, context

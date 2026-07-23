@@ -66,11 +66,22 @@ function ruleBudgetSummary(value) {
 
 function ruleEffectLedgerSnapshot(value) {
   verifyPublicationDigestSync("effect-ledger-snapshot/v1", value);
-  const counts = Object.values(value.state_counts);
-  if (value.watermark !== value.rows.length ||
-      counts.reduce((left, right) => left + right, 0) !== value.rows.length ||
-      counts.some((item) => item !== 0)) {
-    fail("EFFECT_LEDGER_NOT_EMPTY");
+  if (value.watermark !== value.rows.length) {
+    fail("EFFECT_LEDGER_WATERMARK_INVALID", "$.watermark");
+  }
+  const effectIds = value.rows.map((item) => item.effect_id);
+  if (new Set(effectIds).size !== effectIds.length ||
+      canonicalString(effectIds) !== canonicalString([...effectIds].sort())) {
+    fail("EFFECT_LEDGER_ROW_ORDER_INVALID", "$.rows");
+  }
+  const expected = Object.fromEntries(
+    Object.keys(value.state_counts).map((state) => [
+      state,
+      value.rows.filter((item) => item.state === state.toUpperCase()).length,
+    ]),
+  );
+  if (canonicalString(value.state_counts) !== canonicalString(expected)) {
+    fail("EFFECT_LEDGER_STATE_COUNTS_INVALID", "$.state_counts");
   }
 }
 
