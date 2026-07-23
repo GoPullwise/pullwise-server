@@ -67,6 +67,17 @@ class AgentFirstResultDebugTransportHelperRedTest(
         fragment = self.fixture_document("worker_debug_transport_fragment_golden_terminal")
         file_manifest = self.fixture_document("worker_debug_content_golden_file_manifest")
         redaction_report = self.fixture_document("worker_debug_content_golden_redaction_report")
+        task_result, terminal_gate_decision = bind_task_result_to_terminal_decision(
+            self,
+            envelope_fixture["task_result"],
+        )
+        task_result_core = self.derive_core_expected(task_result)
+        task_result_core_ref = self.content_ref(
+            "art_99999999999999999999999999999992",
+            "task-result-core/v1",
+            task_result_core,
+        )
+        fragment["task_result_core"]["ref"] = deepcopy(task_result_core_ref)
 
         fragment_ref = self.content_ref(
             "art_99999999999999999999999999999991",
@@ -123,22 +134,12 @@ class AgentFirstResultDebugTransportHelperRedTest(
             "worker-debug-fragment-descriptor/v1",
             worker_debug_descriptor,
         )
-        task_result, terminal_gate_decision = bind_task_result_to_terminal_decision(
-            self,
-            envelope_fixture["task_result"],
-        )
         task_result["diagnostics"] = {
             "worker_debug_fragment": {
                 "availability": "available",
                 "ref": deepcopy(worker_debug_descriptor_ref),
             }
         }
-        task_result_core = self.derive_core_expected(task_result)
-        task_result_core_ref = self.content_ref(
-            "art_99999999999999999999999999999992",
-            "task-result-core/v1",
-            task_result_core,
-        )
         transport_envelope = {
             "schema_id": "task-result-transport-envelope/v1",
             "package": deepcopy(envelope_fixture["package"]),

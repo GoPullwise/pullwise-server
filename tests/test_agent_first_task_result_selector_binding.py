@@ -57,6 +57,15 @@ class AgentFirstTaskResultSelectorBindingTest(unittest.TestCase):
         missing = self.operation(result, None)
         bad_ref = deepcopy(result)
         bad_ref["gate_decision"]["ref"]["sha256"] = "0" * 64
+        bad_task = deepcopy(result)
+        bad_task["task_id"] = "task_22222222222222222222222222222222"
+        success_decision = self.builder.document("gate_decision_golden_success")
+        non_terminal = deepcopy(result)
+        non_terminal["gate_decision"]["ref"] = self.builder.facade.content_ref(
+            "art_f0000000000000000000000000000001",
+            "gate-decision/v1",
+            success_decision,
+        )
         bad_version = deepcopy(result)
         bad_version["published_from_version"] -= 1
         bad_version["terminal_task_version"] -= 1
@@ -71,6 +80,8 @@ class AgentFirstTaskResultSelectorBindingTest(unittest.TestCase):
         operations = [
             missing,
             self.operation(bad_ref, decision),
+            self.operation(bad_task, decision),
+            self.operation(non_terminal, success_decision),
             self.operation(bad_version, decision),
             self.operation(bad_outcome, decision),
             self.operation(bad_reason, decision),
@@ -81,6 +92,8 @@ class AgentFirstTaskResultSelectorBindingTest(unittest.TestCase):
             for code, detail, path in (
                 ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.ref"),
                 ("CAS_CORRUPT", "CAS_CORRUPT", "$.gate_decision.ref"),
+                ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_CONTEXT_INVALID", "$.task_id"),
+                ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision"),
                 ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_CONTEXT_INVALID", "$.published_from_version"),
                 ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_CONTEXT_INVALID", "$.outcome"),
                 ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_CONTEXT_INVALID", "$.reason_code"),

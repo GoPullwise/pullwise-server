@@ -20,6 +20,7 @@ FAMILY_IDS = (
     "core",
     "task-result-identities",
     "task-result-reasons",
+    "task-completion-proposal",
     "gate-preparation",
     "pre-gate",
     "gate-input",
@@ -123,7 +124,12 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         cls.families = {family["family_id"]: family for family in families}
         cls.fixtures = {
             item["fixture_id"]: item
-            for family_id in ("pre-gate", "gate-input", "gate-preparation")
+            for family_id in (
+                "pre-gate",
+                "gate-input",
+                "gate-preparation",
+                "task-completion-proposal",
+            )
             for item in cls.families[family_id]["fixtures"]
         }
 
@@ -137,7 +143,6 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
             if field in {
                 "schema_id",
                 "task_id",
-                "outcome_candidate",
                 "root_set_digest",
             }:
                 continue
@@ -184,6 +189,11 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
     def make_success_context(self) -> list[object]:
         root_set = self.document("pre_gate_golden_root_set")
         snapshot = self.document("gate_input_golden_success_snapshot")
+        proposal = self.document("task_completion_golden_proposal")
+        root_set["proposal"]["ref"] = content_ref(proposal, "d")
+        root_set = reseal(
+            root_set, "root_set_digest", "pullwise:pre-gate-root-set:v1"
+        )
         quality_ref = deepcopy(snapshot["quality_policy_plan_ref"])
         quality_ref["artifact_id"] = "art_deadbeefdeadbeefdeadbeefdeadbeef"
         manifest = self.make_manifest(root_set, extra_refs=[quality_ref])
@@ -208,7 +218,7 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
             deepcopy(item["ref"]) for item in root_set["execution_states"]
         ]
         snapshot["change_set"] = deepcopy(root_set["change_set"])
-        snapshot["requested_outcome"] = root_set["outcome_candidate"]
+        snapshot["requested_outcome"] = proposal["outcome_requested"]
         snapshot["pre_gate_root_set_ref"] = content_ref(root_set, "a")
         snapshot["pre_gate_evidence_closure_ref"] = content_ref(manifest, "b")
         snapshot["pre_gate_closure_digest"] = manifest[
@@ -218,7 +228,7 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         snapshot = reseal(
             snapshot, "input_digest", "pullwise:gate-input-snapshot:v1"
         )
-        return [snapshot, root_set, manifest]
+        return [snapshot, root_set, manifest, proposal]
 
     def make_terminal_context(self) -> list[object]:
         root_set = self.document("pre_gate_golden_terminal_root_set")
@@ -363,7 +373,7 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         valid = [
             {
                 "kind": "root_context",
-                "args": [root, root["task_id"], root["outcome_candidate"]],
+                "args": [root, root["task_id"]],
             },
             {"kind": "closure_context", "args": [success[2], success[1]]},
             {"kind": "success_context", "args": success},
@@ -450,7 +460,6 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
             "verify_pre_gate_root_set_context": [
                 "root_set",
                 "task_id",
-                "outcome_candidate",
             ],
             "verify_pre_gate_evidence_closure_context": [
                 "manifest",
@@ -460,6 +469,7 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
                 "snapshot",
                 "root_set",
                 "pre_gate_manifest",
+                "completion_proposal",
             ],
             "verify_terminalization_input_snapshot_context": [
                 "snapshot",
