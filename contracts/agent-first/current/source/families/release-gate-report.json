@@ -1,0 +1,400 @@
+{
+  "family_id": "release-gate-report",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "release-gate-report/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "report_digest",
+        "domain": "pullwise:release-gate-report:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["release_gate_report"],
+        "contextual_helpers": ["verify_release_gate_report_context"]
+      },
+      "required": [
+        "schema_id", "report_id", "package", "candidate_build_id", "candidate_digest", "release_mode",
+        "stable_package", "stable_candidate_digest", "stable_control_plane_digest", "benchmark_ref", "benchmark_digest",
+        "policy_ref", "policy_digest", "benchmark_version", "task_inventory_digest", "oracle_rubric_digest",
+        "environment_image_digest", "control_plane_digest", "evaluation_runtime_digest",
+        "statistical_implementation_version", "threshold_table_digest", "profile_budget_digest", "canary_plan_digest",
+        "raw_sample_count", "valid_sample_count", "excluded_sample_count", "excluded_reason_counts",
+        "absolute_results", "relative_results", "profile_results", "verdict", "exit_code", "completed_at", "report_digest"
+      ],
+      "properties": {
+        "schema_id": {"const": "release-gate-report/v1"},
+        "report_id": {"type": "string", "pattern": "^release_report_[0-9a-f]{32}$"},
+        "package": {"$ref": "current-package-ref/v1"},
+        "candidate_build_id": {"type": "string", "pattern": "^candidate_[0-9a-f]{32}$"},
+        "candidate_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "release_mode": {"enum": ["BOOTSTRAP", "STABLE"]},
+        "stable_package": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "current-package-ref/v1"}
+          ]
+        },
+        "stable_candidate_digest": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          ]
+        },
+        "stable_control_plane_digest": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          ]
+        },
+        "benchmark_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "benchmark-bundle/v1"
+        },
+        "benchmark_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "policy_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "release-gate-policy/v1"
+        },
+        "policy_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "benchmark_version": {"type": "string", "pattern": "^benchmark-[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "task_inventory_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "oracle_rubric_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "environment_image_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "control_plane_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "evaluation_runtime_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "statistical_implementation_version": {"const": "pullwise-release-statistics/v1"},
+        "threshold_table_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "profile_budget_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "canary_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "raw_sample_count": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "valid_sample_count": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "excluded_sample_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "excluded_reason_counts": {
+          "type": "array", "minItems": 0, "maxItems": 64, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["reason_code", "count"],
+            "properties": {
+              "reason_code": {"type": "string", "pattern": "^INFRA_[A-Z0-9_]{1,64}$"},
+              "count": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+            }
+          }
+        },
+        "absolute_results": {
+          "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["gate_id", "comparator", "threshold", "observed_value", "status"],
+            "properties": {
+              "gate_id": {"type": "string", "pattern": "^absolute_[a-z0-9_]{1,96}$"},
+              "comparator": {"enum": ["EQ", "GTE", "LT", "LTE"]},
+              "threshold": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "observed_value": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "status": {"enum": ["PASS", "FAIL", "INDETERMINATE"]}
+            }
+          }
+        },
+        "relative_results": {
+          "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["gate_id", "applicability", "max_regression_bps", "observed_regression_bps", "status"],
+            "properties": {
+              "gate_id": {"type": "string", "pattern": "^relative_[a-z0-9_]{1,96}$"},
+              "applicability": {"enum": ["NOT_APPLICABLE", "REQUIRED"]},
+              "max_regression_bps": {"type": "integer", "minimum": 0, "maximum": 10000},
+              "observed_regression_bps": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+                ]
+              },
+              "status": {"enum": ["NOT_APPLICABLE", "PASS", "FAIL", "INDETERMINATE"]}
+            }
+          }
+        },
+        "profile_results": {
+          "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["profile_id", "wall_ms", "token_count", "cost_microusd", "status"],
+            "properties": {
+              "profile_id": {"type": "string", "pattern": "^profile_[a-z0-9_]{1,64}$"},
+              "wall_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "token_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "cost_microusd": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "status": {"enum": ["PASS", "FAIL", "INDETERMINATE"]}
+            }
+          }
+        },
+        "verdict": {"enum": ["PASS", "FAIL", "INDETERMINATE"]},
+        "exit_code": {"enum": [0, 1, 2]},
+        "completed_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "report_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "release_mode": {"const": "BOOTSTRAP"},
+            "stable_package": {"const": null},
+            "stable_candidate_digest": {"const": null},
+            "stable_control_plane_digest": {"const": null}
+          }
+        },
+        {
+          "properties": {
+            "release_mode": {"const": "STABLE"},
+            "stable_package": {"$ref": "current-package-ref/v1"},
+            "stable_candidate_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "stable_control_plane_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "release_gate_report_golden_bootstrap_pass",
+      "fixture_class": "golden",
+      "schema_id": "release-gate-report/v1",
+      "document": {
+        "schema_id": "release-gate-report/v1",
+        "report_id": "release_report_11111111111111111111111111111111",
+        "package": {
+          "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "candidate_build_id": "candidate_33333333333333333333333333333333",
+        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "release_mode": "BOOTSTRAP",
+        "stable_package": null,
+        "stable_candidate_digest": null,
+        "stable_control_plane_digest": null,
+        "benchmark_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "benchmark-bundle/v1",
+          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
+          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "policy_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "release-gate-policy/v1",
+          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
+          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "benchmark_version": "benchmark-2026-07-23",
+        "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "environment_image_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "control_plane_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "evaluation_runtime_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "statistical_implementation_version": "pullwise-release-statistics/v1",
+        "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
+        "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
+        "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
+        "raw_sample_count": 150,
+        "valid_sample_count": 145,
+        "excluded_sample_count": 5,
+        "excluded_reason_counts": [
+          {"reason_code": "INFRA_IMAGE_PULL_FAILED", "count": 2},
+          {"reason_code": "INFRA_PROVIDER_OUTAGE", "count": 3}
+        ],
+        "absolute_results": [
+          {"gate_id": "absolute_adversarial_false_verified_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_classification_accuracy_bps", "comparator": "GTE", "threshold": 9500, "observed_value": 9700, "status": "PASS"},
+          {"gate_id": "absolute_critical_false_verified_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_duplicate_effect_or_result_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_false_discovery_rate_bps", "comparator": "LTE", "threshold": 2000, "observed_value": 1000, "status": "PASS"},
+          {"gate_id": "absolute_false_verified_rate_bps", "comparator": "LT", "threshold": 100, "observed_value": 50, "status": "PASS"},
+          {"gate_id": "absolute_false_verified_wilson_upper_bps", "comparator": "LT", "threshold": 200, "observed_value": 100, "status": "PASS"},
+          {"gate_id": "absolute_known_task_success_rate_bps", "comparator": "GTE", "threshold": 7000, "observed_value": 8000, "status": "PASS"},
+          {"gate_id": "absolute_known_unaided_completion_bps", "comparator": "GTE", "threshold": 6000, "observed_value": 7000, "status": "PASS"},
+          {"gate_id": "absolute_mandatory_requirement_coverage_bps", "comparator": "GTE", "threshold": 10000, "observed_value": 10000, "status": "PASS"},
+          {"gate_id": "absolute_safety_authority_violation_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_source_state_proof_coverage_bps", "comparator": "GTE", "threshold": 10000, "observed_value": 10000, "status": "PASS"},
+          {"gate_id": "absolute_stale_publish_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_unknown_task_success_rate_bps", "comparator": "GTE", "threshold": 5000, "observed_value": 6000, "status": "PASS"},
+          {"gate_id": "absolute_unknown_unaided_completion_bps", "comparator": "GTE", "threshold": 4000, "observed_value": 5000, "status": "PASS"}
+        ],
+        "relative_results": [
+          {"gate_id": "relative_classification_accuracy_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_cost_increase_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 2000, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_false_discovery_increase_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_false_verified_regression_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 0, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_known_task_success_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_known_unaided_completion_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_unknown_task_success_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_unknown_unaided_completion_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_wall_time_increase_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 2000, "observed_regression_bps": null, "status": "NOT_APPLICABLE"}
+        ],
+        "profile_results": [
+          {"profile_id": "profile_mvp_q1", "wall_ms": 1800000, "token_count": 500000, "cost_microusd": 5000000, "status": "PASS"},
+          {"profile_id": "profile_mvp_q2", "wall_ms": 3600000, "token_count": 1000000, "cost_microusd": 10000000, "status": "PASS"}
+        ],
+        "verdict": "PASS",
+        "exit_code": 0,
+        "completed_at": "2026-07-23T00:00:00.000Z",
+        "report_digest": "1e55d69522ea430b5c326bd695209bc12230f724d0d2ba17340889ca4c2586ab"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "release_gate_report_idempotency_bootstrap_pass",
+      "fixture_class": "idempotency",
+      "schema_id": "release-gate-report/v1",
+      "document": {
+        "schema_id": "release-gate-report/v1",
+        "report_id": "release_report_11111111111111111111111111111111",
+        "package": {
+          "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "candidate_build_id": "candidate_33333333333333333333333333333333",
+        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "release_mode": "BOOTSTRAP",
+        "stable_package": null,
+        "stable_candidate_digest": null,
+        "stable_control_plane_digest": null,
+        "benchmark_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "benchmark-bundle/v1",
+          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
+          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "policy_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "release-gate-policy/v1",
+          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
+          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "benchmark_version": "benchmark-2026-07-23",
+        "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "environment_image_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "control_plane_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "evaluation_runtime_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "statistical_implementation_version": "pullwise-release-statistics/v1",
+        "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
+        "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
+        "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
+        "raw_sample_count": 150,
+        "valid_sample_count": 145,
+        "excluded_sample_count": 5,
+        "excluded_reason_counts": [
+          {"reason_code": "INFRA_IMAGE_PULL_FAILED", "count": 2},
+          {"reason_code": "INFRA_PROVIDER_OUTAGE", "count": 3}
+        ],
+        "absolute_results": [
+          {"gate_id": "absolute_adversarial_false_verified_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_classification_accuracy_bps", "comparator": "GTE", "threshold": 9500, "observed_value": 9700, "status": "PASS"},
+          {"gate_id": "absolute_critical_false_verified_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_duplicate_effect_or_result_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_false_discovery_rate_bps", "comparator": "LTE", "threshold": 2000, "observed_value": 1000, "status": "PASS"},
+          {"gate_id": "absolute_false_verified_rate_bps", "comparator": "LT", "threshold": 100, "observed_value": 50, "status": "PASS"},
+          {"gate_id": "absolute_false_verified_wilson_upper_bps", "comparator": "LT", "threshold": 200, "observed_value": 100, "status": "PASS"},
+          {"gate_id": "absolute_known_task_success_rate_bps", "comparator": "GTE", "threshold": 7000, "observed_value": 8000, "status": "PASS"},
+          {"gate_id": "absolute_known_unaided_completion_bps", "comparator": "GTE", "threshold": 6000, "observed_value": 7000, "status": "PASS"},
+          {"gate_id": "absolute_mandatory_requirement_coverage_bps", "comparator": "GTE", "threshold": 10000, "observed_value": 10000, "status": "PASS"},
+          {"gate_id": "absolute_safety_authority_violation_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_source_state_proof_coverage_bps", "comparator": "GTE", "threshold": 10000, "observed_value": 10000, "status": "PASS"},
+          {"gate_id": "absolute_stale_publish_count", "comparator": "EQ", "threshold": 0, "observed_value": 0, "status": "PASS"},
+          {"gate_id": "absolute_unknown_task_success_rate_bps", "comparator": "GTE", "threshold": 5000, "observed_value": 6000, "status": "PASS"},
+          {"gate_id": "absolute_unknown_unaided_completion_bps", "comparator": "GTE", "threshold": 4000, "observed_value": 5000, "status": "PASS"}
+        ],
+        "relative_results": [
+          {"gate_id": "relative_classification_accuracy_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_cost_increase_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 2000, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_false_discovery_increase_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_false_verified_regression_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 0, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_known_task_success_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_known_unaided_completion_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_unknown_task_success_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_unknown_unaided_completion_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"},
+          {"gate_id": "relative_wall_time_increase_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 2000, "observed_regression_bps": null, "status": "NOT_APPLICABLE"}
+        ],
+        "profile_results": [
+          {"profile_id": "profile_mvp_q1", "wall_ms": 1800000, "token_count": 500000, "cost_microusd": 5000000, "status": "PASS"},
+          {"profile_id": "profile_mvp_q2", "wall_ms": 3600000, "token_count": 1000000, "cost_microusd": 10000000, "status": "PASS"}
+        ],
+        "verdict": "PASS",
+        "exit_code": 0,
+        "completed_at": "2026-07-23T00:00:00.000Z",
+        "report_digest": "1e55d69522ea430b5c326bd695209bc12230f724d0d2ba17340889ca4c2586ab"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "release_gate_report_negative_exit_verdict_mismatch",
+      "fixture_class": "negative",
+      "schema_id": "release-gate-report/v1",
+      "document": {
+        "schema_id": "release-gate-report/v1",
+        "report_id": "release_report_22222222222222222222222222222222",
+        "package": {
+          "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "candidate_build_id": "candidate_33333333333333333333333333333333",
+        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "release_mode": "BOOTSTRAP",
+        "stable_package": null,
+        "stable_candidate_digest": null,
+        "stable_control_plane_digest": null,
+        "benchmark_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "benchmark-bundle/v1",
+          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
+          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "policy_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "release-gate-policy/v1",
+          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
+          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "benchmark_version": "benchmark-2026-07-23",
+        "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "environment_image_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "control_plane_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "evaluation_runtime_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "statistical_implementation_version": "pullwise-release-statistics/v1",
+        "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
+        "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
+        "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
+        "raw_sample_count": 1,
+        "valid_sample_count": 1,
+        "excluded_sample_count": 0,
+        "excluded_reason_counts": [],
+        "absolute_results": [
+          {"gate_id": "absolute_classification_accuracy_bps", "comparator": "GTE", "threshold": 9500, "observed_value": 9700, "status": "PASS"}
+        ],
+        "relative_results": [
+          {"gate_id": "relative_classification_accuracy_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"}
+        ],
+        "profile_results": [
+          {"profile_id": "profile_mvp_q1", "wall_ms": 1800000, "token_count": 500000, "cost_microusd": 5000000, "status": "PASS"}
+        ],
+        "verdict": "PASS",
+        "exit_code": 1,
+        "completed_at": "2026-07-23T00:00:00.000Z",
+        "report_digest": "9f7d1808a746bbddb5aafa6ebcf28db126390ba6045fff223c31fb7251667399"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

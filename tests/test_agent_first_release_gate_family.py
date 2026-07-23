@@ -278,6 +278,156 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
             [item["applicability"] for item in negative["document"]["relative_gates"]],
         )
 
+    def test_release_gate_report_freezes_reproducible_three_state_result(self) -> None:
+        path = SOURCE_ROOT / "families/release-gate-report.json"
+        family = json.loads(path.read_text(encoding="utf-8"))
+        loaded = load_family(path, "release-gate-report", {}, set())
+        schema = loaded["schemas"][0]
+        self.assertEqual("release-gate-report/v1", schema["$id"])
+        self.assertIs(False, schema["additionalProperties"])
+        self.assertEqual(set(schema["required"]), set(schema["properties"]))
+        self.assertEqual(
+            {
+                "document_rules": ["release_gate_report"],
+                "contextual_helpers": ["verify_release_gate_report_context"],
+            },
+            schema["x-pullwise-semantics"],
+        )
+        properties = schema["properties"]
+        self.assertEqual(
+            "benchmark-bundle/v1",
+            properties["benchmark_ref"]["x-pullwise-content-schema-id"],
+        )
+        self.assertEqual(
+            "release-gate-policy/v1",
+            properties["policy_ref"]["x-pullwise-content-schema-id"],
+        )
+        self.assertEqual(["PASS", "FAIL", "INDETERMINATE"], properties["verdict"]["enum"])
+        self.assertEqual([0, 1, 2], properties["exit_code"]["enum"])
+
+        fixtures = {
+            fixture["fixture_id"]: fixture for fixture in family["fixtures"]
+        }
+        self.assertEqual(
+            {
+                "release_gate_report_golden_bootstrap_pass",
+                "release_gate_report_idempotency_bootstrap_pass",
+                "release_gate_report_negative_exit_verdict_mismatch",
+            },
+            set(fixtures),
+        )
+        self.assertEqual(
+            fixtures["release_gate_report_golden_bootstrap_pass"]["document"],
+            fixtures["release_gate_report_idempotency_bootstrap_pass"]["document"],
+        )
+        for fixture_id, fixture in fixtures.items():
+            document = fixture["document"]
+            unsigned = {
+                key: value for key, value in document.items()
+                if key != "report_digest"
+            }
+            self.assertEqual(
+                hashlib.sha256(
+                    b"pullwise:release-gate-report:v1\0"
+                    + canonical_bytes(unsigned)
+                ).hexdigest(),
+                document["report_digest"],
+                fixture_id,
+            )
+
+        golden = fixtures["release_gate_report_golden_bootstrap_pass"]["document"]
+        self.assertEqual(("PASS", 0), (golden["verdict"], golden["exit_code"]))
+        self.assertEqual(
+            golden["raw_sample_count"],
+            golden["valid_sample_count"] + golden["excluded_sample_count"],
+        )
+        self.assertEqual(
+            golden["excluded_sample_count"],
+            sum(item["count"] for item in golden["excluded_reason_counts"]),
+        )
+        for field in ("absolute_results", "relative_results", "profile_results"):
+            identity = "profile_id" if field == "profile_results" else "gate_id"
+            values = [item[identity] for item in golden[field]]
+            self.assertEqual(sorted(set(values)), values)
+        self.assertTrue(all(
+            item["applicability"] == "NOT_APPLICABLE"
+            and item["status"] == "NOT_APPLICABLE"
+            for item in golden["relative_results"]
+        ))
+        negative = fixtures["release_gate_report_negative_exit_verdict_mismatch"]
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", negative["expected_code"])
+        self.assertEqual("PASS", negative["document"]["verdict"])
+        self.assertEqual(1, negative["document"]["exit_code"])
+
+    def test_release_gate_attestation_binds_only_an_exact_pass_report(self) -> None:
+        path = SOURCE_ROOT / "families/release-gate-attestation.json"
+        family = json.loads(path.read_text(encoding="utf-8"))
+        loaded = load_family(path, "release-gate-attestation", {}, set())
+        schema = loaded["schemas"][0]
+        self.assertEqual("release-gate-attestation/v1", schema["$id"])
+        self.assertIs(False, schema["additionalProperties"])
+        self.assertEqual(set(schema["required"]), set(schema["properties"]))
+        self.assertEqual(
+            {
+                "document_rules": ["release_gate_attestation"],
+                "contextual_helpers": ["verify_release_gate_attestation_context"],
+            },
+            schema["x-pullwise-semantics"],
+        )
+        properties = schema["properties"]
+        self.assertEqual(
+            "release-gate-policy/v1",
+            properties["policy_ref"]["x-pullwise-content-schema-id"],
+        )
+        self.assertEqual(
+            "release-gate-report/v1",
+            properties["report_ref"]["x-pullwise-content-schema-id"],
+        )
+        self.assertEqual("PASS", properties["attested_verdict"]["const"])
+        self.assertEqual(0, properties["attested_exit_code"]["const"])
+        self.assertEqual("release_operator", properties["signer_role"]["const"])
+        self.assertEqual("Ed25519", properties["signature_algorithm"]["const"])
+        self.assertNotIn("signature_contract", schema["x-pullwise-semantics"])
+
+        fixtures = {
+            fixture["fixture_id"]: fixture for fixture in family["fixtures"]
+        }
+        self.assertEqual(
+            {
+                "release_gate_attestation_golden_bootstrap_pass",
+                "release_gate_attestation_idempotency_bootstrap_pass",
+                "release_gate_attestation_negative_validity_window",
+            },
+            set(fixtures),
+        )
+        self.assertEqual(
+            fixtures["release_gate_attestation_golden_bootstrap_pass"]["document"],
+            fixtures["release_gate_attestation_idempotency_bootstrap_pass"]["document"],
+        )
+        for fixture_id, fixture in fixtures.items():
+            document = fixture["document"]
+            unsigned = {
+                key: value for key, value in document.items()
+                if key != "attestation_digest"
+            }
+            self.assertEqual(
+                hashlib.sha256(
+                    b"pullwise:release-gate-attestation:v1\0"
+                    + canonical_bytes(unsigned)
+                ).hexdigest(),
+                document["attestation_digest"],
+                fixture_id,
+            )
+
+        golden = fixtures["release_gate_attestation_golden_bootstrap_pass"]["document"]
+        self.assertEqual(("PASS", 0), (
+            golden["attested_verdict"], golden["attested_exit_code"]
+        ))
+        self.assertLess(golden["issued_at"], golden["expires_at"])
+        negative = fixtures["release_gate_attestation_negative_validity_window"]
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", negative["expected_code"])
+        self.assertEqual("2026-07-31T01:00:00.000Z", negative["document"]["expires_at"])
+
 
 if __name__ == "__main__":
     unittest.main()
