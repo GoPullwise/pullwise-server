@@ -21,7 +21,6 @@ SOURCE_ROOT = (
 
 CONTEXTUAL_NEGATIVE_FIXTURE_IDS = frozenset(
     {
-        "authority_negative_agent_selected_fence",
         "budget_negative_reservation_call_limit",
         "budget_negative_reservation_elapsed_limit",
         "budget_negative_settlement_conservation",
