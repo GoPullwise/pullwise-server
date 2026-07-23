@@ -17,10 +17,14 @@ _RELEASE_POLICY_BENCHMARK_FIELDS = (
 _RELEASE_REPORT_POLICY_FIELDS = (
     "package", "candidate_build_id", "candidate_digest", "release_mode",
     "stable_package", "stable_candidate_digest", "stable_control_plane_digest",
-    "benchmark_ref", "benchmark_digest", "benchmark_version", "task_inventory_digest",
+    "benchmark_digest", "benchmark_version", "task_inventory_digest",
     "oracle_rubric_digest", "environment_image_digest", "control_plane_digest",
     "evaluation_runtime_digest", "statistical_implementation_version",
     "threshold_table_digest", "profile_budget_digest", "canary_plan_digest",
+)
+_RELEASE_REPORT_BINDING_FIELDS = (
+    *_RELEASE_REPORT_POLICY_FIELDS[:7], "benchmark_ref",
+    *_RELEASE_REPORT_POLICY_FIELDS[7:],
 )
 
 _RELEASE_ATTESTATION_IDENTITY_FIELDS = (
@@ -423,7 +427,7 @@ def verify_release_gate_report_context(
     _release_require_bindings(
         checked_report,
         checked_policy,
-        _RELEASE_REPORT_POLICY_FIELDS,
+        _RELEASE_REPORT_BINDING_FIELDS,
         "RELEASE_REPORT_BINDING_INVALID",
     )
     _release_require_bindings(
@@ -518,6 +522,25 @@ def verify_release_gate_attestation_context(
         checked_report,
         "RELEASE_ATTESTATION_REF_INVALID",
         "$.report_ref",
+    )
+    _release_require_ref(
+        checked_report["policy_ref"],
+        "release-gate-policy/v1",
+        checked_policy,
+        "RELEASE_ATTESTATION_REF_INVALID",
+        "$.report.policy_ref",
+    )
+    _release_require(
+        checked_report["policy_digest"] == checked_policy["policy_digest"],
+        "RELEASE_ATTESTATION_BINDING_INVALID",
+        "$.report.policy_digest",
+    )
+    _release_require_bindings(
+        checked_report,
+        checked_policy,
+        _RELEASE_REPORT_POLICY_FIELDS,
+        "RELEASE_ATTESTATION_BINDING_INVALID",
+        "$.report",
     )
     _release_require_bindings(
         checked_attestation,

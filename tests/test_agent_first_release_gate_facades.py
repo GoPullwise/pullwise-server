@@ -141,6 +141,34 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             nonpass_attestation,
         )
 
+        other_policy = deepcopy(policy)
+        other_policy["policy_id"] = (
+            "release_policy_22222222222222222222222222222222"
+        )
+        other_policy = self.reseal(
+            "release-gate-policy/v1", "policy_digest", other_policy
+        )
+        transitive_report = deepcopy(report)
+        transitive_report["policy_digest"] = other_policy["policy_digest"]
+        transitive_report["policy_ref"] = self.content_ref(
+            transitive_report["policy_ref"], other_policy
+        )
+        transitive_report = self.reseal(
+            "release-gate-report/v1", "report_digest", transitive_report
+        )
+        transitive_attestation = deepcopy(attestation)
+        transitive_attestation["report_digest"] = transitive_report[
+            "report_digest"
+        ]
+        transitive_attestation["report_ref"] = self.content_ref(
+            transitive_attestation["report_ref"], transitive_report
+        )
+        transitive_attestation = self.reseal(
+            "release-gate-attestation/v1",
+            "attestation_digest",
+            transitive_attestation,
+        )
+
         operations = [
             {"kind": "policy", "documents": [policy, benchmark]},
             {"kind": "report", "documents": [report, benchmark, policy]},
@@ -153,6 +181,10 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             {
                 "kind": "attestation",
                 "documents": [nonpass_attestation, policy, failed_report],
+            },
+            {
+                "kind": "attestation",
+                "documents": [transitive_attestation, policy, transitive_report],
             },
             {"kind": "policy_snake", "documents": [policy, benchmark]},
             {"kind": "report_snake", "documents": [report, benchmark, policy]},
@@ -176,10 +208,10 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             node["exports"],
         )
         self.assertTrue(all(item["ok"] for item in python_results[:3]))
-        for result in python_results[3:6]:
+        for result in python_results[3:7]:
             self.assertFalse(result["ok"])
             self.assertEqual("CONTRACT_DOCUMENT_INVALID", result["code"])
-        self.assertEqual(python_results[:3], python_results[6:])
+        self.assertEqual(python_results[:3], python_results[7:])
 
     @staticmethod
     def reseal(

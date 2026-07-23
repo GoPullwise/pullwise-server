@@ -552,6 +552,27 @@ export async function verifyReleaseGateAttestationContext(
     "RELEASE_ATTESTATION_REF_INVALID",
     "$.report_ref",
   );
+  releaseRequire(
+    seoRefMatchesDocument(
+      reportValue.policy_ref,
+      "release-gate-policy/v1",
+      policyValue,
+    ),
+    "RELEASE_ATTESTATION_REF_INVALID",
+    "$.report.policy_ref",
+  );
+  releaseRequire(
+    reportValue.policy_digest === policyValue.policy_digest,
+    "RELEASE_ATTESTATION_BINDING_INVALID",
+    "$.report.policy_digest",
+  );
+  releaseRequireBinding(
+    reportValue,
+    policyValue,
+    RELEASE_REPORT_POLICY_FIELDS,
+    "RELEASE_ATTESTATION_BINDING_INVALID",
+    "$.report",
+  );
   releaseRequireBinding(
     checked,
     policyValue,
