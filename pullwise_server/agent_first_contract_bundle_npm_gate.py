@@ -173,7 +173,7 @@ function terminalSelection(axes) {
       selected_reason: GATE_BLOCKED_REASONS[causeFamily]};
   }
   if (causeFamily in GATE_FAILED_REASONS) {
-    if (!["none", "committed"].includes(effectState) || deliveryState !== "none") invalid();
+    if (effectState !== "none" || deliveryState !== "none") invalid();
     return {selected_lifecycle: "TERMINAL", selected_outcome: "FAILED",
       selected_reason: GATE_FAILED_REASONS[causeFamily]};
   }
@@ -338,6 +338,31 @@ async function gateSnapshotAndRef(schemaId, snapshotValue, referenceValue) {
   return [snapshot, reference];
 }
 
+async function gateEffectState(snapshot, effectLedger) {
+  const ledger = await verifyDocumentDigest(
+    "effect-ledger-snapshot/v1", effectLedger,
+  );
+  const raw = canonicalDocumentBytes(ledger), ref = snapshot.effect_ledger_ref;
+  if (ref.content_schema_id !== "effect-ledger-snapshot/v1" ||
+      ref.sha256 !== sha256Sync(raw) || ref.size_bytes !== raw.length ||
+      ref.media_type !== "application/json" || ref.encoding !== "utf-8") {
+    fail("CAS_CORRUPT", "$.context.effect_ledger");
+  }
+  if (ledger.task_id !== snapshot.task_id) {
+    fail("GATE_TERMINAL_EFFECT_LEDGER_TASK_INVALID", "$.context.effect_ledger.task_id");
+  }
+  const counts = ledger.state_counts;
+  if (counts.prepared !== 0 || counts.dispatched !== 0) {
+    fail("GATE_TERMINAL_ACTIVE_EFFECTS", "$.context.effect_ledger.state_counts");
+  }
+  if (counts.unknown) {
+    return gateInputTimestampMillis(snapshot.trusted_wall_time_at) <
+      gateInputTimestampMillis(snapshot.absolute_deadline_at)
+      ? "unknown_pre_deadline" : "unknown_post_deadline";
+  }
+  return counts.committed ? "committed" : "none";
+}
+
 export async function evaluateSuccessGate(inputSnapshot, context) {
   const evaluation = gateContext(context, ["input_snapshot_ref", "predicate_results"]);
   const [snapshot, reference] = await gateSnapshotAndRef(
@@ -362,6 +387,7 @@ export async function evaluateTerminalizationGate(inputSnapshot, context) {
     "input_snapshot_ref", "profile", "gate_mode", "cancel_state", "effect_state",
     "cause_family", "delivery_state",
     "source_availability", "evidence_availability", "effect_availability",
+    "effect_ledger",
     "predicate_results",
   ]);
   const [snapshot, reference] = await gateSnapshotAndRef(
@@ -374,6 +400,10 @@ export async function evaluateTerminalizationGate(inputSnapshot, context) {
   const expectedEffect = {availability: "available", ref: snapshot.effect_ledger_ref};
   if (canonicalString(evaluation.effect_availability) !== canonicalString(expectedEffect)) {
     fail("GATE_TERMINAL_AVAILABILITY_MISMATCH", "$.context.effect_availability");
+  }
+  if (evaluation.effect_state !==
+      await gateEffectState(snapshot, evaluation.effect_ledger)) {
+    fail("GATE_TERMINAL_EFFECT_STATE_INVALID", "$.context.effect_state");
   }
   const results = evaluation.predicate_results;
   const passed = gatePassed(results);

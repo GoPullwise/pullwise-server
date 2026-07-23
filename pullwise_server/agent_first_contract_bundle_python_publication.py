@@ -65,33 +65,33 @@ def _rule_budget_summary(value: dict[str, object]) -> None:
 
 
 def _rule_effect_ledger_snapshot(value: dict[str, object]) -> None:
-    _verify_embedded_digest("effect-ledger-snapshot/v1", value)
-    rows = value["rows"]
-    _require(
-        value["watermark"] == len(rows),
-        "EFFECT_LEDGER_WATERMARK_INVALID",
-        "$.watermark",
-    )
-    effect_ids = [item["effect_id"] for item in rows]
-    _require(
-        effect_ids == sorted(set(effect_ids)),
-        "EFFECT_LEDGER_ROW_ORDER_INVALID",
-        "$.rows",
-    )
-    expected = {
-        state: sum(
-            item["state"] == state.upper()
-            for item in rows
-        )
-        for state in value["state_counts"]
+    _verify_embedded_digest('effect-ledger-snapshot/v1', value)
+    rows = value['rows']
+    actual_counts = {
+        'prepared': 0,
+        'dispatched': 0,
+        'committed': 0,
+        'not_applied': 0,
+        'rejected': 0,
+        'unknown': 0,
     }
+    for row in rows:
+        actual_counts[row['state'].lower()] += 1
     _require(
-        value["state_counts"] == expected,
-        "EFFECT_LEDGER_STATE_COUNTS_INVALID",
-        "$.state_counts",
+        value['watermark'] == len(rows),
+        'EFFECT_LEDGER_WATERMARK_INVALID',
+        '$.watermark',
     )
-
-
+    _require(
+        value['state_counts'] == actual_counts,
+        'EFFECT_LEDGER_STATE_COUNTS_INVALID',
+        '$.state_counts',
+    )
+    _require(
+        rows == sorted(rows, key=lambda item: item['effect_id']),
+        'EFFECT_LEDGER_ROW_ORDER_INVALID',
+        '$.rows',
+    )
 def _rule_task_report(value: dict[str, object]) -> None:
     _verify_embedded_digest("task-report/v1", value)
     _require(

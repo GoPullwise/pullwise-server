@@ -268,7 +268,7 @@ def _terminal_selection(axes: dict[str, object]) -> tuple[str, str | None, str |
         return "TERMINAL", "BLOCKED", _GATE_BLOCKED_REASONS[cause_family]
     if cause_family in _GATE_FAILED_REASONS:
         _require(
-            effect_state in {"none", "committed"} and delivery_state == "none",
+            effect_state == "none" and delivery_state == "none",
             valid,
             "$.context",
         )
@@ -463,6 +463,42 @@ def _gate_snapshot_and_ref(
     return snapshot, reference
 
 
+def _gate_effect_state(
+    snapshot: dict[str, object],
+    effect_ledger: object,
+) -> str:
+    ledger = verify_document_digest("effect-ledger-snapshot/v1", effect_ledger)
+    raw = canonical_document_bytes(ledger)
+    ref = snapshot["effect_ledger_ref"]
+    _require(
+        ref["content_schema_id"] == "effect-ledger-snapshot/v1"
+        and ref["sha256"] == hashlib.sha256(raw).hexdigest()
+        and ref["size_bytes"] == len(raw)
+        and ref["media_type"] == "application/json"
+        and ref["encoding"] == "utf-8",
+        "CAS_CORRUPT",
+        "$.context.effect_ledger",
+    )
+    _require(
+        ledger["task_id"] == snapshot["task_id"],
+        "GATE_TERMINAL_EFFECT_LEDGER_TASK_INVALID",
+        "$.context.effect_ledger.task_id",
+    )
+    counts = ledger["state_counts"]
+    _require(
+        counts["prepared"] == counts["dispatched"] == 0,
+        "GATE_TERMINAL_ACTIVE_EFFECTS",
+        "$.context.effect_ledger.state_counts",
+    )
+    if counts["unknown"]:
+        before_deadline = (
+            _timestamp_millis(snapshot["trusted_wall_time_at"])
+            < _timestamp_millis(snapshot["absolute_deadline_at"])
+        )
+        return "unknown_pre_deadline" if before_deadline else "unknown_post_deadline"
+    return "committed" if counts["committed"] else "none"
+
+
 def evaluate_success_gate(
     input_snapshot: object, context: object
 ) -> dict[str, object]:
@@ -500,7 +536,7 @@ def evaluate_terminalization_gate(
             "input_snapshot_ref", "profile", "gate_mode", "cancel_state",
             "effect_state", "cause_family", "delivery_state",
             "source_availability", "evidence_availability",
-            "effect_availability", "predicate_results",
+            "effect_availability", "effect_ledger", "predicate_results",
         },
     )
     snapshot, reference = _gate_snapshot_and_ref(
@@ -521,6 +557,12 @@ def evaluate_terminalization_gate(
         evaluation["effect_availability"] == expected_effect,
         "GATE_TERMINAL_AVAILABILITY_MISMATCH",
         "$.context.effect_availability",
+    )
+    _require(
+        evaluation["effect_state"]
+        == _gate_effect_state(snapshot, evaluation["effect_ledger"]),
+        "GATE_TERMINAL_EFFECT_STATE_INVALID",
+        "$.context.effect_state",
     )
     results = evaluation["predicate_results"]
     passed = _gate_passed(results)

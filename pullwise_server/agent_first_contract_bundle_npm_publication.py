@@ -65,26 +65,32 @@ function ruleBudgetSummary(value) {
 }
 
 function ruleEffectLedgerSnapshot(value) {
-  verifyPublicationDigestSync("effect-ledger-snapshot/v1", value);
-  if (value.watermark !== value.rows.length) {
-    fail("EFFECT_LEDGER_WATERMARK_INVALID", "$.watermark");
+  verifyPublicationDigestSync('effect-ledger-snapshot/v1', value);
+  const rows = value.rows;
+  const actualCounts = {
+    prepared: 0,
+    dispatched: 0,
+    committed: 0,
+    not_applied: 0,
+    rejected: 0,
+    unknown: 0,
+  };
+  for (const row of rows) {
+    actualCounts[row.state.toLowerCase()] += 1;
   }
-  const effectIds = value.rows.map((item) => item.effect_id);
-  if (new Set(effectIds).size !== effectIds.length ||
-      canonicalString(effectIds) !== canonicalString([...effectIds].sort())) {
-    fail("EFFECT_LEDGER_ROW_ORDER_INVALID", "$.rows");
+  if (value.watermark !== rows.length) {
+    fail('EFFECT_LEDGER_WATERMARK_INVALID', '$.watermark');
   }
-  const expected = Object.fromEntries(
-    Object.keys(value.state_counts).map((state) => [
-      state,
-      value.rows.filter((item) => item.state === state.toUpperCase()).length,
-    ]),
+  if (JSON.stringify(value.state_counts) !== JSON.stringify(actualCounts)) {
+    fail('EFFECT_LEDGER_STATE_COUNTS_INVALID', '$.state_counts');
+  }
+  const orderedRows = [...rows].sort((left, right) =>
+    left.effect_id.localeCompare(right.effect_id),
   );
-  if (canonicalString(value.state_counts) !== canonicalString(expected)) {
-    fail("EFFECT_LEDGER_STATE_COUNTS_INVALID", "$.state_counts");
+  if (JSON.stringify(rows) !== JSON.stringify(orderedRows)) {
+    fail('EFFECT_LEDGER_ROW_ORDER_INVALID', '$.rows');
   }
 }
-
 function publicationRefKey(value) {
   return [value.content_schema_id, value.artifact_id, value.sha256];
 }
