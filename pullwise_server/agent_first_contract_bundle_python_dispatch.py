@@ -53,6 +53,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "requirement_id_source_kind_match": _task_control_rule_requirement_id,
     "risk_ceiling_current_mvp": _task_control_rule_policy_mvp,
     "root_and_origin_sets_sorted_unique": _task_control_rule_policy_roots,
+    "server_authority_envelope": _rule_server_authority_envelope,
     "sorted_unique_active_requirement_ids": _task_control_rule_ledger_active,
     "sorted_unique_charter_sets": _task_control_rule_charter_sets,
     "sorted_unique_requirement_links": _task_control_rule_requirement_links,

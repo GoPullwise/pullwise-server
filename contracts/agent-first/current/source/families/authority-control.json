@@ -346,6 +346,7 @@
         "field": "authority_digest",
         "domain": "pullwise:server-authority-envelope:v1"
       },
+      "x-pullwise-semantics": {"document_rules":["server_authority_envelope"],"contextual_helpers":[]},
       "required": [
         "schema_id",
         "package",

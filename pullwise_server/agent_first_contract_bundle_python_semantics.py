@@ -130,14 +130,6 @@ def _validate_legacy_semantics(schema_id: str, value: dict[str, object]) -> None
     elif schema_id == "elapsed-budget-settlement/v1":
         if value["consumed_calls"] + value["released_calls"] != 1:
             _fail("BUDGET_CALL_CONSERVATION_INVALID")
-    elif schema_id == "server-authority-envelope/v1":
-        grant = verify_document_digest("agent-worker-grant/v1", value["grant"])
-        deadline_fields = ("absolute_deadline_at", "terminalization_reserve_ms")
-        if any(value[key] != grant[key] for key in deadline_fields):
-            _fail(
-                "AUTHORITY_GRANT_BINDING_MISMATCH",
-                code="AUTHORITY_INPUT_UNTRUSTED",
-            )
     elif schema_id == "agent-claim-abandon-response/v1":
         grant = verify_document_digest("agent-worker-grant/v1", value["grant"])
         exact = ("package", "task_id", "attempt_id", "session_id", "owner_id",

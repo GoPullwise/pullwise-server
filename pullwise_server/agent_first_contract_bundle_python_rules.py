@@ -50,6 +50,17 @@ def _verify_embedded_digest(schema_id: str, value: dict[str, object]) -> None:
     )
 
 
+def _rule_server_authority_envelope(value: dict[str, object]) -> None:
+    grant = value["grant"]
+    _verify_embedded_digest("agent-worker-grant/v1", grant)
+    deadline_fields = ("absolute_deadline_at", "terminalization_reserve_ms")
+    _require(
+        all(value[field] == grant[field] for field in deadline_fields),
+        "AUTHORITY_GRANT_BINDING_MISMATCH",
+        code="AUTHORITY_INPUT_UNTRUSTED",
+    )
+
+
 def _decode_canonical_base64(value: str, path: str) -> bytes:
     try:
         raw = base64.b64decode(value, validate=True)

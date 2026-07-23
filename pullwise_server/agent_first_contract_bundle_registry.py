@@ -88,6 +88,7 @@ DOCUMENT_RULE_IDS = frozenset(
         "requirement_id_source_kind_match",
         "risk_ceiling_current_mvp",
         "root_and_origin_sets_sorted_unique",
+        "server_authority_envelope",
         "sorted_unique_active_requirement_ids",
         "sorted_unique_charter_sets",
         "sorted_unique_requirement_links",
