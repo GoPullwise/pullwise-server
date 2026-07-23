@@ -12,7 +12,7 @@
         "contextual_helpers": ["verify_gate_input_snapshot_context"]
       },
       "required": [
-        "schema_id", "task_id", "attempt_id", "native_epoch", "owner_id", "owner_epoch", "task_version", "lifecycle", "desired_state",
+        "schema_id", "task_id", "attempt_id", "native_epoch", "owner_id", "owner_epoch", "task_version", "deletion_version", "lifecycle", "desired_state",
         "lease_id", "outer_lease_expires_at", "outer_lease_grace_expires_at", "authoritative_cancel_received", "absolute_deadline_at",
         "trusted_wall_time_at", "monotonic_deadline_remaining_ms", "terminal_budget_reserved_ms", "predicate_registry_digest",
         "request_ref", "policy_ref", "requirement_ledger_ref", "completion_proposal_ref", "quality_policy_plan_ref", "original_source_ref",
@@ -29,6 +29,7 @@
         "owner_id": {"type":"string","pattern":"^owner_[0-9a-f]{32}$"},
         "owner_epoch": {"type":"integer","minimum":1,"maximum":9007199254740991},
         "task_version": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "deletion_version": {"type":"integer","minimum":0,"maximum":9007199254740991},
         "lifecycle": {"const":"FINALIZING"},
         "desired_state": {"const":"RUN"},
         "lease_id": {"type":"string","minLength":1,"maxLength":160},
@@ -215,7 +216,7 @@
       "document": {
         "schema_id":"terminalization-input-snapshot/v1", "task_id":"task_11111111111111111111111111111111",
         "attempt_id":"attempt_11111111111111111111111111111111", "native_epoch":1,
-        "owner_id":"owner_11111111111111111111111111111111", "owner_epoch":1, "task_version":8,
+        "owner_id":"owner_11111111111111111111111111111111", "owner_epoch":1, "task_version":8, "deletion_version":4,
         "lifecycle":"FINALIZING", "desired_state":"RUN", "lease_id":"legacy-lease-1",
         "outer_lease_expires_at":"2026-01-01T00:10:00.000Z", "outer_lease_grace_expires_at":"2026-01-01T00:11:00.000Z",
         "absolute_deadline_at":"2026-01-01T00:09:00.000Z", "trusted_wall_time_at":"2026-01-01T00:09:00.000Z",
@@ -246,7 +247,7 @@
           "content_schema_id":"pre-gate-evidence-closure-manifest/v1","sha256":"1010101010101010101010101010101010101010101010101010101010101010","size_bytes":1,
             "media_type":"application/json","encoding":"utf-8"},
         "pre_gate_closure_digest":"c8e013a3204f3c633c0b237f651f143625f7fd0e64b7bebf1733cf44127a0fca",
-        "input_digest":"80b5e32d7eb63014b18705a2f4764d0a1a5161f6234ebfd8caa5ee695c3a68b0"
+        "input_digest":"f9e3b59f6a9d5c5c5c9adcb184be7dd786b8a3ccdf56a2749e9cff1ef31147a8"
       },
       "expected_code": null
     },
@@ -311,7 +312,7 @@
       "document": {
         "schema_id":"terminalization-input-snapshot/v1", "task_id":"task_11111111111111111111111111111111",
         "attempt_id":"attempt_11111111111111111111111111111111", "native_epoch":1,
-        "owner_id":"owner_11111111111111111111111111111111", "owner_epoch":1, "task_version":8,
+        "owner_id":"owner_11111111111111111111111111111111", "owner_epoch":1, "task_version":8, "deletion_version":4,
         "lifecycle":"FINALIZING", "desired_state":"RUN", "lease_id":"legacy-lease-1",
         "outer_lease_expires_at":"2026-01-01T00:10:00.000Z", "outer_lease_grace_expires_at":"2026-01-01T00:11:00.000Z",
         "absolute_deadline_at":"2026-01-01T00:09:00.000Z", "trusted_wall_time_at":"2026-01-01T00:09:00.000Z",
@@ -342,7 +343,7 @@
           "content_schema_id":"pre-gate-evidence-closure-manifest/v1","sha256":"1010101010101010101010101010101010101010101010101010101010101010","size_bytes":1,
             "media_type":"application/json","encoding":"utf-8"},
         "pre_gate_closure_digest":"c8e013a3204f3c633c0b237f651f143625f7fd0e64b7bebf1733cf44127a0fca",
-        "input_digest":"80b5e32d7eb63014b18705a2f4764d0a1a5161f6234ebfd8caa5ee695c3a68b0"
+        "input_digest":"f9e3b59f6a9d5c5c5c9adcb184be7dd786b8a3ccdf56a2749e9cff1ef31147a8"
       },
       "expected_code": null
     },
@@ -410,7 +411,7 @@
       "document": {
         "schema_id":"terminalization-input-snapshot/v1", "task_id":"task_11111111111111111111111111111111",
         "attempt_id":"attempt_11111111111111111111111111111111", "native_epoch":1,
-        "owner_id":"owner_11111111111111111111111111111111", "owner_epoch":1, "task_version":8,
+        "owner_id":"owner_11111111111111111111111111111111", "owner_epoch":1, "task_version":8, "deletion_version":4,
         "lifecycle":"FINALIZING", "desired_state":"RUN", "lease_id":"legacy-lease-1",
         "outer_lease_expires_at":"2026-01-01T00:10:00.000Z", "outer_lease_grace_expires_at":"2026-01-01T00:11:00.000Z",
         "absolute_deadline_at":"2026-01-01T00:09:00.000Z", "trusted_wall_time_at":"2026-01-01T00:09:00.000Z",
@@ -440,7 +441,7 @@
           "content_schema_id":"pre-gate-evidence-closure-manifest/v1","sha256":"1010101010101010101010101010101010101010101010101010101010101010","size_bytes":1,
             "media_type":"application/json","encoding":"utf-8"},
         "pre_gate_closure_digest":"c8e013a3204f3c633c0b237f651f143625f7fd0e64b7bebf1733cf44127a0fca",
-        "input_digest":"8c85363a3ecd8a25e86a92e030fbd2ab5a3ada716a2ad132fff6a38b941568d6"
+        "input_digest":"cf78b2d48c95942913e3d98470b748f116d429002f48cd85d667cede79585ac4"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

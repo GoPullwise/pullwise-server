@@ -72,6 +72,9 @@ const GATE_PREDICATE_ENTRIES = [
 ];
 
 const GATE_TERMINAL_REASONS = {
+  COMPLETED: new Set(["SUCCESS"]),
+  COMPLETED_WITH_WAIVERS: new Set(["SUCCESS_WITH_WAIVERS"]),
+  NO_CHANGE_NEEDED: new Set(["NO_CHANGE_NEEDED"]),
   PARTIAL: new Set(["BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "DEADLINE_REACHED",
     "INTERACTION_UNAVAILABLE", "SAFE_PARTIAL_DELIVERY", "VERIFICATION_INCOMPLETE"]),
   BLOCKED: new Set(["APPROVAL_REQUIRED", "CAPABILITY_UNAVAILABLE", "ENVIRONMENT_UNAVAILABLE",
@@ -80,7 +83,122 @@ const GATE_TERMINAL_REASONS = {
     "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED",
     "RUNTIME_FAILURE", "SOURCE_MUTATION_FORBIDDEN", "STORAGE_FAILURE"]),
   CANCELLED: new Set(["LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"]),
+  CANCELLED_WITH_EFFECTS: new Set(["LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"]),
+  TERMINATED_WITH_UNKNOWN_EFFECTS: new Set(["DEADLINE_REACHED"]),
 };
+
+const GATE_SELECTOR_AXES = Object.freeze({
+  profile: ["task_result", "tombstone_pre_fence"],
+  gate_mode: ["none", "completed", "completed_with_waivers", "no_change_needed"],
+  cancel_state: ["none", "user_cancelled", "server_cancelled", "lease_cancelled"],
+  effect_state: ["none", "committed", "unknown_pre_deadline", "unknown_post_deadline"],
+  cause_family: [
+    "none", "approval_required", "input_required", "capability_unavailable",
+    "environment_unavailable", "interaction_unavailable", "policy_unsupported",
+    "policy_invariant_broken", "budget_exhausted", "deadline_reached",
+    "verification_incomplete", "contract_invalid", "protocol_failure",
+    "quality_gate_failed", "runtime_failure", "storage_failure", "source_mutation_forbidden",
+  ],
+  delivery_state: [
+    "none", "safe_complete", "safe_complete_with_waivers", "safe_no_change", "safe_partial",
+  ],
+});
+const GATE_CANCEL_REASONS = Object.freeze({
+  user_cancelled: "USER_CANCELLED", server_cancelled: "SERVER_CANCELLED",
+  lease_cancelled: "LEASE_CANCELLED",
+});
+const GATE_SUCCESS_SELECTIONS = Object.freeze({
+  completed: ["COMPLETED", "SUCCESS", "safe_complete"],
+  completed_with_waivers: [
+    "COMPLETED_WITH_WAIVERS", "SUCCESS_WITH_WAIVERS", "safe_complete_with_waivers",
+  ],
+  no_change_needed: ["NO_CHANGE_NEEDED", "NO_CHANGE_NEEDED", "safe_no_change"],
+});
+const GATE_PARTIAL_REASONS = Object.freeze({
+  none: "SAFE_PARTIAL_DELIVERY", budget_exhausted: "BUDGET_EXHAUSTED",
+  capability_unavailable: "CAPABILITY_UNAVAILABLE", deadline_reached: "DEADLINE_REACHED",
+  interaction_unavailable: "INTERACTION_UNAVAILABLE",
+  verification_incomplete: "VERIFICATION_INCOMPLETE",
+});
+const GATE_BLOCKED_REASONS = Object.freeze(Object.fromEntries([
+  "approval_required", "capability_unavailable", "environment_unavailable",
+  "input_required", "interaction_unavailable", "policy_invariant_broken", "policy_unsupported",
+].map((name) => [name, name.toUpperCase()])));
+const GATE_FAILED_REASONS = Object.freeze(Object.fromEntries([
+  "budget_exhausted", "contract_invalid", "deadline_reached", "policy_invariant_broken",
+  "policy_unsupported", "protocol_failure", "quality_gate_failed", "runtime_failure",
+  "source_mutation_forbidden", "storage_failure",
+].map((name) => [name, name.toUpperCase()])));
+
+function terminalSelection(axes) {
+  if (Object.entries(GATE_SELECTOR_AXES).some(
+    ([field, allowed]) => !allowed.includes(axes[field]),
+  )) fail("GATE_TERMINAL_SELECTOR_COMBINATION_INVALID", "$.context");
+  if (axes.profile === "tombstone_pre_fence") {
+    fail("GATE_TERMINAL_SELECTOR_TOMBSTONE_PRE_FENCE", "$.context.profile");
+  }
+  const {gate_mode: gateMode, cancel_state: cancelState, effect_state: effectState,
+    cause_family: causeFamily, delivery_state: deliveryState} = axes;
+  const invalid = () => fail("GATE_TERMINAL_SELECTOR_COMBINATION_INVALID", "$.context");
+  if (["unknown_pre_deadline", "unknown_post_deadline"].includes(effectState)) {
+    if (gateMode !== "none" || deliveryState !== "none") invalid();
+    if (effectState === "unknown_pre_deadline") {
+      return {selected_lifecycle: "RECONCILING", selected_outcome: null, selected_reason: null};
+    }
+    return {selected_lifecycle: "TERMINAL", selected_outcome: "TERMINATED_WITH_UNKNOWN_EFFECTS",
+      selected_reason: "DEADLINE_REACHED"};
+  }
+  if (cancelState !== "none") {
+    if (gateMode !== "none" || deliveryState !== "none" ||
+        !["none", "committed"].includes(effectState) || causeFamily !== "none") invalid();
+    return {selected_lifecycle: "TERMINAL",
+      selected_outcome: effectState === "committed" ? "CANCELLED_WITH_EFFECTS" : "CANCELLED",
+      selected_reason: GATE_CANCEL_REASONS[cancelState]};
+  }
+  if (gateMode !== "none") {
+    const [outcome, reason, expectedDelivery] = GATE_SUCCESS_SELECTIONS[gateMode];
+    const validEffect = gateMode === "no_change_needed"
+      ? effectState === "none" : ["none", "committed"].includes(effectState);
+    if (causeFamily !== "none" || deliveryState !== expectedDelivery || !validEffect) invalid();
+    return {selected_lifecycle: "TERMINAL", selected_outcome: outcome, selected_reason: reason};
+  }
+  if (deliveryState === "safe_partial") {
+    if (effectState !== "committed" || !(causeFamily in GATE_PARTIAL_REASONS)) invalid();
+    return {selected_lifecycle: "TERMINAL", selected_outcome: "PARTIAL",
+      selected_reason: GATE_PARTIAL_REASONS[causeFamily]};
+  }
+  if (causeFamily in GATE_BLOCKED_REASONS) {
+    if (effectState !== "none" || deliveryState !== "none") invalid();
+    return {selected_lifecycle: "TERMINAL", selected_outcome: "BLOCKED",
+      selected_reason: GATE_BLOCKED_REASONS[causeFamily]};
+  }
+  if (causeFamily in GATE_FAILED_REASONS) {
+    if (!["none", "committed"].includes(effectState) || deliveryState !== "none") invalid();
+    return {selected_lifecycle: "TERMINAL", selected_outcome: "FAILED",
+      selected_reason: GATE_FAILED_REASONS[causeFamily]};
+  }
+  return invalid();
+}
+
+function terminalSelectorProjection(value) {
+  const fields = [
+    "input_digest", "predicate_registry_digest", "task_id", "task_version",
+    "deletion_version", "profile", "gate_mode", "cancel_state", "effect_state",
+    "cause_family", "delivery_state", "authoritative_fact_refs", "source_availability",
+    "evidence_availability", "effect_availability", "predicate_results",
+    "selected_lifecycle", "selected_outcome", "selected_reason",
+  ];
+  return Object.fromEntries(fields.map((field) => [field, value[field]]));
+}
+
+function terminalSelectorDigest(value) {
+  const domain = encoder.encode("pullwise:terminal-selector-input:v1");
+  const document = canonicalDocumentBytes(terminalSelectorProjection(value));
+  const input = new Uint8Array(domain.length + 1 + document.length);
+  input.set(domain);
+  input.set(document, domain.length + 1);
+  return sha256Sync(input);
+}
 
 function gateVerifyDigest(schemaId, value, field) {
   const presented = value[field];
@@ -161,7 +279,14 @@ function ruleGateDecision(value) {
     fail("GATE_DECISION_PASS_INVALID", "$.passed");
   }
   if (value.decision_kind === "terminalization") {
-    if (!GATE_TERMINAL_REASONS[value.selected_outcome].has(value.selected_reason)) {
+    const selected = terminalSelection(Object.fromEntries(
+      Object.keys(GATE_SELECTOR_AXES).map((field) => [field, value[field]]),
+    ));
+    if (canonicalString(selected) !== canonicalString({
+      selected_lifecycle: value.selected_lifecycle,
+      selected_outcome: value.selected_outcome,
+      selected_reason: value.selected_reason,
+    })) {
       fail("GATE_TERMINAL_OUTCOME_INVALID", "$.selected_reason");
     }
     verifyContentRefSet(value.authoritative_fact_refs);
@@ -170,6 +295,9 @@ function ruleGateDecision(value) {
     const unique = new Set(keys.map((item) => JSON.stringify(item))).size === keys.length;
     if (!unique || canonicalString(keys) !== canonicalString(ordered)) {
       fail("GATE_TERMINAL_FACT_ORDER_INVALID", "$.authoritative_fact_refs");
+    }
+    if (value.selector_input_digest !== terminalSelectorDigest(value)) {
+      fail("GATE_TERMINAL_SELECTOR_DIGEST_INVALID", "$.selector_input_digest");
     }
   }
   gateVerifyDigest("gate-decision/v1", value, "decision_digest");
@@ -231,7 +359,8 @@ export async function evaluateSuccessGate(inputSnapshot, context) {
 
 export async function evaluateTerminalizationGate(inputSnapshot, context) {
   const evaluation = gateContext(context, [
-    "input_snapshot_ref", "selected_outcome", "selected_reason",
+    "input_snapshot_ref", "profile", "gate_mode", "cancel_state", "effect_state",
+    "cause_family", "delivery_state",
     "source_availability", "evidence_availability", "effect_availability",
     "predicate_results",
   ]);
@@ -248,21 +377,30 @@ export async function evaluateTerminalizationGate(inputSnapshot, context) {
   }
   const results = evaluation.predicate_results;
   const passed = gatePassed(results);
-  return sealDocument("gate-decision/v1", {
+  const axes = Object.fromEntries(
+    Object.keys(GATE_SELECTOR_AXES).map((field) => [field, evaluation[field]]),
+  );
+  const selected = terminalSelection(axes);
+  const decision = {
     schema_id: "gate-decision/v1",
     decision_kind: "terminalization",
     input_snapshot_ref: reference,
     input_digest: snapshot.input_digest,
     predicate_registry_digest: snapshot.predicate_registry_digest,
-    selected_outcome: evaluation.selected_outcome,
-    selected_reason: evaluation.selected_reason,
+    task_id: snapshot.task_id,
+    task_version: snapshot.task_version,
+    deletion_version: snapshot.deletion_version,
+    ...axes,
+    ...selected,
     authoritative_fact_refs: snapshot.terminalization_fact_refs,
     source_availability: evaluation.source_availability,
     evidence_availability: evaluation.evidence_availability,
     effect_availability: evaluation.effect_availability,
     passed,
     predicate_results: results,
-  });
+  };
+  decision.selector_input_digest = terminalSelectorDigest(decision);
+  return sealDocument("gate-decision/v1", decision);
 }
 '''
 

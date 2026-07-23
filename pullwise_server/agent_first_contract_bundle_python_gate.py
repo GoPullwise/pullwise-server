@@ -132,6 +132,9 @@ _GATE_PREDICATE_ENTRIES = [
 ]
 
 _GATE_TERMINAL_REASONS = {
+    "COMPLETED": {"SUCCESS"},
+    "COMPLETED_WITH_WAIVERS": {"SUCCESS_WITH_WAIVERS"},
+    "NO_CHANGE_NEEDED": {"NO_CHANGE_NEEDED"},
     "PARTIAL": {
         "BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "DEADLINE_REACHED",
         "INTERACTION_UNAVAILABLE", "SAFE_PARTIAL_DELIVERY", "VERIFICATION_INCOMPLETE",
@@ -148,7 +151,147 @@ _GATE_TERMINAL_REASONS = {
         "STORAGE_FAILURE",
     },
     "CANCELLED": {"LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"},
+    "CANCELLED_WITH_EFFECTS": {
+        "LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED",
+    },
+    "TERMINATED_WITH_UNKNOWN_EFFECTS": {"DEADLINE_REACHED"},
 }
+
+_GATE_SELECTOR_AXES = {
+    "profile": {"task_result", "tombstone_pre_fence"},
+    "gate_mode": {"none", "completed", "completed_with_waivers", "no_change_needed"},
+    "cancel_state": {"none", "user_cancelled", "server_cancelled", "lease_cancelled"},
+    "effect_state": {"none", "committed", "unknown_pre_deadline", "unknown_post_deadline"},
+    "cause_family": {
+        "none", "approval_required", "input_required", "capability_unavailable",
+        "environment_unavailable", "interaction_unavailable", "policy_unsupported",
+        "policy_invariant_broken", "budget_exhausted", "deadline_reached",
+        "verification_incomplete", "contract_invalid", "protocol_failure",
+        "quality_gate_failed", "runtime_failure", "storage_failure",
+        "source_mutation_forbidden",
+    },
+    "delivery_state": {
+        "none", "safe_complete", "safe_complete_with_waivers",
+        "safe_no_change", "safe_partial",
+    },
+}
+_GATE_CANCEL_REASONS = {
+    "user_cancelled": "USER_CANCELLED",
+    "server_cancelled": "SERVER_CANCELLED",
+    "lease_cancelled": "LEASE_CANCELLED",
+}
+_GATE_SUCCESS_SELECTIONS = {
+    "completed": ("COMPLETED", "SUCCESS", "safe_complete"),
+    "completed_with_waivers": (
+        "COMPLETED_WITH_WAIVERS", "SUCCESS_WITH_WAIVERS",
+        "safe_complete_with_waivers",
+    ),
+    "no_change_needed": ("NO_CHANGE_NEEDED", "NO_CHANGE_NEEDED", "safe_no_change"),
+}
+_GATE_PARTIAL_REASONS = {
+    "none": "SAFE_PARTIAL_DELIVERY",
+    "budget_exhausted": "BUDGET_EXHAUSTED",
+    "capability_unavailable": "CAPABILITY_UNAVAILABLE",
+    "deadline_reached": "DEADLINE_REACHED",
+    "interaction_unavailable": "INTERACTION_UNAVAILABLE",
+    "verification_incomplete": "VERIFICATION_INCOMPLETE",
+}
+_GATE_BLOCKED_REASONS = {
+    name: name.upper()
+    for name in {
+        "approval_required", "capability_unavailable", "environment_unavailable",
+        "input_required", "interaction_unavailable", "policy_invariant_broken",
+        "policy_unsupported",
+    }
+}
+_GATE_FAILED_REASONS = {
+    name: name.upper()
+    for name in {
+        "budget_exhausted", "contract_invalid", "deadline_reached",
+        "policy_invariant_broken", "policy_unsupported", "protocol_failure",
+        "quality_gate_failed", "runtime_failure", "source_mutation_forbidden",
+        "storage_failure",
+    }
+}
+
+
+def _terminal_selection(axes: dict[str, object]) -> tuple[str, str | None, str | None]:
+    _require(
+        all(axes.get(field) in allowed for field, allowed in _GATE_SELECTOR_AXES.items()),
+        "GATE_TERMINAL_SELECTOR_COMBINATION_INVALID",
+        "$.context",
+    )
+    if axes["profile"] == "tombstone_pre_fence":
+        _fail("GATE_TERMINAL_SELECTOR_TOMBSTONE_PRE_FENCE", "$.context.profile")
+    gate_mode = axes["gate_mode"]
+    cancel_state = axes["cancel_state"]
+    effect_state = axes["effect_state"]
+    cause_family = axes["cause_family"]
+    delivery_state = axes["delivery_state"]
+    valid = "GATE_TERMINAL_SELECTOR_COMBINATION_INVALID"
+    if effect_state in {"unknown_pre_deadline", "unknown_post_deadline"}:
+        _require(gate_mode == "none" and delivery_state == "none", valid, "$.context")
+        if effect_state == "unknown_pre_deadline":
+            return "RECONCILING", None, None
+        return "TERMINAL", "TERMINATED_WITH_UNKNOWN_EFFECTS", "DEADLINE_REACHED"
+    if cancel_state != "none":
+        _require(
+            gate_mode == "none" and delivery_state == "none"
+            and effect_state in {"none", "committed"} and cause_family == "none",
+            valid,
+            "$.context",
+        )
+        outcome = "CANCELLED_WITH_EFFECTS" if effect_state == "committed" else "CANCELLED"
+        return "TERMINAL", outcome, _GATE_CANCEL_REASONS[cancel_state]
+    if gate_mode != "none":
+        outcome, reason, expected_delivery = _GATE_SUCCESS_SELECTIONS[gate_mode]
+        _require(
+            cause_family == "none" and delivery_state == expected_delivery
+            and (
+                effect_state == "none"
+                if gate_mode == "no_change_needed"
+                else effect_state in {"none", "committed"}
+            ),
+            valid,
+            "$.context",
+        )
+        return "TERMINAL", outcome, reason
+    if delivery_state == "safe_partial":
+        _require(
+            effect_state == "committed" and cause_family in _GATE_PARTIAL_REASONS,
+            valid,
+            "$.context",
+        )
+        return "TERMINAL", "PARTIAL", _GATE_PARTIAL_REASONS[cause_family]
+    if cause_family in _GATE_BLOCKED_REASONS:
+        _require(effect_state == "none" and delivery_state == "none", valid, "$.context")
+        return "TERMINAL", "BLOCKED", _GATE_BLOCKED_REASONS[cause_family]
+    if cause_family in _GATE_FAILED_REASONS:
+        _require(
+            effect_state in {"none", "committed"} and delivery_state == "none",
+            valid,
+            "$.context",
+        )
+        return "TERMINAL", "FAILED", _GATE_FAILED_REASONS[cause_family]
+    _fail(valid, "$.context")
+
+
+def _terminal_selector_projection(value: dict[str, object]) -> dict[str, object]:
+    fields = (
+        "input_digest", "predicate_registry_digest", "task_id", "task_version",
+        "deletion_version", "profile", "gate_mode", "cancel_state", "effect_state",
+        "cause_family", "delivery_state", "authoritative_fact_refs",
+        "source_availability", "evidence_availability", "effect_availability",
+        "predicate_results", "selected_lifecycle", "selected_outcome", "selected_reason",
+    )
+    return {field: value[field] for field in fields}
+
+
+def _terminal_selector_digest(value: dict[str, object]) -> str:
+    return hashlib.sha256(
+        b"pullwise:terminal-selector-input:v1\0"
+        + canonical_document_bytes(_terminal_selector_projection(value))
+    ).hexdigest()
 
 
 def _gate_verify_digest(
@@ -245,9 +388,14 @@ def _rule_gate_decision(value: dict[str, object]) -> None:
         "$.passed",
     )
     if value["decision_kind"] == "terminalization":
+        selected = _terminal_selection(
+            {field: value[field] for field in _GATE_SELECTOR_AXES}
+        )
         _require(
-            value["selected_reason"]
-            in _GATE_TERMINAL_REASONS[value["selected_outcome"]],
+            selected == (
+                value["selected_lifecycle"], value["selected_outcome"],
+                value["selected_reason"],
+            ),
             "GATE_TERMINAL_OUTCOME_INVALID",
             "$.selected_reason",
         )
@@ -258,6 +406,11 @@ def _rule_gate_decision(value: dict[str, object]) -> None:
             keys == sorted(set(keys)),
             "GATE_TERMINAL_FACT_ORDER_INVALID",
             "$.authoritative_fact_refs",
+        )
+        _require(
+            value["selector_input_digest"] == _terminal_selector_digest(value),
+            "GATE_TERMINAL_SELECTOR_DIGEST_INVALID",
+            "$.selector_input_digest",
         )
     _gate_verify_digest("gate-decision/v1", value, "decision_digest")
 
@@ -344,7 +497,8 @@ def evaluate_terminalization_gate(
     evaluation = _gate_context(
         context,
         {
-            "input_snapshot_ref", "selected_outcome", "selected_reason",
+            "input_snapshot_ref", "profile", "gate_mode", "cancel_state",
+            "effect_state", "cause_family", "delivery_state",
             "source_availability", "evidence_availability",
             "effect_availability", "predicate_results",
         },
@@ -370,24 +524,30 @@ def evaluate_terminalization_gate(
     )
     results = evaluation["predicate_results"]
     passed = _gate_passed(results)
-    return seal_document(
-        "gate-decision/v1",
-        {
-            "schema_id": "gate-decision/v1",
-            "decision_kind": "terminalization",
-            "input_snapshot_ref": reference,
-            "input_digest": snapshot["input_digest"],
-            "predicate_registry_digest": snapshot["predicate_registry_digest"],
-            "selected_outcome": evaluation["selected_outcome"],
-            "selected_reason": evaluation["selected_reason"],
-            "authoritative_fact_refs": snapshot["terminalization_fact_refs"],
-            "source_availability": evaluation["source_availability"],
-            "evidence_availability": evaluation["evidence_availability"],
-            "effect_availability": evaluation["effect_availability"],
-            "passed": passed,
-            "predicate_results": results,
-        },
-    )
+    axes = {field: evaluation[field] for field in _GATE_SELECTOR_AXES}
+    lifecycle, outcome, reason = _terminal_selection(axes)
+    decision = {
+        "schema_id": "gate-decision/v1",
+        "decision_kind": "terminalization",
+        "input_snapshot_ref": reference,
+        "input_digest": snapshot["input_digest"],
+        "predicate_registry_digest": snapshot["predicate_registry_digest"],
+        "task_id": snapshot["task_id"],
+        "task_version": snapshot["task_version"],
+        "deletion_version": snapshot["deletion_version"],
+        **axes,
+        "selected_lifecycle": lifecycle,
+        "selected_outcome": outcome,
+        "selected_reason": reason,
+        "authoritative_fact_refs": snapshot["terminalization_fact_refs"],
+        "source_availability": evaluation["source_availability"],
+        "evidence_availability": evaluation["evidence_availability"],
+        "effect_availability": evaluation["effect_availability"],
+        "passed": passed,
+        "predicate_results": results,
+    }
+    decision["selector_input_digest"] = _terminal_selector_digest(decision)
+    return seal_document("gate-decision/v1", decision)
 '''
 
 
