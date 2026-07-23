@@ -31,7 +31,6 @@ _PRE_GATE_ROOT_FIELDS = (
 _PRE_GATE_ROOT_KEYS = {
     "schema_id",
     "task_id",
-    "outcome_candidate",
     "root_set_digest",
     *_PRE_GATE_ROOT_FIELDS,
 }
@@ -96,59 +95,6 @@ def _rule_pre_gate_root_set(value: dict[str, object]) -> None:
             "PRE_GATE_REQUIRED_ROOT_UNAVAILABLE",
             f"$.{field}",
         )
-
-    outcome = value["outcome_candidate"]
-    if outcome in _PRE_GATE_SUCCESS_OUTCOMES:
-        for field in _PRE_GATE_SUCCESS_AVAILABLE:
-            _require(
-                _availability(value[field]) == "available",
-                "PRE_GATE_SUCCESS_ROOT_UNAVAILABLE",
-                f"$.{field}",
-            )
-        for field in ("verifier_inputs", "verifier_work"):
-            _require(
-                bool(value[field])
-                and all(_availability(item) == "available" for item in value[field]),
-                "PRE_GATE_SUCCESS_VERIFICATION_UNAVAILABLE",
-                f"$.{field}",
-            )
-    elif outcome == "PARTIAL":
-        for field in _PRE_GATE_PARTIAL_AVAILABLE:
-            _require(
-                _availability(value[field]) == "available",
-                "PRE_GATE_PARTIAL_ROOT_UNAVAILABLE",
-                f"$.{field}",
-            )
-        _require(
-            _availability(value["attestations"]) in {"available", "unavailable"},
-            "PRE_GATE_PARTIAL_ATTESTATION_AVAILABILITY_INVALID",
-            "$.attestations",
-        )
-    elif outcome in _PRE_GATE_TERMINAL_OUTCOMES:
-        facts = value["termination_facts"]
-        _require(
-            bool(facts)
-            and all(_availability(item) == "available" for item in facts),
-            "PRE_GATE_TERMINATION_FACT_REQUIRED",
-            "$.termination_facts",
-        )
-        for field in ("proposal", "attestations", "report"):
-            _require(
-                _availability(value[field]) in {"not_applicable", "unavailable"},
-                "PRE_GATE_TERMINAL_AVAILABILITY_INVALID",
-                f"$.{field}",
-            )
-        for field in (
-            "original_source",
-            "final_source",
-            "final_observation_manifest",
-        ):
-            _require(
-                _availability(value[field]) in {"available", "unavailable"},
-                "PRE_GATE_TERMINAL_AVAILABILITY_INVALID",
-                f"$.{field}",
-            )
-
 
 def _rule_pre_gate_evidence_closure_manifest(
     value: dict[str, object],
@@ -220,20 +166,13 @@ def _pre_gate_available_root_refs(
 def verify_pre_gate_root_set_context(
     root_set: object,
     task_id: str,
-    outcome_candidate: str,
 ) -> dict[str, object]:
-    """Verify a root set against direct task and outcome context."""
+    """Verify an outcome-neutral root set against direct task context."""
     validated = verify_document_digest("pre-gate-root-set/v1", root_set)
     _require(
         isinstance(task_id, str) and validated["task_id"] == task_id,
         "PRE_GATE_TASK_BINDING_INVALID",
         "$.task_id",
-    )
-    _require(
-        isinstance(outcome_candidate, str)
-        and validated["outcome_candidate"] == outcome_candidate,
-        "PRE_GATE_OUTCOME_BINDING_INVALID",
-        "$.outcome_candidate",
     )
     return validated
 

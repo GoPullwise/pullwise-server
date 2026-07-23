@@ -150,15 +150,37 @@ export async function verifyGateInputSnapshotContext(
   snapshot,
   rootSet,
   preGateManifest,
+  completionProposal,
 ) {
   const validated = await verifyDocumentDigest("gate-input-snapshot/v1", snapshot);
   const roots = await verifyDocumentDigest("pre-gate-root-set/v1", rootSet);
   const manifest = await verifyPreGateEvidenceClosureContext(
     preGateManifest, roots,
   );
+  const proposal = await verifyDocumentDigest(
+    "completion-proposal/v1", completionProposal,
+  );
   verifySnapshotPreGateContext(validated, roots, manifest);
-  if (!PRE_GATE_SUCCESS_OUTCOMES.has(roots.outcome_candidate) ||
-      validated.requested_outcome !== roots.outcome_candidate) {
+  for (const field of PRE_GATE_SUCCESS_AVAILABLE) {
+    if (preGateAvailability(roots[field]) !== "available") {
+      fail("PRE_GATE_SUCCESS_ROOT_UNAVAILABLE", "$." + field);
+    }
+  }
+  for (const field of ["verifier_inputs", "verifier_work"]) {
+    if (!roots[field].length || !roots[field].every(
+      (item) => preGateAvailability(item) === "available",
+    )) {
+      fail("PRE_GATE_SUCCESS_VERIFICATION_UNAVAILABLE", "$." + field);
+    }
+  }
+  if (!contentRefMatchesDirectDocument(
+    roots.proposal.ref, "completion-proposal/v1", proposal,
+  )) {
+    fail("CAS_CORRUPT", "$.completion_proposal_ref");
+  }
+  if (proposal.task_id !== validated.task_id ||
+      !PRE_GATE_SUCCESS_OUTCOMES.has(proposal.outcome_requested) ||
+      validated.requested_outcome !== proposal.outcome_requested) {
     fail("GATE_INPUT_STALE", "$.requested_outcome");
   }
   const projections = {
@@ -207,9 +229,11 @@ export async function verifyTerminalizationInputSnapshotContext(
     preGateManifest, roots,
   );
   verifySnapshotPreGateContext(validated, roots, manifest);
-  if (!(PRE_GATE_TERMINAL_OUTCOMES.has(roots.outcome_candidate) ||
-        roots.outcome_candidate === "PARTIAL")) {
-    fail("GATE_INPUT_STALE", "$.outcome_candidate");
+  if (!roots.termination_facts.length ||
+      !roots.termination_facts.every(
+        (item) => preGateAvailability(item) === "available",
+      )) {
+    fail("PRE_GATE_TERMINATION_FACT_REQUIRED", "$.termination_facts");
   }
   const projections = {
     request_ref: roots.request.ref,

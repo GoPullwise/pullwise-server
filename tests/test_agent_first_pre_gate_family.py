@@ -85,11 +85,6 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
         "artifacts",
         "termination_facts",
     }
-    SUCCESS_OUTCOMES = {
-        "COMPLETED",
-        "COMPLETED_WITH_WAIVERS",
-        "NO_CHANGE_NEEDED",
-    }
     FORBIDDEN_CLOSURE_TARGETS = {
         "evidence-closure-manifest/v1",
         "error-response/v1",
@@ -125,7 +120,6 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
         metadata = {
             "schema_id",
             "task_id",
-            "outcome_candidate",
             "root_set_digest",
         }
         self.assertEqual(metadata | self.ROOT_FIELDS, set(root["required"]))
@@ -164,12 +158,7 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
     def _availability_branch(document: dict[str, object], field: str) -> str:
         return document[field]["availability"]
 
-    def _valid_root(
-        self,
-        document: dict[str, object],
-        *,
-        enforce_outcome_availability: bool = True,
-    ) -> bool:
+    def _valid_root(self, document: dict[str, object]) -> bool:
         schema = self.schemas["pre-gate-root-set/v1"]
         if set(document) != set(schema["required"]) or not sealed(
             document, schema
@@ -179,8 +168,6 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
             values = document[field] if field in self.ARRAY_ROOTS else [document[field]]
             if not all(valid_availability(value, targets) for value in values):
                 return False
-        if not enforce_outcome_availability:
-            return True
         always_available = (
             "request",
             "policy",
@@ -190,64 +177,9 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
             "publication_content_manifest",
             "debug_redaction_plan",
         )
-        if any(
+        return not any(
             self._availability_branch(document, field) != "available"
             for field in always_available
-        ):
-            return False
-        outcome = document["outcome_candidate"]
-        if outcome in self.SUCCESS_OUTCOMES:
-            required = (
-                "charter",
-                "proposal",
-                "original_source",
-                "final_source",
-                "pre_observation_manifest",
-                "final_observation_manifest",
-                "attestations",
-                "report",
-            )
-            return all(
-                self._availability_branch(document, field) == "available"
-                for field in required
-            ) and all(
-                document[field]
-                and all(item["availability"] == "available" for item in document[field])
-                for field in ("verifier_inputs", "verifier_work")
-            )
-        if outcome == "PARTIAL":
-            required = (
-                "proposal",
-                "original_source",
-                "final_source",
-                "final_observation_manifest",
-                "report",
-            )
-            return all(
-                self._availability_branch(document, field) == "available"
-                for field in required
-            )
-        unavailable_only = (
-            "proposal",
-            "attestations",
-            "report",
-        )
-        honest_source = (
-            "original_source",
-            "final_source",
-            "final_observation_manifest",
-        )
-        return bool(document["termination_facts"]) and all(
-            item["availability"] == "available"
-            for item in document["termination_facts"]
-        ) and all(
-            self._availability_branch(document, field)
-            in {"not_applicable", "unavailable"}
-            for field in unavailable_only
-        ) and all(
-            self._availability_branch(document, field)
-            in {"available", "unavailable"}
-            for field in honest_source
         )
 
     def _valid_closure(
@@ -317,11 +249,6 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
         )
         self.assertFalse(self._valid_closure(reverse["document"]))
         self.assertEqual("CONTRACT_DOCUMENT_INVALID", policy["expected_code"])
-        self.assertTrue(
-            self._valid_root(
-                policy["document"], enforce_outcome_availability=False
-            )
-        )
         self.assertFalse(self._valid_root(policy["document"]))
 
     def _seal_root(self, document: dict[str, object]) -> dict[str, object]:
@@ -333,31 +260,21 @@ class AgentFirstPreGateFamilyTest(unittest.TestCase):
         ).hexdigest()
         return sealed_document
 
-    def test_terminal_outcomes_keep_honest_availability(self) -> None:
+    def test_root_set_is_outcome_neutral(self) -> None:
         fixtures = {
             item["fixture_id"]: item for item in self.family["fixtures"]
         }
         golden = fixtures["pre_gate_golden_terminal_root_set"]["document"]
-        self.assertEqual("FAILED", golden["outcome_candidate"])
+        self.assertNotIn("outcome_candidate", golden)
         self.assertTrue(self._valid_root(golden))
 
-        for outcome in ("BLOCKED", "CANCELLED"):
-            candidate = copy.deepcopy(golden)
-            candidate["outcome_candidate"] = outcome
-            self.assertTrue(self._valid_root(self._seal_root(candidate)), outcome)
+        success = fixtures["pre_gate_golden_root_set"]["document"]
+        self.assertNotIn("outcome_candidate", success)
+        self.assertTrue(self._valid_root(success))
 
-        false_proposal = copy.deepcopy(golden)
-        false_proposal["proposal"] = copy.deepcopy(
-            fixtures["pre_gate_golden_root_set"]["document"]["proposal"]
-        )
-        self.assertFalse(self._valid_root(self._seal_root(false_proposal)))
-
-        dishonest_source = copy.deepcopy(golden)
-        dishonest_source["final_source"] = {
-            "availability": "not_applicable",
-            "reason_code": "SOURCE_STATE_UNAVAILABLE",
-        }
-        self.assertFalse(self._valid_root(self._seal_root(dishonest_source)))
+        legacy = copy.deepcopy(success)
+        legacy["outcome_candidate"] = "COMPLETED"
+        self.assertFalse(self._valid_root(self._seal_root(legacy)))
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ const PRE_GATE_ROOT_FIELDS = [
   "debug_redaction_plan",
 ];
 const PRE_GATE_ROOT_KEYS = new Set([
-  "schema_id", "task_id", "outcome_candidate", "root_set_digest",
+  "schema_id", "task_id", "root_set_digest",
   ...PRE_GATE_ROOT_FIELDS,
 ]);
 const PRE_GATE_ALWAYS_AVAILABLE = [
@@ -90,54 +90,6 @@ function rulePreGateRootSet(value) {
       fail("PRE_GATE_REQUIRED_ROOT_UNAVAILABLE", "$." + field);
     }
   }
-  const outcome = value.outcome_candidate;
-  if (PRE_GATE_SUCCESS_OUTCOMES.has(outcome)) {
-    for (const field of PRE_GATE_SUCCESS_AVAILABLE) {
-      if (preGateAvailability(value[field]) !== "available") {
-        fail("PRE_GATE_SUCCESS_ROOT_UNAVAILABLE", "$." + field);
-      }
-    }
-    for (const field of ["verifier_inputs", "verifier_work"]) {
-      if (!value[field].length || !value[field].every(
-        (item) => preGateAvailability(item) === "available",
-      )) {
-        fail("PRE_GATE_SUCCESS_VERIFICATION_UNAVAILABLE", "$." + field);
-      }
-    }
-  } else if (outcome === "PARTIAL") {
-    for (const field of PRE_GATE_PARTIAL_AVAILABLE) {
-      if (preGateAvailability(value[field]) !== "available") {
-        fail("PRE_GATE_PARTIAL_ROOT_UNAVAILABLE", "$." + field);
-      }
-    }
-    if (!["available", "unavailable"].includes(
-      preGateAvailability(value.attestations),
-    )) {
-      fail("PRE_GATE_PARTIAL_ATTESTATION_AVAILABILITY_INVALID", "$.attestations");
-    }
-  } else if (PRE_GATE_TERMINAL_OUTCOMES.has(outcome)) {
-    if (!value.termination_facts.length || !value.termination_facts.every(
-      (item) => preGateAvailability(item) === "available",
-    )) {
-      fail("PRE_GATE_TERMINATION_FACT_REQUIRED", "$.termination_facts");
-    }
-    for (const field of ["proposal", "attestations", "report"]) {
-      if (!["not_applicable", "unavailable"].includes(
-        preGateAvailability(value[field]),
-      )) {
-        fail("PRE_GATE_TERMINAL_AVAILABILITY_INVALID", "$." + field);
-      }
-    }
-    for (const field of [
-      "original_source", "final_source", "final_observation_manifest",
-    ]) {
-      if (!["available", "unavailable"].includes(
-        preGateAvailability(value[field]),
-      )) {
-        fail("PRE_GATE_TERMINAL_AVAILABILITY_INVALID", "$." + field);
-      }
-    }
-  }
 }
 
 function rulePreGateEvidenceClosureManifest(value) {
@@ -188,19 +140,14 @@ function preGateAvailableRootRefs(rootSet) {
   return refs;
 }
 
-/** Verify a root set against direct task and outcome context. */
+/** Verify an outcome-neutral root set against direct task context. */
 export async function verifyPreGateRootSetContext(
   rootSet,
   taskId,
-  outcomeCandidate,
 ) {
   const validated = await verifyDocumentDigest("pre-gate-root-set/v1", rootSet);
   if (typeof taskId !== "string" || validated.task_id !== taskId) {
     fail("PRE_GATE_TASK_BINDING_INVALID", "$.task_id");
-  }
-  if (typeof outcomeCandidate !== "string" ||
-      validated.outcome_candidate !== outcomeCandidate) {
-    fail("PRE_GATE_OUTCOME_BINDING_INVALID", "$.outcome_candidate");
   }
   return validated;
 }

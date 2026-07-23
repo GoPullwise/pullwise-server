@@ -229,6 +229,7 @@ def verify_gate_input_snapshot_context(
     snapshot: object,
     root_set: object,
     pre_gate_manifest: object,
+    completion_proposal: object,
 ) -> dict[str, object]:
     """Bind a success snapshot to direct PreGate documents and projections."""
     validated = verify_document_digest("gate-input-snapshot/v1", snapshot)
@@ -236,10 +237,36 @@ def verify_gate_input_snapshot_context(
     manifest = verify_pre_gate_evidence_closure_context(
         pre_gate_manifest, roots
     )
+    proposal = verify_document_digest(
+        "completion-proposal/v1", completion_proposal
+    )
     _verify_snapshot_pre_gate_context(validated, roots, manifest)
+    for field in _PRE_GATE_SUCCESS_AVAILABLE:
+        _require(
+            _availability(roots[field]) == "available",
+            "PRE_GATE_SUCCESS_ROOT_UNAVAILABLE",
+            f"$.{field}",
+        )
+    for field in ("verifier_inputs", "verifier_work"):
+        _require(
+            bool(roots[field])
+            and all(_availability(item) == "available" for item in roots[field]),
+            "PRE_GATE_SUCCESS_VERIFICATION_UNAVAILABLE",
+            f"$.{field}",
+        )
     _require(
-        roots["outcome_candidate"] in _PRE_GATE_SUCCESS_OUTCOMES
-        and validated["requested_outcome"] == roots["outcome_candidate"],
+        _content_ref_matches_direct_document(
+            roots["proposal"]["ref"],
+            "completion-proposal/v1",
+            proposal,
+        ),
+        "CAS_CORRUPT",
+        "$.completion_proposal_ref",
+    )
+    _require(
+        proposal["task_id"] == validated["task_id"]
+        and proposal["outcome_requested"] in _PRE_GATE_SUCCESS_OUTCOMES
+        and validated["requested_outcome"] == proposal["outcome_requested"],
         "GATE_INPUT_STALE",
         "$.requested_outcome",
     )
@@ -293,10 +320,13 @@ def verify_terminalization_input_snapshot_context(
     )
     _verify_snapshot_pre_gate_context(validated, roots, manifest)
     _require(
-        roots["outcome_candidate"]
-        in _PRE_GATE_TERMINAL_OUTCOMES | {"PARTIAL"},
-        "GATE_INPUT_STALE",
-        "$.outcome_candidate",
+        bool(roots["termination_facts"])
+        and all(
+            _availability(item) == "available"
+            for item in roots["termination_facts"]
+        ),
+        "PRE_GATE_TERMINATION_FACT_REQUIRED",
+        "$.termination_facts",
     )
     projections = {
         "request_ref": roots["request"]["ref"],

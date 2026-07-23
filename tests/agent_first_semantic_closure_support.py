@@ -687,7 +687,6 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             if field in {
                 "schema_id",
                 "task_id",
-                "outcome_candidate",
                 "root_set_digest",
             }:
                 continue
@@ -726,6 +725,13 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
     def make_success_context(self) -> list[object]:
         root_set = self.fixture_document("pre_gate_golden_root_set")
         snapshot = self.fixture_document("gate_input_golden_success_snapshot")
+        proposal = self.fixture_document("task_completion_golden_proposal")
+        root_set["proposal"]["ref"] = self.content_ref(
+            "art_" + "c" * 32,
+            "completion-proposal/v1",
+            proposal,
+        )
+        root_set = self.reseal("pre-gate-root-set/v1", root_set)
         quality_ref = deepcopy(snapshot["quality_policy_plan_ref"])
         quality_ref["artifact_id"] = "art_deadbeefdeadbeefdeadbeefdeadbeef"
         manifest = self.make_pre_gate_manifest(root_set, extra_refs=[quality_ref])
@@ -750,7 +756,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             deepcopy(item["ref"]) for item in root_set["execution_states"]
         ]
         snapshot["change_set"] = deepcopy(root_set["change_set"])
-        snapshot["requested_outcome"] = root_set["outcome_candidate"]
+        snapshot["requested_outcome"] = proposal["outcome_requested"]
         snapshot["pre_gate_root_set_ref"] = self.content_ref(
             "art_" + "a" * 32, "pre-gate-root-set/v1", root_set
         )
@@ -760,7 +766,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         snapshot["pre_gate_closure_digest"] = manifest["pre_gate_closure_digest"]
         snapshot["quality_policy_plan_ref"] = deepcopy(quality_ref)
         snapshot = self.reseal("gate-input-snapshot/v1", snapshot)
-        return [snapshot, root_set, manifest]
+        return [snapshot, root_set, manifest, proposal]
 
     def make_terminal_context(self) -> list[object]:
         root_set = self.fixture_document("pre_gate_golden_terminal_root_set")
@@ -1226,7 +1232,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         return {
             "verify_pre_gate_root_set_context": self.helper_operation(
                 "verify_pre_gate_root_set_context",
-                [root, "task_" + "2" * 32, root["outcome_candidate"]],
+                [root, "task_" + "2" * 32],
             ),
             "verify_pre_gate_evidence_closure_context": self.helper_operation(
                 "verify_pre_gate_evidence_closure_context",
@@ -1805,7 +1811,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             ),
             "verify_pre_gate_root_set_context": self.helper_operation(
                 "verify_pre_gate_root_set_context",
-                [root, root["task_id"], root["outcome_candidate"]],
+                [root, root["task_id"]],
             ),
             "verify_quality_policy_plan_context": self.helper_operation(
                 "verify_quality_policy_plan_context", quality_context
