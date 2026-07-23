@@ -228,8 +228,10 @@ class AgentFirstAuthorityStore:
                 INSERT INTO agent_current_task_requests (
                     task_id, task_type, package_identity, package_version,
                     content_sha256, root_sha256, policy_digest, policy_bytes,
-                    idempotency_key, request_digest, request_bytes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    accepted_at, absolute_deadline_at,
+                    terminalization_reserve_ms, idempotency_key,
+                    request_digest, request_bytes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["task_id"],
@@ -237,6 +239,9 @@ class AgentFirstAuthorityStore:
                     *values["package_tuple"],
                     values["policy_digest"],
                     values["policy_bytes"],
+                    values["accepted_at"],
+                    values["absolute_deadline_at"],
+                    values["terminalization_reserve_ms"],
                     values["idempotency_key"],
                     values["request_digest"],
                     values["request_bytes"],

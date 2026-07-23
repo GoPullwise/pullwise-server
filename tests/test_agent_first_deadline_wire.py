@@ -91,7 +91,7 @@ class AgentFirstDeadlineWireTest(AuthorityHarness, unittest.TestCase):
         self.assertEqual("2026-07-22T12:01:00.000Z", grant["absolute_deadline_at"])
         self.assertEqual(1_000, grant["terminalization_reserve_ms"])
         drift = self.fixtures["authority_negative_deadline_grant_drift"]
-        self.assertEqual("AUTHORITY_GRANT_BINDING_MISMATCH", drift["expected_code"])
+        self.assertEqual("AUTHORITY_INPUT_UNTRUSTED", drift["expected_code"])
         self.assertNotEqual(
             drift["document"]["absolute_deadline_at"],
             drift["document"]["grant"]["absolute_deadline_at"],

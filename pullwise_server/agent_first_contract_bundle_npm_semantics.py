@@ -200,7 +200,9 @@ function validateSemantics(schemaId, value) {
     verifyEmbeddedDigestSync("agent-worker-grant/v1", grant);
     const deadlineFields = ["absolute_deadline_at", "terminalization_reserve_ms"];
     if (deadlineFields.some((key) => value[key] !== grant[key])) {
-      fail("AUTHORITY_GRANT_BINDING_MISMATCH");
+      throw new ContractValidationError(
+        "AUTHORITY_INPUT_UNTRUSTED", "AUTHORITY_GRANT_BINDING_MISMATCH", "$",
+      );
     }
   } else if (schemaId === "agent-claim-abandon-response/v1") {
     const grant = value.grant;

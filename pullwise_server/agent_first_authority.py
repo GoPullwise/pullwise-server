@@ -109,6 +109,38 @@ def _effective_policy_grant_fields(policy: Mapping[str, object]) -> dict[str, ob
     }
 
 
+def _effective_policy_deadline_fields(
+    policy: Mapping[str, object], accepted_at: str
+) -> dict[str, object]:
+    budgets = policy["budgets"]
+    wall_ms = budgets["wall_ms"]
+    reserve_ms = policy["terminalization_reserve_ms"]
+    if (
+        not isinstance(wall_ms, int)
+        or isinstance(wall_ms, bool)
+        or wall_ms < 1
+        or wall_ms > 9007199254740991
+        or not isinstance(reserve_ms, int)
+        or isinstance(reserve_ms, bool)
+        or reserve_ms < 0
+        or reserve_ms > 9007199254740991
+    ):
+        raise ValueError("effective policy has invalid deadline fields")
+    try:
+        accepted = dt.datetime.fromisoformat(accepted_at.replace("Z", "+00:00"))
+        if accepted.tzinfo != dt.timezone.utc:
+            raise ValueError
+        deadline = accepted + dt.timedelta(milliseconds=wall_ms)
+    except (OverflowError, TypeError, ValueError):
+        raise ValueError("effective policy deadline is not representable") from None
+    return {
+        "absolute_deadline_at": deadline.isoformat(timespec="milliseconds").replace(
+            "+00:00", "Z"
+        ),
+        "terminalization_reserve_ms": reserve_ms,
+    }
+
+
 def _now() -> str:
     return (
         dt.datetime.now(dt.timezone.utc)
@@ -262,6 +294,8 @@ class AgentFirstAuthority:
                 request["effective_policy"],
             )
             _effective_policy_grant_fields(policy)
+            accepted_at = _now()
+            deadline_fields = _effective_policy_deadline_fields(policy, accepted_at)
             request_bytes = canonical_validated_bytes("task-request/v1", document)
             policy_bytes = canonical_validated_bytes(
                 "effective-execution-policy/v1", policy
@@ -286,7 +320,7 @@ class AgentFirstAuthority:
                 "deletion_version": 0,
                 "lifecycle": "QUEUED",
                 "desired_state": "RUN",
-                "accepted_at": _now(),
+                "accepted_at": accepted_at,
             },
         )
         values = {
@@ -300,6 +334,8 @@ class AgentFirstAuthority:
             "event_request_digest": event_request_digest,
             "request_bytes": request_bytes,
             "owner_id": f"owner_{secrets.token_hex(16)}",
+            "accepted_at": accepted_at,
+            **deadline_fields,
             "response_bytes": canonical_validated_bytes(
                 "agent-task-accept-response/v1", response
             ),
@@ -326,6 +362,14 @@ class AgentFirstAuthority:
                 if policy["digest"] != head["policy_digest"]:
                     raise ValueError("stored policy digest mismatch")
                 policy_fields = _effective_policy_grant_fields(policy)
+                expected_deadline = _effective_policy_deadline_fields(
+                    policy, head["accepted_at"]
+                )
+                if any(
+                    head[field] != value
+                    for field, value in expected_deadline.items()
+                ):
+                    raise ValueError("stored deadline wire mismatch")
             except (ContractValidationError, UnicodeError, ValueError, TypeError, KeyError):
                 raise AuthorityStoreError("AUTHORITY_STORAGE_CORRUPT") from None
             if any(document[field] != value for field, value in policy_fields.items()):
@@ -347,6 +391,10 @@ class AgentFirstAuthority:
                 "native_epoch": head["native_epoch"] + 1,
                 "transport_epoch": document["transport_epoch"],
             }
+            deadline_wire = {
+                "absolute_deadline_at": head["absolute_deadline_at"],
+                "terminalization_reserve_ms": head["terminalization_reserve_ms"],
+            }
             grant = seal_document(
                 "agent-worker-grant/v1",
                 {
@@ -354,6 +402,7 @@ class AgentFirstAuthority:
                     **common,
                     "grant_id": grant_id,
                     "policy_digest": head["policy_digest"],
+                    **deadline_wire,
                     **policy_fields,
                 },
             )
@@ -371,6 +420,7 @@ class AgentFirstAuthority:
                 {
                     "schema_id": "server-authority-envelope/v1",
                     **common,
+                    **deadline_wire,
                     "lifecycle": "ACTIVE",
                     "desired_state": "RUN",
                     "grant": grant,

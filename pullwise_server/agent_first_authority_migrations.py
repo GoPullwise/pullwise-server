@@ -79,6 +79,12 @@ _DDL = (
         root_sha256 TEXT NOT NULL CHECK(length(root_sha256) = 64),
         policy_digest TEXT NOT NULL CHECK(length(policy_digest) = 64),
         policy_bytes BLOB NOT NULL,
+        accepted_at TEXT NOT NULL,
+        absolute_deadline_at TEXT NOT NULL,
+        terminalization_reserve_ms INTEGER NOT NULL CHECK(
+            terminalization_reserve_ms >= 0
+            AND terminalization_reserve_ms <= 9007199254740991
+        ),
         idempotency_key TEXT NOT NULL,
         request_digest TEXT NOT NULL CHECK(length(request_digest) = 64),
         request_bytes BLOB NOT NULL,

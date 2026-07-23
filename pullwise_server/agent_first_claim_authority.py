@@ -102,7 +102,8 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 """
                 SELECT h.*, r.package_identity, r.package_version,
                        r.content_sha256, r.root_sha256, r.policy_digest,
-                       r.policy_bytes
+                       r.policy_bytes, r.accepted_at, r.absolute_deadline_at,
+                       r.terminalization_reserve_ms
                 FROM agent_current_task_heads h
                 JOIN agent_current_task_requests r USING (task_id)
                 WHERE h.task_id = ?
