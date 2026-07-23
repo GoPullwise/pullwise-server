@@ -14,6 +14,9 @@ from tests.agent_first_verification_direct_graph_builder import (
     VerificationDirectGraphBuilderMixin,
     canonical_bytes,
 )
+from tests.agent_first_task_result_selector_support import (
+    bind_task_result_to_terminal_decision,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -959,7 +962,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "worker-debug-fragment-descriptor/v1",
             worker_debug_descriptor,
         )
-        task_result = deepcopy(envelope_fixture["task_result"])
+        task_result, terminal_gate_decision = bind_task_result_to_terminal_decision(
+            self,
+            envelope_fixture["task_result"],
+        )
         task_result["diagnostics"] = {
             "worker_debug_fragment": {
                 "availability": "available",
@@ -1014,6 +1020,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "task_result_core": task_result_core,
             "task_result_transport_envelope": transport_envelope,
             "task_result_transport_ack": transport_ack,
+            "terminal_gate_decision": terminal_gate_decision,
             "transport_receipt": transport_receipt,
             "worker_debug_descriptor": worker_debug_descriptor,
             "worker_debug_fragment": fragment,
@@ -1457,7 +1464,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "verify_task_result_context": self.helper_operation(
                 "verify_task_result_context",
                 [invalid_task_result],
-                kwargs={"worker_debug_descriptor": worker_debug_descriptor},
+                kwargs={
+                    "terminal_gate_decision": documents["terminal_gate_decision"],
+                    "worker_debug_descriptor": worker_debug_descriptor,
+                },
             ),
             "verify_task_result_transport_envelope": self.helper_operation(
                 "verify_task_result_transport_envelope",
@@ -1806,7 +1816,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "verify_task_result_context": self.helper_operation(
                 "verify_task_result_context",
                 [uploaded["task_result"]],
-                kwargs={"worker_debug_descriptor": uploaded["worker_debug_descriptor"]},
+                kwargs={
+                    "terminal_gate_decision": uploaded["terminal_gate_decision"],
+                    "worker_debug_descriptor": uploaded["worker_debug_descriptor"],
+                },
             ),
             "verify_task_result_core": self.helper_operation(
                 "verify_task_result_core",

@@ -5,6 +5,7 @@ import hashlib
 import unittest
 
 from tests.agent_first_result_debug_transport_facade_support import canonical_bytes
+from tests.agent_first_task_result_selector_support import bind_task_result_to_terminal_decision
 from tests.test_agent_first_result_debug_transport_helper_red import (
     AgentFirstResultDebugTransportHelperRedTest,
 )
@@ -298,13 +299,14 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             "PARTIAL", "BLOCKED", "FAILED", "CANCELLED",
             "CANCELLED_WITH_EFFECTS", "TERMINATED_WITH_UNKNOWN_EFFECTS",
         )
-        results = [self.task_result_branch(outcome) for outcome in outcomes]
+        bound = [bind_task_result_to_terminal_decision(self.facade, self.task_result_branch(outcome)) for outcome in outcomes]
+        results, decisions = map(list, zip(*bound))
         cases = [("task-result/v1", result) for result in results]
         expected = [{"ok": True, "value": result} for result in results]
         operations = [
             {"python": "verify_task_result_context", "node": "verifyTaskResultContext",
-             "args": [result]}
-            for result in results
+             "args": [result], "kwargs": {"terminal_gate_decision": decision}}
+            for result, decision in zip(results, decisions)
         ]
 
         self.assertEqual(expected, self.facade.python_document_results(cases))
