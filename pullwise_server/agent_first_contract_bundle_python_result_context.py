@@ -36,7 +36,13 @@ def derive_task_result_core(task_result: object) -> dict[str, object]:
     )
 
 
-def verify_task_result_context(task_result: object, *, terminal_gate_decision: object = None, worker_debug_descriptor: object = None) -> dict[str, object]:
+def verify_task_result_context(
+    task_result: object,
+    *,
+    terminal_gate_decision: object = None,
+    effect_ledger_snapshot: object = None,
+    worker_debug_descriptor: object = None,
+) -> dict[str, object]:
     checked = validate_document("task-result/v1", task_result)
     _seo_require(isinstance(terminal_gate_decision, dict), "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.ref")
     decision = verify_document_digest("gate-decision/v1", terminal_gate_decision)
@@ -47,6 +53,23 @@ def verify_task_result_context(task_result: object, *, terminal_gate_decision: o
     _seo_require(decision["selected_outcome"] == checked["outcome"], "TASK_RESULT_CONTEXT_INVALID", "$.outcome")
     _seo_require(decision["selected_reason"] == checked["reason_code"], "TASK_RESULT_CONTEXT_INVALID", "$.reason_code")
     _seo_require(decision["selector_input_digest"] == checked["selector_input_digest"], "TASK_RESULT_CONTEXT_INVALID", "$.selector_input_digest")
+    _seo_require(isinstance(effect_ledger_snapshot, dict), "TASK_RESULT_CONTEXT_INVALID", "$.effects")
+    ledger = verify_document_digest("effect-ledger-snapshot/v1", effect_ledger_snapshot)
+    effect_availability = decision["effect_availability"]
+    _seo_require(effect_availability["availability"] == "available", "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.effect_availability")
+    _result_require_ref(effect_availability["ref"], "effect-ledger-snapshot/v1", ledger, "$.gate_decision.effect_availability.ref")
+    _seo_require(ledger["task_id"] == checked["task_id"], "TASK_RESULT_EFFECT_LEDGER_TASK_INVALID", "$.effects")
+    counts = ledger["state_counts"]
+    _seo_require(counts["prepared"] == counts["dispatched"] == 0, "TASK_RESULT_ACTIVE_EFFECTS", "$.effects")
+    _seo_require(_json_equal(counts, checked["effects"]), "TASK_RESULT_EFFECT_COUNTS_INVALID", "$.effects")
+    effect_state = (
+        "unknown_post_deadline"
+        if counts["unknown"]
+        else "committed"
+        if counts["committed"]
+        else "none"
+    )
+    _seo_require(decision["effect_state"] == effect_state, "TASK_RESULT_EFFECT_STATE_INVALID", "$.gate_decision.effect_state")
     debug = checked["diagnostics"]["worker_debug_fragment"]
     if debug["availability"] == "available":
         _seo_require(isinstance(worker_debug_descriptor, dict), "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment.ref")

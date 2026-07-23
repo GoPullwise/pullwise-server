@@ -5,10 +5,11 @@ from __future__ import annotations
 
 NPM_RESULT_CONTEXT = r'''
 function resultContextOptions(value) {
-  if (value === undefined || value === null) return {terminalGateDecision: null, workerDebugDescriptor: null, transportReceipt: null};
-  if (!Array.isArray(value) && typeof value === "object" && Object.keys(value).length === 0) return {terminalGateDecision: null, workerDebugDescriptor: null, transportReceipt: null};
-  if (typeof value === "object" && !Array.isArray(value) && ("terminalGateDecision" in value || "terminal_gate_decision" in value || "workerDebugDescriptor" in value || "worker_debug_descriptor" in value || "transportReceipt" in value || "transport_receipt" in value)) return {terminalGateDecision: value.terminalGateDecision ?? value.terminal_gate_decision ?? null, workerDebugDescriptor: value.workerDebugDescriptor ?? value.worker_debug_descriptor ?? null, transportReceipt: value.transportReceipt ?? value.transport_receipt ?? null};
-  return {terminalGateDecision: null, workerDebugDescriptor: value, transportReceipt: null};
+  const empty = {terminalGateDecision: null, effectLedgerSnapshot: null, workerDebugDescriptor: null, transportReceipt: null};
+  if (value === undefined || value === null) return empty;
+  if (!Array.isArray(value) && typeof value === "object" && Object.keys(value).length === 0) return empty;
+  if (typeof value === "object" && !Array.isArray(value) && ("terminalGateDecision" in value || "terminal_gate_decision" in value || "effectLedgerSnapshot" in value || "effect_ledger_snapshot" in value || "workerDebugDescriptor" in value || "worker_debug_descriptor" in value || "transportReceipt" in value || "transport_receipt" in value)) return {terminalGateDecision: value.terminalGateDecision ?? value.terminal_gate_decision ?? null, effectLedgerSnapshot: value.effectLedgerSnapshot ?? value.effect_ledger_snapshot ?? null, workerDebugDescriptor: value.workerDebugDescriptor ?? value.worker_debug_descriptor ?? null, transportReceipt: value.transportReceipt ?? value.transport_receipt ?? null};
+  return {...empty, workerDebugDescriptor: value};
 }
 
 function resultCheckedReceipt(value) {
@@ -30,7 +31,7 @@ export function deriveTaskResultCore(taskResult) {
 }
 
 export async function verifyTaskResultContext(taskResult, options = {}) {
-  const checked = validateDocument("task-result/v1", taskResult), {terminalGateDecision, workerDebugDescriptor} = resultContextOptions(options);
+  const checked = validateDocument("task-result/v1", taskResult), {terminalGateDecision, effectLedgerSnapshot, workerDebugDescriptor} = resultContextOptions(options);
   seoRequire(terminalGateDecision !== null && typeof terminalGateDecision === "object" && !Array.isArray(terminalGateDecision), "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.ref");
   const decision = await verifyDocumentDigest("gate-decision/v1", terminalGateDecision);
   seoRequire(seoRefMatchesDocument(checked.gate_decision.ref, "gate-decision/v1", decision), "CAS_CORRUPT", "$.gate_decision.ref");
@@ -40,6 +41,17 @@ export async function verifyTaskResultContext(taskResult, options = {}) {
   seoRequire(decision.selected_outcome === checked.outcome, "TASK_RESULT_CONTEXT_INVALID", "$.outcome");
   seoRequire(decision.selected_reason === checked.reason_code, "TASK_RESULT_CONTEXT_INVALID", "$.reason_code");
   seoRequire(decision.selector_input_digest === checked.selector_input_digest, "TASK_RESULT_CONTEXT_INVALID", "$.selector_input_digest");
+  seoRequire(effectLedgerSnapshot !== null && typeof effectLedgerSnapshot === "object" && !Array.isArray(effectLedgerSnapshot), "TASK_RESULT_CONTEXT_INVALID", "$.effects");
+  const ledger = await verifyDocumentDigest("effect-ledger-snapshot/v1", effectLedgerSnapshot);
+  const effectAvailability = decision.effect_availability;
+  seoRequire(effectAvailability.availability === "available", "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.effect_availability");
+  seoRequire(seoRefMatchesDocument(effectAvailability.ref, "effect-ledger-snapshot/v1", ledger), "CAS_CORRUPT", "$.gate_decision.effect_availability.ref");
+  seoRequire(ledger.task_id === checked.task_id, "TASK_RESULT_EFFECT_LEDGER_TASK_INVALID", "$.effects");
+  const counts = ledger.state_counts;
+  seoRequire(counts.prepared === 0 && counts.dispatched === 0, "TASK_RESULT_ACTIVE_EFFECTS", "$.effects");
+  seoRequire(canonicalString(counts) === canonicalString(checked.effects), "TASK_RESULT_EFFECT_COUNTS_INVALID", "$.effects");
+  const effectState = counts.unknown ? "unknown_post_deadline" : counts.committed ? "committed" : "none";
+  seoRequire(decision.effect_state === effectState, "TASK_RESULT_EFFECT_STATE_INVALID", "$.gate_decision.effect_state");
   const debug = checked.diagnostics.worker_debug_fragment;
   if (debug.availability === "available") {
     seoRequire(workerDebugDescriptor !== null && typeof workerDebugDescriptor === "object" && !Array.isArray(workerDebugDescriptor), "TASK_RESULT_CONTEXT_INVALID", "$.diagnostics.worker_debug_fragment.ref");
