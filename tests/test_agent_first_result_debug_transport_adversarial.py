@@ -305,10 +305,8 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
         expected = [{"ok": True, "value": result} for result in results]
         operations = [
             {"python": "verify_task_result_context", "node": "verifyTaskResultContext",
-             "args": [result], "kwargs": {
-                 "terminal_gate_decision": decision,
-                 "effect_ledger_snapshot": ledger,
-             }}
+             "args": [result], "kwargs": {"terminal_gate_decision": decision,
+                                         "effect_ledger_snapshot": ledger}}
             for result, decision, ledger in zip(results, decisions, ledgers)
         ]
 
