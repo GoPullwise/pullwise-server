@@ -70,6 +70,10 @@ class AgentFirstAuthorityReceiptContractTest(unittest.TestCase):
         from pullwise_server import _generated_agent_task_contract as contract
 
         local_type_negative = "receipt_negative_transport_as_local"
+        authority_binding_negatives = {
+            "authority_negative_agent_selected_fence",
+            "authority_negative_deadline_grant_drift",
+        }
         for family in (self.authority_family, self.receipt_family):
             for item in family["fixtures"]:
                 with self.subTest(fixture_id=item["fixture_id"]):
@@ -84,6 +88,15 @@ class AgentFirstAuthorityReceiptContractTest(unittest.TestCase):
                         with self.assertRaises(contract.ContractValidationError) as raised:
                             contract.validate_document(schema_id, document)
                         self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
+                    elif item["fixture_id"] in authority_binding_negatives:
+                        with self.assertRaises(contract.ContractValidationError) as raised:
+                            contract.verify_document_digest(schema_id, document)
+                        self.assertEqual("AUTHORITY_INPUT_UNTRUSTED", raised.exception.code)
+                        self.assertEqual(
+                            "AUTHORITY_GRANT_BINDING_MISMATCH",
+                            raised.exception.detail,
+                        )
+                        self.assertEqual("$", raised.exception.path)
                     elif expected is None:
                         contract.validate_document(schema_id, document)
                     else:
