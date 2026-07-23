@@ -94,7 +94,7 @@
         "superseded_authority_digest": "8888888888888888888888888888888888888888888888888888888888888888",
         "reason": "outer_lease_lost",
         "abandoned_at": "2026-07-22T12:00:00.000Z",
-        "abandonment_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "abandonment_digest": "32fe8e49101c6b7d52a8c68d78cb21cd7e6f197a4a38354a8ec696117be7ecac"
       },
       "expected_code": null
     },
@@ -128,7 +128,7 @@
         "superseded_authority_digest": "8888888888888888888888888888888888888888888888888888888888888888",
         "reason": "outer_lease_lost",
         "abandoned_at": "2026-07-22T12:00:00.000Z",
-        "abandonment_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "abandonment_digest": "32fe8e49101c6b7d52a8c68d78cb21cd7e6f197a4a38354a8ec696117be7ecac"
       },
       "expected_code": null
     },
@@ -162,7 +162,7 @@
         "superseded_authority_digest": "8888888888888888888888888888888888888888888888888888888888888888",
         "reason": "outer_lease_lost",
         "abandoned_at": "2026-07-22T12:00:00.000Z",
-        "abandonment_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        "abandonment_digest": "49ef800a2121c16ed855a446202adc9aeea251b62df802ac0d471fe4770ece96"
       },
       "expected_code": "AUTHORITY_INPUT_UNTRUSTED"
     }

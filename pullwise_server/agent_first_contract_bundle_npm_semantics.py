@@ -172,8 +172,12 @@ function verifyEmbeddedDigestSync(schemaId, value) {
 function ruleServerAuthorityEnvelope(value) {
   const grant = value.grant;
   verifyEmbeddedDigestSync("agent-worker-grant/v1", grant);
-  const deadlineFields = ["absolute_deadline_at", "terminalization_reserve_ms"];
-  if (deadlineFields.some((key) => value[key] !== grant[key])) {
+  const grantBoundFields = [
+    "task_id", "attempt_id", "session_id", "owner_id", "lease_id",
+    "task_version", "deletion_version", "owner_epoch", "native_epoch",
+    "transport_epoch", "absolute_deadline_at", "terminalization_reserve_ms",
+  ];
+  if (grantBoundFields.some((key) => value[key] !== grant[key])) {
     throw new ContractValidationError(
       "AUTHORITY_INPUT_UNTRUSTED", "AUTHORITY_GRANT_BINDING_MISMATCH", "$",
     );

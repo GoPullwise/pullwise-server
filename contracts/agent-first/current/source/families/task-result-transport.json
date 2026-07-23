@@ -212,6 +212,8 @@
           "owner_epoch": 1,
           "native_epoch": 1,
           "transport_epoch": 1,
+          "absolute_deadline_at": "2026-07-22T00:01:00.000Z",
+          "terminalization_reserve_ms": 1000,
           "lifecycle": "ACTIVE",
           "desired_state": "RUN",
           "grant": {
@@ -235,13 +237,15 @@
             "native_epoch": 1,
             "transport_epoch": 1,
             "policy_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "absolute_deadline_at": "2026-07-22T00:01:00.000Z",
+            "terminalization_reserve_ms": 1000,
             "capability_ids": ["source.read"],
             "tool_keys": ["internal.read_source"],
             "elapsed_limit_ms": 60000,
             "tool_call_limit": 100,
-            "grant_digest": "74e5dda7dc3ec63ef1268d893222c6f5ccebfd10236fe0f3c015b8081db58667"
+            "grant_digest": "bced3d25cf54204e4d8e99c1dd47b3a749a94a159aeb955f53e2aa09bcfa0111"
           },
-          "authority_digest": "d5a00cbb071a178f61677fa927ef2d79bcc92af4d8633cafc0f786fe1ea4d371"
+          "authority_digest": "1f2874c15647dfa05b3e70df5ac2fcc5a063e55f8dc40fdc4469fc2735300ae3"
         },
         "full_fence": {
           "schema_id": "task-fence/v1",
