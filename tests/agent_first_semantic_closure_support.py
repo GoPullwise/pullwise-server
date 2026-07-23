@@ -1395,6 +1395,46 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             )
         }
 
+    def release_gate_probe_operations(self) -> dict[str, dict[str, object]]:
+        benchmark = self.fixture_document("benchmark_bundle_golden_current")
+        policy = self.fixture_document("release_gate_policy_golden_bootstrap")
+        report = self.fixture_document(
+            "release_gate_report_golden_bootstrap_pass"
+        )
+        attestation = self.fixture_document(
+            "release_gate_attestation_golden_bootstrap_pass"
+        )
+
+        bad_benchmark = deepcopy(benchmark)
+        bad_benchmark["benchmark_version"] = "benchmark-2026-07-24"
+        bad_benchmark = self.reseal("benchmark-bundle/v1", bad_benchmark)
+
+        bad_report = deepcopy(report)
+        bad_report["candidate_build_id"] = (
+            "candidate_44444444444444444444444444444444"
+        )
+        bad_report = self.reseal("release-gate-report/v1", bad_report)
+
+        bad_attestation = deepcopy(attestation)
+        bad_attestation["report_digest"] = "0" * 64
+        bad_attestation = self.reseal(
+            "release-gate-attestation/v1", bad_attestation
+        )
+
+        return {
+            "verify_release_gate_policy_context": self.helper_operation(
+                "verify_release_gate_policy_context", [policy, bad_benchmark]
+            ),
+            "verify_release_gate_report_context": self.helper_operation(
+                "verify_release_gate_report_context",
+                [bad_report, benchmark, policy],
+            ),
+            "verify_release_gate_attestation_context": self.helper_operation(
+                "verify_release_gate_attestation_context",
+                [bad_attestation, policy, report],
+            ),
+        }
+
     def task_evidence_probe_operations(self) -> dict[str, dict[str, object]]:
         manifest = self.fixture_document("task_evidence_golden_manifest")
         pre_gate = self.fixture_document("pre_gate_golden_evidence_closure")
@@ -1671,6 +1711,18 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         graph = self.build_graph()
         plan = self.fixture_document("quality_policy_golden_q2_plan")
         quality_context = self.quality_policy_context(plan)
+        release_benchmark = self.fixture_document(
+            "benchmark_bundle_golden_current"
+        )
+        release_policy = self.fixture_document(
+            "release_gate_policy_golden_bootstrap"
+        )
+        release_report = self.fixture_document(
+            "release_gate_report_golden_bootstrap_pass"
+        )
+        release_attestation = self.fixture_document(
+            "release_gate_attestation_golden_bootstrap_pass"
+        )
         evidence_manifest = self.fixture_document("task_evidence_golden_manifest")
         pre_gate_manifest = self.fixture_document("pre_gate_golden_evidence_closure")
         budget_before = self.fixture_document("budget_golden_ledger_before")
@@ -1827,6 +1879,18 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "verify_quality_policy_plan_context": self.helper_operation(
                 "verify_quality_policy_plan_context", quality_context
             ),
+            "verify_release_gate_policy_context": self.helper_operation(
+                "verify_release_gate_policy_context",
+                [release_policy, release_benchmark],
+            ),
+            "verify_release_gate_report_context": self.helper_operation(
+                "verify_release_gate_report_context",
+                [release_report, release_benchmark, release_policy],
+            ),
+            "verify_release_gate_attestation_context": self.helper_operation(
+                "verify_release_gate_attestation_context",
+                [release_attestation, release_policy, release_report],
+            ),
             "verify_source_tree_context": self.helper_operation(
                 "verify_source_tree_context",
                 [graph["original_source"], graph["selection_policy"]],
@@ -1913,6 +1977,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             self.pre_gate_probe_operations(),
             self.gate_probe_operations(),
             self.quality_policy_probe_operations(),
+            self.release_gate_probe_operations(),
             self.task_evidence_probe_operations(),
             self.verification_probe_operations(),
             self.result_debug_probe_operations(),

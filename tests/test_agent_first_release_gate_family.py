@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import unittest
 
-from pullwise_server.agent_first_contract_bundle import REQUIRED_FAMILIES
+from pullwise_server.agent_first_contract_bundle import REQUIRED_FAMILIES, build_bundle
 from pullwise_server.agent_first_contract_bundle_source import (
     canonical_bytes,
     load_family,
@@ -48,6 +48,41 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
             {key: list(D22_FAMILIES) for key in observed},
             observed,
         )
+
+    def test_d22_typed_reference_dag_is_exact_and_files_stay_reviewable(self) -> None:
+        bundle = build_bundle(SOURCE_ROOT)
+        dag = {
+            item["schema_id"]: item
+            for item in bundle.document["root_manifest"]["reference_dag"]
+        }
+        expected_targets = {
+            "benchmark-bundle/v1": set(),
+            "release-gate-policy/v1": {"benchmark-bundle/v1"},
+            "release-gate-report/v1": {
+                "benchmark-bundle/v1",
+                "release-gate-policy/v1",
+            },
+            "release-gate-attestation/v1": {
+                "release-gate-policy/v1",
+                "release-gate-report/v1",
+            },
+        }
+        for schema_id, targets in expected_targets.items():
+            with self.subTest(schema_id=schema_id):
+                typed_targets = {
+                    edge["target_schema_id"]
+                    for edge in dag[schema_id]["edges"]
+                    if edge["kind"] == "content_ref_target"
+                }
+                self.assertEqual(targets, typed_targets)
+
+        for family_id in D22_FAMILIES:
+            lines = (SOURCE_ROOT / "families" / f"{family_id}.json").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            with self.subTest(family_id=family_id):
+                self.assertLessEqual(len(lines), 600)
+                self.assertLessEqual(max(map(len, lines)), 200)
 
     def test_benchmark_bundle_freezes_reproducible_input_shape(self) -> None:
         path = SOURCE_ROOT / "families/benchmark-bundle.json"
@@ -244,6 +279,48 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
                     + canonical_bytes(candidate_projection)
                 ).hexdigest(),
                 document["candidate_digest"],
+                fixture_id,
+            )
+            threshold_projection = {
+                key: document[key]
+                for key in (
+                    "absolute_gates",
+                    "relative_gates",
+                    "infrastructure_reason_codes",
+                )
+            }
+            self.assertEqual(
+                hashlib.sha256(
+                    b"pullwise:release-threshold-table:v1\0"
+                    + canonical_bytes(threshold_projection)
+                ).hexdigest(),
+                document["threshold_table_digest"],
+                fixture_id,
+            )
+            self.assertEqual(
+                hashlib.sha256(
+                    b"pullwise:release-profile-budgets:v1\0"
+                    + canonical_bytes(document["profile_budgets"])
+                ).hexdigest(),
+                document["profile_budget_digest"],
+                fixture_id,
+            )
+            canary_projection = {
+                key: document[key]
+                for key in (
+                    "canary_stages",
+                    "canary_platform_failure_rate_max_bps",
+                    "canary_relative_platform_failure_increase_max_bps",
+                    "canary_p95_wall_time_increase_max_bps",
+                    "canary_p95_cost_increase_max_bps",
+                )
+            }
+            self.assertEqual(
+                hashlib.sha256(
+                    b"pullwise:release-canary-plan:v1\0"
+                    + canonical_bytes(canary_projection)
+                ).hexdigest(),
+                document["canary_plan_digest"],
                 fixture_id,
             )
 

@@ -21,6 +21,10 @@ OWNED_RULE_IDS = frozenset(
         "pre_verifier_observation_manifest",
         "publication_content_manifest",
         "quality_policy_plan",
+        "benchmark_bundle",
+        "release_gate_attestation",
+        "release_gate_policy",
+        "release_gate_report",
         "task_report",
         "task_result",
         "task_result_core",
@@ -116,6 +120,36 @@ def build_gate_result_negative_cases(
     )
 
     return [
+        case(
+            "benchmark_bundle",
+            "benchmark_bundle_negative_unsorted_seeds",
+            harness.fixture_document("benchmark_bundle_negative_unsorted_seeds"),
+            failure("RELEASE_BENCHMARK_ORDER_INVALID", "$.seeds"),
+        ),
+        case(
+            "release_gate_policy",
+            "release_gate_policy_negative_bootstrap_relative_required",
+            harness.fixture_document(
+                "release_gate_policy_negative_bootstrap_relative_required"
+            ),
+            failure("RELEASE_POLICY_MODE_INVALID", "$.relative_gates"),
+        ),
+        case(
+            "release_gate_report",
+            "release_gate_report_negative_exit_verdict_mismatch",
+            harness.fixture_document(
+                "release_gate_report_negative_exit_verdict_mismatch"
+            ),
+            failure("RELEASE_REPORT_VERDICT_INVALID", "$.exit_code"),
+        ),
+        case(
+            "release_gate_attestation",
+            "release_gate_attestation_negative_validity_window",
+            harness.fixture_document(
+                "release_gate_attestation_negative_validity_window"
+            ),
+            failure("RELEASE_ATTESTATION_WINDOW_INVALID", "$.expires_at"),
+        ),
         case(
             "completion_proposal",
             "task_completion_negative_no_change_source_drift",

@@ -169,6 +169,9 @@ class AgentFirstSemanticClosureGateTest(
     def test_contextual_helpers_negative_execution_batch_4(self) -> None:
         self.assert_negative_helper_batch(3)
 
+    def test_contextual_helpers_negative_execution_batch_5(self) -> None:
+        self.assert_negative_helper_batch(4)
+
 
 if __name__ == "__main__":
     unittest.main()
