@@ -184,11 +184,7 @@ TERMINAL_REASON_MAP = {
         "STORAGE_FAILURE",
     },
     "CANCELLED": {"LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"},
-    "CANCELLED_WITH_EFFECTS": {
-        "LEASE_CANCELLED",
-        "SERVER_CANCELLED",
-        "USER_CANCELLED",
-    },
+    "CANCELLED_WITH_EFFECTS": {"LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"},
     "TERMINATED_WITH_UNKNOWN_EFFECTS": {"DEADLINE_REACHED"},
 }
 
@@ -380,8 +376,19 @@ class GateFamilyTest(unittest.TestCase):
             success_results["items"]["properties"]["predicate_id"]["enum"],
         )
         terminal_fields = {
+            "task_id",
+            "task_version",
+            "deletion_version",
+            "profile",
+            "gate_mode",
+            "cancel_state",
+            "effect_state",
+            "cause_family",
+            "delivery_state",
+            "selected_lifecycle",
             "selected_outcome",
             "selected_reason",
+            "selector_input_digest",
             "authoritative_fact_refs",
             "source_availability",
             "evidence_availability",

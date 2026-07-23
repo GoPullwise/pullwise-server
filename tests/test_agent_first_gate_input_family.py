@@ -70,6 +70,7 @@ class AgentFirstGateInputFamilyTest(unittest.TestCase):
         "owner_id",
         "owner_epoch",
         "task_version",
+        "deletion_version",
         "lifecycle",
         "desired_state",
         "lease_id",
