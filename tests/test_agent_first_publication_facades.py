@@ -192,6 +192,9 @@ class AgentFirstPublicationFacadesTest(unittest.TestCase):
         bad_order = deepcopy(mixed)
         bad_order["rows"].reverse()
         bad_order = seal(schema, bad_order)
+        duplicate_effect_id = deepcopy(mixed)
+        duplicate_effect_id["rows"][1]["effect_id"] = duplicate_effect_id["rows"][0]["effect_id"]
+        duplicate_effect_id = seal(schema, duplicate_effect_id)
         bad_watermark = deepcopy(mixed)
         bad_watermark["watermark"] += 1
         bad_watermark = seal(schema, bad_watermark)
@@ -204,6 +207,7 @@ class AgentFirstPublicationFacadesTest(unittest.TestCase):
                     mixed,
                     bad_count,
                     bad_order,
+                    duplicate_effect_id,
                     bad_watermark,
                 )
             ]
@@ -213,6 +217,7 @@ class AgentFirstPublicationFacadesTest(unittest.TestCase):
         self.assertEqual(
             [
                 ("EFFECT_LEDGER_STATE_COUNTS_INVALID", "$.state_counts"),
+                ("EFFECT_LEDGER_ROW_ORDER_INVALID", "$.rows"),
                 ("EFFECT_LEDGER_ROW_ORDER_INVALID", "$.rows"),
                 ("EFFECT_LEDGER_WATERMARK_INVALID", "$.watermark"),
             ],

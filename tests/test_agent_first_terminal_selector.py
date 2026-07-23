@@ -91,14 +91,6 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
         self,
         **axis_overrides: str,
     ) -> tuple[dict[str, object], dict[str, object]]:
-        snapshot = deepcopy(
-            self.fixtures["gate_input_golden_terminalization_snapshot"]["document"]
-        )
-        snapshot["deletion_version"] = 4
-        snapshot["predicate_registry_digest"] = self.registry["registry_digest"]
-        snapshot = self.harness.reseal(
-            "terminalization-input-snapshot/v1", snapshot
-        )
         axes = {
             "profile": "task_result",
             "gate_mode": "none",
@@ -108,6 +100,26 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
             "delivery_state": "none",
             **axis_overrides,
         }
+        snapshot = deepcopy(
+            self.fixtures["gate_input_golden_terminalization_snapshot"]["document"]
+        )
+        snapshot["deletion_version"] = 4
+        if axes["effect_state"] == "unknown_pre_deadline":
+            snapshot["trusted_wall_time_at"] = "2026-01-01T00:08:59.999Z"
+        ledger_states = {
+            "none": [],
+            "committed": ["COMMITTED"],
+            "unknown_pre_deadline": ["UNKNOWN"],
+            "unknown_post_deadline": ["UNKNOWN"],
+        }[axes["effect_state"]]
+        ledger = self.harness.effect_ledger(snapshot["task_id"], ledger_states)
+        snapshot["effect_ledger_ref"] = self.harness.snapshot_ref(
+            ledger, "art_f3000000000000000000000000000002"
+        )
+        snapshot["predicate_registry_digest"] = self.registry["registry_digest"]
+        snapshot = self.harness.reseal(
+            "terminalization-input-snapshot/v1", snapshot
+        )
         context = {
             "input_snapshot_ref": self.harness.snapshot_ref(
                 snapshot, "art_f3000000000000000000000000000003"
@@ -121,6 +133,7 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
                 "availability": "available",
                 "ref": deepcopy(snapshot["effect_ledger_ref"]),
             },
+            "effect_ledger": ledger,
             "predicate_results": deepcopy(self.terminal["predicate_results"]),
         }
         return snapshot, context
@@ -335,14 +348,18 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
         caller_selected.update(
             {"selected_outcome": "COMPLETED", "selected_reason": "SUCCESS"}
         )
-        _, tombstone = self.inputs(
+        tombstone_snapshot, tombstone = self.inputs(
             profile="tombstone_pre_fence", cause_family="none"
         )
-        _, contradictory = self.inputs(
+        contradictory_snapshot, contradictory = self.inputs(
             gate_mode="completed",
             effect_state="unknown_pre_deadline",
             cause_family="none",
             delivery_state="safe_complete",
+        )
+        failed_snapshot, failed_with_effects = self.inputs(
+            effect_state="committed",
+            cause_family="runtime_failure",
         )
         results = self.harness.assert_operation_parity(
             [
@@ -351,11 +368,20 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
                     "snapshot": snapshot,
                     "context": caller_selected,
                 },
-                {"kind": "terminal", "snapshot": snapshot, "context": tombstone},
                 {
                     "kind": "terminal",
-                    "snapshot": snapshot,
+                    "snapshot": tombstone_snapshot,
+                    "context": tombstone,
+                },
+                {
+                    "kind": "terminal",
+                    "snapshot": contradictory_snapshot,
                     "context": contradictory,
+                },
+                {
+                    "kind": "terminal",
+                    "snapshot": failed_snapshot,
+                    "context": failed_with_effects,
                 },
             ]
         )
@@ -363,6 +389,7 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
             [
                 "GATE_EVALUATION_CONTEXT_INVALID",
                 "GATE_TERMINAL_SELECTOR_TOMBSTONE_PRE_FENCE",
+                "GATE_TERMINAL_SELECTOR_COMBINATION_INVALID",
                 "GATE_TERMINAL_SELECTOR_COMBINATION_INVALID",
             ],
             [result["detail"] for result in results],

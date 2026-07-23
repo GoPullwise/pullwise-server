@@ -832,6 +832,14 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "gate_input_golden_terminalization_snapshot"
         )
         decision = self.fixture_document("gate_decision_golden_terminalization")
+        ledger = self.fixture_document("publication_golden_effect_ledger")
+        ledger["task_id"] = snapshot["task_id"]
+        ledger = self.reseal("effect-ledger-snapshot/v1", ledger)
+        snapshot["effect_ledger_ref"] = self.content_ref(
+            "art_" + "3" * 32,
+            "effect-ledger-snapshot/v1",
+            ledger,
+        )
         snapshot["predicate_registry_digest"] = registry["registry_digest"]
         snapshot = self.reseal("terminalization-input-snapshot/v1", snapshot)
         context = {
@@ -852,6 +860,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                 "availability": "available",
                 "ref": deepcopy(snapshot["effect_ledger_ref"]),
             },
+            "effect_ledger": ledger,
             "predicate_results": deepcopy(decision["predicate_results"]),
         }
         return snapshot, context
