@@ -125,7 +125,7 @@
         "receipt_binding_state": "bound",
         "receipt_digest": "9acbc5f37166d691f56b017f9116278d6a3fb27d37441ebf57edfda5da5cd4a7",
         "accepted_at": "2026-07-22T00:01:10Z",
-        "ack_digest": "b34394115e32da18afe06aa4cbfc18b2b78ba7e54c30846db80c76930fc6e2f8"
+        "ack_digest": "958e0d8fba52caa1d2a487fe2ffa5aa5a71b02040bf091df16a37dbbca859e8d"
       },
       "expected_code": null
     },
@@ -151,7 +151,7 @@
         "receipt_binding_state": "bound",
         "receipt_digest": "9acbc5f37166d691f56b017f9116278d6a3fb27d37441ebf57edfda5da5cd4a7",
         "accepted_at": "2026-07-22T00:01:10Z",
-        "ack_digest": "b34394115e32da18afe06aa4cbfc18b2b78ba7e54c30846db80c76930fc6e2f8"
+        "ack_digest": "958e0d8fba52caa1d2a487fe2ffa5aa5a71b02040bf091df16a37dbbca859e8d"
       },
       "expected_code": null
     },
