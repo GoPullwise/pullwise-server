@@ -177,7 +177,7 @@
         "receipt_binding_state": "not_applicable",
         "receipt_digest": "9acbc5f37166d691f56b017f9116278d6a3fb27d37441ebf57edfda5da5cd4a7",
         "accepted_at": "2026-07-22T00:01:10Z",
-        "ack_digest": "741402f3df4f5fdc2d1c97ce87fb21fc17ad2c83d8f3bfad2c60bbe39cb7c7e6"
+        "ack_digest": "403a312027827aea9474061ad89a0547b892a9ed4549b91acf6484c4473124a1"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
