@@ -4,11 +4,11 @@ from copy import deepcopy
 import hashlib
 import unittest
 
-from tests.test_agent_first_gate_decision_facades import (
-    AgentFirstGateDecisionFacadesTest,
-    GATE_SCHEMA_ID,
-    canonical_bytes,
-)
+from tests import test_agent_first_gate_decision_facades as gate_facades
+
+
+GATE_SCHEMA_ID = gate_facades.GATE_SCHEMA_ID
+canonical_bytes = gate_facades.canonical_bytes
 
 
 AXIS_ENUMS = {
@@ -59,16 +59,33 @@ AXIS_ENUMS = {
     ],
 }
 
+RESULT_VARIANTS = [
+    ("COMPLETED", "task-result-completed-variant/v1"),
+    ("NO_CHANGE_NEEDED", "task-result-no-change-needed-variant/v1"),
+    ("COMPLETED_WITH_WAIVERS", "task-result-completed-with-waivers-variant/v1"),
+    ("PARTIAL", "task-result-partial-variant/v1"),
+    ("BLOCKED", "task-result-blocked-variant/v1"),
+    ("FAILED", "task-result-failed-variant/v1"),
+    ("CANCELLED", "task-result-cancelled-variant/v1"),
+    ("CANCELLED_WITH_EFFECTS", "task-result-cancelled-with-effects-variant/v1"),
+    (
+        "TERMINATED_WITH_UNKNOWN_EFFECTS",
+        "task-result-terminated-with-unknown-effects-variant/v1",
+    ),
+]
+
 
 class AgentFirstTerminalSelectorTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        AgentFirstGateDecisionFacadesTest.setUpClass()
-        cls.harness = AgentFirstGateDecisionFacadesTest(methodName="runTest")
-        cls.schemas = AgentFirstGateDecisionFacadesTest.schemas
-        cls.fixtures = AgentFirstGateDecisionFacadesTest.fixtures
-        cls.registry = AgentFirstGateDecisionFacadesTest.registry
-        cls.terminal = AgentFirstGateDecisionFacadesTest.terminal
+        gate_facades.AgentFirstGateDecisionFacadesTest.setUpClass()
+        cls.harness = gate_facades.AgentFirstGateDecisionFacadesTest(
+            methodName="runTest"
+        )
+        cls.schemas = gate_facades.AgentFirstGateDecisionFacadesTest.schemas
+        cls.fixtures = gate_facades.AgentFirstGateDecisionFacadesTest.fixtures
+        cls.registry = gate_facades.AgentFirstGateDecisionFacadesTest.registry
+        cls.terminal = gate_facades.AgentFirstGateDecisionFacadesTest.terminal
 
     def inputs(
         self,
@@ -174,6 +191,30 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
             self.assertIn(
                 "selector_input_digest", self.schemas[schema_id]["properties"]
             )
+            self.assertEqual(
+                [outcome for outcome, _ in RESULT_VARIANTS],
+                self.schemas[schema_id]["properties"]["outcome"]["enum"],
+            )
+            self.assertEqual(
+                [{"$ref": variant} for _, variant in RESULT_VARIANTS],
+                self.schemas[schema_id]["oneOf"],
+            )
+        for _, variant_id in RESULT_VARIANTS:
+            self.assertIn("selector_input_digest", self.schemas[variant_id]["required"])
+            self.assertIn(
+                "selector_input_digest", self.schemas[variant_id]["properties"]
+            )
+        cancelled_effects = self.schemas[
+            "task-result-cancelled-with-effects-variant/v1"
+        ]["properties"]["effects"]["properties"]
+        self.assertEqual(1, cancelled_effects["committed"]["minimum"])
+        self.assertEqual(0, cancelled_effects["unknown"]["const"])
+        unknown_effects = self.schemas[
+            "task-result-terminated-with-unknown-effects-variant/v1"
+        ]["properties"]["effects"]["properties"]
+        self.assertEqual(1, unknown_effects["unknown"]["minimum"])
+        task_record = self.schemas["task-record/v1"]
+        self.assertIn("RECONCILING", task_record["properties"]["lifecycle"]["enum"])
 
     def test_selector_is_mechanical_exhaustive_and_python_node_identical(self) -> None:
         cases = [

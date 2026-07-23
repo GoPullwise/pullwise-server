@@ -144,8 +144,12 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
             "input_snapshot_ref": cls.snapshot_ref(
                 snapshot, "art_f2000000000000000000000000000002"
             ),
-            "selected_outcome": cls.terminal["selected_outcome"],
-            "selected_reason": cls.terminal["selected_reason"],
+            "profile": cls.terminal["profile"],
+            "gate_mode": cls.terminal["gate_mode"],
+            "cancel_state": cls.terminal["cancel_state"],
+            "effect_state": cls.terminal["effect_state"],
+            "cause_family": cls.terminal["cause_family"],
+            "delivery_state": cls.terminal["delivery_state"],
             "source_availability": deepcopy(snapshot["final_source"]),
             "evidence_availability": deepcopy(cls.terminal["evidence_availability"]),
             "effect_availability": {
@@ -392,7 +396,7 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
             terminal_snapshot["terminalization_fact_refs"],
             terminal["authoritative_fact_refs"],
         )
-        self.assertEqual(terminal_context["selected_reason"], terminal["selected_reason"])
+        self.assertEqual(self.terminal["selected_reason"], terminal["selected_reason"])
         self.assertEqual(
             terminal["decision_digest"],
             self.python.document_digest(
