@@ -25,11 +25,13 @@ OWNED_RULE_IDS = frozenset(
         "requirement_id_source_kind_match",
         "risk_ceiling_current_mvp",
         "root_and_origin_sets_sorted_unique",
+        "server_authority_envelope",
         "sorted_unique_active_requirement_ids",
         "sorted_unique_charter_sets",
         "sorted_unique_requirement_links",
         "task_record_transport_binding_all_or_none",
         "terminal_result_shape",
+        "transport_abandonment_record",
         "utf8_nfc_byte_limits",
         "waiver_time_order",
     }
@@ -143,6 +145,12 @@ def build_task_control_negative_cases(
 
     invalid_terminal_shape = deepcopy(record)
     invalid_terminal_shape["lifecycle"] = "TERMINAL"
+
+    authority_fixture = "authority_negative_agent_selected_fence"
+    invalid_authority_binding = harness.fixture_document(authority_fixture)
+
+    abandonment_fixture = "transport_abandonment_negative_successor_version"
+    invalid_abandonment_version = harness.fixture_document(abandonment_fixture)
 
     ledger_fixture = "requirements_golden_ledger"
     ledger = harness.fixture_document(ledger_fixture)
@@ -291,6 +299,15 @@ def build_task_control_negative_cases(
             failure("POLICY_ROOT_ORDER_INVALID"),
         ),
         case(
+            "server_authority_envelope",
+            authority_fixture,
+            invalid_authority_binding,
+            failure(
+                "AUTHORITY_GRANT_BINDING_MISMATCH",
+                code="AUTHORITY_INPUT_UNTRUSTED",
+            ),
+        ),
+        case(
             "sorted_unique_active_requirement_ids",
             ledger_fixture,
             invalid_active_set,
@@ -321,6 +338,16 @@ def build_task_control_negative_cases(
             record_fixture,
             invalid_terminal_shape,
             failure("TASK_RECORD_TERMINAL_RESULT_INVALID"),
+        ),
+        case(
+            "transport_abandonment_record",
+            abandonment_fixture,
+            invalid_abandonment_version,
+            failure(
+                "AUTHORITY_SUCCESSOR_VERSION_INVALID",
+                "$.abandoned_task_version",
+                code="AUTHORITY_INPUT_UNTRUSTED",
+            ),
         ),
         case(
             "utf8_nfc_byte_limits",
