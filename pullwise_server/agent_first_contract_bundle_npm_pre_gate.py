@@ -28,13 +28,6 @@ const PRE_GATE_SUCCESS_AVAILABLE = [
   "pre_observation_manifest", "final_observation_manifest", "attestations",
   "report",
 ];
-const PRE_GATE_PARTIAL_AVAILABLE = [
-  "proposal", "original_source", "final_source", "final_observation_manifest",
-  "report",
-];
-const PRE_GATE_TERMINAL_OUTCOMES = new Set([
-  "BLOCKED", "CANCELLED", "FAILED",
-]);
 const PRE_GATE_FORBIDDEN_CLOSURE_TARGETS = new Set([
   "error-response/v1", "evidence-closure-manifest/v1", "gate-decision/v1",
   "gate-input-snapshot/v1", "server-debug-assembly/v1",

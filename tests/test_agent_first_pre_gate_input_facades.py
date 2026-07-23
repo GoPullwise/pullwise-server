@@ -323,6 +323,13 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
             "input_digest",
             "pullwise:terminalization-input-snapshot:v1",
         )
+        legacy_root = self.document("pre_gate_golden_root_set")
+        legacy_root["outcome_candidate"] = "FAILED"
+        legacy_root = reseal(
+            legacy_root,
+            "root_set_digest",
+            "pullwise:pre-gate-root-set:v1",
+        )
         cases = [
             (
                 "pre-gate-evidence-closure-manifest/v1",
@@ -347,6 +354,12 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
                 wrong_attempt,
                 "TERMINALIZATION_ATTEMPT_BINDING_INVALID",
                 "$.attempt_id",
+            ),
+            (
+                "pre-gate-root-set/v1",
+                legacy_root,
+                "CONTRACT_FIELD_UNKNOWN",
+                "$.outcome_candidate",
             ),
         ]
         results = self.assert_parity(
@@ -407,6 +420,36 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
             )
         )
 
+        bad_proposal = deepcopy(success)
+        bad_proposal[3]["outcome_requested"] = "COMPLETED"
+        bad_proposal[3] = reseal(
+            bad_proposal[3],
+            "proposal_digest",
+            "pullwise:completion-proposal:v1",
+        )
+        invalid.append(
+            (
+                {"kind": "success_context", "args": bad_proposal},
+                "CAS_CORRUPT",
+                "$.completion_proposal_ref",
+            )
+        )
+
+        bad_requested = deepcopy(success)
+        bad_requested[0]["requested_outcome"] = "COMPLETED"
+        bad_requested[0] = reseal(
+            bad_requested[0],
+            "input_digest",
+            "pullwise:gate-input-snapshot:v1",
+        )
+        invalid.append(
+            (
+                {"kind": "success_context", "args": bad_requested},
+                "GATE_INPUT_STALE",
+                "$.requested_outcome",
+            )
+        )
+
         missing_root = deepcopy(success)
         direct_ref = missing_root[1]["request"]["ref"]
         missing_root[2]["entries"].remove(direct_ref)
@@ -449,7 +492,10 @@ class AgentFirstPreGateInputFacadesTest(unittest.TestCase):
         )
 
         results = self.assert_parity(valid + [item[0] for item in invalid])
-        self.assertTrue(all(result["ok"] for result in results[: len(valid)]))
+        self.assertTrue(
+            all(result["ok"] for result in results[: len(valid)]),
+            results[: len(valid)],
+        )
         for result, (_, detail, path) in zip(results[len(valid) :], invalid):
             self.assertEqual(detail, result["code"])
             self.assertEqual(detail, result["detail"])

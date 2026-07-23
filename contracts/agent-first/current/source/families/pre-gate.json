@@ -200,7 +200,7 @@
             "media_type":"application/json","encoding":"utf-8"}},
         "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012",
           "content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
-        "root_set_digest":"9caaf47fab13a74d04bdbce5aacf11f012b9c51005988f0cdc44330557c86bcb"
+        "root_set_digest":"807def74f104919b83ca183b31867bbab8f2503fc39954b42eecc2d7219ca5d1"
       },
       "expected_code": null
     },
@@ -244,7 +244,7 @@
             "media_type":"application/json","encoding":"utf-8"}},
         "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012",
           "content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
-        "root_set_digest":"61c183d73ae0492ac4117274fd8e3603e632ca57d4c9242928cbcc7f32e279ae"
+        "root_set_digest":"0eef142628d665af953486197947731a87569ec4435345069ebfd61b195fe397"
       },
       "expected_code": null
     },
@@ -330,7 +330,7 @@
             "media_type":"application/json","encoding":"utf-8"}},
         "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012",
           "content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
-        "root_set_digest":"9caaf47fab13a74d04bdbce5aacf11f012b9c51005988f0cdc44330557c86bcb"
+        "root_set_digest":"807def74f104919b83ca183b31867bbab8f2503fc39954b42eecc2d7219ca5d1"
       },
       "expected_code": null
     },
@@ -395,7 +395,7 @@
             "media_type":"application/json","encoding":"utf-8"}},
         "debug_redaction_plan":{"availability":"available","ref":{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000012",
           "content_schema_id":"debug-redaction-plan/v1","sha256":"1212121212121212121212121212121212121212121212121212121212121212","size_bytes":1,"media_type":"application/json","encoding":"utf-8"}},
-        "root_set_digest":"63a83a8d7653623f1d0b0002d22607faa72bb9a642192d5d5d997e156bda4588"
+        "root_set_digest":"3a37ed090b112f40bf41de3f2012f0324eff8eb7a437d6ba05f64fb7be7695ab"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

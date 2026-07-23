@@ -58,14 +58,6 @@ _PRE_GATE_SUCCESS_AVAILABLE = (
     "attestations",
     "report",
 )
-_PRE_GATE_PARTIAL_AVAILABLE = (
-    "proposal",
-    "original_source",
-    "final_source",
-    "final_observation_manifest",
-    "report",
-)
-_PRE_GATE_TERMINAL_OUTCOMES = {"BLOCKED", "CANCELLED", "FAILED"}
 _PRE_GATE_FORBIDDEN_CLOSURE_TARGETS = {
     "error-response/v1",
     "evidence-closure-manifest/v1",
