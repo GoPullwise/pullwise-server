@@ -73,8 +73,8 @@ const GATE_PREDICATE_ENTRIES = [
 
 const GATE_TERMINAL_REASONS = {
   COMPLETED: new Set(["SUCCESS"]),
-  COMPLETED_WITH_WAIVERS: new Set(["SUCCESS_WITH_WAIVERS"]),
-  NO_CHANGE_NEEDED: new Set(["NO_CHANGE_NEEDED"]),
+  COMPLETED_WITH_WAIVERS: new Set(["AUTHORIZED_WAIVER"]),
+  NO_CHANGE_NEEDED: new Set(["ALREADY_SATISFIED"]),
   PARTIAL: new Set(["BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "DEADLINE_REACHED",
     "INTERACTION_UNAVAILABLE", "SAFE_PARTIAL_DELIVERY", "VERIFICATION_INCOMPLETE"]),
   BLOCKED: new Set(["APPROVAL_REQUIRED", "CAPABILITY_UNAVAILABLE", "ENVIRONMENT_UNAVAILABLE",
@@ -110,9 +110,9 @@ const GATE_CANCEL_REASONS = Object.freeze({
 const GATE_SUCCESS_SELECTIONS = Object.freeze({
   completed: ["COMPLETED", "SUCCESS", "safe_complete"],
   completed_with_waivers: [
-    "COMPLETED_WITH_WAIVERS", "SUCCESS_WITH_WAIVERS", "safe_complete_with_waivers",
+    "COMPLETED_WITH_WAIVERS", "AUTHORIZED_WAIVER", "safe_complete_with_waivers",
   ],
-  no_change_needed: ["NO_CHANGE_NEEDED", "NO_CHANGE_NEEDED", "safe_no_change"],
+  no_change_needed: ["NO_CHANGE_NEEDED", "ALREADY_SATISFIED", "safe_no_change"],
 });
 const GATE_PARTIAL_REASONS = Object.freeze({
   none: "SAFE_PARTIAL_DELIVERY", budget_exhausted: "BUDGET_EXHAUSTED",

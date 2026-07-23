@@ -12,7 +12,7 @@
         "contextual_helpers": ["verify_gate_input_snapshot_context"]
       },
       "required": [
-        "schema_id", "task_id", "attempt_id", "native_epoch", "owner_id", "owner_epoch", "task_version", "deletion_version", "lifecycle", "desired_state",
+        "schema_id", "task_id", "attempt_id", "native_epoch", "owner_id", "owner_epoch", "task_version", "lifecycle", "desired_state",
         "lease_id", "outer_lease_expires_at", "outer_lease_grace_expires_at", "authoritative_cancel_received", "absolute_deadline_at",
         "trusted_wall_time_at", "monotonic_deadline_remaining_ms", "terminal_budget_reserved_ms", "predicate_registry_digest",
         "request_ref", "policy_ref", "requirement_ledger_ref", "completion_proposal_ref", "quality_policy_plan_ref", "original_source_ref",
@@ -29,7 +29,6 @@
         "owner_id": {"type":"string","pattern":"^owner_[0-9a-f]{32}$"},
         "owner_epoch": {"type":"integer","minimum":1,"maximum":9007199254740991},
         "task_version": {"type":"integer","minimum":1,"maximum":9007199254740991},
-        "deletion_version": {"type":"integer","minimum":0,"maximum":9007199254740991},
         "lifecycle": {"const":"FINALIZING"},
         "desired_state": {"const":"RUN"},
         "lease_id": {"type":"string","minLength":1,"maxLength":160},
@@ -94,7 +93,7 @@
         "contextual_helpers": ["verify_terminalization_input_snapshot_context"]
       },
       "required": [
-        "schema_id", "task_id", "attempt_id", "native_epoch", "owner_id", "owner_epoch", "task_version", "lifecycle", "desired_state",
+        "schema_id", "task_id", "attempt_id", "native_epoch", "owner_id", "owner_epoch", "task_version", "deletion_version", "lifecycle", "desired_state",
         "lease_id", "outer_lease_expires_at", "outer_lease_grace_expires_at", "absolute_deadline_at", "trusted_wall_time_at",
         "monotonic_deadline_remaining_ms", "terminal_budget_reserved_ms", "predicate_registry_digest", "request_ref", "policy_ref",
         "requirement_ledger_ref", "original_source", "final_source", "final_observation_manifest", "effect_ledger_ref", "budget_summary_ref",
@@ -109,6 +108,7 @@
         "owner_id": {"type":"string","pattern":"^owner_[0-9a-f]{32}$"},
         "owner_epoch": {"type":"integer","minimum":0,"maximum":9007199254740991},
         "task_version": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "deletion_version": {"type":"integer","minimum":0,"maximum":9007199254740991},
         "lifecycle": {"const":"FINALIZING"},
         "desired_state": {"enum":["CANCEL","RUN"]},
         "lease_id": {"type":["string","null"],"minLength":1,"maxLength":160},

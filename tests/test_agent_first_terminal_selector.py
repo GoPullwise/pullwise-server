@@ -229,7 +229,7 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
                 (
                     "TERMINAL",
                     "COMPLETED_WITH_WAIVERS",
-                    "SUCCESS_WITH_WAIVERS",
+                    "AUTHORIZED_WAIVER",
                 ),
             ),
             (
@@ -238,7 +238,7 @@ class AgentFirstTerminalSelectorTest(unittest.TestCase):
                     "cause_family": "none",
                     "delivery_state": "safe_no_change",
                 },
-                ("TERMINAL", "NO_CHANGE_NEEDED", "NO_CHANGE_NEEDED"),
+                ("TERMINAL", "NO_CHANGE_NEEDED", "ALREADY_SATISFIED"),
             ),
             (
                 {

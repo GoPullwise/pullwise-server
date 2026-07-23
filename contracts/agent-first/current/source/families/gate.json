@@ -16,37 +16,44 @@
       "properties": {
         "schema_id": {"const": "gate-decision/v1"},
         "decision_kind": {"enum": ["success", "terminalization"]},
-        "input_snapshot_ref": {
-          "$ref": "content-ref/v1",
-          "x-pullwise-content-schema-ids": ["gate-input-snapshot/v1", "terminalization-input-snapshot/v1"]
-        },
+        "input_snapshot_ref": {"$ref":"content-ref/v1",
+          "x-pullwise-content-schema-ids":["gate-input-snapshot/v1","terminalization-input-snapshot/v1"]},
         "input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "predicate_registry_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "requested_outcome": {"enum": ["COMPLETED", "COMPLETED_WITH_WAIVERS", "NO_CHANGE_NEEDED"]},
-        "selected_outcome": {"enum": ["BLOCKED", "CANCELLED", "FAILED", "PARTIAL"]},
-        "selected_reason": {
-          "enum": [
-            "APPROVAL_REQUIRED", "BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "CONTRACT_INVALID", "DEADLINE_REACHED",
-            "ENVIRONMENT_UNAVAILABLE", "INPUT_REQUIRED", "INTERACTION_UNAVAILABLE", "LEASE_CANCELLED",
-            "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED",
-            "RUNTIME_FAILURE", "SAFE_PARTIAL_DELIVERY", "SERVER_CANCELLED", "SOURCE_MUTATION_FORBIDDEN",
-            "STORAGE_FAILURE", "USER_CANCELLED", "VERIFICATION_INCOMPLETE"
-          ]
-        },
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "task_version": {"type":"integer","minimum":1,"maximum":9007199254740991},
+        "deletion_version": {"type":"integer","minimum":0,"maximum":9007199254740991},
+        "profile": {"enum":["task_result","tombstone_pre_fence"]},
+        "gate_mode": {"enum":["none","completed","completed_with_waivers","no_change_needed"]},
+        "cancel_state": {"enum":["none","user_cancelled","server_cancelled","lease_cancelled"]},
+        "effect_state": {"enum":["none","committed","unknown_pre_deadline","unknown_post_deadline"]},
+        "cause_family": {"enum":["none","approval_required","input_required","capability_unavailable",
+          "environment_unavailable","interaction_unavailable","policy_unsupported","policy_invariant_broken",
+          "budget_exhausted","deadline_reached","verification_incomplete","contract_invalid","protocol_failure",
+          "quality_gate_failed","runtime_failure","storage_failure","source_mutation_forbidden"]},
+        "delivery_state": {"enum":["none","safe_complete","safe_complete_with_waivers","safe_no_change","safe_partial"]},
+        "selected_lifecycle": {"enum":["RECONCILING","TERMINAL"]},
+        "selected_outcome": {"type":["string","null"],"enum":[null,"COMPLETED","COMPLETED_WITH_WAIVERS",
+          "NO_CHANGE_NEEDED","PARTIAL","BLOCKED","FAILED","CANCELLED","CANCELLED_WITH_EFFECTS",
+          "TERMINATED_WITH_UNKNOWN_EFFECTS"]},
+        "selected_reason": {"type":["string","null"],"enum":[null,"SUCCESS","AUTHORIZED_WAIVER",
+          "ALREADY_SATISFIED","APPROVAL_REQUIRED","BUDGET_EXHAUSTED","CAPABILITY_UNAVAILABLE","CONTRACT_INVALID",
+          "DEADLINE_REACHED","ENVIRONMENT_UNAVAILABLE","INPUT_REQUIRED","INTERACTION_UNAVAILABLE","LEASE_CANCELLED",
+          "POLICY_INVARIANT_BROKEN","POLICY_UNSUPPORTED","PROTOCOL_FAILURE","QUALITY_GATE_FAILED","RUNTIME_FAILURE",
+          "SAFE_PARTIAL_DELIVERY","SERVER_CANCELLED","SOURCE_MUTATION_FORBIDDEN","STORAGE_FAILURE","USER_CANCELLED",
+          "VERIFICATION_INCOMPLETE"]},
+        "selector_input_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
         "authoritative_fact_refs": {
           "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true,
           "items": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "terminalization-fact/v1"}
         },
-        "source_availability": {
-          "$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-id": "source-tree-manifest/v1"
-        },
-        "evidence_availability": {
-          "$ref": "availability-ref/v1",
-          "x-pullwise-availability-content-schema-id": "pre-gate-evidence-closure-manifest/v1"
-        },
-        "effect_availability": {
-          "$ref": "availability-ref/v1", "x-pullwise-availability-content-schema-id": "effect-ledger-snapshot/v1"
-        },
+        "source_availability": {"$ref":"availability-ref/v1",
+          "x-pullwise-availability-content-schema-id":"source-tree-manifest/v1"},
+        "evidence_availability": {"$ref":"availability-ref/v1",
+          "x-pullwise-availability-content-schema-id":"pre-gate-evidence-closure-manifest/v1"},
+        "effect_availability": {"$ref":"availability-ref/v1",
+          "x-pullwise-availability-content-schema-id":"effect-ledger-snapshot/v1"},
         "passed": {"type": "boolean"},
         "predicate_results": {
           "type": "array",
@@ -113,25 +120,16 @@
           "properties": {
             "schema_id": {},
             "decision_kind": {"const": "success"},
-            "input_snapshot_ref": {
-              "$ref": "content-ref/v1", "x-pullwise-content-schema-id": "gate-input-snapshot/v1"
-            },
+            "input_snapshot_ref": {"$ref":"content-ref/v1",
+              "x-pullwise-content-schema-id":"gate-input-snapshot/v1"},
             "input_digest": {}, "predicate_registry_digest": {}, "requested_outcome": {}, "passed": {},
-            "predicate_results": {
-              "type": "array", "minItems": 15, "maxItems": 15,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "predicate_id": {
-                    "enum": [
-                      "GATE_TASK_STATE", "GATE_LEASE_VALID", "GATE_DEADLINE", "GATE_POLICY", "GATE_LEDGER",
-                      "GATE_SOURCE_FROZEN", "GATE_PROPOSAL_FRESH", "GATE_QUALITY_PLAN", "GATE_ATTESTATIONS",
-                      "GATE_REQUIREMENTS", "GATE_OUTCOME_SHAPE", "GATE_EFFECTS_EMPTY", "GATE_EVIDENCE_CLOSURE",
-                      "GATE_BUDGET", "GATE_SECRET_SCAN"
-                    ]
-                  }
-                }
-              }
+            "predicate_results": {"type":"array","minItems":15,"maxItems":15,
+              "items":{"type":"object","properties":{"predicate_id":{"enum":[
+                "GATE_TASK_STATE", "GATE_LEASE_VALID", "GATE_DEADLINE", "GATE_POLICY", "GATE_LEDGER",
+                "GATE_SOURCE_FROZEN", "GATE_PROPOSAL_FRESH", "GATE_QUALITY_PLAN", "GATE_ATTESTATIONS",
+                "GATE_REQUIREMENTS", "GATE_OUTCOME_SHAPE", "GATE_EFFECTS_EMPTY", "GATE_EVIDENCE_CLOSURE",
+                "GATE_BUDGET", "GATE_SECRET_SCAN"
+              ]}}}
             },
             "decision_digest": {}
           }
@@ -140,64 +138,59 @@
           "type": "object", "additionalProperties": false,
           "required": [
             "schema_id", "decision_kind", "input_snapshot_ref", "input_digest", "predicate_registry_digest",
-            "selected_outcome", "selected_reason", "authoritative_fact_refs", "source_availability",
-            "evidence_availability", "effect_availability", "passed", "predicate_results", "decision_digest"
+            "task_id", "task_version", "deletion_version", "profile", "gate_mode", "cancel_state", "effect_state",
+            "cause_family", "delivery_state", "selected_lifecycle", "selected_outcome", "selected_reason",
+            "selector_input_digest", "authoritative_fact_refs", "source_availability", "evidence_availability",
+            "effect_availability", "passed", "predicate_results", "decision_digest"
           ],
           "properties": {
             "schema_id": {},
             "decision_kind": {"const": "terminalization"},
-            "input_snapshot_ref": {
-              "$ref": "content-ref/v1", "x-pullwise-content-schema-id": "terminalization-input-snapshot/v1"
-            },
-            "input_digest": {}, "predicate_registry_digest": {}, "selected_outcome": {}, "selected_reason": {},
+            "input_snapshot_ref": {"$ref":"content-ref/v1",
+              "x-pullwise-content-schema-id":"terminalization-input-snapshot/v1"},
+            "input_digest": {}, "predicate_registry_digest": {}, "task_id": {}, "task_version": {},
+            "deletion_version": {}, "profile": {}, "gate_mode": {}, "cancel_state": {}, "effect_state": {},
+            "cause_family": {}, "delivery_state": {}, "selected_lifecycle": {}, "selected_outcome": {},
+            "selected_reason": {}, "selector_input_digest": {},
             "authoritative_fact_refs": {}, "source_availability": {}, "evidence_availability": {},
             "effect_availability": {}, "passed": {},
-            "predicate_results": {
-              "type": "array", "minItems": 5, "maxItems": 5,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "predicate_id": {
-                    "enum": [
-                      "GATE_TERMINAL_AUTHORITY_FACT", "GATE_TERMINAL_AVAILABILITY",
-                      "GATE_TERMINAL_NO_ACTIVE_EFFECTS", "GATE_TERMINAL_OUTCOME_CLASSIFICATION",
-                      "GATE_TERMINAL_ARTIFACT_DELIVERY"
-                    ]
-                  }
-                }
-              }
+            "predicate_results": {"type":"array","minItems":5,"maxItems":5,
+              "items":{"type":"object","properties":{"predicate_id":{"enum":[
+                "GATE_TERMINAL_AUTHORITY_FACT", "GATE_TERMINAL_AVAILABILITY",
+                "GATE_TERMINAL_NO_ACTIVE_EFFECTS", "GATE_TERMINAL_OUTCOME_CLASSIFICATION",
+                "GATE_TERMINAL_ARTIFACT_DELIVERY"
+              ]}}}
             },
             "decision_digest": {}
           },
           "oneOf": [
-            {"type": "object",
-              "properties": {
-                "selected_outcome": {"const": "PARTIAL"},
-                "selected_reason": {"enum": ["BUDGET_EXHAUSTED", "CAPABILITY_UNAVAILABLE", "DEADLINE_REACHED",
-                  "INTERACTION_UNAVAILABLE", "SAFE_PARTIAL_DELIVERY", "VERIFICATION_INCOMPLETE"]}
-              }
-            },
-            {"type": "object",
-              "properties": {
-                "selected_outcome": {"const": "BLOCKED"},
-                "selected_reason": {"enum": ["APPROVAL_REQUIRED", "CAPABILITY_UNAVAILABLE", "ENVIRONMENT_UNAVAILABLE",
-                  "INPUT_REQUIRED", "INTERACTION_UNAVAILABLE", "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED"]}
-              }
-            },
-            {"type": "object",
-              "properties": {
-                "selected_outcome": {"const": "FAILED"},
-                "selected_reason": {"enum": ["BUDGET_EXHAUSTED", "CONTRACT_INVALID", "DEADLINE_REACHED",
-                  "POLICY_INVARIANT_BROKEN", "POLICY_UNSUPPORTED", "PROTOCOL_FAILURE", "QUALITY_GATE_FAILED",
-                  "RUNTIME_FAILURE", "SOURCE_MUTATION_FORBIDDEN", "STORAGE_FAILURE"]}
-              }
-            },
-            {"type": "object",
-              "properties": {
-                "selected_outcome": {"const": "CANCELLED"},
-                "selected_reason": {"enum": ["LEASE_CANCELLED", "SERVER_CANCELLED", "USER_CANCELLED"]}
-              }
-            }
+            {"type":"object","properties":{"selected_lifecycle":{"const":"RECONCILING"},
+              "selected_outcome":{"type":"null"},"selected_reason":{"type":"null"},"effect_state":{"const":"unknown_pre_deadline"}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},"selected_outcome":{"const":"COMPLETED"},
+              "selected_reason":{"const":"SUCCESS"}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},
+              "selected_outcome":{"const":"COMPLETED_WITH_WAIVERS"},"selected_reason":{"const":"AUTHORIZED_WAIVER"}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},
+              "selected_outcome":{"const":"NO_CHANGE_NEEDED"},"selected_reason":{"const":"ALREADY_SATISFIED"}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},
+              "selected_outcome":{"const":"PARTIAL"},"selected_reason":{"enum":["BUDGET_EXHAUSTED",
+                "CAPABILITY_UNAVAILABLE","DEADLINE_REACHED","INTERACTION_UNAVAILABLE","SAFE_PARTIAL_DELIVERY",
+                "VERIFICATION_INCOMPLETE"]}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},
+              "selected_outcome":{"const":"BLOCKED"},"selected_reason":{"enum":["APPROVAL_REQUIRED",
+                "CAPABILITY_UNAVAILABLE","ENVIRONMENT_UNAVAILABLE","INPUT_REQUIRED","INTERACTION_UNAVAILABLE",
+                "POLICY_INVARIANT_BROKEN","POLICY_UNSUPPORTED"]}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},
+              "selected_outcome":{"const":"FAILED"},"selected_reason":{"enum":["BUDGET_EXHAUSTED",
+                "CONTRACT_INVALID","DEADLINE_REACHED","POLICY_INVARIANT_BROKEN","POLICY_UNSUPPORTED",
+                "PROTOCOL_FAILURE","QUALITY_GATE_FAILED","RUNTIME_FAILURE","SOURCE_MUTATION_FORBIDDEN",
+                "STORAGE_FAILURE"]}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},
+              "selected_outcome":{"const":"CANCELLED"},"selected_reason":{"enum":["LEASE_CANCELLED","SERVER_CANCELLED","USER_CANCELLED"]}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},"selected_outcome":{"const":"CANCELLED_WITH_EFFECTS"},
+              "selected_reason":{"enum":["LEASE_CANCELLED","SERVER_CANCELLED","USER_CANCELLED"]}}},
+            {"type":"object","properties":{"selected_lifecycle":{"const":"TERMINAL"},
+              "selected_outcome":{"const":"TERMINATED_WITH_UNKNOWN_EFFECTS"},"selected_reason":{"const":"DEADLINE_REACHED"}}}
           ]
         }
       ]
@@ -275,7 +268,11 @@
         },
         "input_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "task_id":"task_11111111111111111111111111111111", "task_version":8, "deletion_version":4,
+        "profile":"task_result", "gate_mode":"none", "cancel_state":"none", "effect_state":"none",
+        "cause_family":"runtime_failure", "delivery_state":"none", "selected_lifecycle":"TERMINAL",
         "selected_outcome":"FAILED", "selected_reason":"RUNTIME_FAILURE",
+        "selector_input_digest":"c01a6f9fa21da6a522e7e546b4e456136b7c36bb441bd1c25d17642b4524b873",
         "authoritative_fact_refs": [{
           "schema_id":"content-ref/v1", "artifact_id":"art_cccccccccccccccccccccccccccccccc",
           "content_schema_id":"terminalization-fact/v1",
@@ -308,7 +305,7 @@
            "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000005","content_schema_id":"publication-content-manifest/v1",
            "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]}
         ],
-        "decision_digest":"c69e486263e273bf7ea29987721839274a9b5eb396dfdd5d4d66d81f98036f43"
+        "decision_digest":"9bfe3a2e64e23e2f4d4562a49d13bc3938256c0604ce7e69bbafc97acbf38b47"
       },
       "expected_code": null
     },
@@ -422,7 +419,11 @@
           "size_bytes":1,"media_type":"x","encoding":"binary"},
         "input_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
+        "task_id":"task_11111111111111111111111111111111", "task_version":8, "deletion_version":4,
+        "profile":"task_result", "gate_mode":"none", "cancel_state":"none", "effect_state":"none",
+        "cause_family":"capability_unavailable", "delivery_state":"none", "selected_lifecycle":"TERMINAL",
         "selected_outcome":"BLOCKED", "selected_reason":"CAPABILITY_UNAVAILABLE",
+        "selector_input_digest":"6e8aad8e7295d1e25ff0389d563b5eb5246763cb44ae303345312596b615d6c6",
         "authoritative_fact_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_cccccccccccccccccccccccccccccccc",
           "content_schema_id":"terminalization-fact/v1","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
           "size_bytes":1,"media_type":"x","encoding":"binary"}],
@@ -450,7 +451,7 @@
            "evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_e0000000000000000000000000000005","content_schema_id":"publication-content-manifest/v1",
            "sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","size_bytes":1,"media_type":"x","encoding":"binary"}]}
         ],
-        "decision_digest":"5218994eee155da7e7b03627eeddaef9522c86e91d5c28191cbfb1c4a25f377c"
+        "decision_digest":"9b7b74546431d1fd19b9e748f2a12cca63e38e868ae9881bd50edfc4343470c9"
       },
       "expected_code": null
     },
