@@ -10,7 +10,8 @@
       "required": [
         "schema_id", "result_id", "task_id", "task_type", "result_source", "outcome", "reason_code", "summary", "outcome_details", "published_from_version", "terminal_task_version",
         "attempt_identity", "owner_identity", "request_ref", "policy_ref", "requirement_ledger_ref", "charter", "requirement_results", "original_source_state", "final_source_state",
-        "execution_states", "change_set_ref", "completion_proposal", "observation_manifest", "attestations", "gate_decision", "selector_input_digest", "evidence_closure_ref", "evidence_closure_digest",
+        "execution_states", "change_set_ref", "completion_proposal", "observation_manifest", "attestations", "gate_decision",
+        "selector_input_digest", "evidence_closure_ref", "evidence_closure_digest",
         "effect_ledger_ref", "effects", "artifact_refs", "report", "budget_summary_ref", "provenance", "diagnostics", "created_at", "terminal_at"
       ],
       "properties": {

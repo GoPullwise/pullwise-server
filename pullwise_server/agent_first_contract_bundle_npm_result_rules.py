@@ -197,7 +197,16 @@ function ruleTaskResult(value) {
   seoRequire(value.terminal_task_version === value.published_from_version + 1, "TASK_RESULT_VERSION_SUCCESSOR_INVALID");
   const started = value.attempt_identity.kind === "started", ownerStarted = value.owner_identity.kind === "started";
   seoRequire(started === ownerStarted, "TASK_RESULT_IDENTITY_MATRIX_INVALID");
-  if (new Set(["COMPLETED", "NO_CHANGE_NEEDED", "COMPLETED_WITH_WAIVERS", "PARTIAL"]).has(value.outcome)) seoRequire(started && ownerStarted, "TASK_RESULT_IDENTITY_MATRIX_INVALID");
+  if (new Set(["COMPLETED", "NO_CHANGE_NEEDED", "COMPLETED_WITH_WAIVERS", "PARTIAL",
+    "CANCELLED_WITH_EFFECTS", "TERMINATED_WITH_UNKNOWN_EFFECTS"]).has(value.outcome)) seoRequire(started && ownerStarted, "TASK_RESULT_IDENTITY_MATRIX_INVALID");
+  const effects = value.effects;
+  let effectValid;
+  if (value.outcome === "CANCELLED_WITH_EFFECTS") effectValid = effects.committed >= 1 && effects.unknown === 0;
+  else if (value.outcome === "TERMINATED_WITH_UNKNOWN_EFFECTS") effectValid = effects.unknown >= 1;
+  else if (value.outcome === "PARTIAL") effectValid = effects.committed >= 1 && effects.unknown === 0;
+  else if (new Set(["BLOCKED", "FAILED", "CANCELLED", "NO_CHANGE_NEEDED"]).has(value.outcome)) effectValid = effects.committed === 0 && effects.unknown === 0;
+  else effectValid = effects.unknown === 0;
+  seoRequire(effectValid, "TASK_RESULT_EFFECT_MATRIX_INVALID", "$.effects");
   seoRequire(resultOrderedUnique(value.requirement_results, (item) => item.requirement_id), "TASK_RESULT_REQUIREMENT_ORDER_INVALID");
   value.requirement_results.forEach((item, index) => ["evidence_refs", "attestation_refs", "waiver_refs"].forEach((field) => seoRequire(resultOrderedUnique(item[field], resultRefKey), "TASK_RESULT_REFERENCE_ORDER_INVALID", `$.requirement_results[${index}].${field}`)));
   seoRequire(resultOrderedUnique(value.execution_states, resultAvailabilityKey), "TASK_RESULT_EXECUTION_ORDER_INVALID");

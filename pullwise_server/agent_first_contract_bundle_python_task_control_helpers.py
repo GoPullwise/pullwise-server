@@ -368,7 +368,8 @@ _TASK_CONTROL_RECORD_TRANSITIONS = {
     "ACTIVE": {"ACTIVE", "WAITING_INPUT", "WAITING_APPROVAL", "FINALIZING"},
     "WAITING_INPUT": {"QUEUED", "FINALIZING"},
     "WAITING_APPROVAL": {"QUEUED", "FINALIZING"},
-    "FINALIZING": {"ACTIVE", "QUEUED", "FINALIZING", "TERMINAL"},
+    "FINALIZING": {"ACTIVE", "QUEUED", "RECONCILING", "FINALIZING", "TERMINAL"},
+    "RECONCILING": {"RECONCILING", "TERMINAL"},
     "TERMINAL": set(),
 }
 
@@ -516,7 +517,7 @@ def validate_task_result_publication(
     result_bytes = canonical_document_bytes(result)
     result_digest = hashlib.sha256(result_bytes).hexdigest()
     _require(
-        previous["lifecycle"] == "FINALIZING"
+        previous["lifecycle"] in {"FINALIZING", "RECONCILING"}
         and terminal["lifecycle"] == "TERMINAL",
         "TASK_RESULT_PUBLICATION_STATE_INVALID",
         code="STATE_TRANSITION_INVALID",

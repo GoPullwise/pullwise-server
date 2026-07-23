@@ -67,6 +67,8 @@ def _validate_reason_registries(
         "task-result-blocked-variant/v1",
         "task-result-failed-variant/v1",
         "task-result-cancelled-variant/v1",
+        "task-result-cancelled-with-effects-variant/v1",
+        "task-result-terminated-with-unknown-effects-variant/v1",
     )
     declared: set[str] = set()
     for schema_id in variant_ids:
@@ -137,11 +139,13 @@ def _validate_task_result_variants(
         "task-result-blocked-variant/v1",
         "task-result-failed-variant/v1",
         "task-result-cancelled-variant/v1",
+        "task-result-cancelled-with-effects-variant/v1",
+        "task-result-terminated-with-unknown-effects-variant/v1",
     ]
     main = schemas["task-result/v1"]
     core = schemas["task-result-core/v1"]
     main_keys = set(main["properties"])
-    if len(main_keys) != 37 or set(core["properties"]) != main_keys:
+    if len(main_keys) != 38 or set(core["properties"]) != main_keys:
         raise error_type("task_result_core_property_parity_invalid")
     for schema_id in expected_order:
         variant = schemas[schema_id]

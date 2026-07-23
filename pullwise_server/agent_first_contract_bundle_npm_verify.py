@@ -7,11 +7,13 @@ NPM_VERIFY = r'''
 const INTERNAL_CONSTRAINT_SCHEMA_IDS = new Set([
   "task-result-blocked-variant/v1",
   "task-result-cancelled-variant/v1",
+  "task-result-cancelled-with-effects-variant/v1",
   "task-result-completed-variant/v1",
   "task-result-completed-with-waivers-variant/v1",
   "task-result-failed-variant/v1",
   "task-result-no-change-needed-variant/v1",
   "task-result-partial-variant/v1",
+  "task-result-terminated-with-unknown-effects-variant/v1",
 ]);
 
 function schemaRole(schemaId) {

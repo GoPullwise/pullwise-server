@@ -166,8 +166,23 @@ def _rule_task_result_complete(value: dict[str, object]) -> None:
     _seo_require(value["terminal_task_version"] == value["published_from_version"] + 1, "TASK_RESULT_VERSION_SUCCESSOR_INVALID")
     started = value["attempt_identity"]["kind"] == "started"
     _seo_require(started == (value["owner_identity"]["kind"] == "started"), "TASK_RESULT_IDENTITY_MATRIX_INVALID")
-    if value["outcome"] in {"COMPLETED", "NO_CHANGE_NEEDED", "COMPLETED_WITH_WAIVERS", "PARTIAL"}:
+    if value["outcome"] in {
+        "COMPLETED", "NO_CHANGE_NEEDED", "COMPLETED_WITH_WAIVERS", "PARTIAL",
+        "CANCELLED_WITH_EFFECTS", "TERMINATED_WITH_UNKNOWN_EFFECTS",
+    }:
         _seo_require(started, "TASK_RESULT_IDENTITY_MATRIX_INVALID")
+    effects = value["effects"]
+    if value["outcome"] == "CANCELLED_WITH_EFFECTS":
+        effect_valid = effects["committed"] >= 1 and effects["unknown"] == 0
+    elif value["outcome"] == "TERMINATED_WITH_UNKNOWN_EFFECTS":
+        effect_valid = effects["unknown"] >= 1
+    elif value["outcome"] == "PARTIAL":
+        effect_valid = effects["committed"] >= 1 and effects["unknown"] == 0
+    elif value["outcome"] in {"BLOCKED", "FAILED", "CANCELLED", "NO_CHANGE_NEEDED"}:
+        effect_valid = effects["committed"] == 0 and effects["unknown"] == 0
+    else:
+        effect_valid = effects["unknown"] == 0
+    _seo_require(effect_valid, "TASK_RESULT_EFFECT_MATRIX_INVALID", "$.effects")
     results = value["requirement_results"]
     _seo_require(_ordered_unique(results, lambda item: item["requirement_id"]), "TASK_RESULT_REQUIREMENT_ORDER_INVALID")
     for index, item in enumerate(results):

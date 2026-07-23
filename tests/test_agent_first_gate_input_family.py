@@ -180,7 +180,7 @@ class AgentFirstGateInputFamilyTest(unittest.TestCase):
         execution_keys = [self._ref_key(item) for item in execution]
         return (
             document["schema_id"] == "gate-input-snapshot/v1"
-            and document["lifecycle"] == "FINALIZING"
+            and document["lifecycle"] in {"FINALIZING", "RECONCILING"}
             and document["desired_state"] == "RUN"
             and document["authoritative_cancel_received"] is False
             and document["requested_outcome"]
@@ -381,6 +381,10 @@ class AgentFirstGateInputFamilyTest(unittest.TestCase):
         self.assertEqual(self.SUCCESS_FIELDS, set(success["properties"]))
         self.assertEqual(self.TERMINAL_FIELDS, set(terminal["required"]))
         self.assertEqual(self.TERMINAL_FIELDS, set(terminal["properties"]))
+        self.assertEqual(
+            ["FINALIZING", "RECONCILING"],
+            terminal["properties"]["lifecycle"]["enum"],
+        )
         self.assertNotIn("final_closure_ref", success["properties"])
         self.assertNotIn("final_closure_ref", terminal["properties"])
         self.assertFalse(

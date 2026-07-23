@@ -109,7 +109,7 @@
         "owner_epoch": {"type":"integer","minimum":0,"maximum":9007199254740991},
         "task_version": {"type":"integer","minimum":1,"maximum":9007199254740991},
         "deletion_version": {"type":"integer","minimum":0,"maximum":9007199254740991},
-        "lifecycle": {"const":"FINALIZING"},
+        "lifecycle": {"enum":["FINALIZING","RECONCILING"]},
         "desired_state": {"enum":["CANCEL","RUN"]},
         "lease_id": {"type":["string","null"],"minLength":1,"maxLength":160},
         "outer_lease_expires_at": {

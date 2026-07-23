@@ -101,6 +101,7 @@
             "ACTIVE",
             "WAITING_INPUT",
             "WAITING_APPROVAL",
+            "RECONCILING",
             "FINALIZING",
             "TERMINAL"
           ]
@@ -291,7 +292,9 @@
             "PARTIAL",
             "BLOCKED",
             "FAILED",
-            "CANCELLED"
+            "CANCELLED",
+            "CANCELLED_WITH_EFFECTS",
+            "TERMINATED_WITH_UNKNOWN_EFFECTS"
           ]
         },
         "created_at": {

@@ -284,7 +284,8 @@ class AgentFirstTaskControlContractTest(unittest.TestCase):
             "ACTIVE": {"ACTIVE", "WAITING_INPUT", "WAITING_APPROVAL", "FINALIZING"},
             "WAITING_INPUT": {"QUEUED", "FINALIZING"},
             "WAITING_APPROVAL": {"QUEUED", "FINALIZING"},
-            "FINALIZING": {"ACTIVE", "QUEUED", "FINALIZING", "TERMINAL"},
+            "FINALIZING": {"ACTIVE", "QUEUED", "RECONCILING", "FINALIZING", "TERMINAL"},
+            "RECONCILING": {"RECONCILING", "TERMINAL"},
             "TERMINAL": set(),
         }
         if after["lifecycle"] not in allowed[before["lifecycle"]]:

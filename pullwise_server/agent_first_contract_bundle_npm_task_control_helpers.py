@@ -321,7 +321,8 @@ const TASK_CONTROL_RECORD_TRANSITIONS = Object.freeze({
   ]),
   WAITING_INPUT: new Set(["QUEUED", "FINALIZING"]),
   WAITING_APPROVAL: new Set(["QUEUED", "FINALIZING"]),
-  FINALIZING: new Set(["ACTIVE", "QUEUED", "FINALIZING", "TERMINAL"]),
+  FINALIZING: new Set(["ACTIVE", "QUEUED", "RECONCILING", "FINALIZING", "TERMINAL"]),
+  RECONCILING: new Set(["RECONCILING", "TERMINAL"]),
   TERMINAL: new Set(),
 });
 
@@ -451,7 +452,7 @@ export function validateTaskResultPublication(
   }
   const resultBytes = canonicalDocumentBytes(result);
   const resultDigest = sha256Sync(resultBytes);
-  if (previous.lifecycle !== "FINALIZING" ||
+  if (!["FINALIZING", "RECONCILING"].includes(previous.lifecycle) ||
       terminal.lifecycle !== "TERMINAL") {
     taskControlFail(
       "TASK_RESULT_PUBLICATION_STATE_INVALID", "$", "STATE_TRANSITION_INVALID",
