@@ -300,13 +300,16 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             "CANCELLED_WITH_EFFECTS", "TERMINATED_WITH_UNKNOWN_EFFECTS",
         )
         bound = [bind_task_result_to_terminal_decision(self.facade, self.task_result_branch(outcome)) for outcome in outcomes]
-        results, decisions = map(list, zip(*bound))
+        results, decisions, ledgers = map(list, zip(*bound))
         cases = [("task-result/v1", result) for result in results]
         expected = [{"ok": True, "value": result} for result in results]
         operations = [
             {"python": "verify_task_result_context", "node": "verifyTaskResultContext",
-             "args": [result], "kwargs": {"terminal_gate_decision": decision}}
-            for result, decision in zip(results, decisions)
+             "args": [result], "kwargs": {
+                 "terminal_gate_decision": decision,
+                 "effect_ledger_snapshot": ledger,
+             }}
+            for result, decision, ledger in zip(results, decisions, ledgers)
         ]
 
         self.assertEqual(expected, self.facade.python_document_results(cases))

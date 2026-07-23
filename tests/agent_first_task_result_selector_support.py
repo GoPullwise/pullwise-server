@@ -68,19 +68,55 @@ _OUTCOME_AXES = {
 def bind_task_result_to_terminal_decision(
     harness: object,
     task_result: dict[str, object],
-) -> tuple[dict[str, object], dict[str, object]]:
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     result = deepcopy(task_result)
     decision = harness.fixture_document("gate_decision_golden_terminalization")
     axes = _OUTCOME_AXES[result["outcome"]]
+    ledger = harness.fixture_document("publication_golden_effect_ledger")
+    ledger["task_id"] = result["task_id"]
+    states = [
+        state.upper()
+        for state in (
+            "prepared",
+            "dispatched",
+            "committed",
+            "not_applied",
+            "rejected",
+            "unknown",
+        )
+        for _ in range(result["effects"][state])
+    ]
+    ledger["rows"] = [
+        {"effect_id": f"effect_{index:032x}", "state": state}
+        for index, state in enumerate(states, start=1)
+    ]
+    ledger["watermark"] = len(ledger["rows"])
+    ledger["state_counts"] = deepcopy(result["effects"])
+    ledger = harness.reseal("effect-ledger-snapshot/v1", ledger)
+    effect_state = (
+        "unknown_post_deadline"
+        if result["effects"]["unknown"]
+        else "committed"
+        if result["effects"]["committed"]
+        else axes[2]
+    )
     decision.update(
         {
             "task_id": result["task_id"],
             "task_version": result["published_from_version"],
             "gate_mode": axes[0],
             "cancel_state": axes[1],
-            "effect_state": axes[2],
+            "effect_state": effect_state,
             "cause_family": axes[3],
             "delivery_state": axes[4],
+            "effect_availability": {
+                "availability": "available",
+                "ref": harness.content_ref(
+                    "art_f0000000000000000000000000000002",
+                    "effect-ledger-snapshot/v1",
+                    ledger,
+                ),
+            },
             "selected_outcome": result["outcome"],
             "selected_reason": result["reason_code"],
         }
@@ -99,4 +135,4 @@ def bind_task_result_to_terminal_decision(
             decision,
         ),
     }
-    return result, decision
+    return result, decision, ledger

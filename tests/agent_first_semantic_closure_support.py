@@ -913,7 +913,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         redaction_report = self.fixture_document(
             "worker_debug_content_golden_redaction_report"
         )
-        task_result, terminal_gate_decision = bind_task_result_to_terminal_decision(
+        task_result, terminal_gate_decision, effect_ledger_snapshot = bind_task_result_to_terminal_decision(
             self,
             envelope_fixture["task_result"],
         )
@@ -1037,6 +1037,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "task_result_transport_envelope": transport_envelope,
             "task_result_transport_ack": transport_ack,
             "terminal_gate_decision": terminal_gate_decision,
+            "effect_ledger_snapshot": effect_ledger_snapshot,
             "transport_receipt": transport_receipt,
             "worker_debug_descriptor": worker_debug_descriptor,
             "worker_debug_fragment": fragment,
@@ -1482,6 +1483,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                 [invalid_task_result],
                 kwargs={
                     "terminal_gate_decision": documents["terminal_gate_decision"],
+                    "effect_ledger_snapshot": documents["effect_ledger_snapshot"],
                     "worker_debug_descriptor": worker_debug_descriptor,
                 },
             ),
@@ -1834,6 +1836,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                 [uploaded["task_result"]],
                 kwargs={
                     "terminal_gate_decision": uploaded["terminal_gate_decision"],
+                    "effect_ledger_snapshot": uploaded["effect_ledger_snapshot"],
                     "worker_debug_descriptor": uploaded["worker_debug_descriptor"],
                 },
             ),

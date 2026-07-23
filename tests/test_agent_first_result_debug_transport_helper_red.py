@@ -67,7 +67,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
         fragment = self.fixture_document("worker_debug_transport_fragment_golden_terminal")
         file_manifest = self.fixture_document("worker_debug_content_golden_file_manifest")
         redaction_report = self.fixture_document("worker_debug_content_golden_redaction_report")
-        task_result, terminal_gate_decision = bind_task_result_to_terminal_decision(
+        task_result, terminal_gate_decision, effect_ledger_snapshot = bind_task_result_to_terminal_decision(
             self,
             envelope_fixture["task_result"],
         )
@@ -177,6 +177,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
             "task_result_transport_envelope": transport_envelope,
             "task_result_transport_ack": transport_ack,
             "terminal_gate_decision": terminal_gate_decision,
+            "effect_ledger_snapshot": effect_ledger_snapshot,
             "transport_receipt": transport_receipt,
             "worker_debug_descriptor": worker_debug_descriptor,
             "worker_debug_fragment": fragment,
@@ -339,6 +340,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
         transport_ack = documents["task_result_transport_ack"]
         transport_receipt = documents["transport_receipt"]
         terminal_gate_decision = documents["terminal_gate_decision"]
+        effect_ledger_snapshot = documents["effect_ledger_snapshot"]
         worker_debug_descriptor = documents["worker_debug_descriptor"]
         worker_debug_fragment = documents["worker_debug_fragment"]
         worker_debug_file_manifest = documents["worker_debug_file_manifest"]
@@ -347,7 +349,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
         operations = [
             {"python": "derive_task_result_core", "node": "deriveTaskResultCore", "args": [task_result]},
             {"python": "verify_task_result_core", "node": "verifyTaskResultCore", "args": [task_result, task_result_core]},
-            {"python": "verify_task_result_context", "node": "verifyTaskResultContext", "args": [task_result], "kwargs": {"terminal_gate_decision": terminal_gate_decision, "worker_debug_descriptor": worker_debug_descriptor}},
+            {"python": "verify_task_result_context", "node": "verifyTaskResultContext", "args": [task_result], "kwargs": {"terminal_gate_decision": terminal_gate_decision, "effect_ledger_snapshot": effect_ledger_snapshot, "worker_debug_descriptor": worker_debug_descriptor}},
             {"python": "verify_task_result_transport_envelope", "node": "verifyTaskResultTransportEnvelope", "args": [transport_envelope, task_result_core], "kwargs": {"transport_receipt": transport_receipt, "worker_debug_descriptor": worker_debug_descriptor}},
             {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [transport_ack, transport_envelope], "kwargs": {"transport_receipt": transport_receipt}},
             {"python": "verify_worker_debug_descriptor_content", "node": "verifyWorkerDebugDescriptorContent", "args": [worker_debug_descriptor, worker_debug_fragment], "kwargs": {"transport_receipt": transport_receipt}},
@@ -381,6 +383,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
         transport_envelope = documents["task_result_transport_envelope"]
         transport_receipt = documents["transport_receipt"]
         terminal_gate_decision = documents["terminal_gate_decision"]
+        effect_ledger_snapshot = documents["effect_ledger_snapshot"]
         worker_debug_descriptor = documents["worker_debug_descriptor"]
         worker_debug_fragment = documents["worker_debug_fragment"]
         worker_debug_file_manifest = documents["worker_debug_file_manifest"]
@@ -404,7 +407,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
 
         operations = [
             {"python": "verify_task_result_core", "node": "verifyTaskResultCore", "args": [task_result, invalid_core]},
-            {"python": "verify_task_result_context", "node": "verifyTaskResultContext", "args": [invalid_task_result], "kwargs": {"terminal_gate_decision": terminal_gate_decision, "worker_debug_descriptor": worker_debug_descriptor}},
+            {"python": "verify_task_result_context", "node": "verifyTaskResultContext", "args": [invalid_task_result], "kwargs": {"terminal_gate_decision": terminal_gate_decision, "effect_ledger_snapshot": effect_ledger_snapshot, "worker_debug_descriptor": worker_debug_descriptor}},
             {"python": "verify_task_result_transport_envelope", "node": "verifyTaskResultTransportEnvelope", "args": [invalid_envelope, task_result_core], "kwargs": {"transport_receipt": transport_receipt, "worker_debug_descriptor": worker_debug_descriptor}},
             {"python": "verify_task_result_transport_ack", "node": "verifyTaskResultTransportAck", "args": [invalid_ack, transport_envelope], "kwargs": {"transport_receipt": transport_receipt}},
             {"python": "verify_worker_debug_descriptor_content", "node": "verifyWorkerDebugDescriptorContent", "args": [invalid_descriptor, worker_debug_fragment], "kwargs": {"transport_receipt": transport_receipt}},
