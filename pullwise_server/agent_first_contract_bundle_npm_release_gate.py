@@ -307,29 +307,6 @@ function ruleReleaseGateAttestation(value) {
   );
 }
 
-function ruleReleasePrincipal(value) {
-  releaseRequireTimeOrder(value, "RELEASE_PRINCIPAL_TIME_INVALID");
-}
-
-function ruleReleaseSigningKey(value) {
-  releaseRequireTimeOrder(value, "RELEASE_SIGNING_KEY_TIME_INVALID");
-}
-
-function ruleReleaseKeyRevocation(value) {
-  const issuedAt = timestampMillis(value.issued_at);
-  const effectiveAt = timestampMillis(value.effective_at);
-  releaseRequire(
-    issuedAt !== null,
-    "RELEASE_KEY_REVOCATION_TIME_INVALID",
-    "$.issued_at",
-  );
-  releaseRequire(
-    effectiveAt !== null && issuedAt <= effectiveAt,
-    "RELEASE_KEY_REVOCATION_TIME_INVALID",
-    "$.effective_at",
-  );
-}
-
 function releaseRequireBinding(left, right, fields, detail, prefix = "$") {
   for (const field of fields) {
     releaseRequire(
@@ -376,17 +353,16 @@ function releaseVerifyPolicyBenchmarkBinding(policy, benchmarkBundle) {
     "RELEASE_POLICY_BENCHMARK_BINDING_INVALID",
   );
 }
-
 export async function verifyReleaseGatePolicyContext(policy, benchmarkBundle) {
   const checked = await verifyDocumentDigest("release-gate-policy/v1", policy);
   const benchmark = await verifyDocumentDigest(
     "benchmark-bundle/v1",
     benchmarkBundle,
   );
+  releaseRequire(checked.organization_id === benchmark.organization_id, "RELEASE_POLICY_ORGANIZATION_MISMATCH", "$.organization_id");
   releaseVerifyPolicyBenchmarkBinding(checked, benchmark);
   return checked;
 }
-
 export async function verifyReleaseGateReportContext(
   report, benchmarkBundle, policy,
 ) {
@@ -532,6 +508,7 @@ export async function verifyReleaseGateAttestationContext(
     "release-gate-report/v1",
     report,
   );
+  releaseRequire(checked.organization_id === policyValue.organization_id, "RELEASE_ATTESTATION_ORGANIZATION_MISMATCH", "$.organization_id");
   releaseRequire(
     seoRefMatchesDocument(
       checked.policy_ref,

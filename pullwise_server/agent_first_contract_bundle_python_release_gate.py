@@ -345,40 +345,6 @@ def _rule_release_gate_attestation(value: dict[str, object]) -> None:
     )
 
 
-def _rule_release_principal(value: dict[str, object]) -> None:
-    issued_at = _timestamp_millis(value["issued_at"])
-    expires_at = _timestamp_millis(value["expires_at"])
-    _release_require(
-        issued_at is not None,
-        "RELEASE_PRINCIPAL_TIME_INVALID",
-        "$.issued_at",
-    )
-    _release_require(
-        expires_at is not None and expires_at > issued_at,
-        "RELEASE_PRINCIPAL_TIME_INVALID",
-        "$.expires_at",
-    )
-
-
-def _rule_release_signing_key(value: dict[str, object]) -> None:
-    _rule_release_principal(value)
-
-
-def _rule_release_key_revocation(value: dict[str, object]) -> None:
-    issued_at = _timestamp_millis(value["issued_at"])
-    effective_at = _timestamp_millis(value["effective_at"])
-    _release_require(
-        issued_at is not None,
-        "RELEASE_KEY_REVOCATION_TIME_INVALID",
-        "$.issued_at",
-    )
-    _release_require(
-        effective_at is not None and issued_at <= effective_at,
-        "RELEASE_KEY_REVOCATION_TIME_INVALID",
-        "$.effective_at",
-    )
-
-
 def _verify_release_gate_policy_binding(
     policy: dict[str, object],
     benchmark_bundle: dict[str, object],
@@ -418,6 +384,12 @@ def verify_release_gate_policy_context(
     checked_benchmark = verify_document_digest(
         "benchmark-bundle/v1",
         benchmark_bundle,
+    )
+    _release_require_equal(
+        checked_policy["organization_id"],
+        checked_benchmark["organization_id"],
+        "RELEASE_POLICY_ORGANIZATION_MISMATCH",
+        "$.organization_id",
     )
     _verify_release_gate_policy_binding(checked_policy, checked_benchmark)
     return checked_policy
@@ -548,6 +520,12 @@ def verify_release_gate_attestation_context(
     )
     checked_policy = verify_document_digest("release-gate-policy/v1", policy)
     checked_report = verify_document_digest("release-gate-report/v1", report)
+    _release_require_equal(
+        checked_attestation["organization_id"],
+        checked_policy["organization_id"],
+        "RELEASE_ATTESTATION_ORGANIZATION_MISMATCH",
+        "$.organization_id",
+    )
     _release_require_ref(
         checked_attestation["policy_ref"],
         "release-gate-policy/v1",

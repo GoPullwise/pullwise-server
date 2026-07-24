@@ -99,6 +99,13 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
             {
                 "document_rules": ["benchmark_bundle"],
                 "contextual_helpers": [],
+                "signature_contract": {
+                    "algorithm": "Ed25519",
+                    "domain": "pullwise-benchmark-bundle/v1",
+                    "domain_separator": "NUL",
+                    "encoding": "base64url_no_padding",
+                    "signed_projection": "document_without_signature_and_digest",
+                },
             },
             schema["x-pullwise-semantics"],
         )
@@ -200,6 +207,13 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
             {
                 "document_rules": ["release_gate_policy"],
                 "contextual_helpers": ["verify_release_gate_policy_context"],
+                "signature_contract": {
+                    "algorithm": "Ed25519",
+                    "domain": "pullwise-release-gate-policy/v1",
+                    "domain_separator": "NUL",
+                    "encoding": "base64url_no_padding",
+                    "signed_projection": "document_without_signature_and_digest",
+                },
             },
             schema["x-pullwise-semantics"],
         )
@@ -488,6 +502,13 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
             {
                 "document_rules": ["release_gate_attestation"],
                 "contextual_helpers": ["verify_release_gate_attestation_context"],
+                "signature_contract": {
+                    "algorithm": "Ed25519",
+                    "domain": "pullwise-release-gate-attestation/v1",
+                    "domain_separator": "NUL",
+                    "encoding": "base64url_no_padding",
+                    "signed_projection": "document_without_signature_and_digest",
+                },
             },
             schema["x-pullwise-semantics"],
         )
@@ -504,7 +525,10 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
         self.assertEqual(0, properties["attested_exit_code"]["const"])
         self.assertEqual("release_operator", properties["signer_role"]["const"])
         self.assertEqual("Ed25519", properties["signature_algorithm"]["const"])
-        self.assertNotIn("signature_contract", schema["x-pullwise-semantics"])
+        self.assertEqual(
+            "^[A-Za-z0-9_-]{86}$",
+            properties["signature"]["pattern"],
+        )
 
         fixtures = {
             fixture["fixture_id"]: fixture for fixture in family["fixtures"]

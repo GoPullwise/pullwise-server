@@ -231,15 +231,15 @@ RELEASE_SIGNING_KEY_SIGNATURE_CONTRACT = {
     "encoding": "base64url_no_padding",
     "signed_projection": "document_without_signature_and_digest",
 }
-SUPPORTED_SIGNATURE_CONTRACTS = (
-    BENCHMARK_BUNDLE_SIGNATURE_CONTRACT,
-    RELEASE_GATE_ATTESTATION_SIGNATURE_CONTRACT,
-    RELEASE_GATE_POLICY_SIGNATURE_CONTRACT,
-    WAIVER_SIGNATURE_CONTRACT,
-    RELEASE_KEY_REVOCATION_SIGNATURE_CONTRACT,
-    RELEASE_PRINCIPAL_SIGNATURE_CONTRACT,
-    RELEASE_SIGNING_KEY_SIGNATURE_CONTRACT,
-)
+SIGNATURE_CONTRACTS_BY_SCHEMA_ID = {
+    "benchmark-bundle/v1": BENCHMARK_BUNDLE_SIGNATURE_CONTRACT,
+    "release-gate-attestation/v1": RELEASE_GATE_ATTESTATION_SIGNATURE_CONTRACT,
+    "release-gate-policy/v1": RELEASE_GATE_POLICY_SIGNATURE_CONTRACT,
+    "release-key-revocation/v1": RELEASE_KEY_REVOCATION_SIGNATURE_CONTRACT,
+    "release-principal/v1": RELEASE_PRINCIPAL_SIGNATURE_CONTRACT,
+    "release-signing-key/v1": RELEASE_SIGNING_KEY_SIGNATURE_CONTRACT,
+    "waiver-event/v1": WAIVER_SIGNATURE_CONTRACT,
+}
 
 
 def validate_supported_schema(
@@ -291,7 +291,10 @@ def validate_supported_schema(
             raise error_type(f"schema_digest_invalid: {path}")
     if "x-pullwise-semantics" in schema:
         _validate_semantic_metadata(
-            schema["x-pullwise-semantics"], error_type, path
+            schema["x-pullwise-semantics"],
+            schema.get("$id"),
+            error_type,
+            path,
         )
     if "additionalProperties" in schema and schema["additionalProperties"] is not False:
         raise error_type(f"schema_additional_properties_unsupported: {path}")
@@ -319,7 +322,10 @@ def validate_supported_schema(
 
 
 def _validate_semantic_metadata(
-    metadata: object, error_type: type[Exception], path: str
+    metadata: object,
+    schema_id: object,
+    error_type: type[Exception],
+    path: str,
 ) -> None:
     if not isinstance(metadata, dict):
         raise error_type(f"schema_semantics_shape_invalid: {path}")
@@ -346,7 +352,8 @@ def _validate_semantic_metadata(
                 f"schema_semantics_unknown: {path}.{key}: {sorted(unknown)[0]}"
             )
     signature = metadata.get("signature_contract")
-    if signature is not None and signature not in SUPPORTED_SIGNATURE_CONTRACTS:
+    expected_signature = SIGNATURE_CONTRACTS_BY_SCHEMA_ID.get(schema_id)
+    if signature != expected_signature:
         raise error_type(f"schema_signature_contract_invalid: {path}")
     if (
         not metadata["document_rules"]

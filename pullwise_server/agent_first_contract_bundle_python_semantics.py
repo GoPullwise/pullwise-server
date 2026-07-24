@@ -21,6 +21,7 @@ from .agent_first_contract_bundle_python_release_gate import (
 from .agent_first_contract_bundle_python_release_gate_evaluator import (
     PYTHON_RELEASE_GATE_EVALUATOR,
 )
+from .agent_first_contract_bundle_python_release_trust import PYTHON_RELEASE_TRUST
 from .agent_first_contract_bundle_python_result import PYTHON_RESULT
 from .agent_first_contract_bundle_python_rules import PYTHON_RULES
 from .agent_first_contract_bundle_python_source_execution_observation import (
@@ -332,6 +333,7 @@ PYTHON_SEMANTICS = "\n".join(
         PYTHON_GATE_PREPARATION,
         PYTHON_VERIFICATION,
         PYTHON_RELEASE_GATE,
+        PYTHON_RELEASE_TRUST,
         PYTHON_RELEASE_GATE_EVALUATOR,
         PYTHON_DISPATCH,
     )
