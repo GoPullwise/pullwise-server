@@ -52,6 +52,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "r0_read_payload": _rule_r0_read_payload,
     "r0_read_result": _rule_r0_read_result,
     "requirement_id_source_kind_match": _task_control_rule_requirement_id,
+    "release_principal": _rule_release_principal,
     "release_gate_attestation": _rule_release_gate_attestation,
     "release_gate_policy": _rule_release_gate_policy,
     "release_gate_report": _rule_release_gate_report,
@@ -100,17 +101,30 @@ def _validate_semantics(
     if semantics is None:
         return
     expected_keys = {"document_rules", "contextual_helpers"}
-    if schema_id == "waiver-event/v1":
+    signature_contracts = {
+        "waiver-event/v1": {
+            "algorithm": "Ed25519",
+            "domain": "pullwise-waiver-event/v1",
+            "domain_separator": "NUL",
+            "encoding": "base64url_no_padding",
+            "signed_projection": "event_without_signature",
+        },
+        "release-principal/v1": {
+            "algorithm": "Ed25519",
+            "domain": "pullwise-release-principal/v1",
+            "domain_separator": "NUL",
+            "encoding": "base64url_no_padding",
+            "signed_projection": "document_without_signature_and_digest",
+        },
+    }
+    if schema_id in signature_contracts:
         expected_keys.add("signature_contract")
     if not isinstance(semantics, dict) or set(semantics) != expected_keys:
         _fail("CONTRACT_SEMANTICS_INVALID", schema_id)
-    if schema_id == "waiver-event/v1" and semantics["signature_contract"] != {
-        "algorithm": "Ed25519",
-        "domain": "pullwise-waiver-event/v1",
-        "domain_separator": "NUL",
-        "encoding": "base64url_no_padding",
-        "signed_projection": "event_without_signature",
-    }:
+    if (
+        schema_id in signature_contracts
+        and semantics["signature_contract"] != signature_contracts[schema_id]
+    ):
         _fail("CONTRACT_SEMANTICS_INVALID", schema_id)
     rules = semantics["document_rules"]
     helpers = semantics["contextual_helpers"]

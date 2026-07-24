@@ -87,6 +87,7 @@ DOCUMENT_RULE_IDS = frozenset(
         "r0_read_payload",
         "r0_read_result",
         "requirement_id_source_kind_match",
+        "release_principal",
         "release_gate_policy",
         "release_gate_attestation",
         "release_gate_report",
@@ -186,6 +187,17 @@ WAIVER_SIGNATURE_CONTRACT = {
     "encoding": "base64url_no_padding",
     "signed_projection": "event_without_signature",
 }
+RELEASE_PRINCIPAL_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-release-principal/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "document_without_signature_and_digest",
+}
+SUPPORTED_SIGNATURE_CONTRACTS = (
+    WAIVER_SIGNATURE_CONTRACT,
+    RELEASE_PRINCIPAL_SIGNATURE_CONTRACT,
+)
 
 
 def validate_supported_schema(
@@ -292,7 +304,7 @@ def _validate_semantic_metadata(
                 f"schema_semantics_unknown: {path}.{key}: {sorted(unknown)[0]}"
             )
     signature = metadata.get("signature_contract")
-    if signature is not None and signature != WAIVER_SIGNATURE_CONTRACT:
+    if signature is not None and signature not in SUPPORTED_SIGNATURE_CONTRACTS:
         raise error_type(f"schema_signature_contract_invalid: {path}")
     if (
         not metadata["document_rules"]

@@ -385,6 +385,7 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   release_gate_attestation: ruleReleaseGateAttestation,
   release_gate_policy: ruleReleaseGatePolicy,
   release_gate_report: ruleReleaseGateReport,
+  release_principal: ruleReleasePrincipal,
   r0_read_payload: ruleR0ReadPayload,
   r0_read_result: ruleR0ReadResult,
   requirement_id_source_kind_match: taskControlRuleRequirementId,
@@ -455,7 +456,16 @@ function validateDeclaredDocumentRules(schemaId, value) {
   const semantics = schema(schemaId)["x-pullwise-semantics"];
   const rules = semantics?.document_rules;
   if (semantics === undefined) return false;
-  const expectedKeys = schemaId === "waiver-event/v1"
+  const signatureContracts = {
+    "waiver-event/v1": {algorithm: "Ed25519", domain: "pullwise-waiver-event/v1",
+      domain_separator: "NUL", encoding: "base64url_no_padding",
+      signed_projection: "event_without_signature"},
+    "release-principal/v1": {algorithm: "Ed25519",
+      domain: "pullwise-release-principal/v1", domain_separator: "NUL",
+      encoding: "base64url_no_padding",
+      signed_projection: "document_without_signature_and_digest"},
+  };
+  const expectedKeys = Object.hasOwn(signatureContracts, schemaId)
     ? ["contextual_helpers", "document_rules", "signature_contract"]
     : ["contextual_helpers", "document_rules"];
   if (!semantics || typeof semantics !== "object" || Array.isArray(semantics) ||
@@ -464,10 +474,9 @@ function validateDeclaredDocumentRules(schemaId, value) {
       !sortedUniqueStrings(semantics.contextual_helpers, true)) {
     fail("CONTRACT_SEMANTICS_INVALID", schemaId);
   }
-  if (schemaId === "waiver-event/v1" && canonicalString(semantics.signature_contract) !==
-      canonicalString({algorithm: "Ed25519", domain: "pullwise-waiver-event/v1",
-        domain_separator: "NUL", encoding: "base64url_no_padding",
-        signed_projection: "event_without_signature"})) {
+  if (Object.hasOwn(signatureContracts, schemaId) &&
+      canonicalString(semantics.signature_contract) !==
+      canonicalString(signatureContracts[schemaId])) {
     fail("CONTRACT_SEMANTICS_INVALID", schemaId);
   }
   for (const ruleId of rules) {

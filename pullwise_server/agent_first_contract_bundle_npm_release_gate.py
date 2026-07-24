@@ -307,6 +307,10 @@ function ruleReleaseGateAttestation(value) {
   );
 }
 
+function ruleReleasePrincipal(value) {
+  releaseRequireTimeOrder(value, "RELEASE_PRINCIPAL_TIME_INVALID");
+}
+
 function releaseRequireBinding(left, right, fields, detail, prefix = "$") {
   for (const field of fields) {
     releaseRequire(

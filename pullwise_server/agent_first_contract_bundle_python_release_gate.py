@@ -345,6 +345,21 @@ def _rule_release_gate_attestation(value: dict[str, object]) -> None:
     )
 
 
+def _rule_release_principal(value: dict[str, object]) -> None:
+    issued_at = _timestamp_millis(value["issued_at"])
+    expires_at = _timestamp_millis(value["expires_at"])
+    _release_require(
+        issued_at is not None,
+        "RELEASE_PRINCIPAL_TIME_INVALID",
+        "$.issued_at",
+    )
+    _release_require(
+        expires_at is not None and expires_at > issued_at,
+        "RELEASE_PRINCIPAL_TIME_INVALID",
+        "$.expires_at",
+    )
+
+
 def _verify_release_gate_policy_binding(
     policy: dict[str, object],
     benchmark_bundle: dict[str, object],

@@ -3,6 +3,168 @@
   "schemas": [
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "release-principal/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "principal_digest",
+        "domain": "pullwise:release-principal:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["release_principal"],
+        "contextual_helpers": [],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-release-principal/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "document_without_signature_and_digest"
+        }
+      },
+      "required": [
+        "schema_id", "principal_id", "organization_id", "role",
+        "trust_root_id", "trust_root_ref", "trust_root_digest",
+        "signer_id", "key_id", "signature_algorithm", "signature",
+        "issued_at", "expires_at", "principal_digest"
+      ],
+      "properties": {
+        "schema_id": {"const": "release-principal/v1"},
+        "principal_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "organization_id": {
+          "type": "string",
+          "pattern": "^org_[a-z0-9_]{1,64}$"
+        },
+        "role": {"enum": ["benchmark_owner", "release_operator"]},
+        "trust_root_id": {
+          "type": "string",
+          "pattern": "^release_trust_root_[0-9a-f]{32}$"
+        },
+        "trust_root_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "release-trust-root/v1"
+        },
+        "trust_root_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "signer_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^key_[A-Za-z0-9_-]{1,96}$"
+        },
+        "signature_algorithm": {"const": "Ed25519"},
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "principal_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "release-principal/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "principal_digest",
+        "domain": "pullwise:release-principal:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["release_principal"],
+        "contextual_helpers": [],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-release-principal/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "document_without_signature_and_digest"
+        }
+      },
+      "required": [
+        "schema_id",
+        "principal_id",
+        "organization_id",
+        "role",
+        "trust_root_id",
+        "trust_root_ref",
+        "trust_root_digest",
+        "signer_id",
+        "key_id",
+        "signature_algorithm",
+        "signature",
+        "issued_at",
+        "expires_at",
+        "principal_digest"
+      ],
+      "properties": {
+        "schema_id": {"const": "release-principal/v1"},
+        "principal_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "organization_id": {
+          "type": "string",
+          "pattern": "^org_[a-z0-9_]{1,64}$"
+        },
+        "role": {"enum": ["benchmark_owner", "release_operator"]},
+        "trust_root_id": {
+          "type": "string",
+          "pattern": "^release_trust_root_[0-9a-f]{32}$"
+        },
+        "trust_root_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "release-trust-root/v1"
+        },
+        "trust_root_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "signer_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^key_[A-Za-z0-9_-]{1,96}$"
+        },
+        "signature_algorithm": {"const": "Ed25519"},
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "principal_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "release-trust-root/v1",
       "type": "object",
       "additionalProperties": false,
@@ -60,5 +222,60 @@
       }
     }
   ],
-  "fixtures": []
+  "fixtures": [
+    {
+      "fixture_id": "release_trust_root_golden_external_pin",
+      "fixture_class": "golden",
+      "schema_id": "release-trust-root/v1",
+      "document": {
+        "schema_id": "release-trust-root/v1",
+        "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "organization_id": "org_acme",
+        "root_principal_id": "principal_trust_admin",
+        "root_key_id": "key_root_2026_01",
+        "signature_algorithm": "Ed25519",
+        "public_key": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+        "issued_at": "2026-07-01T00:00:00.000Z",
+        "expires_at": "2027-07-01T00:00:00.000Z",
+        "root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "release_trust_root_idempotency_external_pin",
+      "fixture_class": "idempotency",
+      "schema_id": "release-trust-root/v1",
+      "document": {
+        "root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
+        "expires_at": "2027-07-01T00:00:00.000Z",
+        "issued_at": "2026-07-01T00:00:00.000Z",
+        "public_key": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+        "signature_algorithm": "Ed25519",
+        "root_key_id": "key_root_2026_01",
+        "root_principal_id": "principal_trust_admin",
+        "organization_id": "org_acme",
+        "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "schema_id": "release-trust-root/v1"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "release_trust_root_negative_public_key",
+      "fixture_class": "negative",
+      "schema_id": "release-trust-root/v1",
+      "document": {
+        "schema_id": "release-trust-root/v1",
+        "trust_root_id": "release_trust_root_22222222222222222222222222222222",
+        "organization_id": "org_acme",
+        "root_principal_id": "principal_trust_admin",
+        "root_key_id": "key_root_invalid",
+        "signature_algorithm": "Ed25519",
+        "public_key": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHUR",
+        "issued_at": "2026-07-01T00:00:00.000Z",
+        "expires_at": "2027-07-01T00:00:00.000Z",
+        "root_digest": "41c9d01e05920d4340dc3be7147ff2a30d90b61a0441d3f1ccac65154e322f94"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
 }
