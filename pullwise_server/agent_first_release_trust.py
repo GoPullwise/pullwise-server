@@ -94,7 +94,10 @@ class AgentFirstReleaseTrust:
         )
 
     def _now(self) -> datetime:
-        value = self._clock()
+        return self._utc(self._clock())
+
+    @staticmethod
+    def _utc(value: object) -> datetime:
         if not isinstance(value, datetime) or value.tzinfo is None:
             raise RuntimeError("release trust clock must return an aware datetime")
         return value.astimezone(timezone.utc)
@@ -126,9 +129,13 @@ class AgentFirstReleaseTrust:
         try:
             checked = self._contract.verify_document_digest(schema_id, document)
             encoded = self._contract.canonical_validated_bytes(schema_id, checked)
-        except (Exception,) as error:
-            if isinstance(error, AuthorityError):
-                raise
+        except (
+            self._contract.ContractValidationError,
+            KeyError,
+            TypeError,
+            UnicodeError,
+            ValueError,
+        ):
             self._raise_untrusted()
         return checked, encoded
 
@@ -329,7 +336,11 @@ class AgentFirstReleaseTrust:
             str(checked["effective_at"]),
         )
 
-    def verify_document(self, document: object) -> VerifiedReleaseSignature:
+    def _verify_document_at(
+        self,
+        document: object,
+        now: datetime,
+    ) -> VerifiedReleaseSignature:
         if not isinstance(document, dict):
             self._raise_untrusted()
         schema_id = document.get("schema_id")
@@ -380,7 +391,6 @@ class AgentFirstReleaseTrust:
         except (KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError):
             raise AuthorityError("AUTHORITY_RELOAD_REQUIRED") from None
         root, _, principal_value, _, key, _ = chain
-        now = self._now()
         for item in (root, principal_value, key, checked):
             self._require_active(item, now)
         if any(
@@ -401,6 +411,16 @@ class AgentFirstReleaseTrust:
             str(schema_id), organization_id, str(principal_value["principal_id"]),
             key_id, purpose, self._time_text(now)
         )
+
+    def verify_document(self, document: object) -> VerifiedReleaseSignature:
+        return self._verify_document_at(document, self._now())
+
+    def verify_document_at(
+        self,
+        document: object,
+        verified_at: datetime,
+    ) -> VerifiedReleaseSignature:
+        return self._verify_document_at(document, self._utc(verified_at))
 
 
 __all__ = [

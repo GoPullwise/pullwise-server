@@ -5,16 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import sqlite3
+from types import ModuleType
 from typing import Callable
 
 from . import db
-from ._generated_agent_task_contract import (
-    ContractValidationError,
-    canonical_validated_bytes,
-    evaluate_release_gate,
-    package_tuple,
-    verify_bundle,
-)
+from . import _generated_agent_task_contract as _default_contract
 from .agent_first_authority import AuthorityError
 from .agent_first_release_evaluator_store import (
     FaultInjector,
@@ -39,15 +34,20 @@ class AgentFirstReleaseEvaluator:
         connect_factory: Callable[[], sqlite3.Connection] = db.connect,
         *,
         fault_injector: FaultInjector | None = None,
+        contract: ModuleType = _default_contract,
     ) -> None:
-        verify_bundle()
-        self._store = ReleaseEvaluatorStore(connect_factory, fault_injector)
+        contract.verify_bundle()
+        self._contract = contract
+        self._store = ReleaseEvaluatorStore(
+            connect_factory,
+            fault_injector,
+            package_values=contract.PACKAGE_TUPLE,
+        )
 
-    @staticmethod
-    def _require_current_package(document: object) -> None:
+    def _require_current_package(self, document: object) -> None:
         if not isinstance(document, dict) or "package" not in document:
             raise AuthorityError("CURRENT_PACKAGE_PIN_MISSING")
-        if document["package"] != package_tuple():
+        if document["package"] != self._contract.package_tuple():
             raise AuthorityError("CURRENT_PACKAGE_PIN_MISMATCH")
 
     @staticmethod
@@ -81,17 +81,22 @@ class AgentFirstReleaseEvaluator:
         for document in (benchmark_bundle, policy, report):
             self._require_current_package(document)
         try:
-            result = evaluate_release_gate(benchmark_bundle, policy, report)
-            benchmark_bytes = canonical_validated_bytes(
+            result = self._contract.evaluate_release_gate(benchmark_bundle, policy, report)
+            benchmark_bytes = self._contract.canonical_validated_bytes(
                 "benchmark-bundle/v1", benchmark_bundle
             )
-            policy_bytes = canonical_validated_bytes(
+            policy_bytes = self._contract.canonical_validated_bytes(
                 "release-gate-policy/v1", policy
             )
-            report_bytes = canonical_validated_bytes(
+            report_bytes = self._contract.canonical_validated_bytes(
                 "release-gate-report/v1", report
             )
-        except (ContractValidationError, TypeError, ValueError, UnicodeError):
+        except (
+            self._contract.ContractValidationError,
+            TypeError,
+            ValueError,
+            UnicodeError,
+        ):
             raise AuthorityError("CONTRACT_DOCUMENT_INVALID") from None
         assert isinstance(benchmark_bundle, dict)
         assert isinstance(policy, dict)
@@ -124,11 +129,11 @@ class AgentFirstReleaseEvaluator:
             report = json.loads(stored.report_bytes)
             for document in (benchmark, policy, report):
                 self._require_current_package(document)
-            result = evaluate_release_gate(benchmark, policy, report)
+            result = self._contract.evaluate_release_gate(benchmark, policy, report)
             canonical = (
-                canonical_validated_bytes("benchmark-bundle/v1", benchmark),
-                canonical_validated_bytes("release-gate-policy/v1", policy),
-                canonical_validated_bytes("release-gate-report/v1", report),
+                self._contract.canonical_validated_bytes("benchmark-bundle/v1", benchmark),
+                self._contract.canonical_validated_bytes("release-gate-policy/v1", policy),
+                self._contract.canonical_validated_bytes("release-gate-report/v1", report),
             )
             if canonical != (
                 stored.benchmark_bytes,
@@ -145,7 +150,7 @@ class AgentFirstReleaseEvaluator:
         except AuthorityError:
             raise AuthorityError("AUTHORITY_RELOAD_REQUIRED") from None
         except (
-            ContractValidationError,
+            self._contract.ContractValidationError,
             KeyError,
             TypeError,
             ValueError,

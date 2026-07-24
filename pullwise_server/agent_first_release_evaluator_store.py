@@ -45,9 +45,11 @@ class ReleaseEvaluatorStore:
         self,
         connect_factory: Callable[[], sqlite3.Connection],
         fault_injector: FaultInjector | None = None,
+        package_values: PackageTuple = PACKAGE_TUPLE,
     ) -> None:
         self._connect_factory = connect_factory
         self._fault_injector = fault_injector
+        self._current_package = package_values
 
     def _fault(self, point: str) -> None:
         if self._fault_injector is not None:
@@ -72,9 +74,8 @@ class ReleaseEvaluatorStore:
     def _document_values(document_bytes: bytes) -> tuple[str, int]:
         return hashlib.sha256(document_bytes).hexdigest(), len(document_bytes)
 
-    @staticmethod
-    def _package_values() -> PackageTuple:
-        return PACKAGE_TUPLE
+    def _package_values(self) -> PackageTuple:
+        return self._current_package
 
     @staticmethod
     def _insert_or_match(
