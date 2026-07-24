@@ -13,8 +13,8 @@ function ruleReleaseSigningKey(value) {
 }
 
 function ruleReleaseKeyRevocation(value) {
-  const issuedAt = timestampMillis(value.issued_at);
-  const effectiveAt = timestampMillis(value.effective_at);
+  const issuedAt = releaseTimestampMillis(value.issued_at);
+  const effectiveAt = releaseTimestampMillis(value.effective_at);
   releaseRequire(
     issuedAt !== null,
     "RELEASE_KEY_REVOCATION_TIME_INVALID",

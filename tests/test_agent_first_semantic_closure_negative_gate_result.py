@@ -25,6 +25,9 @@ OWNED_RULE_IDS = frozenset(
         "release_gate_attestation",
         "release_gate_policy",
         "release_gate_report",
+        "release_key_revocation",
+        "release_principal",
+        "release_signing_key",
         "task_report",
         "task_result",
         "task_result_core",
@@ -149,6 +152,26 @@ def build_gate_result_negative_cases(
                 "release_gate_attestation_negative_validity_window"
             ),
             failure("RELEASE_ATTESTATION_WINDOW_INVALID", "$.expires_at"),
+        ),
+        case(
+            "release_key_revocation",
+            "release_key_revocation_negative_time_order",
+            harness.fixture_document(
+                "release_key_revocation_negative_time_order"
+            ),
+            failure("RELEASE_KEY_REVOCATION_TIME_INVALID", "$.effective_at"),
+        ),
+        case(
+            "release_principal",
+            "release_principal_negative_time_order",
+            harness.fixture_document("release_principal_negative_time_order"),
+            failure("RELEASE_PRINCIPAL_TIME_INVALID", "$.expires_at"),
+        ),
+        case(
+            "release_signing_key",
+            "release_signing_key_negative_time_order",
+            harness.fixture_document("release_signing_key_negative_time_order"),
+            failure("RELEASE_SIGNING_KEY_TIME_INVALID", "$.expires_at"),
         ),
         case(
             "completion_proposal",
