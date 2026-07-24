@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
 from types import ModuleType
 import unittest
 
@@ -240,6 +241,33 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
                             for table in CURRENT_RELEASE_TRUST_TABLES
                         ),
                     )
+
+    def test_concurrent_exact_authority_registration_converges(self) -> None:
+        outcomes: list[object] = []
+        outcome_lock = threading.Lock()
+
+        def register() -> None:
+            try:
+                outcome: object = self.trust.register_authority(
+                    deepcopy(self.root),
+                    deepcopy(self.principal),
+                    deepcopy(self.signing_key),
+                )
+            except BaseException as error:
+                outcome = error
+            with outcome_lock:
+                outcomes.append(outcome)
+
+        threads = [threading.Thread(target=register) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(2, len(outcomes))
+        self.assertEqual(outcomes[0], outcomes[1])
+        self.assertFalse(any(isinstance(item, BaseException) for item in outcomes))
+        self.assertEqual((1, 1, 1, 0), self.counts())
 
     def test_unpinned_root_and_invalid_signature_write_nothing(self) -> None:
         unpinned = AgentFirstReleaseTrust(
