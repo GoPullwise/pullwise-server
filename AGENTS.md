@@ -647,6 +647,31 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 - Evaluator storage does not persist attestations, signatures or trust state,
   principals or organizations, mutable baseline/canary state, external
   evidence, HTTP/auth state, or Worker/Web activation.
+- The separate Server-only release trust candidate validates real Ed25519
+  signatures for benchmark bundles, release-gate policies, and release-gate
+  attestations. Trust roots are accepted only through an externally configured
+  organization-to-root-digest pin set; stored root documents never bootstrap
+  their own trust.
+- `db.initialize()` also installs normalized append-only tables for release
+  trust roots, organization principals, signing keys, key revocations, and
+  verified release-gate attestations. Root-to-principal-to-key registration is
+  one `BEGIN IMMEDIATE` transaction with exact replay, stable-id conflict,
+  immutable-row, corruption, missing-link, and normalized-metadata closure.
+- Principal roles bind exact purposes: `benchmark_owner` to
+  `benchmark_signing`, and `release_operator` to `release_signing`. Key
+  rotation appends a new root-signed key; root-signed revocations block a key
+  only at or after `effective_at`. Organization, principal, purpose, package,
+  ContentRef, domain digest, canonical SHA/size, validity window, and signature
+  bindings all fail closed.
+- `AgentFirstReleaseAttestor` composes, but does not change, the deterministic
+  evaluator. It verifies benchmark/policy/attestation signatures at one time,
+  accepts only an exact PASS/0 report binding, persists the attestation after
+  the existing evaluation chain, and reloads by rerunning evaluator, context,
+  canonical-byte, link, and signature checks at the stored `verified_at`.
+- This candidate does not provide private-key custody, trust-root enrollment or
+  automatic root rollover, external key distribution, HTTP/auth exposure,
+  mutable baseline/canary state, external evidence, Worker-loop activation,
+  D24, deployment, or canary.
 
 ## Agent-First Gate Decision Semantics
 
