@@ -8,6 +8,11 @@ import hashlib
 import sqlite3
 from typing import Callable, Iterator, Mapping
 
+from .agent_first_release_trust_integrity import (
+    authority_metadata_matches,
+    revocation_metadata_matches,
+)
+
 
 FaultInjector = Callable[[str], None]
 RELEASE_TRUST_FAULT_POINTS = (
@@ -253,12 +258,48 @@ class ReleaseTrustStore:
                     root.document_bytes AS root_bytes,
                     root.document_sha256 AS root_document_sha256,
                     root.size_bytes AS root_size_bytes,
+                    root.root_digest AS stored_root_digest,
+                    root.trust_root_id AS stored_root_id,
+                    root.organization_id AS root_organization_id,
+                    root.root_principal_id AS stored_root_principal_id,
+                    root.root_key_id AS stored_root_key_id,
+                    root.public_key AS root_public_key,
+                    root.issued_at AS root_issued_at,
+                    root.expires_at AS root_expires_at,
                     principal.document_bytes AS principal_bytes,
                     principal.document_sha256 AS principal_document_sha256,
                     principal.size_bytes AS principal_size_bytes,
+                    principal.principal_digest AS stored_principal_digest,
+                    principal.principal_id AS stored_principal_id,
+                    principal.organization_id AS principal_organization_id,
+                    principal.role AS principal_role,
+                    principal.trust_root_id AS principal_root_id,
+                    principal.root_digest AS principal_root_digest,
+                    principal.root_ref_sha256 AS principal_root_ref_sha256,
+                    principal.root_ref_size_bytes AS principal_root_ref_size_bytes,
+                    principal.signer_id AS principal_signer_id,
+                    principal.signer_key_id AS principal_signer_key_id,
+                    principal.issued_at AS principal_issued_at,
+                    principal.expires_at AS principal_expires_at,
                     signing_key.document_bytes AS key_bytes,
                     signing_key.document_sha256 AS key_document_sha256,
-                    signing_key.size_bytes AS key_size_bytes
+                    signing_key.size_bytes AS key_size_bytes,
+                    signing_key.signing_key_digest AS stored_key_digest,
+                    signing_key.key_id AS stored_key_id,
+                    signing_key.organization_id AS key_organization_id,
+                    signing_key.principal_id AS key_principal_id,
+                    signing_key.principal_digest AS key_principal_digest,
+                    signing_key.principal_ref_sha256 AS key_principal_ref_sha256,
+                    signing_key.principal_ref_size_bytes
+                        AS key_principal_ref_size_bytes,
+                    signing_key.key_purpose AS stored_key_purpose,
+                    signing_key.trust_root_id AS key_root_id,
+                    signing_key.root_digest AS key_root_digest,
+                    signing_key.signer_id AS key_signer_id,
+                    signing_key.signer_key_id AS key_signer_key_id,
+                    signing_key.public_key AS key_public_key,
+                    signing_key.issued_at AS key_issued_at,
+                    signing_key.expires_at AS key_expires_at
                 FROM agent_current_release_signing_keys AS signing_key
                 JOIN agent_current_release_principals AS principal
                     ON principal.principal_digest = signing_key.principal_digest
@@ -279,7 +320,7 @@ class ReleaseTrustStore:
             revocations = () if row is None else tuple(
                 connection.execute(
                     """
-                    SELECT document_bytes, document_sha256, size_bytes
+                    SELECT *
                     FROM agent_current_release_key_revocations
                     WHERE signing_key_digest = (
                         SELECT signing_key_digest
@@ -304,13 +345,21 @@ class ReleaseTrustStore:
                 or len(value) != revocation["size_bytes"]
                 or hashlib.sha256(value).hexdigest()
                 != revocation["document_sha256"]
+                or not revocation_metadata_matches(revocation, value)
             ):
                 raise ReleaseTrustStoreError("AUTHORITY_STORAGE_CORRUPT")
             checked_revocations.append(value)
+        root_bytes = self._checked_bytes(row, "root")
+        principal_bytes = self._checked_bytes(row, "principal")
+        key_bytes = self._checked_bytes(row, "key")
+        if not authority_metadata_matches(
+            row, root_bytes, principal_bytes, key_bytes
+        ):
+            raise ReleaseTrustStoreError("AUTHORITY_STORAGE_CORRUPT")
         return StoredReleaseAuthorityRows(
-            self._checked_bytes(row, "root"),
-            self._checked_bytes(row, "principal"),
-            self._checked_bytes(row, "key"),
+            root_bytes,
+            principal_bytes,
+            key_bytes,
             tuple(checked_revocations),
         )
 
