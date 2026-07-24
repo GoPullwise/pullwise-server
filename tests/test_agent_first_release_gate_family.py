@@ -366,7 +366,10 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
         self.assertEqual(
             {
                 "document_rules": ["release_gate_report"],
-                "contextual_helpers": ["verify_release_gate_report_context"],
+                "contextual_helpers": [
+                    "evaluate_release_gate",
+                    "verify_release_gate_report_context",
+                ],
             },
             schema["x-pullwise-semantics"],
         )
@@ -402,6 +405,21 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
                 "observed_value"
             ]["oneOf"],
         )
+        profile_properties = properties["profile_results"]["items"][
+            "properties"
+        ]
+        for field in ("wall_ms", "token_count", "cost_microusd"):
+            self.assertEqual(
+                [
+                    {"type": "null"},
+                    {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991,
+                    },
+                ],
+                profile_properties[field]["oneOf"],
+            )
 
         fixtures = {
             fixture["fixture_id"]: fixture for fixture in family["fixtures"]

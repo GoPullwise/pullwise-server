@@ -258,7 +258,7 @@ __all__ = [
     "canonical_document_sha256", "canonical_validated_bytes", "document_digest",
     "validate_tool_capability_consumption", "validate_tool_invocation_binding",
     "validate_tool_journal_begin", "validate_tool_journal_settlement",
-    "evaluate_success_gate", "evaluate_terminalization_gate",
+    "evaluate_release_gate", "evaluate_success_gate", "evaluate_terminalization_gate",
     "validate_attempt_transition", "validate_claim_write_set",
     "validate_effective_policy_derivation", "validate_requirement_entry_ingest",
     "validate_requirement_ledger_transition", "validate_task_charter_transition",

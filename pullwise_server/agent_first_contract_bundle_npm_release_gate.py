@@ -6,8 +6,7 @@ from __future__ import annotations
 NPM_RELEASE_GATE = r'''
 const RELEASE_GATE_PUBLIC_CODE = "CONTRACT_DOCUMENT_INVALID";
 const RELEASE_CANARY_STAGE_IDS = Object.freeze([
-  "CAPACITY_5", "CAPACITY_25", "FULL_CAPACITY",
-]);
+  "CAPACITY_5", "CAPACITY_25", "FULL_CAPACITY"]);
 const RELEASE_ATTESTATION_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const RELEASE_POLICY_BENCHMARK_FIELDS = Object.freeze([
   "benchmark_version", "task_inventory_digest", "oracle_rubric_digest",
@@ -225,7 +224,8 @@ function releaseReportVerdict(value) {
 }
 
 function ruleReleaseGateReport(value) {
-  releaseValidateAbsoluteResults(value);
+  releaseValidateIndeterminateShape(value);
+  releaseValidateAbsoluteResults(value); releaseValidateRelativeResults(value);
   releaseRequire(
     value.raw_sample_count ===
       value.valid_sample_count + value.excluded_sample_count,
@@ -483,7 +483,7 @@ export async function verifyReleaseGateReportContext(
     "RELEASE_REPORT_POLICY_TABLE_INVALID",
     "$.profile_results",
   );
-  releaseValidateProfileResults(checked, policyValue);
+  releaseValidateProfileResults(checked, policyValue); releaseValidateSampleInventory(checked, benchmark);
   releaseRequire(
     checked.excluded_reason_counts.every(
       (item) => policyValue.infrastructure_reason_codes.includes(item.reason_code),

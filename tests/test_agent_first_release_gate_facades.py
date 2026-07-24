@@ -323,6 +323,185 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             results[0],
         )
 
+    def test_evaluator_rejects_caller_selected_relative_status(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        policy["release_mode"] = "STABLE"
+        policy["stable_package"] = deepcopy(policy["package"])
+        policy["stable_candidate_digest"] = "9" * 64
+        policy["stable_control_plane_digest"] = "8" * 64
+        for gate in policy["relative_gates"]:
+            gate["applicability"] = "REQUIRED"
+        policy["threshold_table_digest"] = self.projection_digest(
+            "pullwise:release-threshold-table:v1",
+            {
+                key: policy[key]
+                for key in (
+                    "absolute_gates",
+                    "relative_gates",
+                    "infrastructure_reason_codes",
+                )
+            },
+        )
+        policy["candidate_digest"] = self.projection_digest(
+            "pullwise:candidate-digest:v1",
+            {
+                key: policy[key]
+                for key in (
+                    "package",
+                    "candidate_build_id",
+                    "control_plane_digest",
+                    "evaluation_runtime_digest",
+                    "benchmark_ref",
+                    "benchmark_digest",
+                    "threshold_table_digest",
+                    "profile_budget_digest",
+                    "canary_plan_digest",
+                )
+            },
+        )
+        policy = self.reseal(
+            "release-gate-policy/v1", "policy_digest", policy
+        )
+
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        for key in (
+            "package",
+            "candidate_build_id",
+            "candidate_digest",
+            "release_mode",
+            "stable_package",
+            "stable_candidate_digest",
+            "stable_control_plane_digest",
+            "benchmark_digest",
+            "benchmark_version",
+            "task_inventory_digest",
+            "oracle_rubric_digest",
+            "environment_image_digest",
+            "control_plane_digest",
+            "evaluation_runtime_digest",
+            "statistical_implementation_version",
+            "threshold_table_digest",
+            "profile_budget_digest",
+            "canary_plan_digest",
+        ):
+            report[key] = deepcopy(policy[key])
+        report["policy_digest"] = policy["policy_digest"]
+        report["policy_ref"] = self.content_ref(report["policy_ref"], policy)
+        for result in report["relative_results"]:
+            result["applicability"] = "REQUIRED"
+            result["observed_regression_bps"] = 0
+            result["status"] = "PASS"
+        report["relative_results"][0]["observed_regression_bps"] = (
+            report["relative_results"][0]["max_regression_bps"] + 1
+        )
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+        operations = [
+            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_EVALUATOR_STATUS_INVALID",
+                "path": "$.relative_results[0].status",
+            },
+            python_results[0],
+        )
+
+    def test_evaluator_rejects_unexplained_indeterminate_result(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        report["absolute_results"][0]["observed_value"] = None
+        report["absolute_results"][0]["status"] = "INDETERMINATE"
+        report["verdict"] = "INDETERMINATE"
+        report["exit_code"] = 2
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+        operations = [
+            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_EVALUATOR_INDETERMINATE_INVALID",
+                "path": "$.indeterminate_reason_codes",
+            },
+            python_results[0],
+        )
+
+    def test_evaluator_rejects_pass_with_insufficient_sample_inventory(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        report["raw_sample_count"] = 150
+        report["valid_sample_count"] = 145
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+        operations = [
+            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_EVALUATOR_SAMPLE_INVALID",
+                "path": "$.indeterminate_reason_codes",
+            },
+            python_results[0],
+        )
+
+    def test_evaluator_rejects_partial_profile_evidence(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        report["indeterminate_reason_codes"] = ["EVIDENCE_MISSING"]
+        report["profile_results"][0]["wall_ms"] = None
+        report["profile_results"][0]["status"] = "INDETERMINATE"
+        report["verdict"] = "INDETERMINATE"
+        report["exit_code"] = 2
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+        operations = [
+            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_EVALUATOR_INDETERMINATE_INVALID",
+                "path": "$.profile_results[0]",
+            },
+            python_results[0],
+        )
+
     @staticmethod
     def reseal(
         schema_id: str, digest_field: str, document: dict[str, object]
@@ -347,6 +526,12 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "size_bytes": len(encoded),
         }
+
+    @staticmethod
+    def projection_digest(domain: str, value: object) -> str:
+        return hashlib.sha256(
+            domain.encode("ascii") + b"\0" + canonical_bytes(value)
+        ).hexdigest()
 
     def capture(self, callback) -> dict[str, object]:
         try:

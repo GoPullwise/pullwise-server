@@ -1879,6 +1879,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "verify_quality_policy_plan_context": self.helper_operation(
                 "verify_quality_policy_plan_context", quality_context
             ),
+            "evaluate_release_gate": self.helper_operation(
+                "evaluate_release_gate",
+                [release_benchmark, release_policy, release_report],
+            ),
             "verify_release_gate_policy_context": self.helper_operation(
                 "verify_release_gate_policy_context",
                 [release_policy, release_benchmark],

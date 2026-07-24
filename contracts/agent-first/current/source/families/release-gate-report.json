@@ -12,7 +12,10 @@
       },
       "x-pullwise-semantics": {
         "document_rules": ["release_gate_report"],
-        "contextual_helpers": ["verify_release_gate_report_context"]
+        "contextual_helpers": [
+          "evaluate_release_gate",
+          "verify_release_gate_report_context"
+        ]
       },
       "required": [
         "schema_id", "report_id", "package", "candidate_build_id", "candidate_digest", "release_mode",
@@ -137,9 +140,24 @@
             "required": ["profile_id", "wall_ms", "token_count", "cost_microusd", "status"],
             "properties": {
               "profile_id": {"type": "string", "pattern": "^profile_[a-z0-9_]{1,64}$"},
-              "wall_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-              "token_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-              "cost_microusd": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "wall_ms": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+                ]
+              },
+              "token_count": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+                ]
+              },
+              "cost_microusd": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+                ]
+              },
               "status": {"enum": ["PASS", "FAIL", "INDETERMINATE"]}
             }
           }
@@ -216,8 +234,8 @@
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
         "indeterminate_reason_codes": [],
-        "raw_sample_count": 150,
-        "valid_sample_count": 145,
+        "raw_sample_count": 495,
+        "valid_sample_count": 490,
         "excluded_sample_count": 5,
         "excluded_reason_counts": [
           {"reason_code": "INFRA_IMAGE_PULL_FAILED", "count": 2},
@@ -258,7 +276,7 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "d10ad8a37a3b0f89635b485f41bcf8f78356b0280ea4ef0e86f20a6ce122f899"
+        "report_digest": "4d9617deacb7c21ae72d1234bf1f9366d8712ecc7eeaa79ebeb1f84502baee4d"
       },
       "expected_code": null
     },
@@ -305,8 +323,8 @@
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
         "indeterminate_reason_codes": [],
-        "raw_sample_count": 150,
-        "valid_sample_count": 145,
+        "raw_sample_count": 495,
+        "valid_sample_count": 490,
         "excluded_sample_count": 5,
         "excluded_reason_counts": [
           {"reason_code": "INFRA_IMAGE_PULL_FAILED", "count": 2},
@@ -347,7 +365,7 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "d10ad8a37a3b0f89635b485f41bcf8f78356b0280ea4ef0e86f20a6ce122f899"
+        "report_digest": "4d9617deacb7c21ae72d1234bf1f9366d8712ecc7eeaa79ebeb1f84502baee4d"
       },
       "expected_code": null
     },
