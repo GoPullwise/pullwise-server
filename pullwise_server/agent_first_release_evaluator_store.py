@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
+import json
 import sqlite3
 from typing import Callable, Iterator, Mapping
 
@@ -97,7 +98,11 @@ class ReleaseEvaluatorStore:
         ).fetchone()
         if selected is not None:
             if tuple(selected[column] for column in columns) != values:
-                raise ReleaseEvaluatorStoreError("IDEMPOTENCY_CONFLICT")
+                raise ReleaseEvaluatorStoreError(
+                    "AUTHORITY_STORAGE_CORRUPT"
+                    if selected[digest_column] == digest
+                    else "IDEMPOTENCY_CONFLICT"
+                )
             return
         placeholders = ", ".join("?" for _ in columns)
         try:
@@ -279,6 +284,7 @@ class ReleaseEvaluatorStore:
         return value
 
     def load_evaluation(self, report_id: str) -> StoredReleaseEvaluationRows:
+        report_present = False
         with self._connection(immediate=False) as connection:
             row = connection.execute(
                 """
@@ -287,6 +293,7 @@ class ReleaseEvaluatorStore:
                     benchmark.document_sha256 AS benchmark_document_sha256,
                     benchmark.size_bytes AS benchmark_size_bytes,
                     benchmark.bundle_digest AS stored_benchmark_digest,
+                    benchmark.benchmark_id AS stored_benchmark_id,
                     benchmark.package_identity AS benchmark_package_identity,
                     benchmark.package_version AS benchmark_package_version,
                     benchmark.package_content_sha256
@@ -297,6 +304,7 @@ class ReleaseEvaluatorStore:
                     policy.document_sha256 AS policy_document_sha256,
                     policy.size_bytes AS policy_size_bytes,
                     policy.policy_digest AS stored_policy_digest,
+                    policy.policy_id AS stored_policy_id,
                     policy.benchmark_digest AS policy_benchmark_digest,
                     policy.benchmark_ref_sha256,
                     policy.benchmark_ref_size_bytes,
@@ -331,8 +339,20 @@ class ReleaseEvaluatorStore:
                 """,
                 (report_id,),
             ).fetchone()
+            if row is None:
+                report_present = connection.execute(
+                    """
+                    SELECT 1 FROM agent_current_release_gate_reports
+                    WHERE report_id = ?
+                    """,
+                    (report_id,),
+                ).fetchone() is not None
         if row is None:
-            raise ReleaseEvaluatorStoreError("RELEASE_EVALUATION_NOT_FOUND")
+            raise ReleaseEvaluatorStoreError(
+                "AUTHORITY_STORAGE_CORRUPT"
+                if report_present
+                else "RELEASE_EVALUATION_NOT_FOUND"
+            )
         expected_package = self._package_values()
         for prefix in ("benchmark", "policy", "report"):
             stored_package = (
@@ -343,10 +363,57 @@ class ReleaseEvaluatorStore:
             )
             if stored_package != expected_package:
                 raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT")
+        benchmark_bytes = self._checked_bytes(row, prefix="benchmark")
+        policy_bytes = self._checked_bytes(row, prefix="policy")
+        report_bytes = self._checked_bytes(row, prefix="report")
+        try:
+            benchmark = json.loads(benchmark_bytes)
+            policy = json.loads(policy_bytes)
+            report = json.loads(report_bytes)
+            metadata_matches = (
+                benchmark["bundle_digest"] == row["stored_benchmark_digest"]
+                and benchmark["benchmark_id"] == row["stored_benchmark_id"]
+                and policy["policy_digest"] == row["stored_policy_digest"]
+                and policy["policy_id"] == row["stored_policy_id"]
+                and policy["benchmark_digest"]
+                == row["policy_benchmark_digest"]
+                and policy["benchmark_ref"]["sha256"]
+                == row["benchmark_document_sha256"]
+                == row["benchmark_ref_sha256"]
+                and policy["benchmark_ref"]["size_bytes"]
+                == row["benchmark_size_bytes"]
+                == row["benchmark_ref_size_bytes"]
+                and report["report_digest"] == row["stored_report_digest"]
+                and report["report_id"] == row["stored_report_id"]
+                and report["benchmark_digest"]
+                == row["report_benchmark_digest"]
+                == row["stored_benchmark_digest"]
+                and report["policy_digest"]
+                == row["report_policy_digest"]
+                == row["stored_policy_digest"]
+                and report["benchmark_ref"]["sha256"]
+                == row["report_benchmark_ref_sha256"]
+                == row["benchmark_document_sha256"]
+                and report["benchmark_ref"]["size_bytes"]
+                == row["report_benchmark_ref_size_bytes"]
+                == row["benchmark_size_bytes"]
+                and report["policy_ref"]["sha256"]
+                == row["policy_ref_sha256"]
+                == row["policy_document_sha256"]
+                and report["policy_ref"]["size_bytes"]
+                == row["policy_ref_size_bytes"]
+                == row["policy_size_bytes"]
+                and report["verdict"] == row["verdict"]
+                and report["exit_code"] == row["exit_code"]
+            )
+        except (json.JSONDecodeError, KeyError, TypeError):
+            raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT") from None
+        if not metadata_matches:
+            raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT")
         return StoredReleaseEvaluationRows(
-            self._checked_bytes(row, prefix="benchmark"),
-            self._checked_bytes(row, prefix="policy"),
-            self._checked_bytes(row, prefix="report"),
+            benchmark_bytes,
+            policy_bytes,
+            report_bytes,
             row["verdict"],
             row["exit_code"],
         )
