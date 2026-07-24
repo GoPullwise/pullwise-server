@@ -9,6 +9,17 @@ import sqlite3
 from typing import Callable, Iterator, Mapping
 
 
+FaultInjector = Callable[[str], None]
+RELEASE_TRUST_FAULT_POINTS = (
+    "before_root",
+    "after_root",
+    "before_principal",
+    "after_principal",
+    "before_signing_key",
+    "after_signing_key",
+)
+
+
 class ReleaseTrustStoreError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
@@ -20,11 +31,21 @@ class StoredReleaseAuthorityRows:
     root_bytes: bytes
     principal_bytes: bytes
     key_bytes: bytes
+    revocation_bytes: tuple[bytes, ...] = ()
 
 
 class ReleaseTrustStore:
-    def __init__(self, connect_factory: Callable[[], sqlite3.Connection]) -> None:
+    def __init__(
+        self,
+        connect_factory: Callable[[], sqlite3.Connection],
+        fault_injector: FaultInjector | None = None,
+    ) -> None:
         self._connect_factory = connect_factory
+        self._fault_injector = fault_injector
+
+    def _fault(self, point: str) -> None:
+        if self._fault_injector is not None:
+            self._fault_injector(point)
 
     @contextmanager
     def _connection(self, *, immediate: bool) -> Iterator[sqlite3.Connection]:
@@ -142,17 +163,18 @@ class ReleaseTrustStore:
             key_size, key_bytes,
         )
         rows = (
-            ("agent_current_release_trust_roots", "root_digest", root["root_digest"],
+            ("root", "agent_current_release_trust_roots", "root_digest", root["root_digest"],
              "trust_root_id", root["trust_root_id"], root_columns, root_values),
-            ("agent_current_release_principals", "principal_digest",
+            ("principal", "agent_current_release_principals", "principal_digest",
              principal["principal_digest"], "principal_id", principal["principal_id"],
              principal_columns, principal_values),
-            ("agent_current_release_signing_keys", "signing_key_digest",
+            ("signing_key", "agent_current_release_signing_keys", "signing_key_digest",
              signing_key["signing_key_digest"], "key_id", signing_key["key_id"],
              key_columns, key_values),
         )
         with self._connection(immediate=True) as connection:
-            for table, digest_column, digest, id_column, document_id, columns, values in rows:
+            for name, table, digest_column, digest, id_column, document_id, columns, values in rows:
+                self._fault(f"before_{name}")
                 self._insert_or_match(
                     connection,
                     table=table,
@@ -163,7 +185,49 @@ class ReleaseTrustStore:
                     columns=columns,
                     values=values,
                 )
+                self._fault(f"after_{name}")
         return StoredReleaseAuthorityRows(root_bytes, principal_bytes, key_bytes)
+
+    def store_revocation(
+        self,
+        *,
+        revocation: Mapping[str, object],
+        revocation_bytes: bytes,
+    ) -> bytes:
+        document_sha, size_bytes = self._document_values(revocation_bytes)
+        columns = (
+            "revocation_digest", "revocation_id", "organization_id",
+            "root_digest", "root_ref_sha256", "root_ref_size_bytes",
+            "revoked_key_id", "signing_key_digest", "key_ref_sha256",
+            "key_ref_size_bytes", "revoked_principal_id", "reason_code",
+            "signer_id", "signer_key_id", "issued_at", "effective_at",
+            "document_sha256", "size_bytes", "document_bytes",
+        )
+        values = (
+            revocation["revocation_digest"], revocation["revocation_id"],
+            revocation["organization_id"], revocation["trust_root_digest"],
+            revocation["trust_root_ref"]["sha256"],
+            revocation["trust_root_ref"]["size_bytes"],
+            revocation["revoked_key_id"], revocation["revoked_key_digest"],
+            revocation["revoked_key_ref"]["sha256"],
+            revocation["revoked_key_ref"]["size_bytes"],
+            revocation["revoked_principal_id"], revocation["reason_code"],
+            revocation["signer_id"], revocation["signer_key_id"],
+            revocation["issued_at"], revocation["effective_at"],
+            document_sha, size_bytes, revocation_bytes,
+        )
+        with self._connection(immediate=True) as connection:
+            self._insert_or_match(
+                connection,
+                table="agent_current_release_key_revocations",
+                digest_column="revocation_digest",
+                digest=revocation["revocation_digest"],
+                id_column="revocation_id",
+                document_id=revocation["revocation_id"],
+                columns=columns,
+                values=values,
+            )
+        return revocation_bytes
 
     @staticmethod
     def _checked_bytes(row: sqlite3.Row, prefix: str) -> bytes:
@@ -203,16 +267,45 @@ class ReleaseTrustStore:
                 """,
                 (organization_id, key_id),
             ).fetchone()
+            revocations = () if row is None else tuple(
+                connection.execute(
+                    """
+                    SELECT document_bytes, document_sha256, size_bytes
+                    FROM agent_current_release_key_revocations
+                    WHERE signing_key_digest = (
+                        SELECT signing_key_digest
+                        FROM agent_current_release_signing_keys
+                        WHERE organization_id = ? AND key_id = ?
+                    )
+                    ORDER BY effective_at, revocation_digest
+                    """,
+                    (organization_id, key_id),
+                ).fetchall()
+            )
         if row is None:
             raise ReleaseTrustStoreError("RELEASE_TRUST_NOT_FOUND")
+        checked_revocations = []
+        for revocation in revocations:
+            value = revocation["document_bytes"]
+            if (
+                not isinstance(value, bytes)
+                or len(value) != revocation["size_bytes"]
+                or hashlib.sha256(value).hexdigest()
+                != revocation["document_sha256"]
+            ):
+                raise ReleaseTrustStoreError("AUTHORITY_STORAGE_CORRUPT")
+            checked_revocations.append(value)
         return StoredReleaseAuthorityRows(
             self._checked_bytes(row, "root"),
             self._checked_bytes(row, "principal"),
             self._checked_bytes(row, "key"),
+            tuple(checked_revocations),
         )
 
 
 __all__ = [
+    "FaultInjector",
+    "RELEASE_TRUST_FAULT_POINTS",
     "ReleaseTrustStore",
     "ReleaseTrustStoreError",
     "StoredReleaseAuthorityRows",
