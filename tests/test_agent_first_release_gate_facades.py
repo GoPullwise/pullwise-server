@@ -280,9 +280,22 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "release-gate-report/v1", "report_digest", indeterminate
         )
 
+        fail_over_indeterminate = deepcopy(failing)
+        fail_over_indeterminate["indeterminate_reason_codes"] = ["EVIDENCE_MISSING"]
+        fail_over_indeterminate["absolute_results"][1]["observed_value"] = None
+        fail_over_indeterminate["absolute_results"][1]["status"] = "INDETERMINATE"
+        fail_over_indeterminate = self.reseal(
+            "release-gate-report/v1", "report_digest", fail_over_indeterminate
+        )
+
         operations = [
             {"kind": "evaluator", "documents": [benchmark, policy, report]}
-            for report in (passing, failing, indeterminate)
+            for report in (
+                passing,
+                failing,
+                indeterminate,
+                fail_over_indeterminate,
+            )
         ]
         expected = [
             {"ok": True, "value": {"verdict": "PASS", "exit_code": 0}},
@@ -291,6 +304,7 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
                 "ok": True,
                 "value": {"verdict": "INDETERMINATE", "exit_code": 2},
             },
+            {"ok": True, "value": {"verdict": "FAIL", "exit_code": 1}},
         ]
 
         python_results = self.python_results(operations)
