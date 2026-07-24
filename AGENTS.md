@@ -633,6 +633,20 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   source-only logic: no evaluator storage, signing/trust, organization
   principal, baseline/canary runtime state, external evidence, production
   HTTP/auth, Worker-loop activation, D24, deployment, or canary is implied.
+- Durable release-evaluator storage is Server-only and current-package-only.
+  `db.initialize()` installs exactly three normalized append-only tables for
+  benchmark bundles, release-gate policies, and release-gate reports. One
+  `BEGIN IMMEDIATE` transaction inserts or exactly replays the linked chain;
+  faults at any before/after document stage roll back the whole chain.
+- Keep each document's domain-separated digest distinct from the SHA-256 of
+  its canonical bytes. Persist and verify both, plus exact byte size, runtime
+  package tuple, normalized link digests, ContentRef SHA/size, and report
+  verdict/exit-code pairing. A valid new document with a reused stable id is
+  `IDEMPOTENCY_CONFLICT`; a same-digest mismatch or corrupt/missing linked row
+  is `AUTHORITY_RELOAD_REQUIRED`.
+- Evaluator storage does not persist attestations, signatures or trust state,
+  principals or organizations, mutable baseline/canary state, external
+  evidence, HTTP/auth state, or Worker/Web activation.
 
 ## Agent-First Gate Decision Semantics
 

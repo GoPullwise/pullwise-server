@@ -20,6 +20,7 @@ from .agent_first_release_evaluator_store import (
     FaultInjector,
     ReleaseEvaluatorStore,
     ReleaseEvaluatorStoreError,
+    StoredReleaseEvaluationRows,
 )
 
 
@@ -59,6 +60,18 @@ class AgentFirstReleaseEvaluator:
             }.get(error.code, "AUTHORITY_INPUT_UNTRUSTED")
         )
 
+    @staticmethod
+    def _public_result(
+        stored: StoredReleaseEvaluationRows,
+    ) -> StoredReleaseEvaluation:
+        return StoredReleaseEvaluation(
+            benchmark_bytes=stored.benchmark_bytes,
+            policy_bytes=stored.policy_bytes,
+            report_bytes=stored.report_bytes,
+            verdict=stored.verdict,
+            exit_code=stored.exit_code,
+        )
+
     def evaluate_and_store(
         self,
         benchmark_bundle: object,
@@ -96,7 +109,7 @@ class AgentFirstReleaseEvaluator:
             )
         except ReleaseEvaluatorStoreError as error:
             raise self._store_error(error) from None
-        return StoredReleaseEvaluation(**stored.__dict__)
+        return self._public_result(stored)
 
     def load_evaluation(self, report_id: str) -> StoredReleaseEvaluation:
         if not isinstance(report_id, str):
@@ -140,7 +153,7 @@ class AgentFirstReleaseEvaluator:
             json.JSONDecodeError,
         ):
             raise AuthorityError("AUTHORITY_RELOAD_REQUIRED") from None
-        return StoredReleaseEvaluation(**stored.__dict__)
+        return self._public_result(stored)
 
 
 __all__ = ["AgentFirstReleaseEvaluator", "StoredReleaseEvaluation"]
