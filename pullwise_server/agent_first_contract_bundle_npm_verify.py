@@ -257,6 +257,7 @@ export const all_schema_ids = allSchemaIds;
 export const canonical_document_bytes = canonicalDocumentBytes;
 export const canonical_validated_bytes = canonicalValidatedBytes;
 export const document_digest = documentDigest;
+export const signature_message = signatureMessage;
 export const evaluate_success_gate = evaluateSuccessGate;
 export const evaluate_terminalization_gate = evaluateTerminalizationGate;
 export const fixture_bytes = fixtureBytes;

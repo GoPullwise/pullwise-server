@@ -256,6 +256,7 @@ __all__ = [
     "PACKAGE_IDENTITY", "PACKAGE_TUPLE", "PACKAGE_VERSION", "ROOT_SHA256",
     "all_schema_ids", "assert_pin", "bundle", "bundle_bytes", "canonical_document_bytes",
     "canonical_document_sha256", "canonical_validated_bytes", "document_digest",
+    "signature_message",
     "validate_tool_capability_consumption", "validate_tool_invocation_binding",
     "validate_tool_journal_begin", "validate_tool_journal_settlement",
     "evaluate_release_gate", "evaluate_success_gate", "evaluate_terminalization_gate",

@@ -279,5 +279,47 @@ export async function verifyDocumentDigest(schemaId, completeValue) {
   return complete;
 }
 
+export async function signatureMessage(schemaId, completeValue) {
+  const semantics = schema(schemaId)["x-pullwise-semantics"];
+  const contract = semantics?.signature_contract;
+  if (!contract || typeof contract !== "object") {
+    fail("CONTRACT_SEMANTICS_INVALID", schemaId);
+  }
+  if (
+    contract.algorithm !== "Ed25519"
+    || contract.domain_separator !== "NUL"
+    || contract.encoding !== "base64url_no_padding"
+    || typeof contract.domain !== "string"
+  ) {
+    fail("CONTRACT_SEMANTICS_INVALID", schemaId);
+  }
+  let projected;
+  if (contract.signed_projection === "event_without_signature") {
+    const complete = validateDocument(schemaId, completeValue);
+    projected = Object.fromEntries(
+      Object.entries(complete).filter(([key]) => key !== "signature"),
+    );
+  } else if (
+    contract.signed_projection === "document_without_signature_and_digest"
+  ) {
+    const complete = await verifyDocumentDigest(schemaId, completeValue);
+    const {field} = digestSpec(schemaId);
+    projected = Object.fromEntries(
+      Object.entries(complete).filter(
+        ([key]) => key !== "signature" && key !== field,
+      ),
+    );
+  } else {
+    fail("CONTRACT_SEMANTICS_INVALID", schemaId);
+  }
+  const domainBytes = encoder.encode(contract.domain);
+  const documentBytes = canonicalDocumentBytes(projected);
+  const message = new Uint8Array(domainBytes.length + 1 + documentBytes.length);
+  message.set(domainBytes);
+  message[domainBytes.length] = 0;
+  message.set(documentBytes, domainBytes.length + 1);
+  return message;
+}
+
 @@VERIFY@@
 '''

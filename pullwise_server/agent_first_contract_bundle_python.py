@@ -273,5 +273,42 @@ def verify_document_digest(
     return complete
 
 
+def signature_message(schema_id: str, complete_value: object) -> bytes:
+    semantics = schema(schema_id).get("x-pullwise-semantics")
+    contract = (
+        semantics.get("signature_contract")
+        if isinstance(semantics, dict)
+        else None
+    )
+    if not isinstance(contract, dict):
+        _fail("CONTRACT_SEMANTICS_INVALID", schema_id)
+    if (
+        contract.get("algorithm") != "Ed25519"
+        or contract.get("domain_separator") != "NUL"
+        or contract.get("encoding") != "base64url_no_padding"
+    ):
+        _fail("CONTRACT_SEMANTICS_INVALID", schema_id)
+    domain = contract.get("domain")
+    projection = contract.get("signed_projection")
+    if not isinstance(domain, str):
+        _fail("CONTRACT_SEMANTICS_INVALID", schema_id)
+    if projection == "event_without_signature":
+        complete = validate_document(schema_id, complete_value)
+        projected = {
+            key: value for key, value in complete.items() if key != "signature"
+        }
+    elif projection == "document_without_signature_and_digest":
+        complete = verify_document_digest(schema_id, complete_value)
+        digest_field, _ = _digest_spec(schema_id)
+        projected = {
+            key: value
+            for key, value in complete.items()
+            if key not in {"signature", digest_field}
+        }
+    else:
+        _fail("CONTRACT_SEMANTICS_INVALID", schema_id)
+    return domain.encode("utf-8") + b"\\0" + canonical_document_bytes(projected)
+
+
 @@VERIFY@@
 '''
