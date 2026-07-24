@@ -624,6 +624,15 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   canary. Run Generate exactly once only after every source, fixture, semantic
   closure, DAG, registry, digest, and Python/Node parity pre-generation gate is
   green; then exact-pin the same canonical bytes in Server, Worker, and Web.
+- The tri-state release evaluator candidate reuses
+  `benchmark-bundle/v1`, `release-gate-policy/v1`, and
+  `release-gate-report/v1`. `evaluate_release_gate` derives PASS, FAIL, or
+  INDETERMINATE deterministically, with FAIL taking precedence, and rejects
+  caller-selected result status, unexplained/partial unknown evidence, and
+  benchmark sample-count drift with stable fail-closed errors. It is
+  source-only logic: no evaluator storage, signing/trust, organization
+  principal, baseline/canary runtime state, external evidence, production
+  HTTP/auth, Worker-loop activation, D24, deployment, or canary is implied.
 
 ## Agent-First Gate Decision Semantics
 
