@@ -429,6 +429,7 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
                 "release_gate_report_golden_bootstrap_pass",
                 "release_gate_report_idempotency_bootstrap_pass",
                 "release_gate_report_negative_exit_verdict_mismatch",
+                "release_gate_report_negative_unexplained_indeterminate",
             },
             set(fixtures),
         )

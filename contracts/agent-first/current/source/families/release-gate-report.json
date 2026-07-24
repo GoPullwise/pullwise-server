@@ -431,6 +431,69 @@
         "report_digest": "69301cd9cf7dc5f321551dc89689619c61677a185ad343004febd857d8773050"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "release_gate_report_negative_unexplained_indeterminate",
+      "fixture_class": "negative",
+      "schema_id": "release-gate-report/v1",
+      "document": {
+        "schema_id": "release-gate-report/v1",
+        "report_id": "release_report_33333333333333333333333333333333",
+        "package": {
+          "schema_id": "current-package-ref/v1", "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "candidate_build_id": "candidate_33333333333333333333333333333333",
+        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "release_mode": "BOOTSTRAP",
+        "stable_package": null,
+        "stable_candidate_digest": null,
+        "stable_control_plane_digest": null,
+        "benchmark_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
+          "content_schema_id": "benchmark-bundle/v1",
+          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
+          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "policy_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "release-gate-policy/v1",
+          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
+          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "benchmark_version": "benchmark-2026-07-23",
+        "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "environment_image_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "control_plane_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "evaluation_runtime_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "statistical_implementation_version": "pullwise-release-statistics/v1",
+        "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
+        "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
+        "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
+        "indeterminate_reason_codes": [],
+        "raw_sample_count": 1,
+        "valid_sample_count": 1,
+        "excluded_sample_count": 0,
+        "excluded_reason_counts": [],
+        "absolute_results": [
+          {"gate_id": "absolute_classification_accuracy_bps", "comparator": "GTE", "threshold": 9500, "observed_value": null, "status": "INDETERMINATE"}
+        ],
+        "relative_results": [
+          {"gate_id": "relative_classification_accuracy_drop_bps", "applicability": "NOT_APPLICABLE", "max_regression_bps": 200, "observed_regression_bps": null, "status": "NOT_APPLICABLE"}
+        ],
+        "profile_results": [
+          {"profile_id": "profile_mvp_q1", "wall_ms": 1800000, "token_count": 500000, "cost_microusd": 5000000, "status": "PASS"}
+        ],
+        "verdict": "INDETERMINATE",
+        "exit_code": 2,
+        "completed_at": "2026-07-23T00:00:00.000Z",
+        "report_digest": "73bff527c30a8938de2b1fc694133ea179ffafd40c94f9e00d8fd251f5bbe050"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }
   ]
 }

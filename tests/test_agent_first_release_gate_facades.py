@@ -12,6 +12,7 @@ import unittest
 from pullwise_server.agent_first_contract_bundle_npm import render_npm_wrapper
 from pullwise_server.agent_first_contract_bundle_python import render_python_wrapper
 from pullwise_server.agent_first_contract_bundle_source import canonical_bytes
+from tests.release_gate_facade_support import stable_release_gate_documents
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,7 +101,9 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
     def test_release_gate_semantic_fragments_stay_reviewable(self) -> None:
         for filename in (
             "agent_first_contract_bundle_python_release_gate.py",
+            "agent_first_contract_bundle_python_release_gate_evaluator.py",
             "agent_first_contract_bundle_npm_release_gate.py",
+            "agent_first_contract_bundle_npm_release_gate_evaluator.py",
         ):
             lines = (ROOT / "pullwise_server" / filename).read_text(
                 encoding="utf-8"
@@ -324,74 +327,7 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         )
 
     def test_evaluator_rejects_caller_selected_relative_status(self) -> None:
-        benchmark = self.document("benchmark_bundle_golden_current")
-        policy = self.document("release_gate_policy_golden_bootstrap")
-        policy["release_mode"] = "STABLE"
-        policy["stable_package"] = deepcopy(policy["package"])
-        policy["stable_candidate_digest"] = "9" * 64
-        policy["stable_control_plane_digest"] = "8" * 64
-        for gate in policy["relative_gates"]:
-            gate["applicability"] = "REQUIRED"
-        policy["threshold_table_digest"] = self.projection_digest(
-            "pullwise:release-threshold-table:v1",
-            {
-                key: policy[key]
-                for key in (
-                    "absolute_gates",
-                    "relative_gates",
-                    "infrastructure_reason_codes",
-                )
-            },
-        )
-        policy["candidate_digest"] = self.projection_digest(
-            "pullwise:candidate-digest:v1",
-            {
-                key: policy[key]
-                for key in (
-                    "package",
-                    "candidate_build_id",
-                    "control_plane_digest",
-                    "evaluation_runtime_digest",
-                    "benchmark_ref",
-                    "benchmark_digest",
-                    "threshold_table_digest",
-                    "profile_budget_digest",
-                    "canary_plan_digest",
-                )
-            },
-        )
-        policy = self.reseal(
-            "release-gate-policy/v1", "policy_digest", policy
-        )
-
-        report = self.document("release_gate_report_golden_bootstrap_pass")
-        for key in (
-            "package",
-            "candidate_build_id",
-            "candidate_digest",
-            "release_mode",
-            "stable_package",
-            "stable_candidate_digest",
-            "stable_control_plane_digest",
-            "benchmark_digest",
-            "benchmark_version",
-            "task_inventory_digest",
-            "oracle_rubric_digest",
-            "environment_image_digest",
-            "control_plane_digest",
-            "evaluation_runtime_digest",
-            "statistical_implementation_version",
-            "threshold_table_digest",
-            "profile_budget_digest",
-            "canary_plan_digest",
-        ):
-            report[key] = deepcopy(policy[key])
-        report["policy_digest"] = policy["policy_digest"]
-        report["policy_ref"] = self.content_ref(report["policy_ref"], policy)
-        for result in report["relative_results"]:
-            result["applicability"] = "REQUIRED"
-            result["observed_regression_bps"] = 0
-            result["status"] = "PASS"
+        benchmark, policy, report = stable_release_gate_documents(self)
         report["relative_results"][0]["observed_regression_bps"] = (
             report["relative_results"][0]["max_regression_bps"] + 1
         )
@@ -526,12 +462,6 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "size_bytes": len(encoded),
         }
-
-    @staticmethod
-    def projection_digest(domain: str, value: object) -> str:
-        return hashlib.sha256(
-            domain.encode("ascii") + b"\0" + canonical_bytes(value)
-        ).hexdigest()
 
     def capture(self, callback) -> dict[str, object]:
         try:
