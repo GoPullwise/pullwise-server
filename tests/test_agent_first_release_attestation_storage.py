@@ -24,6 +24,7 @@ from pullwise_server.agent_first_release_attestation_migrations import (
     install_current_release_attestation_tables,
 )
 from pullwise_server.agent_first_release_evaluator_migrations import (
+    CURRENT_RELEASE_EVALUATOR_TABLES,
     install_current_release_evaluator_tables,
 )
 from pullwise_server.agent_first_release_trust import AgentFirstReleaseTrust
@@ -123,7 +124,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
 
-    def _authorities(self) -> None:
+    def _authorities(self) -> tuple[dict[str, object], dict[str, object]]:
         benchmark_principal = deepcopy(
             self.contract.fixture("release_principal_golden_benchmark_owner")["document"]
         )
@@ -168,6 +169,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             ROOT_SEED,
         )
         self.trust.register_authority(self.root, release_principal, release_key)
+        return release_principal, release_key
 
     def _documents(self) -> tuple[dict[str, object], ...]:
         package = self.contract.package_tuple()
@@ -292,6 +294,132 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
                 for table in CURRENT_RELEASE_ATTESTATION_TABLES
             )
         self.assertEqual((1,), counts)
+
+    def test_invalid_attestation_signature_writes_no_evaluation_or_attestation(
+        self,
+    ) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestation["signature"] = (
+            "A" if attestation["signature"][0] != "A" else "B"
+        ) + attestation["signature"][1:]
+        attestation.pop("attestation_digest")
+        attestation["attestation_digest"] = self.contract.document_digest(
+            "release-gate-attestation/v1", attestation
+        )
+        attestor = AgentFirstReleaseAttestor(
+            self.connect, trust=self.trust, contract=self.contract
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
+            attestor.attest_and_store(benchmark, policy, report, attestation)
+
+        with closing(self.connect()) as connection:
+            counts = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    *CURRENT_RELEASE_EVALUATOR_TABLES,
+                    *CURRENT_RELEASE_ATTESTATION_TABLES,
+                )
+            )
+        self.assertEqual((0, 0, 0, 0), counts)
+
+    def test_same_attestation_id_with_different_valid_document_conflicts(self) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect, trust=self.trust, contract=self.contract
+        )
+        attestor.attest_and_store(benchmark, policy, report, attestation)
+        collision = deepcopy(attestation)
+        collision["expires_at"] = "2026-07-29T01:00:00.000Z"
+        collision = _seal_signed(
+            self.contract,
+            "release-gate-attestation/v1",
+            "pullwise-release-gate-attestation/v1",
+            "attestation_digest",
+            collision,
+            RELEASE_SEED,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "IDEMPOTENCY_CONFLICT"):
+            attestor.attest_and_store(benchmark, policy, report, collision)
+
+        with closing(self.connect()) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM agent_current_release_gate_attestations"
+            ).fetchone()[0]
+        self.assertEqual(1, count)
+
+    def test_attestation_is_immutable_and_corruption_fails_closed_on_reload(
+        self,
+    ) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect, trust=self.trust, contract=self.contract
+        )
+        attestor.attest_and_store(benchmark, policy, report, attestation)
+        table = CURRENT_RELEASE_ATTESTATION_TABLES[0]
+        with closing(self.connect()) as connection:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(f"UPDATE {table} SET created_at = created_at + 1")
+        with closing(self.connect()) as connection, connection:
+            connection.execute(f"DROP TRIGGER {table}_immutable_update")
+            connection.execute(
+                f"UPDATE {table} SET document_bytes = ?",
+                (b"{}",),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "AUTHORITY_RELOAD_REQUIRED"):
+            attestor.load_attestation(attestation["attestation_id"])
+
+    def test_reload_revalidates_at_recorded_time_after_expiry_and_revocation(
+        self,
+    ) -> None:
+        release_principal, release_key = self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect, trust=self.trust, contract=self.contract
+        )
+        stored = attestor.attest_and_store(
+            benchmark, policy, report, attestation
+        )
+        revocation = deepcopy(
+            self.contract.fixture("release_key_revocation_golden_superseded")[
+                "document"
+            ]
+        )
+        revocation.update(
+            revocation_id="release_key_revocation_99999999999999999999999999999999",
+            revoked_key_id=release_key["key_id"],
+            revoked_key_digest=release_key["signing_key_digest"],
+            revoked_key_ref=_content_ref(
+                self.contract,
+                revocation["revoked_key_ref"],
+                "release-signing-key/v1",
+                release_key,
+            ),
+            revoked_principal_id=release_principal["principal_id"],
+            issued_at="2026-12-01T00:00:00.000Z",
+            effective_at="2027-01-01T00:00:00.000Z",
+        )
+        revocation = _seal_signed(
+            self.contract,
+            "release-key-revocation/v1",
+            "pullwise-release-key-revocation/v1",
+            "revocation_digest",
+            revocation,
+            ROOT_SEED,
+        )
+        self.now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+        self.trust.revoke_key(revocation)
+        self.now = datetime(2027, 1, 2, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            stored,
+            attestor.load_attestation(attestation["attestation_id"]),
+        )
 
     def test_main_database_initialization_installs_trust_and_attestation_tables(
         self,

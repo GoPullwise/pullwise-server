@@ -245,6 +245,7 @@ class ReleaseTrustStore:
     def load_authority(
         self, organization_id: str, key_id: str
     ) -> StoredReleaseAuthorityRows:
+        key_present = False
         with self._connection(immediate=False) as connection:
             row = connection.execute(
                 """
@@ -267,6 +268,14 @@ class ReleaseTrustStore:
                 """,
                 (organization_id, key_id),
             ).fetchone()
+            if row is None:
+                key_present = connection.execute(
+                    """
+                    SELECT 1 FROM agent_current_release_signing_keys
+                    WHERE organization_id = ? AND key_id = ?
+                    """,
+                    (organization_id, key_id),
+                ).fetchone() is not None
             revocations = () if row is None else tuple(
                 connection.execute(
                     """
@@ -283,7 +292,10 @@ class ReleaseTrustStore:
                 ).fetchall()
             )
         if row is None:
-            raise ReleaseTrustStoreError("RELEASE_TRUST_NOT_FOUND")
+            raise ReleaseTrustStoreError(
+                "AUTHORITY_STORAGE_CORRUPT"
+                if key_present else "RELEASE_TRUST_NOT_FOUND"
+            )
         checked_revocations = []
         for revocation in revocations:
             value = revocation["document_bytes"]

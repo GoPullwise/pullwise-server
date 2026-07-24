@@ -11,6 +11,7 @@ from types import ModuleType
 import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
 from pullwise_server.agent_first_authority import AuthorityError
@@ -26,6 +27,41 @@ from pullwise_server.agent_first_release_trust_store import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = ROOT / "contracts" / "agent-first" / "current" / "source"
+ROOT_SEED = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
+BENCHMARK_SEED = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"
+
+
+def _public_key(private_seed: str) -> str:
+    public = Ed25519PrivateKey.from_private_bytes(
+        bytes.fromhex(private_seed)
+    ).public_key()
+    encoded = public.public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+    return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
+
+
+def _seal_signed_document(
+    contract: ModuleType,
+    schema_id: str,
+    signature_domain: str,
+    digest_field: str,
+    document: dict[str, object],
+    private_seed: str,
+) -> dict[str, object]:
+    value = deepcopy(document)
+    value.pop("signature", None)
+    value.pop(digest_field, None)
+    key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_seed))
+    message = signature_domain.encode("ascii") + b"\0" + (
+        contract.canonical_document_bytes(value)
+    )
+    value["signature"] = base64.urlsafe_b64encode(key.sign(message)).decode(
+        "ascii"
+    ).rstrip("=")
+    value[digest_field] = contract.document_digest(schema_id, value)
+    return value
 
 
 def _sign_current_document(
@@ -123,7 +159,7 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
             "pullwise-benchmark-bundle/v1",
             "bundle_digest",
             self.contract.fixture("benchmark_bundle_golden_current")["document"],
-            "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+            BENCHMARK_SEED,
         )
 
         verified = self.trust.verify_document(benchmark)
@@ -220,9 +256,9 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
         self.assertEqual((0, 0, 0, 0), self.counts())
 
         principal = deepcopy(self.principal)
-        principal["signature"] = ("A" if principal["signature"][0] != "A" else "B") + principal[
-            "signature"
-        ][1:]
+        principal["signature"] = (
+            "A" if principal["signature"][0] != "A" else "B"
+        ) + principal["signature"][1:]
         principal.pop("principal_digest")
         principal["principal_digest"] = self.contract.document_digest(
             "release-principal/v1", principal
@@ -233,6 +269,166 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
             "AUTHORITY_INPUT_UNTRUSTED", signature_error.exception.code
         )
         self.assertEqual((0, 0, 0, 0), self.counts())
+
+    def test_rotation_appends_a_new_valid_key_and_same_id_conflicts(self) -> None:
+        self.trust.register_authority(self.root, self.principal, self.signing_key)
+        rotated_seed = "1f" * 32
+        rotated = deepcopy(self.signing_key)
+        rotated.update(
+            key_id="key_benchmark_2026_02",
+            public_key=_public_key(rotated_seed),
+            issued_at="2026-07-01T00:00:00.000Z",
+        )
+        rotated = _seal_signed_document(
+            self.contract,
+            "release-signing-key/v1",
+            "pullwise-release-signing-key/v1",
+            "signing_key_digest",
+            rotated,
+            ROOT_SEED,
+        )
+
+        self.trust.register_authority(self.root, self.principal, rotated)
+
+        source = deepcopy(
+            self.contract.fixture("benchmark_bundle_golden_current")["document"]
+        )
+        source["key_id"] = rotated["key_id"]
+        benchmark = _sign_current_document(
+            self.contract,
+            "benchmark-bundle/v1",
+            "pullwise-benchmark-bundle/v1",
+            "bundle_digest",
+            source,
+            rotated_seed,
+        )
+        self.assertEqual(
+            "key_benchmark_2026_02",
+            self.trust.verify_document(benchmark).key_id,
+        )
+        self.assertEqual((1, 1, 2, 0), self.counts())
+
+        collision = deepcopy(rotated)
+        collision["expires_at"] = "2027-01-02T00:00:00.000Z"
+        collision = _seal_signed_document(
+            self.contract,
+            "release-signing-key/v1",
+            "pullwise-release-signing-key/v1",
+            "signing_key_digest",
+            collision,
+            ROOT_SEED,
+        )
+        with self.assertRaises(AuthorityError) as raised:
+            self.trust.register_authority(self.root, self.principal, collision)
+        self.assertEqual("IDEMPOTENCY_CONFLICT", raised.exception.code)
+        self.assertEqual((1, 1, 2, 0), self.counts())
+
+    def test_corrupted_stored_key_fails_closed_on_verified_reload(self) -> None:
+        self.trust.register_authority(self.root, self.principal, self.signing_key)
+        benchmark = _sign_current_document(
+            self.contract,
+            "benchmark-bundle/v1",
+            "pullwise-benchmark-bundle/v1",
+            "bundle_digest",
+            self.contract.fixture("benchmark_bundle_golden_current")["document"],
+            BENCHMARK_SEED,
+        )
+        table = "agent_current_release_signing_keys"
+        with closing(self.connect()) as connection, connection:
+            connection.execute(f"DROP TRIGGER {table}_immutable_update")
+            connection.execute(
+                f"UPDATE {table} SET document_bytes = ?",
+                (b"{}",),
+            )
+
+        with self.assertRaises(AuthorityError) as raised:
+            self.trust.verify_document(benchmark)
+
+        self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
+
+    def test_missing_linked_principal_is_storage_corruption(self) -> None:
+        self.trust.register_authority(self.root, self.principal, self.signing_key)
+        benchmark = _sign_current_document(
+            self.contract,
+            "benchmark-bundle/v1",
+            "pullwise-benchmark-bundle/v1",
+            "bundle_digest",
+            self.contract.fixture("benchmark_bundle_golden_current")["document"],
+            BENCHMARK_SEED,
+        )
+        table = "agent_current_release_principals"
+        with closing(self.connect()) as connection:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            with connection:
+                connection.execute(f"DROP TRIGGER {table}_immutable_delete")
+                connection.execute(f"DELETE FROM {table}")
+
+        with self.assertRaises(AuthorityError) as raised:
+            self.trust.verify_document(benchmark)
+
+        self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
+
+    def test_normalized_link_metadata_mismatch_is_storage_corruption(self) -> None:
+        self.trust.register_authority(self.root, self.principal, self.signing_key)
+        benchmark = _sign_current_document(
+            self.contract,
+            "benchmark-bundle/v1",
+            "pullwise-benchmark-bundle/v1",
+            "bundle_digest",
+            self.contract.fixture("benchmark_bundle_golden_current")["document"],
+            BENCHMARK_SEED,
+        )
+        table = "agent_current_release_signing_keys"
+        with closing(self.connect()) as connection, connection:
+            connection.execute(f"DROP TRIGGER {table}_immutable_update")
+            connection.execute(
+                f"UPDATE {table} SET principal_ref_sha256 = ?",
+                ("0" * 64,),
+            )
+
+        with self.assertRaises(AuthorityError) as raised:
+            self.trust.verify_document(benchmark)
+
+        self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
+
+    def test_document_organization_and_current_package_are_exact(self) -> None:
+        self.trust.register_authority(self.root, self.principal, self.signing_key)
+        source = deepcopy(
+            self.contract.fixture("benchmark_bundle_golden_current")["document"]
+        )
+        source["organization_id"] = "org_other"
+        wrong_organization = _sign_current_document(
+            self.contract,
+            "benchmark-bundle/v1",
+            "pullwise-benchmark-bundle/v1",
+            "bundle_digest",
+            source,
+            BENCHMARK_SEED,
+        )
+        with self.assertRaises(AuthorityError) as organization_error:
+            self.trust.verify_document(wrong_organization)
+        self.assertEqual(
+            "AUTHORITY_INPUT_UNTRUSTED", organization_error.exception.code
+        )
+
+        stale_package = deepcopy(
+            self.contract.fixture("benchmark_bundle_golden_current")["document"]
+        )
+        stale_package["package"] = {
+            **self.contract.package_tuple(),
+            "root_sha256": "0" * 64,
+        }
+        stale_package = _seal_signed_document(
+            self.contract,
+            "benchmark-bundle/v1",
+            "pullwise-benchmark-bundle/v1",
+            "bundle_digest",
+            stale_package,
+            BENCHMARK_SEED,
+        )
+        with self.assertRaises(AuthorityError) as package_error:
+            self.trust.verify_document(stale_package)
+        self.assertEqual("AUTHORITY_INPUT_UNTRUSTED", package_error.exception.code)
 
     def test_revocation_blocks_verification_only_when_effective(self) -> None:
         self.trust.register_authority(self.root, self.principal, self.signing_key)
@@ -251,7 +447,7 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
             "pullwise-benchmark-bundle/v1",
             "bundle_digest",
             source,
-            "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+            BENCHMARK_SEED,
         )
         self.now = datetime(2026, 12, 15, tzinfo=timezone.utc)
 
