@@ -88,9 +88,11 @@ DOCUMENT_RULE_IDS = frozenset(
         "r0_read_result",
         "requirement_id_source_kind_match",
         "release_principal",
+        "release_signing_key",
         "release_gate_policy",
         "release_gate_attestation",
         "release_gate_report",
+        "release_key_revocation",
         "risk_ceiling_current_mvp",
         "root_and_origin_sets_sorted_unique",
         "server_authority_envelope",
@@ -187,6 +189,13 @@ WAIVER_SIGNATURE_CONTRACT = {
     "encoding": "base64url_no_padding",
     "signed_projection": "event_without_signature",
 }
+RELEASE_KEY_REVOCATION_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-release-key-revocation/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "document_without_signature_and_digest",
+}
 RELEASE_PRINCIPAL_SIGNATURE_CONTRACT = {
     "algorithm": "Ed25519",
     "domain": "pullwise-release-principal/v1",
@@ -194,9 +203,18 @@ RELEASE_PRINCIPAL_SIGNATURE_CONTRACT = {
     "encoding": "base64url_no_padding",
     "signed_projection": "document_without_signature_and_digest",
 }
+RELEASE_SIGNING_KEY_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-release-signing-key/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "document_without_signature_and_digest",
+}
 SUPPORTED_SIGNATURE_CONTRACTS = (
     WAIVER_SIGNATURE_CONTRACT,
+    RELEASE_KEY_REVOCATION_SIGNATURE_CONTRACT,
     RELEASE_PRINCIPAL_SIGNATURE_CONTRACT,
+    RELEASE_SIGNING_KEY_SIGNATURE_CONTRACT,
 )
 
 

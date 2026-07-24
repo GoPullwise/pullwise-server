@@ -360,6 +360,25 @@ def _rule_release_principal(value: dict[str, object]) -> None:
     )
 
 
+def _rule_release_signing_key(value: dict[str, object]) -> None:
+    _rule_release_principal(value)
+
+
+def _rule_release_key_revocation(value: dict[str, object]) -> None:
+    issued_at = _timestamp_millis(value["issued_at"])
+    effective_at = _timestamp_millis(value["effective_at"])
+    _release_require(
+        issued_at is not None,
+        "RELEASE_KEY_REVOCATION_TIME_INVALID",
+        "$.issued_at",
+    )
+    _release_require(
+        effective_at is not None and issued_at <= effective_at,
+        "RELEASE_KEY_REVOCATION_TIME_INVALID",
+        "$.effective_at",
+    )
+
+
 def _verify_release_gate_policy_binding(
     policy: dict[str, object],
     benchmark_bundle: dict[str, object],

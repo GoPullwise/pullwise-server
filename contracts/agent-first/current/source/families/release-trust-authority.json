@@ -3,6 +3,95 @@
   "schemas": [
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "release-key-revocation/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "revocation_digest",
+        "domain": "pullwise:release-key-revocation:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["release_key_revocation"],
+        "contextual_helpers": [],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-release-key-revocation/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "document_without_signature_and_digest"
+        }
+      },
+      "required": [
+        "schema_id", "revocation_id", "organization_id", "trust_root_id",
+        "trust_root_ref", "trust_root_digest", "revoked_key_id",
+        "revoked_key_ref", "revoked_key_digest", "revoked_principal_id",
+        "reason_code", "signer_id", "signer_key_id", "signature_algorithm",
+        "issued_at", "effective_at", "signature", "revocation_digest"
+      ],
+      "properties": {
+        "schema_id": {"const": "release-key-revocation/v1"},
+        "revocation_id": {
+          "type": "string",
+          "pattern": "^release_key_revocation_[0-9a-f]{32}$"
+        },
+        "organization_id": {
+          "type": "string",
+          "pattern": "^org_[a-z0-9_]{1,64}$"
+        },
+        "trust_root_id": {
+          "type": "string",
+          "pattern": "^release_trust_root_[0-9a-f]{32}$"
+        },
+        "trust_root_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "release-trust-root/v1"
+        },
+        "trust_root_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "revoked_key_id": {
+          "type": "string",
+          "pattern": "^key_[A-Za-z0-9_-]{1,96}$"
+        },
+        "revoked_key_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "release-signing-key/v1"
+        },
+        "revoked_key_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "revoked_principal_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "reason_code": {
+          "enum": ["authorization_withdrawn", "compromised", "retired", "superseded"]
+        },
+        "signer_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "signer_key_id": {
+          "type": "string",
+          "pattern": "^key_[A-Za-z0-9_-]{1,96}$"
+        },
+        "signature_algorithm": {"const": "Ed25519"},
+        "issued_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "effective_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"},
+        "revocation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "release-principal/v1",
       "type": "object",
       "additionalProperties": false,
@@ -81,10 +170,93 @@
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
         },
+        "principal_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "release-signing-key/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "signing_key_digest",
+        "domain": "pullwise:release-signing-key:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["release_signing_key"],
+        "contextual_helpers": [],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-release-signing-key/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "document_without_signature_and_digest"
+        }
+      },
+      "required": [
+        "schema_id", "key_id", "organization_id", "principal_id",
+        "principal_ref", "principal_digest", "key_purpose", "trust_root_id",
+        "trust_root_digest", "signer_id", "signer_key_id",
+        "signature_algorithm", "public_key", "issued_at", "expires_at",
+        "signature", "signing_key_digest"
+      ],
+      "properties": {
+        "schema_id": {"const": "release-signing-key/v1"},
+        "key_id": {
+          "type": "string",
+          "pattern": "^key_[A-Za-z0-9_-]{1,96}$"
+        },
+        "organization_id": {
+          "type": "string",
+          "pattern": "^org_[a-z0-9_]{1,64}$"
+        },
+        "principal_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "principal_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "release-principal/v1"
+        },
         "principal_digest": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
-        }
+        },
+        "key_purpose": {"enum": ["benchmark_signing", "release_signing"]},
+        "trust_root_id": {
+          "type": "string",
+          "pattern": "^release_trust_root_[0-9a-f]{32}$"
+        },
+        "trust_root_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "signer_id": {
+          "type": "string",
+          "pattern": "^principal_[a-z0-9_]{1,64}$"
+        },
+        "signer_key_id": {
+          "type": "string",
+          "pattern": "^key_[A-Za-z0-9_-]{1,96}$"
+        },
+        "signature_algorithm": {"const": "Ed25519"},
+        "public_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "issued_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$"
+        },
+        "signing_key_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     },
     {
@@ -139,14 +311,104 @@
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
         },
-        "root_digest": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        }
+        "root_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     }
   ],
   "fixtures": [
+    {
+      "fixture_id": "release_key_revocation_golden_superseded", "fixture_class": "golden",
+      "schema_id": "release-key-revocation/v1",
+      "document": {
+        "schema_id": "release-key-revocation/v1",
+        "revocation_id": "release_key_revocation_11111111111111111111111111111111",
+        "organization_id": "org_acme", "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "trust_root_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "release-trust-root/v1",
+          "sha256": "ace14fee2efa90bcbc28436f25a31868b6aece0efba136f4d67933421c702419", "size_bytes": 464,
+          "media_type": "application/json", "encoding": "utf-8"
+        },
+        "trust_root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
+        "revoked_key_id": "key_benchmark_2026_01",
+        "revoked_key_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_44444444444444444444444444444444",
+          "content_schema_id": "release-signing-key/v1",
+          "sha256": "ff9d91479de5069d90db4af7b3fcf3da35cc6f7a54977ddd3b583ddc34da8536", "size_bytes": 1137,
+          "media_type": "application/json", "encoding": "utf-8"
+        },
+        "revoked_key_digest": "9246721f4f4f21ea7b2d36df3fd35f3cd11f1c81027a1373ec6f1474267de192",
+        "revoked_principal_id": "principal_benchmark_owner", "reason_code": "superseded",
+        "signer_id": "principal_trust_admin", "signer_key_id": "key_root_2026_01",
+        "signature_algorithm": "Ed25519", "issued_at": "2026-12-01T00:00:00.000Z",
+        "effective_at": "2027-01-01T00:00:00.000Z",
+        "signature": "KN3N6zEApeGDnuyQapBjmCn9akM1XplOsUkvP2GudY2ANWd4VX252wRKjJ4GlYx5A0iCow59tObr5e93j8BdDw",
+        "revocation_digest": "ca4ef5d37323c1cdbd895ca9c0970f6145434e81b05409a2f54d756e1e709ba2"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "release_key_revocation_idempotency_superseded", "fixture_class": "idempotency",
+      "schema_id": "release-key-revocation/v1",
+      "document": {
+        "revocation_digest": "ca4ef5d37323c1cdbd895ca9c0970f6145434e81b05409a2f54d756e1e709ba2",
+        "signature": "KN3N6zEApeGDnuyQapBjmCn9akM1XplOsUkvP2GudY2ANWd4VX252wRKjJ4GlYx5A0iCow59tObr5e93j8BdDw",
+        "effective_at": "2027-01-01T00:00:00.000Z", "issued_at": "2026-12-01T00:00:00.000Z",
+        "signature_algorithm": "Ed25519", "signer_key_id": "key_root_2026_01",
+        "signer_id": "principal_trust_admin", "reason_code": "superseded",
+        "revoked_principal_id": "principal_benchmark_owner",
+        "revoked_key_digest": "9246721f4f4f21ea7b2d36df3fd35f3cd11f1c81027a1373ec6f1474267de192",
+        "revoked_key_ref": {
+          "encoding": "utf-8", "media_type": "application/json", "size_bytes": 1137,
+          "sha256": "ff9d91479de5069d90db4af7b3fcf3da35cc6f7a54977ddd3b583ddc34da8536",
+          "content_schema_id": "release-signing-key/v1", "artifact_id": "art_44444444444444444444444444444444",
+          "schema_id": "content-ref/v1"
+        },
+        "revoked_key_id": "key_benchmark_2026_01",
+        "trust_root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
+        "trust_root_ref": {
+          "encoding": "utf-8", "media_type": "application/json", "size_bytes": 464,
+          "sha256": "ace14fee2efa90bcbc28436f25a31868b6aece0efba136f4d67933421c702419",
+          "content_schema_id": "release-trust-root/v1", "artifact_id": "art_33333333333333333333333333333333",
+          "schema_id": "content-ref/v1"
+        },
+        "trust_root_id": "release_trust_root_11111111111111111111111111111111", "organization_id": "org_acme",
+        "revocation_id": "release_key_revocation_11111111111111111111111111111111",
+        "schema_id": "release-key-revocation/v1"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "release_key_revocation_negative_time_order", "fixture_class": "negative",
+      "schema_id": "release-key-revocation/v1",
+      "document": {
+        "schema_id": "release-key-revocation/v1",
+        "revocation_id": "release_key_revocation_11111111111111111111111111111111",
+        "organization_id": "org_acme", "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "trust_root_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "release-trust-root/v1",
+          "sha256": "ace14fee2efa90bcbc28436f25a31868b6aece0efba136f4d67933421c702419", "size_bytes": 464,
+          "media_type": "application/json", "encoding": "utf-8"
+        },
+        "trust_root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
+        "revoked_key_id": "key_benchmark_2026_01",
+        "revoked_key_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_44444444444444444444444444444444",
+          "content_schema_id": "release-signing-key/v1",
+          "sha256": "ff9d91479de5069d90db4af7b3fcf3da35cc6f7a54977ddd3b583ddc34da8536", "size_bytes": 1137,
+          "media_type": "application/json", "encoding": "utf-8"
+        },
+        "revoked_key_digest": "9246721f4f4f21ea7b2d36df3fd35f3cd11f1c81027a1373ec6f1474267de192",
+        "revoked_principal_id": "principal_benchmark_owner", "reason_code": "superseded",
+        "signer_id": "principal_trust_admin", "signer_key_id": "key_root_2026_01",
+        "signature_algorithm": "Ed25519", "issued_at": "2027-02-01T00:00:00.000Z",
+        "effective_at": "2027-01-01T00:00:00.000Z",
+        "signature": "KN3N6zEApeGDnuyQapBjmCn9akM1XplOsUkvP2GudY2ANWd4VX252wRKjJ4GlYx5A0iCow59tObr5e93j8BdDw",
+        "revocation_digest": "ca4ef5d37323c1cdbd895ca9c0970f6145434e81b05409a2f54d756e1e709ba2"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
     {
       "fixture_id": "release_principal_golden_benchmark_owner",
       "fixture_class": "golden",
@@ -238,58 +500,98 @@
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
     {
-      "fixture_id": "release_trust_root_golden_external_pin",
-      "fixture_class": "golden",
-      "schema_id": "release-trust-root/v1",
-      "document": {
-        "schema_id": "release-trust-root/v1",
-        "trust_root_id": "release_trust_root_11111111111111111111111111111111",
-        "organization_id": "org_acme",
-        "root_principal_id": "principal_trust_admin",
-        "root_key_id": "key_root_2026_01",
-        "signature_algorithm": "Ed25519",
+      "fixture_id": "release_signing_key_golden_benchmark_owner", "fixture_class": "golden",
+      "schema_id": "release-signing-key/v1", "document": {
+        "schema_id": "release-signing-key/v1", "key_id": "key_benchmark_2026_01", "organization_id": "org_acme",
+        "principal_id": "principal_benchmark_owner", "principal_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "release-principal/v1",
+          "sha256": "bf77de65791ca751ae5e3ddbbd7c6269b202af5b99b834c48279216360beef88", "size_bytes": 941,
+          "media_type": "application/json", "encoding": "utf-8"
+        },
+        "principal_digest": "46b43b6fa48f2af8d95b76afe4ca139091bb2bb1f00822e29280fa8ee5352135",
+        "key_purpose": "benchmark_signing", "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "trust_root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
+        "signer_id": "principal_trust_admin", "signer_key_id": "key_root_2026_01", "signature_algorithm": "Ed25519",
+        "public_key": "PUAXw-hDiVqStwqnTRt-vJyYLM8uxJaMwM1V8Sr0Zgw",
+        "issued_at": "2026-07-03T00:00:00.000Z", "expires_at": "2027-06-29T00:00:00.000Z",
+        "signature": "rNmVEiKFBwMXglzqOGWelpnjBjQxclzEDk_MfqSpbqxCAlWSZWp4gPkCOpZQ8WcWSUGn6Rfo7WqpDJavr_OpCQ",
+        "signing_key_digest": "9246721f4f4f21ea7b2d36df3fd35f3cd11f1c81027a1373ec6f1474267de192"
+      }, "expected_code": null
+    },
+    {
+      "fixture_id": "release_signing_key_idempotency_benchmark_owner", "fixture_class": "idempotency",
+      "schema_id": "release-signing-key/v1", "document": {
+        "signing_key_digest": "9246721f4f4f21ea7b2d36df3fd35f3cd11f1c81027a1373ec6f1474267de192",
+        "signature": "rNmVEiKFBwMXglzqOGWelpnjBjQxclzEDk_MfqSpbqxCAlWSZWp4gPkCOpZQ8WcWSUGn6Rfo7WqpDJavr_OpCQ",
+        "expires_at": "2027-06-29T00:00:00.000Z", "issued_at": "2026-07-03T00:00:00.000Z",
+        "public_key": "PUAXw-hDiVqStwqnTRt-vJyYLM8uxJaMwM1V8Sr0Zgw", "signature_algorithm": "Ed25519",
+        "signer_key_id": "key_root_2026_01", "signer_id": "principal_trust_admin",
+        "trust_root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
+        "trust_root_id": "release_trust_root_11111111111111111111111111111111", "key_purpose": "benchmark_signing",
+        "principal_digest": "46b43b6fa48f2af8d95b76afe4ca139091bb2bb1f00822e29280fa8ee5352135",
+        "principal_ref": {
+          "encoding": "utf-8", "media_type": "application/json", "size_bytes": 941,
+          "sha256": "bf77de65791ca751ae5e3ddbbd7c6269b202af5b99b834c48279216360beef88",
+          "content_schema_id": "release-principal/v1", "artifact_id": "art_22222222222222222222222222222222",
+          "schema_id": "content-ref/v1"
+        },
+        "principal_id": "principal_benchmark_owner", "organization_id": "org_acme",
+        "key_id": "key_benchmark_2026_01", "schema_id": "release-signing-key/v1"
+      }, "expected_code": null
+    },
+    {
+      "fixture_id": "release_signing_key_negative_time_order", "fixture_class": "negative",
+      "schema_id": "release-signing-key/v1", "document": {
+        "schema_id": "release-signing-key/v1", "key_id": "key_benchmark_2026_01", "organization_id": "org_acme",
+        "principal_id": "principal_benchmark_owner", "principal_ref": {
+          "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
+          "content_schema_id": "release-principal/v1",
+          "sha256": "bf77de65791ca751ae5e3ddbbd7c6269b202af5b99b834c48279216360beef88", "size_bytes": 941,
+          "media_type": "application/json", "encoding": "utf-8"
+        },
+        "principal_digest": "46b43b6fa48f2af8d95b76afe4ca139091bb2bb1f00822e29280fa8ee5352135",
+        "key_purpose": "benchmark_signing", "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "trust_root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
+        "signer_id": "principal_trust_admin", "signer_key_id": "key_root_2026_01", "signature_algorithm": "Ed25519",
+        "public_key": "PUAXw-hDiVqStwqnTRt-vJyYLM8uxJaMwM1V8Sr0Zgw",
+        "issued_at": "2027-07-03T00:00:00.000Z", "expires_at": "2027-06-29T00:00:00.000Z",
+        "signature": "rNmVEiKFBwMXglzqOGWelpnjBjQxclzEDk_MfqSpbqxCAlWSZWp4gPkCOpZQ8WcWSUGn6Rfo7WqpDJavr_OpCQ",
+        "signing_key_digest": "9246721f4f21ea7b2d36df3fd35f3cd11f1c81027a1373ec6f1474267de192"
+      }, "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "release_trust_root_golden_external_pin", "fixture_class": "golden",
+      "schema_id": "release-trust-root/v1", "document": {
+        "schema_id": "release-trust-root/v1", "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "organization_id": "org_acme", "root_principal_id": "principal_trust_admin",
+        "root_key_id": "key_root_2026_01", "signature_algorithm": "Ed25519",
         "public_key": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
-        "issued_at": "2026-07-01T00:00:00.000Z",
-        "expires_at": "2027-07-01T00:00:00.000Z",
+        "issued_at": "2026-07-01T00:00:00.000Z", "expires_at": "2027-07-01T00:00:00.000Z",
         "root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18"
-      },
-      "expected_code": null
+      }, "expected_code": null
     },
     {
-      "fixture_id": "release_trust_root_idempotency_external_pin",
-      "fixture_class": "idempotency",
-      "schema_id": "release-trust-root/v1",
-      "document": {
+      "fixture_id": "release_trust_root_idempotency_external_pin", "fixture_class": "idempotency",
+      "schema_id": "release-trust-root/v1", "document": {
         "root_digest": "e8547e8f232b0613c4b366008be54fbc20bab7fb734a50bba14593f526f81b18",
-        "expires_at": "2027-07-01T00:00:00.000Z",
-        "issued_at": "2026-07-01T00:00:00.000Z",
-        "public_key": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
-        "signature_algorithm": "Ed25519",
-        "root_key_id": "key_root_2026_01",
-        "root_principal_id": "principal_trust_admin",
-        "organization_id": "org_acme",
-        "trust_root_id": "release_trust_root_11111111111111111111111111111111",
+        "expires_at": "2027-07-01T00:00:00.000Z", "issued_at": "2026-07-01T00:00:00.000Z",
+        "public_key": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo", "signature_algorithm": "Ed25519",
+        "root_key_id": "key_root_2026_01", "root_principal_id": "principal_trust_admin",
+        "organization_id": "org_acme", "trust_root_id": "release_trust_root_11111111111111111111111111111111",
         "schema_id": "release-trust-root/v1"
-      },
-      "expected_code": null
+      }, "expected_code": null
     },
     {
-      "fixture_id": "release_trust_root_negative_public_key",
-      "fixture_class": "negative",
-      "schema_id": "release-trust-root/v1",
-      "document": {
-        "schema_id": "release-trust-root/v1",
-        "trust_root_id": "release_trust_root_22222222222222222222222222222222",
-        "organization_id": "org_acme",
-        "root_principal_id": "principal_trust_admin",
-        "root_key_id": "key_root_invalid",
-        "signature_algorithm": "Ed25519",
+      "fixture_id": "release_trust_root_negative_public_key", "fixture_class": "negative",
+      "schema_id": "release-trust-root/v1", "document": {
+        "schema_id": "release-trust-root/v1", "trust_root_id": "release_trust_root_22222222222222222222222222222222",
+        "organization_id": "org_acme", "root_principal_id": "principal_trust_admin",
+        "root_key_id": "key_root_invalid", "signature_algorithm": "Ed25519",
         "public_key": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHUR",
-        "issued_at": "2026-07-01T00:00:00.000Z",
-        "expires_at": "2027-07-01T00:00:00.000Z",
+        "issued_at": "2026-07-01T00:00:00.000Z", "expires_at": "2027-07-01T00:00:00.000Z",
         "root_digest": "41c9d01e05920d4340dc3be7147ff2a30d90b61a0441d3f1ccac65154e322f94"
-      },
-      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+      }, "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }
   ]
 }
