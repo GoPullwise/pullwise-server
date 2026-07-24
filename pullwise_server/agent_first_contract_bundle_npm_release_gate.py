@@ -225,6 +225,7 @@ function releaseReportVerdict(value) {
 }
 
 function ruleReleaseGateReport(value) {
+  releaseValidateAbsoluteResults(value);
   releaseRequire(
     value.raw_sample_count ===
       value.valid_sample_count + value.excluded_sample_count,
@@ -482,6 +483,7 @@ export async function verifyReleaseGateReportContext(
     "RELEASE_REPORT_POLICY_TABLE_INVALID",
     "$.profile_results",
   );
+  releaseValidateProfileResults(checked, policyValue);
   releaseRequire(
     checked.excluded_reason_counts.every(
       (item) => policyValue.infrastructure_reason_codes.includes(item.reason_code),

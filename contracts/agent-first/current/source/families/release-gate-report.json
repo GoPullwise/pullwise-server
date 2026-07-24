@@ -20,6 +20,7 @@
         "policy_ref", "policy_digest", "benchmark_version", "task_inventory_digest", "oracle_rubric_digest",
         "environment_image_digest", "control_plane_digest", "evaluation_runtime_digest",
         "statistical_implementation_version", "threshold_table_digest", "profile_budget_digest", "canary_plan_digest",
+        "indeterminate_reason_codes",
         "raw_sample_count", "valid_sample_count", "excluded_sample_count", "excluded_reason_counts",
         "absolute_results", "relative_results", "profile_results", "verdict", "exit_code", "completed_at", "report_digest"
       ],
@@ -68,8 +69,17 @@
         "threshold_table_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "profile_budget_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "canary_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "indeterminate_reason_codes": {
+          "type": "array", "minItems": 0, "maxItems": 8, "uniqueItems": true,
+          "items": {
+            "enum": [
+              "BASELINE_INCOMPARABLE", "EVALUATOR_FAILURE", "EVIDENCE_MISSING", "EVIDENCE_STALE",
+              "ORACLE_RUBRIC_CONFLICT", "SAMPLE_INSUFFICIENT", "TIMEOUT", "ZERO_DENOMINATOR"
+            ]
+          }
+        },
         "raw_sample_count": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-        "valid_sample_count": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "valid_sample_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "excluded_sample_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "excluded_reason_counts": {
           "type": "array", "minItems": 0, "maxItems": 64, "uniqueItems": true,
@@ -91,7 +101,12 @@
               "gate_id": {"type": "string", "pattern": "^absolute_[a-z0-9_]{1,96}$"},
               "comparator": {"enum": ["EQ", "GTE", "LT", "LTE"]},
               "threshold": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-              "observed_value": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+              "observed_value": {
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+                ]
+              },
               "status": {"enum": ["PASS", "FAIL", "INDETERMINATE"]}
             }
           }
@@ -200,6 +215,7 @@
         "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
+        "indeterminate_reason_codes": [],
         "raw_sample_count": 150,
         "valid_sample_count": 145,
         "excluded_sample_count": 5,
@@ -242,7 +258,7 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "1e55d69522ea430b5c326bd695209bc12230f724d0d2ba17340889ca4c2586ab"
+        "report_digest": "d10ad8a37a3b0f89635b485f41bcf8f78356b0280ea4ef0e86f20a6ce122f899"
       },
       "expected_code": null
     },
@@ -288,6 +304,7 @@
         "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
+        "indeterminate_reason_codes": [],
         "raw_sample_count": 150,
         "valid_sample_count": 145,
         "excluded_sample_count": 5,
@@ -330,7 +347,7 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "1e55d69522ea430b5c326bd695209bc12230f724d0d2ba17340889ca4c2586ab"
+        "report_digest": "d10ad8a37a3b0f89635b485f41bcf8f78356b0280ea4ef0e86f20a6ce122f899"
       },
       "expected_code": null
     },
@@ -376,6 +393,7 @@
         "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
+        "indeterminate_reason_codes": [],
         "raw_sample_count": 1,
         "valid_sample_count": 1,
         "excluded_sample_count": 0,
@@ -392,7 +410,7 @@
         "verdict": "PASS",
         "exit_code": 1,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "9f7d1808a746bbddb5aafa6ebcf28db126390ba6045fff223c31fb7251667399"
+        "report_digest": "69301cd9cf7dc5f321551dc89689619c61677a185ad343004febd857d8773050"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

@@ -23,6 +23,9 @@ from .agent_first_contract_bundle_npm_pre_gate import NPM_PRE_GATE
 from .agent_first_contract_bundle_npm_publication import NPM_PUBLICATION
 from .agent_first_contract_bundle_npm_quality_policy import NPM_QUALITY_POLICY
 from .agent_first_contract_bundle_npm_release_gate import NPM_RELEASE_GATE
+from .agent_first_contract_bundle_npm_release_gate_evaluator import (
+    NPM_RELEASE_GATE_EVALUATOR,
+)
 from .agent_first_contract_bundle_npm_result import NPM_RESULT
 from .agent_first_contract_bundle_npm_task_evidence import NPM_TASK_EVIDENCE
 from .agent_first_contract_bundle_npm_task_control_helpers import (
@@ -499,6 +502,7 @@ NPM_SEMANTICS = "\n".join(
         NPM_PUBLICATION,
         NPM_QUALITY_POLICY,
         NPM_RELEASE_GATE,
+        NPM_RELEASE_GATE_EVALUATOR,
         NPM_PRE_GATE,
         NPM_TASK_EVIDENCE,
         NPM_GATE_INPUT,

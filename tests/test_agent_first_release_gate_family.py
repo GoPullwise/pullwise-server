@@ -381,6 +381,27 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
         )
         self.assertEqual(["PASS", "FAIL", "INDETERMINATE"], properties["verdict"]["enum"])
         self.assertEqual([0, 1, 2], properties["exit_code"]["enum"])
+        self.assertEqual(
+            [
+                "BASELINE_INCOMPARABLE",
+                "EVALUATOR_FAILURE",
+                "EVIDENCE_MISSING",
+                "EVIDENCE_STALE",
+                "ORACLE_RUBRIC_CONFLICT",
+                "SAMPLE_INSUFFICIENT",
+                "TIMEOUT",
+                "ZERO_DENOMINATOR",
+            ],
+            properties["indeterminate_reason_codes"]["items"]["enum"],
+        )
+        self.assertEqual(0, properties["valid_sample_count"]["minimum"])
+        self.assertEqual(
+            [{"type": "null"}, {"type": "integer", "minimum": 0,
+             "maximum": 9007199254740991}],
+            properties["absolute_results"]["items"]["properties"][
+                "observed_value"
+            ]["oneOf"],
+        )
 
         fixtures = {
             fixture["fixture_id"]: fixture for fixture in family["fixtures"]

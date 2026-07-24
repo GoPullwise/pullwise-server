@@ -234,6 +234,7 @@ def _rule_release_gate_policy(value: dict[str, object]) -> None:
 
 
 def _rule_release_gate_report(value: dict[str, object]) -> None:
+    _release_validate_absolute_results(value)
     _release_require(
         value["raw_sample_count"]
         == value["valid_sample_count"] + value["excluded_sample_count"],
@@ -486,6 +487,7 @@ def verify_release_gate_report_context(
         "RELEASE_REPORT_POLICY_TABLE_INVALID",
         "$.profile_results",
     )
+    _release_validate_profile_results(checked_report, checked_policy)
     allowed_reason_codes = set(checked_policy["infrastructure_reason_codes"])
     _release_require(
         all(

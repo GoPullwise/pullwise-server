@@ -62,6 +62,32 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         exec(render_python_wrapper(*render_args), cls.python.__dict__)
         cls.npm_bytes = render_npm_wrapper(*render_args)
 
+    def test_report_context_rejects_caller_selected_absolute_status(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        report["absolute_results"][0]["observed_value"] = 1
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+        operations = [
+            {"kind": "report", "documents": [report, benchmark, policy]}
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_EVALUATOR_STATUS_INVALID",
+                "path": "$.absolute_results[0].status",
+            },
+            python_results[0],
+        )
+
     @staticmethod
     def load_family(family_id: str) -> dict[str, object]:
         return json.loads(
@@ -210,6 +236,8 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         self.assertEqual(python_results, node["results"])
         self.assertEqual(
             {
+                "evaluator_camel": True,
+                "evaluator_snake": True,
                 "policy_camel": True,
                 "policy_snake": True,
                 "report_camel": True,
@@ -224,6 +252,76 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertEqual("CONTRACT_DOCUMENT_INVALID", result["code"])
         self.assertEqual(python_results[:3], python_results[7:])
+
+    def test_evaluator_selects_all_three_states_from_exact_inputs(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        passing = self.document("release_gate_report_golden_bootstrap_pass")
+
+        failing = deepcopy(passing)
+        failing["absolute_results"][0]["observed_value"] = 1
+        failing["absolute_results"][0]["status"] = "FAIL"
+        failing["verdict"] = "FAIL"
+        failing["exit_code"] = 1
+        failing = self.reseal(
+            "release-gate-report/v1", "report_digest", failing
+        )
+
+        indeterminate = deepcopy(passing)
+        indeterminate["indeterminate_reason_codes"] = ["EVIDENCE_MISSING"]
+        indeterminate["absolute_results"][0]["observed_value"] = None
+        indeterminate["absolute_results"][0]["status"] = "INDETERMINATE"
+        indeterminate["verdict"] = "INDETERMINATE"
+        indeterminate["exit_code"] = 2
+        indeterminate = self.reseal(
+            "release-gate-report/v1", "report_digest", indeterminate
+        )
+
+        operations = [
+            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+            for report in (passing, failing, indeterminate)
+        ]
+        expected = [
+            {"ok": True, "value": {"verdict": "PASS", "exit_code": 0}},
+            {"ok": True, "value": {"verdict": "FAIL", "exit_code": 1}},
+            {
+                "ok": True,
+                "value": {"verdict": "INDETERMINATE", "exit_code": 2},
+            },
+        ]
+
+        python_results = self.python_results(operations)
+        node = self.node_results(operations)
+
+        self.assertEqual(expected, python_results)
+        self.assertEqual(python_results, node["results"])
+        self.assertTrue(node["exports"]["evaluator_camel"])
+        self.assertTrue(node["exports"]["evaluator_snake"])
+
+    def test_evaluator_rejects_caller_selected_profile_status(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        report["profile_results"][0]["wall_ms"] = (
+            policy["profile_budgets"][0]["wall_ms"] + 1
+        )
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+
+        results = self.python_results([
+            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+        ])
+
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_EVALUATOR_STATUS_INVALID",
+                "path": "$.profile_results[0].status",
+            },
+            results[0],
+        )
 
     @staticmethod
     def reseal(
@@ -277,6 +375,9 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "attestation": lambda operation: self.python.verify_release_gate_attestation_context(
                 *operation["documents"]
             ),
+            "evaluator": lambda operation: self.python.evaluate_release_gate(
+                *operation["documents"]
+            ),
             "policy_snake": lambda operation: self.python.verify_release_gate_policy_context(
                 *operation["documents"]
             ),
@@ -314,6 +415,7 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
                     "  policy: (item) => facade.verifyReleaseGatePolicyContext(...item.documents),",
                     "  report: (item) => facade.verifyReleaseGateReportContext(...item.documents),",
                     "  attestation: (item) => facade.verifyReleaseGateAttestationContext(...item.documents),",
+                    "  evaluator: (item) => facade.evaluateReleaseGate(...item.documents),",
                     "  policy_snake: (item) => facade.verify_release_gate_policy_context(...item.documents),",
                     "  report_snake: (item) => facade.verify_release_gate_report_context(...item.documents),",
                     "  attestation_snake: (item) => facade.verify_release_gate_attestation_context(...item.documents),",
@@ -321,6 +423,8 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
                     "const results = [];",
                     "for (const item of operations) results.push(await capture(() => handlers[item.kind](item)));",
                     "const exports = {",
+                    "  evaluator_camel: typeof facade.evaluateReleaseGate === 'function',",
+                    "  evaluator_snake: typeof facade.evaluate_release_gate === 'function',",
                     "  policy_camel: typeof facade.verifyReleaseGatePolicyContext === 'function',",
                     "  policy_snake: typeof facade.verify_release_gate_policy_context === 'function',",
                     "  report_camel: typeof facade.verifyReleaseGateReportContext === 'function',",
