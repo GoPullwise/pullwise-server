@@ -8,6 +8,7 @@ import unittest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from pullwise_server.agent_first_contract_bundle import build_bundle
 from pullwise_server.agent_first_contract_bundle_source import (
     canonical_bytes,
     load_family,
@@ -27,6 +28,26 @@ FAMILY_PATH = (
 
 
 class AgentFirstReleaseTrustKeyFamilyTest(unittest.TestCase):
+    def test_trust_family_is_part_of_the_current_source_package(self) -> None:
+        source_root = FAMILY_PATH.parents[1]
+
+        built = build_bundle(source_root)
+
+        family_ids = {item["family_id"] for item in built.document["families"]}
+        self.assertIn("release-trust-authority", family_ids)
+        schema_ids = {
+            item["schema_id"]
+            for item in built.document["root_manifest"]["schema_registry"]
+        }
+        self.assertTrue(
+            {
+                "release-key-revocation/v1",
+                "release-principal/v1",
+                "release-signing-key/v1",
+                "release-trust-root/v1",
+            }.issubset(schema_ids)
+        )
+
     def test_key_and_revocation_have_signed_semantic_closure(self) -> None:
         family = json.loads(FAMILY_PATH.read_text(encoding="utf-8"))
         fixtures = {item["fixture_id"]: item for item in family["fixtures"]}

@@ -204,7 +204,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "candidate_build_id": "candidate_33333333333333333333333333333333",
-        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "candidate_digest": "db1bffc07854cb1075b753da9982e64e468c193ac1a23f9ef0b32d4245b8650a",
         "release_mode": "BOOTSTRAP",
         "stable_package": null,
         "stable_candidate_digest": null,
@@ -212,17 +212,17 @@
         "benchmark_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
           "content_schema_id": "benchmark-bundle/v1",
-          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
-          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "ff185714e00494f2b3759c7dd7fb17af6a02ab3b1d2b7108fc746c8167c2122a",
+          "size_bytes": 2200, "media_type": "application/json", "encoding": "utf-8"
         },
-        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "benchmark_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece",
         "policy_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
           "content_schema_id": "release-gate-policy/v1",
-          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
-          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "e2976cbe698be89ea7fcdfe199b7ba01fb1dcdce4b249a92b976c2a39c77dc57",
+          "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
-        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -276,7 +276,7 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "4d9617deacb7c21ae72d1234bf1f9366d8712ecc7eeaa79ebeb1f84502baee4d"
+        "report_digest": "979426bd4c4df38cb585080da3e3a8480d0c64cb5b75810b6d3978cdff2c2dd4"
       },
       "expected_code": null
     },
@@ -293,7 +293,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "candidate_build_id": "candidate_33333333333333333333333333333333",
-        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "candidate_digest": "db1bffc07854cb1075b753da9982e64e468c193ac1a23f9ef0b32d4245b8650a",
         "release_mode": "BOOTSTRAP",
         "stable_package": null,
         "stable_candidate_digest": null,
@@ -301,17 +301,17 @@
         "benchmark_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
           "content_schema_id": "benchmark-bundle/v1",
-          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
-          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "ff185714e00494f2b3759c7dd7fb17af6a02ab3b1d2b7108fc746c8167c2122a",
+          "size_bytes": 2200, "media_type": "application/json", "encoding": "utf-8"
         },
-        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "benchmark_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece",
         "policy_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
           "content_schema_id": "release-gate-policy/v1",
-          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
-          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "e2976cbe698be89ea7fcdfe199b7ba01fb1dcdce4b249a92b976c2a39c77dc57",
+          "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
-        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -365,7 +365,7 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "4d9617deacb7c21ae72d1234bf1f9366d8712ecc7eeaa79ebeb1f84502baee4d"
+        "report_digest": "979426bd4c4df38cb585080da3e3a8480d0c64cb5b75810b6d3978cdff2c2dd4"
       },
       "expected_code": null
     },
@@ -382,7 +382,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "candidate_build_id": "candidate_33333333333333333333333333333333",
-        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "candidate_digest": "db1bffc07854cb1075b753da9982e64e468c193ac1a23f9ef0b32d4245b8650a",
         "release_mode": "BOOTSTRAP",
         "stable_package": null,
         "stable_candidate_digest": null,
@@ -390,17 +390,17 @@
         "benchmark_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
           "content_schema_id": "benchmark-bundle/v1",
-          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
-          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "ff185714e00494f2b3759c7dd7fb17af6a02ab3b1d2b7108fc746c8167c2122a",
+          "size_bytes": 2200, "media_type": "application/json", "encoding": "utf-8"
         },
-        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "benchmark_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece",
         "policy_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
           "content_schema_id": "release-gate-policy/v1",
-          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
-          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "e2976cbe698be89ea7fcdfe199b7ba01fb1dcdce4b249a92b976c2a39c77dc57",
+          "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
-        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -428,7 +428,7 @@
         "verdict": "PASS",
         "exit_code": 1,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "69301cd9cf7dc5f321551dc89689619c61677a185ad343004febd857d8773050"
+        "report_digest": "e598547fe5aed28ad74bc1be863a3c37570f0f2bd84b182d95477b783febcf85"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -445,7 +445,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "candidate_build_id": "candidate_33333333333333333333333333333333",
-        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "candidate_digest": "db1bffc07854cb1075b753da9982e64e468c193ac1a23f9ef0b32d4245b8650a",
         "release_mode": "BOOTSTRAP",
         "stable_package": null,
         "stable_candidate_digest": null,
@@ -453,17 +453,17 @@
         "benchmark_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
           "content_schema_id": "benchmark-bundle/v1",
-          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
-          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "ff185714e00494f2b3759c7dd7fb17af6a02ab3b1d2b7108fc746c8167c2122a",
+          "size_bytes": 2200, "media_type": "application/json", "encoding": "utf-8"
         },
-        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "benchmark_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece",
         "policy_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_22222222222222222222222222222222",
           "content_schema_id": "release-gate-policy/v1",
-          "sha256": "5e35aa0a4842da69d1f95a271fdab83cacae9f1d9cfd7a93ff878b03a69518fe",
-          "size_bytes": 5905, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "e2976cbe698be89ea7fcdfe199b7ba01fb1dcdce4b249a92b976c2a39c77dc57",
+          "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
-        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281",
+        "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -491,7 +491,7 @@
         "verdict": "INDETERMINATE",
         "exit_code": 2,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "73bff527c30a8938de2b1fc694133ea179ffafd40c94f9e00d8fd251f5bbe050"
+        "report_digest": "c5b91b58aff93985301ce029e5b0b746b340ceaf6b60b87e2e699da42b7cc39e"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

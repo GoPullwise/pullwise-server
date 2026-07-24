@@ -12,7 +12,14 @@
       },
       "x-pullwise-semantics": {
         "document_rules": ["benchmark_bundle"],
-        "contextual_helpers": []
+        "contextual_helpers": [],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-benchmark-bundle/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "document_without_signature_and_digest"
+        }
       },
       "required": [
         "schema_id",
@@ -33,6 +40,7 @@
         "oracle_positive_finding_count",
         "core_cluster_ids",
         "cluster_coverage",
+        "organization_id",
         "signer_role",
         "signer_id",
         "key_id",
@@ -183,6 +191,7 @@
             }
           }
         },
+        "organization_id": {"type": "string", "pattern": "^org_[a-z0-9_]{1,64}$"},
         "signer_role": {"const": "benchmark_owner"},
         "signer_id": {
           "type": "string",
@@ -193,12 +202,7 @@
           "pattern": "^key_[A-Za-z0-9_-]{1,96}$"
         },
         "signature_algorithm": {"const": "Ed25519"},
-        "signature": {
-          "type": "string",
-          "minLength": 2,
-          "maxLength": 128,
-          "pattern": "^[A-Za-z0-9_-]+$"
-        },
+        "signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"},
         "issued_at": {
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
@@ -265,14 +269,15 @@
             "adversarial_input_tasks": 3
           }
         ],
+        "organization_id": "org_acme",
         "signer_role": "benchmark_owner",
         "signer_id": "principal_benchmark_owner",
-        "key_id": "key_benchmark_shape_only",
+        "key_id": "key_benchmark_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "AA",
+        "signature": "773OLhp9eOB4iyZ8MNJTsvNw9ugGquPj1URX2J_bMgAPpxHkWKCu-5HbSEJG7tKJCt2BGutLcEj5QxQOP_7pBg",
         "issued_at": "2026-07-01T00:00:00.000Z",
         "expires_at": "2026-07-31T00:00:00.000Z",
-        "bundle_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d"
+        "bundle_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece"
       },
       "expected_code": null
     },
@@ -326,14 +331,15 @@
             "adversarial_input_tasks": 3
           }
         ],
+        "organization_id": "org_acme",
         "signer_role": "benchmark_owner",
         "signer_id": "principal_benchmark_owner",
-        "key_id": "key_benchmark_shape_only",
+        "key_id": "key_benchmark_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "AA",
+        "signature": "773OLhp9eOB4iyZ8MNJTsvNw9ugGquPj1URX2J_bMgAPpxHkWKCu-5HbSEJG7tKJCt2BGutLcEj5QxQOP_7pBg",
         "issued_at": "2026-07-01T00:00:00.000Z",
         "expires_at": "2026-07-31T00:00:00.000Z",
-        "bundle_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d"
+        "bundle_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece"
       },
       "expected_code": null
     },
@@ -387,14 +393,15 @@
             "adversarial_input_tasks": 3
           }
         ],
+        "organization_id": "org_acme",
         "signer_role": "benchmark_owner",
         "signer_id": "principal_benchmark_owner",
-        "key_id": "key_benchmark_shape_only",
+        "key_id": "key_benchmark_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "AA",
+        "signature": "ShmDgPHBTQ7js84MdX9w-VQAkoEG-wvDgpvlNILz8oPq9IFOQ1l9_xF9HX0mGCMoM-Bp3dqKvupU_kfh8edSBA",
         "issued_at": "2026-07-01T00:00:00.000Z",
         "expires_at": "2026-07-31T00:00:00.000Z",
-        "bundle_digest": "a5a140a2dd050001900371bb779f870d8c8cea183a0d27118d8b1df5cc025094"
+        "bundle_digest": "31e041b331dc51592e2fb130c7400682b2a2ffa4f2809948147862efda9a6099"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

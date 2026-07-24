@@ -182,6 +182,27 @@ CONTEXTUAL_HELPER_IDS = frozenset(
         "verify_worker_debug_fragment_content",
     }
 )
+BENCHMARK_BUNDLE_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-benchmark-bundle/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "document_without_signature_and_digest",
+}
+RELEASE_GATE_ATTESTATION_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-release-gate-attestation/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "document_without_signature_and_digest",
+}
+RELEASE_GATE_POLICY_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-release-gate-policy/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "document_without_signature_and_digest",
+}
 WAIVER_SIGNATURE_CONTRACT = {
     "algorithm": "Ed25519",
     "domain": "pullwise-waiver-event/v1",
@@ -211,6 +232,9 @@ RELEASE_SIGNING_KEY_SIGNATURE_CONTRACT = {
     "signed_projection": "document_without_signature_and_digest",
 }
 SUPPORTED_SIGNATURE_CONTRACTS = (
+    BENCHMARK_BUNDLE_SIGNATURE_CONTRACT,
+    RELEASE_GATE_ATTESTATION_SIGNATURE_CONTRACT,
+    RELEASE_GATE_POLICY_SIGNATURE_CONTRACT,
     WAIVER_SIGNATURE_CONTRACT,
     RELEASE_KEY_REVOCATION_SIGNATURE_CONTRACT,
     RELEASE_PRINCIPAL_SIGNATURE_CONTRACT,

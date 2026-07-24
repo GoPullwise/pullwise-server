@@ -459,6 +459,18 @@ function validateDeclaredDocumentRules(schemaId, value) {
   const rules = semantics?.document_rules;
   if (semantics === undefined) return false;
   const signatureContracts = {
+    "benchmark-bundle/v1": {algorithm: "Ed25519",
+      domain: "pullwise-benchmark-bundle/v1", domain_separator: "NUL",
+      encoding: "base64url_no_padding",
+      signed_projection: "document_without_signature_and_digest"},
+    "release-gate-attestation/v1": {algorithm: "Ed25519",
+      domain: "pullwise-release-gate-attestation/v1", domain_separator: "NUL",
+      encoding: "base64url_no_padding",
+      signed_projection: "document_without_signature_and_digest"},
+    "release-gate-policy/v1": {algorithm: "Ed25519",
+      domain: "pullwise-release-gate-policy/v1", domain_separator: "NUL",
+      encoding: "base64url_no_padding",
+      signed_projection: "document_without_signature_and_digest"},
     "waiver-event/v1": {algorithm: "Ed25519", domain: "pullwise-waiver-event/v1",
       domain_separator: "NUL", encoding: "base64url_no_padding",
       signed_projection: "event_without_signature"},

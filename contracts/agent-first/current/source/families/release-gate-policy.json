@@ -12,7 +12,14 @@
       },
       "x-pullwise-semantics": {
         "document_rules": ["release_gate_policy"],
-        "contextual_helpers": ["verify_release_gate_policy_context"]
+        "contextual_helpers": ["verify_release_gate_policy_context"],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-release-gate-policy/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "document_without_signature_and_digest"
+        }
       },
       "required": [
         "schema_id", "policy_id", "package", "candidate_build_id", "candidate_digest", "release_mode",
@@ -22,7 +29,7 @@
         "relative_gates", "profile_budgets", "infrastructure_reason_codes", "canary_stages",
         "canary_platform_failure_rate_max_bps", "canary_relative_platform_failure_increase_max_bps",
         "canary_p95_wall_time_increase_max_bps", "canary_p95_cost_increase_max_bps", "threshold_table_digest",
-        "profile_budget_digest", "canary_plan_digest", "signer_role", "signer_id", "key_id", "signature_algorithm",
+        "profile_budget_digest", "canary_plan_digest", "organization_id", "signer_role", "signer_id", "key_id", "signature_algorithm",
         "signature", "issued_at", "expires_at", "policy_digest"
       ],
       "properties": {
@@ -125,11 +132,12 @@
         "threshold_table_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "profile_budget_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "canary_plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "organization_id": {"type": "string", "pattern": "^org_[a-z0-9_]{1,64}$"},
         "signer_role": {"const": "release_operator"},
         "signer_id": {"type": "string", "pattern": "^principal_[a-z0-9_]{1,64}$"},
         "key_id": {"type": "string", "pattern": "^key_[A-Za-z0-9_-]{1,96}$"},
         "signature_algorithm": {"const": "Ed25519"},
-        "signature": {"type": "string", "minLength": 2, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"},
+        "signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"},
         "issued_at": {
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
@@ -174,7 +182,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "candidate_build_id": "candidate_33333333333333333333333333333333",
-        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "candidate_digest": "db1bffc07854cb1075b753da9982e64e468c193ac1a23f9ef0b32d4245b8650a",
         "release_mode": "BOOTSTRAP",
         "stable_package": null,
         "stable_candidate_digest": null,
@@ -182,10 +190,10 @@
         "benchmark_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
           "content_schema_id": "benchmark-bundle/v1",
-          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
-          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "ff185714e00494f2b3759c7dd7fb17af6a02ab3b1d2b7108fc746c8167c2122a",
+          "size_bytes": 2200, "media_type": "application/json", "encoding": "utf-8"
         },
-        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "benchmark_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -238,10 +246,11 @@
         "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
-        "signer_role": "release_operator", "signer_id": "principal_release_operator",
-        "key_id": "key_policy_shape_only", "signature_algorithm": "Ed25519", "signature": "AA",
+        "organization_id": "org_acme", "signer_role": "release_operator", "signer_id": "principal_release_operator",
+        "key_id": "key_release_2026_01", "signature_algorithm": "Ed25519",
+        "signature": "88hQDxOnEDg8M-LPMxbZDpsp6_LWyZfMh6h249Ah-ZGJp1_0xeoxoz4oAlt4puUyZDtWV_ogCCAvpMOyxZq_AA",
         "issued_at": "2026-07-01T00:00:00.000Z", "expires_at": "2026-07-30T00:00:00.000Z",
-        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281"
+        "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa"
       },
       "expected_code": null
     },
@@ -258,7 +267,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "candidate_build_id": "candidate_33333333333333333333333333333333",
-        "candidate_digest": "94559554bed17412cca46b2716027110055f68a60d44e20cef85b71e0faa2136",
+        "candidate_digest": "db1bffc07854cb1075b753da9982e64e468c193ac1a23f9ef0b32d4245b8650a",
         "release_mode": "BOOTSTRAP",
         "stable_package": null,
         "stable_candidate_digest": null,
@@ -266,10 +275,10 @@
         "benchmark_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
           "content_schema_id": "benchmark-bundle/v1",
-          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
-          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "ff185714e00494f2b3759c7dd7fb17af6a02ab3b1d2b7108fc746c8167c2122a",
+          "size_bytes": 2200, "media_type": "application/json", "encoding": "utf-8"
         },
-        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "benchmark_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -322,10 +331,11 @@
         "threshold_table_digest": "e1ebe75db346b824bf81c2a576edd3b67467fae127e64136c6696b69891d75ac",
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
-        "signer_role": "release_operator", "signer_id": "principal_release_operator",
-        "key_id": "key_policy_shape_only", "signature_algorithm": "Ed25519", "signature": "AA",
+        "organization_id": "org_acme", "signer_role": "release_operator", "signer_id": "principal_release_operator",
+        "key_id": "key_release_2026_01", "signature_algorithm": "Ed25519",
+        "signature": "88hQDxOnEDg8M-LPMxbZDpsp6_LWyZfMh6h249Ah-ZGJp1_0xeoxoz4oAlt4puUyZDtWV_ogCCAvpMOyxZq_AA",
         "issued_at": "2026-07-01T00:00:00.000Z", "expires_at": "2026-07-30T00:00:00.000Z",
-        "policy_digest": "5f42cefd6cf4087a7e17553c8c8151f9321402624ea965312afa415b10702281"
+        "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa"
       },
       "expected_code": null
     },
@@ -342,7 +352,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "candidate_build_id": "candidate_33333333333333333333333333333333",
-        "candidate_digest": "a5171c1129b4807e5e8849cb39da411d6b9bbd9d03eea68f72ee4bb4da134768",
+        "candidate_digest": "5dcf063718b84ea64415d53d6bfdbc2282168ad932d0e9f9dbe39ad4cd0ef5dd",
         "release_mode": "BOOTSTRAP",
         "stable_package": null,
         "stable_candidate_digest": null,
@@ -350,10 +360,10 @@
         "benchmark_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_11111111111111111111111111111111",
           "content_schema_id": "benchmark-bundle/v1",
-          "sha256": "d785cc4ee7576aa0ed2912d942b37fbfc9505c8f3124a11d62457d6eedb11b13",
-          "size_bytes": 2090, "media_type": "application/json", "encoding": "utf-8"
+          "sha256": "ff185714e00494f2b3759c7dd7fb17af6a02ab3b1d2b7108fc746c8167c2122a",
+          "size_bytes": 2200, "media_type": "application/json", "encoding": "utf-8"
         },
-        "benchmark_digest": "87b425557110e26467931d1f6ad3213b3f5d37fab8fd53ff639347af4b2d323d",
+        "benchmark_digest": "873b43bacc952b18a6a77fc9b986efb614441cb6a4783cdaf273448724824ece",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -406,10 +416,11 @@
         "threshold_table_digest": "5b42c6628a535f4417329f7f27b3133eb70573ffee863b6b0c3718bdc576fc18",
         "profile_budget_digest": "8ebdc1c03d86a9934c500b3c8a33ff46cb35a750b27f6182d44ea8b2759dd73c",
         "canary_plan_digest": "094df6d87b95d82927440a19c0bc069364caf44a8683acf4cf4f61b094a9d393",
-        "signer_role": "release_operator", "signer_id": "principal_release_operator",
-        "key_id": "key_policy_shape_only", "signature_algorithm": "Ed25519", "signature": "AA",
+        "organization_id": "org_acme", "signer_role": "release_operator", "signer_id": "principal_release_operator",
+        "key_id": "key_release_2026_01", "signature_algorithm": "Ed25519",
+        "signature": "0-yTFRDgf4aprhhSaWmmJXSnzpX4pk7Cxx_5AnaanZ17i5vtNLeziUxahepnk9tLzvzzbMo3_PfDXxVdrznZAw",
         "issued_at": "2026-07-01T00:00:00.000Z", "expires_at": "2026-07-30T00:00:00.000Z",
-        "policy_digest": "560b73c58dcab0ed437aee752200349381888a0f69917c73907e148c56991e18"
+        "policy_digest": "c90c7922b63cbb9e3eb781a1f1c235af14c0d78cb3d0790858788ad3ebe8d5a6"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

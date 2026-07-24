@@ -73,6 +73,7 @@ REQUIRED_FAMILIES = (
     "worker-debug-content",
     "worker-debug-transport",
     "task-result-transport",
+    "release-trust-authority",
     "benchmark-bundle",
     "release-gate-policy",
     "release-gate-report",
