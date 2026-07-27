@@ -557,6 +557,11 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 
 ## CI Test Harness Notes
 
+- `tests/test_agent_first_source_fixture_global_gate.py` runs one large generated
+  Node fixture process that can exceed ten minutes even when its semantic
+  sub-gates are green. Keep the test's internal subprocess timeout at 1,800
+  seconds or higher and run it without competing Node-heavy suites; increasing
+  only an outer pytest/command timeout cannot override that internal limit.
 - `app.main()` constructs `PullwiseThreadingHTTPServer`, not the stdlib `ThreadingHTTPServer` symbol. Tests that call `app.main()` must patch `app.PullwiseThreadingHTTPServer` so they do not start a real `serve_forever()` loop in CI.
 - Scan request IDs are globally idempotent per requesting user, not per repository. Quota reservation must atomically detect the same user/request ID across repositories so concurrent requests cannot reserve twice; route code decides whether the existing repository is a dedupe or `IDEMPOTENCY_KEY_REUSED` conflict.
 - Persisted issue row IDs must be globally collision-safe across scans; raw
