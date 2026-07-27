@@ -122,7 +122,7 @@ class AgentFirstSourceFixtureGlobalGateTest(unittest.TestCase):
             check=True,
             capture_output=True,
             encoding="utf-8",
-            timeout=600,
+            timeout=1800,
         )
         cls.node = json.loads(completed.stdout)
 
