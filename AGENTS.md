@@ -640,9 +640,12 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   HTTP/auth, Worker-loop activation, D24, deployment, or canary is implied.
 - Durable release-evaluator storage is Server-only and current-package-only.
   `db.initialize()` installs exactly three normalized append-only tables for
-  benchmark bundles, release-gate policies, and release-gate reports. One
-  `BEGIN IMMEDIATE` transaction inserts or exactly replays the linked chain;
-  faults at any before/after document stage roll back the whole chain.
+  benchmark bundles, release-gate policies, and release-gate reports. Before a
+  report can be persisted, one `BEGIN IMMEDIATE` transaction must insert or
+  exactly replay the canonical benchmark/policy pair. The later report
+  transaction must require that exact pair and may insert or replay only the
+  report; it must never backfill missing inputs. Input-stage faults roll back
+  both frozen rows, while report-stage faults preserve the already-frozen pair.
 - Keep each document's domain-separated digest distinct from the SHA-256 of
   its canonical bytes. Persist and verify both, plus exact byte size, runtime
   package tuple, normalized link digests, ContentRef SHA/size, and report
@@ -678,10 +681,14 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   ContentRef, domain digest, canonical SHA/size, validity window, and signature
   bindings all fail closed.
 - `AgentFirstReleaseAttestor` composes, but does not change, the deterministic
-  evaluator. It verifies benchmark/policy/attestation signatures at one time,
-  accepts only an exact PASS/0 report binding, persists the attestation after
-  the existing evaluation chain, and reloads by rerunning evaluator, context,
-  canonical-byte, link, and signature checks at the stored `verified_at`.
+  evaluator. Its input-freeze facade verifies benchmark and policy signatures
+  at one Server time, requires the same organization and distinct benchmark
+  owner/release-operator principals, then atomically freezes their exact
+  canonical pair. Attestation later rechecks benchmark/policy/attestation
+  signatures at one time, accepts only an exact PASS/0 report binding against
+  that pre-existing pair, persists the attestation, and reloads by rerunning
+  evaluator, context, canonical-byte, link, and signature checks at the stored
+  `verified_at`.
 - This candidate does not provide private-key custody, authenticated or remote
   root-pin enrollment orchestration, unpin or automatic root rollover,
   external key distribution, HTTP/auth exposure, mutable baseline/canary

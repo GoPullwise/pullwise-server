@@ -134,6 +134,9 @@ class AgentFirstReleaseAttestor:
             benchmark_signature.organization_id
             == policy_signature.organization_id
             == attestation_signature.organization_id
+        ) or (
+            benchmark_signature.principal_id
+            == attestation_signature.principal_id
         ):
             raise AuthorityError("AUTHORITY_INPUT_UNTRUSTED")
         return attestation_signature
@@ -238,6 +241,7 @@ class AgentFirstReleaseAttestor:
                 == stored.organization_id
                 and benchmark_signature.principal_id
                 != policy_signature.principal_id
+                and benchmark_signature.principal_id != signature.principal_id
                 and signature.principal_id == stored.principal_id
                 and signature.key_id == stored.key_id
             )

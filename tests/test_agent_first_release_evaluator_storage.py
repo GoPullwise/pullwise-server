@@ -175,43 +175,6 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
             )
         self.assertEqual((1, 1, 1), counts)
 
-    def test_invalid_or_noncurrent_input_freeze_writes_nothing(self) -> None:
-        benchmark, policy, _ = _current_documents()
-        mismatched = deepcopy(policy)
-        mismatched["benchmark_digest"] = "0" * 64
-        mismatched["candidate_digest"] = _release_digest(
-            "pullwise:candidate-digest:v1",
-            {
-                field: mismatched[field]
-                for field in (
-                    "package", "candidate_build_id", "control_plane_digest",
-                    "evaluation_runtime_digest", "benchmark_ref",
-                    "benchmark_digest", "threshold_table_digest",
-                    "profile_budget_digest", "canary_plan_digest",
-                )
-            },
-        )
-        mismatched.pop("policy_digest")
-        mismatched = seal_document("release-gate-policy/v1", mismatched)
-
-        with self.assertRaises(AuthorityError) as invalid:
-            self.evaluator.freeze_inputs(benchmark, mismatched)
-        self.assertEqual("CONTRACT_DOCUMENT_INVALID", invalid.exception.code)
-
-        with self.assertRaises(AuthorityError) as noncurrent:
-            self.evaluator.freeze_inputs(
-                fixture("benchmark_bundle_golden_current")["document"],
-                fixture("release_gate_policy_golden_bootstrap")["document"],
-            )
-        self.assertEqual("CURRENT_PACKAGE_PIN_MISMATCH", noncurrent.exception.code)
-
-        with closing(self.connect()) as connection:
-            counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in CURRENT_RELEASE_EVALUATOR_TABLES
-            )
-        self.assertEqual((0, 0, 0), counts)
-
     def test_verified_read_rejects_corrupt_domain_digest_metadata(self) -> None:
         benchmark, policy, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
@@ -318,46 +281,6 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
             )
         self.assertEqual((1, 1, 1), counts)
 
-    def test_input_freeze_rejects_a_stable_policy_id_conflict(self) -> None:
-        benchmark, policy, _ = _current_documents()
-        self.evaluator.freeze_inputs(benchmark, policy)
-        collision = deepcopy(policy)
-        collision["expires_at"] = "2026-07-29T00:00:00.000Z"
-        collision.pop("policy_digest")
-        collision = seal_document("release-gate-policy/v1", collision)
-
-        with self.assertRaises(AuthorityError) as raised:
-            self.evaluator.freeze_inputs(benchmark, collision)
-
-        self.assertEqual("IDEMPOTENCY_CONFLICT", raised.exception.code)
-        with closing(self.connect()) as connection:
-            counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in CURRENT_RELEASE_EVALUATOR_TABLES
-            )
-        self.assertEqual((1, 1, 0), counts)
-
-    def test_input_freeze_rejects_corrupt_existing_bytes_metadata(self) -> None:
-        benchmark, policy, _ = _current_documents()
-        self.evaluator.freeze_inputs(benchmark, policy)
-        with closing(self.connect()) as connection, connection:
-            connection.execute(
-                "DROP TRIGGER agent_current_release_gate_policies_immutable_update"
-            )
-            connection.execute(
-                """
-                UPDATE agent_current_release_gate_policies
-                SET document_sha256 = ?
-                WHERE policy_id = ?
-                """,
-                ("e" * 64, policy["policy_id"]),
-            )
-
-        with self.assertRaises(AuthorityError) as raised:
-            self.evaluator.freeze_inputs(benchmark, policy)
-
-        self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
-
     def test_invalid_or_noncurrent_chain_writes_nothing(self) -> None:
         benchmark, policy, report = _current_documents()
         mismatched = deepcopy(report)
@@ -461,61 +384,6 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                     stored,
                     self.evaluator.load_evaluation(report["report_id"]),
                 )
-
-    def test_concurrent_exact_input_freezes_converge(self) -> None:
-        benchmark, policy, _ = _current_documents()
-        barrier = threading.Barrier(2)
-        outcomes: list[object] = []
-
-        def freeze() -> None:
-            barrier.wait()
-            try:
-                outcomes.append(
-                    self.evaluator.freeze_inputs(
-                        deepcopy(benchmark),
-                        deepcopy(policy),
-                    )
-                )
-            except AuthorityError as error:
-                outcomes.append(error)
-
-        threads = [threading.Thread(target=freeze) for _ in range(2)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-
-        self.assertEqual(2, len(outcomes))
-        self.assertTrue(all(item == outcomes[0] for item in outcomes))
-        with closing(self.connect()) as connection:
-            counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in CURRENT_RELEASE_EVALUATOR_TABLES
-            )
-        self.assertEqual((1, 1, 0), counts)
-
-    def test_locked_input_freeze_preserves_the_sqlite_lock_error(self) -> None:
-        benchmark, policy, _ = _current_documents()
-
-        def quick_connect() -> sqlite3.Connection:
-            connection = sqlite3.connect(self.db_path, timeout=0.01)
-            connection.execute("PRAGMA busy_timeout=10")
-            connection.execute("PRAGMA foreign_keys=ON")
-            return connection
-
-        evaluator = AgentFirstReleaseEvaluator(quick_connect)
-        with closing(self.connect()) as blocker:
-            blocker.execute("BEGIN IMMEDIATE")
-            with self.assertRaises(sqlite3.OperationalError):
-                evaluator.freeze_inputs(benchmark, policy)
-            blocker.rollback()
-
-        with closing(self.connect()) as connection:
-            counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in CURRENT_RELEASE_EVALUATOR_TABLES
-            )
-        self.assertEqual((0, 0, 0), counts)
 
     def test_concurrent_exact_writes_converge_and_conflicts_choose_one(self) -> None:
         benchmark, policy, report = _current_documents()

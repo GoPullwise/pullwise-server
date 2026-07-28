@@ -131,6 +131,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
 
+    def _row_counts(self, tables: tuple[str, ...]) -> tuple[int, ...]:
+        with closing(self.connect()) as connection:
+            return tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in tables
+            )
+
     def _authorities(self) -> tuple[dict[str, object], dict[str, object]]:
         benchmark_principal = deepcopy(
             self.contract.fixture("release_principal_golden_benchmark_owner")["document"]
@@ -285,16 +292,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
             attestor.attest_and_store(benchmark, policy, report, attestation)
 
-        with closing(self.connect()) as connection:
-            evaluator_counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in CURRENT_RELEASE_EVALUATOR_TABLES
-            )
-            attestation_count = connection.execute(
-                f"SELECT COUNT(*) FROM {CURRENT_RELEASE_ATTESTATION_TABLES[0]}"
-            ).fetchone()[0]
-        self.assertEqual(evaluator_counts, (0, 0, 0))
-        self.assertEqual(attestation_count, 0)
+        self.assertEqual(
+            self._row_counts(
+                (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
+            ),
+            (0, 0, 0, 0),
+        )
 
         attestor.freeze_inputs(benchmark, policy)
         stored = attestor.attest_and_store(benchmark, policy, report, attestation)
@@ -357,12 +360,62 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
                     ):
                         attestor.freeze_inputs(benchmark, policy)
 
-        with closing(self.connect()) as connection:
-            counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in CURRENT_RELEASE_EVALUATOR_TABLES
-            )
-        self.assertEqual(counts, (0, 0, 0))
+        self.assertEqual(
+            self._row_counts(CURRENT_RELEASE_EVALUATOR_TABLES),
+            (0, 0, 0),
+        )
+
+    def test_attestation_rejects_the_benchmark_owner_as_final_signer(self) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            contract=self.contract,
+            trust=self.trust,
+        )
+        verified_at = "2026-07-24T00:00:00.000Z"
+        benchmark_signature = VerifiedReleaseSignature(
+            "benchmark-bundle/v1", "organization_pullwise",
+            "principal_benchmark_owner", "key_benchmark_2026_01",
+            "benchmark_signing", verified_at,
+        )
+        policy_signature = VerifiedReleaseSignature(
+            "release-gate-policy/v1", "organization_pullwise",
+            "principal_release_operator", "key_release_2026_01",
+            "release_signing", verified_at,
+        )
+        invalid_attestation_signature = VerifiedReleaseSignature(
+            "release-gate-attestation/v1", "organization_pullwise",
+            "principal_benchmark_owner", "key_release_2026_01",
+            "release_signing", verified_at,
+        )
+
+        with (
+            patch.object(
+                self.trust,
+                "verify_document",
+                return_value=benchmark_signature,
+            ),
+            patch.object(
+                self.trust,
+                "verify_document_at",
+                side_effect=(policy_signature, invalid_attestation_signature),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
+                attestor.attest_and_store(
+                    benchmark,
+                    policy,
+                    report,
+                    attestation,
+                )
+
+        self.assertEqual(
+            self._row_counts(
+                (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
+            ),
+            (0, 0, 0, 0),
+        )
 
     def test_verified_pass_attestation_is_append_only_and_reloads(self) -> None:
         self._authorities()
@@ -387,12 +440,10 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self.assertEqual("principal_release_operator", first.principal_id)
         self.assertEqual("key_release_2026_01", first.key_id)
         self.assertEqual("2026-07-24T00:00:00.000Z", first.verified_at)
-        with closing(self.connect()) as connection:
-            counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in CURRENT_RELEASE_ATTESTATION_TABLES
-            )
-        self.assertEqual((1,), counts)
+        self.assertEqual(
+            (1,),
+            self._row_counts(CURRENT_RELEASE_ATTESTATION_TABLES),
+        )
 
     def test_invalid_attestation_signature_writes_no_evaluation_or_attestation(
         self,
@@ -413,15 +464,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
             attestor.attest_and_store(benchmark, policy, report, attestation)
 
-        with closing(self.connect()) as connection:
-            counts = tuple(
-                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in (
-                    *CURRENT_RELEASE_EVALUATOR_TABLES,
-                    *CURRENT_RELEASE_ATTESTATION_TABLES,
-                )
-            )
-        self.assertEqual((0, 0, 0, 0), counts)
+        self.assertEqual(
+            (0, 0, 0, 0),
+            self._row_counts(
+                (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
+            ),
+        )
 
     def test_same_attestation_id_with_different_valid_document_conflicts(self) -> None:
         self._authorities()
