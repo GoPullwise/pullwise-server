@@ -15,6 +15,11 @@ from .agent_first_release_root_pin_migrations import (
 
 _ORGANIZATION_ID = re.compile(r"^org_[a-z0-9_]{1,64}$")
 _ROOT_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+FaultInjector = Callable[[str], None]
+RELEASE_ROOT_PIN_FAULT_POINTS = (
+    "before_root_pin",
+    "after_root_pin",
+)
 
 
 class ReleaseRootPinStoreError(RuntimeError):
@@ -33,8 +38,14 @@ class ReleaseRootPinStore:
     def __init__(
         self,
         connect_factory: Callable[[], sqlite3.Connection],
+        fault_injector: FaultInjector | None = None,
     ) -> None:
         self._connect_factory = connect_factory
+        self._fault_injector = fault_injector
+
+    def _fault(self, point: str) -> None:
+        if self._fault_injector is not None:
+            self._fault_injector(point)
 
     @contextmanager
     def _connection(self, *, immediate: bool) -> Iterator[sqlite3.Connection]:
@@ -76,6 +87,7 @@ class ReleaseRootPinStore:
             organization_id, root_digest
         )
         with self._connection(immediate=True) as connection:
+            self._fault("before_root_pin")
             row = connection.execute(
                 f"""
                 SELECT organization_id, root_digest
@@ -95,6 +107,7 @@ class ReleaseRootPinStore:
                 )
             elif tuple(row) != (organization_id, root_digest):
                 raise ReleaseRootPinStoreError("AUTHORITY_STORAGE_CORRUPT")
+            self._fault("after_root_pin")
         return StoredReleaseRootPin(organization_id, root_digest)
 
     def is_trusted(self, organization_id: object, root_digest: object) -> bool:
@@ -118,6 +131,7 @@ class ReleaseRootPinStore:
 
 
 __all__ = [
+    "RELEASE_ROOT_PIN_FAULT_POINTS",
     "ReleaseRootPinStore",
     "ReleaseRootPinStoreError",
     "StoredReleaseRootPin",

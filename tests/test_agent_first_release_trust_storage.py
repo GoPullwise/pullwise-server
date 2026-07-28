@@ -126,11 +126,12 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
         self.now = datetime(2026, 7, 24, tzinfo=timezone.utc)
         self.trust = AgentFirstReleaseTrust(
             self.connect,
-            trusted_root_digests={
-                self.root["organization_id"]: {self.root["root_digest"]}
-            },
             contract=self.contract,
             clock=lambda: self.now,
+        )
+        self.trust.enroll_root_pin(
+            str(self.root["organization_id"]),
+            str(self.root["root_digest"]),
         )
 
     def tearDown(self) -> None:
@@ -152,7 +153,6 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
     def test_enrolled_root_pin_survives_a_fresh_trust_instance(self) -> None:
         unpinned = AgentFirstReleaseTrust(
             self.connect,
-            trusted_root_digests={},
             contract=self.contract,
             clock=lambda: self.now,
         )
@@ -163,7 +163,6 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
         )
         reloaded = AgentFirstReleaseTrust(
             self.connect,
-            trusted_root_digests={},
             contract=self.contract,
             clock=lambda: self.now,
         )
@@ -280,12 +279,13 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
 
                 trust = AgentFirstReleaseTrust(
                     connect,
-                    trusted_root_digests={
-                        self.root["organization_id"]: {self.root["root_digest"]}
-                    },
                     contract=self.contract,
                     clock=lambda: self.now,
                     fault_injector=fault,
+                )
+                trust.enroll_root_pin(
+                    str(self.root["organization_id"]),
+                    str(self.root["root_digest"]),
                 )
                 with self.assertRaisesRegex(RuntimeError, point):
                     trust.register_authority(
@@ -330,18 +330,29 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
         self.assertEqual((1, 1, 1, 0), self.counts())
 
     def test_unpinned_root_and_invalid_signature_write_nothing(self) -> None:
-        unpinned = AgentFirstReleaseTrust(
-            self.connect,
-            trusted_root_digests={},
-            contract=self.contract,
-            clock=lambda: self.now,
-        )
-        with self.assertRaises(AuthorityError) as unpinned_error:
-            unpinned.register_authority(
-                self.root, self.principal, self.signing_key
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "unpinned.sqlite3"
+
+            def connect() -> sqlite3.Connection:
+                connection = sqlite3.connect(path)
+                connection.execute("PRAGMA foreign_keys=ON")
+                return connection
+
+            with closing(connect()) as connection:
+                install_current_release_trust_tables(connection)
+            unpinned = AgentFirstReleaseTrust(
+                connect,
+                contract=self.contract,
+                clock=lambda: self.now,
             )
-        self.assertEqual("AUTHORITY_INPUT_UNTRUSTED", unpinned_error.exception.code)
-        self.assertEqual((0, 0, 0, 0), self.counts())
+            with self.assertRaises(AuthorityError) as unpinned_error:
+                unpinned.register_authority(
+                    self.root, self.principal, self.signing_key
+                )
+            self.assertEqual(
+                "AUTHORITY_INPUT_UNTRUSTED", unpinned_error.exception.code
+            )
+            self.assertEqual((0, 0, 0, 0), self.counts(connect))
 
         principal = deepcopy(self.principal)
         principal["signature"] = (

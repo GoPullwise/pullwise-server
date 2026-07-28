@@ -109,11 +109,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         )
         self.trust = AgentFirstReleaseTrust(
             self.connect,
-            trusted_root_digests={
-                self.root["organization_id"]: {self.root["root_digest"]}
-            },
             contract=self.contract,
             clock=lambda: self.now,
+        )
+        self.trust.enroll_root_pin(
+            str(self.root["organization_id"]),
+            str(self.root["root_digest"]),
         )
 
     def tearDown(self) -> None:

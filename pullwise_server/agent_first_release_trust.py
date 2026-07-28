@@ -9,7 +9,7 @@ import hashlib
 import json
 import sqlite3
 from types import ModuleType
-from typing import Callable, Collection, Mapping
+from typing import Callable, Mapping
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -70,7 +70,6 @@ class AgentFirstReleaseTrust:
         self,
         connect_factory: Callable[[], sqlite3.Connection] = db.connect,
         *,
-        trusted_root_digests: Mapping[str, Collection[str]],
         contract: ModuleType = _default_contract,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         fault_injector: FaultInjector | None = None,
@@ -79,11 +78,7 @@ class AgentFirstReleaseTrust:
         self._contract = contract
         self._clock = clock
         self._store = ReleaseTrustStore(connect_factory, fault_injector)
-        self._root_pins = ReleaseRootPinStore(connect_factory)
-        self._trusted_roots = {
-            organization_id: frozenset(digests)
-            for organization_id, digests in trusted_root_digests.items()
-        }
+        self._root_pins = ReleaseRootPinStore(connect_factory, fault_injector)
 
     @staticmethod
     def _raise_untrusted() -> None:
@@ -224,16 +219,12 @@ class AgentFirstReleaseTrust:
         key, key_bytes = self._validated("release-signing-key/v1", signing_key)
         organization_id = str(root["organization_id"])
         root_digest = str(root["root_digest"])
-        trusted = root_digest in self._trusted_roots.get(
-            organization_id, frozenset()
-        )
-        if not trusted:
-            try:
-                trusted = self._root_pins.is_trusted(
-                    organization_id, root_digest
-                )
-            except ReleaseRootPinStoreError as error:
-                raise self._root_pin_error(error) from None
+        try:
+            trusted = self._root_pins.is_trusted(
+                organization_id, root_digest
+            )
+        except ReleaseRootPinStoreError as error:
+            raise self._root_pin_error(error) from None
         if not trusted:
             self._raise_untrusted()
         self._require_ref(principal_value["trust_root_ref"], "release-trust-root/v1", root_bytes)
