@@ -1,0 +1,124 @@
+"""Durable external trust-root pin policy for Agent-First releases."""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from dataclasses import dataclass
+import re
+import sqlite3
+from typing import Callable, Iterator
+
+from .agent_first_release_root_pin_migrations import (
+    CURRENT_RELEASE_ROOT_PIN_TABLE,
+)
+
+
+_ORGANIZATION_ID = re.compile(r"^org_[a-z0-9_]{1,64}$")
+_ROOT_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+
+
+class ReleaseRootPinStoreError(RuntimeError):
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+@dataclass(frozen=True)
+class StoredReleaseRootPin:
+    organization_id: str
+    root_digest: str
+
+
+class ReleaseRootPinStore:
+    def __init__(
+        self,
+        connect_factory: Callable[[], sqlite3.Connection],
+    ) -> None:
+        self._connect_factory = connect_factory
+
+    @contextmanager
+    def _connection(self, *, immediate: bool) -> Iterator[sqlite3.Connection]:
+        connection = self._connect_factory()
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            yield connection
+            connection.commit()
+        except ReleaseRootPinStoreError:
+            connection.rollback()
+            raise
+        except sqlite3.DatabaseError as error:
+            connection.rollback()
+            raise ReleaseRootPinStoreError("AUTHORITY_STORAGE_CORRUPT") from error
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _validate(organization_id: object, root_digest: object) -> tuple[str, str]:
+        if (
+            not isinstance(organization_id, str)
+            or _ORGANIZATION_ID.fullmatch(organization_id) is None
+            or not isinstance(root_digest, str)
+            or _ROOT_DIGEST.fullmatch(root_digest) is None
+        ):
+            raise ReleaseRootPinStoreError("ROOT_PIN_INVALID")
+        return organization_id, root_digest
+
+    def enroll(
+        self,
+        organization_id: object,
+        root_digest: object,
+    ) -> StoredReleaseRootPin:
+        organization_id, root_digest = self._validate(
+            organization_id, root_digest
+        )
+        with self._connection(immediate=True) as connection:
+            row = connection.execute(
+                f"""
+                SELECT organization_id, root_digest
+                FROM {CURRENT_RELEASE_ROOT_PIN_TABLE}
+                WHERE organization_id = ? AND root_digest = ?
+                """,
+                (organization_id, root_digest),
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    f"""
+                    INSERT INTO {CURRENT_RELEASE_ROOT_PIN_TABLE}
+                        (organization_id, root_digest)
+                    VALUES (?, ?)
+                    """,
+                    (organization_id, root_digest),
+                )
+            elif tuple(row) != (organization_id, root_digest):
+                raise ReleaseRootPinStoreError("AUTHORITY_STORAGE_CORRUPT")
+        return StoredReleaseRootPin(organization_id, root_digest)
+
+    def is_trusted(self, organization_id: object, root_digest: object) -> bool:
+        organization_id, root_digest = self._validate(
+            organization_id, root_digest
+        )
+        with self._connection(immediate=False) as connection:
+            row = connection.execute(
+                f"""
+                SELECT organization_id, root_digest
+                FROM {CURRENT_RELEASE_ROOT_PIN_TABLE}
+                WHERE organization_id = ? AND root_digest = ?
+                """,
+                (organization_id, root_digest),
+            ).fetchone()
+            if row is None:
+                return False
+            if tuple(row) != (organization_id, root_digest):
+                raise ReleaseRootPinStoreError("AUTHORITY_STORAGE_CORRUPT")
+            return True
+
+
+__all__ = [
+    "ReleaseRootPinStore",
+    "ReleaseRootPinStoreError",
+    "StoredReleaseRootPin",
+]

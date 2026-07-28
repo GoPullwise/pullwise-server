@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 
+from .agent_first_release_root_pin_migrations import (
+    install_current_release_root_pin_table,
+)
+
 
 CURRENT_RELEASE_TRUST_TABLES = (
     "agent_current_release_trust_roots",
@@ -125,6 +129,7 @@ def _immutable_trigger(table: str, operation: str) -> str:
 
 def install_current_release_trust_tables(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA foreign_keys=ON")
+    install_current_release_root_pin_table(connection)
     for statement in _TABLE_STATEMENTS:
         connection.execute(statement)
     for table in CURRENT_RELEASE_TRUST_TABLES:

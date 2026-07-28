@@ -16,6 +16,9 @@ from cryptography.hazmat.primitives import serialization
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
 from pullwise_server.agent_first_authority import AuthorityError
+from pullwise_server.agent_first_release_root_pin_migrations import (
+    CURRENT_RELEASE_ROOT_PIN_TABLE,
+)
 from pullwise_server.agent_first_release_trust import AgentFirstReleaseTrust
 from pullwise_server.agent_first_release_trust_migrations import (
     CURRENT_RELEASE_TRUST_TABLES,
@@ -145,6 +148,63 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
                 connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in CURRENT_RELEASE_TRUST_TABLES
             )
+
+    def test_enrolled_root_pin_survives_a_fresh_trust_instance(self) -> None:
+        unpinned = AgentFirstReleaseTrust(
+            self.connect,
+            trusted_root_digests={},
+            contract=self.contract,
+            clock=lambda: self.now,
+        )
+
+        enrolled = unpinned.enroll_root_pin(
+            str(self.root["organization_id"]),
+            str(self.root["root_digest"]),
+        )
+        reloaded = AgentFirstReleaseTrust(
+            self.connect,
+            trusted_root_digests={},
+            contract=self.contract,
+            clock=lambda: self.now,
+        )
+        stored = reloaded.register_authority(
+            self.root,
+            self.principal,
+            self.signing_key,
+        )
+
+        self.assertEqual(self.root["organization_id"], enrolled.organization_id)
+        self.assertEqual(self.root["root_digest"], enrolled.root_digest)
+        self.assertEqual(self.root["trust_root_id"], stored.trust_root_id)
+
+    def test_stored_authority_fails_closed_when_its_pin_disappears(self) -> None:
+        self.trust.enroll_root_pin(
+            str(self.root["organization_id"]),
+            str(self.root["root_digest"]),
+        )
+        self.trust.register_authority(
+            self.root,
+            self.principal,
+            self.signing_key,
+        )
+        benchmark = _sign_current_document(
+            self.contract,
+            "benchmark-bundle/v1",
+            "pullwise-benchmark-bundle/v1",
+            "bundle_digest",
+            self.contract.fixture("benchmark_bundle_golden_current")["document"],
+            BENCHMARK_SEED,
+        )
+        with closing(self.connect()) as connection, connection:
+            connection.execute(
+                f"DROP TRIGGER {CURRENT_RELEASE_ROOT_PIN_TABLE}_immutable_delete"
+            )
+            connection.execute(f"DELETE FROM {CURRENT_RELEASE_ROOT_PIN_TABLE}")
+
+        with self.assertRaises(AuthorityError) as raised:
+            self.trust.verify_document(benchmark)
+
+        self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
 
     def test_registers_a_pinned_chain_and_verifies_a_benchmark_signature(
         self,

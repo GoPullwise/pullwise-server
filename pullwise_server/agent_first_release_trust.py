@@ -17,6 +17,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from . import _generated_agent_task_contract as _default_contract
 from . import db
 from .agent_first_authority import AuthorityError
+from .agent_first_release_root_pins import (
+    ReleaseRootPinStore,
+    ReleaseRootPinStoreError,
+    StoredReleaseRootPin,
+)
 from .agent_first_release_trust_store import (
     FaultInjector,
     ReleaseTrustStore,
@@ -74,6 +79,7 @@ class AgentFirstReleaseTrust:
         self._contract = contract
         self._clock = clock
         self._store = ReleaseTrustStore(connect_factory, fault_injector)
+        self._root_pins = ReleaseRootPinStore(connect_factory)
         self._trusted_roots = {
             organization_id: frozenset(digests)
             for organization_id, digests in trusted_root_digests.items()
@@ -92,6 +98,24 @@ class AgentFirstReleaseTrust:
                 "RELEASE_TRUST_NOT_FOUND": "AUTHORITY_INPUT_UNTRUSTED",
             }.get(error.code, "AUTHORITY_INPUT_UNTRUSTED")
         )
+
+    @staticmethod
+    def _root_pin_error(error: ReleaseRootPinStoreError) -> AuthorityError:
+        return AuthorityError(
+            "AUTHORITY_RELOAD_REQUIRED"
+            if error.code == "AUTHORITY_STORAGE_CORRUPT"
+            else "AUTHORITY_INPUT_UNTRUSTED"
+        )
+
+    def enroll_root_pin(
+        self,
+        organization_id: str,
+        root_digest: str,
+    ) -> StoredReleaseRootPin:
+        try:
+            return self._root_pins.enroll(organization_id, root_digest)
+        except ReleaseRootPinStoreError as error:
+            raise self._root_pin_error(error) from None
 
     def _now(self) -> datetime:
         return self._utc(self._clock())
@@ -198,8 +222,19 @@ class AgentFirstReleaseTrust:
             "release-principal/v1", principal
         )
         key, key_bytes = self._validated("release-signing-key/v1", signing_key)
-        trusted = self._trusted_roots.get(str(root["organization_id"]), frozenset())
-        if root["root_digest"] not in trusted:
+        organization_id = str(root["organization_id"])
+        root_digest = str(root["root_digest"])
+        trusted = root_digest in self._trusted_roots.get(
+            organization_id, frozenset()
+        )
+        if not trusted:
+            try:
+                trusted = self._root_pins.is_trusted(
+                    organization_id, root_digest
+                )
+            except ReleaseRootPinStoreError as error:
+                raise self._root_pin_error(error) from None
+        if not trusted:
             self._raise_untrusted()
         self._require_ref(principal_value["trust_root_ref"], "release-trust-root/v1", root_bytes)
         principal_binding = (
@@ -426,6 +461,7 @@ class AgentFirstReleaseTrust:
 __all__ = [
     "AgentFirstReleaseTrust",
     "StoredReleaseAuthority",
+    "StoredReleaseRootPin",
     "StoredReleaseRevocation",
     "VerifiedReleaseSignature",
 ]
