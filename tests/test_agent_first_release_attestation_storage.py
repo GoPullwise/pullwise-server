@@ -27,6 +27,9 @@ from pullwise_server.agent_first_release_evaluator_migrations import (
     CURRENT_RELEASE_EVALUATOR_TABLES,
     install_current_release_evaluator_tables,
 )
+from pullwise_server.agent_first_release_root_pin_migrations import (
+    CURRENT_RELEASE_ROOT_PIN_TABLE,
+)
 from pullwise_server.agent_first_release_trust import AgentFirstReleaseTrust
 from pullwise_server.agent_first_release_trust_migrations import (
     install_current_release_trust_tables,
@@ -437,6 +440,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
                 }
 
         self.assertIn("agent_current_release_trust_roots", installed)
+        self.assertIn(CURRENT_RELEASE_ROOT_PIN_TABLE, installed)
         self.assertIn("agent_current_release_principals", installed)
         self.assertIn("agent_current_release_signing_keys", installed)
         self.assertIn("agent_current_release_key_revocations", installed)

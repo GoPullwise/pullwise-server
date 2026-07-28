@@ -369,6 +369,37 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
         )
         self.assertEqual((0, 0, 0, 0), self.counts())
 
+    def test_root_pin_is_scoped_to_its_exact_organization(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "other-organization-pin.sqlite3"
+
+            def connect() -> sqlite3.Connection:
+                return sqlite3.connect(path)
+
+            with closing(connect()) as connection:
+                install_current_release_trust_tables(connection)
+            trust = AgentFirstReleaseTrust(
+                connect,
+                contract=self.contract,
+                clock=lambda: self.now,
+            )
+            trust.enroll_root_pin(
+                "org_other",
+                str(self.root["root_digest"]),
+            )
+
+            with self.assertRaises(AuthorityError) as raised:
+                trust.register_authority(
+                    self.root,
+                    self.principal,
+                    self.signing_key,
+                )
+
+            self.assertEqual(
+                "AUTHORITY_INPUT_UNTRUSTED", raised.exception.code
+            )
+            self.assertEqual((0, 0, 0, 0), self.counts(connect))
+
     def test_rotation_appends_a_new_valid_key_and_same_id_conflicts(self) -> None:
         self.trust.register_authority(self.root, self.principal, self.signing_key)
         rotated_seed = "1f" * 32

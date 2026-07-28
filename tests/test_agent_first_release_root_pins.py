@@ -7,10 +7,13 @@ import tempfile
 import threading
 import unittest
 
+from pullwise_server.agent_first_authority import AuthorityError
 from pullwise_server.agent_first_release_root_pin_migrations import (
     CURRENT_RELEASE_ROOT_PIN_TABLE,
 )
-from pullwise_server.agent_first_authority import AuthorityError
+from pullwise_server.agent_first_release_root_pins import (
+    RELEASE_ROOT_PIN_FAULT_POINTS,
+)
 from pullwise_server.agent_first_release_trust import AgentFirstReleaseTrust
 from pullwise_server.agent_first_release_trust_migrations import (
     install_current_release_trust_tables,
@@ -42,20 +45,22 @@ class AgentFirstReleaseRootPinsTest(unittest.TestCase):
         assert row is not None
         return int(row[0])
 
-    def test_fault_after_pin_insert_rolls_back_enrollment(self) -> None:
-        def fault(point: str) -> None:
-            if point == "after_root_pin":
-                raise RuntimeError(point)
+    def test_all_pin_fault_points_roll_back_enrollment(self) -> None:
+        for point in RELEASE_ROOT_PIN_FAULT_POINTS:
+            with self.subTest(point=point):
+                def fault(candidate: str) -> None:
+                    if candidate == point:
+                        raise RuntimeError(point)
 
-        trust = AgentFirstReleaseTrust(
-            self.connect,
-            fault_injector=fault,
-        )
+                trust = AgentFirstReleaseTrust(
+                    self.connect,
+                    fault_injector=fault,
+                )
 
-        with self.assertRaisesRegex(RuntimeError, "after_root_pin"):
-            trust.enroll_root_pin(ORGANIZATION_ID, ROOT_DIGEST)
+                with self.assertRaisesRegex(RuntimeError, point):
+                    trust.enroll_root_pin(ORGANIZATION_ID, ROOT_DIGEST)
 
-        self.assertEqual(0, self.pin_count())
+                self.assertEqual(0, self.pin_count())
 
     def test_exact_replay_is_a_noop_and_pin_rows_are_immutable(self) -> None:
         trust = AgentFirstReleaseTrust(self.connect)
@@ -126,6 +131,16 @@ class AgentFirstReleaseRootPinsTest(unittest.TestCase):
                 )
 
         self.assertEqual(0, self.pin_count())
+
+    def test_pin_storage_failure_requires_authority_reload(self) -> None:
+        trust = AgentFirstReleaseTrust(self.connect)
+        with closing(self.connect()) as connection, connection:
+            connection.execute(f"DROP TABLE {CURRENT_RELEASE_ROOT_PIN_TABLE}")
+
+        with self.assertRaises(AuthorityError) as raised:
+            trust.enroll_root_pin(ORGANIZATION_ID, ROOT_DIGEST)
+
+        self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
 
 
 if __name__ == "__main__":
