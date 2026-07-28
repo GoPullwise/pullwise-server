@@ -49,16 +49,19 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
                 for table in CURRENT_RELEASE_EVALUATOR_TABLES
             )
 
-    def _delete_policy_row(self, policy_id: str) -> None:
+    def _delete_input_row(
+        self,
+        table: str,
+        id_column: str,
+        document_id: str,
+    ) -> None:
         with closing(self.connect()) as connection:
             connection.execute("PRAGMA foreign_keys=OFF")
             with connection:
+                connection.execute(f"DROP TRIGGER {table}_immutable_delete")
                 connection.execute(
-                    "DROP TRIGGER agent_current_release_gate_policies_immutable_delete"
-                )
-                connection.execute(
-                    "DELETE FROM agent_current_release_gate_policies WHERE policy_id = ?",
-                    (policy_id,),
+                    f"DELETE FROM {table} WHERE {id_column} = ?",
+                    (document_id,),
                 )
 
     def test_invalid_or_noncurrent_input_freeze_writes_nothing(self) -> None:
@@ -130,7 +133,11 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
     def test_input_freeze_does_not_backfill_a_partially_missing_pair(self) -> None:
         benchmark, policy, _ = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
-        self._delete_policy_row(str(policy["policy_id"]))
+        self._delete_input_row(
+            "agent_current_release_gate_policies",
+            "policy_id",
+            str(policy["policy_id"]),
+        )
 
         with self.assertRaises(AuthorityError) as raised:
             self.evaluator.freeze_inputs(benchmark, policy)
@@ -141,13 +148,17 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
     def test_report_rejects_a_partially_missing_frozen_pair_as_corrupt(self) -> None:
         benchmark, policy, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
-        self._delete_policy_row(str(policy["policy_id"]))
+        self._delete_input_row(
+            "agent_current_release_benchmark_bundles",
+            "benchmark_id",
+            str(benchmark["benchmark_id"]),
+        )
 
         with self.assertRaises(AuthorityError) as raised:
             self.evaluator.evaluate_and_store(benchmark, policy, report)
 
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
-        self.assertEqual((1, 0, 0), self._counts())
+        self.assertEqual((0, 1, 0), self._counts())
 
     def test_concurrent_exact_input_freezes_converge(self) -> None:
         benchmark, policy, _ = _current_documents()

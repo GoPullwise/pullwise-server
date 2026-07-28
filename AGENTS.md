@@ -646,6 +646,10 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   transaction must require that exact pair and may insert or replay only the
   report; it must never backfill missing inputs. Input-stage faults roll back
   both frozen rows, while report-stage faults preserve the already-frozen pair.
+  A freeze is fresh only when neither row exists and is an exact replay only
+  when both rows match. Any one-sided pair state is
+  `AUTHORITY_RELOAD_REQUIRED`; neither freeze nor report persistence may repair
+  or reinterpret it as caller input.
 - Keep each document's domain-separated digest distinct from the SHA-256 of
   its canonical bytes. Persist and verify both, plus exact byte size, runtime
   package tuple, normalized link digests, ContentRef SHA/size, and report

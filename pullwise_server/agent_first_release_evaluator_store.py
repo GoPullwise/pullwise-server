@@ -179,7 +179,9 @@ class ReleaseEvaluatorStore:
         input_rows: tuple[InputRow, InputRow],
     ) -> tuple[bool, bool]:
         presence: list[bool] = []
-        for _, table, digest_column, digest, id_column, document_id, columns, values in input_rows:
+        for (
+            _, table, digest_column, digest, id_column, document_id, columns, values
+        ) in input_rows:
             selected = cls._selected_document(
                 connection,
                 table=table,
@@ -296,7 +298,10 @@ class ReleaseEvaluatorStore:
             presence = self._matching_presence(connection, input_rows)
             if presence in ((True, False), (False, True)):
                 raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT")
-            for name, table, digest_column, digest, id_column, document_id, columns, values in input_rows:
+            for (
+                name, table, digest_column, digest, id_column,
+                document_id, columns, values,
+            ) in input_rows:
                 self._fault(f"before_{name}")
                 self._insert_or_match(
                     connection,
