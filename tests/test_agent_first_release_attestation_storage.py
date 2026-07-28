@@ -30,7 +30,10 @@ from pullwise_server.agent_first_release_evaluator_migrations import (
 from pullwise_server.agent_first_release_root_pin_migrations import (
     CURRENT_RELEASE_ROOT_PIN_TABLE,
 )
-from pullwise_server.agent_first_release_trust import AgentFirstReleaseTrust
+from pullwise_server.agent_first_release_trust import (
+    AgentFirstReleaseTrust,
+    VerifiedReleaseSignature,
+)
 from pullwise_server.agent_first_release_trust_migrations import (
     install_current_release_trust_tables,
 )
@@ -298,6 +301,68 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
         self.assertEqual(stored.verdict, "PASS")
         self.assertEqual(stored.exit_code, 0)
+
+    def test_input_freeze_rejects_cross_org_or_same_principal_signers(self) -> None:
+        self._authorities()
+        benchmark, policy, _, _ = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            contract=self.contract,
+            trust=self.trust,
+        )
+        verified_at = "2026-07-24T00:00:00.000Z"
+        benchmark_signature = VerifiedReleaseSignature(
+            "benchmark-bundle/v1",
+            "organization_pullwise",
+            "principal_benchmark_owner",
+            "key_benchmark_2026_01",
+            "benchmark_signing",
+            verified_at,
+        )
+        rejected_policy_signatures = (
+            VerifiedReleaseSignature(
+                "release-gate-policy/v1",
+                "organization_other",
+                "principal_release_operator",
+                "key_release_2026_01",
+                "release_signing",
+                verified_at,
+            ),
+            VerifiedReleaseSignature(
+                "release-gate-policy/v1",
+                "organization_pullwise",
+                "principal_benchmark_owner",
+                "key_release_2026_01",
+                "release_signing",
+                verified_at,
+            ),
+        )
+
+        for policy_signature in rejected_policy_signatures:
+            with self.subTest(policy_signature=policy_signature):
+                with (
+                    patch.object(
+                        self.trust,
+                        "verify_document",
+                        return_value=benchmark_signature,
+                    ),
+                    patch.object(
+                        self.trust,
+                        "verify_document_at",
+                        return_value=policy_signature,
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"
+                    ):
+                        attestor.freeze_inputs(benchmark, policy)
+
+        with closing(self.connect()) as connection:
+            counts = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in CURRENT_RELEASE_EVALUATOR_TABLES
+            )
+        self.assertEqual(counts, (0, 0, 0))
 
     def test_verified_pass_attestation_is_append_only_and_reloads(self) -> None:
         self._authorities()
