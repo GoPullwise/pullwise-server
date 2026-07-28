@@ -663,6 +663,8 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   IMMEDIATE`; every chain validation rereads the durable pin. A missing pin is
   `AUTHORITY_INPUT_UNTRUSTED` for fresh registration and
   `AUTHORITY_RELOAD_REQUIRED` when replaying stored authority state.
+  Transient SQLite `BUSY`/`LOCKED` failures remain operational errors and must
+  not be mislabeled as storage corruption.
 - `db.initialize()` also installs normalized append-only tables for release
   root pins, trust roots, organization principals, signing keys, key
   revocations, and verified release-gate attestations.

@@ -142,6 +142,19 @@ class AgentFirstReleaseRootPinsTest(unittest.TestCase):
 
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
 
+    def test_transient_database_lock_is_not_reported_as_corruption(self) -> None:
+        def lock_sensitive_connect() -> sqlite3.Connection:
+            return sqlite3.connect(self.db_path, timeout=0)
+
+        trust = AgentFirstReleaseTrust(lock_sensitive_connect)
+        with closing(self.connect()) as blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+
+            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                trust.enroll_root_pin(ORGANIZATION_ID, ROOT_DIGEST)
+
+        self.assertEqual(0, self.pin_count())
+
 
 if __name__ == "__main__":
     unittest.main()

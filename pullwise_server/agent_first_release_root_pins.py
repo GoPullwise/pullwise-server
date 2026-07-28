@@ -22,6 +22,15 @@ RELEASE_ROOT_PIN_FAULT_POINTS = (
 )
 
 
+def _is_lock_contention(error: sqlite3.OperationalError) -> bool:
+    error_code = getattr(error, "sqlite_errorcode", None)
+    base_code = error_code & 0xFF if isinstance(error_code, int) else None
+    return base_code in {
+        getattr(sqlite3, "SQLITE_BUSY", 5),
+        getattr(sqlite3, "SQLITE_LOCKED", 6),
+    } or any(word in str(error).lower() for word in ("busy", "locked"))
+
+
 class ReleaseRootPinStoreError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
@@ -58,6 +67,11 @@ class ReleaseRootPinStore:
         except ReleaseRootPinStoreError:
             connection.rollback()
             raise
+        except sqlite3.OperationalError as error:
+            connection.rollback()
+            if _is_lock_contention(error):
+                raise
+            raise ReleaseRootPinStoreError("AUTHORITY_STORAGE_CORRUPT") from error
         except sqlite3.DatabaseError as error:
             connection.rollback()
             raise ReleaseRootPinStoreError("AUTHORITY_STORAGE_CORRUPT") from error
