@@ -14,6 +14,16 @@ from ._generated_agent_task_contract import PACKAGE_TUPLE
 
 FaultInjector = Callable[[str], None]
 PackageTuple = tuple[str, str, str, str]
+InputRow = tuple[
+    str,
+    str,
+    str,
+    object,
+    str,
+    object,
+    tuple[str, ...],
+    tuple[object, ...],
+]
 
 RELEASE_EVALUATOR_FAULT_POINTS = (
     "before_benchmark",
@@ -163,50 +173,41 @@ class ReleaseEvaluatorStore:
             raise ReleaseEvaluatorStoreError("IDEMPOTENCY_CONFLICT") from None
 
     @classmethod
-    def _require_match(
+    def _matching_presence(
         cls,
         connection: sqlite3.Connection,
-        *,
-        table: str,
-        digest_column: str,
-        digest: str,
-        id_column: str,
-        document_id: str,
-        columns: tuple[str, ...],
-        values: tuple[object, ...],
-    ) -> None:
-        selected = cls._selected_document(
-            connection,
-            table=table,
-            digest_column=digest_column,
-            digest=digest,
-            id_column=id_column,
-            document_id=document_id,
-            columns=columns,
-        )
-        if selected is None:
-            raise ReleaseEvaluatorStoreError("RELEASE_EVALUATION_NOT_FOUND")
-        cls._require_selected_match(
-            selected,
-            digest_column=digest_column,
-            digest=digest,
-            columns=columns,
-            values=values,
-        )
+        input_rows: tuple[InputRow, InputRow],
+    ) -> tuple[bool, bool]:
+        presence: list[bool] = []
+        for _, table, digest_column, digest, id_column, document_id, columns, values in input_rows:
+            selected = cls._selected_document(
+                connection,
+                table=table,
+                digest_column=digest_column,
+                digest=str(digest),
+                id_column=id_column,
+                document_id=str(document_id),
+                columns=columns,
+            )
+            if selected is not None:
+                cls._require_selected_match(
+                    selected,
+                    digest_column=digest_column,
+                    digest=str(digest),
+                    columns=columns,
+                    values=values,
+                )
+            presence.append(selected is not None)
+        return presence[0], presence[1]
 
-    def _input_values(
+    def _input_rows(
         self,
         *,
         benchmark: Mapping[str, object],
         benchmark_bytes: bytes,
         policy: Mapping[str, object],
         policy_bytes: bytes,
-    ) -> tuple[
-        tuple[str, ...],
-        tuple[object, ...],
-        tuple[str, ...],
-        tuple[object, ...],
-    ]:
+    ) -> tuple[InputRow, InputRow]:
         package_values = self._package_values()
         benchmark_sha256, benchmark_size = self._document_values(benchmark_bytes)
         policy_sha256, policy_size = self._document_values(policy_bytes)
@@ -255,10 +256,26 @@ class ReleaseEvaluatorStore:
             policy_bytes,
         )
         return (
-            benchmark_columns,
-            benchmark_values,
-            policy_columns,
-            policy_values,
+            (
+                "benchmark",
+                "agent_current_release_benchmark_bundles",
+                "bundle_digest",
+                benchmark["bundle_digest"],
+                "benchmark_id",
+                benchmark["benchmark_id"],
+                benchmark_columns,
+                benchmark_values,
+            ),
+            (
+                "policy",
+                "agent_current_release_gate_policies",
+                "policy_digest",
+                policy["policy_digest"],
+                "policy_id",
+                policy["policy_id"],
+                policy_columns,
+                policy_values,
+            ),
         )
 
     def freeze_inputs(
@@ -269,40 +286,17 @@ class ReleaseEvaluatorStore:
         policy: Mapping[str, object],
         policy_bytes: bytes,
     ) -> StoredReleaseInputRows:
-        (
-            benchmark_columns,
-            benchmark_values,
-            policy_columns,
-            policy_values,
-        ) = self._input_values(
+        input_rows = self._input_rows(
             benchmark=benchmark,
             benchmark_bytes=benchmark_bytes,
             policy=policy,
             policy_bytes=policy_bytes,
         )
         with self._connection(immediate=True) as connection:
-            for name, table, digest_column, digest, id_column, document_id, columns, values in (
-                (
-                    "benchmark",
-                    "agent_current_release_benchmark_bundles",
-                    "bundle_digest",
-                    benchmark["bundle_digest"],
-                    "benchmark_id",
-                    benchmark["benchmark_id"],
-                    benchmark_columns,
-                    benchmark_values,
-                ),
-                (
-                    "policy",
-                    "agent_current_release_gate_policies",
-                    "policy_digest",
-                    policy["policy_digest"],
-                    "policy_id",
-                    policy["policy_id"],
-                    policy_columns,
-                    policy_values,
-                ),
-            ):
+            presence = self._matching_presence(connection, input_rows)
+            if presence in ((True, False), (False, True)):
+                raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT")
+            for name, table, digest_column, digest, id_column, document_id, columns, values in input_rows:
                 self._fault(f"before_{name}")
                 self._insert_or_match(
                     connection,
@@ -331,12 +325,7 @@ class ReleaseEvaluatorStore:
     ) -> StoredReleaseEvaluationRows:
         package_values = self._package_values()
         report_sha256, report_size = self._document_values(report_bytes)
-        (
-            benchmark_columns,
-            benchmark_values,
-            policy_columns,
-            policy_values,
-        ) = self._input_values(
+        input_rows = self._input_rows(
             benchmark=benchmark,
             benchmark_bytes=benchmark_bytes,
             policy=policy,
@@ -379,36 +368,11 @@ class ReleaseEvaluatorStore:
         )
 
         with self._connection(immediate=True) as connection:
-            for table, digest_column, digest, id_column, document_id, columns, values in (
-                (
-                    "agent_current_release_benchmark_bundles",
-                    "bundle_digest",
-                    benchmark["bundle_digest"],
-                    "benchmark_id",
-                    benchmark["benchmark_id"],
-                    benchmark_columns,
-                    benchmark_values,
-                ),
-                (
-                    "agent_current_release_gate_policies",
-                    "policy_digest",
-                    policy["policy_digest"],
-                    "policy_id",
-                    policy["policy_id"],
-                    policy_columns,
-                    policy_values,
-                ),
-            ):
-                self._require_match(
-                    connection,
-                    table=table,
-                    digest_column=digest_column,
-                    digest=str(digest),
-                    id_column=id_column,
-                    document_id=str(document_id),
-                    columns=columns,
-                    values=values,
-                )
+            presence = self._matching_presence(connection, input_rows)
+            if presence == (False, False):
+                raise ReleaseEvaluatorStoreError("RELEASE_EVALUATION_NOT_FOUND")
+            if presence != (True, True):
+                raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT")
             self._fault("before_report")
             self._insert_or_match(
                 connection,
