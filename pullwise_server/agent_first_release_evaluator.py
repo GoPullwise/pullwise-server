@@ -16,7 +16,14 @@ from .agent_first_release_evaluator_store import (
     ReleaseEvaluatorStore,
     ReleaseEvaluatorStoreError,
     StoredReleaseEvaluationRows,
+    StoredReleaseInputRows,
 )
+
+
+@dataclass(frozen=True)
+class StoredReleaseInputs:
+    benchmark_bytes: bytes
+    policy_bytes: bytes
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,45 @@ class AgentFirstReleaseEvaluator:
             verdict=stored.verdict,
             exit_code=stored.exit_code,
         )
+
+    def freeze_inputs(
+        self,
+        benchmark_bundle: object,
+        policy: object,
+    ) -> StoredReleaseInputs:
+        for document in (benchmark_bundle, policy):
+            self._require_current_package(document)
+        try:
+            checked_policy = self._contract.verify_release_gate_policy_context(
+                policy,
+                benchmark_bundle,
+            )
+            benchmark_bytes = self._contract.canonical_validated_bytes(
+                "benchmark-bundle/v1", benchmark_bundle
+            )
+            policy_bytes = self._contract.canonical_validated_bytes(
+                "release-gate-policy/v1", checked_policy
+            )
+        except (
+            self._contract.ContractValidationError,
+            KeyError,
+            TypeError,
+            ValueError,
+            UnicodeError,
+        ):
+            raise AuthorityError("CONTRACT_DOCUMENT_INVALID") from None
+        assert isinstance(benchmark_bundle, dict)
+        assert isinstance(checked_policy, dict)
+        try:
+            stored: StoredReleaseInputRows = self._store.freeze_inputs(
+                benchmark=benchmark_bundle,
+                benchmark_bytes=benchmark_bytes,
+                policy=checked_policy,
+                policy_bytes=policy_bytes,
+            )
+        except ReleaseEvaluatorStoreError as error:
+            raise self._store_error(error) from None
+        return StoredReleaseInputs(stored.benchmark_bytes, stored.policy_bytes)
 
     def evaluate_and_store(
         self,
@@ -161,4 +207,8 @@ class AgentFirstReleaseEvaluator:
         return self._public_result(stored)
 
 
-__all__ = ["AgentFirstReleaseEvaluator", "StoredReleaseEvaluation"]
+__all__ = [
+    "AgentFirstReleaseEvaluator",
+    "StoredReleaseEvaluation",
+    "StoredReleaseInputs",
+]

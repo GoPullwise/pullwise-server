@@ -20,6 +20,7 @@ from .agent_first_release_attestation_store import (
 from .agent_first_release_evaluator import (
     AgentFirstReleaseEvaluator,
     StoredReleaseEvaluation,
+    StoredReleaseInputs,
 )
 from .agent_first_release_trust import (
     AgentFirstReleaseTrust,
@@ -99,15 +100,33 @@ class AgentFirstReleaseAttestor:
             stored.verified_at,
         )
 
+    def _verify_release_inputs(
+        self,
+        benchmark: object,
+        policy: object,
+    ) -> tuple[VerifiedReleaseSignature, VerifiedReleaseSignature]:
+        benchmark_signature = self._trust.verify_document(benchmark)
+        verified_at = self._verified_time(benchmark_signature.verified_at)
+        policy_signature = self._trust.verify_document_at(policy, verified_at)
+        if (
+            benchmark_signature.organization_id
+            != policy_signature.organization_id
+            or benchmark_signature.principal_id == policy_signature.principal_id
+        ):
+            raise AuthorityError("AUTHORITY_INPUT_UNTRUSTED")
+        return benchmark_signature, policy_signature
+
     def _verify_input_signatures(
         self,
         benchmark: object,
         policy: object,
         attestation: object,
     ) -> VerifiedReleaseSignature:
-        benchmark_signature = self._trust.verify_document(benchmark)
+        benchmark_signature, policy_signature = self._verify_release_inputs(
+            benchmark,
+            policy,
+        )
         verified_at = self._verified_time(benchmark_signature.verified_at)
-        policy_signature = self._trust.verify_document_at(policy, verified_at)
         attestation_signature = self._trust.verify_document_at(
             attestation, verified_at
         )
@@ -118,6 +137,23 @@ class AgentFirstReleaseAttestor:
         ):
             raise AuthorityError("AUTHORITY_INPUT_UNTRUSTED")
         return attestation_signature
+
+    def freeze_inputs(
+        self,
+        benchmark_bundle: object,
+        policy: object,
+    ) -> StoredReleaseInputs:
+        self._verify_release_inputs(benchmark_bundle, policy)
+        try:
+            return self._evaluator.freeze_inputs(benchmark_bundle, policy)
+        except AuthorityError as error:
+            if error.code in {
+                "CONTRACT_DOCUMENT_INVALID",
+                "CURRENT_PACKAGE_PIN_MISMATCH",
+                "CURRENT_PACKAGE_PIN_MISSING",
+            }:
+                raise AuthorityError("AUTHORITY_INPUT_UNTRUSTED") from None
+            raise
 
     def attest_and_store(
         self,
@@ -200,6 +236,8 @@ class AgentFirstReleaseAttestor:
                 == policy_signature.organization_id
                 == signature.organization_id
                 == stored.organization_id
+                and benchmark_signature.principal_id
+                != policy_signature.principal_id
                 and signature.principal_id == stored.principal_id
                 and signature.key_id == stored.key_id
             )

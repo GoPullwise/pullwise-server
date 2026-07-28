@@ -270,6 +270,35 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         )
         return benchmark, policy, report, attestation
 
+    def test_signed_inputs_must_be_frozen_before_report_persistence(self) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            contract=self.contract,
+            trust=self.trust,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
+            attestor.attest_and_store(benchmark, policy, report, attestation)
+
+        with closing(self.connect()) as connection:
+            evaluator_counts = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in CURRENT_RELEASE_EVALUATOR_TABLES
+            )
+            attestation_count = connection.execute(
+                f"SELECT COUNT(*) FROM {CURRENT_RELEASE_ATTESTATION_TABLES[0]}"
+            ).fetchone()[0]
+        self.assertEqual(evaluator_counts, (0, 0, 0))
+        self.assertEqual(attestation_count, 0)
+
+        attestor.freeze_inputs(benchmark, policy)
+        stored = attestor.attest_and_store(benchmark, policy, report, attestation)
+
+        self.assertEqual(stored.verdict, "PASS")
+        self.assertEqual(stored.exit_code, 0)
+
     def test_verified_pass_attestation_is_append_only_and_reloads(self) -> None:
         self._authorities()
         benchmark, policy, report, attestation = self._documents()
