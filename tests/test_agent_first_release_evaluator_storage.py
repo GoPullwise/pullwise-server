@@ -147,6 +147,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
     def test_evaluate_and_store_persists_an_exact_verified_evaluation(self) -> None:
         benchmark, policy, report = _current_documents()
 
+        self.evaluator.freeze_inputs(benchmark, policy)
         stored = self.evaluator.evaluate_and_store(benchmark, policy, report)
 
         self.assertEqual("PASS", stored.verdict)
@@ -176,6 +177,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
 
     def test_verified_read_rejects_corrupt_domain_digest_metadata(self) -> None:
         benchmark, policy, report = _current_documents()
+        self.evaluator.freeze_inputs(benchmark, policy)
         self.evaluator.evaluate_and_store(benchmark, policy, report)
         with closing(self.connect()) as connection, connection:
             connection.execute(
@@ -200,6 +202,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
 
     def test_exact_write_rejects_corrupt_existing_digest_row(self) -> None:
         benchmark, policy, report = _current_documents()
+        self.evaluator.freeze_inputs(benchmark, policy)
         self.evaluator.evaluate_and_store(benchmark, policy, report)
         with closing(self.connect()) as connection, connection:
             connection.execute(
@@ -224,6 +227,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
 
     def test_verified_read_rejects_a_missing_linked_document(self) -> None:
         benchmark, policy, report = _current_documents()
+        self.evaluator.freeze_inputs(benchmark, policy)
         self.evaluator.evaluate_and_store(benchmark, policy, report)
         with closing(self.connect()) as connection, connection:
             connection.execute("PRAGMA foreign_keys=OFF")
@@ -242,6 +246,11 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
 
     def test_exact_replay_is_a_no_op_and_rows_are_immutable(self) -> None:
         benchmark, policy, report = _current_documents()
+        first_inputs = self.evaluator.freeze_inputs(benchmark, policy)
+        self.assertEqual(
+            first_inputs,
+            self.evaluator.freeze_inputs(deepcopy(benchmark), deepcopy(policy)),
+        )
         first = self.evaluator.evaluate_and_store(benchmark, policy, report)
 
         self.assertEqual(
@@ -303,7 +312,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
             )
         self.assertEqual((0, 0, 0), counts)
 
-    def test_every_document_stage_fault_rolls_back_the_whole_chain(self) -> None:
+    def test_input_and_report_faults_preserve_the_freeze_boundary(self) -> None:
         benchmark, policy, report = _current_documents()
         for fault_point in RELEASE_EVALUATOR_FAULT_POINTS:
             with self.subTest(fault_point=fault_point):
@@ -316,7 +325,11 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                     fault_injector=inject,
                 )
                 with self.assertRaisesRegex(RuntimeError, fault_point):
-                    evaluator.evaluate_and_store(benchmark, policy, report)
+                    if fault_point.endswith(("benchmark", "policy")):
+                        evaluator.freeze_inputs(benchmark, policy)
+                    else:
+                        evaluator.freeze_inputs(benchmark, policy)
+                        evaluator.evaluate_and_store(benchmark, policy, report)
                 with closing(self.connect()) as connection:
                     counts = tuple(
                         connection.execute(
@@ -324,10 +337,16 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                         ).fetchone()[0]
                         for table in CURRENT_RELEASE_EVALUATOR_TABLES
                     )
-                self.assertEqual((0, 0, 0), counts)
+                self.assertEqual(
+                    (0, 0, 0)
+                    if fault_point.endswith(("benchmark", "policy"))
+                    else (1, 1, 0),
+                    counts,
+                )
 
     def test_pass_fail_and_indeterminate_survive_verified_reload(self) -> None:
         benchmark, policy, passing = _current_documents()
+        self.evaluator.freeze_inputs(benchmark, policy)
         failing = deepcopy(passing)
         failing["report_id"] = "release_report_22222222222222222222222222222222"
         failing["absolute_results"][0]["observed_value"] = 1
@@ -368,6 +387,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
 
     def test_concurrent_exact_writes_converge_and_conflicts_choose_one(self) -> None:
         benchmark, policy, report = _current_documents()
+        self.evaluator.freeze_inputs(benchmark, policy)
 
         def race(reports: tuple[dict[str, object], ...]) -> list[object]:
             barrier = threading.Barrier(len(reports))

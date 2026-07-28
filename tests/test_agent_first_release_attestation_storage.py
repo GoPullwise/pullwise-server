@@ -308,6 +308,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             contract=self.contract,
         )
 
+        attestor.freeze_inputs(benchmark, policy)
         first = attestor.attest_and_store(benchmark, policy, report, attestation)
         replay = attestor.attest_and_store(
             deepcopy(benchmark), deepcopy(policy), deepcopy(report), deepcopy(attestation)
@@ -363,6 +364,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         attestor = AgentFirstReleaseAttestor(
             self.connect, trust=self.trust, contract=self.contract
         )
+        attestor.freeze_inputs(benchmark, policy)
         attestor.attest_and_store(benchmark, policy, report, attestation)
         collision = deepcopy(attestation)
         collision["expires_at"] = "2026-07-29T01:00:00.000Z"
@@ -392,6 +394,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         attestor = AgentFirstReleaseAttestor(
             self.connect, trust=self.trust, contract=self.contract
         )
+        attestor.freeze_inputs(benchmark, policy)
         attestor.attest_and_store(benchmark, policy, report, attestation)
         table = CURRENT_RELEASE_ATTESTATION_TABLES[0]
         with closing(self.connect()) as connection:
@@ -415,6 +418,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         attestor = AgentFirstReleaseAttestor(
             self.connect, trust=self.trust, contract=self.contract
         )
+        attestor.freeze_inputs(benchmark, policy)
         stored = attestor.attest_and_store(
             benchmark, policy, report, attestation
         )
