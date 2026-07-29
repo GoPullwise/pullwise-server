@@ -137,15 +137,13 @@ class AgentFirstReleaseAttestor:
             == policy_signature.organization_id
             == report_signature.organization_id
             == attestation_signature.organization_id
-        ) or len(
-            {
-                benchmark_signature.principal_id,
-                policy_signature.principal_id,
-                report_signature.principal_id,
-            }
-        ) != 3 or attestation_signature.principal_id in {
+        ) or (
+            benchmark_signature.principal_id
+            == attestation_signature.principal_id
+        ) or report_signature.principal_id in {
             benchmark_signature.principal_id,
-            report_signature.principal_id,
+            policy_signature.principal_id,
+            attestation_signature.principal_id,
         }:
             raise AuthorityError("AUTHORITY_INPUT_UNTRUSTED")
         return attestation_signature
@@ -250,18 +248,14 @@ class AgentFirstReleaseAttestor:
                 == report_signature.organization_id
                 == signature.organization_id
                 == stored.organization_id
-                and len(
-                    {
-                        benchmark_signature.principal_id,
-                        policy_signature.principal_id,
-                        report_signature.principal_id,
-                    }
-                )
-                == 3
-                and signature.principal_id
+                and benchmark_signature.principal_id
+                != policy_signature.principal_id
+                and benchmark_signature.principal_id != signature.principal_id
+                and report_signature.principal_id
                 not in {
                     benchmark_signature.principal_id,
-                    report_signature.principal_id,
+                    policy_signature.principal_id,
+                    signature.principal_id,
                 }
                 and signature.principal_id == stored.principal_id
                 and signature.key_id == stored.key_id

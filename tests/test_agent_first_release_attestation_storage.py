@@ -516,6 +516,11 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             "principal_release_operator", "key_release_2026_01",
             "release_signing", verified_at,
         )
+        report_signature = VerifiedReleaseSignature(
+            "release-gate-report/v1", "organization_pullwise",
+            "principal_ci_evidence_producer", "key_ci_evidence_2026_01",
+            "release_signing", verified_at,
+        )
         invalid_attestation_signature = VerifiedReleaseSignature(
             "release-gate-attestation/v1", "organization_pullwise",
             "principal_benchmark_owner", "key_release_2026_01",
@@ -531,7 +536,11 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             patch.object(
                 self.trust,
                 "verify_document_at",
-                side_effect=(policy_signature, invalid_attestation_signature),
+                side_effect=(
+                    policy_signature,
+                    report_signature,
+                    invalid_attestation_signature,
+                ),
             ),
         ):
             with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
@@ -575,6 +584,142 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self.assertEqual(
             (1,),
             self._row_counts(CURRENT_RELEASE_ATTESTATION_TABLES),
+        )
+
+    def test_report_signer_must_be_a_distinct_third_party(self) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            trust=self.trust,
+            contract=self.contract,
+        )
+        attestor.freeze_inputs(benchmark, policy)
+        verified_at = "2026-07-24T00:00:00.000Z"
+        benchmark_signature = VerifiedReleaseSignature(
+            "benchmark-bundle/v1", "organization_pullwise",
+            "principal_benchmark_owner", "key_benchmark_2026_01",
+            "benchmark_signing", verified_at,
+        )
+        release_signature = VerifiedReleaseSignature(
+            "release-gate-policy/v1", "organization_pullwise",
+            "principal_release_operator", "key_release_2026_01",
+            "release_signing", verified_at,
+        )
+        invalid_report_signatures = (
+            VerifiedReleaseSignature(
+                "release-gate-report/v1", "organization_pullwise",
+                "principal_release_operator", "key_release_2026_01",
+                "release_signing", verified_at,
+            ),
+            VerifiedReleaseSignature(
+                "release-gate-report/v1", "organization_pullwise",
+                "principal_benchmark_owner", "key_benchmark_2026_01",
+                "release_signing", verified_at,
+            ),
+        )
+        attestation_signature = VerifiedReleaseSignature(
+            "release-gate-attestation/v1", "organization_pullwise",
+            "principal_release_operator", "key_release_2026_01",
+            "release_signing", verified_at,
+        )
+
+        for report_signature in invalid_report_signatures:
+            with self.subTest(principal_id=report_signature.principal_id):
+                with (
+                    patch.object(
+                        self.trust,
+                        "verify_document",
+                        return_value=benchmark_signature,
+                    ),
+                    patch.object(
+                        self.trust,
+                        "verify_document_at",
+                        side_effect=(
+                            release_signature,
+                            report_signature,
+                            attestation_signature,
+                        ),
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "AUTHORITY_INPUT_UNTRUSTED",
+                    ):
+                        attestor.attest_and_store(
+                            benchmark,
+                            policy,
+                            report,
+                            attestation,
+                        )
+
+        self.assertEqual(
+            (1, 1, 0, 0),
+            self._row_counts(
+                (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
+            ),
+        )
+
+    def test_report_signer_must_match_the_release_organization(self) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            trust=self.trust,
+            contract=self.contract,
+        )
+        attestor.freeze_inputs(benchmark, policy)
+        verified_at = "2026-07-24T00:00:00.000Z"
+        benchmark_signature = VerifiedReleaseSignature(
+            "benchmark-bundle/v1", "organization_pullwise",
+            "principal_benchmark_owner", "key_benchmark_2026_01",
+            "benchmark_signing", verified_at,
+        )
+        policy_signature = VerifiedReleaseSignature(
+            "release-gate-policy/v1", "organization_pullwise",
+            "principal_release_operator", "key_release_2026_01",
+            "release_signing", verified_at,
+        )
+        report_signature = VerifiedReleaseSignature(
+            "release-gate-report/v1", "organization_other",
+            "principal_ci_evidence_producer", "key_ci_evidence_2026_01",
+            "release_signing", verified_at,
+        )
+        attestation_signature = VerifiedReleaseSignature(
+            "release-gate-attestation/v1", "organization_pullwise",
+            "principal_release_operator", "key_release_2026_01",
+            "release_signing", verified_at,
+        )
+
+        with (
+            patch.object(
+                self.trust,
+                "verify_document",
+                return_value=benchmark_signature,
+            ),
+            patch.object(
+                self.trust,
+                "verify_document_at",
+                side_effect=(
+                    policy_signature,
+                    report_signature,
+                    attestation_signature,
+                ),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
+                attestor.attest_and_store(
+                    benchmark,
+                    policy,
+                    report,
+                    attestation,
+                )
+
+        self.assertEqual(
+            (1, 1, 0, 0),
+            self._row_counts(
+                (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
+            ),
         )
 
     def test_invalid_attestation_signature_writes_no_evaluation_or_attestation(
