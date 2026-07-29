@@ -622,13 +622,20 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   effects becomes `CANCELLED_WITH_EFFECTS`. TaskResult CAS binds the complete
   selector-input digest.
 - D34 (`2be5b5752b65714204fa6f41a0a126eb30e82bafcdeb38b5ece426938561158c`)
-  limits this cycle to one unactivated candidate. Add only the Server-owned
-  contract/storage/facade/test closure, including the minimum D22 benchmark and
-  release-gate schema families. Do not connect production current-task/operator
-  HTTP or auth, switch the production Worker loop, enable D24, deploy, or start
-  canary. Run Generate exactly once only after every source, fixture, semantic
-  closure, DAG, registry, digest, and Python/Node parity pre-generation gate is
-  green; then exact-pin the same canonical bytes in Server, Worker, and Web.
+  limited the original work to one unactivated candidate. Its exactly-once
+  Generate allowance was consumed, and D35 withdraws that old candidate tuple;
+  never restore or fall back to those prior package bytes.
+- D35 (`8cde7af149db8e6051f0342bd9490c4be31fce7b1868270ce7206350ee252a9e`)
+  supersedes only D34's Generate limit. It authorized exactly one replacement
+  after every source, fixture, semantic closure, DAG, registry, digest, and
+  Python/Node parity pre-generation gate was green. That allowance is consumed
+  by package `@pullwise/agent-task-contract@0.1.0`, content
+  `11ced3caa5333f5d841a5f5d0ca33e9a91522f9809cd23943f56d1f371409564`,
+  and root `e6dc056cb1b61c2a47c28d3e02117352bae35c7fecb07d10bad6afd65b9e194e`.
+  Server, Worker, and Web must exact-pin those same canonical bytes. Any further
+  Generate requires another append-only superseding decision. Do not connect
+  production current-task/operator HTTP or auth, switch the production Worker
+  loop, enable D24, deploy, or start canary.
 - The tri-state release evaluator candidate reuses
   `benchmark-bundle/v1`, `release-gate-policy/v1`, and
   `release-gate-report/v1`. `evaluate_release_gate` derives PASS, FAIL, or
