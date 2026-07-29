@@ -128,18 +128,25 @@ class AgentFirstReleaseAttestor:
             policy,
         )
         verified_at = self._verified_time(benchmark_signature.verified_at)
-        self._trust.verify_document_at(report, verified_at)
+        report_signature = self._trust.verify_document_at(report, verified_at)
         attestation_signature = self._trust.verify_document_at(
             attestation, verified_at
         )
         if not (
             benchmark_signature.organization_id
             == policy_signature.organization_id
+            == report_signature.organization_id
             == attestation_signature.organization_id
-        ) or (
-            benchmark_signature.principal_id
-            == attestation_signature.principal_id
-        ):
+        ) or len(
+            {
+                benchmark_signature.principal_id,
+                policy_signature.principal_id,
+                report_signature.principal_id,
+            }
+        ) != 3 or attestation_signature.principal_id in {
+            benchmark_signature.principal_id,
+            report_signature.principal_id,
+        }:
             raise AuthorityError("AUTHORITY_INPUT_UNTRUSTED")
         return attestation_signature
 
@@ -233,17 +240,29 @@ class AgentFirstReleaseAttestor:
                 benchmark, verified_at
             )
             policy_signature = self._trust.verify_document_at(policy, verified_at)
+            report_signature = self._trust.verify_document_at(report, verified_at)
             signature = self._trust.verify_document_at(attestation, verified_at)
             metadata_matches = (
                 evaluation.verdict == "PASS"
                 and evaluation.exit_code == 0
                 and benchmark_signature.organization_id
                 == policy_signature.organization_id
+                == report_signature.organization_id
                 == signature.organization_id
                 == stored.organization_id
-                and benchmark_signature.principal_id
-                != policy_signature.principal_id
-                and benchmark_signature.principal_id != signature.principal_id
+                and len(
+                    {
+                        benchmark_signature.principal_id,
+                        policy_signature.principal_id,
+                        report_signature.principal_id,
+                    }
+                )
+                == 3
+                and signature.principal_id
+                not in {
+                    benchmark_signature.principal_id,
+                    report_signature.principal_id,
+                }
                 and signature.principal_id == stored.principal_id
                 and signature.key_id == stored.key_id
             )

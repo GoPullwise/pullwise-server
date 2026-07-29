@@ -166,6 +166,46 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
                 for table in CURRENT_RELEASE_TRUST_TABLES
             )
 
+    def _ci_authority(
+        self,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        principal = deepcopy(self.principal)
+        principal.update(
+            principal_id="principal_ci_evidence_producer",
+            role="ci_evidence_producer",
+        )
+        principal = _seal_signed_document(
+            self.contract,
+            "release-principal/v1",
+            "pullwise-release-principal/v1",
+            "principal_digest",
+            principal,
+            ROOT_SEED,
+        )
+        signing_key = deepcopy(self.signing_key)
+        signing_key.update(
+            key_id="key_ci_evidence_2026_01",
+            principal_id=principal["principal_id"],
+            principal_digest=principal["principal_digest"],
+            principal_ref=_content_ref(
+                self.contract,
+                signing_key["principal_ref"],
+                "release-principal/v1",
+                principal,
+            ),
+            key_purpose="release_signing",
+            public_key=_public_key(EVIDENCE_SEED),
+        )
+        signing_key = _seal_signed_document(
+            self.contract,
+            "release-signing-key/v1",
+            "pullwise-release-signing-key/v1",
+            "signing_key_digest",
+            signing_key,
+            ROOT_SEED,
+        )
+        return principal, signing_key
+
     def test_enrolled_root_pin_survives_a_fresh_trust_instance(self) -> None:
         unpinned = AgentFirstReleaseTrust(
             self.connect,
@@ -256,41 +296,7 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
     def test_registers_a_ci_evidence_producer_with_a_release_signing_key(
         self,
     ) -> None:
-        principal = deepcopy(self.principal)
-        principal.update(
-            principal_id="principal_ci_evidence_producer",
-            role="ci_evidence_producer",
-        )
-        principal = _seal_signed_document(
-            self.contract,
-            "release-principal/v1",
-            "pullwise-release-principal/v1",
-            "principal_digest",
-            principal,
-            ROOT_SEED,
-        )
-        signing_key = deepcopy(self.signing_key)
-        signing_key.update(
-            key_id="key_ci_evidence_2026_01",
-            principal_id=principal["principal_id"],
-            principal_digest=principal["principal_digest"],
-            principal_ref=_content_ref(
-                self.contract,
-                signing_key["principal_ref"],
-                "release-principal/v1",
-                principal,
-            ),
-            key_purpose="release_signing",
-            public_key=_public_key(EVIDENCE_SEED),
-        )
-        signing_key = _seal_signed_document(
-            self.contract,
-            "release-signing-key/v1",
-            "pullwise-release-signing-key/v1",
-            "signing_key_digest",
-            signing_key,
-            ROOT_SEED,
-        )
+        principal, signing_key = self._ci_authority()
 
         stored = self.trust.register_authority(
             self.root, principal, signing_key
@@ -299,6 +305,30 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
         self.assertEqual(principal["principal_id"], stored.principal_id)
         self.assertEqual(signing_key["key_id"], stored.key_id)
         self.assertEqual((1, 1, 1, 0), self.counts())
+
+    def test_verifies_a_ci_evidence_producer_signed_release_gate_report(
+        self,
+    ) -> None:
+        principal, signing_key = self._ci_authority()
+        self.trust.register_authority(self.root, principal, signing_key)
+        report = _sign_current_document(
+            self.contract,
+            "release-gate-report/v1",
+            "pullwise-release-gate-report/v1",
+            "report_digest",
+            self.contract.fixture("release_gate_report_golden_bootstrap_pass")[
+                "document"
+            ],
+            EVIDENCE_SEED,
+        )
+
+        verified = self.trust.verify_document(report)
+
+        self.assertEqual("release-gate-report/v1", verified.schema_id)
+        self.assertEqual("org_acme", verified.organization_id)
+        self.assertEqual(principal["principal_id"], verified.principal_id)
+        self.assertEqual(signing_key["key_id"], verified.key_id)
+        self.assertEqual("release_signing", verified.key_purpose)
 
     def test_exact_replay_is_a_noop_and_rows_are_immutable(self) -> None:
         first = self.trust.register_authority(

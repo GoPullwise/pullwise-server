@@ -33,6 +33,7 @@ from .agent_first_release_trust_store import (
 _PURPOSE_BY_SCHEMA = {
     "benchmark-bundle/v1": ("benchmark_signing", "benchmark_owner"),
     "release-gate-policy/v1": ("release_signing", "release_operator"),
+    "release-gate-report/v1": ("release_signing", "ci_evidence_producer"),
     "release-gate-attestation/v1": ("release_signing", "release_operator"),
 }
 _PURPOSE_BY_ROLE = {

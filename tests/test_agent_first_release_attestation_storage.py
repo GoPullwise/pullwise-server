@@ -44,6 +44,7 @@ SOURCE_ROOT = ROOT / "contracts" / "agent-first" / "current" / "source"
 ROOT_SEED = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
 BENCHMARK_SEED = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"
 RELEASE_SEED = "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7"
+EVIDENCE_SEED = "f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5"
 
 
 def _public_key(seed: str) -> str:
@@ -183,6 +184,47 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             ROOT_SEED,
         )
         self.trust.register_authority(self.root, release_principal, release_key)
+
+        evidence_principal = deepcopy(benchmark_principal)
+        evidence_principal.update(
+            principal_id="principal_ci_evidence_producer",
+            role="ci_evidence_producer",
+        )
+        evidence_principal = _seal_signed(
+            self.contract,
+            "release-principal/v1",
+            "pullwise-release-principal/v1",
+            "principal_digest",
+            evidence_principal,
+            ROOT_SEED,
+        )
+        evidence_key = deepcopy(benchmark_key)
+        evidence_key.update(
+            key_id="key_ci_evidence_2026_01",
+            principal_id=evidence_principal["principal_id"],
+            principal_digest=evidence_principal["principal_digest"],
+            principal_ref=_content_ref(
+                self.contract,
+                evidence_key["principal_ref"],
+                "release-principal/v1",
+                evidence_principal,
+            ),
+            key_purpose="release_signing",
+            public_key=_public_key(EVIDENCE_SEED),
+        )
+        evidence_key = _seal_signed(
+            self.contract,
+            "release-signing-key/v1",
+            "pullwise-release-signing-key/v1",
+            "signing_key_digest",
+            evidence_key,
+            ROOT_SEED,
+        )
+        self.trust.register_authority(
+            self.root,
+            evidence_principal,
+            evidence_key,
+        )
         return release_principal, release_key
 
     def _documents(self) -> tuple[dict[str, object], ...]:
@@ -248,9 +290,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         report["policy_ref"] = _content_ref(
             self.contract, report["policy_ref"], "release-gate-policy/v1", policy
         )
-        report.pop("report_digest", None)
-        report["report_digest"] = self.contract.document_digest(
-            "release-gate-report/v1", report
+        report = _seal_signed(
+            self.contract,
+            "release-gate-report/v1",
+            "pullwise-release-gate-report/v1",
+            "report_digest",
+            report,
+            EVIDENCE_SEED,
         )
 
         attestation = deepcopy(
@@ -283,6 +329,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
     def test_signed_inputs_must_be_frozen_before_report_persistence(self) -> None:
         self._authorities()
         benchmark, policy, report, attestation = self._documents()
+        report.pop("signature")
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             contract=self.contract,
