@@ -374,6 +374,58 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             (1, 1, 0, 0),
         )
 
+    def test_report_must_be_active_at_the_common_verification_time(self) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            contract=self.contract,
+            trust=self.trust,
+        )
+        attestor.freeze_inputs(benchmark, policy)
+        expired = deepcopy(report)
+        expired["expires_at"] = "2026-07-23T23:59:59.999Z"
+        expired = _seal_signed(
+            self.contract,
+            "release-gate-report/v1",
+            "pullwise-release-gate-report/v1",
+            "report_digest",
+            expired,
+            EVIDENCE_SEED,
+        )
+        future = deepcopy(report)
+        future["completed_at"] = "2026-07-25T00:00:00.000Z"
+        future["issued_at"] = "2026-07-25T00:00:00.000Z"
+        future["expires_at"] = "2026-07-26T00:00:00.000Z"
+        future = _seal_signed(
+            self.contract,
+            "release-gate-report/v1",
+            "pullwise-release-gate-report/v1",
+            "report_digest",
+            future,
+            EVIDENCE_SEED,
+        )
+
+        for inactive_report in (expired, future):
+            with self.subTest(issued_at=inactive_report["issued_at"]):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "AUTHORITY_INPUT_UNTRUSTED",
+                ):
+                    attestor.attest_and_store(
+                        benchmark,
+                        policy,
+                        inactive_report,
+                        attestation,
+                    )
+
+        self.assertEqual(
+            (1, 1, 0, 0),
+            self._row_counts(
+                (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
+            ),
+        )
+
     def test_input_freeze_rejects_a_policy_valid_for_more_than_thirty_days(
         self,
     ) -> None:

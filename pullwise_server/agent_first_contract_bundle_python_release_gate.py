@@ -419,6 +419,11 @@ def verify_release_gate_report_context(
         benchmark_bundle,
     )
     checked_policy = verify_document_digest("release-gate-policy/v1", policy)
+    _release_require(
+        checked_report["organization_id"] == checked_policy["organization_id"]
+        == checked_benchmark["organization_id"],
+        "RELEASE_REPORT_ORGANIZATION_MISMATCH", "$.organization_id",
+    )
     _release_require_ref(
         checked_report["benchmark_ref"],
         "benchmark-bundle/v1",
@@ -525,6 +530,10 @@ def verify_release_gate_attestation_context(
         checked_policy["organization_id"],
         "RELEASE_ATTESTATION_ORGANIZATION_MISMATCH",
         "$.organization_id",
+    )
+    _release_require_equal(
+        checked_report["organization_id"], checked_attestation["organization_id"],
+        "RELEASE_ATTESTATION_ORGANIZATION_MISMATCH", "$.report.organization_id",
     )
     _release_require_ref(
         checked_attestation["policy_ref"],

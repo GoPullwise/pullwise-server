@@ -256,6 +256,43 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             python_results[0],
         )
 
+    def test_attestation_context_rejects_cross_organization_report(self) -> None:
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        report["organization_id"] = "org_other"
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+        attestation = self.document(
+            "release_gate_attestation_golden_bootstrap_pass"
+        )
+        attestation["report_digest"] = report["report_digest"]
+        attestation["report_ref"] = self.content_ref(
+            attestation["report_ref"], report
+        )
+        attestation = self.reseal(
+            "release-gate-attestation/v1",
+            "attestation_digest",
+            attestation,
+        )
+        operations = [
+            {"kind": "attestation", "documents": [attestation, policy, report]}
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_ATTESTATION_ORGANIZATION_MISMATCH",
+                "path": "$.report.organization_id",
+            },
+            python_results[0],
+        )
+
     def test_context_helpers_exact_bind_the_supplied_evidence_chain(self) -> None:
         benchmark = self.document("benchmark_bundle_golden_current")
         policy = self.document("release_gate_policy_golden_bootstrap")

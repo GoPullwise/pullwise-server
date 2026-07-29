@@ -224,8 +224,7 @@ function releaseReportVerdict(value) {
 }
 
 function ruleReleaseGateReport(value) {
-  const [issued] = releaseRequireTimeOrder(value, "RELEASE_REPORT_TIME_INVALID");
-  const completed = releaseTimestampMillis(value.completed_at);
+  const [issued] = releaseRequireTimeOrder(value, "RELEASE_REPORT_TIME_INVALID"); const completed = releaseTimestampMillis(value.completed_at);
   releaseRequire(completed !== null && completed <= issued, "RELEASE_REPORT_TIME_INVALID", "$.completed_at");
   releaseValidateIndeterminateShape(value);
   releaseValidateAbsoluteResults(value); releaseValidateRelativeResults(value);
@@ -371,6 +370,11 @@ export async function verifyReleaseGateReportContext(
     policy,
   );
   releaseRequire(
+    checked.organization_id === policyValue.organization_id && checked.organization_id === benchmark.organization_id,
+    "RELEASE_REPORT_ORGANIZATION_MISMATCH",
+    "$.organization_id",
+  );
+  releaseRequire(
     seoRefMatchesDocument(
       checked.benchmark_ref,
       "benchmark-bundle/v1",
@@ -504,6 +508,7 @@ export async function verifyReleaseGateAttestationContext(
     report,
   );
   releaseRequire(checked.organization_id === policyValue.organization_id, "RELEASE_ATTESTATION_ORGANIZATION_MISMATCH", "$.organization_id");
+  releaseRequire(reportValue.organization_id === checked.organization_id, "RELEASE_ATTESTATION_ORGANIZATION_MISMATCH", "$.report.organization_id");
   releaseRequire(
     seoRefMatchesDocument(
       checked.policy_ref,

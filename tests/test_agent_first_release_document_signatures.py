@@ -56,6 +56,11 @@ class AgentFirstReleaseDocumentSignaturesTest(unittest.TestCase):
                 "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025"
             )
         )
+        evidence_public_key = Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(
+                "278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e"
+            )
+        )
         cases = (
             (
                 "benchmark_bundle_golden_current",
@@ -66,6 +71,11 @@ class AgentFirstReleaseDocumentSignaturesTest(unittest.TestCase):
                 "release_gate_policy_golden_bootstrap",
                 "release-gate-policy/v1",
                 release_public_key,
+            ),
+            (
+                "release_gate_report_golden_bootstrap_pass",
+                "release-gate-report/v1",
+                evidence_public_key,
             ),
             (
                 "release_gate_attestation_golden_bootstrap_pass",
@@ -109,6 +119,34 @@ class AgentFirstReleaseDocumentSignaturesTest(unittest.TestCase):
             base64.urlsafe_b64decode(document["signature"] + "=="),
             b"pullwise-release-gate-policy/v1\0" + canonical_bytes(unsigned),
         )
+
+    def test_report_source_fixtures_have_valid_ci_evidence_signatures(
+        self,
+    ) -> None:
+        family = json.loads(
+            (FAMILY_ROOT / "release-gate-report.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        evidence_public_key = Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(
+                "278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e"
+            )
+        )
+
+        for fixture in family["fixtures"]:
+            with self.subTest(fixture_id=fixture["fixture_id"]):
+                document = fixture["document"]
+                unsigned = {
+                    key: value
+                    for key, value in document.items()
+                    if key not in {"signature", "report_digest"}
+                }
+                evidence_public_key.verify(
+                    base64.urlsafe_b64decode(document["signature"] + "=="),
+                    b"pullwise-release-gate-report/v1\0"
+                    + canonical_bytes(unsigned),
+                )
 
     def test_release_context_rejects_cross_organization_binding(self) -> None:
         built = build_bundle(FAMILY_ROOT.parent)
@@ -169,6 +207,7 @@ class AgentFirstReleaseDocumentSignaturesTest(unittest.TestCase):
         family_ids = {
             "benchmark-bundle",
             "release-gate-policy",
+            "release-gate-report",
             "release-gate-attestation",
         }
         fixtures = (
@@ -204,6 +243,12 @@ class AgentFirstReleaseDocumentSignaturesTest(unittest.TestCase):
                 "release-gate-policy/v1",
                 "policy_digest",
                 "pullwise-release-gate-policy/v1",
+            ),
+            (
+                "release-gate-report.json",
+                "release-gate-report/v1",
+                "report_digest",
+                "pullwise-release-gate-report/v1",
             ),
             (
                 "release-gate-attestation.json",
