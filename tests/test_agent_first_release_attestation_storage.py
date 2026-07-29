@@ -305,6 +305,69 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self.assertEqual(stored.verdict, "PASS")
         self.assertEqual(stored.exit_code, 0)
 
+    def test_input_freeze_rejects_a_policy_valid_for_more_than_thirty_days(
+        self,
+    ) -> None:
+        self._authorities()
+        benchmark, policy, _, _ = self._documents()
+        policy["expires_at"] = "2026-07-31T00:00:00.001Z"
+        policy.pop("signature")
+        policy.pop("policy_digest")
+        signature = Ed25519PrivateKey.from_private_bytes(
+            bytes.fromhex(RELEASE_SEED)
+        ).sign(
+            b"pullwise-release-gate-policy/v1\0"
+            + self.contract.canonical_document_bytes(policy)
+        )
+        policy["signature"] = base64.urlsafe_b64encode(signature).decode(
+            "ascii"
+        ).rstrip("=")
+        policy["policy_digest"] = _release_digest(
+            self.contract,
+            "pullwise:release-gate-policy:v1",
+            policy,
+        )
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            contract=self.contract,
+            trust=self.trust,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
+            attestor.freeze_inputs(benchmark, policy)
+
+        self.assertEqual(
+            self._row_counts(CURRENT_RELEASE_EVALUATOR_TABLES),
+            (0, 0, 0),
+        )
+
+    def test_input_freeze_accepts_a_policy_valid_for_exactly_thirty_days(
+        self,
+    ) -> None:
+        self._authorities()
+        benchmark, policy, _, _ = self._documents()
+        policy["expires_at"] = "2026-07-31T00:00:00.000Z"
+        policy = _seal_signed(
+            self.contract,
+            "release-gate-policy/v1",
+            "pullwise-release-gate-policy/v1",
+            "policy_digest",
+            policy,
+            RELEASE_SEED,
+        )
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            contract=self.contract,
+            trust=self.trust,
+        )
+
+        attestor.freeze_inputs(benchmark, policy)
+
+        self.assertEqual(
+            self._row_counts(CURRENT_RELEASE_EVALUATOR_TABLES),
+            (1, 1, 0),
+        )
+
     def test_input_freeze_rejects_cross_org_or_same_principal_signers(self) -> None:
         self._authorities()
         benchmark, policy, _, _ = self._documents()

@@ -142,6 +142,44 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
                         {"ok": True, "value": fixture["document"]}, result
                     )
 
+    def test_policy_validity_window_has_python_node_boundary_parity(self) -> None:
+        exact_boundary = self.document("release_gate_policy_golden_bootstrap")
+        exact_boundary["expires_at"] = "2026-07-31T00:00:00.000Z"
+        exact_boundary = self.reseal(
+            "release-gate-policy/v1", "policy_digest", exact_boundary
+        )
+        over_boundary = deepcopy(exact_boundary)
+        over_boundary["expires_at"] = "2026-07-31T00:00:00.001Z"
+        over_boundary = self.reseal(
+            "release-gate-policy/v1", "policy_digest", over_boundary
+        )
+        operations = [
+            {
+                "kind": "document",
+                "schema_id": "release-gate-policy/v1",
+                "documents": [document],
+            }
+            for document in (exact_boundary, over_boundary)
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {"ok": True, "value": exact_boundary},
+            python_results[0],
+        )
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_POLICY_TIME_INVALID",
+                "path": "$.expires_at",
+            },
+            python_results[1],
+        )
+
     def test_context_helpers_exact_bind_the_supplied_evidence_chain(self) -> None:
         benchmark = self.document("benchmark_bundle_golden_current")
         policy = self.document("release_gate_policy_golden_bootstrap")

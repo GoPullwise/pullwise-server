@@ -6,6 +6,7 @@ from __future__ import annotations
 PYTHON_RELEASE_GATE = r'''
 _RELEASE_INVALID_CODE = "CONTRACT_DOCUMENT_INVALID"
 _RELEASE_CANARY_STAGE_IDS = ("CAPACITY_5", "CAPACITY_25", "FULL_CAPACITY")
+_RELEASE_POLICY_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 _RELEASE_ATTESTATION_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 _RELEASE_POLICY_BENCHMARK_FIELDS = (
@@ -162,7 +163,8 @@ def _rule_release_gate_policy(value: dict[str, object]) -> None:
         "$.issued_at",
     )
     _release_require(
-        expires_at is not None and expires_at > issued_at,
+        expires_at is not None
+        and 0 < expires_at - issued_at <= _RELEASE_POLICY_MAX_WINDOW_MS,
         "RELEASE_POLICY_TIME_INVALID",
         "$.expires_at",
     )
