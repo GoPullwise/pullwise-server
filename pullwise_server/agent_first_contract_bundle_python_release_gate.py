@@ -66,6 +66,22 @@ def _release_require_equal(
     _release_require(_json_equal(actual, expected), detail, path)
 
 
+def _release_require_time_order(
+    value: dict[str, object], detail: str, max_window_ms: int | None = None
+) -> tuple[int, int]:
+    issued_at = _timestamp_millis(value["issued_at"])
+    _release_require(issued_at is not None, detail, "$.issued_at")
+    expires_at = _timestamp_millis(value["expires_at"])
+    _release_require(
+        expires_at is not None
+        and expires_at > issued_at
+        and (max_window_ms is None or expires_at - issued_at <= max_window_ms),
+        detail,
+        "$.expires_at",
+    )
+    return issued_at, expires_at
+
+
 def _rule_benchmark_bundle(value: dict[str, object]) -> None:
     _release_require(
         _sorted_unique(value["seeds"]),
@@ -93,18 +109,7 @@ def _rule_benchmark_bundle(value: dict[str, object]) -> None:
         "RELEASE_BENCHMARK_COVERAGE_INVALID",
         "$.cluster_coverage",
     )
-    issued_at = _timestamp_millis(value["issued_at"])
-    expires_at = _timestamp_millis(value["expires_at"])
-    _release_require(
-        issued_at is not None,
-        "RELEASE_BENCHMARK_TIME_INVALID",
-        "$.issued_at",
-    )
-    _release_require(
-        expires_at is not None and expires_at > issued_at,
-        "RELEASE_BENCHMARK_TIME_INVALID",
-        "$.expires_at",
-    )
+    _release_require_time_order(value, "RELEASE_BENCHMARK_TIME_INVALID")
 
 
 def _rule_release_gate_policy(value: dict[str, object]) -> None:
@@ -155,18 +160,10 @@ def _rule_release_gate_policy(value: dict[str, object]) -> None:
         "RELEASE_POLICY_MODE_INVALID",
         "$.relative_gates",
     )
-    issued_at = _timestamp_millis(value["issued_at"])
-    expires_at = _timestamp_millis(value["expires_at"])
-    _release_require(
-        issued_at is not None,
+    _release_require_time_order(
+        value,
         "RELEASE_POLICY_TIME_INVALID",
-        "$.issued_at",
-    )
-    _release_require(
-        expires_at is not None
-        and 0 < expires_at - issued_at <= _RELEASE_POLICY_MAX_WINDOW_MS,
-        "RELEASE_POLICY_TIME_INVALID",
-        "$.expires_at",
+        _RELEASE_POLICY_MAX_WINDOW_MS,
     )
     threshold_projection = {
         "absolute_gates": value["absolute_gates"],
@@ -236,6 +233,15 @@ def _rule_release_gate_policy(value: dict[str, object]) -> None:
 
 
 def _rule_release_gate_report(value: dict[str, object]) -> None:
+    issued_at, _ = _release_require_time_order(
+        value, "RELEASE_REPORT_TIME_INVALID"
+    )
+    completed_at = _timestamp_millis(value["completed_at"])
+    _release_require(
+        completed_at is not None and completed_at <= issued_at,
+        "RELEASE_REPORT_TIME_INVALID",
+        "$.completed_at",
+    )
     _release_validate_indeterminate_shape(value)
     _release_validate_absolute_results(value)
     _release_validate_relative_results(value)
@@ -332,18 +338,10 @@ def _rule_release_gate_attestation(value: dict[str, object]) -> None:
         "RELEASE_ATTESTATION_VERDICT_INVALID",
         "$.attested_exit_code",
     )
-    issued_at = _timestamp_millis(value["issued_at"])
-    expires_at = _timestamp_millis(value["expires_at"])
-    _release_require(
-        issued_at is not None,
+    _release_require_time_order(
+        value,
         "RELEASE_ATTESTATION_WINDOW_INVALID",
-        "$.issued_at",
-    )
-    _release_require(
-        expires_at is not None
-        and 0 < expires_at - issued_at <= _RELEASE_ATTESTATION_MAX_WINDOW_MS,
-        "RELEASE_ATTESTATION_WINDOW_INVALID",
-        "$.expires_at",
+        _RELEASE_ATTESTATION_MAX_WINDOW_MS,
     )
 
 

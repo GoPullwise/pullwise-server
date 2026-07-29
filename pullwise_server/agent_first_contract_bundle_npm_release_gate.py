@@ -224,6 +224,9 @@ function releaseReportVerdict(value) {
 }
 
 function ruleReleaseGateReport(value) {
+  const [issued] = releaseRequireTimeOrder(value, "RELEASE_REPORT_TIME_INVALID");
+  const completed = releaseTimestampMillis(value.completed_at);
+  releaseRequire(completed !== null && completed <= issued, "RELEASE_REPORT_TIME_INVALID", "$.completed_at");
   releaseValidateIndeterminateShape(value);
   releaseValidateAbsoluteResults(value); releaseValidateRelativeResults(value);
   releaseRequire(
@@ -296,15 +299,7 @@ function ruleReleaseGateAttestation(value) {
     "RELEASE_ATTESTATION_VERDICT_INVALID",
     "$.attested_exit_code",
   );
-  const [issued, expires] = releaseRequireTimeOrder(
-    value,
-    "RELEASE_ATTESTATION_WINDOW_INVALID",
-  );
-  releaseRequire(
-    expires - issued <= RELEASE_ATTESTATION_MAX_WINDOW_MS,
-    "RELEASE_ATTESTATION_WINDOW_INVALID",
-    "$.expires_at",
-  );
+  releaseRequireTimeOrder(value, "RELEASE_ATTESTATION_WINDOW_INVALID", RELEASE_ATTESTATION_MAX_WINDOW_MS);
 }
 
 function releaseRequireBinding(left, right, fields, detail, prefix = "$") {

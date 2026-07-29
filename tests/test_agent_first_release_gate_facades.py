@@ -180,6 +180,82 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             python_results[1],
         )
 
+    def test_report_time_order_has_python_node_boundary_parity(self) -> None:
+        exact_boundary = self.document("release_gate_report_golden_bootstrap_pass")
+        exact_boundary["completed_at"] = exact_boundary["issued_at"]
+        exact_boundary["expires_at"] = "2026-08-23T00:30:00.000Z"
+        exact_boundary = self.reseal(
+            "release-gate-report/v1", "report_digest", exact_boundary
+        )
+        late_completion = deepcopy(exact_boundary)
+        late_completion["completed_at"] = "2026-07-23T00:30:00.001Z"
+        late_completion = self.reseal(
+            "release-gate-report/v1", "report_digest", late_completion
+        )
+        empty_window = deepcopy(exact_boundary)
+        empty_window["expires_at"] = empty_window["issued_at"]
+        empty_window = self.reseal(
+            "release-gate-report/v1", "report_digest", empty_window
+        )
+        operations = [
+            {
+                "kind": "document",
+                "schema_id": "release-gate-report/v1",
+                "documents": [document],
+            }
+            for document in (exact_boundary, late_completion, empty_window)
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual({"ok": True, "value": exact_boundary}, python_results[0])
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_REPORT_TIME_INVALID",
+                "path": "$.completed_at",
+            },
+            python_results[1],
+        )
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_REPORT_TIME_INVALID",
+                "path": "$.expires_at",
+            },
+            python_results[2],
+        )
+
+    def test_report_context_rejects_cross_organization_evidence(self) -> None:
+        benchmark = self.document("benchmark_bundle_golden_current")
+        policy = self.document("release_gate_policy_golden_bootstrap")
+        report = self.document("release_gate_report_golden_bootstrap_pass")
+        report["organization_id"] = "org_other"
+        report = self.reseal(
+            "release-gate-report/v1", "report_digest", report
+        )
+        operations = [
+            {"kind": "report", "documents": [report, benchmark, policy]}
+        ]
+
+        python_results = self.python_results(operations)
+        node_results = self.node_results(operations)["results"]
+
+        self.assertEqual(python_results, node_results)
+        self.assertEqual(
+            {
+                "ok": False,
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "RELEASE_REPORT_ORGANIZATION_MISMATCH",
+                "path": "$.organization_id",
+            },
+            python_results[0],
+        )
+
     def test_context_helpers_exact_bind_the_supplied_evidence_chain(self) -> None:
         benchmark = self.document("benchmark_bundle_golden_current")
         policy = self.document("release_gate_policy_golden_bootstrap")

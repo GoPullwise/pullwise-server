@@ -329,7 +329,6 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
     def test_signed_inputs_must_be_frozen_before_report_persistence(self) -> None:
         self._authorities()
         benchmark, policy, report, attestation = self._documents()
-        report.pop("signature")
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             contract=self.contract,
@@ -357,6 +356,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
     ) -> None:
         self._authorities()
         benchmark, policy, report, attestation = self._documents()
+        report.pop("signature")
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             contract=self.contract,
