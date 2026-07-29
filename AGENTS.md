@@ -684,6 +684,10 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   only at or after `effective_at`. Organization, principal, purpose, package,
   ContentRef, domain digest, canonical SHA/size, validity window, and signature
   bindings all fail closed.
+- A `release-gate-policy/v1` validity window must satisfy
+  `0 < expires_at - issued_at <= 30 days`. Exactly 30 days is valid; any longer
+  window fails document validation and the public input-freeze boundary as
+  `AUTHORITY_INPUT_UNTRUSTED` without persisting evaluator inputs.
 - `AgentFirstReleaseAttestor` composes, but does not change, the deterministic
   evaluator. Its input-freeze facade verifies benchmark and policy signatures
   at one Server time, requires the same organization and distinct benchmark
