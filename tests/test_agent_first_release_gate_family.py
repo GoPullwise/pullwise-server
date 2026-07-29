@@ -252,6 +252,7 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
                 "release_gate_policy_golden_bootstrap",
                 "release_gate_policy_idempotency_bootstrap",
                 "release_gate_policy_negative_bootstrap_relative_required",
+                "release_gate_policy_negative_above_max_validity_window",
             },
             set(fixtures),
         )
@@ -360,13 +361,34 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
             for item in golden["relative_gates"]
         ))
         self.assertLess(golden["issued_at"], golden["expires_at"])
-        negative = fixtures[
+        mode_negative = fixtures[
             "release_gate_policy_negative_bootstrap_relative_required"
         ]
-        self.assertEqual("CONTRACT_DOCUMENT_INVALID", negative["expected_code"])
+        self.assertEqual(
+            "CONTRACT_DOCUMENT_INVALID",
+            mode_negative["expected_code"],
+        )
         self.assertIn(
             "REQUIRED",
-            [item["applicability"] for item in negative["document"]["relative_gates"]],
+            [
+                item["applicability"]
+                for item in mode_negative["document"]["relative_gates"]
+            ],
+        )
+        window_negative = fixtures[
+            "release_gate_policy_negative_above_max_validity_window"
+        ]
+        self.assertEqual(
+            "CONTRACT_DOCUMENT_INVALID",
+            window_negative["expected_code"],
+        )
+        self.assertEqual(
+            "2026-07-01T00:00:00.000Z",
+            window_negative["document"]["issued_at"],
+        )
+        self.assertEqual(
+            "2026-07-31T00:00:00.001Z",
+            window_negative["document"]["expires_at"],
         )
 
     def test_release_gate_report_freezes_reproducible_three_state_result(self) -> None:

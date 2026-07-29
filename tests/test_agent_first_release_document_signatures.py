@@ -13,7 +13,10 @@ from pullwise_server.agent_first_contract_bundle import build_bundle
 from pullwise_server.agent_first_contract_bundle_registry import (
     validate_supported_schema,
 )
-from pullwise_server.agent_first_contract_bundle_source import ContractBundleError
+from pullwise_server.agent_first_contract_bundle_source import (
+    canonical_bytes,
+    ContractBundleError,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +80,35 @@ class AgentFirstReleaseDocumentSignaturesTest(unittest.TestCase):
                     base64.urlsafe_b64decode(document["signature"] + "=="),
                     facade.signature_message(schema_id, document),
                 )
+
+    def test_policy_validity_window_negative_has_a_valid_signature(self) -> None:
+        family = json.loads(
+            (FAMILY_ROOT / "release-gate-policy.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        fixture = next(
+            item
+            for item in family["fixtures"]
+            if item["fixture_id"]
+            == "release_gate_policy_negative_above_max_validity_window"
+        )
+        document = fixture["document"]
+        unsigned = {
+            key: value
+            for key, value in document.items()
+            if key not in {"signature", "policy_digest"}
+        }
+        release_public_key = Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(
+                "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025"
+            )
+        )
+
+        release_public_key.verify(
+            base64.urlsafe_b64decode(document["signature"] + "=="),
+            b"pullwise-release-gate-policy/v1\0" + canonical_bytes(unsigned),
+        )
 
     def test_release_context_rejects_cross_organization_binding(self) -> None:
         built = build_bundle(FAMILY_ROOT.parent)

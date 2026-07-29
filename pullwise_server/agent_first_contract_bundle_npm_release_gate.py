@@ -7,7 +7,6 @@ NPM_RELEASE_GATE = r'''
 const RELEASE_GATE_PUBLIC_CODE = "CONTRACT_DOCUMENT_INVALID";
 const RELEASE_CANARY_STAGE_IDS = Object.freeze([
   "CAPACITY_5", "CAPACITY_25", "FULL_CAPACITY"]);
-const RELEASE_POLICY_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const RELEASE_ATTESTATION_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const RELEASE_POLICY_BENCHMARK_FIELDS = Object.freeze([
   "benchmark_version", "task_inventory_digest", "oracle_rubric_digest",
@@ -61,11 +60,11 @@ function releaseTimestampMillis(value) {
     ? epoch : null;
 }
 
-function releaseRequireTimeOrder(value, detail) {
+function releaseRequireTimeOrder(value, detail, maxWindowMs = Infinity) {
   const issued = releaseTimestampMillis(value.issued_at);
   releaseRequire(issued !== null, detail, "$.issued_at");
   const expires = releaseTimestampMillis(value.expires_at);
-  releaseRequire(expires !== null && issued < expires, detail, "$.expires_at");
+  releaseRequire(expires !== null && issued < expires && expires - issued <= maxWindowMs, detail, "$.expires_at");
   return [issued, expires];
 }
 
@@ -148,15 +147,7 @@ function ruleReleaseGatePolicy(value) {
     "RELEASE_POLICY_MODE_INVALID",
     "$.relative_gates",
   );
-  const [issued, expires] = releaseRequireTimeOrder(
-    value,
-    "RELEASE_POLICY_TIME_INVALID",
-  );
-  releaseRequire(
-    0 < expires - issued && expires - issued <= RELEASE_POLICY_MAX_WINDOW_MS,
-    "RELEASE_POLICY_TIME_INVALID",
-    "$.expires_at",
-  );
+  releaseRequireTimeOrder(value, "RELEASE_POLICY_TIME_INVALID", 30 * 24 * 60 * 60 * 1000);
 
   const thresholdProjection = {
     absolute_gates: value.absolute_gates,
