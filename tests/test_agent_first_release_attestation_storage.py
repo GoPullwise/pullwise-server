@@ -305,6 +305,28 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self.assertEqual(stored.verdict, "PASS")
         self.assertEqual(stored.exit_code, 0)
 
+    def test_unsigned_report_is_rejected_before_evaluation_or_attestation_write(
+        self,
+    ) -> None:
+        self._authorities()
+        benchmark, policy, report, attestation = self._documents()
+        attestor = AgentFirstReleaseAttestor(
+            self.connect,
+            contract=self.contract,
+            trust=self.trust,
+        )
+        attestor.freeze_inputs(benchmark, policy)
+
+        with self.assertRaisesRegex(RuntimeError, 'AUTHORITY_INPUT_UNTRUSTED'):
+            attestor.attest_and_store(benchmark, policy, report, attestation)
+
+        self.assertEqual(
+            self._row_counts(
+                (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
+            ),
+            (1, 1, 0, 0),
+        )
+
     def test_input_freeze_rejects_a_policy_valid_for_more_than_thirty_days(
         self,
     ) -> None:

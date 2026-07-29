@@ -15,7 +15,14 @@
         "contextual_helpers": [
           "evaluate_release_gate",
           "verify_release_gate_report_context"
-        ]
+        ],
+        "signature_contract": {
+          "algorithm": "Ed25519",
+          "domain": "pullwise-release-gate-report/v1",
+          "domain_separator": "NUL",
+          "encoding": "base64url_no_padding",
+          "signed_projection": "document_without_signature_and_digest"
+        }
       },
       "required": [
         "schema_id", "report_id", "package", "candidate_build_id", "candidate_digest", "release_mode",
@@ -25,7 +32,9 @@
         "statistical_implementation_version", "threshold_table_digest", "profile_budget_digest", "canary_plan_digest",
         "indeterminate_reason_codes",
         "raw_sample_count", "valid_sample_count", "excluded_sample_count", "excluded_reason_counts",
-        "absolute_results", "relative_results", "profile_results", "verdict", "exit_code", "completed_at", "report_digest"
+        "absolute_results", "relative_results", "profile_results", "verdict", "exit_code", "completed_at",
+        "organization_id", "signer_role", "signer_id", "key_id", "signature_algorithm", "signature",
+        "issued_at", "expires_at", "report_digest"
       ],
       "properties": {
         "schema_id": {"const": "release-gate-report/v1"},
@@ -168,6 +177,20 @@
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
         },
+        "organization_id": {"type": "string", "pattern": "^org_[a-z0-9_]{1,64}$"},
+        "signer_role": {"const": "ci_evidence_producer"},
+        "signer_id": {"type": "string", "pattern": "^principal_[a-z0-9_]{1,64}$"},
+        "key_id": {"type": "string", "pattern": "^key_[A-Za-z0-9_-]{1,96}$"},
+        "signature_algorithm": {"const": "Ed25519"},
+        "signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"},
+        "issued_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
         "report_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       },
       "oneOf": [
@@ -276,7 +299,15 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "979426bd4c4df38cb585080da3e3a8480d0c64cb5b75810b6d3978cdff2c2dd4"
+        "organization_id": "org_acme",
+        "signer_role": "ci_evidence_producer",
+        "signer_id": "principal_ci_evidence_producer",
+        "key_id": "key_ci_evidence_2026_01",
+        "signature_algorithm": "Ed25519",
+        "signature": "b0mbFCnU3Wxkclls-2LxZrGkBp2jUB2EjVicCTlkcfs3mdeu5XLx8frpqWmIz_IGlCVK_2ffEMRJS72cEq0ADQ",
+        "issued_at": "2026-07-23T00:30:00.000Z",
+        "expires_at": "2026-07-30T00:30:00.000Z",
+        "report_digest": "ce286ba0c3e4cd4e0d89bd8c782cb7286fe9eb619b95b8299ea263f4f7b68400"
       },
       "expected_code": null
     },
@@ -365,7 +396,15 @@
         "verdict": "PASS",
         "exit_code": 0,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "979426bd4c4df38cb585080da3e3a8480d0c64cb5b75810b6d3978cdff2c2dd4"
+        "organization_id": "org_acme",
+        "signer_role": "ci_evidence_producer",
+        "signer_id": "principal_ci_evidence_producer",
+        "key_id": "key_ci_evidence_2026_01",
+        "signature_algorithm": "Ed25519",
+        "signature": "b0mbFCnU3Wxkclls-2LxZrGkBp2jUB2EjVicCTlkcfs3mdeu5XLx8frpqWmIz_IGlCVK_2ffEMRJS72cEq0ADQ",
+        "issued_at": "2026-07-23T00:30:00.000Z",
+        "expires_at": "2026-07-30T00:30:00.000Z",
+        "report_digest": "ce286ba0c3e4cd4e0d89bd8c782cb7286fe9eb619b95b8299ea263f4f7b68400"
       },
       "expected_code": null
     },
@@ -428,7 +467,15 @@
         "verdict": "PASS",
         "exit_code": 1,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "e598547fe5aed28ad74bc1be863a3c37570f0f2bd84b182d95477b783febcf85"
+        "organization_id": "org_acme",
+        "signer_role": "ci_evidence_producer",
+        "signer_id": "principal_ci_evidence_producer",
+        "key_id": "key_ci_evidence_2026_01",
+        "signature_algorithm": "Ed25519",
+        "signature": "Ukc5X74OXcvrjllq3BvcrFaSwrSna8nV8BivGx1ZrzzFjluQqop1Fzgl2CVqIwzxpW0Nie6t_yTucnNW1L6wCw",
+        "issued_at": "2026-07-23T00:30:00.000Z",
+        "expires_at": "2026-07-30T00:30:00.000Z",
+        "report_digest": "389842b98765eac008cacf499a26b032d6746d2c63dececf37ead6faee90a9b8"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -491,7 +538,15 @@
         "verdict": "INDETERMINATE",
         "exit_code": 2,
         "completed_at": "2026-07-23T00:00:00.000Z",
-        "report_digest": "c5b91b58aff93985301ce029e5b0b746b340ceaf6b60b87e2e699da42b7cc39e"
+        "organization_id": "org_acme",
+        "signer_role": "ci_evidence_producer",
+        "signer_id": "principal_ci_evidence_producer",
+        "key_id": "key_ci_evidence_2026_01",
+        "signature_algorithm": "Ed25519",
+        "signature": "mahRdqxf3EsrGZg9Gkoh8gGwaxSjyNeWYn8qa4VJu0GZM5yqfAg1da0GIVHUqJ_0CuuHsetrWwmRyS2y28H_Dg",
+        "issued_at": "2026-07-23T00:30:00.000Z",
+        "expires_at": "2026-07-30T00:30:00.000Z",
+        "report_digest": "f3c59b47d3918ce8a814bac5609bee4f2dbf9a4b6c2a7b084d3a04615c0223d0"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

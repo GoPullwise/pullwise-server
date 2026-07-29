@@ -227,7 +227,7 @@ class AgentFirstReleaseTrustFamilyTest(unittest.TestCase):
         self.assertIs(False, principal["additionalProperties"])
         self.assertEqual(set(principal["required"]), set(principal["properties"]))
         self.assertEqual(
-            ["benchmark_owner", "release_operator"],
+            ["benchmark_owner", "ci_evidence_producer", "release_operator"],
             principal["properties"]["role"]["enum"],
         )
         self.assertEqual(

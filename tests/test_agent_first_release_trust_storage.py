@@ -4,6 +4,7 @@ import base64
 from contextlib import closing
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = ROOT / "contracts" / "agent-first" / "current" / "source"
 ROOT_SEED = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
 BENCHMARK_SEED = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"
+EVIDENCE_SEED = "f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5"
 
 
 def _public_key(private_seed: str) -> str:
@@ -89,6 +91,20 @@ def _sign_current_document(
     ).rstrip("=")
     value[digest_field] = contract.document_digest(schema_id, value)
     return value
+
+
+def _content_ref(
+    contract: ModuleType,
+    original: dict[str, object],
+    schema_id: str,
+    document: dict[str, object],
+) -> dict[str, object]:
+    encoded = contract.canonical_validated_bytes(schema_id, document)
+    return {
+        **original,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "size_bytes": len(encoded),
+    }
 
 
 class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
@@ -236,6 +252,53 @@ class AgentFirstReleaseTrustStorageTest(unittest.TestCase):
                 for table in CURRENT_RELEASE_TRUST_TABLES
             )
         self.assertEqual((1, 1, 1, 0), counts)
+
+    def test_registers_a_ci_evidence_producer_with_a_release_signing_key(
+        self,
+    ) -> None:
+        principal = deepcopy(self.principal)
+        principal.update(
+            principal_id="principal_ci_evidence_producer",
+            role="ci_evidence_producer",
+        )
+        principal = _seal_signed_document(
+            self.contract,
+            "release-principal/v1",
+            "pullwise-release-principal/v1",
+            "principal_digest",
+            principal,
+            ROOT_SEED,
+        )
+        signing_key = deepcopy(self.signing_key)
+        signing_key.update(
+            key_id="key_ci_evidence_2026_01",
+            principal_id=principal["principal_id"],
+            principal_digest=principal["principal_digest"],
+            principal_ref=_content_ref(
+                self.contract,
+                signing_key["principal_ref"],
+                "release-principal/v1",
+                principal,
+            ),
+            key_purpose="release_signing",
+            public_key=_public_key(EVIDENCE_SEED),
+        )
+        signing_key = _seal_signed_document(
+            self.contract,
+            "release-signing-key/v1",
+            "pullwise-release-signing-key/v1",
+            "signing_key_digest",
+            signing_key,
+            ROOT_SEED,
+        )
+
+        stored = self.trust.register_authority(
+            self.root, principal, signing_key
+        )
+
+        self.assertEqual(principal["principal_id"], stored.principal_id)
+        self.assertEqual(signing_key["key_id"], stored.key_id)
+        self.assertEqual((1, 1, 1, 0), self.counts())
 
     def test_exact_replay_is_a_noop_and_rows_are_immutable(self) -> None:
         first = self.trust.register_authority(

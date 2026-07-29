@@ -37,6 +37,7 @@ _PURPOSE_BY_SCHEMA = {
 }
 _PURPOSE_BY_ROLE = {
     "benchmark_owner": "benchmark_signing",
+    "ci_evidence_producer": "release_signing",
     "release_operator": "release_signing",
 }
 

@@ -406,6 +406,13 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
                     "evaluate_release_gate",
                     "verify_release_gate_report_context",
                 ],
+                "signature_contract": {
+                    "algorithm": "Ed25519",
+                    "domain": "pullwise-release-gate-report/v1",
+                    "domain_separator": "NUL",
+                    "encoding": "base64url_no_padding",
+                    "signed_projection": "document_without_signature_and_digest",
+                },
             },
             schema["x-pullwise-semantics"],
         )
@@ -420,6 +427,16 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
         )
         self.assertEqual(["PASS", "FAIL", "INDETERMINATE"], properties["verdict"]["enum"])
         self.assertEqual([0, 1, 2], properties["exit_code"]["enum"])
+        self.assertEqual(
+            "ci_evidence_producer", properties["signer_role"]["const"]
+        )
+        self.assertEqual("Ed25519", properties["signature_algorithm"]["const"])
+        self.assertEqual(
+            "^[A-Za-z0-9_-]{86}$", properties["signature"]["pattern"]
+        )
+        self.assertEqual(
+            "^org_[a-z0-9_]{1,64}$", properties["organization_id"]["pattern"]
+        )
         self.assertEqual(
             [
                 "BASELINE_INCOMPARABLE",

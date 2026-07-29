@@ -39,7 +39,9 @@ _TABLE_STATEMENTS = (
         principal_digest TEXT PRIMARY KEY CHECK(length(principal_digest) = 64),
         principal_id TEXT NOT NULL UNIQUE,
         organization_id TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('benchmark_owner', 'release_operator')),
+        role TEXT NOT NULL CHECK(role IN (
+            'benchmark_owner', 'ci_evidence_producer', 'release_operator'
+        )),
         trust_root_id TEXT NOT NULL,
         root_digest TEXT NOT NULL,
         root_ref_sha256 TEXT NOT NULL CHECK(length(root_ref_sha256) = 64),

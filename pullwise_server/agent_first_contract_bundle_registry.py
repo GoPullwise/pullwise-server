@@ -203,6 +203,13 @@ RELEASE_GATE_POLICY_SIGNATURE_CONTRACT = {
     "encoding": "base64url_no_padding",
     "signed_projection": "document_without_signature_and_digest",
 }
+RELEASE_GATE_REPORT_SIGNATURE_CONTRACT = {
+    "algorithm": "Ed25519",
+    "domain": "pullwise-release-gate-report/v1",
+    "domain_separator": "NUL",
+    "encoding": "base64url_no_padding",
+    "signed_projection": "document_without_signature_and_digest",
+}
 WAIVER_SIGNATURE_CONTRACT = {
     "algorithm": "Ed25519",
     "domain": "pullwise-waiver-event/v1",
@@ -235,6 +242,7 @@ SIGNATURE_CONTRACTS_BY_SCHEMA_ID = {
     "benchmark-bundle/v1": BENCHMARK_BUNDLE_SIGNATURE_CONTRACT,
     "release-gate-attestation/v1": RELEASE_GATE_ATTESTATION_SIGNATURE_CONTRACT,
     "release-gate-policy/v1": RELEASE_GATE_POLICY_SIGNATURE_CONTRACT,
+    "release-gate-report/v1": RELEASE_GATE_REPORT_SIGNATURE_CONTRACT,
     "release-key-revocation/v1": RELEASE_KEY_REVOCATION_SIGNATURE_CONTRACT,
     "release-principal/v1": RELEASE_PRINCIPAL_SIGNATURE_CONTRACT,
     "release-signing-key/v1": RELEASE_SIGNING_KEY_SIGNATURE_CONTRACT,

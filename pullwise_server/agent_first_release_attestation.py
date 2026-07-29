@@ -120,6 +120,7 @@ class AgentFirstReleaseAttestor:
         self,
         benchmark: object,
         policy: object,
+        report: object,
         attestation: object,
     ) -> VerifiedReleaseSignature:
         benchmark_signature, policy_signature = self._verify_release_inputs(
@@ -127,6 +128,7 @@ class AgentFirstReleaseAttestor:
             policy,
         )
         verified_at = self._verified_time(benchmark_signature.verified_at)
+        self._trust.verify_document_at(report, verified_at)
         attestation_signature = self._trust.verify_document_at(
             attestation, verified_at
         )
@@ -166,7 +168,7 @@ class AgentFirstReleaseAttestor:
         attestation: object,
     ) -> StoredReleaseAttestation:
         signature = self._verify_input_signatures(
-            benchmark_bundle, policy, attestation
+            benchmark_bundle, policy, report, attestation
         )
         try:
             checked = self._contract.verify_release_gate_attestation_context(
