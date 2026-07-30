@@ -14,6 +14,11 @@ from .agent_first_runtime_bootstrap_migrations import (
     RUNTIME_BOOTSTRAP_TABLES,
     install_runtime_bootstrap_tables,
 )
+from .agent_first_checkpoint_watermark_migrations import (
+    CHECKPOINT_WATERMARK_IMMUTABLE_TABLES,
+    CHECKPOINT_WATERMARK_TABLES,
+    install_checkpoint_watermark_tables,
+)
 CURRENT_AUTHORITY_TABLES = (
     "agent_current_worker_registrations",
     "agent_current_worker_registration_heads",
@@ -31,6 +36,7 @@ CURRENT_AUTHORITY_TABLES = (
     "agent_current_abandonments",
     "agent_current_fences",
     *RUNTIME_BOOTSTRAP_TABLES,
+    *CHECKPOINT_WATERMARK_TABLES,
 )
 
 IMMUTABLE_TABLES = (
@@ -43,6 +49,7 @@ IMMUTABLE_TABLES = (
     "agent_current_abandonments",
     "agent_current_fences",
     *RUNTIME_BOOTSTRAP_IMMUTABLE_TABLES,
+    *CHECKPOINT_WATERMARK_IMMUTABLE_TABLES,
 )
 AUTHORITY_STATE_TABLES = (
     ("agent_current_attempts", "LEASED"),
@@ -375,6 +382,7 @@ def install_current_authority_tables(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
     install_transport_envelope_tables(connection)
     install_runtime_bootstrap_tables(connection)
+    install_checkpoint_watermark_tables(connection)
     install_authority_guards(
         connection,
         IMMUTABLE_TABLES,

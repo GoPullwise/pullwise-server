@@ -38,6 +38,10 @@ from .agent_first_runtime_bootstrap import (
 )
 from .agent_first_transport_envelope_authority import TransportEnvelopeAuthority
 from .agent_first_transport_receipts import TransportReceiptStore
+from .agent_first_checkpoint_watermark import (
+    CheckpointWatermarkStore,
+    prepare_checkpoint_watermark_request,
+)
 
 
 _STORE_ERROR_MAP = {
@@ -61,6 +65,10 @@ _STORE_ERROR_MAP = {
     "WORKER_PACKAGE_MISMATCH": "CURRENT_PACKAGE_PIN_MISMATCH",
     "WORKER_REGISTRATION_INVALID": "AGENT_GRANT_INVALID",
     "TASK_PACKAGE_MISMATCH": "CURRENT_PACKAGE_PIN_MISMATCH",
+    "CHECKPOINT_WATERMARK_CONFLICT": "AUTHORITY_FENCED",
+    "CHECKPOINT_WATERMARK_CAPABILITY_FENCED": "AUTHORITY_FENCED",
+    "CHECKPOINT_WATERMARK_INVALID": "CONTRACT_DOCUMENT_INVALID",
+    "CHECKPOINT_WATERMARK_SEQUENCE_INVALID": "AUTHORITY_FENCED",
 }
 
 
@@ -121,6 +129,10 @@ class AgentFirstAuthority:
         self._claims = ClaimAuthorityStore(connect_factory, fault_injector)
         self._receipts = TransportReceiptStore(connect_factory, fault_injector)
         self._transport_envelopes = TransportEnvelopeAuthority(
+            connect_factory,
+            fault_injector,
+        )
+        self._checkpoint_watermarks = CheckpointWatermarkStore(
             connect_factory,
             fault_injector,
         )
@@ -257,6 +269,17 @@ class AgentFirstAuthority:
         self._package(envelope)
         return self._store_call(
             lambda: self._transport_envelopes.commit(envelope)
+        )
+
+    def acknowledge_current_checkpoint_watermark(
+        self,
+        request: dict[str, object],
+    ) -> bytes:
+        self._package(request)
+        return self._store_call(
+            lambda: self._checkpoint_watermarks.acknowledge(
+                prepare_checkpoint_watermark_request(request)
+            )
         )
 
     def abandon_current_claim(self, request: dict[str, object]) -> bytes:
