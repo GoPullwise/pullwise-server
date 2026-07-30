@@ -54,88 +54,119 @@ class ClaimAuthorityStore(ClaimWriteSetStore, AgentFirstAuthorityStore):
                 values["request_digest"],  # type: ignore[arg-type]
             )
             if replay is not None:
-                current = connection.execute(
-                    """
-                    SELECT h.lifecycle, h.desired_state, a.state AS attempt_state,
-                           o.state AS owner_state, ga.state AS grant_state
-                    FROM agent_current_task_heads h
-                    JOIN agent_current_claims c
-                      ON c.task_id=h.task_id
-                     AND c.attempt_id=h.current_attempt_id
-                     AND c.session_id=h.current_session_id
-                     AND c.grant_id=h.current_grant_id
-                     AND c.authority_digest=h.current_authority_digest
-                    JOIN agent_current_attempts a ON a.attempt_id=c.attempt_id
-                    JOIN agent_current_owner_incarnations o ON o.session_id=c.session_id
-                    JOIN agent_current_grant_authority ga ON ga.grant_id=c.grant_id
-                    JOIN agent_current_runtime_bootstraps b ON b.claim_id=c.claim_id
-                    WHERE h.task_id=? AND c.worker_id=? AND b.bootstrap_bytes=?
-                      AND h.current_authority_schema_id='server-authority-envelope/v1'
-                    """,
-                    (values["task_id"], values["worker_id"], replay),
-                ).fetchone()
-                if current is None or tuple(current) != (
-                    "ACTIVE", "RUN", "LEASED", "STARTING", "ACTIVE"
-                ):
-                    raise AuthorityStoreError("AUTHORITY_FENCED")
-                return replay
-            worker = connection.execute(
-                """
-                SELECT r.* FROM agent_current_worker_registration_heads h
-                JOIN agent_current_worker_registrations r
-                  ON r.registration_id=h.registration_id
-                WHERE h.worker_id=?
-                """,
-                (values["worker_id"],),
-            ).fetchone()
-            if worker is None:
-                raise AuthorityStoreError("WORKER_NOT_REGISTERED")
-            if self._row_package(worker) != values["package_tuple"]:
-                raise AuthorityStoreError("WORKER_PACKAGE_MISMATCH")
-            try:
-                supported = set(json.loads(self._blob(worker["supported_schema_ids"])))
-            except (TypeError, ValueError):
-                raise AuthorityStoreError("WORKER_REGISTRATION_INVALID") from None
-            if (
-                worker["tool_catalog_digest"] != values["expected_tool_catalog_digest"]
-                or not set(values["required_schema_ids"]).issubset(supported)
-            ):
-                raise AuthorityStoreError("WORKER_REGISTRATION_INVALID")
-            head = connection.execute(
-                """
-                SELECT h.*, r.package_identity, r.package_version,
-                       r.content_sha256, r.root_sha256, r.policy_digest,
-                       r.policy_bytes, r.request_bytes, r.accepted_at,
-                       r.absolute_deadline_at, r.terminalization_reserve_ms,
-                       x.accept_request_digest, x.accept_request_bytes,
-                       x.requirement_ledger_digest,
-                       x.requirement_ledger_version,
-                       x.requirement_ledger_bytes, x.outer_job_id, x.run_id,
-                       x.accept_response_digest, x.accept_response_bytes
-                FROM agent_current_task_heads h
-                JOIN agent_current_task_requests r USING (task_id)
-                JOIN agent_current_task_acceptances x USING (task_id)
-                WHERE h.task_id = ?
-                """,
-                (values["task_id"],),
-            ).fetchone()
-            if head is None:
-                raise AuthorityStoreError("TASK_NOT_FOUND")
-            if self._row_package(head) != values["package_tuple"]:
-                raise AuthorityStoreError("TASK_PACKAGE_MISMATCH")
-            claimable = (
-                head["lifecycle"] == "QUEUED"
-                and head["desired_state"] == "RUN"
-                and head["current_attempt_id"] is None
-                and head["current_authority_schema_id"] is None
-                and head["current_authority_digest"] is None
-                and values["transport_epoch"] == head["transport_epoch"] + 1
+                return self._validated_claim_replay(connection, values, replay)
+            head = self._claimable_head(connection, values)
+        write = build(head)
+        with self._immediate() as connection:
+            replay = self._event_replay(
+                connection,
+                values["task_id"],  # type: ignore[arg-type]
+                values["idempotency_key"],  # type: ignore[arg-type]
+                values["request_digest"],  # type: ignore[arg-type]
             )
-            if not claimable:
+            if replay is not None:
+                return self._validated_claim_replay(connection, values, replay)
+            current = self._claimable_head(connection, values)
+            if (
+                current["task_version"] != write["previous_task_version"]
+                or self._blob(current["accept_request_bytes"])
+                != write["accept_request_bytes"]
+            ):
                 raise AuthorityStoreError("TASK_NOT_CLAIMABLE")
-            write = build(head)
             self._insert_claim_write_set(connection, values, write)
             return write["response_bytes"]  # type: ignore[return-value]
+
+    def _validated_claim_replay(
+        self,
+        connection: sqlite3.Connection,
+        values: Mapping[str, object],
+        replay: bytes,
+    ) -> bytes:
+        current = connection.execute(
+            """
+            SELECT h.lifecycle, h.desired_state, a.state AS attempt_state,
+                   o.state AS owner_state, ga.state AS grant_state
+            FROM agent_current_task_heads h
+            JOIN agent_current_claims c
+              ON c.task_id=h.task_id
+             AND c.attempt_id=h.current_attempt_id
+             AND c.session_id=h.current_session_id
+             AND c.grant_id=h.current_grant_id
+             AND c.authority_digest=h.current_authority_digest
+            JOIN agent_current_attempts a ON a.attempt_id=c.attempt_id
+            JOIN agent_current_owner_incarnations o ON o.session_id=c.session_id
+            JOIN agent_current_grant_authority ga ON ga.grant_id=c.grant_id
+            JOIN agent_current_runtime_bootstraps b ON b.claim_id=c.claim_id
+            WHERE h.task_id=? AND c.worker_id=? AND b.bootstrap_bytes=?
+              AND h.current_authority_schema_id='server-authority-envelope/v1'
+            """,
+            (values["task_id"], values["worker_id"], replay),
+        ).fetchone()
+        if current is None or tuple(current) != (
+            "ACTIVE", "RUN", "LEASED", "STARTING", "ACTIVE"
+        ):
+            raise AuthorityStoreError("AUTHORITY_FENCED")
+        return replay
+
+    def _claimable_head(
+        self,
+        connection: sqlite3.Connection,
+        values: Mapping[str, object],
+    ) -> sqlite3.Row:
+        worker = connection.execute(
+            """
+            SELECT r.* FROM agent_current_worker_registration_heads h
+            JOIN agent_current_worker_registrations r
+              ON r.registration_id=h.registration_id
+            WHERE h.worker_id=?
+            """,
+            (values["worker_id"],),
+        ).fetchone()
+        if worker is None:
+            raise AuthorityStoreError("WORKER_NOT_REGISTERED")
+        if self._row_package(worker) != values["package_tuple"]:
+            raise AuthorityStoreError("WORKER_PACKAGE_MISMATCH")
+        try:
+            supported = set(json.loads(self._blob(worker["supported_schema_ids"])))
+        except (TypeError, ValueError):
+            raise AuthorityStoreError("WORKER_REGISTRATION_INVALID") from None
+        if (
+            worker["tool_catalog_digest"] != values["expected_tool_catalog_digest"]
+            or not set(values["required_schema_ids"]).issubset(supported)
+        ):
+            raise AuthorityStoreError("WORKER_REGISTRATION_INVALID")
+        head = connection.execute(
+            """
+            SELECT h.*, r.package_identity, r.package_version,
+                   r.content_sha256, r.root_sha256, r.policy_digest,
+                   r.policy_bytes, r.request_bytes, r.accepted_at,
+                   r.absolute_deadline_at, r.terminalization_reserve_ms,
+                   x.accept_request_digest, x.accept_request_bytes,
+                   x.requirement_ledger_digest, x.requirement_ledger_version,
+                   x.requirement_ledger_bytes, x.outer_job_id, x.run_id,
+                   x.accept_response_digest, x.accept_response_bytes
+            FROM agent_current_task_heads h
+            JOIN agent_current_task_requests r USING (task_id)
+            JOIN agent_current_task_acceptances x USING (task_id)
+            WHERE h.task_id = ?
+            """,
+            (values["task_id"],),
+        ).fetchone()
+        if head is None:
+            raise AuthorityStoreError("TASK_NOT_FOUND")
+        if self._row_package(head) != values["package_tuple"]:
+            raise AuthorityStoreError("TASK_PACKAGE_MISMATCH")
+        claimable = (
+            head["lifecycle"] == "QUEUED"
+            and head["desired_state"] == "RUN"
+            and head["current_attempt_id"] is None
+            and head["current_authority_schema_id"] is None
+            and head["current_authority_digest"] is None
+            and values["transport_epoch"] == head["transport_epoch"] + 1
+        )
+        if not claimable:
+            raise AuthorityStoreError("TASK_NOT_CLAIMABLE")
+        return head
 
     def abandon_claim(
         self,
