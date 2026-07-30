@@ -1,0 +1,148 @@
+{
+  "family_id": "task-bootstrap",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "agent-task-accept-request/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "accept_request_digest",
+        "domain": "pullwise:agent-task-accept-request:v1"
+      },
+      "required": [
+        "schema_id",
+        "package",
+        "idempotency_key",
+        "outer_job_id",
+        "run_id",
+        "task_request",
+        "effective_policy",
+        "requirement_ledger",
+        "accept_request_digest"
+      ],
+      "properties": {
+        "schema_id": { "const": "agent-task-accept-request/v1" },
+        "package": { "$ref": "current-package-ref/v1" },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "outer_job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "task_request": { "$ref": "task-request/v1" },
+        "effective_policy": { "$ref": "effective-execution-policy/v1" },
+        "requirement_ledger": { "$ref": "requirement-ledger/v1" },
+        "accept_request_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "agent-task-runtime-bootstrap/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "bootstrap_digest",
+        "domain": "pullwise:agent-task-runtime-bootstrap:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["agent_task_runtime_bootstrap"],
+        "contextual_helpers": []
+      },
+      "required": [
+        "schema_id",
+        "package",
+        "accept_request",
+        "accept_response",
+        "authority",
+        "transport_binding",
+        "construction_roots",
+        "bootstrap_digest"
+      ],
+      "properties": {
+        "schema_id": { "const": "agent-task-runtime-bootstrap/v1" },
+        "package": { "$ref": "current-package-ref/v1" },
+        "accept_request": { "$ref": "agent-task-accept-request/v1" },
+        "accept_response": { "$ref": "agent-task-accept-response/v1" },
+        "authority": { "$ref": "server-authority-envelope/v1" },
+        "transport_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outer_job_id",
+            "run_id",
+            "lease_id",
+            "transport_epoch"
+          ],
+          "properties": {
+            "outer_job_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "lease_id": {
+              "type": "string",
+              "pattern": "^lease_[0-9a-f]{32}$"
+            },
+            "transport_epoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "construction_roots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["task_record", "attempt", "owner"],
+          "properties": {
+            "task_record": { "$ref": "task-record/v1" },
+            "attempt": { "$ref": "attempt-record/v1" },
+            "owner": { "$ref": "task-owner/v1" }
+          }
+        },
+        "bootstrap_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_bootstrap_negative_missing_roots",
+      "fixture_class": "negative",
+      "schema_id": "agent-task-runtime-bootstrap/v1",
+      "document": {
+        "schema_id": "agent-task-runtime-bootstrap/v1"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "task_bootstrap_negative_unversioned_accept",
+      "fixture_class": "negative",
+      "schema_id": "agent-task-accept-request/v1",
+      "document": {
+        "schema_id": "agent-task-accept-request"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .agent_first_contract_bundle_npm_budget import NPM_BUDGET
+from .agent_first_contract_bundle_npm_bootstrap import NPM_BOOTSTRAP
 from .agent_first_contract_bundle_npm_change_set_patch import (
     NPM_CHANGE_SET_PATCH_RULE,
 )
@@ -340,6 +341,7 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
 NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
   acceptance_source_ids_unique: taskControlRuleRequestAcceptanceSources,
+  agent_task_runtime_bootstrap: ruleAgentTaskRuntimeBootstrap,
   actor: ruleObservationActor,
   agent_tool_request: ruleAgentToolRequest,
   artifact_content_ref: ruleArtifactContentRef,
@@ -526,6 +528,7 @@ function validateDeclaredDocumentRules(schemaId, value) {
 NPM_SEMANTICS = "\n".join(
     (
         NPM_SEMANTICS_BASE,
+        NPM_BOOTSTRAP,
         NPM_SOURCE_EXECUTION_OBSERVATION,
         NPM_CHANGE_SET_PATCH_RULE,
         NPM_EFFECTIVE_POLICY_RULES,

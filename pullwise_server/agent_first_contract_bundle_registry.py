@@ -40,6 +40,7 @@ DOCUMENT_RULE_IDS = frozenset(
         "acceptance_source_ids_unique",
         "actor",
         "agent_claim_abandon_response",
+        "agent_task_runtime_bootstrap",
         "agent_tool_request",
         "artifact_content_ref",
         "artifact_content_registry",
