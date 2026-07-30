@@ -641,13 +641,28 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   change or Generate. It does not authorize production activation, D24
   implementation or enablement, deployment, changes to a deployed Worker,
   production traffic, canary, legacy deletion, or S8 release/cutover/rollback.
-- D37 is the active append-only S4 contract-gap question. The S3 tracer proved
-  that the current claim response lacks TaskRequest, EffectiveExecutionPolicy,
-  RequirementLedger, and complete `outer_job_id/run_id` bootstrap roots, while
-  the frozen package lacks versioned machine/semantic/committed checkpoint
-  documents. Until the user explicitly resolves D37, do not edit contract
-  source, Generate, invent unversioned wire, switch the Worker main loop, or
-  start dependent S4-S7 implementation.
+- D37 (`ae16d63b19bcd6ec81c65daf1668a3bf8878210aed137a59761ca9b36f96aa70`)
+  is resolved to `bounded_s4_contract_closure_one_generate_no_activation`.
+  Server-owned source now contains versioned `agent-task-accept-request/v1`,
+  atomic `agent-task-runtime-bootstrap/v1`, `machine-checkpoint/v1`,
+  `semantic-checkpoint/v1`, and `committed-checkpoint-manifest/v1`, with
+  source fixtures, document semantics, contextual chain verification, registry,
+  DAG, digest, and focused Python/Node parity coverage. The D37 Generate
+  allowance remains unconsumed (count `0`): live source currently computes
+  content `9dfa928d1a2d139036701b7d69354e6e4ceb16b9fa5d913fc77cd6fd823454fb`
+  and root `4a37e789495b8b22d102ef1e87110b8e28abf555fa30bcd5baa1a2568d4b22ef`,
+  while published/generated consumers still exact-pin D35 content
+  `11ced3caa5333f5d841a5f5d0ca33e9a91522f9809cd23943f56d1f371409564`
+  and root `e6dc056cb1b61c2a47c28d3e02117352bae35c7fecb07d10bad6afd65b9e194e`.
+  The live-source global fixture gate passed in both runtimes, and focused
+  bootstrap/checkpoint/negative-inventory tests are green. Before Generate,
+  finish the long global semantic-helper positive execution gate (the prior
+  isolated run was stopped after 10 minutes with no failure output), then rerun
+  every required pre-generation source/fixture/closure/DAG/registry/digest/
+  parity gate. Only after all are green may one agent execute exactly one
+  Generate and synchronize Server/Worker/Web exact pins. Do not hand-edit
+  generated files, activate production, implement/enable D24, deploy, canary,
+  delete legacy, or begin S8 cutover/rollback.
 - The tri-state release evaluator candidate reuses
   `benchmark-bundle/v1`, `release-gate-policy/v1`, and
   `release-gate-report/v1`. `evaluate_release_gate` derives PASS, FAIL, or

@@ -308,6 +308,23 @@ class AgentFirstCheckpointContractTest(unittest.TestCase):
             "$.previous_manifest_hash",
         )
 
+    def test_source_golden_checkpoint_fixture_is_contextually_closed(self) -> None:
+        machine = self.contract.fixture("checkpoint_state_golden_machine")[
+            "document"
+        ]
+        semantic = self.contract.fixture("checkpoint_state_golden_semantic")[
+            "document"
+        ]
+        manifest = self.contract.fixture(
+            "checkpoint_manifest_golden_genesis_commit"
+        )["document"]
+        self.assertEqual(
+            manifest,
+            self.contract.verify_committed_checkpoint_context(
+                manifest, machine, semantic
+            ),
+        )
+
     def test_python_and_node_checkpoint_helpers_have_exact_parity(self) -> None:
         first = golden_checkpoint_set(self.contract)
         invalid = deepcopy(first["manifest"])
