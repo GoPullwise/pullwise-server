@@ -632,8 +632,7 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   by package `@pullwise/agent-task-contract@0.1.0`, content
   `11ced3caa5333f5d841a5f5d0ca33e9a91522f9809cd23943f56d1f371409564`,
   and root `e6dc056cb1b61c2a47c28d3e02117352bae35c7fecb07d10bad6afd65b9e194e`.
-  Server, Worker, and Web must exact-pin those same canonical bytes. Any further
-  Generate requires another append-only superseding decision.
+  D37 withdraws this historical tuple; never restore or repin these bytes.
 - D36 (`cb40a540cff9af1d350bf1a413aa3aeaee0ca1ddce65afabec7443f294944a1b`)
   supersedes D35's candidate-only implementation boundary. It authorizes local
   repository and CI implementation/verification of S3-S7, including the
@@ -647,22 +646,24 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   atomic `agent-task-runtime-bootstrap/v1`, `machine-checkpoint/v1`,
   `semantic-checkpoint/v1`, and `committed-checkpoint-manifest/v1`, with
   source fixtures, document semantics, contextual chain verification, registry,
-  DAG, digest, and focused Python/Node parity coverage. The D37 Generate
-  allowance remains unconsumed (count `0`): live source currently computes
-  content `9dfa928d1a2d139036701b7d69354e6e4ceb16b9fa5d913fc77cd6fd823454fb`
-  and root `4a37e789495b8b22d102ef1e87110b8e28abf555fa30bcd5baa1a2568d4b22ef`,
-  while published/generated consumers still exact-pin D35 content
-  `11ced3caa5333f5d841a5f5d0ca33e9a91522f9809cd23943f56d1f371409564`
-  and root `e6dc056cb1b61c2a47c28d3e02117352bae35c7fecb07d10bad6afd65b9e194e`.
-  The live-source global fixture gate passed in both runtimes, and focused
-  bootstrap/checkpoint/negative-inventory tests are green. Before Generate,
-  finish the long global semantic-helper positive execution gate (the prior
-  isolated run was stopped after 10 minutes with no failure output), then rerun
-  every required pre-generation source/fixture/closure/DAG/registry/digest/
-  parity gate. Only after all are green may one agent execute exactly one
-  Generate and synchronize Server/Worker/Web exact pins. Do not hand-edit
-  generated files, activate production, implement/enable D24, deploy, canary,
-  delete legacy, or begin S8 cutover/rollback.
+  DAG, digest, and focused Python/Node parity coverage. Every required
+  pre-generation gate passed. The D37 Generate allowance is consumed exactly
+  once (count `1`) by package `@pullwise/agent-task-contract@0.1.0`, content
+  `9dfa928d1a2d139036701b7d69354e6e4ceb16b9fa5d913fc77cd6fd823454fb`,
+  root `4a37e789495b8b22d102ef1e87110b8e28abf555fa30bcd5baa1a2568d4b22ef`,
+  and generated-artifact commit
+  `a223f1ffdee345da366ab7c3bf8ca230ad7f39cb`. Server, Worker, and Web must
+  exact-pin these bytes. Do not Generate again without another append-only
+  superseding decision, and do not hand-edit generated files, activate
+  production, implement or enable D24, deploy, canary, delete legacy, or begin
+  S8 cutover/rollback.
+- Python nested semantic helpers must preserve Node's single-dispatch behavior.
+  For an already nested document, call `validate_document` once and verify its
+  embedded digest directly; do not call public `verify_document_digest` from a
+  semantic helper because its public validate-plus-digest path dispatches
+  document semantics twice. Effective-policy derivation likewise validates its
+  nested policy once. Keep the global fixture semantic-hit trace equal across
+  Python and Node.
 - The tri-state release evaluator candidate reuses
   `benchmark-bundle/v1`, `release-gate-policy/v1`, and
   `release-gate-report/v1`. `evaluate_release_gate` derives PASS, FAIL, or
