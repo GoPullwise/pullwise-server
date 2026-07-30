@@ -26,9 +26,12 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
             for family in self.bundle.document["families"]
         }
 
+        self.assertIn("task-accept", families)
         self.assertIn("task-bootstrap", families)
         schemas = {
-            schema["$id"]: schema for schema in families["task-bootstrap"]["schemas"]
+            schema["$id"]: schema
+            for family_id in ("task-accept", "task-bootstrap")
+            for schema in families[family_id]["schemas"]
         }
         self.assertEqual(
             ["agent-task-accept-request/v1", "agent-task-runtime-bootstrap/v1"],

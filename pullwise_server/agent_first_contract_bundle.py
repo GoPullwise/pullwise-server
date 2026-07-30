@@ -46,6 +46,7 @@ REQUIRED_FAMILIES = (
     "task-requirements",
     "effective-execution-policy",
     "task-request",
+    "task-accept",
     "task-record",
     "task-attempt-owner",
     "task-bootstrap",

@@ -1,0 +1,339 @@
+{
+  "family_id": "task-accept",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "agent-task-accept-request/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "accept_request_digest",
+        "domain": "pullwise:agent-task-accept-request:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["agent_task_accept_request"],
+        "contextual_helpers": []
+      },
+      "required": [
+        "schema_id",
+        "package",
+        "idempotency_key",
+        "outer_job_id",
+        "run_id",
+        "task_request",
+        "effective_policy",
+        "requirement_ledger",
+        "accept_request_digest"
+      ],
+      "properties": {
+        "schema_id": { "const": "agent-task-accept-request/v1" },
+        "package": { "$ref": "current-package-ref/v1" },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "outer_job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "task_request": { "$ref": "task-request/v1" },
+        "effective_policy": { "$ref": "effective-execution-policy/v1" },
+        "requirement_ledger": { "$ref": "requirement-ledger/v1" },
+        "accept_request_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_accept_crash_after_validation",
+      "fixture_class": "crash",
+      "schema_id": "agent-task-accept-request/v1",
+      "document":
+        {
+          "accept_request_digest": "96853be60abcb9a02b6ff7907334a4e9aa6011a41f26961420185c6ac94889f7",
+          "effective_policy":
+            {
+              "agent_tool_network": {"mode":"deny","origins":[]},
+              "allowed_read_roots": ["repository"],
+              "allowed_write_roots": ["worker-run"],
+              "authorized_waiver_issuers": [],
+              "budgets": {"agent_sessions":2,"attempts":1,"cost_micros":0,"output_bytes":1048576,"token_input":10000,"token_output":4000,"tool_calls":10,"wall_ms":60000},
+              "capability_risk_ceiling": "R0",
+              "command_policy_ref":
+                {
+                  "artifact_id": "art_00000000000000000000000000000011",
+                  "content_schema_id": "canonical-document/v1",
+                  "encoding": "utf-8",
+                  "media_type": "application/json",
+                  "schema_id": "content-ref/v1",
+                  "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "size_bytes": 1
+                },
+              "denied_capabilities": [{"id":"source.write","reason_code":"CAPABILITY_DENIED"}],
+              "dependency_install": "deny",
+              "digest": "920320ffbe212e1f6a9c665e54417a2102e9356151576c373b86620a14a15083",
+              "granted_capabilities": ["source.read"],
+              "interaction_mode": "unavailable",
+              "issued_at": "2026-07-22T00:00:00.000Z",
+              "issuer": {"id":"pullwise-server","kind":"server_control","schema_id":"actor/v1","session_id":null},
+              "max_agent_sessions_total": 2,
+              "max_agents": 1,
+              "max_attempts": 1,
+              "policy_id": "policy_00000000000000000000000000000001",
+              "policy_version": 1,
+              "quality_risk_floor": "Q1",
+              "redaction_policy_ref":
+                {
+                  "artifact_id": "art_00000000000000000000000000000013",
+                  "content_schema_id": "canonical-document/v1",
+                  "encoding": "utf-8",
+                  "media_type": "application/json",
+                  "schema_id": "content-ref/v1",
+                  "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                  "size_bytes": 1
+                },
+              "schema_id": "effective-execution-policy/v1",
+              "secret_policy_ref":
+                {
+                  "artifact_id": "art_00000000000000000000000000000012",
+                  "content_schema_id": "canonical-document/v1",
+                  "encoding": "utf-8",
+                  "media_type": "application/json",
+                  "schema_id": "content-ref/v1",
+                  "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+                  "size_bytes": 1
+                },
+              "source_write_mode": "read_only",
+              "task_type": "pullwise.repo-review.full-scan/v1",
+              "terminalization_reserve_ms": 1000
+            },
+          "idempotency_key": "accept:bootstrap:one",
+          "outer_job_id": "job-1",
+          "package":
+            {
+              "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "package_identity": "@pullwise/agent-task-contract",
+              "package_version": "0.1.0",
+              "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "schema_id": "current-package-ref/v1"
+            },
+          "requirement_ledger":
+            {
+              "active_requirement_ids":
+                ["req_policy_2222222222222222222222222222222222222222222222222222222222222222","req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
+              "entries":
+                [
+                  {
+                    "introduced_at": "2026-07-22T00:00:00.000Z",
+                    "introduced_by": {"id":"user_00000000000000000000000000000001","kind":"user_control","schema_id":"actor/v1","session_id":null},
+                    "ledger_version": 1,
+                    "mandatory": true,
+                    "necessity": "explicit",
+                    "parent_requirement_ids": [],
+                    "rationale": "",
+                    "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+                    "schema_id": "requirement-entry/v1",
+                    "source_id": "objective",
+                    "source_kind": "user_objective",
+                    "statement": "Review the repository.",
+                    "supersedes": []
+                  },
+                  {
+                    "introduced_at": "2026-07-22T00:00:00.000Z",
+                    "introduced_by": {"id":"pullwise-server","kind":"server_control","schema_id":"actor/v1","session_id":null},
+                    "ledger_version": 1,
+                    "mandatory": true,
+                    "necessity": "safety_necessary",
+                    "parent_requirement_ids": [],
+                    "rationale": "MVP safety policy.",
+                    "requirement_id": "req_policy_2222222222222222222222222222222222222222222222222222222222222222",
+                    "schema_id": "requirement-entry/v1",
+                    "source_id": "policy.source-read-only",
+                    "source_kind": "policy",
+                    "statement": "Repository source bytes are read-only.",
+                    "supersedes": []
+                  }
+                ],
+              "ledger_digest": "618a0cc0ce08aeb333fcad9a57d00afeff132716fc86499851dabbf5b8a8b155",
+              "ledger_version": 1,
+              "schema_id": "requirement-ledger/v1",
+              "task_id": "task_00000000000000000000000000000001"
+            },
+          "run_id": "run-1",
+          "schema_id": "agent-task-accept-request/v1",
+          "task_request":
+            {
+              "acceptance_criteria": [{"source_id":"acceptance-1","statement":"Publish an evidence-backed report."}],
+              "constraints": [{"source_id":"constraint-1","statement":"Do not modify repository source."}],
+              "delivery": {"kind":"report","output_language":"en","required_outputs":["report"]},
+              "intent_kind": "analysis",
+              "interaction_policy": {"approval_deadline_ms":0,"input_deadline_ms":0,"mode":"unavailable"},
+              "objective": "Review the accepted repository source.",
+              "requested_budgets": {"agent_sessions":2,"attempts":1,"cost_micros":0,"output_bytes":1048576,"token_input":10000,"token_output":4000,"tool_calls":10,"wall_ms":60000},
+              "requested_capabilities": ["source.read"],
+              "schema_id": "task-request/v1",
+              "submitted_at": "2026-07-22T00:00:00.000Z",
+              "submitted_by": {"id":"pullwise-server","kind":"server_control","schema_id":"actor/v1","session_id":null},
+              "task_id": "task_00000000000000000000000000000001",
+              "task_type": "pullwise.repo-review.full-scan/v1"
+            }
+        },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_accept_idempotency_exact_retry",
+      "fixture_class": "idempotency",
+      "schema_id": "agent-task-accept-request/v1",
+      "document":
+        {
+          "accept_request_digest": "96853be60abcb9a02b6ff7907334a4e9aa6011a41f26961420185c6ac94889f7",
+          "effective_policy":
+            {
+              "agent_tool_network": {"mode":"deny","origins":[]},
+              "allowed_read_roots": ["repository"],
+              "allowed_write_roots": ["worker-run"],
+              "authorized_waiver_issuers": [],
+              "budgets": {"agent_sessions":2,"attempts":1,"cost_micros":0,"output_bytes":1048576,"token_input":10000,"token_output":4000,"tool_calls":10,"wall_ms":60000},
+              "capability_risk_ceiling": "R0",
+              "command_policy_ref":
+                {
+                  "artifact_id": "art_00000000000000000000000000000011",
+                  "content_schema_id": "canonical-document/v1",
+                  "encoding": "utf-8",
+                  "media_type": "application/json",
+                  "schema_id": "content-ref/v1",
+                  "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "size_bytes": 1
+                },
+              "denied_capabilities": [{"id":"source.write","reason_code":"CAPABILITY_DENIED"}],
+              "dependency_install": "deny",
+              "digest": "920320ffbe212e1f6a9c665e54417a2102e9356151576c373b86620a14a15083",
+              "granted_capabilities": ["source.read"],
+              "interaction_mode": "unavailable",
+              "issued_at": "2026-07-22T00:00:00.000Z",
+              "issuer": {"id":"pullwise-server","kind":"server_control","schema_id":"actor/v1","session_id":null},
+              "max_agent_sessions_total": 2,
+              "max_agents": 1,
+              "max_attempts": 1,
+              "policy_id": "policy_00000000000000000000000000000001",
+              "policy_version": 1,
+              "quality_risk_floor": "Q1",
+              "redaction_policy_ref":
+                {
+                  "artifact_id": "art_00000000000000000000000000000013",
+                  "content_schema_id": "canonical-document/v1",
+                  "encoding": "utf-8",
+                  "media_type": "application/json",
+                  "schema_id": "content-ref/v1",
+                  "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                  "size_bytes": 1
+                },
+              "schema_id": "effective-execution-policy/v1",
+              "secret_policy_ref":
+                {
+                  "artifact_id": "art_00000000000000000000000000000012",
+                  "content_schema_id": "canonical-document/v1",
+                  "encoding": "utf-8",
+                  "media_type": "application/json",
+                  "schema_id": "content-ref/v1",
+                  "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+                  "size_bytes": 1
+                },
+              "source_write_mode": "read_only",
+              "task_type": "pullwise.repo-review.full-scan/v1",
+              "terminalization_reserve_ms": 1000
+            },
+          "idempotency_key": "accept:bootstrap:one",
+          "outer_job_id": "job-1",
+          "package":
+            {
+              "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "package_identity": "@pullwise/agent-task-contract",
+              "package_version": "0.1.0",
+              "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "schema_id": "current-package-ref/v1"
+            },
+          "requirement_ledger":
+            {
+              "active_requirement_ids":
+                ["req_policy_2222222222222222222222222222222222222222222222222222222222222222","req_user_objective_1111111111111111111111111111111111111111111111111111111111111111"],
+              "entries":
+                [
+                  {
+                    "introduced_at": "2026-07-22T00:00:00.000Z",
+                    "introduced_by": {"id":"user_00000000000000000000000000000001","kind":"user_control","schema_id":"actor/v1","session_id":null},
+                    "ledger_version": 1,
+                    "mandatory": true,
+                    "necessity": "explicit",
+                    "parent_requirement_ids": [],
+                    "rationale": "",
+                    "requirement_id": "req_user_objective_1111111111111111111111111111111111111111111111111111111111111111",
+                    "schema_id": "requirement-entry/v1",
+                    "source_id": "objective",
+                    "source_kind": "user_objective",
+                    "statement": "Review the repository.",
+                    "supersedes": []
+                  },
+                  {
+                    "introduced_at": "2026-07-22T00:00:00.000Z",
+                    "introduced_by": {"id":"pullwise-server","kind":"server_control","schema_id":"actor/v1","session_id":null},
+                    "ledger_version": 1,
+                    "mandatory": true,
+                    "necessity": "safety_necessary",
+                    "parent_requirement_ids": [],
+                    "rationale": "MVP safety policy.",
+                    "requirement_id": "req_policy_2222222222222222222222222222222222222222222222222222222222222222",
+                    "schema_id": "requirement-entry/v1",
+                    "source_id": "policy.source-read-only",
+                    "source_kind": "policy",
+                    "statement": "Repository source bytes are read-only.",
+                    "supersedes": []
+                  }
+                ],
+              "ledger_digest": "618a0cc0ce08aeb333fcad9a57d00afeff132716fc86499851dabbf5b8a8b155",
+              "ledger_version": 1,
+              "schema_id": "requirement-ledger/v1",
+              "task_id": "task_00000000000000000000000000000001"
+            },
+          "run_id": "run-1",
+          "schema_id": "agent-task-accept-request/v1",
+          "task_request":
+            {
+              "acceptance_criteria": [{"source_id":"acceptance-1","statement":"Publish an evidence-backed report."}],
+              "constraints": [{"source_id":"constraint-1","statement":"Do not modify repository source."}],
+              "delivery": {"kind":"report","output_language":"en","required_outputs":["report"]},
+              "intent_kind": "analysis",
+              "interaction_policy": {"approval_deadline_ms":0,"input_deadline_ms":0,"mode":"unavailable"},
+              "objective": "Review the accepted repository source.",
+              "requested_budgets": {"agent_sessions":2,"attempts":1,"cost_micros":0,"output_bytes":1048576,"token_input":10000,"token_output":4000,"tool_calls":10,"wall_ms":60000},
+              "requested_capabilities": ["source.read"],
+              "schema_id": "task-request/v1",
+              "submitted_at": "2026-07-22T00:00:00.000Z",
+              "submitted_by": {"id":"pullwise-server","kind":"server_control","schema_id":"actor/v1","session_id":null},
+              "task_id": "task_00000000000000000000000000000001",
+              "task_type": "pullwise.repo-review.full-scan/v1"
+            }
+        },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_accept_negative_unversioned",
+      "fixture_class": "negative",
+      "schema_id": "agent-task-accept-request/v1",
+      "document": {
+        "schema_id": "agent-task-accept-request"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}
