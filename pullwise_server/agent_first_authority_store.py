@@ -19,6 +19,8 @@ REGISTER_FAULT_POINTS = tuple(
 ACCEPT_FAULT_POINTS = (
     "accept.before_task_request",
     "accept.after_task_request",
+    "accept.before_acceptance",
+    "accept.after_acceptance",
     "accept.before_task_head",
     "accept.after_task_head",
     "accept.before_event",
@@ -248,6 +250,27 @@ class AgentFirstAuthorityStore:
                 ),
             )
             self._fault("accept.after_task_request")
+            self._fault("accept.before_acceptance")
+            connection.execute(
+                """
+                INSERT INTO agent_current_task_acceptances (
+                    task_id, accept_request_digest, accept_request_bytes,
+                    requirement_ledger_digest, requirement_ledger_version,
+                    requirement_ledger_bytes, outer_job_id, run_id,
+                    accept_response_digest, accept_response_bytes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                tuple(
+                    values[field]
+                    for field in (
+                        "task_id", "accept_request_digest", "accept_request_bytes",
+                        "requirement_ledger_digest", "requirement_ledger_version",
+                        "requirement_ledger_bytes", "outer_job_id", "run_id",
+                        "accept_response_digest", "response_bytes",
+                    )
+                ),
+            )
+            self._fault("accept.after_acceptance")
             self._fault("accept.before_task_head")
             connection.execute(
                 """

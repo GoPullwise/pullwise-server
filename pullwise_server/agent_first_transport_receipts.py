@@ -47,7 +47,7 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
             if historical is not None and tuple(
                 historical[name]
                 for name in ("attempt_state", "owner_state", "grant_state")
-            ) != ("CLAIMED", "STARTING", "ACTIVE"):
+            ) != ("LEASED", "STARTING", "ACTIVE"):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
             authority = connection.execute(
                 """
@@ -76,7 +76,7 @@ class TransportReceiptStore(AgentFirstAuthorityStore):
             if tuple(
                 authority[name]
                 for name in ("attempt_state", "owner_state", "grant_state")
-            ) != ("CLAIMED", "STARTING", "ACTIVE"):
+            ) != ("LEASED", "STARTING", "ACTIVE"):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
             fields = (
                 "attempt_id",

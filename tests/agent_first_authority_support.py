@@ -97,12 +97,31 @@ class AuthorityHarness:
             fixture("task_control_golden_task_request")["document"]
         )
         task_request["task_id"] = task_id
-        return {
-            "package": package_tuple(),
-            "idempotency_key": f"accept:{task_id}",
-            "task_request": task_request,
-            "effective_policy": policy(),
-        }
+        ledger = copy.deepcopy(fixture("requirements_golden_ledger")["document"])
+        ledger["task_id"] = task_id
+        ledger.pop("ledger_digest")
+        ledger = seal_document("requirement-ledger/v1", ledger)
+        return seal_document(
+            "agent-task-accept-request/v1",
+            {
+                "schema_id": "agent-task-accept-request/v1",
+                "package": package_tuple(),
+                "idempotency_key": f"accept:{task_id}",
+                "outer_job_id": "job-1",
+                "run_id": "run-1",
+                "task_request": task_request,
+                "effective_policy": policy(),
+                "requirement_ledger": ledger,
+            },
+        )
+
+    @staticmethod
+    def reseal_accept_request(
+        request: dict[str, object],
+    ) -> dict[str, object]:
+        unsigned = copy.deepcopy(request)
+        unsigned.pop("accept_request_digest", None)
+        return seal_document("agent-task-accept-request/v1", unsigned)
 
     def accept(self, task_id: str = TASK_ID) -> bytes:
         return self.authority.accept_current_task(self.accept_request(task_id))
@@ -135,7 +154,10 @@ class AuthorityHarness:
         self.accept()
         request = self.claim_request()
         response = self.authority.claim_and_issue_current_grant(request)
-        return request, json.loads(response)
+        bootstrap = verify_document_digest(
+            "agent-task-runtime-bootstrap/v1", json.loads(response)
+        )
+        return request, bootstrap["authority"]
 
     def counts(self, *tables: str) -> tuple[int, ...]:
         with self.connect() as connection:

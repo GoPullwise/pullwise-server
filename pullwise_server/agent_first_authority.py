@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
-import math
 import secrets
 import sqlite3
 from typing import Callable, Mapping
@@ -23,8 +22,6 @@ from ._generated_agent_task_contract import (
     schema_ids,
     seal_document,
     tool_catalog,
-    validate_effective_policy_derivation,
-    validate_task_request_acceptance,
     verify_bundle,
     verify_document_digest,
 )
@@ -34,6 +31,11 @@ from .agent_first_authority_store import (
     FaultInjector,
 )
 from .agent_first_claim_authority import ClaimAuthorityStore
+from .agent_first_runtime_bootstrap import (
+    RuntimeBootstrapError,
+    build_acceptance_values,
+    build_runtime_bootstrap,
+)
 from .agent_first_transport_envelope_authority import TransportEnvelopeAuthority
 from .agent_first_transport_receipts import TransportReceiptStore
 
@@ -60,85 +62,6 @@ _STORE_ERROR_MAP = {
     "WORKER_REGISTRATION_INVALID": "AGENT_GRANT_INVALID",
     "TASK_PACKAGE_MISMATCH": "CURRENT_PACKAGE_PIN_MISMATCH",
 }
-
-
-ACCEPTANCE_OPERATION_ENVELOPE_KEYS = (
-    "package",
-    "idempotency_key",
-    "task_request",
-    "effective_policy",
-)
-
-
-def _effective_policy_grant_fields(policy: Mapping[str, object]) -> dict[str, object]:
-    capability_ids = list(policy["granted_capabilities"])
-    catalog_tools = tool_catalog()["tools"]
-    tool_keys = sorted(
-        tool["tool_key"]
-        for tool in catalog_tools
-        if tool["capability_id"] in capability_ids
-    )
-    if not capability_ids or not tool_keys:
-        raise ValueError("effective policy has no representable grants")
-    if any(
-        not any(
-            tool["capability_id"] == capability_id for tool in catalog_tools
-        )
-        for capability_id in capability_ids
-    ):
-        raise ValueError("granted capability has no catalog tool")
-    budgets = policy["budgets"]
-    elapsed_limit_ms = budgets["wall_ms"]
-    tool_call_limit = budgets["tool_calls"]
-    if (
-        not isinstance(elapsed_limit_ms, (int, float))
-        or isinstance(elapsed_limit_ms, bool)
-        or not math.isfinite(elapsed_limit_ms)
-        or not elapsed_limit_ms >= 1
-        or not isinstance(tool_call_limit, (int, float))
-        or isinstance(tool_call_limit, bool)
-        or not math.isfinite(tool_call_limit)
-        or not tool_call_limit >= 1
-    ):
-        raise ValueError("effective policy has invalid representable budgets")
-    return {
-        "capability_ids": capability_ids,
-        "tool_keys": tool_keys,
-        "elapsed_limit_ms": elapsed_limit_ms,
-        "tool_call_limit": tool_call_limit,
-    }
-
-
-def _effective_policy_deadline_fields(
-    policy: Mapping[str, object], accepted_at: str
-) -> dict[str, object]:
-    budgets = policy["budgets"]
-    wall_ms = budgets["wall_ms"]
-    reserve_ms = policy["terminalization_reserve_ms"]
-    if (
-        not isinstance(wall_ms, int)
-        or isinstance(wall_ms, bool)
-        or wall_ms < 1
-        or wall_ms > 9007199254740991
-        or not isinstance(reserve_ms, int)
-        or isinstance(reserve_ms, bool)
-        or reserve_ms < 0
-        or reserve_ms > 9007199254740991
-    ):
-        raise ValueError("effective policy has invalid deadline fields")
-    try:
-        accepted = dt.datetime.fromisoformat(accepted_at.replace("Z", "+00:00"))
-        if accepted.tzinfo != dt.timezone.utc:
-            raise ValueError
-        deadline = accepted + dt.timedelta(milliseconds=wall_ms)
-    except (OverflowError, TypeError, ValueError):
-        raise ValueError("effective policy deadline is not representable") from None
-    return {
-        "absolute_deadline_at": deadline.isoformat(timespec="milliseconds").replace(
-            "+00:00", "Z"
-        ),
-        "terminalization_reserve_ms": reserve_ms,
-    }
 
 
 def _now() -> str:
@@ -280,66 +203,15 @@ class AgentFirstAuthority:
         return self._store_call(lambda: self._store.register_worker(values))
 
     def accept_current_task(self, request: dict[str, object]) -> bytes:
-        self._package(request)
+        document = self._verify_digest("agent-task-accept-request/v1", request)
         try:
-            if (
-                set(request) != set(ACCEPTANCE_OPERATION_ENVELOPE_KEYS)
-                or not isinstance(request["idempotency_key"], str)
-                or not 1 <= len(request["idempotency_key"]) <= 160
-            ):
-                self._raise("CONTRACT_DOCUMENT_INVALID")
-            document = validate_task_request_acceptance(request["task_request"])
-            policy = validate_effective_policy_derivation(
+            values = build_acceptance_values(
                 document,
-                request["effective_policy"],
-            )
-            _effective_policy_grant_fields(policy)
-            accepted_at = _now()
-            deadline_fields = _effective_policy_deadline_fields(policy, accepted_at)
-            request_bytes = canonical_validated_bytes("task-request/v1", document)
-            policy_bytes = canonical_validated_bytes(
-                "effective-execution-policy/v1", policy
-            )
-            event_request_digest = canonical_document_sha256(
-                {
-                    "package": request["package"],
-                    "idempotency_key": request["idempotency_key"],
-                    "task_request": document,
-                    "effective_policy": policy,
-                }
+                accepted_at=_now(),
+                owner_id=f"owner_{secrets.token_hex(16)}",
             )
         except (ContractValidationError, UnicodeError, ValueError, TypeError, KeyError):
             self._raise("CONTRACT_DOCUMENT_INVALID")
-        response = seal_document(
-            "agent-task-accept-response/v1",
-            {
-                "schema_id": "agent-task-accept-response/v1",
-                "package": package_tuple(),
-                "task_id": document["task_id"],
-                "task_version": 1,
-                "deletion_version": 0,
-                "lifecycle": "QUEUED",
-                "desired_state": "RUN",
-                "accepted_at": accepted_at,
-            },
-        )
-        values = {
-            "task_id": document["task_id"],
-            "task_type": document["task_type"],
-            "package_tuple": PACKAGE_TUPLE,
-            "policy_digest": policy["digest"],
-            "policy_bytes": policy_bytes,
-            "idempotency_key": request["idempotency_key"],
-            "request_digest": canonical_document_sha256(document),
-            "event_request_digest": event_request_digest,
-            "request_bytes": request_bytes,
-            "owner_id": f"owner_{secrets.token_hex(16)}",
-            "accepted_at": accepted_at,
-            **deadline_fields,
-            "response_bytes": canonical_validated_bytes(
-                "agent-task-accept-response/v1", response
-            ),
-        }
         return self._store_call(lambda: self._store.accept_task(values))
 
     def claim_and_issue_current_grant(self, request: dict[str, object]) -> bytes:
@@ -355,94 +227,11 @@ class AgentFirstAuthority:
 
         def build(head: sqlite3.Row) -> Mapping[str, object]:
             try:
-                policy = verify_document_digest(
-                    "effective-execution-policy/v1",
-                    json.loads(self._store._blob(head["policy_bytes"])),
-                )
-                if policy["digest"] != head["policy_digest"]:
-                    raise ValueError("stored policy digest mismatch")
-                policy_fields = _effective_policy_grant_fields(policy)
-                expected_deadline = _effective_policy_deadline_fields(
-                    policy, head["accepted_at"]
-                )
-                if any(
-                    head[field] != value
-                    for field, value in expected_deadline.items()
-                ):
-                    raise ValueError("stored deadline wire mismatch")
+                return build_runtime_bootstrap(head, document, claimed_at=_now())
+            except RuntimeBootstrapError as error:
+                raise AuthorityStoreError(error.code) from None
             except (ContractValidationError, UnicodeError, ValueError, TypeError, KeyError):
                 raise AuthorityStoreError("AUTHORITY_STORAGE_CORRUPT") from None
-            if any(document[field] != value for field, value in policy_fields.items()):
-                raise AuthorityStoreError("AGENT_GRANT_INVALID")
-            task_version = head["task_version"] + 1
-            attempt_id = f"attempt_{secrets.token_hex(16)}"
-            session_id = f"sess_{secrets.token_hex(16)}"
-            grant_id = f"grant_{secrets.token_hex(16)}"
-            common = {
-                "package": package_tuple(),
-                "task_id": document["task_id"],
-                "attempt_id": attempt_id,
-                "session_id": session_id,
-                "owner_id": head["owner_id"],
-                "lease_id": document["lease_id"],
-                "task_version": task_version,
-                "deletion_version": head["deletion_version"],
-                "owner_epoch": head["owner_epoch"] + 1,
-                "native_epoch": head["native_epoch"] + 1,
-                "transport_epoch": document["transport_epoch"],
-            }
-            deadline_wire = {
-                "absolute_deadline_at": head["absolute_deadline_at"],
-                "terminalization_reserve_ms": head["terminalization_reserve_ms"],
-            }
-            grant = seal_document(
-                "agent-worker-grant/v1",
-                {
-                    "schema_id": "agent-worker-grant/v1",
-                    **common,
-                    "grant_id": grant_id,
-                    "policy_digest": head["policy_digest"],
-                    **deadline_wire,
-                    **policy_fields,
-                },
-            )
-            claim = seal_document(
-                "agent-task-claim/v1",
-                {
-                    "schema_id": "agent-task-claim/v1",
-                    **common,
-                    "claim_id": f"claim_{secrets.token_hex(16)}",
-                    "grant": grant,
-                },
-            )
-            envelope = seal_document(
-                "server-authority-envelope/v1",
-                {
-                    "schema_id": "server-authority-envelope/v1",
-                    **common,
-                    **deadline_wire,
-                    "lifecycle": "ACTIVE",
-                    "desired_state": "RUN",
-                    "grant": grant,
-                },
-            )
-            return {
-                **common,
-                "previous_task_version": head["task_version"],
-                "claim_id": claim["claim_id"],
-                "claim_digest": claim["claim_digest"],
-                "claim_bytes": canonical_validated_bytes("agent-task-claim/v1", claim),
-                "grant_id": grant_id,
-                "grant_digest": grant["grant_digest"],
-                "grant_bytes": canonical_validated_bytes("agent-worker-grant/v1", grant),
-                "authority_digest": envelope["authority_digest"],
-                "authority_bytes": canonical_validated_bytes(
-                    "server-authority-envelope/v1", envelope
-                ),
-                "response_bytes": canonical_validated_bytes(
-                    "server-authority-envelope/v1", envelope
-                ),
-            }
 
         return self._store_call(lambda: self._claims.claim_task(values, build))
 

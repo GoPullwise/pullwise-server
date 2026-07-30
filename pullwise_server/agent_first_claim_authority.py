@@ -8,6 +8,7 @@ import sqlite3
 from typing import Callable, Mapping
 
 from .agent_first_authority_store import AgentFirstAuthorityStore, AuthorityStoreError
+from .agent_first_claim_write_store import ClaimWriteSetStore
 
 
 CLAIM_FAULT_POINTS = tuple(
@@ -18,6 +19,7 @@ CLAIM_FAULT_POINTS = tuple(
         "grant",
         "grant_authority",
         "claim",
+        "runtime_bootstrap",
         "task_head",
         "event",
     )
@@ -38,7 +40,7 @@ ABANDON_FAULT_POINTS = tuple(
 )
 
 
-class ClaimAuthorityStore(AgentFirstAuthorityStore):
+class ClaimAuthorityStore(ClaimWriteSetStore, AgentFirstAuthorityStore):
     def claim_task(
         self,
         values: Mapping[str, object],
@@ -66,13 +68,14 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                     JOIN agent_current_attempts a ON a.attempt_id=c.attempt_id
                     JOIN agent_current_owner_incarnations o ON o.session_id=c.session_id
                     JOIN agent_current_grant_authority ga ON ga.grant_id=c.grant_id
-                    WHERE h.task_id=? AND c.worker_id=? AND c.authority_bytes=?
+                    JOIN agent_current_runtime_bootstraps b ON b.claim_id=c.claim_id
+                    WHERE h.task_id=? AND c.worker_id=? AND b.bootstrap_bytes=?
                       AND h.current_authority_schema_id='server-authority-envelope/v1'
                     """,
                     (values["task_id"], values["worker_id"], replay),
                 ).fetchone()
                 if current is None or tuple(current) != (
-                    "ACTIVE", "RUN", "CLAIMED", "STARTING", "ACTIVE"
+                    "ACTIVE", "RUN", "LEASED", "STARTING", "ACTIVE"
                 ):
                     raise AuthorityStoreError("AUTHORITY_FENCED")
                 return replay
@@ -102,10 +105,16 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
                 """
                 SELECT h.*, r.package_identity, r.package_version,
                        r.content_sha256, r.root_sha256, r.policy_digest,
-                       r.policy_bytes, r.accepted_at, r.absolute_deadline_at,
-                       r.terminalization_reserve_ms
+                       r.policy_bytes, r.request_bytes, r.accepted_at,
+                       r.absolute_deadline_at, r.terminalization_reserve_ms,
+                       x.accept_request_digest, x.accept_request_bytes,
+                       x.requirement_ledger_digest,
+                       x.requirement_ledger_version,
+                       x.requirement_ledger_bytes, x.outer_job_id, x.run_id,
+                       x.accept_response_digest, x.accept_response_bytes
                 FROM agent_current_task_heads h
                 JOIN agent_current_task_requests r USING (task_id)
+                JOIN agent_current_task_acceptances x USING (task_id)
                 WHERE h.task_id = ?
                 """,
                 (values["task_id"],),
@@ -127,108 +136,6 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
             write = build(head)
             self._insert_claim_write_set(connection, values, write)
             return write["response_bytes"]  # type: ignore[return-value]
-
-    def _insert_claim_write_set(
-        self,
-        connection: sqlite3.Connection,
-        request: Mapping[str, object],
-        write: Mapping[str, object],
-    ) -> None:
-        self._fault("claim.before_attempt")
-        connection.execute(
-            "INSERT INTO agent_current_attempts "
-            "(attempt_id, task_id, native_epoch, transport_epoch, lease_id, state) "
-            "VALUES (?, ?, ?, ?, ?, 'CLAIMED')",
-            (
-                write["attempt_id"], request["task_id"], write["native_epoch"],
-                request["transport_epoch"], request["lease_id"],
-            ),
-        )
-        self._fault("claim.after_attempt")
-        self._fault("claim.before_owner")
-        connection.execute(
-            "INSERT INTO agent_current_owner_incarnations "
-            "(session_id, task_id, attempt_id, owner_id, owner_epoch, state) "
-            "VALUES (?, ?, ?, ?, ?, 'STARTING')",
-            (
-                write["session_id"], request["task_id"], write["attempt_id"],
-                write["owner_id"], write["owner_epoch"],
-            ),
-        )
-        self._fault("claim.after_owner")
-        self._fault("claim.before_grant")
-        connection.execute(
-            "INSERT INTO agent_current_grants "
-            "(grant_id, task_id, package_identity, package_version, content_sha256, "
-            "root_sha256, grant_digest, grant_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                write["grant_id"], request["task_id"], *request["package_tuple"],
-                write["grant_digest"], write["grant_bytes"],
-            ),
-        )
-        self._fault("claim.after_grant")
-        self._fault("claim.before_grant_authority")
-        connection.execute(
-            "INSERT INTO agent_current_grant_authority (grant_id, state) VALUES (?, 'ACTIVE')",
-            (write["grant_id"],),
-        )
-        self._fault("claim.after_grant_authority")
-        self._fault("claim.before_claim")
-        connection.execute(
-            """
-            INSERT INTO agent_current_claims (
-                claim_id, task_id, attempt_id, session_id, grant_id, worker_id,
-                owner_id, lease_id, task_version, deletion_version, owner_epoch,
-                native_epoch, transport_epoch, claim_digest, claim_bytes,
-                authority_digest, authority_bytes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                write["claim_id"], request["task_id"], write["attempt_id"],
-                write["session_id"], write["grant_id"], request["worker_id"],
-                write["owner_id"], request["lease_id"], write["task_version"],
-                write["deletion_version"], write["owner_epoch"],
-                write["native_epoch"], request["transport_epoch"],
-                write["claim_digest"], write["claim_bytes"],
-                write["authority_digest"], write["authority_bytes"],
-            ),
-        )
-        self._fault("claim.after_claim")
-        self._fault("claim.before_task_head")
-        updated = connection.execute(
-            """
-            UPDATE agent_current_task_heads
-            SET lifecycle='ACTIVE', task_version=?, native_epoch=?, owner_epoch=?,
-                transport_epoch=?, current_attempt_id=?, current_session_id=?,
-                current_grant_id=?,
-                current_authority_schema_id='server-authority-envelope/v1',
-                current_authority_digest=?, current_lease_id=?,
-                updated_at=strftime('%s','now')
-            WHERE task_id=? AND lifecycle='QUEUED' AND desired_state='RUN'
-              AND task_version=? AND deletion_version=? AND current_attempt_id IS NULL
-            """,
-            (
-                write["task_version"], write["native_epoch"], write["owner_epoch"],
-                request["transport_epoch"], write["attempt_id"], write["session_id"],
-                write["grant_id"], write["authority_digest"], request["lease_id"],
-                request["task_id"],
-                write["previous_task_version"], write["deletion_version"],
-            ),
-        ).rowcount
-        if updated != 1:
-            raise AuthorityStoreError("TASK_NOT_CLAIMABLE")
-        self._fault("claim.after_task_head")
-        self._fault("claim.before_event")
-        self._insert_event(
-            connection,
-            task_id=request["task_id"],  # type: ignore[arg-type]
-            event_type="attempt.claimed",
-            idempotency_key=request["idempotency_key"],  # type: ignore[arg-type]
-            request_digest=request["request_digest"],  # type: ignore[arg-type]
-            response_bytes=write["response_bytes"],  # type: ignore[arg-type]
-            task_version=write["task_version"],  # type: ignore[arg-type]
-        )
-        self._fault("claim.after_event")
 
     def abandon_claim(
         self,
@@ -288,7 +195,7 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
             ).fetchone()
             if (
                 states is None
-                or tuple(states)[:3] != ("CLAIMED", "STARTING", "ACTIVE")
+                or tuple(states)[:3] != ("LEASED", "STARTING", "ACTIVE")
                 or states["authority_digest"] != head["current_authority_digest"]
             ):
                 raise AuthorityStoreError("AUTHORITY_FENCED")
@@ -339,7 +246,7 @@ class ClaimAuthorityStore(AgentFirstAuthorityStore):
         attempt = connection.execute(
             "UPDATE agent_current_attempts SET state='FENCED', "
             "fenced_at=strftime('%s','now'), fence_reason=? "
-            "WHERE attempt_id=? AND state='CLAIMED'",
+            "WHERE attempt_id=? AND state='LEASED'",
             (values["reason"], values["attempt_id"]),
         ).rowcount
         self._fault("abandon.after_attempt")

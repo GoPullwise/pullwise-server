@@ -8,6 +8,11 @@ from .agent_first_transport_envelope_migrations import (
     TERMINAL_RESULT_TABLE,
     install_transport_envelope_tables,
 )
+from .agent_first_runtime_bootstrap_migrations import (
+    RUNTIME_BOOTSTRAP_IMMUTABLE_TABLES,
+    RUNTIME_BOOTSTRAP_TABLES,
+    install_runtime_bootstrap_tables,
+)
 CURRENT_AUTHORITY_TABLES = (
     "agent_current_worker_registrations",
     "agent_current_worker_registration_heads",
@@ -24,6 +29,7 @@ CURRENT_AUTHORITY_TABLES = (
     TERMINAL_RESULT_TABLE,
     "agent_current_abandonments",
     "agent_current_fences",
+    *RUNTIME_BOOTSTRAP_TABLES,
 )
 
 IMMUTABLE_TABLES = (
@@ -35,9 +41,10 @@ IMMUTABLE_TABLES = (
     "agent_current_transport_receipts",
     "agent_current_abandonments",
     "agent_current_fences",
+    *RUNTIME_BOOTSTRAP_IMMUTABLE_TABLES,
 )
 AUTHORITY_STATE_TABLES = (
-    ("agent_current_attempts", "CLAIMED"),
+    ("agent_current_attempts", "LEASED"),
     ("agent_current_owner_incarnations", "STARTING"),
     ("agent_current_grant_authority", "ACTIVE"),
 )
@@ -135,7 +142,8 @@ _DDL = (
         lease_id TEXT NOT NULL,
         state TEXT NOT NULL CHECK(
             state IN (
-                'CLAIMED', 'SUCCEEDED', 'SUSPENDED',
+                'LEASED', 'PREPARING', 'RUNNING', 'VERIFYING',
+                'SUSPENDING', 'PUBLISHING', 'SUCCEEDED', 'SUSPENDED',
                 'FAILED', 'CANCELLED', 'FENCED'
             )
         ),
@@ -365,6 +373,7 @@ def install_current_authority_tables(connection: sqlite3.Connection) -> None:
     for statement in _DDL:
         connection.execute(statement)
     install_transport_envelope_tables(connection)
+    install_runtime_bootstrap_tables(connection)
     for table in IMMUTABLE_TABLES:
         for operation in ("UPDATE", "DELETE"):
             trigger = f"{table}_{operation.lower()}_immutable"

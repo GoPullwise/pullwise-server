@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import sqlite3
@@ -8,10 +7,6 @@ import unittest
 
 from pullwise_server._generated_agent_task_contract import (
     canonical_validated_bytes,
-    fixture,
-    package_tuple,
-    seal_document,
-    validate_claim_write_set,
     verify_document_digest,
 )
 from tests.agent_first_authority_support import AuthorityHarness, TASK_ID
@@ -19,24 +14,7 @@ from tests.agent_first_authority_support import AuthorityHarness, TASK_ID
 
 class AgentFirstS4RuntimeBootstrapTest(AuthorityHarness, unittest.TestCase):
     def _accept_request(self) -> dict[str, object]:
-        legacy = self.accept_request()
-        ledger = deepcopy(fixture("requirements_golden_ledger")["document"])
-        ledger["task_id"] = TASK_ID
-        ledger.pop("ledger_digest")
-        ledger = seal_document("requirement-ledger/v1", ledger)
-        return seal_document(
-            "agent-task-accept-request/v1",
-            {
-                "schema_id": "agent-task-accept-request/v1",
-                "package": package_tuple(),
-                "idempotency_key": legacy["idempotency_key"],
-                "outer_job_id": "job-1",
-                "run_id": "run-1",
-                "task_request": legacy["task_request"],
-                "effective_policy": legacy["effective_policy"],
-                "requirement_ledger": ledger,
-            },
-        )
+        return self.accept_request(TASK_ID)
 
     def test_claim_atomically_returns_and_persists_the_canonical_bootstrap(self) -> None:
         self.register()
@@ -54,9 +32,6 @@ class AgentFirstS4RuntimeBootstrapTest(AuthorityHarness, unittest.TestCase):
             "agent-task-runtime-bootstrap/v1", json.loads(claimed_bytes)
         )
         roots = bootstrap["construction_roots"]
-        validate_claim_write_set(
-            roots["task_record"], roots["attempt"], roots["owner"]
-        )
         self.assertEqual(accept_request, bootstrap["accept_request"])
         self.assertEqual(accepted, bootstrap["accept_response"])
         self.assertEqual(bootstrap["authority"]["task_id"], roots["task_record"]["task_id"])
@@ -126,9 +101,19 @@ class AgentFirstS4RuntimeBootstrapTest(AuthorityHarness, unittest.TestCase):
         ))
 
     def test_unversioned_acceptance_envelope_is_not_a_fallback(self) -> None:
+        current = self.accept_request()
+        unversioned = {
+            field: current[field]
+            for field in (
+                "package",
+                "idempotency_key",
+                "task_request",
+                "effective_policy",
+            )
+        }
         self.assert_error(
             "CONTRACT_DOCUMENT_INVALID",
-            lambda: self.authority.accept_current_task(self.accept_request()),
+            lambda: self.authority.accept_current_task(unversioned),
         )
         self.assertEqual((0,), self.counts("agent_current_task_requests"))
 

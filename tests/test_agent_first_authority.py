@@ -8,6 +8,7 @@ import unittest
 from pullwise_server._generated_agent_task_contract import (
     PACKAGE_TUPLE,
     canonical_document_sha256,
+    canonical_validated_bytes,
     package_tuple,
     seal_document,
     schema_ids,
@@ -71,6 +72,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             "effective-execution-policy/v1",
             unrepresentable["effective_policy"],
         )
+        unrepresentable = self.reseal_accept_request(unrepresentable)
         self.assert_error(
             "CONTRACT_DOCUMENT_INVALID",
             lambda: self.authority.accept_current_task(unrepresentable),
@@ -92,6 +94,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             lambda authority: authority.accept_current_task(self.accept_request()),
             (
                 "agent_current_task_requests",
+                "agent_current_task_acceptances",
                 "agent_current_task_heads",
                 "agent_current_control_events",
             ),
@@ -140,6 +143,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             "effective-execution-policy/v1",
             replay["effective_policy"],
         )
+        replay = self.reseal_accept_request(replay)
         self.assert_error(
             "IDEMPOTENCY_CONFLICT",
             lambda: self.authority.accept_current_task(replay),
@@ -178,7 +182,10 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
         request = self.claim_request()
         first = self.authority.claim_and_issue_current_grant(request)
         self.assertEqual(first, self.authority.claim_and_issue_current_grant(dict(request)))
-        envelope = verify_document_digest("server-authority-envelope/v1", json.loads(first))
+        bootstrap = verify_document_digest(
+            "agent-task-runtime-bootstrap/v1", json.loads(first)
+        )
+        envelope = bootstrap["authority"]
         grant = verify_document_digest("agent-worker-grant/v1", envelope["grant"])
         bound = (
             "task_id", "attempt_id", "session_id", "owner_id", "lease_id",
@@ -188,8 +195,10 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
         self.assertEqual(tuple(grant[key] for key in bound), tuple(envelope[key] for key in bound))
         self.assertEqual(envelope["task_version"], 2)
         with self.connect() as connection:
-            claim, authority = connection.execute(
-                "SELECT claim_bytes, authority_bytes FROM agent_current_claims"
+            claim, authority, persisted_bootstrap = connection.execute(
+                "SELECT c.claim_bytes, c.authority_bytes, b.bootstrap_bytes "
+                "FROM agent_current_claims c "
+                "JOIN agent_current_runtime_bootstraps b USING (claim_id)"
             ).fetchone()
             head = connection.execute(
                 "SELECT lifecycle, task_version, current_authority_digest "
@@ -198,15 +207,19 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             with self.assertRaises(sqlite3.DatabaseError):
                 connection.execute("UPDATE agent_current_grants SET grant_bytes=x'00'")
         verify_document_digest("agent-task-claim/v1", json.loads(claim))
-        self.assertEqual(authority, first)
+        self.assertEqual(
+            authority,
+            canonical_validated_bytes("server-authority-envelope/v1", envelope),
+        )
+        self.assertEqual(persisted_bootstrap, first)
         self.assertEqual(head, ("ACTIVE", 2, envelope["authority_digest"]))
         self.assertEqual(
             self.counts(
                 "agent_current_attempts", "agent_current_owner_incarnations",
                 "agent_current_claims", "agent_current_grants",
-                "agent_current_grant_authority",
+                "agent_current_grant_authority", "agent_current_runtime_bootstraps",
             ),
-            (1, 1, 1, 1, 1),
+            (1, 1, 1, 1, 1, 1),
         )
 
     def test_claim_conflict_concurrency_and_every_fault_stage(self) -> None:

@@ -124,7 +124,7 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
     ) -> None:
         if tuple(
             current[key] for key in ("attempt_state", "owner_state", "grant_state")
-        ) != ("CLAIMED", "STARTING", "ACTIVE"):
+        ) != ("LEASED", "STARTING", "ACTIVE"):
             raise AuthorityStoreError("AUTHORITY_FENCED")
         pairs = (
             ("task_id", "task_id"),
@@ -234,7 +234,7 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
         changed = connection.execute(
             """
             UPDATE agent_current_attempts SET state=?
-            WHERE attempt_id=? AND state='CLAIMED'
+            WHERE attempt_id=? AND state='LEASED'
             """,
             (attempt_state, values["attempt_id"]),
         ).rowcount
