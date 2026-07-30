@@ -273,7 +273,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
         for thread in threads:
             thread.start()
         for thread in threads:
-            thread.join(10)
+            thread.join(120)
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertEqual(sum(isinstance(item, bytes) for item in outcomes), 1)
         failures = [

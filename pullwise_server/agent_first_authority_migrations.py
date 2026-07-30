@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from .agent_first_authority_migration_guards import install_authority_guards
 from .agent_first_transport_envelope_migrations import (
     TERMINAL_RESULT_TABLE,
     install_transport_envelope_tables,
@@ -374,38 +375,11 @@ def install_current_authority_tables(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
     install_transport_envelope_tables(connection)
     install_runtime_bootstrap_tables(connection)
-    for table in IMMUTABLE_TABLES:
-        for operation in ("UPDATE", "DELETE"):
-            trigger = f"{table}_{operation.lower()}_immutable"
-            connection.execute(
-                f"""
-                CREATE TRIGGER IF NOT EXISTS {trigger}
-                BEFORE {operation} ON {table}
-                BEGIN
-                    SELECT RAISE(ABORT, '{table.upper()}_IMMUTABLE');
-                END
-                """
-            )
-    for table, live_state in AUTHORITY_STATE_TABLES:
-        connection.execute(
-            f"""
-            CREATE TRIGGER IF NOT EXISTS {table}_terminal_permanent
-            BEFORE UPDATE ON {table}
-            WHEN OLD.state!='{live_state}'
-            BEGIN
-                SELECT RAISE(ABORT, '{table.upper()}_TERMINAL_PERMANENT');
-            END
-            """
-        )
-        connection.execute(
-            f"""
-            CREATE TRIGGER IF NOT EXISTS {table}_delete_immutable
-            BEFORE DELETE ON {table}
-            BEGIN
-                SELECT RAISE(ABORT, '{table.upper()}_IMMUTABLE');
-            END
-            """
-        )
+    install_authority_guards(
+        connection,
+        IMMUTABLE_TABLES,
+        AUTHORITY_STATE_TABLES,
+    )
 
 
 __all__ = [

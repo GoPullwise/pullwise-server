@@ -30,10 +30,10 @@ from .agent_first_authority_store import (
     AuthorityStoreError,
     FaultInjector,
 )
+from .agent_first_acceptance_documents import build_acceptance_values
 from .agent_first_claim_authority import ClaimAuthorityStore
 from .agent_first_runtime_bootstrap import (
     RuntimeBootstrapError,
-    build_acceptance_values,
     build_runtime_bootstrap,
 )
 from .agent_first_transport_envelope_authority import TransportEnvelopeAuthority
