@@ -271,6 +271,7 @@ __all__ = [
     "seal_document", "stable_error_registry", "tool_catalog", "validate_document",
     "verify_budget_transition", "verify_bundle", "verify_content_ref_set",
     "verify_change_set_context", "verify_document_digest",
+    "verify_committed_checkpoint_context",
     "verify_completion_proposal_context",
     "verify_evidence_closure_context", "verify_execution_state_context",
     "verify_quality_policy_plan_context",

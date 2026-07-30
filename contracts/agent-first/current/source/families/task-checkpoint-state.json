@@ -10,6 +10,10 @@
         "field": "machine_checkpoint_digest",
         "domain": "pullwise:machine-checkpoint:v1"
       },
+      "x-pullwise-semantics": {
+        "document_rules": ["machine_checkpoint"],
+        "contextual_helpers": []
+      },
       "required": [
         "schema_id",
         "package",
@@ -159,6 +163,10 @@
       "x-pullwise-digest": {
         "field": "semantic_checkpoint_digest",
         "domain": "pullwise:semantic-checkpoint:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": ["semantic_checkpoint"],
+        "contextual_helpers": []
       },
       "required": [
         "schema_id",

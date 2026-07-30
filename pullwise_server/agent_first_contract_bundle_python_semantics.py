@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .agent_first_contract_bundle_python_budget import PYTHON_BUDGET
 from .agent_first_contract_bundle_python_bootstrap import PYTHON_BOOTSTRAP
+from .agent_first_contract_bundle_python_checkpoint import PYTHON_CHECKPOINT
 from .agent_first_contract_bundle_python_control import PYTHON_CONTROL
 from .agent_first_contract_bundle_python_dispatch import PYTHON_DISPATCH
 from .agent_first_contract_bundle_python_gate import PYTHON_GATE
@@ -318,6 +319,7 @@ PYTHON_SEMANTICS = "\n".join(
     (
         PYTHON_SEMANTICS_BASE,
         PYTHON_BOOTSTRAP,
+        PYTHON_CHECKPOINT,
         PYTHON_RULES,
         PYTHON_SOURCE_EXECUTION_OBSERVATION,
         PYTHON_BUDGET,

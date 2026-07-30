@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .agent_first_contract_bundle_npm_budget import NPM_BUDGET
 from .agent_first_contract_bundle_npm_bootstrap import NPM_BOOTSTRAP
+from .agent_first_contract_bundle_npm_checkpoint import NPM_CHECKPOINT
 from .agent_first_contract_bundle_npm_change_set_patch import (
     NPM_CHANGE_SET_PATCH_RULE,
 )
@@ -357,6 +358,7 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   capability_sets_disjoint_sorted_unique: taskControlRulePolicyCapabilities,
   change_set: ruleChangeSetComplete,
   change_set_patch: ruleChangeSetPatch,
+  committed_checkpoint_manifest: ruleCommittedCheckpointManifest,
   completion_proposal: ruleCompletionProposal,
   charter_digest_exact: taskControlRuleCharterDigest,
   debug_redaction_plan: ruleDebugRedactionPlan,
@@ -376,6 +378,7 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   head_version_ref_pairs: taskControlRuleRecordHeads,
   ledger_digest_exact: taskControlRuleLedgerDigest,
   local_tool_receipt: ruleLocalToolReceipt,
+  machine_checkpoint: ruleMachineCheckpoint,
   observation: ruleObservation,
   observation_manifest: ruleObservationManifestComplete,
   owner_state_nullability: taskControlRuleOwnerNullability,
@@ -397,6 +400,7 @@ const DOCUMENT_RULE_HANDLERS = Object.freeze({
   requirement_id_source_kind_match: taskControlRuleRequirementId,
   risk_ceiling_current_mvp: taskControlRulePolicyMvp,
   root_and_origin_sets_sorted_unique: taskControlRulePolicyRoots,
+  semantic_checkpoint: ruleSemanticCheckpoint,
   server_authority_envelope: ruleServerAuthorityEnvelope,
   sorted_unique_active_requirement_ids: taskControlRuleLedgerActive,
   sorted_unique_charter_sets: taskControlRuleCharterSets,
@@ -530,6 +534,7 @@ NPM_SEMANTICS = "\n".join(
     (
         NPM_SEMANTICS_BASE,
         NPM_BOOTSTRAP,
+        NPM_CHECKPOINT,
         NPM_SOURCE_EXECUTION_OBSERVATION,
         NPM_CHANGE_SET_PATCH_RULE,
         NPM_EFFECTIVE_POLICY_RULES,

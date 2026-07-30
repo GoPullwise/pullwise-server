@@ -10,6 +10,10 @@
         "field": "manifest_hash",
         "domain": "pullwise:committed-checkpoint-manifest:v1"
       },
+      "x-pullwise-semantics": {
+        "document_rules": ["committed_checkpoint_manifest"],
+        "contextual_helpers": ["verify_committed_checkpoint_context"]
+      },
       "required": [
         "schema_id",
         "package",

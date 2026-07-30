@@ -290,6 +290,7 @@ export const verify_budget_transition = verifyBudgetTransition;
 export const verify_content_ref_set = verifyContentRefSet;
 export const verify_document_digest = verifyDocumentDigest;
 export const verify_change_set_context = verifyChangeSetContext;
+export const verify_committed_checkpoint_context = verifyCommittedCheckpointContext;
 export const verify_completion_proposal_context = verifyCompletionProposalContext;
 export const verify_execution_state_context = verifyExecutionStateContext;
 export const verify_observation_manifest_extension = verifyObservationManifestExtension;

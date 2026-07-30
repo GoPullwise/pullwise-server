@@ -4,10 +4,16 @@ from __future__ import annotations
 
 
 NPM_BOOTSTRAP = r'''
+function verifyBootstrapDigest(schemaId, value) {
+  const validated = validateDocument(schemaId, value);
+  verifyEmbeddedDigestSync(schemaId, validated);
+  return validated;
+}
+
 function ruleAgentTaskAcceptRequest(value) {
   const request = value.task_request;
   validateEffectivePolicyDerivation(request, value.effective_policy);
-  const ledger = verifyDocumentDigest(
+  const ledger = verifyBootstrapDigest(
     "requirement-ledger/v1", value.requirement_ledger,
   );
   if (ledger.task_id !== request.task_id) {
@@ -19,13 +25,13 @@ function ruleAgentTaskAcceptRequest(value) {
 }
 
 function ruleAgentTaskRuntimeBootstrap(value) {
-  const acceptRequest = verifyDocumentDigest(
+  const acceptRequest = verifyBootstrapDigest(
     "agent-task-accept-request/v1", value.accept_request,
   );
-  const acceptResponse = verifyDocumentDigest(
+  const acceptResponse = verifyBootstrapDigest(
     "agent-task-accept-response/v1", value.accept_response,
   );
-  const authority = verifyDocumentDigest(
+  const authority = verifyBootstrapDigest(
     "server-authority-envelope/v1", value.authority,
   );
   const roots = value.construction_roots;
