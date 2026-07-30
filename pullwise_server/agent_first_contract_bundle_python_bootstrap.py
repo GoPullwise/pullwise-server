@@ -4,10 +4,18 @@ from __future__ import annotations
 
 
 PYTHON_BOOTSTRAP = r'''
+def _verify_bootstrap_digest(
+    schema_id: str, value: object
+) -> dict[str, object]:
+    validated = validate_document(schema_id, value)
+    _verify_embedded_digest(schema_id, validated)
+    return validated
+
+
 def _rule_agent_task_accept_request(value: dict[str, object]) -> None:
     request = value["task_request"]
     validate_effective_policy_derivation(request, value["effective_policy"])
-    ledger = verify_document_digest(
+    ledger = _verify_bootstrap_digest(
         "requirement-ledger/v1", value["requirement_ledger"]
     )
     _require(
@@ -18,13 +26,13 @@ def _rule_agent_task_accept_request(value: dict[str, object]) -> None:
 
 
 def _rule_agent_task_runtime_bootstrap(value: dict[str, object]) -> None:
-    accept_request = verify_document_digest(
+    accept_request = _verify_bootstrap_digest(
         "agent-task-accept-request/v1", value["accept_request"]
     )
-    accept_response = verify_document_digest(
+    accept_response = _verify_bootstrap_digest(
         "agent-task-accept-response/v1", value["accept_response"]
     )
-    authority = verify_document_digest(
+    authority = _verify_bootstrap_digest(
         "server-authority-envelope/v1", value["authority"]
     )
     roots = value["construction_roots"]

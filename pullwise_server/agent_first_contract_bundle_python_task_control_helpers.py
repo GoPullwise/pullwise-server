@@ -41,7 +41,7 @@ def validate_effective_policy_derivation(
     request: object, policy: object
 ) -> dict[str, object]:
     accepted = validate_task_request_acceptance(request)
-    effective = verify_document_digest(
+    effective = validate_document(
         "effective-execution-policy/v1", policy
     )
     _require(
