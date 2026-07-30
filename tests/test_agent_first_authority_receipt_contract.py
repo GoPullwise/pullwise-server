@@ -248,7 +248,7 @@ class AgentFirstAuthorityReceiptContractTest(unittest.TestCase):
                 "IDEMPOTENCY_CONFLICT",
                 lambda: harness.authority.claim_and_issue_current_grant(conflict),
             )
-            envelope = json.loads(first)
+            envelope = json.loads(first)["authority"]
             abandon = {
                 "schema_id": "agent-claim-abandon-request/v1",
                 "package": package_tuple(),
