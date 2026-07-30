@@ -4,6 +4,20 @@ from __future__ import annotations
 
 
 NPM_BOOTSTRAP = r'''
+function ruleAgentTaskAcceptRequest(value) {
+  const request = value.task_request;
+  validateEffectivePolicyDerivation(request, value.effective_policy);
+  const ledger = verifyDocumentDigest(
+    "requirement-ledger/v1", value.requirement_ledger,
+  );
+  if (ledger.task_id !== request.task_id) {
+    fail(
+      "ACCEPT_REQUEST_TASK_BINDING_MISMATCH",
+      "$.requirement_ledger.task_id",
+    );
+  }
+}
+
 function ruleAgentTaskRuntimeBootstrap(value) {
   const authority = value.authority;
   const roots = value.construction_roots;

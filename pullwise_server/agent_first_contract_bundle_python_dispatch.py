@@ -6,6 +6,7 @@ from __future__ import annotations
 PYTHON_DISPATCH = r'''
 _DOCUMENT_RULE_HANDLERS = {
     "acceptance_source_ids_unique": _task_control_rule_request_acceptance_sources,
+    "agent_task_accept_request": _rule_agent_task_accept_request,
     "agent_task_runtime_bootstrap": _rule_agent_task_runtime_bootstrap,
     "actor": _rule_actor,
     "agent_tool_request": _rule_agent_tool_request,

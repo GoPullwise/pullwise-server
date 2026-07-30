@@ -125,6 +125,152 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
         self.assertEqual("BOOTSTRAP_GENERATION_MISMATCH", raised.exception.detail)
         self.assertEqual("$.construction_roots", raised.exception.path)
 
+    def test_accept_request_rejects_a_rebound_requirement_ledger(self) -> None:
+        accept_request = deepcopy(self._golden_bootstrap()["accept_request"])
+        ledger = deepcopy(accept_request["requirement_ledger"])
+        ledger.pop("ledger_digest")
+        ledger["task_id"] = "task_ffffffffffffffffffffffffffffffff"
+        accept_request["requirement_ledger"] = self.contract.seal_document(
+            "requirement-ledger/v1", ledger
+        )
+        accept_request = self._seal_adversarial(
+            "agent-task-accept-request/v1",
+            "accept_request_digest",
+            "pullwise:agent-task-accept-request:v1",
+            accept_request,
+        )
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.verify_document_digest(
+                "agent-task-accept-request/v1", accept_request
+            )
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
+        self.assertEqual("ACCEPT_REQUEST_TASK_BINDING_MISMATCH", raised.exception.detail)
+        self.assertEqual("$.requirement_ledger.task_id", raised.exception.path)
+
+    def test_runtime_bootstrap_rejects_each_cross_document_rebinding(self) -> None:
+        cases: list[tuple[str, dict[str, object], str, str]] = []
+        baseline = self._golden_bootstrap()
+
+        package_mix = deepcopy(baseline)
+        response = deepcopy(package_mix["accept_response"])
+        response.pop("response_digest")
+        response["package"]["root_sha256"] = "f" * 64
+        package_mix["accept_response"] = self.contract.seal_document(
+            "agent-task-accept-response/v1", response
+        )
+        cases.append(
+            (
+                "package_mix",
+                package_mix,
+                "BOOTSTRAP_PACKAGE_MISMATCH",
+                "$.package",
+            )
+        )
+
+        task_mix = deepcopy(baseline)
+        task_mix["construction_roots"]["task_record"]["task_id"] = (
+            "task_ffffffffffffffffffffffffffffffff"
+        )
+        cases.append(
+            (
+                "task_mix",
+                task_mix,
+                "BOOTSTRAP_TASK_BINDING_MISMATCH",
+                "$.construction_roots",
+            )
+        )
+
+        version_mix = deepcopy(baseline)
+        version_mix["construction_roots"]["task_record"]["task_version"] += 1
+        cases.append(
+            (
+                "task_version_mix",
+                version_mix,
+                "BOOTSTRAP_TASK_VERSION_MISMATCH",
+                "$.construction_roots.task_record.task_version",
+            )
+        )
+
+        transport_mix = deepcopy(baseline)
+        transport_mix["transport_binding"]["outer_job_id"] = "job-other"
+        cases.append(
+            (
+                "transport_mix",
+                transport_mix,
+                "BOOTSTRAP_TRANSPORT_BINDING_MISMATCH",
+                "$.transport_binding",
+            )
+        )
+
+        session_mix = deepcopy(baseline)
+        session_mix["construction_roots"]["attempt"]["owner_session_id"] = (
+            "sess_ffffffffffffffffffffffffffffffff"
+        )
+        cases.append(
+            (
+                "session_mix",
+                session_mix,
+                "BOOTSTRAP_AUTHORITY_BINDING_MISMATCH",
+                "$.construction_roots",
+            )
+        )
+
+        request_ref_mix = deepcopy(baseline)
+        request_ref_mix["construction_roots"]["task_record"]["request_ref"][
+            "sha256"
+        ] = "f" * 64
+        cases.append(
+            (
+                "request_ref_mix",
+                request_ref_mix,
+                "BOOTSTRAP_REQUEST_REF_MISMATCH",
+                "$.construction_roots.task_record.request_ref",
+            )
+        )
+
+        ledger_mix = deepcopy(baseline)
+        ledger_mix["construction_roots"]["task_record"][
+            "ledger_head_digest"
+        ] = "f" * 64
+        cases.append(
+            (
+                "ledger_mix",
+                ledger_mix,
+                "BOOTSTRAP_LEDGER_BINDING_MISMATCH",
+                "$.construction_roots.task_record.ledger_head_digest",
+            )
+        )
+
+        deadline_mix = deepcopy(baseline)
+        deadline_mix["construction_roots"]["task_record"][
+            "absolute_deadline_at"
+        ] = "2026-07-22T00:02:00.000Z"
+        cases.append(
+            (
+                "deadline_mix",
+                deadline_mix,
+                "BOOTSTRAP_DEADLINE_BINDING_MISMATCH",
+                "$.construction_roots.task_record.absolute_deadline_at",
+            )
+        )
+
+        for name, document, detail, path in cases:
+            with self.subTest(name=name):
+                adversarial = self._seal_adversarial(
+                    "agent-task-runtime-bootstrap/v1",
+                    "bootstrap_digest",
+                    "pullwise:agent-task-runtime-bootstrap:v1",
+                    document,
+                )
+                with self.assertRaises(self.contract.ContractValidationError) as raised:
+                    self.contract.verify_document_digest(
+                        "agent-task-runtime-bootstrap/v1", adversarial
+                    )
+                self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
+                self.assertEqual(detail, raised.exception.detail)
+                self.assertEqual(path, raised.exception.path)
+
     def _golden_bootstrap(self) -> dict[str, object]:
         contract = self.contract
         package = contract.package_tuple()

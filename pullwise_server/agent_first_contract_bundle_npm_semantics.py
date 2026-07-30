@@ -341,6 +341,7 @@ export async function verifyBudgetTransition(previousLedger, reservation, reserv
 NPM_DECLARED_DISPATCH = r'''
 const DOCUMENT_RULE_HANDLERS = Object.freeze({
   acceptance_source_ids_unique: taskControlRuleRequestAcceptanceSources,
+  agent_task_accept_request: ruleAgentTaskAcceptRequest,
   agent_task_runtime_bootstrap: ruleAgentTaskRuntimeBootstrap,
   actor: ruleObservationActor,
   agent_tool_request: ruleAgentToolRequest,

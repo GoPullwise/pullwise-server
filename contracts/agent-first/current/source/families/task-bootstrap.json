@@ -10,6 +10,10 @@
         "field": "accept_request_digest",
         "domain": "pullwise:agent-task-accept-request:v1"
       },
+      "x-pullwise-semantics": {
+        "document_rules": ["agent_task_accept_request"],
+        "contextual_helpers": []
+      },
       "required": [
         "schema_id",
         "package",
