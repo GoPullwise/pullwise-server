@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
 from pathlib import Path
 import types
 import unittest
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
+from tests.agent_first_bootstrap_support import golden_bootstrap, seal_adversarial
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -104,7 +104,7 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
         self.assertEqual("task-owner/v1", roots["properties"]["owner"]["$ref"])
 
     def test_runtime_bootstrap_rejects_mixed_generation_roots(self) -> None:
-        bootstrap = self._golden_bootstrap()
+        bootstrap = golden_bootstrap(self.contract)
         self.assertEqual(
             bootstrap,
             self.contract.verify_document_digest(
@@ -114,8 +114,8 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
 
         mixed = deepcopy(bootstrap)
         mixed["construction_roots"]["owner"]["owner_epoch"] += 1
-        mixed = self._seal_adversarial(
-            "agent-task-runtime-bootstrap/v1",
+        mixed = seal_adversarial(
+            self.contract,
             "bootstrap_digest",
             "pullwise:agent-task-runtime-bootstrap:v1",
             mixed,
@@ -129,15 +129,15 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
         self.assertEqual("$.construction_roots", raised.exception.path)
 
     def test_accept_request_rejects_a_rebound_requirement_ledger(self) -> None:
-        accept_request = deepcopy(self._golden_bootstrap()["accept_request"])
+        accept_request = deepcopy(golden_bootstrap(self.contract)["accept_request"])
         ledger = deepcopy(accept_request["requirement_ledger"])
         ledger.pop("ledger_digest")
         ledger["task_id"] = "task_ffffffffffffffffffffffffffffffff"
         accept_request["requirement_ledger"] = self.contract.seal_document(
             "requirement-ledger/v1", ledger
         )
-        accept_request = self._seal_adversarial(
-            "agent-task-accept-request/v1",
+        accept_request = seal_adversarial(
+            self.contract,
             "accept_request_digest",
             "pullwise:agent-task-accept-request:v1",
             accept_request,
@@ -153,7 +153,7 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
 
     def test_runtime_bootstrap_rejects_each_cross_document_rebinding(self) -> None:
         cases: list[tuple[str, dict[str, object], str, str]] = []
-        baseline = self._golden_bootstrap()
+        baseline = golden_bootstrap(self.contract)
 
         package_mix = deepcopy(baseline)
         response = deepcopy(package_mix["accept_response"])
@@ -190,6 +190,28 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
             (
                 "task_version_mix",
                 version_mix,
+                "BOOTSTRAP_TASK_VERSION_MISMATCH",
+                "$.construction_roots.task_record.task_version",
+            )
+        )
+
+        stale_authority = deepcopy(baseline)
+        authority = stale_authority["authority"]
+        grant = authority["grant"]
+        grant.pop("grant_digest")
+        grant["deletion_version"] += 1
+        authority["grant"] = self.contract.seal_document(
+            "agent-worker-grant/v1", grant
+        )
+        authority.pop("authority_digest")
+        authority["deletion_version"] += 1
+        stale_authority["authority"] = self.contract.seal_document(
+            "server-authority-envelope/v1", authority
+        )
+        cases.append(
+            (
+                "stale_authority",
+                stale_authority,
                 "BOOTSTRAP_TASK_VERSION_MISMATCH",
                 "$.construction_roots.task_record.task_version",
             )
@@ -232,6 +254,19 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
             )
         )
 
+        policy_ref_mix = deepcopy(baseline)
+        policy_ref_mix["construction_roots"]["task_record"]["policy_ref"][
+            "sha256"
+        ] = "f" * 64
+        cases.append(
+            (
+                "policy_ref_mix",
+                policy_ref_mix,
+                "BOOTSTRAP_POLICY_REF_MISMATCH",
+                "$.construction_roots.task_record.policy_ref",
+            )
+        )
+
         ledger_mix = deepcopy(baseline)
         ledger_mix["construction_roots"]["task_record"][
             "ledger_head_digest"
@@ -260,8 +295,8 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
 
         for name, document, detail, path in cases:
             with self.subTest(name=name):
-                adversarial = self._seal_adversarial(
-                    "agent-task-runtime-bootstrap/v1",
+                adversarial = seal_adversarial(
+                    self.contract,
                     "bootstrap_digest",
                     "pullwise:agent-task-runtime-bootstrap:v1",
                     document,
@@ -274,155 +309,68 @@ class AgentFirstBootstrapContractTest(unittest.TestCase):
                 self.assertEqual(detail, raised.exception.detail)
                 self.assertEqual(path, raised.exception.path)
 
-    def _golden_bootstrap(self) -> dict[str, object]:
-        contract = self.contract
-        package = contract.package_tuple()
-        request = deepcopy(
-            contract.fixture("task_control_golden_task_request")["document"]
+    def test_runtime_bootstrap_rejects_policy_deadline_derivation_drift(self) -> None:
+        bootstrap = golden_bootstrap(self.contract)
+        accept_request = deepcopy(bootstrap["accept_request"])
+        request = accept_request["task_request"]
+        request["requested_budgets"]["wall_ms"] = 120_000
+        policy = accept_request["effective_policy"]
+        policy.pop("digest")
+        policy["budgets"]["wall_ms"] = 120_000
+        policy = self.contract.seal_document(
+            "effective-execution-policy/v1", policy
         )
-        policy = deepcopy(
-            contract.fixture("task_control_golden_effective_policy")["document"]
+        accept_request["effective_policy"] = policy
+        accept_request.pop("accept_request_digest")
+        accept_request = self.contract.seal_document(
+            "agent-task-accept-request/v1", accept_request
         )
-        ledger = deepcopy(contract.fixture("requirements_golden_ledger")["document"])
-        accept_request = contract.seal_document(
-            "agent-task-accept-request/v1",
-            {
-                "schema_id": "agent-task-accept-request/v1",
-                "package": package,
-                "idempotency_key": "accept:bootstrap:one",
-                "outer_job_id": "job-1",
-                "run_id": "run-1",
-                "task_request": request,
-                "effective_policy": policy,
-                "requirement_ledger": ledger,
-            },
-        )
-        accept_response = contract.seal_document(
-            "agent-task-accept-response/v1",
-            {
-                "schema_id": "agent-task-accept-response/v1",
-                "package": package,
-                "task_id": request["task_id"],
-                "task_version": 1,
-                "deletion_version": 0,
-                "lifecycle": "QUEUED",
-                "desired_state": "RUN",
-                "accepted_at": "2026-07-22T00:00:00.000Z",
-            },
-        )
+        bootstrap["accept_request"] = accept_request
 
-        task_record = deepcopy(
-            contract.fixture("task_control_golden_task_record")["document"]
+        task = bootstrap["construction_roots"]["task_record"]
+        request_bytes = self.contract.canonical_document_bytes(request)
+        task["request_ref"]["sha256"] = self.contract.canonical_document_sha256(
+            request
         )
-        attempt = deepcopy(
-            contract.fixture("task_control_golden_attempt_record")["document"]
+        task["request_ref"]["size_bytes"] = len(request_bytes)
+        task["request_digest"] = task["request_ref"]["sha256"]
+        policy_bytes = self.contract.canonical_document_bytes(policy)
+        task["policy_ref"]["sha256"] = self.contract.canonical_document_sha256(
+            policy
         )
-        owner = deepcopy(
-            contract.fixture("task_control_golden_task_owner")["document"]
-        )
-        lease_id = "lease_22222222222222222222222222222222"
-        task_record.update(
-            {
-                "lifecycle": "ACTIVE",
-                "task_version": 2,
-                "lease_id": lease_id,
-                "native_epoch": 1,
-                "current_attempt_id": attempt["attempt_id"],
-                "owner_epoch": 1,
-                "ledger_head_digest": ledger["ledger_digest"],
-                "updated_at": "2026-07-22T00:00:01.000Z",
-            }
-        )
-        attempt["transport_binding"]["lease_id"] = lease_id
+        task["policy_ref"]["size_bytes"] = len(policy_bytes)
+        task["policy_digest"] = policy["digest"]
 
-        grant = deepcopy(
-            contract.fixture("authority_golden_server_authority_envelope")[
-                "document"
-            ]["grant"]
-        )
-        grant.update(
-            {
-                "package": package,
-                "task_id": task_record["task_id"],
-                "attempt_id": attempt["attempt_id"],
-                "session_id": owner["session_id"],
-                "owner_id": owner["owner_id"],
-                "lease_id": lease_id,
-                "task_version": task_record["task_version"],
-                "deletion_version": task_record["deletion_version"],
-                "owner_epoch": owner["owner_epoch"],
-                "native_epoch": attempt["native_epoch"],
-                "transport_epoch": task_record["transport_epoch"],
-                "policy_digest": policy["digest"],
-                "absolute_deadline_at": task_record["absolute_deadline_at"],
-                "terminalization_reserve_ms": task_record[
-                    "terminalization_reserve_ms"
-                ],
-            }
-        )
+        authority = bootstrap["authority"]
+        grant = authority["grant"]
         grant.pop("grant_digest")
-        grant = contract.seal_document("agent-worker-grant/v1", grant)
-        authority = contract.seal_document(
-            "server-authority-envelope/v1",
-            {
-                "schema_id": "server-authority-envelope/v1",
-                "package": package,
-                "task_id": task_record["task_id"],
-                "attempt_id": attempt["attempt_id"],
-                "session_id": owner["session_id"],
-                "owner_id": owner["owner_id"],
-                "lease_id": lease_id,
-                "task_version": task_record["task_version"],
-                "deletion_version": task_record["deletion_version"],
-                "owner_epoch": owner["owner_epoch"],
-                "native_epoch": attempt["native_epoch"],
-                "transport_epoch": task_record["transport_epoch"],
-                "absolute_deadline_at": task_record["absolute_deadline_at"],
-                "terminalization_reserve_ms": task_record[
-                    "terminalization_reserve_ms"
-                ],
-                "lifecycle": "ACTIVE",
-                "desired_state": "RUN",
-                "grant": grant,
-            },
+        grant["policy_digest"] = policy["digest"]
+        authority["grant"] = self.contract.seal_document(
+            "agent-worker-grant/v1", grant
         )
-        return contract.seal_document(
-            "agent-task-runtime-bootstrap/v1",
-            {
-                "schema_id": "agent-task-runtime-bootstrap/v1",
-                "package": package,
-                "accept_request": accept_request,
-                "accept_response": accept_response,
-                "authority": authority,
-                "transport_binding": {
-                    "outer_job_id": task_record["outer_job_id"],
-                    "run_id": task_record["run_id"],
-                    "lease_id": lease_id,
-                    "transport_epoch": task_record["transport_epoch"],
-                },
-                "construction_roots": {
-                    "task_record": task_record,
-                    "attempt": attempt,
-                    "owner": owner,
-                },
-            },
+        authority.pop("authority_digest")
+        bootstrap["authority"] = self.contract.seal_document(
+            "server-authority-envelope/v1", authority
+        )
+        bootstrap = seal_adversarial(
+            self.contract,
+            "bootstrap_digest",
+            "pullwise:agent-task-runtime-bootstrap:v1",
+            bootstrap,
         )
 
-    def _seal_adversarial(
-        self,
-        schema_id: str,
-        digest_field: str,
-        domain: str,
-        document: dict[str, object],
-    ) -> dict[str, object]:
-        unsigned = {key: value for key, value in document.items() if key != digest_field}
-        digest = hashlib.sha256(
-            domain.encode("utf-8")
-            + b"\0"
-            + self.contract.canonical_document_bytes(unsigned)
-        ).hexdigest()
-        return {**unsigned, digest_field: digest}
-
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.verify_document_digest(
+                "agent-task-runtime-bootstrap/v1", bootstrap
+            )
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
+        self.assertEqual(
+            "BOOTSTRAP_DEADLINE_DERIVATION_MISMATCH", raised.exception.detail
+        )
+        self.assertEqual(
+            "$.construction_roots.task_record.absolute_deadline_at",
+            raised.exception.path,
+        )
 
 if __name__ == "__main__":
     unittest.main()

@@ -155,6 +155,15 @@ def _rule_agent_task_runtime_bootstrap(value: dict[str, object]) -> None:
         "BOOTSTRAP_DEADLINE_BINDING_MISMATCH",
         "$.construction_roots.task_record.absolute_deadline_at",
     )
+    accepted_millis = _timestamp_millis(accept_response["accepted_at"])
+    deadline_millis = _timestamp_millis(task["absolute_deadline_at"])
+    _require(
+        accepted_millis is not None
+        and deadline_millis
+        == accepted_millis + policy["budgets"]["wall_ms"],
+        "BOOTSTRAP_DEADLINE_DERIVATION_MISMATCH",
+        "$.construction_roots.task_record.absolute_deadline_at",
+    )
     grant = authority["grant"]
     _require(
         set(grant["capability_ids"]).issubset(policy["granted_capabilities"])

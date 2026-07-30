@@ -140,6 +140,15 @@ function ruleAgentTaskRuntimeBootstrap(value) {
       "$.construction_roots.task_record.absolute_deadline_at",
     );
   }
+  const acceptedMillis = taskControlTimestampMillis(acceptResponse.accepted_at);
+  const deadlineMillis = taskControlTimestampMillis(task.absolute_deadline_at);
+  if (acceptedMillis === null || deadlineMillis === null ||
+      deadlineMillis !== acceptedMillis + policy.budgets.wall_ms) {
+    fail(
+      "BOOTSTRAP_DEADLINE_DERIVATION_MISMATCH",
+      "$.construction_roots.task_record.absolute_deadline_at",
+    );
+  }
   const grant = authority.grant;
   const grantedCapabilities = new Set(policy.granted_capabilities);
   if (grant.capability_ids.some((item) => !grantedCapabilities.has(item)) ||

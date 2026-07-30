@@ -1,0 +1,125 @@
+{
+  "family_id": "task-checkpoint-manifest",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "committed-checkpoint-manifest/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "manifest_hash",
+        "domain": "pullwise:committed-checkpoint-manifest:v1"
+      },
+      "required": [
+        "schema_id",
+        "package",
+        "task_id",
+        "generation",
+        "previous_generation",
+        "previous_manifest_hash",
+        "committed_from_task_version",
+        "committed_task_version",
+        "native_epoch",
+        "attempt_id",
+        "owner_epoch",
+        "machine_state_ref",
+        "semantic_state_ref",
+        "budget_watermark",
+        "effect_watermark",
+        "observation_watermark",
+        "event_seq",
+        "created_at",
+        "manifest_hash"
+      ],
+      "properties": {
+        "schema_id": { "const": "committed-checkpoint-manifest/v1" },
+        "package": { "$ref": "current-package-ref/v1" },
+        "task_id": {
+          "type": "string",
+          "pattern": "^task_[0-9a-f]{32}$"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "previous_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "previous_manifest_hash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "committed_from_task_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "committed_task_version": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 9007199254740991
+        },
+        "native_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^attempt_[0-9a-f]{32}$"
+        },
+        "owner_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "machine_state_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "machine-checkpoint/v1"
+        },
+        "semantic_state_ref": {
+          "$ref": "content-ref/v1",
+          "x-pullwise-content-schema-id": "semantic-checkpoint/v1"
+        },
+        "budget_watermark": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "effect_watermark": { "const": 0 },
+        "observation_watermark": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "event_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "created_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "manifest_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "checkpoint_manifest_negative_partial_commit",
+      "fixture_class": "negative",
+      "schema_id": "committed-checkpoint-manifest/v1",
+      "document": {
+        "schema_id": "committed-checkpoint-manifest/v1"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}
