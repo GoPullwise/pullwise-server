@@ -9,6 +9,8 @@ import math
 import time
 import zipfile
 
+from .agent_first_current_http import handle_agent_first_current_post
+
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 from . import _app_part_09_billing_cookie_security as _previous_app_part
@@ -1173,6 +1175,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/webhooks/creem":
             return self.handle_creem_webhook()
         body = self.read_json()
+        if segments[:2] == ["v1", "agent-first"]:
+            session = self.current_session()
+            user = USERS.get(session["userId"]) if session else None
+            return handle_agent_first_current_post(
+                self,
+                segments,
+                body,
+                connect_factory=db.connect,
+                worker_record=worker_token_record(self),
+                operator_authenticated=user is not None,
+                operator_authorized=user_is_admin(user),
+            )
         if segments and segments[0] == "v1" and len(segments) >= 2 and segments[1] in {"workers", "review-runs"}:
             return self.handle_worker_v1_post(segments, body)
         api_segments = external_api_segments(segments)
