@@ -10,6 +10,9 @@ from pullwise_server._generated_agent_task_contract import (
     package_tuple,
     verify_document_digest,
 )
+from pullwise_server.agent_first_authority_migrations import (
+    CURRENT_AUTHORITY_TABLES,
+)
 from tests.agent_first_authority_support import AuthorityHarness, WORKER_ID
 
 
@@ -69,15 +72,17 @@ class AgentFirstCurrentHttpTest(AuthorityHarness, unittest.TestCase):
         *,
         worker_record: dict[str, object] | None = None,
         operator: bool = False,
+        operator_authorized: bool | None = None,
     ) -> _RouteHarness:
         session = {"userId": "operator"} if operator else None
+        authorized = operator if operator_authorized is None else operator_authorized
         handler = _RouteHarness(path, body, session=session)
         segments = [part for part in path.split("/") if part]
         users = {"operator": {"id": "operator"}}
         with (
             patch.object(app.db, "connect", self.connect),
             patch.object(app, "worker_token_record", return_value=worker_record),
-            patch.object(app, "user_is_admin", return_value=operator),
+            patch.object(app, "user_is_admin", return_value=authorized),
             patch.dict(app.USERS, users, clear=False),
         ):
             app.PullwiseHandler.handle_post(handler, path, {}, segments)
@@ -149,6 +154,64 @@ class AgentFirstCurrentHttpTest(AuthorityHarness, unittest.TestCase):
             (register.binary_payload, accepted.binary_payload, claimed.binary_payload),
             replayed,
         )
+
+    def test_untrusted_principals_are_rejected_without_authority_writes(
+        self,
+    ) -> None:
+        other_worker = {"worker_id": "worker_" + "b" * 32}
+        cases = (
+            (
+                "anonymous operator",
+                "/v1/agent-first/tasks/accept",
+                self.accept_request(),
+                {},
+                HTTPStatus.UNAUTHORIZED,
+            ),
+            (
+                "non-admin operator",
+                "/v1/agent-first/tasks/accept",
+                self.accept_request(),
+                {"operator": True, "operator_authorized": False},
+                HTTPStatus.FORBIDDEN,
+            ),
+            (
+                "anonymous worker",
+                "/v1/agent-first/workers/register",
+                self.register_request(),
+                {},
+                HTTPStatus.UNAUTHORIZED,
+            ),
+            (
+                "mismatched worker",
+                "/v1/agent-first/workers/register",
+                self.register_request(),
+                {"worker_record": other_worker},
+                HTTPStatus.FORBIDDEN,
+            ),
+            (
+                "anonymous claimant",
+                "/v1/agent-first/tasks/claim",
+                self.claim_request(),
+                {},
+                HTTPStatus.UNAUTHORIZED,
+            ),
+        )
+        before = self.counts(*CURRENT_AUTHORITY_TABLES)
+
+        for name, path, body, credentials, expected_status in cases:
+            with self.subTest(name=name):
+                response = self._post(path, body, **credentials)
+                payload = json.loads(response.binary_payload)
+                self.assertEqual(expected_status, response.status)
+                self.assertEqual(
+                    "AUTHORITY_INPUT_UNTRUSTED",
+                    payload["error"]["code"],
+                )
+                verify_document_digest("stable-error/v1", payload["error"])
+                self.assertEqual(
+                    before,
+                    self.counts(*CURRENT_AUTHORITY_TABLES),
+                )
 
 
 if __name__ == "__main__":
