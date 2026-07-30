@@ -69,7 +69,7 @@ class AgentFirstTransportEnvelopeTest(
         )
         self.assertEqual(
             self.authority_states(),
-            ("CLAIMED", "STARTING", "ACTIVE"),
+            ("LEASED", "STARTING", "ACTIVE"),
         )
 
         first = self.authority.commit_current_transport_envelope(envelope)

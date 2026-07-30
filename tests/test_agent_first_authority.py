@@ -228,7 +228,17 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
         request = self.claim_request()
         self.assert_fault_rolls_back(
             CLAIM_FAULT_POINTS, lambda a: a.claim_and_issue_current_grant(request),
-            ("agent_current_attempts", "agent_current_claims", "agent_current_grants"))
+            (
+                "agent_current_attempts",
+                "agent_current_owner_incarnations",
+                "agent_current_claims",
+                "agent_current_grants",
+                "agent_current_grant_authority",
+                "agent_current_runtime_bootstraps",
+                "agent_current_task_heads",
+                "agent_current_control_events",
+            ),
+        )
         changed = {**request, "tool_call_limit": 8}
         self.authority.claim_and_issue_current_grant(request)
         before = self.counts("agent_current_control_events", "agent_current_grants")

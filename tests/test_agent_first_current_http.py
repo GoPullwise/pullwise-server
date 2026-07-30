@@ -123,14 +123,16 @@ class AgentFirstCurrentHttpTest(AuthorityHarness, unittest.TestCase):
             "agent-task-accept-response/v1",
             json.loads(accepted.binary_payload),
         )
-        authority = verify_document_digest(
-            "server-authority-envelope/v1",
+        bootstrap = verify_document_digest(
+            "agent-task-runtime-bootstrap/v1",
             json.loads(claimed.binary_payload),
         )
+        authority = bootstrap["authority"]
         self.assertEqual(package_tuple(), registration["package"])
         self.assertEqual(package_tuple(), acceptance["package"])
         self.assertEqual(package_tuple(), authority["package"])
         self.assertEqual(acceptance["task_id"], authority["task_id"])
+        self.assertEqual(accept_request, bootstrap["accept_request"])
         self.assertEqual(WORKER_ID, registration["worker_id"])
 
         replayed = (

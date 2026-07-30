@@ -132,12 +132,13 @@ class AgentFirstDeadlineWireTest(AuthorityHarness, unittest.TestCase):
         later = "2026-07-22T13:00:00.000Z"
         with contract_patch, patch.object(authority_module, "_now", return_value=later):
             self.assertEqual(accepted_bytes, self.accept())
-            envelope_bytes = self.authority.claim_and_issue_current_grant(
+            bootstrap_bytes = self.authority.claim_and_issue_current_grant(
                 self.claim_request()
             )
-        envelope = self.live_contract.verify_document_digest(
-            "server-authority-envelope/v1", json.loads(envelope_bytes)
+        bootstrap = self.live_contract.verify_document_digest(
+            "agent-task-runtime-bootstrap/v1", json.loads(bootstrap_bytes)
         )
+        envelope = bootstrap["authority"]
         grant = self.live_contract.verify_document_digest(
             "agent-worker-grant/v1", envelope["grant"]
         )
