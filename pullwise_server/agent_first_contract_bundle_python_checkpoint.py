@@ -5,7 +5,12 @@ from __future__ import annotations
 
 PYTHON_CHECKPOINT = r'''
 def _rule_machine_checkpoint(value: dict[str, object]) -> None:
-    return None
+    _require(
+        not value["in_flight_tool_invocation_ids"]
+        and value["effect_watermark"] == 0,
+        "MACHINE_CHECKPOINT_QUIESCENCE_INVALID",
+        "$.in_flight_tool_invocation_ids",
+    )
 
 
 def _rule_semantic_checkpoint(value: dict[str, object]) -> None:

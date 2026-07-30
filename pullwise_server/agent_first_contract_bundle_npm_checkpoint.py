@@ -5,7 +5,13 @@ from __future__ import annotations
 
 NPM_CHECKPOINT = r'''
 function ruleMachineCheckpoint(value) {
-  return value;
+  if (value.in_flight_tool_invocation_ids.length !== 0 ||
+      value.effect_watermark !== 0) {
+    fail(
+      "MACHINE_CHECKPOINT_QUIESCENCE_INVALID",
+      "$.in_flight_tool_invocation_ids",
+    );
+  }
 }
 
 function checkpointSortedUnique(values) {

@@ -9,22 +9,27 @@ from tests.agent_first_semantic_closure_support import SemanticClosureHarness
 OWNED_RULE_IDS = frozenset(
     {
         "acceptance_source_ids_unique",
+        "agent_task_accept_request",
+        "agent_task_runtime_bootstrap",
         "attempt_state_nullability",
         "attempt_transport_binding_all_or_none",
         "budget_ceiling_consistency",
         "capability_and_delivery_sets_sorted_unique",
         "capability_sets_disjoint_sorted_unique",
         "charter_digest_exact",
+        "committed_checkpoint_manifest",
         "derived_requirement_shape",
         "entries_normative_ingest_then_append_order",
         "fenced_reason_ownership_loss",
         "head_version_ref_pairs",
         "ledger_digest_exact",
+        "machine_checkpoint",
         "owner_state_nullability",
         "policy_digest_exact",
         "requirement_id_source_kind_match",
         "risk_ceiling_current_mvp",
         "root_and_origin_sets_sorted_unique",
+        "semantic_checkpoint",
         "server_authority_envelope",
         "sorted_unique_active_requirement_ids",
         "sorted_unique_charter_sets",
@@ -191,12 +196,57 @@ def build_task_control_negative_cases(
     invalid_waiver_time = harness.fixture_document(waiver_fixture)
     invalid_waiver_time["expires_at"] = invalid_waiver_time["issued_at"]
 
+    accept_fixture = "task_accept_crash_after_validation"
+    invalid_accept = harness.fixture_document(accept_fixture)
+    rebound_ledger = deepcopy(invalid_accept["requirement_ledger"])
+    rebound_ledger["task_id"] = "task_ffffffffffffffffffffffffffffffff"
+    invalid_accept["requirement_ledger"] = harness.reseal(
+        "requirement-ledger/v1", rebound_ledger
+    )
+
+    bootstrap_fixture = "task_bootstrap_golden_atomic_roots"
+    invalid_bootstrap = harness.fixture_document(bootstrap_fixture)
+    invalid_bootstrap["construction_roots"]["owner"]["owner_epoch"] += 1
+
+    machine_fixture = "checkpoint_state_golden_machine"
+    invalid_machine = harness.fixture_document(machine_fixture)
+    invalid_machine["in_flight_tool_invocation_ids"] = [
+        "invoke_11111111111111111111111111111111"
+    ]
+
+    semantic_fixture = "checkpoint_state_golden_semantic"
+    invalid_semantic = harness.fixture_document(semantic_fixture)
+    invalid_semantic["owner_summary"]["next_requirement_ids"].reverse()
+
+    manifest_fixture = "checkpoint_manifest_golden_genesis_commit"
+    invalid_manifest = harness.fixture_document(manifest_fixture)
+    invalid_manifest["previous_generation"] = 1
+    invalid_manifest["previous_manifest_hash"] = "f" * 64
+
     return [
         case(
             "acceptance_source_ids_unique",
             request_fixture,
             duplicate_source,
             failure("TASK_REQUEST_SOURCE_ID_INVALID"),
+        ),
+        case(
+            "agent_task_accept_request",
+            accept_fixture,
+            invalid_accept,
+            failure(
+                "ACCEPT_REQUEST_TASK_BINDING_MISMATCH",
+                "$.requirement_ledger.task_id",
+            ),
+        ),
+        case(
+            "agent_task_runtime_bootstrap",
+            bootstrap_fixture,
+            invalid_bootstrap,
+            failure(
+                "BOOTSTRAP_GENERATION_MISMATCH",
+                "$.construction_roots",
+            ),
         ),
         case(
             "attempt_state_nullability",
@@ -237,6 +287,15 @@ def build_task_control_negative_cases(
             failure("CONTRACT_DIGEST_MISMATCH", "$.digest"),
         ),
         case(
+            "committed_checkpoint_manifest",
+            manifest_fixture,
+            invalid_manifest,
+            failure(
+                "CHECKPOINT_PREDECESSOR_INVALID",
+                "$.previous_generation",
+            ),
+        ),
+        case(
             "derived_requirement_shape",
             derived_fixture,
             invalid_derived_shape,
@@ -269,6 +328,15 @@ def build_task_control_negative_cases(
             failure("CONTRACT_DIGEST_MISMATCH", "$.ledger_digest"),
         ),
         case(
+            "machine_checkpoint",
+            machine_fixture,
+            invalid_machine,
+            failure(
+                "MACHINE_CHECKPOINT_QUIESCENCE_INVALID",
+                "$.in_flight_tool_invocation_ids",
+            ),
+        ),
+        case(
             "owner_state_nullability",
             owner_fixture,
             invalid_owner_nullability,
@@ -297,6 +365,15 @@ def build_task_control_negative_cases(
             policy_fixture,
             unordered_roots,
             failure("POLICY_ROOT_ORDER_INVALID"),
+        ),
+        case(
+            "semantic_checkpoint",
+            semantic_fixture,
+            invalid_semantic,
+            failure(
+                "SEMANTIC_CHECKPOINT_SUMMARY_ORDER_INVALID",
+                "$.owner_summary.next_requirement_ids",
+            ),
         ),
         case(
             "server_authority_envelope",

@@ -10,6 +10,7 @@ import tempfile
 import types
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
+from tests.agent_first_checkpoint_support import golden_checkpoint_set
 from tests.agent_first_verification_direct_graph_builder import (
     VerificationDirectGraphBuilderMixin,
     canonical_bytes,
@@ -1559,6 +1560,24 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             ),
         }
 
+    def checkpoint_probe_operations(self) -> dict[str, dict[str, object]]:
+        checkpoint = golden_checkpoint_set(self.python)
+        invalid_manifest = deepcopy(checkpoint["manifest"])
+        invalid_manifest["machine_state_ref"]["sha256"] = "0" * 64
+        invalid_manifest = self.reseal(
+            "committed-checkpoint-manifest/v1", invalid_manifest
+        )
+        return {
+            "verify_committed_checkpoint_context": self.helper_operation(
+                "verify_committed_checkpoint_context",
+                [
+                    invalid_manifest,
+                    checkpoint["machine"],
+                    checkpoint["semantic"],
+                ],
+            )
+        }
+
     def tool_probe_operations(self) -> dict[str, dict[str, object]]:
         request = self.synthetic_agent_tool_request()
         catalog = self.fixture_document("tool_golden_current_catalog")
@@ -1741,6 +1760,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         tool_request = self.synthetic_agent_tool_request()
         tool_catalog = self.fixture_document("tool_golden_current_catalog")
         tool_source = self.synthetic_source_state()
+        checkpoint = golden_checkpoint_set(self.python)
 
         return {
             "evaluate_success_gate": self.helper_operation(
@@ -1838,6 +1858,14 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "verify_change_set_context": self.helper_operation(
                 "verify_change_set_context",
                 [graph["change_set"], graph["original_source"], graph["final_source"], graph["patch"]],
+            ),
+            "verify_committed_checkpoint_context": self.helper_operation(
+                "verify_committed_checkpoint_context",
+                [
+                    checkpoint["manifest"],
+                    checkpoint["machine"],
+                    checkpoint["semantic"],
+                ],
             ),
             "verify_completion_proposal_context": self.helper_operation(
                 "verify_completion_proposal_context",
@@ -1988,6 +2016,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             self.task_evidence_probe_operations(),
             self.verification_probe_operations(),
             self.result_debug_probe_operations(),
+            self.checkpoint_probe_operations(),
             self.tool_probe_operations(),
             self.gate_preparation_probe_operations(),
         ):
