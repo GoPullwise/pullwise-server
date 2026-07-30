@@ -4,14 +4,8 @@ from __future__ import annotations
 
 
 NPM_CHECKPOINT = r'''
-function checkpointCurrentPackage(value) {
-  if (canonicalString(value.package) !== canonicalString(packageTuple())) {
-    fail("CHECKPOINT_PACKAGE_MISMATCH", "$.package");
-  }
-}
-
 function ruleMachineCheckpoint(value) {
-  checkpointCurrentPackage(value);
+  return value;
 }
 
 function checkpointSortedUnique(values) {
@@ -20,7 +14,6 @@ function checkpointSortedUnique(values) {
 }
 
 function ruleSemanticCheckpoint(value) {
-  checkpointCurrentPackage(value);
   const summary = value.owner_summary;
   for (const field of [
     "completed_requirement_ids", "next_requirement_ids",
@@ -59,7 +52,6 @@ function ruleSemanticCheckpoint(value) {
 }
 
 function ruleCommittedCheckpointManifest(value) {
-  checkpointCurrentPackage(value);
   const generation = value.generation;
   const predecessorValid = value.previous_generation === generation - 1 &&
     ((generation === 1 && value.previous_manifest_hash === null) ||

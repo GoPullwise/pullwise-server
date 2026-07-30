@@ -117,6 +117,55 @@
   ],
   "fixtures": [
     {
+      "fixture_id": "checkpoint_manifest_golden_genesis_commit",
+      "fixture_class": "golden",
+      "schema_id": "committed-checkpoint-manifest/v1",
+      "document": {
+        "attempt_id": "attempt_00000000000000000000000000000001",
+        "budget_watermark": 0,
+        "committed_from_task_version": 2,
+        "committed_task_version": 3,
+        "created_at": "2026-07-22T00:00:02.000Z",
+        "effect_watermark": 0,
+        "event_seq": 0,
+        "generation": 1,
+        "machine_state_ref": {
+          "artifact_id": "art_10000000000000000000000000000005",
+          "content_schema_id": "machine-checkpoint/v1",
+          "encoding": "utf-8",
+          "media_type": "application/json",
+          "schema_id": "content-ref/v1",
+          "sha256": "1facf55afa92ac9026c10c37ec1d6438a465609c55cbf14026a4d2f09c5635c3",
+          "size_bytes": 1624
+        },
+        "manifest_hash": "77902f3bf21aead4a201d60786fd019f85119de2af65f14fc582614267b0d807",
+        "native_epoch": 1,
+        "observation_watermark": 0,
+        "owner_epoch": 1,
+        "package": {
+          "content_sha256": "69a04138a915355e3802259bdade1cc88ec4a0379211392885a1c7ac2d13f0df",
+          "package_identity": "@pullwise/agent-task-contract",
+          "package_version": "0.1.0",
+          "root_sha256": "4a770bf9dfa8de6e9141b997035c328fe5da7fd32e729d34a238b5a5ffd84141",
+          "schema_id": "current-package-ref/v1"
+        },
+        "previous_generation": 0,
+        "previous_manifest_hash": null,
+        "schema_id": "committed-checkpoint-manifest/v1",
+        "semantic_state_ref": {
+          "artifact_id": "art_10000000000000000000000000000006",
+          "content_schema_id": "semantic-checkpoint/v1",
+          "encoding": "utf-8",
+          "media_type": "application/json",
+          "schema_id": "content-ref/v1",
+          "sha256": "38f20e32dd426692a65c4100cd45285c0383fd6fce3830852743e0ea26aa720a",
+          "size_bytes": 1636
+        },
+        "task_id": "task_00000000000000000000000000000001"
+      },
+      "expected_code": null
+    },
+    {
       "fixture_id": "checkpoint_manifest_negative_partial_commit",
       "fixture_class": "negative",
       "schema_id": "committed-checkpoint-manifest/v1",

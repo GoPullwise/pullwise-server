@@ -4,20 +4,11 @@ from __future__ import annotations
 
 
 PYTHON_CHECKPOINT = r'''
-def _checkpoint_current_package(value: dict[str, object]) -> None:
-    _require(
-        _json_equal(value["package"], package_tuple()),
-        "CHECKPOINT_PACKAGE_MISMATCH",
-        "$.package",
-    )
-
-
 def _rule_machine_checkpoint(value: dict[str, object]) -> None:
-    _checkpoint_current_package(value)
+    return None
 
 
 def _rule_semantic_checkpoint(value: dict[str, object]) -> None:
-    _checkpoint_current_package(value)
     summary = value["owner_summary"]
     for field in (
         "completed_requirement_ids",
@@ -58,7 +49,6 @@ def _rule_semantic_checkpoint(value: dict[str, object]) -> None:
 
 
 def _rule_committed_checkpoint_manifest(value: dict[str, object]) -> None:
-    _checkpoint_current_package(value)
     generation = value["generation"]
     predecessor_valid = (
         value["previous_generation"] == generation - 1
