@@ -598,7 +598,7 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   fact digest, exact task/version binding, a nonterminal request lifecycle, and
   canonical equality for a reused idempotency key.
 
-## Agent-First Current Candidate Boundary
+## Agent-First Current Implementation Boundary
 
 - D31 (`d6fe7e5184e410aa6d034be1b593c8bf83126d5af300ea489a3d077642b42254`)
   makes Server acceptance the sole deadline authority. Persist `accepted_at`,
@@ -633,9 +633,21 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   `11ced3caa5333f5d841a5f5d0ca33e9a91522f9809cd23943f56d1f371409564`,
   and root `e6dc056cb1b61c2a47c28d3e02117352bae35c7fecb07d10bad6afd65b9e194e`.
   Server, Worker, and Web must exact-pin those same canonical bytes. Any further
-  Generate requires another append-only superseding decision. Do not connect
-  production current-task/operator HTTP or auth, switch the production Worker
-  loop, enable D24, deploy, or start canary.
+  Generate requires another append-only superseding decision.
+- D36 (`cb40a540cff9af1d350bf1a413aa3aeaee0ca1ddce65afabec7443f294944a1b`)
+  supersedes D35's candidate-only implementation boundary. It authorizes local
+  repository and CI implementation/verification of S3-S7, including the
+  authenticated current-task/operator HTTP seam, but no contract source
+  change or Generate. It does not authorize production activation, D24
+  implementation or enablement, deployment, changes to a deployed Worker,
+  production traffic, canary, legacy deletion, or S8 release/cutover/rollback.
+- D37 is the active append-only S4 contract-gap question. The S3 tracer proved
+  that the current claim response lacks TaskRequest, EffectiveExecutionPolicy,
+  RequirementLedger, and complete `outer_job_id/run_id` bootstrap roots, while
+  the frozen package lacks versioned machine/semantic/committed checkpoint
+  documents. Until the user explicitly resolves D37, do not edit contract
+  source, Generate, invent unversioned wire, switch the Worker main loop, or
+  start dependent S4-S7 implementation.
 - The tri-state release evaluator candidate reuses
   `benchmark-bundle/v1`, `release-gate-policy/v1`, and
   `release-gate-report/v1`. `evaluate_release_gate` derives PASS, FAIL, or
