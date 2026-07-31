@@ -63,6 +63,11 @@ _OUTCOME_AXES = {
         "none",
     ),
 }
+_SUCCESS_OUTCOMES = {
+    "COMPLETED",
+    "COMPLETED_WITH_WAIVERS",
+    "NO_CHANGE_NEEDED",
+}
 
 
 def bind_task_result_to_terminal_decision(
@@ -70,7 +75,11 @@ def bind_task_result_to_terminal_decision(
     task_result: dict[str, object],
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     result = deepcopy(task_result)
-    decision = harness.fixture_document("gate_decision_golden_terminalization")
+    decision = harness.fixture_document(
+        "gate_decision_golden_success"
+        if result["outcome"] in _SUCCESS_OUTCOMES
+        else "gate_decision_golden_terminalization"
+    )
     axes = _OUTCOME_AXES[result["outcome"]]
     ledger = harness.fixture_document("publication_golden_effect_ledger")
     ledger["task_id"] = result["task_id"]
@@ -109,6 +118,7 @@ def bind_task_result_to_terminal_decision(
             "effect_state": effect_state,
             "cause_family": axes[3],
             "delivery_state": axes[4],
+            "selected_lifecycle": "TERMINAL",
             "effect_availability": {
                 "availability": "available",
                 "ref": harness.content_ref(
@@ -121,6 +131,9 @@ def bind_task_result_to_terminal_decision(
             "selected_reason": result["reason_code"],
         }
     )
+    if result["outcome"] in _SUCCESS_OUTCOMES:
+        decision["requested_outcome"] = result["outcome"]
+        decision["authoritative_fact_refs"] = []
     projection = {field: decision[field] for field in _SELECTOR_FIELDS}
     decision["selector_input_digest"] = hashlib.sha256(
         b"pullwise:terminal-selector-input:v1\0" + canonical_bytes(projection)

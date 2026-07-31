@@ -49,6 +49,40 @@ class AgentFirstTaskResultSelectorBindingTest(unittest.TestCase):
         self.assertEqual(expected, self.builder.facade.python_helper_results(operations))
         self.assertEqual(expected, self.builder.facade.node_helper_results(operations))
 
+    def test_passed_success_gate_binds_success_results_without_terminalization_fact(
+        self,
+    ) -> None:
+        bound = [
+            bind_task_result_to_terminal_decision(
+                self.builder.facade,
+                self.builder.task_result_branch(outcome),
+            )
+            for outcome in (
+                "COMPLETED",
+                "COMPLETED_WITH_WAIVERS",
+                "NO_CHANGE_NEEDED",
+            )
+        ]
+        operations = [
+            self.operation(result, decision, ledger)
+            for result, decision, ledger in bound
+        ]
+        expected = [{"ok": True, "value": result} for result, _, _ in bound]
+
+        for _, decision, _ in bound:
+            self.assertEqual("success", decision["decision_kind"])
+            self.assertTrue(decision["passed"])
+            self.assertEqual("TERMINAL", decision["selected_lifecycle"])
+            self.assertEqual([], decision["authoritative_fact_refs"])
+        self.assertEqual(
+            expected,
+            self.builder.facade.python_helper_results(operations),
+        )
+        self.assertEqual(
+            expected,
+            self.builder.facade.node_helper_results(operations),
+        )
+
     def test_selector_context_mismatches_fail_closed_with_parity(self) -> None:
         result, decision, ledger = self.bound_result()
         missing = self.operation(result, None, ledger)
