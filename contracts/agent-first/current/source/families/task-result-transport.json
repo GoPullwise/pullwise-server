@@ -3,37 +3,6 @@
   "schemas": [
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "task-result-transport-ack/v1",
-      "type": "object",
-      "additionalProperties": false,
-      "x-pullwise-digest": {"field":"ack_digest","domain":"pullwise:task-result-transport-ack:v1"},
-      "x-pullwise-semantics": {"document_rules":["task_result_transport_ack"],"contextual_helpers":["verify_task_result_transport_ack"]},
-      "required": [
-        "schema_id", "package", "result_id", "task_id", "outcome", "published_from_version", "terminal_task_version", "transport_envelope_digest", "receipt_binding_state", "receipt_digest",
-        "accepted_at", "ack_digest"
-      ],
-      "properties": {
-        "schema_id": {"const":"task-result-transport-ack/v1"},
-        "package": {"$ref":"current-package-ref/v1"},
-        "result_id": {"type":"string","pattern":"^result_[0-9a-f]{32}$"},
-        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
-        "outcome": {"enum":["COMPLETED","NO_CHANGE_NEEDED","COMPLETED_WITH_WAIVERS","PARTIAL","BLOCKED","FAILED",
-          "CANCELLED","CANCELLED_WITH_EFFECTS","TERMINATED_WITH_UNKNOWN_EFFECTS"]},
-        "published_from_version": {"type":"integer","minimum":1,"maximum":9007199254740990},
-        "terminal_task_version": {"type":"integer","minimum":2,"maximum":9007199254740991},
-        "transport_envelope_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
-        "receipt_binding_state": {"enum":["bound","not_applicable"]},
-        "receipt_digest": {"oneOf":[{"type":"string","pattern":"^[0-9a-f]{64}$"},{"type":"null"}]},
-        "accepted_at": {"type":"string","pattern":"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"},
-        "ack_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
-      },
-      "oneOf": [
-        {"type":"object","properties":{"receipt_binding_state":{"const":"bound"},"receipt_digest":{"type":"string"}}},
-        {"type":"object","properties":{"receipt_binding_state":{"const":"not_applicable"},"receipt_digest":{"type":"null"}}}
-      ]
-    },
-    {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "task-result-transport-envelope/v1",
       "type": "object",
       "additionalProperties": false,
@@ -104,84 +73,6 @@
     }
   ],
   "fixtures": [
-    {
-      "fixture_id": "task_result_transport_ack_golden_bound",
-      "fixture_class": "golden",
-      "schema_id": "task-result-transport-ack/v1",
-      "document": {
-        "schema_id": "task-result-transport-ack/v1",
-        "package": {
-          "schema_id": "current-package-ref/v1",
-          "package_identity": "@pullwise/agent-task-contract",
-          "package_version": "0.1.0",
-          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        },
-        "result_id": "result_00000000000000000000000000000001",
-        "task_id": "task_00000000000000000000000000000001",
-        "outcome": "COMPLETED",
-        "published_from_version": 3,
-        "terminal_task_version": 4,
-        "transport_envelope_digest": "69b2988cedabd796c85ee46d8e41342b7245293f1a3bdfe30178505778b5d946",
-        "receipt_binding_state": "bound",
-        "receipt_digest": "9acbc5f37166d691f56b017f9116278d6a3fb27d37441ebf57edfda5da5cd4a7",
-        "accepted_at": "2026-07-22T00:01:10Z",
-        "ack_digest": "958e0d8fba52caa1d2a487fe2ffa5aa5a71b02040bf091df16a37dbbca859e8d"
-      },
-      "expected_code": null
-    },
-    {
-      "fixture_id": "task_result_transport_ack_idempotency_exact_bytes",
-      "fixture_class": "idempotency",
-      "schema_id": "task-result-transport-ack/v1",
-      "document": {
-        "schema_id": "task-result-transport-ack/v1",
-        "package": {
-          "schema_id": "current-package-ref/v1",
-          "package_identity": "@pullwise/agent-task-contract",
-          "package_version": "0.1.0",
-          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        },
-        "result_id": "result_00000000000000000000000000000001",
-        "task_id": "task_00000000000000000000000000000001",
-        "outcome": "COMPLETED",
-        "published_from_version": 3,
-        "terminal_task_version": 4,
-        "transport_envelope_digest": "69b2988cedabd796c85ee46d8e41342b7245293f1a3bdfe30178505778b5d946",
-        "receipt_binding_state": "bound",
-        "receipt_digest": "9acbc5f37166d691f56b017f9116278d6a3fb27d37441ebf57edfda5da5cd4a7",
-        "accepted_at": "2026-07-22T00:01:10Z",
-        "ack_digest": "958e0d8fba52caa1d2a487fe2ffa5aa5a71b02040bf091df16a37dbbca859e8d"
-      },
-      "expected_code": null
-    },
-    {
-      "fixture_id": "task_result_transport_ack_negative_binding_matrix",
-      "fixture_class": "negative",
-      "schema_id": "task-result-transport-ack/v1",
-      "document": {
-        "schema_id": "task-result-transport-ack/v1",
-        "package": {
-          "schema_id": "current-package-ref/v1",
-          "package_identity": "@pullwise/agent-task-contract",
-          "package_version": "0.1.0",
-          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        },
-        "result_id": "result_00000000000000000000000000000001",
-        "task_id": "task_00000000000000000000000000000001",
-        "outcome": "COMPLETED",
-        "published_from_version": 3,
-        "terminal_task_version": 4,
-        "transport_envelope_digest": "69b2988cedabd796c85ee46d8e41342b7245293f1a3bdfe30178505778b5d946",
-        "receipt_binding_state": "not_applicable",
-        "receipt_digest": "9acbc5f37166d691f56b017f9116278d6a3fb27d37441ebf57edfda5da5cd4a7",
-        "accepted_at": "2026-07-22T00:01:10Z",
-        "ack_digest": "403a312027827aea9474061ad89a0547b892a9ed4549b91acf6484c4473124a1"
-      },
-      "expected_code": "CONTRACT_DOCUMENT_INVALID"
-    },
     {
       "fixture_id": "task_result_transport_crash_uploaded_replay",
       "fixture_class": "crash",
@@ -278,8 +169,8 @@
               {"statement":"Review report delivered","requirement_ids":["req_user_objective_0000000000000000000000000000000000000000000000000000000000000001"],"artifact_refs":[]}
             ]
           },
-          "published_from_version": 3,
-          "terminal_task_version": 4,
+          "published_from_version": 4,
+          "terminal_task_version": 5,
           "attempt_identity": {"kind":"started","attempt_id":"attempt_00000000000000000000000000000001","native_epoch":1},
           "owner_identity": {"kind":"started","owner_id":"owner_00000000000000000000000000000001","owner_epoch":1},
           "request_ref": {
@@ -504,17 +395,113 @@
           "created_at": "2026-07-22T00:00:00Z",
           "terminal_at": "2026-07-22T00:01:00Z"
         },
-        "task_result_digest": "d70d27446e8fa429cf0e3d2a8d62bdc343ea0632594f1451ef378b74b038b783",
+        "task_result_digest": "40995f765c78783b524a2f9b9127b8ad62710a6a4530e9c91c3bed79a74577e5",
         "task_result_core_ref": {
           "schema_id": "content-ref/v1",
           "artifact_id": "art_99999999999999999999999999999992",
           "content_schema_id": "task-result-core/v1",
-          "sha256": "47e35d0d392cf900d89a6a1474cb9542046b1b913eb1daebe9a737900ae97c9c",
+          "sha256": "07855ee3930d486c6b9c13cc6551d6d3bbeb33d75abdae5b127909f14c37fc39",
           "size_bytes": 6965,
           "media_type": "application/json",
           "encoding": "utf-8"
         },
-        "task_result_core_digest": "47e35d0d392cf900d89a6a1474cb9542046b1b913eb1daebe9a737900ae97c9c",
+        "task_result_core_digest": "07855ee3930d486c6b9c13cc6551d6d3bbeb33d75abdae5b127909f14c37fc39",
+        "task_version_authority": {
+          "schema_id": "task-version-authority-proof/v1",
+          "package": {
+            "schema_id": "current-package-ref/v1",
+            "package_identity": "@pullwise/agent-task-contract",
+            "package_version": "0.1.0",
+            "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "task_id": "task_00000000000000000000000000000001",
+          "authority_digest": "1f2874c15647dfa05b3e70df5ac2fcc5a063e55f8dc40fdc4469fc2735300ae3",
+          "grant_digest": "bced3d25cf54204e4d8e99c1dd47b3a749a94a159aeb955f53e2aa09bcfa0111",
+          "full_fence": {
+            "schema_id": "task-fence/v1",
+            "task_id": "task_00000000000000000000000000000001",
+            "attempt_id": "attempt_00000000000000000000000000000001",
+            "session_id": "sess_11111111111111111111111111111111",
+            "owner_id": "owner_00000000000000000000000000000001",
+            "lease_id": "lease_11111111111111111111111111111111",
+            "task_version": 3,
+            "deletion_version": 0,
+            "owner_epoch": 1,
+            "native_epoch": 1,
+            "transport_epoch": 1,
+            "fence_digest": "3b215df6c86af21d71141ec72b88b28456449a979c37109c0d5a356ad758a733"
+          },
+          "base_task_record_ref": {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_11111111111111111111111111111111",
+            "content_schema_id": "task-record/v1",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "size_bytes": 1,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          "version_chain": [
+            {
+              "transition_kind": "terminalization_requested",
+              "previous_task_version": 3,
+              "task_version": 4,
+              "transition_ref": {
+                "schema_id": "content-ref/v1",
+                "artifact_id": "art_22222222222222222222222222222222",
+                "content_schema_id": "task-control-event/v1",
+                "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+                "size_bytes": 1,
+                "media_type": "application/json",
+                "encoding": "utf-8"
+              },
+              "task_record_ref": {
+                "schema_id": "content-ref/v1",
+                "artifact_id": "art_33333333333333333333333333333333",
+                "content_schema_id": "task-record/v1",
+                "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                "size_bytes": 1,
+                "media_type": "application/json",
+                "encoding": "utf-8"
+              }
+            },
+            {
+              "transition_kind": "task_result_published",
+              "previous_task_version": 4,
+              "task_version": 5,
+              "transition_ref": {
+                "schema_id": "content-ref/v1",
+                "artifact_id": "art_44444444444444444444444444444444",
+                "content_schema_id": "task-control-event/v1",
+                "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+                "size_bytes": 1,
+                "media_type": "application/json",
+                "encoding": "utf-8"
+              },
+              "task_record_ref": {
+                "schema_id": "content-ref/v1",
+                "artifact_id": "art_55555555555555555555555555555555",
+                "content_schema_id": "task-record/v1",
+                "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                "size_bytes": 1,
+                "media_type": "application/json",
+                "encoding": "utf-8"
+              }
+            }
+          ],
+          "published_from_version": 4,
+          "terminal_task_version": 5,
+          "task_result_ref": {
+            "schema_id": "content-ref/v1",
+            "artifact_id": "art_66666666666666666666666666666666",
+            "content_schema_id": "task-result/v1",
+            "sha256": "40995f765c78783b524a2f9b9127b8ad62710a6a4530e9c91c3bed79a74577e5",
+            "size_bytes": 7305,
+            "media_type": "application/json",
+            "encoding": "utf-8"
+          },
+          "proof_digest": "857fa543bcb1ce6b08a4f3e9f619b2852870f7fdc2f8f5504ddddba9f4455ef2"
+        },
         "worker_debug_descriptor": {
           "schema_id": "worker-debug-fragment-descriptor/v1",
           "state": "uploaded",

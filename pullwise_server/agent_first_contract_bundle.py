@@ -78,6 +78,7 @@ REQUIRED_FAMILIES = (
     "task-result-core",
     "worker-debug-content",
     "worker-debug-transport",
+    "task-result-transport-ack",
     "task-result-transport",
     "release-trust-authority",
     "benchmark-bundle",

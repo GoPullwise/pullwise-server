@@ -15,6 +15,9 @@ from tests.agent_first_result_debug_transport_facade_support import (
 from tests.agent_first_task_result_selector_support import (
     bind_task_result_to_terminal_decision,
 )
+from tests.agent_first_task_version_authority_support import (
+    build_transport_version_authority_proof,
+)
 
 
 HELPER_ALIASES = {
@@ -149,6 +152,12 @@ class AgentFirstResultDebugTransportHelperRedTest(
             "task_result_digest": hashlib.sha256(canonical_bytes(task_result)).hexdigest(),
             "task_result_core_ref": deepcopy(task_result_core_ref),
             "task_result_core_digest": hashlib.sha256(canonical_bytes(task_result_core)).hexdigest(),
+            "task_version_authority": build_transport_version_authority_proof(
+                self,
+                envelope_fixture["authority"],
+                envelope_fixture["full_fence"],
+                task_result,
+            ),
             "worker_debug_descriptor": deepcopy(worker_debug_descriptor),
             "transport_receipt": {
                 "availability": "available",
