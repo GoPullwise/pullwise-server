@@ -153,11 +153,17 @@ class AuthorityHarness:
         self.register()
         self.accept()
         request = self.claim_request()
+        return request, self.issue_current_authority(request)
+
+    def issue_current_authority(
+        self,
+        request: dict[str, object],
+    ) -> dict[str, object]:
         response = self.authority.claim_and_issue_current_grant(request)
         bootstrap = verify_document_digest(
             "agent-task-runtime-bootstrap/v1", json.loads(response)
         )
-        return request, bootstrap["authority"]
+        return bootstrap["authority"]
 
     def counts(self, *tables: str) -> tuple[int, ...]:
         with self.connect() as connection:

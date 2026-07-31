@@ -293,9 +293,7 @@ class AgentFirstTransportEnvelopeTest(
             idempotency_key="claim:second",
             lease_id="lease_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         )
-        second_authority = json.loads(
-            self.authority.claim_and_issue_current_grant(second_claim)
-        )
+        second_authority = self.issue_current_authority(second_claim)
         colliding_receipt = self.receipt(second_authority)
         self.assert_error(
             "TRANSPORT_RECEIPT_BINDING_CONFLICT",
@@ -317,9 +315,7 @@ class AgentFirstTransportEnvelopeTest(
             idempotency_key="claim:result-collision",
             lease_id="lease_cccccccccccccccccccccccccccccccc",
         )
-        second_authority = json.loads(
-            self.authority.claim_and_issue_current_grant(second_claim)
-        )
+        second_authority = self.issue_current_authority(second_claim)
         second_envelope, _ = self.transport_envelope(
             second_authority,
             diagnostics_state="local_only",

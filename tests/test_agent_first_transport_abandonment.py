@@ -162,9 +162,7 @@ class AgentFirstTransportAbandonmentTest(AuthorityHarness, unittest.TestCase):
             authority_module, "_now", return_value=NOW
         ):
             self.accept()
-            envelope = json.loads(
-                self.authority.claim_and_issue_current_grant(self.claim_request())
-            )
+            envelope = self.issue_current_authority(self.claim_request())
             stale_receipt = self.receipt(envelope)
             self.authority.store_transport_receipt(stale_receipt)
             request = self._abandon_request(envelope)
