@@ -667,14 +667,29 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   the local checkpoint/control-event Task-version chain; and define one real
   `FINALIZING -> TERMINAL` TaskResult CAS that atomically binds
   `published_from_version=N`, `terminal_task_version=N+1`, the selected result,
-  transport/result/version/fence closure, and exact replay. The D38 Generate
-  count is `0`. All source, golden/negative/idempotency/fence/crash fixture,
-  semantic-closure, DAG, registry, digest, and Python/Node parity gates must be
-  green before exactly one Generate synchronizes Server/Worker/Web exact pins.
+  transport/result/version/fence closure, and exact replay. Every required
+  pre-generation gate passed, and the D38 Generate allowance is consumed
+  exactly once (count `1`) by package `@pullwise/agent-task-contract@0.1.0`,
+  content `51445b46d40b1c61387edfa3a4bd68e18fa388e7ac2139c45e870a3a6a3cc29d`,
+  root `76b6c450fecacc5209cfc426c337134c0f8a7361c830d9d17103160d746233d9`,
+  wrapper SHA-256 `c88455efd633746a34c8833e015d26ca4cd1beb5add4eb2cdd711ffeb7ce48d0`,
+  package-manifest SHA-256
+  `926b673652924591adb85ed7dbf72495ab113f0e9aa8b2381b5e28bf470e65df`,
+  and Server generated-artifact commit `5048af9`. Server, Worker, and Web exact
+  pins are synchronized. Do not Generate again without another append-only
+  superseding decision, and do not hand-edit generated files.
   D24 implementation or activation, deployment, deployed-Worker changes,
   production traffic, canary, legacy deletion, S8, fallback, dual path,
   compatibility/downgrade shims, and a second authority/store/runner remain
   forbidden.
+- S7 currently stops at `SPEC_GAP`: the Server-owned
+  `agent-task-runtime-bootstrap/v1.transport_binding` authenticates only
+  `outer_job_id`, `run_id`, `lease_id`, and `transport_epoch`, while
+  `worker-debug-fragment/v1` requires `transport_attempt_id`. The design makes
+  that value the outer Server claim identity and explicitly forbids replacing
+  it with the native Attempt ID. Keep S7 fail closed; do not edit contract
+  source or Generate until a new append-only decision authorizes a bounded
+  closure.
 - Python nested semantic helpers must preserve Node's single-dispatch behavior.
   For an already nested document, call `validate_document` once and verify its
   embedded digest directly; do not call public `verify_document_digest` from a
