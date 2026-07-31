@@ -6,6 +6,9 @@ import unittest
 
 from tests.agent_first_result_debug_transport_facade_support import canonical_bytes
 from tests.agent_first_task_result_selector_support import bind_task_result_to_terminal_decision
+from tests.agent_first_task_version_authority_support import (
+    build_transport_version_authority_proof,
+)
 from tests.test_agent_first_result_debug_transport_helper_red import (
     AgentFirstResultDebugTransportHelperRedTest,
 )
@@ -24,6 +27,18 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
 
     def uploaded_documents(self) -> dict[str, dict[str, object]]:
         return self.facade.build_uploaded_documents()
+
+    def version_proof(
+        self,
+        envelope: dict[str, object],
+        task_result: dict[str, object],
+    ) -> dict[str, object]:
+        return build_transport_version_authority_proof(
+            self.facade,
+            envelope["authority"],
+            envelope["full_fence"],
+            task_result,
+        )
 
     def assert_schema_valid(self, schema_id: str, document: dict[str, object]) -> None:
         self.assertEqual(
@@ -244,6 +259,9 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
         local_only_envelope["task_result_digest"] = hashlib.sha256(
             canonical_bytes(local_only_task_result)
         ).hexdigest()
+        local_only_envelope["task_version_authority"] = self.version_proof(
+            local_only_envelope, local_only_task_result
+        )
         local_only_envelope["worker_debug_descriptor"] = local_only_descriptor
         local_only_envelope["transport_receipt"] = {
             "availability": "not_applicable",
@@ -263,6 +281,9 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
         unavailable_envelope["task_result_digest"] = hashlib.sha256(
             canonical_bytes(unavailable_task_result)
         ).hexdigest()
+        unavailable_envelope["task_version_authority"] = self.version_proof(
+            unavailable_envelope, unavailable_task_result
+        )
         unavailable_envelope["worker_debug_descriptor"] = None
         unavailable_envelope["transport_receipt"] = {
             "availability": "not_applicable",
@@ -429,7 +450,7 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
             ("availability-reason-registry/v1", self.facade.reseal("availability-reason-registry/v1", availability), ("CONTRACT_DOCUMENT_INVALID", "AVAILABILITY_REASON_REGISTRY_BIJECTION_INVALID", "$")),
             ("task-result-outcome-reason-registry/v1", self.facade.reseal("task-result-outcome-reason-registry/v1", outcome), ("CONTRACT_DOCUMENT_INVALID", "TASK_RESULT_OUTCOME_REASON_REGISTRY_BIJECTION_INVALID", "$")),
             ("task-result-transport-envelope/v1", fence, ("CONTRACT_DOCUMENT_INVALID", "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence.task_version")),
-            ("task-result-transport-envelope/v1", version, ("CONTRACT_DOCUMENT_INVALID", "TRANSPORT_RESULT_VERSION_INVALID", "$.task_result.published_from_version")),
+            ("task-result-transport-envelope/v1", version, ("CONTRACT_DOCUMENT_INVALID", "TRANSPORT_VERSION_AUTHORITY_INVALID", "$.task_version_authority")),
             ("worker-debug-file-manifest/v1", self.facade.reseal("worker-debug-file-manifest/v1", manifest), ("CONTRACT_DOCUMENT_INVALID", "DEBUG_FILE_MEDIA_TYPE_INVALID", "$.entries[0].media_type")),
         ])
 
@@ -552,6 +573,9 @@ class AgentFirstResultDebugTransportAdversarialTest(unittest.TestCase):
         local_envelope = deepcopy(documents["task_result_transport_envelope"])
         local_envelope["task_result"] = local_result
         local_envelope["task_result_digest"] = hashlib.sha256(canonical_bytes(local_result)).hexdigest()
+        local_envelope["task_version_authority"] = self.version_proof(
+            local_envelope, local_result
+        )
         local_envelope["worker_debug_descriptor"] = local_descriptor
         local_envelope["transport_receipt"] = {"availability": "not_applicable", "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE"}
         local_ack = deepcopy(documents["task_result_transport_ack"])

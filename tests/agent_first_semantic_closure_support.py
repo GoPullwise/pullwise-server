@@ -921,6 +921,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             self,
             envelope_fixture["task_result"],
         )
+        fragment["task_version"] = task_result["published_from_version"]
         task_result_core = deepcopy(task_result)
         task_result_core["schema_id"] = "task-result-core/v1"
         task_result_core["diagnostics"] = {}

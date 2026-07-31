@@ -74,6 +74,7 @@ class AgentFirstResultDebugTransportHelperRedTest(
             self,
             envelope_fixture["task_result"],
         )
+        fragment["task_version"] = task_result["published_from_version"]
         task_result_core = self.derive_core_expected(task_result)
         task_result_core_ref = self.content_ref(
             "art_99999999999999999999999999999992",

@@ -22,9 +22,19 @@ def _rule_task_control_event(value: dict[str, object]) -> None:
         "$.task_version",
         code="TASK_VERSION_STALE",
     )
+    _require(
+        value["task_id"] == value["full_fence"]["task_id"],
+        "TASK_CONTROL_EVENT_FENCE_INVALID",
+        "$.task_id",
+    )
 
 
 def _rule_task_version_authority_proof(value: dict[str, object]) -> None:
+    _require(
+        value["task_id"] == value["full_fence"]["task_id"],
+        "TASK_VERSION_AUTHORITY_FENCE_INVALID",
+        "$.task_id",
+    )
     chain = value["version_chain"]
     previous_version = chain[0]["previous_task_version"]
     phase = "checkpoint"

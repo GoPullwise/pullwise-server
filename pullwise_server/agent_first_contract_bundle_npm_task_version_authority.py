@@ -21,9 +21,19 @@ function ruleTaskControlEvent(value) {
     "$.task_version",
     "TASK_VERSION_STALE",
   );
+  seoRequire(
+    value.task_id === value.full_fence.task_id,
+    "TASK_CONTROL_EVENT_FENCE_INVALID",
+    "$.task_id",
+  );
 }
 
 function ruleTaskVersionAuthorityProof(value) {
+  seoRequire(
+    value.task_id === value.full_fence.task_id,
+    "TASK_VERSION_AUTHORITY_FENCE_INVALID",
+    "$.task_id",
+  );
   const chain = value.version_chain;
   let previousVersion = chain[0].previous_task_version;
   let phase = "checkpoint";
