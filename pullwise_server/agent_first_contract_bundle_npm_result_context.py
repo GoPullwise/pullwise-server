@@ -35,7 +35,7 @@ export async function verifyTaskResultContext(taskResult, options = {}) {
   seoRequire(terminalGateDecision !== null && typeof terminalGateDecision === "object" && !Array.isArray(terminalGateDecision), "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.ref");
   const decision = await verifyDocumentDigest("gate-decision/v1", terminalGateDecision);
   seoRequire(seoRefMatchesDocument(checked.gate_decision.ref, "gate-decision/v1", decision), "CAS_CORRUPT", "$.gate_decision.ref");
-  seoRequire(decision.decision_kind === "terminalization" && decision.selected_lifecycle === "TERMINAL" && decision.passed, "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision");
+  seoRequire(decision.passed && ["success", "terminalization"].includes(decision.decision_kind) && decision.selected_lifecycle === "TERMINAL", "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision");
   seoRequire(decision.task_id === checked.task_id, "TASK_RESULT_CONTEXT_INVALID", "$.task_id");
   seoRequire(decision.task_version === checked.published_from_version, "TASK_RESULT_CONTEXT_INVALID", "$.published_from_version");
   seoRequire(decision.selected_outcome === checked.outcome, "TASK_RESULT_CONTEXT_INVALID", "$.outcome");

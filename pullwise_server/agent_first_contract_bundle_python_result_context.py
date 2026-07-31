@@ -47,7 +47,7 @@ def verify_task_result_context(
     _seo_require(isinstance(terminal_gate_decision, dict), "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision.ref")
     decision = verify_document_digest("gate-decision/v1", terminal_gate_decision)
     _result_require_ref(checked["gate_decision"]["ref"], "gate-decision/v1", decision, "$.gate_decision.ref")
-    _seo_require(decision["decision_kind"] == "terminalization" and decision["selected_lifecycle"] == "TERMINAL" and decision["passed"], "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision")
+    _seo_require(decision["passed"] and decision["decision_kind"] in {"success", "terminalization"} and decision["selected_lifecycle"] == "TERMINAL", "TASK_RESULT_CONTEXT_INVALID", "$.gate_decision")
     _seo_require(decision["task_id"] == checked["task_id"], "TASK_RESULT_CONTEXT_INVALID", "$.task_id")
     _seo_require(decision["task_version"] == checked["published_from_version"], "TASK_RESULT_CONTEXT_INVALID", "$.published_from_version")
     _seo_require(decision["selected_outcome"] == checked["outcome"], "TASK_RESULT_CONTEXT_INVALID", "$.outcome")

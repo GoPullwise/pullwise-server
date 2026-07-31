@@ -90,12 +90,14 @@ class AgentFirstTaskResultSelectorBindingTest(unittest.TestCase):
         bad_ref["gate_decision"]["ref"]["sha256"] = "0" * 64
         bad_task = deepcopy(result)
         bad_task["task_id"] = "task_22222222222222222222222222222222"
-        success_decision = self.builder.document("gate_decision_golden_success")
+        failed_success_decision = self.builder.document(
+            "gate_decision_fence_lease_invalid"
+        )
         non_terminal = deepcopy(result)
         non_terminal["gate_decision"]["ref"] = self.builder.facade.content_ref(
             "art_f0000000000000000000000000000001",
             "gate-decision/v1",
-            success_decision,
+            failed_success_decision,
         )
         bad_version = deepcopy(result)
         bad_version["published_from_version"] -= 1
@@ -112,7 +114,7 @@ class AgentFirstTaskResultSelectorBindingTest(unittest.TestCase):
             missing,
             self.operation(bad_ref, decision, ledger),
             self.operation(bad_task, decision, ledger),
-            self.operation(non_terminal, success_decision, ledger),
+            self.operation(non_terminal, failed_success_decision, ledger),
             self.operation(bad_version, decision, ledger),
             self.operation(bad_outcome, decision, ledger),
             self.operation(bad_reason, decision, ledger),

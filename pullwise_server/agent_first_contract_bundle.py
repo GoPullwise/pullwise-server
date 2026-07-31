@@ -64,6 +64,7 @@ REQUIRED_FAMILIES = (
     "gate-preparation",
     "pre-gate",
     "gate-input",
+    "gate-predicate-registry",
     "gate",
     "task-evidence",
     "task-result-identities",

@@ -14,6 +14,9 @@ from tests.agent_first_task_evidence_support import (
 
 ROOT = Path(__file__).resolve().parents[1]
 GATE_PATH = ROOT / "contracts/agent-first/current/source/families/gate.json"
+REGISTRY_PATH = (
+    ROOT / "contracts/agent-first/current/source/families/gate-predicate-registry.json"
+)
 ERROR_PATH = (
     ROOT / "contracts/agent-first/current/source/families/receipt-error.json"
 )
@@ -150,6 +153,13 @@ COMMON_DECISION_FIELDS = {
     "predicate_results",
     "decision_digest",
 }
+SELECTOR_FIELDS = {
+    "task_id", "task_version", "deletion_version", "profile", "gate_mode",
+    "cancel_state", "effect_state", "cause_family", "delivery_state",
+    "selected_lifecycle", "selected_outcome", "selected_reason",
+    "selector_input_digest", "authoritative_fact_refs", "source_availability",
+    "evidence_availability", "effect_availability",
+}
 TERMINAL_REASON_MAP = {
     "COMPLETED": {"SUCCESS"},
     "COMPLETED_WITH_WAIVERS": {"AUTHORIZED_WAIVER"},
@@ -204,21 +214,28 @@ class GateFamilyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.gate_family = json.loads(GATE_PATH.read_text(encoding="utf-8"))
+        cls.registry_family = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
         cls.error_family = json.loads(ERROR_PATH.read_text(encoding="utf-8"))
         cls.schemas = {
-            item["$id"]: item for item in cls.gate_family["schemas"]
+            item["$id"]: item
+            for family in (cls.gate_family, cls.registry_family)
+            for item in family["schemas"]
         }
 
-    def test_obsolete_abbreviated_gate_input_is_removed(self) -> None:
+    def test_gate_decision_and_predicate_registry_have_single_owners(self) -> None:
         self.assertEqual(
-            ["gate-decision/v1", "gate-predicate-registry/v1"],
+            ["gate-decision/v1"],
             [item["$id"] for item in self.gate_family["schemas"]],
+        )
+        self.assertEqual(
+            ["gate-predicate-registry/v1"],
+            [item["$id"] for item in self.registry_family["schemas"]],
         )
 
     def test_predicate_registry_is_complete_ordered_and_many_to_many(self) -> None:
         fixture = next(
             item
-            for item in self.gate_family["fixtures"]
+            for item in self.registry_family["fixtures"]
             if item["fixture_id"] == "gate_golden_independent_registry"
         )
         entries = fixture["document"]["predicates"]
@@ -278,7 +295,7 @@ class GateFamilyTest(unittest.TestCase):
     def test_registries_are_sealed_and_stable_code_views_are_bijective(self) -> None:
         gate_fixture = next(
             item
-            for item in self.gate_family["fixtures"]
+            for item in self.registry_family["fixtures"]
             if item["fixture_id"] == "gate_golden_independent_registry"
         )
         self.assertTrue(
@@ -322,7 +339,7 @@ class GateFamilyTest(unittest.TestCase):
             }.isdisjoint(codes)
         )
 
-    def test_gate_decision_has_two_strict_typed_branches(self) -> None:
+    def test_gate_decision_has_three_strict_typed_branches(self) -> None:
         schema = self.schemas["gate-decision/v1"]
         self.assertEqual(
             {
@@ -353,55 +370,38 @@ class GateFamilyTest(unittest.TestCase):
             props["input_snapshot_ref"]["x-pullwise-content-schema-ids"],
         )
         branches = schema["oneOf"]
-        self.assertEqual(2, len(branches))
-        success, terminal = branches
-        self.assertIs(False, success["additionalProperties"])
-        self.assertIs(False, terminal["additionalProperties"])
+        self.assertEqual(3, len(branches))
+        failed_success, passed_success, terminal = branches
+        for branch in branches:
+            self.assertIs(False, branch["additionalProperties"])
         self.assertEqual(
             set(schema["required"]) | {"requested_outcome"},
-            set(success["required"]),
+            set(failed_success["required"]),
         )
+        self.assertIs(False, failed_success["properties"]["passed"]["const"])
         self.assertEqual(
-            "success", success["properties"]["decision_kind"]["const"]
+            set(schema["required"]) | {"requested_outcome"} | SELECTOR_FIELDS,
+            set(passed_success["required"]),
         )
+        self.assertIs(True, passed_success["properties"]["passed"]["const"])
         self.assertEqual(
-            "gate-input-snapshot/v1",
-            success["properties"]["input_snapshot_ref"]
-            ["x-pullwise-content-schema-id"],
-        )
-        success_results = success["properties"]["predicate_results"]
-        self.assertEqual((15, 15), (success_results["minItems"], success_results["maxItems"]))
-        self.assertEqual(
-            list(SUCCESS_PREDICATES),
-            success_results["items"]["properties"]["predicate_id"]["enum"],
-        )
-        terminal_fields = {
-            "task_id",
-            "task_version",
-            "deletion_version",
-            "profile",
-            "gate_mode",
-            "cancel_state",
-            "effect_state",
-            "cause_family",
-            "delivery_state",
-            "selected_lifecycle",
-            "selected_outcome",
-            "selected_reason",
-            "selector_input_digest",
-            "authoritative_fact_refs",
-            "source_availability",
-            "evidence_availability",
-            "effect_availability",
-        }
-        self.assertEqual(
-            set(schema["required"]) | terminal_fields,
+            set(schema["required"]) | SELECTOR_FIELDS,
             set(terminal["required"]),
         )
-        self.assertEqual(
-            "terminalization",
-            terminal["properties"]["decision_kind"]["const"],
-        )
+        for success in (failed_success, passed_success):
+            self.assertEqual("success", success["properties"]["decision_kind"]["const"])
+            self.assertEqual(
+                "gate-input-snapshot/v1",
+                success["properties"]["input_snapshot_ref"]
+                ["x-pullwise-content-schema-id"],
+            )
+            results = success["properties"]["predicate_results"]
+            self.assertEqual((15, 15), (results["minItems"], results["maxItems"]))
+            self.assertEqual(
+                list(SUCCESS_PREDICATES),
+                results["items"]["properties"]["predicate_id"]["enum"],
+            )
+        self.assertEqual("terminalization", terminal["properties"]["decision_kind"]["const"])
         self.assertEqual(
             "terminalization-input-snapshot/v1",
             terminal["properties"]["input_snapshot_ref"]
@@ -435,26 +435,9 @@ class GateFamilyTest(unittest.TestCase):
         )
         branch_fields = (
             {"requested_outcome"}
+            | (SELECTOR_FIELDS if document.get("passed") else set())
             if kind == "success"
-            else {
-                "task_id",
-                "task_version",
-                "deletion_version",
-                "profile",
-                "gate_mode",
-                "cancel_state",
-                "effect_state",
-                "cause_family",
-                "delivery_state",
-                "selected_lifecycle",
-                "selected_outcome",
-                "selected_reason",
-                "selector_input_digest",
-                "authoritative_fact_refs",
-                "source_availability",
-                "evidence_availability",
-                "effect_availability",
-            }
+            else SELECTOR_FIELDS
         )
         if set(document) != COMMON_DECISION_FIELDS | branch_fields:
             return False
@@ -486,18 +469,37 @@ class GateFamilyTest(unittest.TestCase):
             return False
         if document["predicate_registry_digest"] != next(
             item
-            for item in self.gate_family["fixtures"]
+            for item in self.registry_family["fixtures"]
             if item["fixture_id"] == "gate_golden_independent_registry"
         )["document"]["registry_digest"]:
             return False
         if not sealed(document, self.schemas["gate-decision/v1"]):
             return False
         if kind == "success":
-            return (
+            valid = (
                 document["requested_outcome"]
                 in {"COMPLETED", "COMPLETED_WITH_WAIVERS", "NO_CHANGE_NEEDED"}
                 and valid_content_ref(
                     document["input_snapshot_ref"], {"gate-input-snapshot/v1"}
+                )
+            )
+            if not valid or not document["passed"]:
+                return valid
+            outcome = document["requested_outcome"]
+            return (
+                document["selected_lifecycle"] == "TERMINAL"
+                and document["selected_outcome"] == outcome
+                and document["selected_reason"] in TERMINAL_REASON_MAP[outcome]
+                and document["authoritative_fact_refs"] == []
+                and valid_availability(
+                    document["source_availability"], {"source-tree-manifest/v1"}
+                )
+                and valid_availability(
+                    document["evidence_availability"],
+                    {"pre-gate-evidence-closure-manifest/v1"},
+                )
+                and valid_availability(
+                    document["effect_availability"], {"effect-ledger-snapshot/v1"}
                 )
             )
         if kind != "terminalization":
@@ -588,7 +590,7 @@ class GateFamilyTest(unittest.TestCase):
             )
 
     def test_owned_contract_sources_stay_within_readability_limits(self) -> None:
-        for path in (GATE_PATH, ERROR_PATH, Path(__file__)):
+        for path in (GATE_PATH, REGISTRY_PATH, ERROR_PATH, Path(__file__)):
             lines = path.read_text(encoding="utf-8").splitlines()
             self.assertLessEqual(len(lines), 600, path.name)
             self.assertLessEqual(max(map(len, lines), default=0), 200, path.name)
