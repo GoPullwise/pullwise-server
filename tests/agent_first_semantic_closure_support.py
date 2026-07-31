@@ -19,6 +19,7 @@ from tests.agent_first_task_result_selector_support import (
     bind_task_result_to_terminal_decision,
 )
 from tests.agent_first_task_version_authority_support import (
+    build_task_result_publication_event_context,
     build_transport_version_authority_proof,
 )
 
@@ -1634,6 +1635,46 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             ),
         }
 
+    def task_version_authority_probe_operations(
+        self,
+    ) -> dict[str, dict[str, object]]:
+        uploaded = self.build_uploaded_documents()
+        envelope = uploaded["task_result_transport_envelope"]
+        context = build_task_result_publication_event_context(
+            self,
+            envelope["authority"],
+            envelope["full_fence"],
+            uploaded["task_result"],
+        )
+        invalid_event = deepcopy(context["event"])
+        invalid_event["input_ref"]["sha256"] = "0" * 64
+        invalid_event = self.reseal("task-control-event/v1", invalid_event)
+        invalid_proof = deepcopy(envelope["task_version_authority"])
+        invalid_proof["version_chain"][1]["previous_task_version"] += 1
+        invalid_proof = self.reseal(
+            "task-version-authority-proof/v1", invalid_proof
+        )
+        return {
+            "verify_task_control_event_context": self.helper_operation(
+                "verify_task_control_event_context",
+                [
+                    invalid_event,
+                    envelope["authority"],
+                    context["previous"],
+                    context["terminal"],
+                    context["task_result"],
+                ],
+            ),
+            "verify_task_version_authority_proof": self.helper_operation(
+                "verify_task_version_authority_proof",
+                [
+                    invalid_proof,
+                    envelope["authority"],
+                    uploaded["task_result"],
+                ],
+            ),
+        }
+
     def positive_helper_operations(self) -> dict[str, dict[str, object]]:
         success_snapshot, success_context = self.gate_success_inputs()
         terminal_snapshot, terminal_context = self.gate_terminal_inputs()
@@ -1764,6 +1805,13 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         budget_after = self.fixture_document("budget_golden_ledger_after_settlement")
         fact = self.fixture_document("gate_preparation_golden_terminalization_fact")
         uploaded = self.build_uploaded_documents()
+        uploaded_envelope = uploaded["task_result_transport_envelope"]
+        task_version_context = build_task_result_publication_event_context(
+            self,
+            uploaded_envelope["authority"],
+            uploaded_envelope["full_fence"],
+            uploaded["task_result"],
+        )
         tool_invocation = self.fixture_document("tool_golden_invocation")
         tool_intent = self.fixture_document("tool_crash_after_intent")
         tool_capability = self.fixture_document("tool_golden_dispatch_capability")
@@ -1966,6 +2014,24 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                     "worker_debug_descriptor": uploaded["worker_debug_descriptor"],
                 },
             ),
+            "verify_task_control_event_context": self.helper_operation(
+                "verify_task_control_event_context",
+                [
+                    task_version_context["event"],
+                    uploaded_envelope["authority"],
+                    task_version_context["previous"],
+                    task_version_context["terminal"],
+                    task_version_context["task_result"],
+                ],
+            ),
+            "verify_task_version_authority_proof": self.helper_operation(
+                "verify_task_version_authority_proof",
+                [
+                    uploaded_envelope["task_version_authority"],
+                    uploaded_envelope["authority"],
+                    uploaded["task_result"],
+                ],
+            ),
             "verify_terminalization_fact_context": self.helper_operation(
                 "verify_terminalization_fact_context",
                 [fact, "task_11111111111111111111111111111111", 7, "FINALIZING", fact],
@@ -2026,6 +2092,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             self.task_evidence_probe_operations(),
             self.verification_probe_operations(),
             self.result_debug_probe_operations(),
+            self.task_version_authority_probe_operations(),
             self.checkpoint_probe_operations(),
             self.tool_probe_operations(),
             self.gate_preparation_probe_operations(),
