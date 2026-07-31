@@ -657,6 +657,24 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   superseding decision, and do not hand-edit generated files, activate
   production, implement or enable D24, deploy, canary, delete legacy, or begin
   S8 cutover/rollback.
+- D38 (`d1cbc20e4220c6d073d01a060cce1ae2f109459e0c110d4e403c41ecd0303368`)
+  is resolved to
+  `bounded_s5_terminal_control_and_selector_closure_one_generate_no_activation`.
+  It supersedes only D37's consumed Generate boundary and authorizes the
+  bounded S5 contract closure: versionedly bridge a passed Success Gate into
+  the sole mechanical six-axis terminal selector without requiring or
+  fabricating a terminalization fact; bind immutable Server grant/authority to
+  the local checkpoint/control-event Task-version chain; and define one real
+  `FINALIZING -> TERMINAL` TaskResult CAS that atomically binds
+  `published_from_version=N`, `terminal_task_version=N+1`, the selected result,
+  transport/result/version/fence closure, and exact replay. The D38 Generate
+  count is `0`. All source, golden/negative/idempotency/fence/crash fixture,
+  semantic-closure, DAG, registry, digest, and Python/Node parity gates must be
+  green before exactly one Generate synchronizes Server/Worker/Web exact pins.
+  D24 implementation or activation, deployment, deployed-Worker changes,
+  production traffic, canary, legacy deletion, S8, fallback, dual path,
+  compatibility/downgrade shims, and a second authority/store/runner remain
+  forbidden.
 - Python nested semantic helpers must preserve Node's single-dispatch behavior.
   For an already nested document, call `validate_document` once and verify its
   embedded digest directly; do not call public `verify_document_digest` from a
