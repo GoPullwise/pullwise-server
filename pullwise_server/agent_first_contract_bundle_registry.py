@@ -178,6 +178,8 @@ CONTEXTUAL_HELPER_IDS = frozenset(
         "verify_task_result_core",
         "verify_task_result_transport_ack",
         "verify_task_result_transport_envelope",
+        "verify_task_control_event_context",
+        "verify_task_version_authority_proof",
         "verify_terminalization_fact_context",
         "verify_terminalization_input_snapshot_context",
         "verify_gate_input_snapshot_context",

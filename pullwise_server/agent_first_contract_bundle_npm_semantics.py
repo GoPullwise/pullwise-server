@@ -37,6 +37,9 @@ from .agent_first_contract_bundle_npm_task_control_helpers import (
 from .agent_first_contract_bundle_npm_task_control_rules import (
     NPM_TASK_CONTROL_RULES,
 )
+from .agent_first_contract_bundle_npm_task_version_authority import (
+    NPM_TASK_VERSION_AUTHORITY,
+)
 from .agent_first_contract_bundle_npm_tool_evidence import NPM_TOOL_EVIDENCE
 from .agent_first_contract_bundle_npm_verification import NPM_VERIFICATION
 
@@ -543,6 +546,7 @@ NPM_SEMANTICS = "\n".join(
         NPM_BUDGET,
         NPM_TASK_CONTROL_RULES,
         NPM_TASK_CONTROL_HELPERS,
+        NPM_TASK_VERSION_AUTHORITY,
         NPM_TOOL_EVIDENCE,
         NPM_PUBLICATION,
         NPM_QUALITY_POLICY,

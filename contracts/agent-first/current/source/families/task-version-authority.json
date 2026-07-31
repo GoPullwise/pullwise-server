@@ -1,0 +1,252 @@
+{
+  "family_id": "task-version-authority",
+  "schemas": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "task-control-event/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "event_digest",
+        "domain": "pullwise:task-control-event:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": [],
+        "contextual_helpers": ["verify_task_control_event_context"]
+      },
+      "required": [
+        "schema_id",
+        "package",
+        "event_id",
+        "event_kind",
+        "idempotency_key",
+        "authority_digest",
+        "grant_digest",
+        "full_fence",
+        "task_id",
+        "previous_task_version",
+        "task_version",
+        "input_ref",
+        "previous_task_record_ref",
+        "task_record_ref",
+        "occurred_at",
+        "event_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"task-control-event/v1"},
+        "package": {"$ref":"current-package-ref/v1"},
+        "event_id": {"type":"string","pattern":"^event_[0-9a-f]{32}$"},
+        "event_kind": {
+          "enum":["task_result_published","terminalization_requested"]
+        },
+        "idempotency_key": {
+          "type":"string",
+          "minLength":1,
+          "maxLength":160,
+          "pattern":"^[\\x20-\\x7e]+$"
+        },
+        "authority_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "grant_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "full_fence": {"$ref":"task-fence/v1"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "previous_task_version": {
+          "type":"integer",
+          "minimum":1,
+          "maximum":9007199254740990
+        },
+        "task_version": {
+          "type":"integer",
+          "minimum":2,
+          "maximum":9007199254740991
+        },
+        "input_ref": {
+          "$ref":"content-ref/v1",
+          "x-pullwise-content-schema-ids":[
+            "task-result/v1",
+            "terminalization-input-snapshot/v1"
+          ]
+        },
+        "previous_task_record_ref": {
+          "$ref":"content-ref/v1",
+          "x-pullwise-content-schema-id":"task-record/v1"
+        },
+        "task_record_ref": {
+          "$ref":"content-ref/v1",
+          "x-pullwise-content-schema-id":"task-record/v1"
+        },
+        "occurred_at": {
+          "type":"string",
+          "pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "event_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "event_kind": {"const":"task_result_published"},
+            "input_ref": {
+              "$ref":"content-ref/v1",
+              "x-pullwise-content-schema-id":"task-result/v1"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event_kind": {"const":"terminalization_requested"},
+            "input_ref": {
+              "$ref":"content-ref/v1",
+              "x-pullwise-content-schema-id":"terminalization-input-snapshot/v1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "task-version-authority-proof/v1",
+      "type": "object",
+      "additionalProperties": false,
+      "x-pullwise-digest": {
+        "field": "proof_digest",
+        "domain": "pullwise:task-version-authority-proof:v1"
+      },
+      "x-pullwise-semantics": {
+        "document_rules": [],
+        "contextual_helpers": ["verify_task_version_authority_proof"]
+      },
+      "required": [
+        "schema_id",
+        "package",
+        "task_id",
+        "authority_digest",
+        "grant_digest",
+        "full_fence",
+        "base_task_record_ref",
+        "version_chain",
+        "published_from_version",
+        "terminal_task_version",
+        "task_result_ref",
+        "proof_digest"
+      ],
+      "properties": {
+        "schema_id": {"const":"task-version-authority-proof/v1"},
+        "package": {"$ref":"current-package-ref/v1"},
+        "task_id": {"type":"string","pattern":"^task_[0-9a-f]{32}$"},
+        "authority_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "grant_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "full_fence": {"$ref":"task-fence/v1"},
+        "base_task_record_ref": {
+          "$ref":"content-ref/v1",
+          "x-pullwise-content-schema-id":"task-record/v1"
+        },
+        "version_chain": {
+          "type":"array",
+          "minItems":2,
+          "maxItems":4096,
+          "uniqueItems":true,
+          "items": {
+            "type":"object",
+            "additionalProperties":false,
+            "required":[
+              "transition_kind",
+              "previous_task_version",
+              "task_version",
+              "transition_ref",
+              "task_record_ref"
+            ],
+            "properties": {
+              "transition_kind": {
+                "enum":[
+                  "checkpoint",
+                  "task_result_published",
+                  "terminalization_requested"
+                ]
+              },
+              "previous_task_version": {
+                "type":"integer",
+                "minimum":1,
+                "maximum":9007199254740990
+              },
+              "task_version": {
+                "type":"integer",
+                "minimum":2,
+                "maximum":9007199254740991
+              },
+              "transition_ref": {
+                "$ref":"content-ref/v1",
+                "x-pullwise-content-schema-ids":[
+                  "committed-checkpoint-manifest/v1",
+                  "task-control-event/v1"
+                ]
+              },
+              "task_record_ref": {
+                "$ref":"content-ref/v1",
+                "x-pullwise-content-schema-id":"task-record/v1"
+              }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "transition_kind":{"const":"checkpoint"},
+                  "transition_ref": {
+                    "$ref":"content-ref/v1",
+                    "x-pullwise-content-schema-id":"committed-checkpoint-manifest/v1"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "transition_kind":{"const":"task_result_published"},
+                  "transition_ref": {
+                    "$ref":"content-ref/v1",
+                    "x-pullwise-content-schema-id":"task-control-event/v1"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "transition_kind":{"const":"terminalization_requested"},
+                  "transition_ref": {
+                    "$ref":"content-ref/v1",
+                    "x-pullwise-content-schema-id":"task-control-event/v1"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "published_from_version": {
+          "type":"integer",
+          "minimum":1,
+          "maximum":9007199254740990
+        },
+        "terminal_task_version": {
+          "type":"integer",
+          "minimum":2,
+          "maximum":9007199254740991
+        },
+        "task_result_ref": {
+          "$ref":"content-ref/v1",
+          "x-pullwise-content-schema-id":"task-result/v1"
+        },
+        "proof_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "task_control_event_negative_partial",
+      "fixture_class": "negative",
+      "schema_id": "task-control-event/v1",
+      "document": {"schema_id":"task-control-event/v1"},
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "task_version_authority_negative_partial",
+      "fixture_class": "negative",
+      "schema_id": "task-version-authority-proof/v1",
+      "document": {"schema_id":"task-version-authority-proof/v1"},
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    }
+  ]
+}

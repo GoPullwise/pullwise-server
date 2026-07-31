@@ -52,6 +52,7 @@ REQUIRED_FAMILIES = (
     "task-bootstrap",
     "task-checkpoint-state",
     "task-checkpoint-manifest",
+    "task-version-authority",
     "task-completion-proposal",
     "quality-policy-plan",
     "task-verifier-input",

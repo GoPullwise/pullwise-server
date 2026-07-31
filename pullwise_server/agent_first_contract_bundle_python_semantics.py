@@ -38,6 +38,9 @@ from .agent_first_contract_bundle_python_task_control_helpers import (
 from .agent_first_contract_bundle_python_task_control_rules import (
     PYTHON_TASK_CONTROL_RULES,
 )
+from .agent_first_contract_bundle_python_task_version_authority import (
+    PYTHON_TASK_VERSION_AUTHORITY,
+)
 from .agent_first_contract_bundle_python_tool_evidence import PYTHON_TOOL_EVIDENCE
 from .agent_first_contract_bundle_python_verification import PYTHON_VERIFICATION
 
@@ -326,6 +329,7 @@ PYTHON_SEMANTICS = "\n".join(
         PYTHON_CONTROL,
         PYTHON_TASK_CONTROL_RULES,
         PYTHON_TASK_CONTROL_HELPERS,
+        PYTHON_TASK_VERSION_AUTHORITY,
         PYTHON_TOOL_EVIDENCE,
         PYTHON_PUBLICATION,
         PYTHON_QUALITY_POLICY,
