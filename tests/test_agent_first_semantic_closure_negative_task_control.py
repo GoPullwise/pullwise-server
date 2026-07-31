@@ -34,7 +34,9 @@ OWNED_RULE_IDS = frozenset(
         "sorted_unique_active_requirement_ids",
         "sorted_unique_charter_sets",
         "sorted_unique_requirement_links",
+        "task_control_event",
         "task_record_transport_binding_all_or_none",
+        "task_version_authority_proof",
         "terminal_result_shape",
         "transport_abandonment_record",
         "utf8_nfc_byte_limits",
@@ -150,6 +152,14 @@ def build_task_control_negative_cases(
 
     invalid_terminal_shape = deepcopy(record)
     invalid_terminal_shape["lifecycle"] = "TERMINAL"
+
+    control_event_fixture = "task_control_event_golden_terminalization_requested"
+    invalid_control_event_version = harness.fixture_document(control_event_fixture)
+    invalid_control_event_version["task_version"] += 1
+
+    version_proof_fixture = "task_version_authority_golden_terminal_publication"
+    invalid_version_proof_chain = harness.fixture_document(version_proof_fixture)
+    invalid_version_proof_chain["version_chain"][0]["task_version"] += 1
 
     authority_fixture = "authority_negative_agent_selected_fence"
     invalid_authority_binding = harness.fixture_document(authority_fixture)
@@ -405,10 +415,30 @@ def build_task_control_negative_cases(
             failure("REQUIREMENT_SELF_LINK_INVALID", "$.parent_requirement_ids"),
         ),
         case(
+            "task_control_event",
+            control_event_fixture,
+            invalid_control_event_version,
+            failure(
+                "TASK_CONTROL_EVENT_VERSION_INVALID",
+                "$.task_version",
+                code="TASK_VERSION_STALE",
+            ),
+        ),
+        case(
             "task_record_transport_binding_all_or_none",
             record_fixture,
             partial_record_transport,
             failure("TASK_RECORD_TRANSPORT_BINDING_INVALID"),
+        ),
+        case(
+            "task_version_authority_proof",
+            version_proof_fixture,
+            invalid_version_proof_chain,
+            failure(
+                "TASK_VERSION_AUTHORITY_CHAIN_INVALID",
+                "$.version_chain[0].task_version",
+                code="TASK_VERSION_STALE",
+            ),
         ),
         case(
             "terminal_result_shape",
