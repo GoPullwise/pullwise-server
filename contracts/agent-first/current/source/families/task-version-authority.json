@@ -235,11 +235,330 @@
   ],
   "fixtures": [
     {
+      "fixture_id": "task_control_event_fence_task_mismatch",
+      "fixture_class": "fence",
+      "schema_id": "task-control-event/v1",
+      "document": {
+        "schema_id": "task-control-event/v1",
+        "package": {
+          "schema_id":"current-package-ref/v1",
+          "package_identity":"@pullwise/agent-task-contract",
+          "package_version":"0.1.0",
+          "content_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "event_id":"event_11111111111111111111111111111111",
+        "event_kind":"terminalization_requested",
+        "idempotency_key":"terminalization_requested:task:3",
+        "authority_digest":"1f2874c15647dfa05b3e70df5ac2fcc5a063e55f8dc40fdc4469fc2735300ae3",
+        "grant_digest":"bced3d25cf54204e4d8e99c1dd47b3a749a94a159aeb955f53e2aa09bcfa0111",
+        "full_fence": {
+          "schema_id":"task-fence/v1",
+          "task_id":"task_00000000000000000000000000000001",
+          "attempt_id":"attempt_00000000000000000000000000000001",
+          "session_id":"sess_11111111111111111111111111111111",
+          "owner_id":"owner_00000000000000000000000000000001",
+          "lease_id":"lease_11111111111111111111111111111111",
+          "task_version":3,"deletion_version":0,"owner_epoch":1,
+          "native_epoch":1,"transport_epoch":1,
+          "fence_digest":"3b215df6c86af21d71141ec72b88b28456449a979c37109c0d5a356ad758a733"
+        },
+        "task_id":"task_ffffffffffffffffffffffffffffffff",
+        "previous_task_version":3,
+        "task_version":4,
+        "input_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_77777777777777777777777777777777",
+          "content_schema_id":"terminalization-input-snapshot/v1",
+          "sha256":"9bd890a703f8e565d8357559870ef5141009d011c2bf7ea6d6cbd942b994bb84",
+          "size_bytes":62,"media_type":"application/json","encoding":"utf-8"
+        },
+        "previous_task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_88888888888888888888888888888888",
+          "content_schema_id":"task-record/v1",
+          "sha256":"51d0d659aa59c7dc70f8a177057e8a9d96f4819589cdd5bf1eac4555cb37eb61",
+          "size_bytes":43,"media_type":"application/json","encoding":"utf-8"
+        },
+        "task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_99999999999999999999999999999999",
+          "content_schema_id":"task-record/v1",
+          "sha256":"df613c58ca221e6775076256bc571b8cc63210e121aa742888be990dc04e590a",
+          "size_bytes":43,"media_type":"application/json","encoding":"utf-8"
+        },
+        "occurred_at":"2026-07-22T00:00:40.000Z",
+        "event_digest":"8a7c755499b264ce27a247e67e7898d7fb693962145a9692f00cdadbbf5a3898"
+      },
+      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "task_control_event_golden_terminalization_requested",
+      "fixture_class": "golden",
+      "schema_id": "task-control-event/v1",
+      "document": {
+        "schema_id":"task-control-event/v1",
+        "package": {
+          "schema_id":"current-package-ref/v1",
+          "package_identity":"@pullwise/agent-task-contract",
+          "package_version":"0.1.0",
+          "content_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "event_id":"event_11111111111111111111111111111111",
+        "event_kind":"terminalization_requested",
+        "idempotency_key":"terminalization_requested:task:3",
+        "authority_digest":"1f2874c15647dfa05b3e70df5ac2fcc5a063e55f8dc40fdc4469fc2735300ae3",
+        "grant_digest":"bced3d25cf54204e4d8e99c1dd47b3a749a94a159aeb955f53e2aa09bcfa0111",
+        "full_fence": {
+          "schema_id":"task-fence/v1",
+          "task_id":"task_00000000000000000000000000000001",
+          "attempt_id":"attempt_00000000000000000000000000000001",
+          "session_id":"sess_11111111111111111111111111111111",
+          "owner_id":"owner_00000000000000000000000000000001",
+          "lease_id":"lease_11111111111111111111111111111111",
+          "task_version":3,"deletion_version":0,"owner_epoch":1,
+          "native_epoch":1,"transport_epoch":1,
+          "fence_digest":"3b215df6c86af21d71141ec72b88b28456449a979c37109c0d5a356ad758a733"
+        },
+        "task_id":"task_00000000000000000000000000000001",
+        "previous_task_version":3,"task_version":4,
+        "input_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_77777777777777777777777777777777",
+          "content_schema_id":"terminalization-input-snapshot/v1",
+          "sha256":"9bd890a703f8e565d8357559870ef5141009d011c2bf7ea6d6cbd942b994bb84",
+          "size_bytes":62,"media_type":"application/json","encoding":"utf-8"
+        },
+        "previous_task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_88888888888888888888888888888888",
+          "content_schema_id":"task-record/v1",
+          "sha256":"51d0d659aa59c7dc70f8a177057e8a9d96f4819589cdd5bf1eac4555cb37eb61",
+          "size_bytes":43,"media_type":"application/json","encoding":"utf-8"
+        },
+        "task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_99999999999999999999999999999999",
+          "content_schema_id":"task-record/v1",
+          "sha256":"df613c58ca221e6775076256bc571b8cc63210e121aa742888be990dc04e590a",
+          "size_bytes":43,"media_type":"application/json","encoding":"utf-8"
+        },
+        "occurred_at":"2026-07-22T00:00:40.000Z",
+        "event_digest":"e10ad88d90c953f38ca8e2dab6e50d28600e58086a8c5cd282d0ab8a937f7fb2"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_control_event_idempotency_exact_bytes",
+      "fixture_class": "idempotency",
+      "schema_id": "task-control-event/v1",
+      "document": {
+        "schema_id":"task-control-event/v1",
+        "package": {
+          "schema_id":"current-package-ref/v1",
+          "package_identity":"@pullwise/agent-task-contract",
+          "package_version":"0.1.0",
+          "content_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "event_id":"event_11111111111111111111111111111111",
+        "event_kind":"terminalization_requested",
+        "idempotency_key":"terminalization_requested:task:3",
+        "authority_digest":"1f2874c15647dfa05b3e70df5ac2fcc5a063e55f8dc40fdc4469fc2735300ae3",
+        "grant_digest":"bced3d25cf54204e4d8e99c1dd47b3a749a94a159aeb955f53e2aa09bcfa0111",
+        "full_fence": {
+          "schema_id":"task-fence/v1",
+          "task_id":"task_00000000000000000000000000000001",
+          "attempt_id":"attempt_00000000000000000000000000000001",
+          "session_id":"sess_11111111111111111111111111111111",
+          "owner_id":"owner_00000000000000000000000000000001",
+          "lease_id":"lease_11111111111111111111111111111111",
+          "task_version":3,"deletion_version":0,"owner_epoch":1,
+          "native_epoch":1,"transport_epoch":1,
+          "fence_digest":"3b215df6c86af21d71141ec72b88b28456449a979c37109c0d5a356ad758a733"
+        },
+        "task_id":"task_00000000000000000000000000000001",
+        "previous_task_version":3,"task_version":4,
+        "input_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_77777777777777777777777777777777",
+          "content_schema_id":"terminalization-input-snapshot/v1",
+          "sha256":"9bd890a703f8e565d8357559870ef5141009d011c2bf7ea6d6cbd942b994bb84",
+          "size_bytes":62,"media_type":"application/json","encoding":"utf-8"
+        },
+        "previous_task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_88888888888888888888888888888888",
+          "content_schema_id":"task-record/v1",
+          "sha256":"51d0d659aa59c7dc70f8a177057e8a9d96f4819589cdd5bf1eac4555cb37eb61",
+          "size_bytes":43,"media_type":"application/json","encoding":"utf-8"
+        },
+        "task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_99999999999999999999999999999999",
+          "content_schema_id":"task-record/v1",
+          "sha256":"df613c58ca221e6775076256bc571b8cc63210e121aa742888be990dc04e590a",
+          "size_bytes":43,"media_type":"application/json","encoding":"utf-8"
+        },
+        "occurred_at":"2026-07-22T00:00:40.000Z",
+        "event_digest":"e10ad88d90c953f38ca8e2dab6e50d28600e58086a8c5cd282d0ab8a937f7fb2"
+      },
+      "expected_code": null
+    },
+    {
       "fixture_id": "task_control_event_negative_partial",
       "fixture_class": "negative",
       "schema_id": "task-control-event/v1",
       "document": {"schema_id":"task-control-event/v1"},
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
+    },
+    {
+      "fixture_id": "task_version_authority_crash_replay",
+      "fixture_class": "crash",
+      "schema_id": "task-version-authority-proof/v1",
+      "document": {
+        "schema_id":"task-version-authority-proof/v1",
+        "package": {
+          "schema_id":"current-package-ref/v1",
+          "package_identity":"@pullwise/agent-task-contract",
+          "package_version":"0.1.0",
+          "content_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "task_id":"task_00000000000000000000000000000001",
+        "authority_digest":"1f2874c15647dfa05b3e70df5ac2fcc5a063e55f8dc40fdc4469fc2735300ae3",
+        "grant_digest":"bced3d25cf54204e4d8e99c1dd47b3a749a94a159aeb955f53e2aa09bcfa0111",
+        "full_fence": {
+          "schema_id":"task-fence/v1",
+          "task_id":"task_00000000000000000000000000000001",
+          "attempt_id":"attempt_00000000000000000000000000000001",
+          "session_id":"sess_11111111111111111111111111111111",
+          "owner_id":"owner_00000000000000000000000000000001",
+          "lease_id":"lease_11111111111111111111111111111111",
+          "task_version":3,"deletion_version":0,"owner_epoch":1,
+          "native_epoch":1,"transport_epoch":1,
+          "fence_digest":"3b215df6c86af21d71141ec72b88b28456449a979c37109c0d5a356ad758a733"
+        },
+        "base_task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_11111111111111111111111111111111",
+          "content_schema_id":"task-record/v1",
+          "sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+        },
+        "version_chain": [
+          {
+            "transition_kind":"terminalization_requested",
+            "previous_task_version":3,"task_version":4,
+            "transition_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_22222222222222222222222222222222",
+              "content_schema_id":"task-control-event/v1",
+              "sha256":"2222222222222222222222222222222222222222222222222222222222222222",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            },
+            "task_record_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_33333333333333333333333333333333",
+              "content_schema_id":"task-record/v1",
+              "sha256":"3333333333333333333333333333333333333333333333333333333333333333",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            }
+          },
+          {
+            "transition_kind":"task_result_published",
+            "previous_task_version":4,"task_version":5,
+            "transition_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_44444444444444444444444444444444",
+              "content_schema_id":"task-control-event/v1",
+              "sha256":"4444444444444444444444444444444444444444444444444444444444444444",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            },
+            "task_record_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_55555555555555555555555555555555",
+              "content_schema_id":"task-record/v1",
+              "sha256":"5555555555555555555555555555555555555555555555555555555555555555",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            }
+          }
+        ],
+        "published_from_version":4,"terminal_task_version":5,
+        "task_result_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_66666666666666666666666666666666",
+          "content_schema_id":"task-result/v1",
+          "sha256":"40995f765c78783b524a2f9b9127b8ad62710a6a4530e9c91c3bed79a74577e5",
+          "size_bytes":7305,"media_type":"application/json","encoding":"utf-8"
+        },
+        "proof_digest":"857fa543bcb1ce6b08a4f3e9f619b2852870f7fdc2f8f5504ddddba9f4455ef2"
+      },
+      "expected_code": null
+    },
+    {
+      "fixture_id": "task_version_authority_golden_terminal_publication",
+      "fixture_class": "golden",
+      "schema_id": "task-version-authority-proof/v1",
+      "document": {
+        "schema_id":"task-version-authority-proof/v1",
+        "package": {
+          "schema_id":"current-package-ref/v1",
+          "package_identity":"@pullwise/agent-task-contract",
+          "package_version":"0.1.0",
+          "content_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "root_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "task_id":"task_00000000000000000000000000000001",
+        "authority_digest":"1f2874c15647dfa05b3e70df5ac2fcc5a063e55f8dc40fdc4469fc2735300ae3",
+        "grant_digest":"bced3d25cf54204e4d8e99c1dd47b3a749a94a159aeb955f53e2aa09bcfa0111",
+        "full_fence": {
+          "schema_id":"task-fence/v1",
+          "task_id":"task_00000000000000000000000000000001",
+          "attempt_id":"attempt_00000000000000000000000000000001",
+          "session_id":"sess_11111111111111111111111111111111",
+          "owner_id":"owner_00000000000000000000000000000001",
+          "lease_id":"lease_11111111111111111111111111111111",
+          "task_version":3,"deletion_version":0,"owner_epoch":1,
+          "native_epoch":1,"transport_epoch":1,
+          "fence_digest":"3b215df6c86af21d71141ec72b88b28456449a979c37109c0d5a356ad758a733"
+        },
+        "base_task_record_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_11111111111111111111111111111111",
+          "content_schema_id":"task-record/v1",
+          "sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+          "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+        },
+        "version_chain": [
+          {
+            "transition_kind":"terminalization_requested",
+            "previous_task_version":3,"task_version":4,
+            "transition_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_22222222222222222222222222222222",
+              "content_schema_id":"task-control-event/v1",
+              "sha256":"2222222222222222222222222222222222222222222222222222222222222222",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            },
+            "task_record_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_33333333333333333333333333333333",
+              "content_schema_id":"task-record/v1",
+              "sha256":"3333333333333333333333333333333333333333333333333333333333333333",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            }
+          },
+          {
+            "transition_kind":"task_result_published",
+            "previous_task_version":4,"task_version":5,
+            "transition_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_44444444444444444444444444444444",
+              "content_schema_id":"task-control-event/v1",
+              "sha256":"4444444444444444444444444444444444444444444444444444444444444444",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            },
+            "task_record_ref": {
+              "schema_id":"content-ref/v1","artifact_id":"art_55555555555555555555555555555555",
+              "content_schema_id":"task-record/v1",
+              "sha256":"5555555555555555555555555555555555555555555555555555555555555555",
+              "size_bytes":1,"media_type":"application/json","encoding":"utf-8"
+            }
+          }
+        ],
+        "published_from_version":4,"terminal_task_version":5,
+        "task_result_ref": {
+          "schema_id":"content-ref/v1","artifact_id":"art_66666666666666666666666666666666",
+          "content_schema_id":"task-result/v1",
+          "sha256":"40995f765c78783b524a2f9b9127b8ad62710a6a4530e9c91c3bed79a74577e5",
+          "size_bytes":7305,"media_type":"application/json","encoding":"utf-8"
+        },
+        "proof_digest":"857fa543bcb1ce6b08a4f3e9f619b2852870f7fdc2f8f5504ddddba9f4455ef2"
+      },
+      "expected_code": null
     },
     {
       "fixture_id": "task_version_authority_negative_partial",

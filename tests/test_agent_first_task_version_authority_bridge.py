@@ -387,6 +387,126 @@ class AgentFirstTaskVersionAuthorityBridgeTest(unittest.TestCase):
         self.assertTrue(python[0]["ok"], python)
         self.assertEqual(envelope, python[0]["value"]["document"])
 
+    def test_version_proof_replay_and_adversarial_cases_fail_closed(
+        self,
+    ) -> None:
+        documents = self.bridge_documents()
+        event_golden = self.builder.document(
+            "task_control_event_golden_terminalization_requested"
+        )
+        event_retry = self.builder.document(
+            "task_control_event_idempotency_exact_bytes"
+        )
+        proof_golden = self.builder.document(
+            "task_version_authority_golden_terminal_publication"
+        )
+        proof_replay = self.builder.document(
+            "task_version_authority_crash_replay"
+        )
+        canonical = self.builder.facade.python.canonical_document_bytes
+        self.assertEqual(event_golden, event_retry)
+        self.assertEqual(
+            canonical(event_golden),
+            canonical(event_retry),
+        )
+        self.assertEqual(proof_golden, proof_replay)
+        self.assertEqual(
+            canonical(proof_golden),
+            canonical(proof_replay),
+        )
+
+        replay_operation = {
+            "python": "verify_task_version_authority_proof",
+            "node": "verifyTaskVersionAuthorityProof",
+            "args": [
+                documents["proof"],
+                documents["authority"],
+                documents["result"],
+            ],
+        }
+        replay_expected = [
+            {"ok": True, "value": documents["proof"]},
+            {"ok": True, "value": documents["proof"]},
+        ]
+        replay_operations = [replay_operation, deepcopy(replay_operation)]
+        self.assertEqual(
+            replay_expected,
+            self.builder.facade.python_helper_results(replay_operations),
+        )
+        self.assertEqual(
+            replay_expected,
+            self.builder.facade.node_helper_results(replay_operations),
+        )
+
+        gapped = deepcopy(documents["proof"])
+        gapped["version_chain"][1]["previous_task_version"] += 1
+        gapped = self.builder.facade.reseal(
+            "task-version-authority-proof/v1", gapped
+        )
+        selected_result = deepcopy(documents["result"])
+        selected_result["summary"] = "Caller-selected terminal result."
+        corrupt_ref = deepcopy(documents["proof"])
+        corrupt_ref["version_chain"][1]["transition_ref"] = deepcopy(
+            corrupt_ref["version_chain"][0]["transition_ref"]
+        )
+        corrupt_ref = self.builder.facade.reseal(
+            "task-version-authority-proof/v1", corrupt_ref
+        )
+        operations = [
+            {
+                **replay_operation,
+                "args": [
+                    gapped,
+                    documents["authority"],
+                    documents["result"],
+                ],
+            },
+            {
+                **replay_operation,
+                "args": [
+                    documents["proof"],
+                    documents["authority"],
+                    selected_result,
+                ],
+            },
+            {
+                **replay_operation,
+                "args": [
+                    corrupt_ref,
+                    documents["authority"],
+                    documents["result"],
+                ],
+            },
+        ]
+        expected = [
+            {
+                "ok": False,
+                "code": "TASK_VERSION_STALE",
+                "detail": "TASK_VERSION_AUTHORITY_CHAIN_INVALID",
+                "path": "$.version_chain[1].task_version",
+            },
+            {
+                "ok": False,
+                "code": "CAS_CORRUPT",
+                "detail": "TASK_VERSION_AUTHORITY_RESULT_REF_INVALID",
+                "path": "$.task_result_ref",
+            },
+            {
+                "ok": False,
+                "code": "CAS_CORRUPT",
+                "detail": "TASK_VERSION_AUTHORITY_CHAIN_DUPLICATE",
+                "path": "$.version_chain[1]",
+            },
+        ]
+        self.assertEqual(
+            expected,
+            self.builder.facade.python_helper_results(operations),
+        )
+        self.assertEqual(
+            expected,
+            self.builder.facade.node_helper_results(operations),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

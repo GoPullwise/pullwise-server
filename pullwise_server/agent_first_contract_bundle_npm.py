@@ -50,8 +50,10 @@ export class ContractValidationError extends Error {
   }
 }
 
-function fail(code, path = "$") {
-  throw new ContractValidationError(publicErrorCode(code, null), code, path);
+function fail(detail, path = "$", explicit = undefined) {
+  throw new ContractValidationError(
+    publicErrorCode(detail, explicit), detail, path,
+  );
 }
 
 function canonicalValue(value, path = "$") {
