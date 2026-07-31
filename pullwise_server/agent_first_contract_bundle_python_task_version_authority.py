@@ -15,6 +15,55 @@ _TASK_VERSION_RECORD_AUTHORITY_FIELDS = (
 )
 
 
+def _rule_task_control_event(value: dict[str, object]) -> None:
+    _require(
+        value["task_version"] == value["previous_task_version"] + 1,
+        "TASK_CONTROL_EVENT_VERSION_INVALID",
+        "$.task_version",
+        code="TASK_VERSION_STALE",
+    )
+
+
+def _rule_task_version_authority_proof(value: dict[str, object]) -> None:
+    chain = value["version_chain"]
+    previous_version = chain[0]["previous_task_version"]
+    phase = "checkpoint"
+    for index, link in enumerate(chain):
+        path = f"$.version_chain[{index}]"
+        _require(
+            link["previous_task_version"] == previous_version
+            and link["task_version"] == previous_version + 1,
+            "TASK_VERSION_AUTHORITY_CHAIN_INVALID",
+            path + ".task_version",
+            code="TASK_VERSION_STALE",
+        )
+        kind = link["transition_kind"]
+        allowed = (
+            kind == "checkpoint" and phase == "checkpoint"
+            or kind == "terminalization_requested" and phase == "checkpoint"
+            or kind == "task_result_published"
+            and phase == "terminalization_requested"
+            and index == len(chain) - 1
+        )
+        _require(
+            allowed,
+            "TASK_VERSION_AUTHORITY_PUBLICATION_ORDER_INVALID",
+            path + ".transition_kind",
+            code="STATE_TRANSITION_INVALID",
+        )
+        if kind != "checkpoint":
+            phase = kind
+        previous_version = link["task_version"]
+    last = chain[-1]
+    _require(
+        phase == "task_result_published"
+        and value["published_from_version"] == last["previous_task_version"]
+        and value["terminal_task_version"] == last["task_version"],
+        "TASK_VERSION_AUTHORITY_TERMINAL_BINDING_INVALID",
+        "$.terminal_task_version",
+    )
+
+
 def _task_version_ref_matches(
     ref: dict[str, object],
     schema_id: str,

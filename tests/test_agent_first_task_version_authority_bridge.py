@@ -335,6 +335,58 @@ class AgentFirstTaskVersionAuthorityBridgeTest(unittest.TestCase):
             self.builder.facade.node_helper_results([fence_operation]),
         )
 
+    def test_transport_uses_local_version_proof_not_server_base_version(
+        self,
+    ) -> None:
+        documents = self.bridge_documents()
+        result = documents["result"]
+        core = self.builder.facade.derive_core_expected(result)
+        core_ref = self.reference("7", "task-result-core/v1", core)
+        envelope = {
+            "schema_id": "task-result-transport-envelope/v1",
+            "package": deepcopy(documents["authority"]["package"]),
+            "authority": deepcopy(documents["authority"]),
+            "full_fence": deepcopy(documents["authority"]),
+            "task_result": deepcopy(result),
+            "task_result_digest": documents["proof"]["task_result_ref"]["sha256"],
+            "task_result_core_ref": core_ref,
+            "task_result_core_digest": core_ref["sha256"],
+            "task_version_authority": deepcopy(documents["proof"]),
+            "worker_debug_descriptor": None,
+            "transport_receipt": {
+                "availability": "not_applicable",
+                "reason_code": "TRANSPORT_RECEIPT_NOT_APPLICABLE",
+            },
+        }
+        envelope["full_fence"] = deepcopy(documents["proof"]["full_fence"])
+        self.assertNotEqual(
+            envelope["authority"]["task_version"],
+            result["published_from_version"],
+        )
+        expected_document = {"ok": True, "value": envelope}
+        self.assertEqual(
+            [expected_document],
+            self.builder.facade.python_document_results(
+                [("task-result-transport-envelope/v1", envelope)]
+            ),
+        )
+        self.assertEqual(
+            [expected_document],
+            self.builder.facade.node_document_results(
+                [("task-result-transport-envelope/v1", envelope)]
+            ),
+        )
+        operation = {
+            "python": "verify_task_result_transport_envelope",
+            "node": "verifyTaskResultTransportEnvelope",
+            "args": [envelope, core],
+        }
+        python = self.builder.facade.python_helper_results([operation])
+        node = self.builder.facade.node_helper_results([operation])
+        self.assertEqual(python, node)
+        self.assertTrue(python[0]["ok"], python)
+        self.assertEqual(envelope, python[0]["value"]["document"])
+
 
 if __name__ == "__main__":
     unittest.main()

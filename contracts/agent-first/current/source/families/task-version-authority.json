@@ -11,7 +11,7 @@
         "domain": "pullwise:task-control-event:v1"
       },
       "x-pullwise-semantics": {
-        "document_rules": [],
+        "document_rules": ["task_control_event"],
         "contextual_helpers": ["verify_task_control_event_context"]
       },
       "required": [
@@ -111,7 +111,7 @@
         "domain": "pullwise:task-version-authority-proof:v1"
       },
       "x-pullwise-semantics": {
-        "document_rules": [],
+        "document_rules": ["task_version_authority_proof"],
         "contextual_helpers": ["verify_task_version_authority_proof"]
       },
       "required": [

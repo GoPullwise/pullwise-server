@@ -39,7 +39,7 @@
       "additionalProperties": false,
       "x-pullwise-semantics": {"document_rules":["task_result_transport_envelope"],"contextual_helpers":["verify_task_result_transport_envelope"]},
       "required": [
-        "schema_id", "package", "authority", "full_fence", "task_result", "task_result_digest", "task_result_core_ref", "task_result_core_digest", "worker_debug_descriptor",
+        "schema_id", "package", "authority", "full_fence", "task_result", "task_result_digest", "task_result_core_ref", "task_result_core_digest", "task_version_authority", "worker_debug_descriptor",
         "transport_receipt"
       ],
       "properties": {
@@ -51,6 +51,7 @@
         "task_result_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
         "task_result_core_ref": {"$ref":"content-ref/v1","x-pullwise-content-schema-id":"task-result-core/v1"},
         "task_result_core_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "task_version_authority": {"$ref":"task-version-authority-proof/v1"},
         "worker_debug_descriptor": {"oneOf":[{"$ref":"worker-debug-fragment-descriptor/v1"},{"type":"null"}]},
         "transport_receipt": {"$ref":"availability-ref/v1","x-pullwise-availability-content-schema-id":"server-transport-receipt/v1"}
       },

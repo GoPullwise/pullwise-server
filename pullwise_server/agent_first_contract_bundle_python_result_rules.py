@@ -264,7 +264,23 @@ def _rule_task_result_transport_envelope(value: dict[str, object]) -> None:
     exact = ("task_id", "attempt_id", "session_id", "owner_id", "lease_id", "task_version", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch")
     for key in exact:
         _seo_require(authority[key] == fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", f"$.full_fence.{key}")
-    _seo_require(authority["task_version"] == result["published_from_version"], "TRANSPORT_RESULT_VERSION_INVALID", "$.task_result.published_from_version")
+    proof = value["task_version_authority"]
+    _seo_verify_embedded_digest("task-version-authority-proof/v1", proof)
+    _rule_task_version_authority_proof(proof)
+    _seo_require(
+        _json_equal(proof["package"], value["package"])
+        and _json_equal(proof["full_fence"], fence)
+        and proof["task_id"] == result["task_id"]
+        and proof["authority_digest"] == authority["authority_digest"]
+        and proof["grant_digest"] == authority["grant"]["grant_digest"]
+        and proof["published_from_version"] == result["published_from_version"]
+        and proof["terminal_task_version"] == result["terminal_task_version"]
+        and _task_version_ref_matches(
+            proof["task_result_ref"], "task-result/v1", result
+        ),
+        "TRANSPORT_VERSION_AUTHORITY_INVALID",
+        "$.task_version_authority",
+    )
     _seo_require(authority["task_id"] == result["task_id"], "TRANSPORT_RESULT_TASK_INVALID")
     _seo_require(_json_equal(value["package"], authority["package"]), "TRANSPORT_PACKAGE_INVALID")
     debug = result["diagnostics"]["worker_debug_fragment"]

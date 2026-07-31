@@ -274,8 +274,22 @@ function ruleTaskResultTransportEnvelope(value) {
   const authority = value.authority, fence = value.full_fence;
   ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].forEach((key) => seoRequire(authority[key] === fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", `$.full_fence.${key}`));
   seoRequire(authority.task_version === fence.task_version, "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence.task_version");
+  const proof = value.task_version_authority;
+  seoVerifyEmbeddedDigest("task-version-authority-proof/v1", proof);
+  ruleTaskVersionAuthorityProof(proof);
+  seoRequire(
+    canonicalString(proof.package) === canonicalString(value.package)
+      && canonicalString(proof.full_fence) === canonicalString(fence)
+      && proof.task_id === result.task_id
+      && proof.authority_digest === authority.authority_digest
+      && proof.grant_digest === authority.grant.grant_digest
+      && proof.published_from_version === result.published_from_version
+      && proof.terminal_task_version === result.terminal_task_version
+      && taskVersionRefMatches(proof.task_result_ref, "task-result/v1", result),
+    "TRANSPORT_VERSION_AUTHORITY_INVALID",
+    "$.task_version_authority",
+  );
   seoRequire(authority.task_id === result.task_id, "TRANSPORT_RESULT_TASK_INVALID", "$.authority.task_id");
-  seoRequire(authority.task_version === result.published_from_version, "TRANSPORT_RESULT_VERSION_INVALID", "$.task_result.published_from_version");
   seoRequire(canonicalString(value.package) === canonicalString(authority.package), "TRANSPORT_PACKAGE_INVALID", "$.package");
   const debug = result.diagnostics.worker_debug_fragment, descriptor = value.worker_debug_descriptor, receipt = value.transport_receipt;
   if (debug.availability === "available") {

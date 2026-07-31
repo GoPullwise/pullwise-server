@@ -14,6 +14,53 @@ const TASK_VERSION_RECORD_AUTHORITY_FIELDS = [
   "lease_id", "transport_epoch",
 ];
 
+function ruleTaskControlEvent(value) {
+  seoRequire(
+    value.task_version === value.previous_task_version + 1,
+    "TASK_CONTROL_EVENT_VERSION_INVALID",
+    "$.task_version",
+    "TASK_VERSION_STALE",
+  );
+}
+
+function ruleTaskVersionAuthorityProof(value) {
+  const chain = value.version_chain;
+  let previousVersion = chain[0].previous_task_version;
+  let phase = "checkpoint";
+  chain.forEach((link, index) => {
+    const path = `$.version_chain[${index}]`;
+    seoRequire(
+      link.previous_task_version === previousVersion
+        && link.task_version === previousVersion + 1,
+      "TASK_VERSION_AUTHORITY_CHAIN_INVALID",
+      path + ".task_version",
+      "TASK_VERSION_STALE",
+    );
+    const kind = link.transition_kind;
+    const allowed = kind === "checkpoint" && phase === "checkpoint"
+      || kind === "terminalization_requested" && phase === "checkpoint"
+      || kind === "task_result_published"
+        && phase === "terminalization_requested"
+        && index === chain.length - 1;
+    seoRequire(
+      allowed,
+      "TASK_VERSION_AUTHORITY_PUBLICATION_ORDER_INVALID",
+      path + ".transition_kind",
+      "STATE_TRANSITION_INVALID",
+    );
+    if (kind !== "checkpoint") phase = kind;
+    previousVersion = link.task_version;
+  });
+  const last = chain.at(-1);
+  seoRequire(
+    phase === "task_result_published"
+      && value.published_from_version === last.previous_task_version
+      && value.terminal_task_version === last.task_version,
+    "TASK_VERSION_AUTHORITY_TERMINAL_BINDING_INVALID",
+    "$.terminal_task_version",
+  );
+}
+
 function taskVersionRefMatches(ref, schemaId, document) {
   const raw = canonicalDocumentBytes(document);
   return ref.content_schema_id === schemaId
