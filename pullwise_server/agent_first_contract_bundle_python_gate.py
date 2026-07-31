@@ -188,6 +188,14 @@ _GATE_SUCCESS_SELECTIONS = {
     ),
     "no_change_needed": ("NO_CHANGE_NEEDED", "ALREADY_SATISFIED", "safe_no_change"),
 }
+_GATE_SUCCESS_MODES = {
+    "COMPLETED": ("completed", "safe_complete"),
+    "COMPLETED_WITH_WAIVERS": (
+        "completed_with_waivers",
+        "safe_complete_with_waivers",
+    ),
+    "NO_CHANGE_NEEDED": ("no_change_needed", "safe_no_change"),
+}
 _GATE_PARTIAL_REASONS = {
     "none": "SAFE_PARTIAL_DELIVERY",
     "budget_exhausted": "BUDGET_EXHAUSTED",
@@ -387,7 +395,11 @@ def _rule_gate_decision(value: dict[str, object]) -> None:
         "GATE_DECISION_PASS_INVALID",
         "$.passed",
     )
-    if value["decision_kind"] == "terminalization":
+    has_terminal_selection = (
+        value["decision_kind"] == "terminalization"
+        or value["decision_kind"] == "success" and value["passed"]
+    )
+    if has_terminal_selection:
         selected = _terminal_selection(
             {field: value[field] for field in _GATE_SELECTOR_AXES}
         )
@@ -412,6 +424,12 @@ def _rule_gate_decision(value: dict[str, object]) -> None:
             "GATE_TERMINAL_SELECTOR_DIGEST_INVALID",
             "$.selector_input_digest",
         )
+        if value["decision_kind"] == "success":
+            _require(
+                not refs and value["requested_outcome"] == value["selected_outcome"],
+                "GATE_SUCCESS_SELECTOR_BRIDGE_INVALID",
+                "$.authoritative_fact_refs",
+            )
     _gate_verify_digest("gate-decision/v1", value, "decision_digest")
 
 
@@ -512,9 +530,7 @@ def evaluate_success_gate(
     )
     results = evaluation["predicate_results"]
     passed = _gate_passed(results)
-    return seal_document(
-        "gate-decision/v1",
-        {
+    decision = {
             "schema_id": "gate-decision/v1",
             "decision_kind": "success",
             "input_snapshot_ref": reference,
@@ -523,8 +539,46 @@ def evaluate_success_gate(
             "requested_outcome": snapshot["requested_outcome"],
             "passed": passed,
             "predicate_results": results,
-        },
-    )
+    }
+    if passed:
+        gate_mode, delivery_state = _GATE_SUCCESS_MODES[
+            snapshot["requested_outcome"]
+        ]
+        axes = {
+            "profile": "task_result",
+            "gate_mode": gate_mode,
+            "cancel_state": "none",
+            "effect_state": "none",
+            "cause_family": "none",
+            "delivery_state": delivery_state,
+        }
+        lifecycle, outcome, reason = _terminal_selection(axes)
+        decision.update(
+            {
+                "task_id": snapshot["task_id"],
+                "task_version": snapshot["task_version"],
+                "deletion_version": snapshot["deletion_version"],
+                **axes,
+                "selected_lifecycle": lifecycle,
+                "selected_outcome": outcome,
+                "selected_reason": reason,
+                "authoritative_fact_refs": [],
+                "source_availability": {
+                    "availability": "available",
+                    "ref": snapshot["final_source_ref"],
+                },
+                "evidence_availability": {
+                    "availability": "available",
+                    "ref": snapshot["pre_gate_evidence_closure_ref"],
+                },
+                "effect_availability": {
+                    "availability": "available",
+                    "ref": snapshot["effect_ledger_ref"],
+                },
+            }
+        )
+        decision["selector_input_digest"] = _terminal_selector_digest(decision)
+    return seal_document("gate-decision/v1", decision)
 
 
 def evaluate_terminalization_gate(

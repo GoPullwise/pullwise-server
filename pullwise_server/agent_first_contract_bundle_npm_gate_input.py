@@ -6,7 +6,7 @@ from __future__ import annotations
 NPM_GATE_INPUT = r'''
 const GATE_INPUT_KEYS = new Set([
   "schema_id", "task_id", "attempt_id", "native_epoch", "owner_id",
-  "owner_epoch", "task_version", "lifecycle", "desired_state", "lease_id",
+  "owner_epoch", "task_version", "deletion_version", "lifecycle", "desired_state", "lease_id",
   "outer_lease_expires_at", "outer_lease_grace_expires_at",
   "authoritative_cancel_received", "absolute_deadline_at",
   "trusted_wall_time_at", "monotonic_deadline_remaining_ms",

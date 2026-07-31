@@ -17,6 +17,25 @@ ROOT = Path(__file__).resolve().parents[1]
 FAMILY_ROOT = ROOT / "contracts" / "agent-first" / "current" / "source" / "families"
 GATE_SCHEMA_ID = "gate-decision/v1"
 REGISTRY_SCHEMA_ID = "gate-predicate-registry/v1"
+PASSED_SUCCESS_SELECTION_FIELDS = (
+    "task_id",
+    "task_version",
+    "deletion_version",
+    "profile",
+    "gate_mode",
+    "cancel_state",
+    "effect_state",
+    "cause_family",
+    "delivery_state",
+    "selected_lifecycle",
+    "selected_outcome",
+    "selected_reason",
+    "selector_input_digest",
+    "authoritative_fact_refs",
+    "source_availability",
+    "evidence_availability",
+    "effect_availability",
+)
 
 
 def canonical_bytes(value: object) -> bytes:
@@ -341,6 +360,8 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
             {"passed": False, "failure_code": "LEASE_INVALID"}
         )
         wrong_code["passed"] = False
+        for field in PASSED_SUCCESS_SELECTION_FIELDS:
+            wrong_code.pop(field)
         wrong_code = self.reseal(GATE_SCHEMA_ID, wrong_code)
 
         wrong_evidence = deepcopy(self.success)
@@ -351,6 +372,8 @@ class AgentFirstGateDecisionFacadesTest(unittest.TestCase):
 
         aggregate = deepcopy(self.success)
         aggregate["passed"] = False
+        for field in PASSED_SUCCESS_SELECTION_FIELDS:
+            aggregate.pop(field)
         aggregate = self.reseal(GATE_SCHEMA_ID, aggregate)
 
         registry_digest = deepcopy(self.success)

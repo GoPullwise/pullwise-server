@@ -45,7 +45,7 @@
           "VERIFICATION_INCOMPLETE"]},
         "selector_input_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
         "authoritative_fact_refs": {
-          "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true,
+          "type": "array", "maxItems": 256, "uniqueItems": true,
           "items": {"$ref": "content-ref/v1", "x-pullwise-content-schema-id": "terminalization-fact/v1"}
         },
         "source_availability": {"$ref":"availability-ref/v1",
@@ -122,7 +122,8 @@
             "decision_kind": {"const": "success"},
             "input_snapshot_ref": {"$ref":"content-ref/v1",
               "x-pullwise-content-schema-id":"gate-input-snapshot/v1"},
-            "input_digest": {}, "predicate_registry_digest": {}, "requested_outcome": {}, "passed": {},
+            "input_digest": {}, "predicate_registry_digest": {}, "requested_outcome": {},
+            "passed": {"const": false},
             "predicate_results": {"type":"array","minItems":15,"maxItems":15,
               "items":{"type":"object","properties":{"predicate_id":{"enum":[
                 "GATE_TASK_STATE", "GATE_LEASE_VALID", "GATE_DEADLINE", "GATE_POLICY", "GATE_LEDGER",
@@ -133,6 +134,60 @@
             },
             "decision_digest": {}
           }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": [
+            "schema_id", "decision_kind", "input_snapshot_ref", "input_digest", "predicate_registry_digest",
+            "requested_outcome", "task_id", "task_version", "deletion_version", "profile", "gate_mode",
+            "cancel_state", "effect_state", "cause_family", "delivery_state", "selected_lifecycle",
+            "selected_outcome", "selected_reason", "selector_input_digest", "authoritative_fact_refs",
+            "source_availability", "evidence_availability", "effect_availability", "passed",
+            "predicate_results", "decision_digest"
+          ],
+          "properties": {
+            "schema_id": {},
+            "decision_kind": {"const": "success"},
+            "input_snapshot_ref": {"$ref":"content-ref/v1",
+              "x-pullwise-content-schema-id":"gate-input-snapshot/v1"},
+            "input_digest": {}, "predicate_registry_digest": {}, "requested_outcome": {},
+            "task_id": {}, "task_version": {}, "deletion_version": {},
+            "profile": {"const":"task_result"},
+            "gate_mode": {"enum":["completed","completed_with_waivers","no_change_needed"]},
+            "cancel_state": {"const":"none"}, "effect_state": {"const":"none"},
+            "cause_family": {"const":"none"},
+            "delivery_state": {"enum":["safe_complete","safe_complete_with_waivers","safe_no_change"]},
+            "selected_lifecycle": {"const":"TERMINAL"},
+            "selected_outcome": {"enum":["COMPLETED","COMPLETED_WITH_WAIVERS","NO_CHANGE_NEEDED"]},
+            "selected_reason": {"enum":["SUCCESS","AUTHORIZED_WAIVER","ALREADY_SATISFIED"]},
+            "selector_input_digest": {},
+            "authoritative_fact_refs": {"type":"array","maxItems":0},
+            "source_availability": {}, "evidence_availability": {}, "effect_availability": {},
+            "passed": {"const":true},
+            "predicate_results": {"type":"array","minItems":15,"maxItems":15,
+              "items":{"type":"object","properties":{"predicate_id":{"enum":[
+                "GATE_TASK_STATE", "GATE_LEASE_VALID", "GATE_DEADLINE", "GATE_POLICY", "GATE_LEDGER",
+                "GATE_SOURCE_FROZEN", "GATE_PROPOSAL_FRESH", "GATE_QUALITY_PLAN", "GATE_ATTESTATIONS",
+                "GATE_REQUIREMENTS", "GATE_OUTCOME_SHAPE", "GATE_EFFECTS_EMPTY", "GATE_EVIDENCE_CLOSURE",
+                "GATE_BUDGET", "GATE_SECRET_SCAN"
+              ]}}}
+            },
+            "decision_digest": {}
+          },
+          "oneOf": [
+            {"type":"object","properties":{"requested_outcome":{"const":"COMPLETED"},
+              "gate_mode":{"const":"completed"},"delivery_state":{"const":"safe_complete"},
+              "selected_outcome":{"const":"COMPLETED"},"selected_reason":{"const":"SUCCESS"}}},
+            {"type":"object","properties":{"requested_outcome":{"const":"COMPLETED_WITH_WAIVERS"},
+              "gate_mode":{"const":"completed_with_waivers"},
+              "delivery_state":{"const":"safe_complete_with_waivers"},
+              "selected_outcome":{"const":"COMPLETED_WITH_WAIVERS"},
+              "selected_reason":{"const":"AUTHORIZED_WAIVER"}}},
+            {"type":"object","properties":{"requested_outcome":{"const":"NO_CHANGE_NEEDED"},
+              "gate_mode":{"const":"no_change_needed"},"delivery_state":{"const":"safe_no_change"},
+              "selected_outcome":{"const":"NO_CHANGE_NEEDED"},
+              "selected_reason":{"const":"ALREADY_SATISFIED"}}}
+          ]
         },
         {
           "type": "object", "additionalProperties": false,
@@ -152,7 +207,8 @@
             "deletion_version": {}, "profile": {}, "gate_mode": {}, "cancel_state": {}, "effect_state": {},
             "cause_family": {}, "delivery_state": {}, "selected_lifecycle": {}, "selected_outcome": {},
             "selected_reason": {}, "selector_input_digest": {},
-            "authoritative_fact_refs": {}, "source_availability": {}, "evidence_availability": {},
+            "authoritative_fact_refs": {"type":"array","minItems":1},
+            "source_availability": {}, "evidence_availability": {},
             "effect_availability": {}, "passed": {},
             "predicate_results": {"type":"array","minItems":5,"maxItems":5,
               "items":{"type":"object","properties":{"predicate_id":{"enum":[
@@ -369,7 +425,29 @@
           "size_bytes":1,"media_type":"x","encoding":"binary"},
         "input_digest":"1111111111111111111111111111111111111111111111111111111111111111",
         "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
-        "requested_outcome":"NO_CHANGE_NEEDED", "passed":true,
+        "requested_outcome":"NO_CHANGE_NEEDED",
+        "task_id":"task_11111111111111111111111111111111", "task_version":7, "deletion_version":4,
+        "profile":"task_result", "gate_mode":"no_change_needed", "cancel_state":"none", "effect_state":"none",
+        "cause_family":"none", "delivery_state":"safe_no_change", "selected_lifecycle":"TERMINAL",
+        "selected_outcome":"NO_CHANGE_NEEDED", "selected_reason":"ALREADY_SATISFIED",
+        "selector_input_digest":"921c37a2cee60cb2857a66f14bc7d40c1dcfe89187a5a857ec8ff20fdc593bb0",
+        "authoritative_fact_refs":[],
+        "source_availability":{"availability":"available","ref":{
+          "schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006",
+          "content_schema_id":"source-tree-manifest/v1",
+          "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}},
+        "evidence_availability":{"availability":"available","ref":{
+          "schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000d",
+          "content_schema_id":"pre-gate-evidence-closure-manifest/v1",
+          "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}},
+        "effect_availability":{"availability":"available","ref":{
+          "schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000c",
+          "content_schema_id":"effect-ledger-snapshot/v1",
+          "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}},
+        "passed":true,
         "predicate_results": [
           {"predicate_id":"GATE_TASK_STATE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001",
 "content_schema_id":"attempt-record/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
@@ -403,7 +481,7 @@
           {"predicate_id":"GATE_SECRET_SCAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f",
 "content_schema_id":"debug-redaction-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false}
         ],
-        "decision_digest":"af7b0427cb72e9eeb6c7bb61ad7e9608847fd03c2c315fb650c16a99794c4443"
+        "decision_digest":"e194804eb2ce5e48caba96e54b7db1669f32fc12daf9eed57dc6f39ad911f8c1"
       },
       "expected_code": null
     },
@@ -466,7 +544,29 @@
           "size_bytes":1,"media_type":"x","encoding":"binary"},
         "input_digest":"1111111111111111111111111111111111111111111111111111111111111111",
         "predicate_registry_digest":"dfbbe5b131578df0e534e448459bf343d9c9ba14f5abd022414043bc3f899fb0",
-        "requested_outcome":"NO_CHANGE_NEEDED", "passed":true,
+        "requested_outcome":"NO_CHANGE_NEEDED",
+        "task_id":"task_11111111111111111111111111111111", "task_version":7, "deletion_version":4,
+        "profile":"task_result", "gate_mode":"no_change_needed", "cancel_state":"none", "effect_state":"none",
+        "cause_family":"none", "delivery_state":"safe_no_change", "selected_lifecycle":"TERMINAL",
+        "selected_outcome":"NO_CHANGE_NEEDED", "selected_reason":"ALREADY_SATISFIED",
+        "selector_input_digest":"921c37a2cee60cb2857a66f14bc7d40c1dcfe89187a5a857ec8ff20fdc593bb0",
+        "authoritative_fact_refs":[],
+        "source_availability":{"availability":"available","ref":{
+          "schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000006",
+          "content_schema_id":"source-tree-manifest/v1",
+          "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}},
+        "evidence_availability":{"availability":"available","ref":{
+          "schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000d",
+          "content_schema_id":"pre-gate-evidence-closure-manifest/v1",
+          "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}},
+        "effect_availability":{"availability":"available","ref":{
+          "schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000c",
+          "content_schema_id":"effect-ledger-snapshot/v1",
+          "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size_bytes":1,"media_type":"x","encoding":"binary"}},
+        "passed":true,
         "predicate_results": [
           {"predicate_id":"GATE_TASK_STATE","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_00000000000000000000000000000001",
 "content_schema_id":"attempt-record/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false},
@@ -500,7 +600,7 @@
           {"predicate_id":"GATE_SECRET_SCAN","passed":true,"failure_code":null,"evidence_refs":[{"schema_id":"content-ref/v1","artifact_id":"art_0000000000000000000000000000000f",
 "content_schema_id":"debug-redaction-plan/v1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"media_type":"x","encoding":"binary"}],"repairable":false}
         ],
-        "decision_digest":"af7b0427cb72e9eeb6c7bb61ad7e9608847fd03c2c315fb650c16a99794c4443"
+        "decision_digest":"e194804eb2ce5e48caba96e54b7db1669f32fc12daf9eed57dc6f39ad911f8c1"
       },
       "expected_code": null
     },

@@ -114,6 +114,13 @@ const GATE_SUCCESS_SELECTIONS = Object.freeze({
   ],
   no_change_needed: ["NO_CHANGE_NEEDED", "ALREADY_SATISFIED", "safe_no_change"],
 });
+const GATE_SUCCESS_MODES = Object.freeze({
+  COMPLETED: ["completed", "safe_complete"],
+  COMPLETED_WITH_WAIVERS: [
+    "completed_with_waivers", "safe_complete_with_waivers",
+  ],
+  NO_CHANGE_NEEDED: ["no_change_needed", "safe_no_change"],
+});
 const GATE_PARTIAL_REASONS = Object.freeze({
   none: "SAFE_PARTIAL_DELIVERY", budget_exhausted: "BUDGET_EXHAUSTED",
   capability_unavailable: "CAPABILITY_UNAVAILABLE", deadline_reached: "DEADLINE_REACHED",
@@ -278,7 +285,9 @@ function ruleGateDecision(value) {
   if (value.passed !== value.predicate_results.every((item) => item.passed)) {
     fail("GATE_DECISION_PASS_INVALID", "$.passed");
   }
-  if (value.decision_kind === "terminalization") {
+  const hasTerminalSelection = value.decision_kind === "terminalization" ||
+    (value.decision_kind === "success" && value.passed);
+  if (hasTerminalSelection) {
     const selected = terminalSelection(Object.fromEntries(
       Object.keys(GATE_SELECTOR_AXES).map((field) => [field, value[field]]),
     ));
@@ -298,6 +307,11 @@ function ruleGateDecision(value) {
     }
     if (value.selector_input_digest !== terminalSelectorDigest(value)) {
       fail("GATE_TERMINAL_SELECTOR_DIGEST_INVALID", "$.selector_input_digest");
+    }
+    if (value.decision_kind === "success" &&
+        (value.authoritative_fact_refs.length !== 0 ||
+         value.requested_outcome !== value.selected_outcome)) {
+      fail("GATE_SUCCESS_SELECTOR_BRIDGE_INVALID", "$.authoritative_fact_refs");
     }
   }
   gateVerifyDigest("gate-decision/v1", value, "decision_digest");
@@ -370,7 +384,7 @@ export async function evaluateSuccessGate(inputSnapshot, context) {
   );
   const results = evaluation.predicate_results;
   const passed = gatePassed(results);
-  return sealDocument("gate-decision/v1", {
+  const decision = {
     schema_id: "gate-decision/v1",
     decision_kind: "success",
     input_snapshot_ref: reference,
@@ -379,7 +393,38 @@ export async function evaluateSuccessGate(inputSnapshot, context) {
     requested_outcome: snapshot.requested_outcome,
     passed,
     predicate_results: results,
-  });
+  };
+  if (passed) {
+    const [gateMode, deliveryState] = GATE_SUCCESS_MODES[snapshot.requested_outcome];
+    const axes = {
+      profile: "task_result",
+      gate_mode: gateMode,
+      cancel_state: "none",
+      effect_state: "none",
+      cause_family: "none",
+      delivery_state: deliveryState,
+    };
+    const selected = terminalSelection(axes);
+    Object.assign(decision, {
+      task_id: snapshot.task_id,
+      task_version: snapshot.task_version,
+      deletion_version: snapshot.deletion_version,
+      ...axes,
+      ...selected,
+      authoritative_fact_refs: [],
+      source_availability: {
+        availability: "available", ref: snapshot.final_source_ref,
+      },
+      evidence_availability: {
+        availability: "available", ref: snapshot.pre_gate_evidence_closure_ref,
+      },
+      effect_availability: {
+        availability: "available", ref: snapshot.effect_ledger_ref,
+      },
+    });
+    decision.selector_input_digest = terminalSelectorDigest(decision);
+  }
+  return sealDocument("gate-decision/v1", decision);
 }
 
 export async function evaluateTerminalizationGate(inputSnapshot, context) {

@@ -12,6 +12,7 @@ _GATE_INPUT_KEYS = {
     "owner_id",
     "owner_epoch",
     "task_version",
+    "deletion_version",
     "lifecycle",
     "desired_state",
     "lease_id",
