@@ -186,12 +186,9 @@ export async function verifyTaskControlEventContext(
   return checked;
 }
 
-export async function verifyTaskVersionAuthorityProof(
-  proof, authority, taskResult,
+async function verifyTaskVersionAuthorityProofChecked(
+  checked, authority, taskResult,
 ) {
-  const checked = await verifyDocumentDigest(
-    "task-version-authority-proof/v1", proof,
-  );
   const boundAuthority = await taskVersionAuthorityBinding(checked, authority);
   const result = validateDocument("task-result/v1", taskResult);
   seoRequire(
@@ -247,6 +244,17 @@ export async function verifyTaskVersionAuthorityProof(
     "$.terminal_task_version",
   );
   return checked;
+}
+
+export async function verifyTaskVersionAuthorityProof(
+  proof, authority, taskResult,
+) {
+  const checked = await verifyDocumentDigest(
+    "task-version-authority-proof/v1", proof,
+  );
+  return verifyTaskVersionAuthorityProofChecked(
+    checked, authority, taskResult,
+  );
 }
 
 export const verify_task_control_event_context = verifyTaskControlEventContext;

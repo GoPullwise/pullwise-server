@@ -334,6 +334,33 @@ class AgentFirstTaskVersionAuthorityBridgeTest(unittest.TestCase):
             expected_fence,
             self.builder.facade.node_helper_results([fence_operation]),
         )
+        fenced_event = deepcopy(documents["requested"])
+        fenced_event["full_fence"]["task_version"] += 1
+        fenced_event["full_fence"] = self.builder.facade.reseal(
+            "task-fence/v1", fenced_event["full_fence"]
+        )
+        fenced_event = self.builder.facade.reseal(
+            "task-control-event/v1", fenced_event
+        )
+        event_operation = {
+            "python": "verify_task_control_event_context",
+            "node": "verifyTaskControlEventContext",
+            "args": [
+                fenced_event,
+                documents["authority"],
+                documents["base"],
+                documents["finalizing"],
+                documents["snapshot"],
+            ],
+        }
+        self.assertEqual(
+            expected_fence,
+            self.builder.facade.python_helper_results([event_operation]),
+        )
+        self.assertEqual(
+            expected_fence,
+            self.builder.facade.node_helper_results([event_operation]),
+        )
 
     def test_transport_uses_local_version_proof_not_server_base_version(
         self,

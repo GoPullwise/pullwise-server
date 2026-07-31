@@ -235,7 +235,7 @@
   ],
   "fixtures": [
     {
-      "fixture_id": "task_control_event_fence_task_mismatch",
+      "fixture_id": "task_control_event_fence_authority_stale",
       "fixture_class": "fence",
       "schema_id": "task-control-event/v1",
       "document": {
@@ -259,13 +259,13 @@
           "session_id":"sess_11111111111111111111111111111111",
           "owner_id":"owner_00000000000000000000000000000001",
           "lease_id":"lease_11111111111111111111111111111111",
-          "task_version":3,"deletion_version":0,"owner_epoch":1,
+          "task_version":4,"deletion_version":0,"owner_epoch":1,
           "native_epoch":1,"transport_epoch":1,
-          "fence_digest":"3b215df6c86af21d71141ec72b88b28456449a979c37109c0d5a356ad758a733"
+          "fence_digest":"08b7bac790f9ac6e63f4b1ffa7bc59656675fe9eb3df168b6c11ff61ffef2445"
         },
-        "task_id":"task_ffffffffffffffffffffffffffffffff",
-        "previous_task_version":3,
-        "task_version":4,
+        "task_id":"task_00000000000000000000000000000001",
+        "previous_task_version":4,
+        "task_version":5,
         "input_ref": {
           "schema_id":"content-ref/v1","artifact_id":"art_77777777777777777777777777777777",
           "content_schema_id":"terminalization-input-snapshot/v1",
@@ -285,9 +285,9 @@
           "size_bytes":43,"media_type":"application/json","encoding":"utf-8"
         },
         "occurred_at":"2026-07-22T00:00:40.000Z",
-        "event_digest":"8a7c755499b264ce27a247e67e7898d7fb693962145a9692f00cdadbbf5a3898"
+        "event_digest":"34cd665c58520d0646dfd269c81d97e9b6e94d02e68e53c11327691374cefcdf"
       },
-      "expected_code": "CONTRACT_DOCUMENT_INVALID"
+      "expected_code": null
     },
     {
       "fixture_id": "task_control_event_golden_terminalization_requested",

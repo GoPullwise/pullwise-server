@@ -219,14 +219,11 @@ def verify_task_control_event_context(
     return checked
 
 
-def verify_task_version_authority_proof(
-    proof: object,
+def _verify_task_version_authority_proof_checked(
+    checked: dict[str, object],
     authority: object,
     task_result: object,
 ) -> dict[str, object]:
-    checked = verify_document_digest(
-        "task-version-authority-proof/v1", proof
-    )
     bound_authority = _task_version_authority_binding(checked, authority)
     result = validate_document("task-result/v1", task_result)
     _require(
@@ -289,6 +286,19 @@ def verify_task_version_authority_proof(
         code="CONTRACT_DOCUMENT_INVALID",
     )
     return checked
+
+
+def verify_task_version_authority_proof(
+    proof: object,
+    authority: object,
+    task_result: object,
+) -> dict[str, object]:
+    checked = verify_document_digest(
+        "task-version-authority-proof/v1", proof
+    )
+    return _verify_task_version_authority_proof_checked(
+        checked, authority, task_result
+    )
 '''
 
 

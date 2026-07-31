@@ -115,7 +115,7 @@ export async function verifyTaskResultTransportEnvelope(envelope, core, options 
   const authority = checked.authority, fence = checked.full_fence;
   ["task_id", "attempt_id", "session_id", "owner_id", "lease_id", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"].forEach((key) => seoRequire(authority[key] === fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence." + key));
   seoRequire(authority.task_version === fence.task_version, "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence.task_version");
-  await verifyTaskVersionAuthorityProof(
+  await verifyTaskVersionAuthorityProofChecked(
     checked.task_version_authority, authority, taskResult,
   );
   const debug = taskResult.diagnostics.worker_debug_fragment;

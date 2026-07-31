@@ -141,7 +141,7 @@ def verify_task_result_transport_envelope(envelope: object, core: object, *, tra
     for key in ("task_id", "attempt_id", "session_id", "owner_id", "lease_id", "deletion_version", "owner_epoch", "native_epoch", "transport_epoch"):
         _seo_require(authority[key] == fence[key], "TRANSPORT_AUTHORITY_FENCE_INVALID", f"$.full_fence.{key}")
     _seo_require(authority["task_version"] == fence["task_version"], "TRANSPORT_AUTHORITY_FENCE_INVALID", "$.full_fence.task_version")
-    verify_task_version_authority_proof(
+    _verify_task_version_authority_proof_checked(
         checked["task_version_authority"], authority, result
     )
     debug = result["diagnostics"]["worker_debug_fragment"]
