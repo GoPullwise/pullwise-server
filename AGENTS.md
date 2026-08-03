@@ -821,6 +821,10 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   TaskResult, TaskResultCore, transport, or debug artifact into either evidence
   closure.
 
+## Agent-First Generated Artifact Semantics
+
+- Generated Agent-First publication artifacts are exact-byte test fixtures. Keep contracts/agent-first/current/published/*.json, generated/agent-task-contract-npm/index.js, generated/agent-task-contract-npm/package.json, and pullwise_server/_generated_agent_task_contract.py pinned to LF line endings; CRLF working-tree rewrites make write_generated(..., check=True) and wrapper lock tests fail.
+
 ## Agent-First Result, Debug, And Transport Semantics
 
 - `TaskResult.diagnostics.worker_debug_fragment.ref` targets the
