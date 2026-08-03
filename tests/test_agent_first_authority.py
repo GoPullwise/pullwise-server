@@ -176,6 +176,36 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             self.authority.register_worker(self.register_request(worker_id=worker_id))
             self.authority.claim_and_issue_current_grant(request)
 
+    def test_claim_requires_valid_outer_transport_attempt_identity(self) -> None:
+        self.register()
+        self.accept()
+        valid = self.claim_request()
+        variants = (
+            {key: value for key, value in valid.items() if key != "transport_attempt_id"},
+            {**valid, "transport_attempt_id": "transport_attempt_short"},
+            {
+                **valid,
+                "transport_attempt_id": "attempt_44444444444444444444444444444444",
+            },
+        )
+        for request in variants:
+            with self.subTest(transport_attempt_id=request.get("transport_attempt_id")):
+                self.assert_error(
+                    "CONTRACT_DOCUMENT_INVALID",
+                    lambda request=request: self.authority.claim_and_issue_current_grant(
+                        request
+                    ),
+                )
+                self.assertEqual(
+                    (0, 0, 0),
+                    self.counts(
+                        "agent_current_attempts",
+                        "agent_current_claims",
+                        "agent_current_runtime_bootstraps",
+                    ),
+                )
+        self.authority.claim_and_issue_current_grant(valid)
+
     def test_claim_is_complete_atomic_and_exactly_idempotent(self) -> None:
         self.register()
         self.accept()
@@ -185,6 +215,16 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
         bootstrap = verify_document_digest(
             "agent-task-runtime-bootstrap/v1", json.loads(first)
         )
+        binding = bootstrap["transport_binding"]
+        task = bootstrap["construction_roots"]["task_record"]
+        attempt = bootstrap["construction_roots"]["attempt"]
+        self.assertEqual(request["transport_attempt_id"], binding["transport_attempt_id"])
+        self.assertEqual(binding["transport_attempt_id"], task["transport_attempt_id"])
+        self.assertEqual(
+            binding["transport_attempt_id"],
+            attempt["transport_binding"]["transport_attempt_id"],
+        )
+        self.assertNotEqual(binding["transport_attempt_id"], attempt["attempt_id"])
         envelope = bootstrap["authority"]
         grant = verify_document_digest("agent-worker-grant/v1", envelope["grant"])
         bound = (
@@ -239,7 +279,12 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
                 "agent_current_control_events",
             ),
         )
-        changed = {**request, "tool_call_limit": 8}
+        changed = {
+            **request,
+            "transport_attempt_id": (
+                "transport_attempt_ffffffffffffffffffffffffffffffff"
+            ),
+        }
         self.authority.claim_and_issue_current_grant(request)
         before = self.counts("agent_current_control_events", "agent_current_grants")
         self.assert_error(
@@ -261,6 +306,7 @@ class AgentFirstAuthorityTest(AuthorityHarness, unittest.TestCase):
             request = self.claim_request(
                 idempotency_key=f"claim:{suffix}",
                 lease_id=f"lease_{suffix * 32}",
+                transport_attempt_id=f"transport_attempt_{suffix * 32}",
             )
             barrier.wait()
             try:
