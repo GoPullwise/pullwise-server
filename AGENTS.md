@@ -682,14 +682,32 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   production traffic, canary, legacy deletion, S8, fallback, dual path,
   compatibility/downgrade shims, and a second authority/store/runner remain
   forbidden.
-- S7 currently stops at `SPEC_GAP`: the Server-owned
-  `agent-task-runtime-bootstrap/v1.transport_binding` authenticates only
-  `outer_job_id`, `run_id`, `lease_id`, and `transport_epoch`, while
-  `worker-debug-fragment/v1` requires `transport_attempt_id`. The design makes
-  that value the outer Server claim identity and explicitly forbids replacing
-  it with the native Attempt ID. Keep S7 fail closed; do not edit contract
-  source or Generate until a new append-only decision authorizes a bounded
-  closure.
+- D39 (`85365d344a6bc0d36d5d11dbc088278722083bf51e98c9cd518dd3d57ac90f9c`)
+  is resolved to
+  `bounded_s7_transport_attempt_binding_one_generate_no_activation`. It
+  supersedes only the pre-D39 S7 `SPEC_GAP` and authorizes bounded local S7
+  closure: authenticate the Server-issued outer `transport_attempt_id` claim,
+  capture the worker debug fragment/descriptor variants, enforce replay,
+  conflict, concurrency, redaction, and bounded extraction behavior, and add
+  migration 9 with schema-v9 fingerprint
+  `028cc25005ce33dd7b16017fe7e5324774205b0b603f2e2582e9930511065e6a`.
+  Exactly one Generate was consumed (count `1`) for
+  `@pullwise/agent-task-contract@0.1.0`: content
+  `35468e289dd08a2b9a91b5c7ffb589f844c4373cfedd8f3846cc40dd1e8f6105`, root
+  `ff6fce2d8a0d28adeb880b97ebfaa6037fa0503eb7c1accd68e840994add43b1`,
+  Python wrapper `bd099dd825c2b2340061b67500bc02f1bb4fee0a1ce7ff44138b36b8821a59fd`,
+  npm wrapper `4027cf1383772871efa293a1c55338e96e17d5c0387efd84d059585cdce6c0ef`,
+  and package manifest
+  `161c7d7bef846de963a491f2d9f07f9cbc1ced039a3c017467d6f02f14b1925e`;
+  Server producer commit is `06ed22299e324a8a39f9030c653aef34044c3d3e`.
+  Server, Worker, and Web exact pins match. This remains local candidate-only
+  with no activation; do not Generate again, activate D24, deploy, send
+  production traffic/canary, delete legacy paths, add fallback/dual/
+  compatibility/downgrade shims, create a second authority/store/runner, or
+  begin S8.
+- The preceding S7 `SPEC_GAP` text is historical pre-D39 guidance. Native
+  Attempt ID substitution remains forbidden, and all D39 work stays within
+  the bounded no-activation boundary.
 - Python nested semantic helpers must preserve Node's single-dispatch behavior.
   For an already nested document, call `validate_document` once and verify its
   embedded digest directly; do not call public `verify_document_digest` from a
