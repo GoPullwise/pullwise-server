@@ -82,7 +82,8 @@ function ruleAgentTaskRuntimeBootstrap(value) {
   const binding = value.transport_binding;
   const attemptBinding = attempt.transport_binding;
   const transportFields = [
-    "outer_job_id", "run_id", "lease_id", "transport_epoch",
+    "outer_job_id", "run_id", "lease_id", "transport_attempt_id",
+    "transport_epoch",
   ];
   const transportMatches =
     acceptRequest.outer_job_id === binding.outer_job_id &&

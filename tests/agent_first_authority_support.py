@@ -23,6 +23,9 @@ from pullwise_server.agent_first_authority_migrations import (
 WORKER_ID = "worker_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 TASK_ID = "task_11111111111111111111111111111111"
 LEASE_ID = "lease_22222222222222222222222222222222"
+TRANSPORT_ATTEMPT_ID = (
+    "transport_attempt_33333333333333333333333333333333"
+)
 NOW = "2026-07-22T12:00:00.000Z"
 
 
@@ -133,6 +136,7 @@ class AuthorityHarness:
         lease_id: str = LEASE_ID,
         task_id: str = TASK_ID,
         worker_id: str = WORKER_ID,
+        transport_attempt_id: str = TRANSPORT_ATTEMPT_ID,
         transport_epoch: int = 1,
     ) -> dict[str, object]:
         return {
@@ -141,6 +145,7 @@ class AuthorityHarness:
             "task_id": task_id,
             "worker_id": worker_id,
             "lease_id": lease_id,
+            "transport_attempt_id": transport_attempt_id,
             "transport_epoch": transport_epoch,
             "idempotency_key": idempotency_key,
             "capability_ids": ["source.read"],

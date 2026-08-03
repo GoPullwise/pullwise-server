@@ -91,7 +91,11 @@ def _rule_agent_task_runtime_bootstrap(value: dict[str, object]) -> None:
     binding = value["transport_binding"]
     attempt_binding = attempt["transport_binding"]
     transport_fields = (
-        "outer_job_id", "run_id", "lease_id", "transport_epoch"
+        "outer_job_id",
+        "run_id",
+        "lease_id",
+        "transport_attempt_id",
+        "transport_epoch",
     )
     transport_matches = (
         accept_request["outer_job_id"] == binding["outer_job_id"]

@@ -137,8 +137,7 @@
         "package",
         "task_id",
         "worker_id",
-        "lease_id",
-        "transport_epoch",
+        "lease_id", "transport_attempt_id", "transport_epoch",
         "idempotency_key",
         "capability_ids",
         "tool_keys",
@@ -151,6 +150,7 @@
         "task_id": { "type": "string", "pattern": "^task_[0-9a-f]{32}$" },
         "worker_id": { "type": "string", "pattern": "^worker_[0-9a-f]{32}$" },
         "lease_id": { "type": "string", "pattern": "^lease_[0-9a-f]{32}$" },
+        "transport_attempt_id": { "type": "string", "pattern": "^transport_attempt_[0-9a-f]{32}$" },
         "transport_epoch": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
         "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 160 },
         "capability_ids": {
@@ -404,7 +404,7 @@
           "root_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "task_id": "task_11111111111111111111111111111111", "worker_id": "worker_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "lease_id": "lease_22222222222222222222222222222222", "transport_epoch": 1,
+        "lease_id": "lease_22222222222222222222222222222222", "transport_attempt_id": "transport_attempt_33333333333333333333333333333333", "transport_epoch": 1,
         "idempotency_key": "claim:fixture:one", "capability_ids": ["source.read"],
         "tool_keys": ["internal.read_source"], "elapsed_limit_ms": 60000, "tool_call_limit": 7
       },

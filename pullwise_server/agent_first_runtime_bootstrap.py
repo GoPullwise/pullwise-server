@@ -199,6 +199,7 @@ def build_runtime_bootstrap(
         "outer_job_id": None,
         "run_id": None,
         "lease_id": None,
+        "transport_attempt_id": None,
         "transport_epoch": None,
         "native_epoch": 0,
         "current_attempt_id": None,
@@ -212,6 +213,7 @@ def build_runtime_bootstrap(
         "outer_job_id": accept_request["outer_job_id"],
         "run_id": accept_request["run_id"],
         "lease_id": claim_request["lease_id"],
+        "transport_attempt_id": claim_request["transport_attempt_id"],
         "transport_epoch": transport_epoch,
         "native_epoch": native_epoch,
         "current_attempt_id": attempt_id,
@@ -222,6 +224,7 @@ def build_runtime_bootstrap(
         "outer_job_id": accept_request["outer_job_id"],
         "run_id": accept_request["run_id"],
         "lease_id": claim_request["lease_id"],
+        "transport_attempt_id": claim_request["transport_attempt_id"],
         "transport_epoch": transport_epoch,
     }
     attempt = {

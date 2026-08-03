@@ -58,6 +58,7 @@
             "outer_job_id",
             "run_id",
             "lease_id",
+            "transport_attempt_id",
             "transport_epoch"
           ],
           "properties": {
@@ -88,6 +89,13 @@
               "minLength": 1,
               "maxLength": 160
             },
+            "transport_attempt_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^transport_attempt_[0-9a-f]{32}$"
+            },
             "transport_epoch": {
               "type": [
                 "integer",
@@ -109,6 +117,9 @@
                 "lease_id": {
                   "type": "string"
                 },
+                "transport_attempt_id": {
+                  "type": "string"
+                },
                 "transport_epoch": {
                   "type": "integer"
                 }
@@ -123,6 +134,9 @@
                   "const": null
                 },
                 "lease_id": {
+                  "const": null
+                },
+                "transport_attempt_id": {
                   "const": null
                 },
                 "transport_epoch": {
@@ -408,6 +422,7 @@
           "outer_job_id": "job-1",
           "run_id": "run-1",
           "lease_id": "lease-1",
+          "transport_attempt_id": "transport_attempt_33333333333333333333333333333333",
           "transport_epoch": 1
         },
         "state": "LEASED",

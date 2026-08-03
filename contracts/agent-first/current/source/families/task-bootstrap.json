@@ -37,6 +37,7 @@
             "outer_job_id",
             "run_id",
             "lease_id",
+            "transport_attempt_id",
             "transport_epoch"
           ],
           "properties": {
@@ -53,6 +54,10 @@
             "lease_id": {
               "type": "string",
               "pattern": "^lease_[0-9a-f]{32}$"
+            },
+            "transport_attempt_id": {
+              "type": "string",
+              "pattern": "^transport_attempt_[0-9a-f]{32}$"
             },
             "transport_epoch": {
               "type": "integer",
@@ -310,7 +315,14 @@
                   "state_version": 1,
                   "task_id": "task_00000000000000000000000000000001",
                   "termination_reason": null,
-                  "transport_binding": {"lease_id":"lease_22222222222222222222222222222222","outer_job_id":"job-1","protocol_mode":"agent_task_v1","run_id":"run-1","transport_epoch":1}
+                  "transport_binding": {
+                    "lease_id": "lease_22222222222222222222222222222222",
+                    "outer_job_id": "job-1",
+                    "protocol_mode": "agent_task_v1",
+                    "run_id": "run-1",
+                    "transport_attempt_id": "transport_attempt_33333333333333333333333333333333",
+                    "transport_epoch": 1
+                  }
                 },
               "owner":
                 {
@@ -384,6 +396,7 @@
                   "terminal_at": null,
                   "terminal_kind": null,
                   "terminalization_reserve_ms": 1000,
+                  "transport_attempt_id": "transport_attempt_33333333333333333333333333333333",
                   "transport_epoch": 1,
                   "updated_at": "2026-07-22T00:00:01.000Z"
                 }
@@ -397,7 +410,13 @@
               "schema_id": "current-package-ref/v1"
             },
           "schema_id": "agent-task-runtime-bootstrap/v1",
-          "transport_binding": {"lease_id":"lease_22222222222222222222222222222222","outer_job_id":"job-1","run_id":"run-1","transport_epoch":1}
+          "transport_binding": {
+            "lease_id": "lease_22222222222222222222222222222222",
+            "outer_job_id": "job-1",
+            "run_id": "run-1",
+            "transport_attempt_id": "transport_attempt_33333333333333333333333333333333",
+            "transport_epoch": 1
+          }
         },
       "expected_code": null
     },
