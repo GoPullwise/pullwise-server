@@ -9,25 +9,42 @@ from pullwise_server._generated_agent_task_contract import (
     package_tuple,
     seal_document,
 )
+from tests.agent_first_task_version_authority_support import (
+    build_transport_version_authority_proof,
+)
 
 
 class TransportEnvelopeHarness:
     def content_ref(
         self,
-        *,
         artifact_id: str,
         content_schema_id: str,
-        content: bytes,
+        content: bytes | object,
     ) -> dict[str, object]:
+        raw = (
+            content
+            if isinstance(content, bytes)
+            else json.dumps(
+                content,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        )
         return {
             "schema_id": "content-ref/v1",
             "artifact_id": artifact_id,
             "content_schema_id": content_schema_id,
-            "sha256": hashlib.sha256(content).hexdigest(),
-            "size_bytes": len(content),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "size_bytes": len(raw),
             "media_type": "application/json",
             "encoding": "utf-8",
         }
+
+    @staticmethod
+    def reseal(schema_id: str, document: dict[str, object]) -> dict[str, object]:
+        return seal_document(schema_id, document)
 
     def transport_envelope(
         self,
@@ -37,9 +54,9 @@ class TransportEnvelopeHarness:
         outcome: str = "COMPLETED",
     ) -> tuple[dict[str, object], dict[str, object] | None]:
         fragment_ref = self.content_ref(
-            artifact_id="art_99999999999999999999999999999991",
-            content_schema_id="worker-debug-fragment/v1",
-            content=b'{"debug":"fragment"}',
+            "art_99999999999999999999999999999991",
+            "worker-debug-fragment/v1",
+            b'{"debug":"fragment"}',
         )
         receipt, receipt_ref = self._transport_receipt(
             authority,
@@ -52,6 +69,8 @@ class TransportEnvelopeHarness:
             receipt_ref,
         )
         task_result = self.task_result(authority, outcome=outcome)
+        task_result["published_from_version"] = authority["task_version"] + 1
+        task_result["terminal_task_version"] = authority["task_version"] + 2
         task_result["diagnostics"] = {
             "worker_debug_fragment": self._debug_availability(
                 diagnostics_state,
@@ -70,11 +89,17 @@ class TransportEnvelopeHarness:
             "task_result": task_result,
             "task_result_digest": hashlib.sha256(task_result_bytes).hexdigest(),
             "task_result_core_ref": self.content_ref(
-                artifact_id="art_99999999999999999999999999999992",
-                content_schema_id="task-result-core/v1",
-                content=core_bytes,
+                "art_99999999999999999999999999999992",
+                "task-result-core/v1",
+                core_bytes,
             ),
             "task_result_core_digest": hashlib.sha256(core_bytes).hexdigest(),
+            "task_version_authority": build_transport_version_authority_proof(
+                self,
+                authority,
+                full_fence,
+                task_result,
+            ),
             "transport_receipt": (
                 {"availability": "available", "ref": receipt_ref}
                 if receipt_ref is not None
@@ -103,9 +128,9 @@ class TransportEnvelopeHarness:
             "server-transport-receipt/v1", receipt
         )
         reference = self.content_ref(
-            artifact_id="art_99999999999999999999999999999993",
-            content_schema_id="server-transport-receipt/v1",
-            content=receipt_bytes,
+            "art_99999999999999999999999999999993",
+            "server-transport-receipt/v1",
+            receipt_bytes,
         )
         return receipt, reference
 
@@ -150,9 +175,9 @@ class TransportEnvelopeHarness:
         return {
             "availability": "available",
             "ref": self.content_ref(
-                artifact_id="art_99999999999999999999999999999994",
-                content_schema_id="worker-debug-fragment-descriptor/v1",
-                content=descriptor_bytes,
+                "art_99999999999999999999999999999994",
+                "worker-debug-fragment-descriptor/v1",
+                descriptor_bytes,
             ),
         }
 

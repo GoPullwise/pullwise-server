@@ -1935,7 +1935,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 (user_bucket["id"], repository_bucket["id"]),
             ).fetchall()
         self.assertEqual([row[0] for row in remaining_buckets], [repository_bucket["id"]])
-        self.assertEqual(handler.payload["removed"]["quotaBuckets"], 1)
+        self.assertEqual(handler.payload["removed"]["quotaBuckets"], 2)
         self.assertEqual(handler.payload["removed"]["sessions"], 1)
         self.assertEqual(handler.payload["removed"]["scans"], 1)
         self.assertEqual(handler.payload["removed"]["issues"], 1)

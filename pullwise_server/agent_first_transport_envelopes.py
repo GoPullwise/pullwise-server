@@ -133,7 +133,6 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
             ("owner_id", "owner_id"),
             ("grant_id", "current_grant_id"),
             ("lease_id", "current_lease_id"),
-            ("published_from_version", "task_version"),
             ("deletion_version", "deletion_version"),
             ("owner_epoch", "owner_epoch"),
             ("native_epoch", "native_epoch"),
@@ -141,9 +140,13 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
             ("grant_digest", "grant_digest"),
             ("authority_digest", "current_authority_digest"),
         )
+        expected_published_from_version = current["task_version"]
+        if current["lifecycle"] == "ACTIVE":
+            expected_published_from_version += 1
         exact = all(values[left] == current[right] for left, right in pairs)
         exact = exact and self._row_package(current) == values["package_tuple"]
-        exact = exact and values["terminal_task_version"] == current["task_version"] + 1
+        exact = exact and values["published_from_version"] == expected_published_from_version
+        exact = exact and values["terminal_task_version"] == expected_published_from_version + 1
         if not exact:
             raise AuthorityStoreError("AUTHORITY_MISMATCH")
 
@@ -289,7 +292,7 @@ class TransportEnvelopeStore(AgentFirstAuthorityStore):
             (
                 values["terminal_task_version"], values["transport_envelope_digest"],
                 values["task_result_digest"], values["outcome"], values["task_id"],
-                values["published_from_version"], values["deletion_version"],
+                current["task_version"], values["deletion_version"],
                 values["attempt_id"], values["session_id"], values["grant_id"],
                 values["lease_id"], current["current_authority_digest"],
             ),

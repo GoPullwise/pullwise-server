@@ -96,13 +96,21 @@ def install_transport_envelope_tables(connection: sqlite3.Connection) -> None:
         END
         """
     )
+    connection.execute("DROP TRIGGER IF EXISTS agent_current_task_head_monotonic")
     connection.execute(
         """
-        CREATE TRIGGER IF NOT EXISTS agent_current_task_head_monotonic
+        CREATE TRIGGER agent_current_task_head_monotonic
         BEFORE UPDATE ON agent_current_task_heads
         WHEN NEW.task_id IS NOT OLD.task_id
           OR NEW.owner_id IS NOT OLD.owner_id
-          OR NEW.task_version != OLD.task_version + 1
+          OR NOT (
+            NEW.task_version = OLD.task_version + 1
+            OR (
+              OLD.lifecycle='ACTIVE'
+              AND NEW.lifecycle='TERMINAL'
+              AND NEW.task_version = OLD.task_version + 2
+            )
+          )
           OR NEW.deletion_version < OLD.deletion_version
           OR NEW.owner_epoch < OLD.owner_epoch
           OR NEW.native_epoch < OLD.native_epoch

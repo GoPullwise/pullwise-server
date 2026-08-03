@@ -258,6 +258,10 @@ The server owns subscription plan agent policy.
 
 ## Review Worker Protocol Semantics
 
+Agent-First terminal transport may atomically advance an ACTIVE task head
+through terminalization_requested into task_result_published; FINALIZING heads
+still publish directly from their current task version.
+
 `../codex_full_repo_review_worker_spec_v1_2_FULL_SELF_CONTAINED.md` is the
 source of truth for worker-facing server behavior. The server owns the global
 job queue, leases at most one job to a worker, and must not add worker-side
@@ -466,6 +470,9 @@ quota to workspace quota.
 
 - Scan quota is enforced against two buckets: account/user scope and repository
   scope.
+- Admin user deletion removes all user-scope quota buckets for the deleted user,
+  including auto-created current-period reservation buckets; repository-scope
+  buckets are preserved.
 - Public/API payloads should keep the existing account/repository vocabulary:
   `userQuota`, `repoQuota`, `billingUsage`, `repoUsage`, and quota scope values
   `user` and `repository`.
