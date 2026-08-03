@@ -4,6 +4,8 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -183,6 +185,81 @@ class AgentFirstS7TransportAttemptBindingTest(
         self.assertNotEqual(
             TRANSPORT_ATTEMPT_ID,
             bootstrap["construction_roots"]["attempt"]["attempt_id"],
+        )
+
+    def test_node_facade_matches_python_for_valid_and_rebound_identity(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="agent-first-s7-binding-") as temp:
+            root = Path(temp)
+            facade = root / "facade.mjs"
+            runner = root / "runner.mjs"
+            facade.write_bytes(self.bundle.npm_wrapper)
+            runner.write_text(
+                "\n".join(
+                    (
+                        'import {createHash} from "node:crypto";',
+                        f"import * as facade from {json.dumps(facade.as_uri())};",
+                        "const golden = facade.fixture(",
+                        '  "task_bootstrap_golden_atomic_roots",',
+                        ").document;",
+                        "const valid = await facade.verifyDocumentDigest(",
+                        '  "agent-task-runtime-bootstrap/v1", golden,',
+                        ");",
+                        "const rebound = structuredClone(golden);",
+                        "rebound.construction_roots.attempt.transport_binding.",
+                        '  transport_attempt_id = "transport_attempt_ffffffffffffffffffffffffffffffff";',
+                        "delete rebound.bootstrap_digest;",
+                        "rebound.bootstrap_digest = createHash('sha256')",
+                        "  .update('pullwise:agent-task-runtime-bootstrap:v1\\0')",
+                        "  .update(facade.canonicalDocumentBytes(rebound))",
+                        "  .digest('hex');",
+                        "let error = null;",
+                        "try {",
+                        "  await facade.verifyDocumentDigest(",
+                        '    "agent-task-runtime-bootstrap/v1", rebound,',
+                        "  );",
+                        "} catch (caught) {",
+                        "  error = {",
+                        "    code: caught.code, detail: caught.detail,",
+                        "    path: caught.path,",
+                        "  };",
+                        "}",
+                        "process.stdout.write(JSON.stringify({",
+                        "  transportAttemptId:",
+                        "    valid.transport_binding.transport_attempt_id,",
+                        "  nativeAttemptId:",
+                        "    valid.construction_roots.attempt.attempt_id,",
+                        "  error,",
+                        "}));",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["node", str(runner)],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                timeout=120,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+
+        result = json.loads(completed.stdout)
+        self.assertEqual(
+            "transport_attempt_33333333333333333333333333333333",
+            result["transportAttemptId"],
+        )
+        self.assertNotEqual(
+            result["transportAttemptId"], result["nativeAttemptId"]
+        )
+        self.assertEqual(
+            {
+                "code": "CONTRACT_DOCUMENT_INVALID",
+                "detail": "BOOTSTRAP_TRANSPORT_BINDING_MISMATCH",
+                "path": "$.transport_binding",
+            },
+            result["error"],
         )
 
 
