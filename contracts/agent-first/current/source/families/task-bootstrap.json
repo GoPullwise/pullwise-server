@@ -297,7 +297,7 @@
               "terminalization_reserve_ms": 1000,
               "transport_epoch": 1
             },
-          "bootstrap_digest": "913c5546bd7ece0adf68b3a5614ec92c6b440bc92cca585302de483fee87b93d",
+          "bootstrap_digest": "d82be656995c7adeed3906ee97bfc97846449e8bf6db7f967112d557072646f2",
           "construction_roots":
             {
               "attempt":
