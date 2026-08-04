@@ -180,6 +180,10 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
         golden = self.contract.fixture(
             "release_gate_sample_set_golden_bootstrap_included"
         )["document"]
+        idempotency = self.contract.fixture(
+            "release_gate_sample_set_idempotency_bootstrap_included"
+        )["document"]
+        self.assertEqual(golden, idempotency)
         self.assertEqual(
             golden,
             self.contract.verify_document_digest(

@@ -308,8 +308,12 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         )
 
     def test_context_helpers_exact_bind_the_supplied_evidence_chain(self) -> None:
-        benchmark = self.document("benchmark_bundle_golden_current")
-        policy = self.document("release_gate_policy_golden_bootstrap")
+        benchmark, policy, sample_set, context_report = bound_minimal_report(
+            self.python
+        )
+        attestation_policy = self.document(
+            "release_gate_policy_golden_bootstrap"
+        )
         report = self.document("release_gate_report_golden_bootstrap_pass")
         attestation = self.document(
             "release_gate_attestation_golden_bootstrap_pass"
@@ -321,7 +325,7 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "benchmark-bundle/v1", "bundle_digest", wrong_benchmark
         )
 
-        wrong_candidate_report = deepcopy(report)
+        wrong_candidate_report = deepcopy(context_report)
         wrong_candidate_report["candidate_build_id"] = (
             "candidate_44444444444444444444444444444444"
         )
@@ -377,12 +381,22 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
 
         operations = [
             {"kind": "policy", "documents": [policy, benchmark]},
-            {"kind": "report", "documents": [report, benchmark, policy]},
-            {"kind": "attestation", "documents": [attestation, policy, report]},
+            {
+                "kind": "report",
+                "documents": [
+                    context_report, benchmark, policy, sample_set
+                ],
+            },
+            {
+                "kind": "attestation",
+                "documents": [attestation, attestation_policy, report],
+            },
             {"kind": "policy", "documents": [policy, wrong_benchmark]},
             {
                 "kind": "report",
-                "documents": [wrong_candidate_report, benchmark, policy],
+                "documents": [
+                    wrong_candidate_report, benchmark, policy, sample_set
+                ],
             },
             {
                 "kind": "attestation",
@@ -393,10 +407,15 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
                 "documents": [transitive_attestation, policy, transitive_report],
             },
             {"kind": "policy_snake", "documents": [policy, benchmark]},
-            {"kind": "report_snake", "documents": [report, benchmark, policy]},
+            {
+                "kind": "report_snake",
+                "documents": [
+                    context_report, benchmark, policy, sample_set
+                ],
+            },
             {
                 "kind": "attestation_snake",
-                "documents": [attestation, policy, report],
+                "documents": [attestation, attestation_policy, report],
             },
         ]
         python_results = self.python_results(operations)
@@ -421,89 +440,45 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             self.assertEqual("CONTRACT_DOCUMENT_INVALID", result["code"])
         self.assertEqual(python_results[:3], python_results[7:])
 
-    def test_evaluator_selects_all_three_states_from_exact_inputs(self) -> None:
-        benchmark = self.document("benchmark_bundle_golden_current")
-        policy = self.document("release_gate_policy_golden_bootstrap")
-        passing = self.document("release_gate_report_golden_bootstrap_pass")
-
-        failing = deepcopy(passing)
-        failing["absolute_results"][0]["observed_value"] = 1
-        failing["absolute_results"][0]["status"] = "FAIL"
-        failing["verdict"] = "FAIL"
-        failing["exit_code"] = 1
-        failing = self.reseal(
-            "release-gate-report/v1", "report_digest", failing
+    def test_evaluator_returns_only_the_rederived_state(self) -> None:
+        benchmark, policy, sample_set, report = bound_minimal_report(
+            self.python
         )
-
-        indeterminate = deepcopy(passing)
-        indeterminate["indeterminate_reason_codes"] = ["EVIDENCE_MISSING"]
-        indeterminate["absolute_results"][0]["observed_value"] = None
-        indeterminate["absolute_results"][0]["status"] = "INDETERMINATE"
-        indeterminate["verdict"] = "INDETERMINATE"
-        indeterminate["exit_code"] = 2
-        indeterminate = self.reseal(
-            "release-gate-report/v1", "report_digest", indeterminate
+        tampered = deepcopy(report)
+        result = tampered["absolute_results"][0]
+        result["observed_value"] = result["threshold"]
+        result["status"] = "PASS"
+        tampered = self.reseal(
+            "release-gate-report/v1", "report_digest", tampered
         )
-
-        fail_over_indeterminate = deepcopy(failing)
-        fail_over_indeterminate["indeterminate_reason_codes"] = ["EVIDENCE_MISSING"]
-        fail_over_indeterminate["absolute_results"][1]["observed_value"] = None
-        fail_over_indeterminate["absolute_results"][1]["status"] = "INDETERMINATE"
-        fail_over_indeterminate = self.reseal(
-            "release-gate-report/v1", "report_digest", fail_over_indeterminate
-        )
-
         operations = [
-            {"kind": "evaluator", "documents": [benchmark, policy, report]}
-            for report in (
-                passing,
-                failing,
-                indeterminate,
-                fail_over_indeterminate,
-            )
-        ]
-        expected = [
-            {"ok": True, "value": {"verdict": "PASS", "exit_code": 0}},
-            {"ok": True, "value": {"verdict": "FAIL", "exit_code": 1}},
             {
-                "ok": True,
-                "value": {"verdict": "INDETERMINATE", "exit_code": 2},
+                "kind": "evaluator",
+                "documents": [benchmark, policy, sample_set, report],
             },
-            {"ok": True, "value": {"verdict": "FAIL", "exit_code": 1}},
+            {
+                "kind": "evaluator",
+                "documents": [benchmark, policy, sample_set, tampered],
+            },
         ]
 
         python_results = self.python_results(operations)
         node = self.node_results(operations)
 
-        self.assertEqual(expected, python_results)
         self.assertEqual(python_results, node["results"])
-        self.assertTrue(node["exports"]["evaluator_camel"])
-        self.assertTrue(node["exports"]["evaluator_snake"])
-
-    def test_evaluator_rejects_caller_selected_profile_status(self) -> None:
-        benchmark = self.document("benchmark_bundle_golden_current")
-        policy = self.document("release_gate_policy_golden_bootstrap")
-        report = self.document("release_gate_report_golden_bootstrap_pass")
-        report["profile_results"][0]["wall_ms"] = (
-            policy["profile_budgets"][0]["wall_ms"] + 1
-        )
-        report = self.reseal(
-            "release-gate-report/v1", "report_digest", report
-        )
-
-        results = self.python_results([
-            {"kind": "evaluator", "documents": [benchmark, policy, report]}
-        ])
-
         self.assertEqual(
             {
-                "ok": False,
-                "code": "CONTRACT_DOCUMENT_INVALID",
-                "detail": "RELEASE_EVALUATOR_STATUS_INVALID",
-                "path": "$.profile_results[0].status",
+                "ok": True,
+                "value": {"verdict": "INDETERMINATE", "exit_code": 2},
             },
-            results[0],
+            python_results[0],
         )
+        self.assertEqual(
+            "RELEASE_REPORT_EVALUATION_INVALID",
+            python_results[1]["detail"],
+        )
+        self.assertTrue(node["exports"]["evaluator_camel"])
+        self.assertTrue(node["exports"]["evaluator_snake"])
 
     def test_evaluator_rejects_caller_selected_relative_status(self) -> None:
         benchmark, policy, report = stable_release_gate_documents(self)
@@ -514,7 +489,11 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "release-gate-report/v1", "report_digest", report
         )
         operations = [
-            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+            {
+                "kind": "document",
+                "schema_id": "release-gate-report/v1",
+                "documents": [report],
+            }
         ]
 
         python_results = self.python_results(operations)
@@ -543,7 +522,11 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "release-gate-report/v1", "report_digest", report
         )
         operations = [
-            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+            {
+                "kind": "document",
+                "schema_id": "release-gate-report/v1",
+                "documents": [report],
+            }
         ]
 
         python_results = self.python_results(operations)
@@ -561,16 +544,19 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         )
 
     def test_evaluator_rejects_pass_with_insufficient_sample_inventory(self) -> None:
-        benchmark = self.document("benchmark_bundle_golden_current")
-        policy = self.document("release_gate_policy_golden_bootstrap")
-        report = self.document("release_gate_report_golden_bootstrap_pass")
+        benchmark, policy, sample_set, report = bound_minimal_report(
+            self.python
+        )
         report["raw_sample_count"] = 150
-        report["valid_sample_count"] = 145
+        report["valid_sample_count"] = 150
         report = self.reseal(
             "release-gate-report/v1", "report_digest", report
         )
         operations = [
-            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+            {
+                "kind": "report",
+                "documents": [report, benchmark, policy, sample_set],
+            }
         ]
 
         python_results = self.python_results(operations)
@@ -581,8 +567,8 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             {
                 "ok": False,
                 "code": "CONTRACT_DOCUMENT_INVALID",
-                "detail": "RELEASE_EVALUATOR_SAMPLE_INVALID",
-                "path": "$.indeterminate_reason_codes",
+                "detail": "RELEASE_REPORT_EVALUATION_INVALID",
+                "path": "$.absolute_results",
             },
             python_results[0],
         )
@@ -600,7 +586,11 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             "release-gate-report/v1", "report_digest", report
         )
         operations = [
-            {"kind": "evaluator", "documents": [benchmark, policy, report]}
+            {
+                "kind": "document",
+                "schema_id": "release-gate-report/v1",
+                "documents": [report],
+            }
         ]
 
         python_results = self.python_results(operations)
