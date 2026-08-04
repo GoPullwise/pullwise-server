@@ -1412,6 +1412,9 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         benchmark, policy, sample_set, report = bound_minimal_report(
             self.python
         )
+        attestation_policy = self.fixture_document(
+            "release_gate_policy_golden_bootstrap"
+        )
         attestation_report = self.fixture_document(
             "release_gate_report_golden_bootstrap_pass"
         )
@@ -1459,7 +1462,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             ),
             "verify_release_gate_attestation_context": self.helper_operation(
                 "verify_release_gate_attestation_context",
-                [bad_attestation, policy, attestation_report],
+                [bad_attestation, attestation_policy, attestation_report],
             ),
         }
 
@@ -1803,6 +1806,9 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             release_sample_set,
             release_report,
         ) = bound_minimal_report(self.python)
+        release_attestation_policy = self.fixture_document(
+            "release_gate_policy_golden_bootstrap"
+        )
         release_attestation_report = self.fixture_document(
             "release_gate_report_golden_bootstrap_pass"
         )
@@ -2011,7 +2017,7 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
                 "verify_release_gate_attestation_context",
                 [
                     release_attestation,
-                    release_policy,
+                    release_attestation_policy,
                     release_attestation_report,
                 ],
             ),
