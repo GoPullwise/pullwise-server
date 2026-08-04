@@ -22,6 +22,7 @@ from tests.agent_first_task_version_authority_support import (
     build_task_result_publication_event_context,
     build_transport_version_authority_proof,
 )
+from tests.release_gate_minimal_support import bound_minimal_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1408,9 +1409,10 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         }
 
     def release_gate_probe_operations(self) -> dict[str, dict[str, object]]:
-        benchmark = self.fixture_document("benchmark_bundle_golden_current")
-        policy = self.fixture_document("release_gate_policy_golden_bootstrap")
-        report = self.fixture_document(
+        benchmark, policy, sample_set, report = bound_minimal_report(
+            self.python
+        )
+        attestation_report = self.fixture_document(
             "release_gate_report_golden_bootstrap_pass"
         )
         attestation = self.fixture_document(
@@ -1427,6 +1429,12 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         )
         bad_report = self.reseal("release-gate-report/v1", bad_report)
 
+        bad_sample_set = deepcopy(sample_set)
+        bad_sample_set["policy_digest"] = "0" * 64
+        bad_sample_set = self.reseal(
+            "release-gate-sample-set/v1", bad_sample_set
+        )
+
         bad_attestation = deepcopy(attestation)
         bad_attestation["report_digest"] = "0" * 64
         bad_attestation = self.reseal(
@@ -1434,19 +1442,24 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         )
 
         return {
+            "derive_release_gate_evaluation": self.helper_operation(
+                "derive_release_gate_evaluation",
+                [benchmark, policy, bad_sample_set],
+            ),
             "evaluate_release_gate": self.helper_operation(
-                "evaluate_release_gate", [benchmark, policy, bad_report]
+                "evaluate_release_gate",
+                [benchmark, policy, sample_set, bad_report],
             ),
             "verify_release_gate_policy_context": self.helper_operation(
                 "verify_release_gate_policy_context", [policy, bad_benchmark]
             ),
             "verify_release_gate_report_context": self.helper_operation(
                 "verify_release_gate_report_context",
-                [bad_report, benchmark, policy],
+                [bad_report, benchmark, policy, sample_set],
             ),
             "verify_release_gate_attestation_context": self.helper_operation(
                 "verify_release_gate_attestation_context",
-                [bad_attestation, policy, report],
+                [bad_attestation, policy, attestation_report],
             ),
         }
 
@@ -1784,13 +1797,13 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
         graph = self.build_graph()
         plan = self.fixture_document("quality_policy_golden_q2_plan")
         quality_context = self.quality_policy_context(plan)
-        release_benchmark = self.fixture_document(
-            "benchmark_bundle_golden_current"
-        )
-        release_policy = self.fixture_document(
-            "release_gate_policy_golden_bootstrap"
-        )
-        release_report = self.fixture_document(
+        (
+            release_benchmark,
+            release_policy,
+            release_sample_set,
+            release_report,
+        ) = bound_minimal_report(self.python)
+        release_attestation_report = self.fixture_document(
             "release_gate_report_golden_bootstrap_pass"
         )
         release_attestation = self.fixture_document(
@@ -1968,9 +1981,18 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             "verify_quality_policy_plan_context": self.helper_operation(
                 "verify_quality_policy_plan_context", quality_context
             ),
+            "derive_release_gate_evaluation": self.helper_operation(
+                "derive_release_gate_evaluation",
+                [release_benchmark, release_policy, release_sample_set],
+            ),
             "evaluate_release_gate": self.helper_operation(
                 "evaluate_release_gate",
-                [release_benchmark, release_policy, release_report],
+                [
+                    release_benchmark,
+                    release_policy,
+                    release_sample_set,
+                    release_report,
+                ],
             ),
             "verify_release_gate_policy_context": self.helper_operation(
                 "verify_release_gate_policy_context",
@@ -1978,11 +2000,20 @@ class SemanticClosureHarness(VerificationDirectGraphBuilderMixin):
             ),
             "verify_release_gate_report_context": self.helper_operation(
                 "verify_release_gate_report_context",
-                [release_report, release_benchmark, release_policy],
+                [
+                    release_report,
+                    release_benchmark,
+                    release_policy,
+                    release_sample_set,
+                ],
             ),
             "verify_release_gate_attestation_context": self.helper_operation(
                 "verify_release_gate_attestation_context",
-                [release_attestation, release_policy, release_report],
+                [
+                    release_attestation,
+                    release_policy,
+                    release_attestation_report,
+                ],
             ),
             "verify_source_tree_context": self.helper_operation(
                 "verify_source_tree_context",
