@@ -221,8 +221,8 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
             report,
         )
 
-        self.assertEqual("PASS", stored.verdict)
-        self.assertEqual(0, stored.exit_code)
+        self.assertEqual("INDETERMINATE", stored.verdict)
+        self.assertEqual(2, stored.exit_code)
         self.assertEqual(
             canonical_validated_bytes("benchmark-bundle/v1", benchmark),
             stored.benchmark_bytes,
@@ -253,9 +253,11 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
         self.assertEqual((1, 1, 1, 1), counts)
 
     def test_verified_read_rejects_corrupt_domain_digest_metadata(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
-        self.evaluator.evaluate_and_store(benchmark, policy, report)
+        self.evaluator.evaluate_and_store(
+            benchmark, policy, sample_set, report
+        )
         with closing(self.connect()) as connection, connection:
             connection.execute(
                 """
@@ -278,9 +280,11 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
 
     def test_exact_write_rejects_corrupt_existing_digest_row(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
-        self.evaluator.evaluate_and_store(benchmark, policy, report)
+        self.evaluator.evaluate_and_store(
+            benchmark, policy, sample_set, report
+        )
         with closing(self.connect()) as connection, connection:
             connection.execute(
                 """
@@ -298,14 +302,18 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
             )
 
         with self.assertRaises(AuthorityError) as raised:
-            self.evaluator.evaluate_and_store(benchmark, policy, report)
+            self.evaluator.evaluate_and_store(
+                benchmark, policy, sample_set, report
+            )
 
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
 
     def test_verified_read_rejects_a_missing_linked_document(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
-        self.evaluator.evaluate_and_store(benchmark, policy, report)
+        self.evaluator.evaluate_and_store(
+            benchmark, policy, sample_set, report
+        )
         with closing(self.connect()) as connection, connection:
             connection.execute("PRAGMA foreign_keys=OFF")
             connection.execute(
@@ -322,28 +330,33 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
 
     def test_exact_replay_is_a_no_op_and_rows_are_immutable(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         first_inputs = self.evaluator.freeze_inputs(benchmark, policy)
         self.assertEqual(
             first_inputs,
             self.evaluator.freeze_inputs(deepcopy(benchmark), deepcopy(policy)),
         )
-        first = self.evaluator.evaluate_and_store(benchmark, policy, report)
+        first = self.evaluator.evaluate_and_store(
+            benchmark, policy, sample_set, report
+        )
 
         self.assertEqual(
             first,
             self.evaluator.evaluate_and_store(
                 deepcopy(benchmark),
                 deepcopy(policy),
+                deepcopy(sample_set),
                 deepcopy(report),
             ),
         )
         collision = deepcopy(report)
-        collision["completed_at"] = "2026-07-23T00:00:01.000Z"
+        collision["signature"] = "A" * 86
         collision.pop("report_digest")
         collision = seal_document("release-gate-report/v1", collision)
         with self.assertRaises(AuthorityError) as raised:
-            self.evaluator.evaluate_and_store(benchmark, policy, collision)
+            self.evaluator.evaluate_and_store(
+                benchmark, policy, sample_set, collision
+            )
         self.assertEqual("IDEMPOTENCY_CONFLICT", raised.exception.code)
 
         with closing(self.connect()) as connection:
@@ -356,21 +369,26 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                 connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in CURRENT_RELEASE_EVALUATOR_TABLES
             )
-        self.assertEqual((1, 1, 1), counts)
+        self.assertEqual((1, 1, 1, 1), counts)
 
     def test_invalid_or_noncurrent_chain_writes_nothing(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         mismatched = deepcopy(report)
         mismatched["benchmark_digest"] = "0" * 64
         mismatched.pop("report_digest")
         mismatched = seal_document("release-gate-report/v1", mismatched)
 
         with self.assertRaises(AuthorityError) as invalid:
-            self.evaluator.evaluate_and_store(benchmark, policy, mismatched)
+            self.evaluator.evaluate_and_store(
+                benchmark, policy, sample_set, mismatched
+            )
         self.assertEqual("CONTRACT_DOCUMENT_INVALID", invalid.exception.code)
 
         fixture_benchmark = fixture("benchmark_bundle_golden_current")["document"]
         fixture_policy = fixture("release_gate_policy_golden_bootstrap")["document"]
+        fixture_sample_set = fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
         fixture_report = fixture(
             "release_gate_report_golden_bootstrap_pass"
         )["document"]
@@ -378,6 +396,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
             self.evaluator.evaluate_and_store(
                 fixture_benchmark,
                 fixture_policy,
+                fixture_sample_set,
                 fixture_report,
             )
         self.assertEqual("CURRENT_PACKAGE_PIN_MISMATCH", noncurrent.exception.code)
@@ -387,10 +406,10 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                 connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in CURRENT_RELEASE_EVALUATOR_TABLES
             )
-        self.assertEqual((0, 0, 0), counts)
+        self.assertEqual((0, 0, 0, 0), counts)
 
     def test_input_and_report_faults_preserve_the_freeze_boundary(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         for fault_point in RELEASE_EVALUATOR_FAULT_POINTS:
             with self.subTest(fault_point=fault_point):
                 def inject(point: str) -> None:
@@ -406,7 +425,9 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                         evaluator.freeze_inputs(benchmark, policy)
                     else:
                         evaluator.freeze_inputs(benchmark, policy)
-                        evaluator.evaluate_and_store(benchmark, policy, report)
+                        evaluator.evaluate_and_store(
+                            benchmark, policy, sample_set, report
+                        )
                 with closing(self.connect()) as connection:
                     counts = tuple(
                         connection.execute(
@@ -415,55 +436,38 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                         for table in CURRENT_RELEASE_EVALUATOR_TABLES
                     )
                 self.assertEqual(
-                    (0, 0, 0)
+                    (0, 0, 0, 0)
                     if fault_point.endswith(("benchmark", "policy"))
-                    else (1, 1, 0),
+                    else (1, 1, 0, 0),
                     counts,
                 )
 
-    def test_pass_fail_and_indeterminate_survive_verified_reload(self) -> None:
-        benchmark, policy, passing = _current_documents()
+    def test_report_projection_must_match_frozen_raw_samples(self) -> None:
+        benchmark, policy, sample_set, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
-        failing = deepcopy(passing)
-        failing["report_id"] = "release_report_22222222222222222222222222222222"
-        failing["absolute_results"][0]["observed_value"] = 1
-        failing["absolute_results"][0]["status"] = "FAIL"
-        failing["verdict"] = "FAIL"
-        failing["exit_code"] = 1
-        failing.pop("report_digest")
-        failing = seal_document("release-gate-report/v1", failing)
+        tampered = deepcopy(report)
+        tampered["raw_sample_count"] += 1
+        tampered["valid_sample_count"] += 1
+        tampered.pop("report_digest")
+        tampered = seal_document("release-gate-report/v1", tampered)
 
-        indeterminate = deepcopy(passing)
-        indeterminate["report_id"] = (
-            "release_report_33333333333333333333333333333333"
+        with self.assertRaises(AuthorityError) as raised:
+            self.evaluator.evaluate_and_store(
+                benchmark, policy, sample_set, tampered
+            )
+        self.assertEqual("CONTRACT_DOCUMENT_INVALID", raised.exception.code)
+
+        stored = self.evaluator.evaluate_and_store(
+            benchmark, policy, sample_set, report
         )
-        indeterminate["indeterminate_reason_codes"] = ["EVIDENCE_MISSING"]
-        indeterminate["absolute_results"][0]["observed_value"] = None
-        indeterminate["absolute_results"][0]["status"] = "INDETERMINATE"
-        indeterminate["verdict"] = "INDETERMINATE"
-        indeterminate["exit_code"] = 2
-        indeterminate.pop("report_digest")
-        indeterminate = seal_document("release-gate-report/v1", indeterminate)
-
-        for report, verdict, exit_code in (
-            (passing, "PASS", 0),
-            (failing, "FAIL", 1),
-            (indeterminate, "INDETERMINATE", 2),
-        ):
-            with self.subTest(verdict=verdict):
-                stored = self.evaluator.evaluate_and_store(
-                    benchmark,
-                    policy,
-                    report,
-                )
-                self.assertEqual((verdict, exit_code), (stored.verdict, stored.exit_code))
-                self.assertEqual(
-                    stored,
-                    self.evaluator.load_evaluation(report["report_id"]),
-                )
+        self.assertEqual("INDETERMINATE", stored.verdict)
+        self.assertEqual(
+            stored,
+            self.evaluator.load_evaluation(report["report_id"]),
+        )
 
     def test_concurrent_exact_writes_converge_and_conflicts_choose_one(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
 
         def race(reports: tuple[dict[str, object], ...]) -> list[object]:
@@ -477,6 +481,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                         self.evaluator.evaluate_and_store(
                             benchmark,
                             policy,
+                            sample_set,
                             candidate,
                         )
                     )
@@ -499,7 +504,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
         first.pop("report_digest")
         first = seal_document("release-gate-report/v1", first)
         second = deepcopy(first)
-        second["completed_at"] = "2026-07-23T00:00:01.000Z"
+        second["signature"] = "B" * 86
         second.pop("report_digest")
         second = seal_document("release-gate-report/v1", second)
         conflict = race((first, second))

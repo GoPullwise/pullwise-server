@@ -18,25 +18,12 @@ from .agent_first_release_evaluator_store_sql import (
 FaultInjector = Callable[[str], None]
 PackageTuple = tuple[str, str, str, str]
 InputRow = tuple[
-    str,
-    str,
-    str,
-    object,
-    str,
-    object,
-    tuple[str, ...],
-    tuple[object, ...],
+    str, str, str, object, str, object, tuple[str, ...], tuple[object, ...]
 ]
 
 RELEASE_EVALUATOR_FAULT_POINTS = (
-    "before_benchmark",
-    "after_benchmark",
-    "before_policy",
-    "after_policy",
-    "before_sample_set",
-    "after_sample_set",
-    "before_report",
-    "after_report",
+    "before_benchmark", "after_benchmark", "before_policy", "after_policy",
+    "before_sample_set", "after_sample_set", "before_report", "after_report",
 )
 
 
@@ -481,56 +468,7 @@ class ReleaseEvaluatorStore:
         report_present = False
         with self._connection(immediate=False) as connection:
             row = connection.execute(
-                """
-                SELECT
-                    benchmark.document_bytes AS benchmark_bytes,
-                    benchmark.document_sha256 AS benchmark_document_sha256,
-                    benchmark.size_bytes AS benchmark_size_bytes,
-                    benchmark.bundle_digest AS stored_benchmark_digest,
-                    benchmark.benchmark_id AS stored_benchmark_id,
-                    benchmark.package_identity AS benchmark_package_identity,
-                    benchmark.package_version AS benchmark_package_version,
-                    benchmark.package_content_sha256
-                        AS benchmark_package_content_sha256,
-                    benchmark.package_root_sha256
-                        AS benchmark_package_root_sha256,
-                    policy.document_bytes AS policy_bytes,
-                    policy.document_sha256 AS policy_document_sha256,
-                    policy.size_bytes AS policy_size_bytes,
-                    policy.policy_digest AS stored_policy_digest,
-                    policy.policy_id AS stored_policy_id,
-                    policy.benchmark_digest AS policy_benchmark_digest,
-                    policy.benchmark_ref_sha256,
-                    policy.benchmark_ref_size_bytes,
-                    policy.package_identity AS policy_package_identity,
-                    policy.package_version AS policy_package_version,
-                    policy.package_content_sha256 AS policy_package_content_sha256,
-                    policy.package_root_sha256 AS policy_package_root_sha256,
-                    report.document_bytes AS report_bytes,
-                    report.document_sha256 AS report_document_sha256,
-                    report.size_bytes AS report_size_bytes,
-                    report.report_digest AS stored_report_digest,
-                    report.report_id AS stored_report_id,
-                    report.benchmark_digest AS report_benchmark_digest,
-                    report.policy_digest AS report_policy_digest,
-                    report.benchmark_ref_sha256 AS report_benchmark_ref_sha256,
-                    report.benchmark_ref_size_bytes
-                        AS report_benchmark_ref_size_bytes,
-                    report.policy_ref_sha256,
-                    report.policy_ref_size_bytes,
-                    report.verdict,
-                    report.exit_code,
-                    report.package_identity AS report_package_identity,
-                    report.package_version AS report_package_version,
-                    report.package_content_sha256 AS report_package_content_sha256,
-                    report.package_root_sha256 AS report_package_root_sha256
-                FROM agent_current_release_gate_reports AS report
-                JOIN agent_current_release_gate_policies AS policy
-                    ON policy.policy_digest = report.policy_digest
-                JOIN agent_current_release_benchmark_bundles AS benchmark
-                    ON benchmark.bundle_digest = report.benchmark_digest
-                WHERE report.report_id = ?
-                """,
+                LOAD_RELEASE_EVALUATION_SQL,
                 (report_id,),
             ).fetchone()
             if row is None:
@@ -548,7 +486,7 @@ class ReleaseEvaluatorStore:
                 else "RELEASE_EVALUATION_NOT_FOUND"
             )
         expected_package = self._package_values()
-        for prefix in ("benchmark", "policy", "report"):
+        for prefix in ("benchmark", "policy", "sample_set", "report"):
             stored_package = (
                 row[f"{prefix}_package_identity"],
                 row[f"{prefix}_package_version"],
@@ -559,10 +497,12 @@ class ReleaseEvaluatorStore:
                 raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT")
         benchmark_bytes = self._checked_bytes(row, prefix="benchmark")
         policy_bytes = self._checked_bytes(row, prefix="policy")
+        sample_set_bytes = self._checked_bytes(row, prefix="sample_set")
         report_bytes = self._checked_bytes(row, prefix="report")
         try:
             benchmark = json.loads(benchmark_bytes)
             policy = json.loads(policy_bytes)
+            sample_set = json.loads(sample_set_bytes)
             report = json.loads(report_bytes)
             metadata_matches = (
                 benchmark["bundle_digest"] == row["stored_benchmark_digest"]
@@ -577,6 +517,28 @@ class ReleaseEvaluatorStore:
                 and policy["benchmark_ref"]["size_bytes"]
                 == row["benchmark_size_bytes"]
                 == row["benchmark_ref_size_bytes"]
+                and sample_set["sample_set_digest"]
+                == row["stored_sample_set_digest"]
+                and sample_set["sample_set_id"]
+                == row["stored_sample_set_id"]
+                and sample_set["benchmark_digest"]
+                == row["sample_set_benchmark_digest"]
+                == row["stored_benchmark_digest"]
+                and sample_set["policy_digest"]
+                == row["sample_set_policy_digest"]
+                == row["stored_policy_digest"]
+                and sample_set["benchmark_ref"]["sha256"]
+                == row["sample_set_benchmark_ref_sha256"]
+                == row["benchmark_document_sha256"]
+                and sample_set["benchmark_ref"]["size_bytes"]
+                == row["sample_set_benchmark_ref_size_bytes"]
+                == row["benchmark_size_bytes"]
+                and sample_set["policy_ref"]["sha256"]
+                == row["sample_set_policy_ref_sha256"]
+                == row["policy_document_sha256"]
+                and sample_set["policy_ref"]["size_bytes"]
+                == row["sample_set_policy_ref_size_bytes"]
+                == row["policy_size_bytes"]
                 and report["report_digest"] == row["stored_report_digest"]
                 and report["report_id"] == row["stored_report_id"]
                 and report["benchmark_digest"]
@@ -585,6 +547,9 @@ class ReleaseEvaluatorStore:
                 and report["policy_digest"]
                 == row["report_policy_digest"]
                 == row["stored_policy_digest"]
+                and report["sample_set_digest"]
+                == row["report_sample_set_digest"]
+                == row["stored_sample_set_digest"]
                 and report["benchmark_ref"]["sha256"]
                 == row["report_benchmark_ref_sha256"]
                 == row["benchmark_document_sha256"]
@@ -597,6 +562,12 @@ class ReleaseEvaluatorStore:
                 and report["policy_ref"]["size_bytes"]
                 == row["policy_ref_size_bytes"]
                 == row["policy_size_bytes"]
+                and report["sample_set_ref"]["sha256"]
+                == row["sample_set_ref_sha256"]
+                == row["sample_set_document_sha256"]
+                and report["sample_set_ref"]["size_bytes"]
+                == row["sample_set_ref_size_bytes"]
+                == row["sample_set_size_bytes"]
                 and report["verdict"] == row["verdict"]
                 and report["exit_code"] == row["exit_code"]
             )
@@ -607,6 +578,7 @@ class ReleaseEvaluatorStore:
         return StoredReleaseEvaluationRows(
             benchmark_bytes,
             policy_bytes,
+            sample_set_bytes,
             report_bytes,
             row["verdict"],
             row["exit_code"],

@@ -65,7 +65,7 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
                 )
 
     def test_invalid_or_noncurrent_input_freeze_writes_nothing(self) -> None:
-        benchmark, policy, _ = _current_documents()
+        benchmark, policy, _, _ = _current_documents()
         mismatched = deepcopy(policy)
         mismatched["benchmark_digest"] = "0" * 64
         mismatched["candidate_digest"] = _release_digest(
@@ -93,10 +93,10 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
                 fixture("release_gate_policy_golden_bootstrap")["document"],
             )
         self.assertEqual("CURRENT_PACKAGE_PIN_MISMATCH", noncurrent.exception.code)
-        self.assertEqual((0, 0, 0), self._counts())
+        self.assertEqual((0, 0, 0, 0), self._counts())
 
     def test_input_freeze_rejects_a_stable_policy_id_conflict(self) -> None:
-        benchmark, policy, _ = _current_documents()
+        benchmark, policy, _, _ = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
         collision = deepcopy(policy)
         collision["expires_at"] = "2026-07-29T00:00:00.000Z"
@@ -107,10 +107,10 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
             self.evaluator.freeze_inputs(benchmark, collision)
 
         self.assertEqual("IDEMPOTENCY_CONFLICT", raised.exception.code)
-        self.assertEqual((1, 1, 0), self._counts())
+        self.assertEqual((1, 1, 0, 0), self._counts())
 
     def test_input_freeze_rejects_corrupt_existing_bytes_metadata(self) -> None:
-        benchmark, policy, _ = _current_documents()
+        benchmark, policy, _, _ = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
         with closing(self.connect()) as connection, connection:
             connection.execute(
@@ -131,7 +131,7 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
 
     def test_input_freeze_does_not_backfill_a_partially_missing_pair(self) -> None:
-        benchmark, policy, _ = _current_documents()
+        benchmark, policy, _, _ = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
         self._delete_input_row(
             "agent_current_release_gate_policies",
@@ -143,10 +143,10 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
             self.evaluator.freeze_inputs(benchmark, policy)
 
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
-        self.assertEqual((1, 0, 0), self._counts())
+        self.assertEqual((1, 0, 0, 0), self._counts())
 
     def test_report_rejects_a_partially_missing_frozen_pair_as_corrupt(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
         self.evaluator.freeze_inputs(benchmark, policy)
         self._delete_input_row(
             "agent_current_release_benchmark_bundles",
@@ -155,13 +155,15 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
         )
 
         with self.assertRaises(AuthorityError) as raised:
-            self.evaluator.evaluate_and_store(benchmark, policy, report)
+            self.evaluator.evaluate_and_store(
+                benchmark, policy, sample_set, report
+            )
 
         self.assertEqual("AUTHORITY_RELOAD_REQUIRED", raised.exception.code)
-        self.assertEqual((0, 1, 0), self._counts())
+        self.assertEqual((0, 1, 0, 0), self._counts())
 
     def test_concurrent_exact_input_freezes_converge(self) -> None:
-        benchmark, policy, _ = _current_documents()
+        benchmark, policy, _, _ = _current_documents()
         barrier = threading.Barrier(2)
         outcomes: list[object] = []
 
@@ -185,10 +187,10 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
 
         self.assertEqual(2, len(outcomes))
         self.assertTrue(all(item == outcomes[0] for item in outcomes))
-        self.assertEqual((1, 1, 0), self._counts())
+        self.assertEqual((1, 1, 0, 0), self._counts())
 
     def test_locked_input_freeze_preserves_the_sqlite_lock_error(self) -> None:
-        benchmark, policy, _ = _current_documents()
+        benchmark, policy, _, _ = _current_documents()
 
         def quick_connect() -> sqlite3.Connection:
             connection = sqlite3.connect(self.db_path, timeout=0.01)
@@ -203,7 +205,7 @@ class AgentFirstReleaseInputFreezeTest(unittest.TestCase):
                 evaluator.freeze_inputs(benchmark, policy)
             blocker.rollback()
 
-        self.assertEqual((0, 0, 0), self._counts())
+        self.assertEqual((0, 0, 0, 0), self._counts())
 
 
 if __name__ == "__main__":
