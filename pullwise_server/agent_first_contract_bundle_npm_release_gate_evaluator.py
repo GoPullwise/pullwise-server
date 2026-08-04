@@ -66,6 +66,16 @@ export async function deriveReleaseGateEvaluation(
     "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
     "$.benchmark_digest",
   );
+  const allowedProfiles = new Set(
+    checkedPolicy.profile_budgets.map((item) => item.profile_id),
+  );
+  releaseRequire(
+    checkedSampleSet.samples.every(
+      (item) => allowedProfiles.has(item.profile_id),
+    ),
+    "RELEASE_SAMPLE_PROFILE_INVALID",
+    "$.samples",
+  );
   const completedAt = releaseTimestampMillis(checkedSampleSet.completed_at);
   releaseRequire(
     completedAt !== null &&

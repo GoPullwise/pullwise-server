@@ -13,7 +13,7 @@ from pullwise_server.agent_first_contract_bundle_npm import render_npm_wrapper
 from pullwise_server.agent_first_contract_bundle_python import render_python_wrapper
 from pullwise_server.agent_first_contract_bundle_source import canonical_bytes
 from tests.release_gate_facade_support import stable_release_gate_documents
-from tests.release_gate_sample_set_support import bound_minimal_report
+from tests.release_gate_minimal_support import bound_minimal_report
 
 
 ROOT = Path(__file__).resolve().parents[1]

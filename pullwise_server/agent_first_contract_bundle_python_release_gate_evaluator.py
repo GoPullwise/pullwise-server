@@ -66,6 +66,17 @@ def derive_release_gate_evaluation(
         "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
         "$.benchmark_digest",
     )
+    allowed_profiles = {
+        item["profile_id"] for item in checked_policy["profile_budgets"]
+    }
+    _release_require(
+        all(
+            item["profile_id"] in allowed_profiles
+            for item in checked_sample_set["samples"]
+        ),
+        "RELEASE_SAMPLE_PROFILE_INVALID",
+        "$.samples",
+    )
     completed_at = _timestamp_millis(checked_sample_set["completed_at"])
     _release_require(
         completed_at is not None

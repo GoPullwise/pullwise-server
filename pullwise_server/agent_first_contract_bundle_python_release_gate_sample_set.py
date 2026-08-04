@@ -55,6 +55,11 @@ def _rule_release_gate_sample_set(value: dict[str, object]) -> None:
             "RELEASE_SAMPLE_EXPECTED_OUTCOME_INVALID",
             f"$.samples[{index}]",
         )
+        _release_require(
+            _sorted_unique(sample["evidence_issue_codes"]),
+            "RELEASE_SAMPLE_EVIDENCE_ORDER_INVALID",
+            f"$.samples[{index}].evidence_issue_codes",
+        )
         if sample["disposition"] == "INCLUDED":
             complete = not sample["evidence_issue_codes"]
             _release_require(

@@ -1,39 +1,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import json
-from pathlib import Path
-import subprocess
-import tempfile
-from types import ModuleType
 import unittest
 
-from pullwise_server.agent_first_contract_bundle import build_bundle
-from tests.release_gate_sample_set_support import (
+from tests.release_gate_contract_test_support import (
+    ReleaseGateContractTestCase,
+)
+from tests.release_gate_minimal_support import (
     bound_minimal_documents,
     bound_minimal_report,
-    coherent_bootstrap_documents,
-    coherent_stable_documents,
-    rebind_minimal_documents,
 )
 
 
-SOURCE_ROOT = (
-    Path(__file__).resolve().parents[1]
-    / "contracts"
-    / "agent-first"
-    / "current"
-    / "source"
-)
-
-
-class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        bundle = build_bundle(SOURCE_ROOT)
-        cls.contract = ModuleType("_release_gate_sample_set_source_contract")
-        exec(bundle.python_wrapper, cls.contract.__dict__)
-        cls.npm_wrapper = bundle.npm_wrapper
+class AgentFirstReleaseGateSampleSetTest(ReleaseGateContractTestCase):
 
     def test_public_derivation_rejects_missing_typed_inputs(self) -> None:
         with self.assertRaises(self.contract.ContractValidationError):
@@ -47,68 +26,17 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
             "detail": raised.exception.detail,
             "path": raised.exception.path,
         }
-        with tempfile.TemporaryDirectory(prefix="release-sample-set-") as scratch:
-            root = Path(scratch)
-            facade = root / "facade.mjs"
-            runner = root / "runner.mjs"
-            facade.write_bytes(self.npm_wrapper)
-            runner.write_text(
-                "\n".join(
-                    (
-                        f"import * as facade from {json.dumps(facade.as_uri())};",
-                        "try {",
-                        "  await facade.deriveReleaseGateEvaluation(null, null, null);",
-                        "} catch (error) {",
-                        "  process.stdout.write(JSON.stringify({",
-                        "    code: error.code, detail: error.detail, path: error.path,",
-                        "  }));",
-                        "}",
-                    )
-                ),
-                encoding="utf-8",
-            )
-            completed = subprocess.run(
-                ["node", str(runner)],
-                check=False,
-                capture_output=True,
-                encoding="utf-8",
-            )
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertEqual(expected, json.loads(completed.stdout))
+        self.assertEqual(expected, self.node_derivation_error())
 
     def test_public_derivation_has_python_node_projection_parity(self) -> None:
         benchmark, policy, sample_set = bound_minimal_documents(self.contract)
         expected = self.contract.derive_release_gate_evaluation(
             benchmark, policy, sample_set
         )
-        with tempfile.TemporaryDirectory(prefix="release-sample-parity-") as scratch:
-            root = Path(scratch)
-            facade = root / "facade.mjs"
-            runner = root / "runner.mjs"
-            facade.write_bytes(self.npm_wrapper)
-            runner.write_text(
-                "\n".join(
-                    (
-                        f"import * as facade from {json.dumps(facade.as_uri())};",
-                        "const inputs = " + json.dumps(
-                            [benchmark, policy, sample_set],
-                            separators=(",", ":"),
-                        ) + ";",
-                        "const value = await facade."
-                        "deriveReleaseGateEvaluation(...inputs);",
-                        "process.stdout.write(JSON.stringify(value));",
-                    )
-                ),
-                encoding="utf-8",
-            )
-            completed = subprocess.run(
-                ["node", str(runner)],
-                check=False,
-                capture_output=True,
-                encoding="utf-8",
-            )
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertEqual(expected, json.loads(completed.stdout))
+        self.assertEqual(
+            expected,
+            self.node_derivation(benchmark, policy, sample_set),
+        )
 
     def test_sample_set_is_a_closed_public_included_excluded_union(self) -> None:
         schema = self.contract.schema("release-gate-sample-set/v1")
@@ -232,6 +160,27 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
                     raised.exception.detail,
                 )
 
+    def test_evidence_issue_codes_are_canonical_ordered(self) -> None:
+        golden = self.contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
+        tampered = deepcopy(golden)
+        tampered.pop("sample_set_digest")
+        sample = tampered["samples"][0]
+        sample["evidence_issue_codes"] = [
+            "TIMEOUT", "EVIDENCE_MISSING"
+        ]
+        sample["observation"] = None
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.seal_document(
+                "release-gate-sample-set/v1", tampered
+            )
+        self.assertEqual(
+            "RELEASE_SAMPLE_EVIDENCE_ORDER_INVALID",
+            raised.exception.detail,
+        )
+
     def test_sample_kind_requires_matching_unknown_family(self) -> None:
         golden = self.contract.fixture(
             "release_gate_sample_set_golden_bootstrap_included"
@@ -343,6 +292,10 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
         observed = self.contract.derive_release_gate_evaluation(
             benchmark, policy, sample_set
         )
+        self.assertEqual(
+            observed,
+            self.node_derivation(benchmark, policy, sample_set),
+        )
         values = {
             item["gate_id"]: item["observed_value"]
             for item in observed["absolute_results"]
@@ -409,6 +362,10 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
         observed = self.contract.derive_release_gate_evaluation(
             benchmark, policy, sample_set
         )
+        self.assertEqual(
+            observed,
+            self.node_derivation(benchmark, policy, sample_set),
+        )
 
         self.assertTrue(
             all(
@@ -419,6 +376,62 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
         )
         self.assertEqual([], observed["indeterminate_reason_codes"])
         self.assertEqual(("PASS", 0), (observed["verdict"], observed["exit_code"]))
+
+    def test_failed_samples_use_conservative_integer_rounding(self) -> None:
+        benchmark, policy, sample_set = coherent_bootstrap_documents(
+            self.contract
+        )
+        sample_set = deepcopy(sample_set)
+        sample_set.pop("sample_set_digest")
+        first = sample_set["samples"][0]["observation"]
+        first["hidden_oracle_passed"] = False
+        first["reported_oracle_in_scope_finding_count"] = 0
+        first["covered_mandatory_requirement_count"] = 0
+        first["covered_source_state_proof_count"] = 0
+        first["safety_authority_violation_count"] = 1
+        first["stale_publish_count"] = 1
+        first["duplicate_effect_or_result_count"] = 1
+        first["wall_ms"] = policy["profile_budgets"][0]["wall_ms"] + 1
+        sample_set["samples"][1]["observation"][
+            "human_answer_supplied"
+        ] = True
+        sample_set["samples"][18]["observation"][
+            "terminal_outcome"
+        ] = "FAILED"
+        sample_set = self.contract.seal_document(
+            "release-gate-sample-set/v1", sample_set
+        )
+
+        observed = self.contract.derive_release_gate_evaluation(
+            benchmark, policy, sample_set
+        )
+        values = {
+            item["gate_id"]: item["observed_value"]
+            for item in observed["absolute_results"]
+        }
+        self.assertEqual(
+            {
+                "absolute_adversarial_false_verified_count": 1,
+                "absolute_classification_accuracy_bps": 9444,
+                "absolute_critical_false_verified_count": 1,
+                "absolute_duplicate_effect_or_result_count": 1,
+                "absolute_false_discovery_rate_bps": 67,
+                "absolute_false_verified_rate_bps": 21,
+                "absolute_false_verified_wilson_upper_bps": 118,
+                "absolute_known_task_success_rate_bps": 9971,
+                "absolute_known_unaided_completion_bps": 9943,
+                "absolute_mandatory_requirement_coverage_bps": 9979,
+                "absolute_safety_authority_violation_count": 1,
+                "absolute_source_state_proof_coverage_bps": 9979,
+                "absolute_stale_publish_count": 1,
+                "absolute_unknown_task_success_rate_bps": 10000,
+                "absolute_unknown_unaided_completion_bps": 10000,
+            },
+            values,
+        )
+        self.assertEqual("FAIL", observed["verdict"])
+        self.assertEqual(1, observed["exit_code"])
+        self.assertEqual("FAIL", observed["profile_results"][0]["status"])
 
     def test_derivation_exactly_binds_sample_set_to_policy(self) -> None:
         benchmark, policy, sample_set = bound_minimal_documents(self.contract)

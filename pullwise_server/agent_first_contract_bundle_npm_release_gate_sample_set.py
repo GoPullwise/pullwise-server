@@ -52,6 +52,11 @@ function ruleReleaseGateSampleSet(value) {
       "RELEASE_SAMPLE_EXPECTED_OUTCOME_INVALID",
       "$.samples[" + index + "]",
     );
+    releaseRequire(
+      releaseSortedUnique(sample.evidence_issue_codes),
+      "RELEASE_SAMPLE_EVIDENCE_ORDER_INVALID",
+      "$.samples[" + index + "].evidence_issue_codes",
+    );
     if (sample.disposition === "INCLUDED") {
       const complete = sample.evidence_issue_codes.length === 0;
       releaseRequire(
