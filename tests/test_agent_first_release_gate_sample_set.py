@@ -14,6 +14,7 @@ from tests.release_gate_sample_set_support import (
     bound_minimal_report,
     coherent_bootstrap_documents,
     coherent_stable_documents,
+    rebind_minimal_documents,
 )
 
 
@@ -487,6 +488,42 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
                         benchmark, policy, tampered
                     )
                 self.assertEqual(expected_detail, raised.exception.detail)
+
+    def test_every_sample_profile_requires_a_signed_policy_budget(self) -> None:
+        sample_set = deepcopy(
+            self.contract.fixture(
+                "release_gate_sample_set_golden_bootstrap_included"
+            )["document"]
+        )
+        sample_set.pop("sample_set_digest")
+        sample_set["samples"][0]["profile_id"] = "profile_unbudgeted"
+        task = sample_set["samples"][0]
+        inventory = [
+            {
+                field: task[field]
+                for field in (
+                    "task_id", "task_kind", "unknown_family_id",
+                    "cluster_id", "case_category", "criticality",
+                    "profile_id", "oracle_in_scope_finding_count",
+                    "expected_failure_outcome",
+                )
+            }
+        ]
+        sample_set["task_inventory_digest"] = self.contract._release_digest(
+            "pullwise:release-gate-task-inventory:v1", inventory
+        )
+        benchmark, policy, sample_set = rebind_minimal_documents(
+            self.contract, sample_set
+        )
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.derive_release_gate_evaluation(
+                benchmark, policy, sample_set
+            )
+        self.assertEqual(
+            "RELEASE_SAMPLE_PROFILE_INVALID",
+            raised.exception.detail,
+        )
 
 
 if __name__ == "__main__":

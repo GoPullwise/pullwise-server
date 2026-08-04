@@ -292,12 +292,8 @@ def coherent_stable_documents(contract):
     return benchmark, policy, sample_set
 
 
-def bound_minimal_documents(contract):
-    sample_set = deepcopy(
-        contract.fixture(
-            "release_gate_sample_set_golden_bootstrap_included"
-        )["document"]
-    )
+def rebind_minimal_documents(contract, sample_set):
+    sample_set = deepcopy(sample_set)
     benchmark = deepcopy(
         contract.fixture("benchmark_bundle_golden_current")["document"]
     )
@@ -336,7 +332,7 @@ def bound_minimal_documents(contract):
     )
     policy = contract.seal_document("release-gate-policy/v1", policy)
 
-    sample_set.pop("sample_set_digest")
+    sample_set.pop("sample_set_digest", None)
     for field in (
         "package",
         "candidate_build_id",
@@ -367,6 +363,15 @@ def bound_minimal_documents(contract):
         "release-gate-sample-set/v1", sample_set
     )
     return benchmark, policy, sample_set
+
+
+def bound_minimal_documents(contract):
+    return rebind_minimal_documents(
+        contract,
+        contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"],
+    )
 
 
 def bound_minimal_report(contract):
@@ -427,4 +432,5 @@ __all__ = [
     "bound_minimal_documents",
     "coherent_bootstrap_documents",
     "coherent_stable_documents",
+    "rebind_minimal_documents",
 ]
