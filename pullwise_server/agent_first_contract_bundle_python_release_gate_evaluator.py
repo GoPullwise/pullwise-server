@@ -4,6 +4,17 @@ from __future__ import annotations
 
 
 PYTHON_RELEASE_GATE_EVALUATOR = r'''
+def derive_release_gate_evaluation(
+    benchmark_bundle: object,
+    policy: object,
+    sample_set: object,
+) -> dict[str, object]:
+    verify_document_digest("benchmark-bundle/v1", benchmark_bundle)
+    verify_document_digest("release-gate-policy/v1", policy)
+    verify_document_digest("release-gate-sample-set/v1", sample_set)
+    return {}
+
+
 def _release_compare(comparator: str, observed: int, threshold: int) -> bool:
     return {
         "EQ": observed == threshold,
