@@ -9,10 +9,65 @@ export async function deriveReleaseGateEvaluation(
   policy,
   sampleSet,
 ) {
-  await verifyDocumentDigest("benchmark-bundle/v1", benchmarkBundle);
-  await verifyDocumentDigest("release-gate-policy/v1", policy);
-  await verifyDocumentDigest("release-gate-sample-set/v1", sampleSet);
-  return {};
+  const checkedBenchmark = await verifyDocumentDigest(
+    "benchmark-bundle/v1", benchmarkBundle,
+  );
+  const checkedPolicy = await verifyDocumentDigest(
+    "release-gate-policy/v1", policy,
+  );
+  const checkedSampleSet = await verifyDocumentDigest(
+    "release-gate-sample-set/v1", sampleSet,
+  );
+  releaseRequire(
+    checkedPolicy.organization_id === checkedBenchmark.organization_id,
+    "RELEASE_POLICY_ORGANIZATION_MISMATCH",
+    "$.organization_id",
+  );
+  verifyReleaseGatePolicyBinding(checkedPolicy, checkedBenchmark);
+  releaseRequireRef(
+    checkedSampleSet.benchmark_ref,
+    "benchmark-bundle/v1",
+    checkedBenchmark,
+    "RELEASE_SAMPLE_REF_INVALID",
+    "$.benchmark_ref",
+  );
+  releaseRequireRef(
+    checkedSampleSet.policy_ref,
+    "release-gate-policy/v1",
+    checkedPolicy,
+    "RELEASE_SAMPLE_REF_INVALID",
+    "$.policy_ref",
+  );
+  releaseRequireBindings(
+    checkedSampleSet,
+    checkedBenchmark,
+    ["package", ...RELEASE_POLICY_BENCHMARK_FIELDS],
+    "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+  );
+  releaseRequire(
+    checkedSampleSet.benchmark_digest === checkedBenchmark.bundle_digest,
+    "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+    "$.benchmark_digest",
+  );
+  const candidateSamples = checkedSampleSet.samples.filter(
+    (item) => item.cohort === "CANDIDATE",
+  );
+  const excluded = candidateSamples.filter(
+    (item) => item.disposition === "EXCLUDED",
+  );
+  const reasonCounts = new Map();
+  for (const item of excluded) {
+    const reason = item.infrastructure_reason_code;
+    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+  }
+  return {
+    raw_sample_count: candidateSamples.length,
+    valid_sample_count: candidateSamples.length - excluded.length,
+    excluded_sample_count: excluded.length,
+    excluded_reason_counts: [...reasonCounts].sort(
+      ([left], [right]) => left < right ? -1 : left > right ? 1 : 0,
+    ).map(([reason_code, count]) => ({reason_code, count})),
+  };
 }
 
 function releaseCompare(comparator, observed, threshold) {

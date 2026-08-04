@@ -9,10 +9,69 @@ def derive_release_gate_evaluation(
     policy: object,
     sample_set: object,
 ) -> dict[str, object]:
-    verify_document_digest("benchmark-bundle/v1", benchmark_bundle)
-    verify_document_digest("release-gate-policy/v1", policy)
-    verify_document_digest("release-gate-sample-set/v1", sample_set)
-    return {}
+    checked_benchmark = verify_document_digest(
+        "benchmark-bundle/v1", benchmark_bundle
+    )
+    checked_policy = verify_document_digest("release-gate-policy/v1", policy)
+    checked_sample_set = verify_document_digest(
+        "release-gate-sample-set/v1", sample_set
+    )
+    _release_require_equal(
+        checked_policy["organization_id"],
+        checked_benchmark["organization_id"],
+        "RELEASE_POLICY_ORGANIZATION_MISMATCH",
+        "$.organization_id",
+    )
+    _verify_release_gate_policy_binding(checked_policy, checked_benchmark)
+    _release_require_ref(
+        checked_sample_set["benchmark_ref"],
+        "benchmark-bundle/v1",
+        checked_benchmark,
+        "RELEASE_SAMPLE_REF_INVALID",
+        "$.benchmark_ref",
+    )
+    _release_require_ref(
+        checked_sample_set["policy_ref"],
+        "release-gate-policy/v1",
+        checked_policy,
+        "RELEASE_SAMPLE_REF_INVALID",
+        "$.policy_ref",
+    )
+    _release_require_bindings(
+        checked_sample_set,
+        checked_benchmark,
+        ("package",) + _RELEASE_POLICY_BENCHMARK_FIELDS,
+        "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+    )
+    _release_require(
+        checked_sample_set["benchmark_digest"]
+        == checked_benchmark["bundle_digest"],
+        "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+        "$.benchmark_digest",
+    )
+    candidate_samples = [
+        item
+        for item in checked_sample_set["samples"]
+        if item["cohort"] == "CANDIDATE"
+    ]
+    excluded = [
+        item
+        for item in candidate_samples
+        if item["disposition"] == "EXCLUDED"
+    ]
+    reason_counts: dict[str, int] = {}
+    for item in excluded:
+        reason = item["infrastructure_reason_code"]
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return {
+        "raw_sample_count": len(candidate_samples),
+        "valid_sample_count": len(candidate_samples) - len(excluded),
+        "excluded_sample_count": len(excluded),
+        "excluded_reason_counts": [
+            {"reason_code": reason, "count": reason_counts[reason]}
+            for reason in sorted(reason_counts)
+        ],
+    }
 
 
 def _release_compare(comparator: str, observed: int, threshold: int) -> bool:

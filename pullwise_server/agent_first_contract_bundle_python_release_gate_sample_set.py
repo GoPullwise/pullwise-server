@@ -39,6 +39,13 @@ def _rule_release_gate_sample_set(value: dict[str, object]) -> None:
     )
     tasks: dict[str, dict[str, object]] = {}
     for index, sample in enumerate(samples):
+        if sample["disposition"] == "INCLUDED":
+            complete = not sample["evidence_issue_codes"]
+            _release_require(
+                (sample["observation"] is not None) == complete,
+                "RELEASE_SAMPLE_EVIDENCE_INVALID",
+                f"$.samples[{index}]",
+            )
         identity = {
             field: sample[field] for field in ("cohort", "task_id", "seed")
         }

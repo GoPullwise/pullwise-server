@@ -9,6 +9,7 @@ from types import ModuleType
 import unittest
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
+from tests.release_gate_sample_set_support import coherent_bootstrap_documents
 
 
 SOURCE_ROOT = (
@@ -118,6 +119,82 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
                 "release-gate-sample-set/v1", tampered
             )
         self.assertEqual("RELEASE_SAMPLE_ID_INVALID", raised.exception.detail)
+
+    def test_included_sample_requires_complete_observation_or_named_issue(self) -> None:
+        golden = self.contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
+        cases = []
+
+        missing_without_issue = deepcopy(golden)
+        missing_without_issue.pop("sample_set_digest")
+        missing_without_issue["samples"][0]["observation"] = None
+        cases.append(missing_without_issue)
+
+        observation_with_issue = deepcopy(golden)
+        observation_with_issue.pop("sample_set_digest")
+        observation_with_issue["samples"][0]["evidence_issue_codes"] = [
+            "EVIDENCE_MISSING"
+        ]
+        cases.append(observation_with_issue)
+
+        for document in cases:
+            with self.subTest(document=document):
+                with self.assertRaises(
+                    self.contract.ContractValidationError
+                ) as raised:
+                    self.contract.seal_document(
+                        "release-gate-sample-set/v1", document
+                    )
+                self.assertEqual(
+                    "RELEASE_SAMPLE_EVIDENCE_INVALID",
+                    raised.exception.detail,
+                )
+
+    def test_derivation_rejects_sample_set_not_bound_to_benchmark(self) -> None:
+        benchmark = self.contract.fixture(
+            "benchmark_bundle_golden_current"
+        )["document"]
+        policy = self.contract.fixture(
+            "release_gate_policy_golden_bootstrap"
+        )["document"]
+        sample_set = self.contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.derive_release_gate_evaluation(
+                benchmark, policy, sample_set
+            )
+        self.assertEqual(
+            "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+            raised.exception.detail,
+        )
+
+    def test_derivation_counts_complete_predeclared_candidate_samples(self) -> None:
+        benchmark, policy, sample_set = coherent_bootstrap_documents(
+            self.contract
+        )
+        observed = self.contract.derive_release_gate_evaluation(
+            benchmark, policy, sample_set
+        )
+        self.assertEqual(
+            {
+                "raw_sample_count": 495,
+                "valid_sample_count": 495,
+                "excluded_sample_count": 0,
+                "excluded_reason_counts": [],
+            },
+            {
+                key: observed[key]
+                for key in (
+                    "raw_sample_count",
+                    "valid_sample_count",
+                    "excluded_sample_count",
+                    "excluded_reason_counts",
+                )
+            },
+        )
 
 
 if __name__ == "__main__":

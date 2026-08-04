@@ -39,6 +39,14 @@ function ruleReleaseGateSampleSet(value) {
   );
   const tasks = new Map();
   samples.forEach((sample, index) => {
+    if (sample.disposition === "INCLUDED") {
+      const complete = sample.evidence_issue_codes.length === 0;
+      releaseRequire(
+        (sample.observation !== null) === complete,
+        "RELEASE_SAMPLE_EVIDENCE_INVALID",
+        "$.samples[" + index + "]",
+      );
+    }
     const identity = Object.fromEntries(
       ["cohort", "task_id", "seed"].map((field) => [field, sample[field]]),
     );
