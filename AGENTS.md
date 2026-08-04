@@ -1,5 +1,9 @@
 # Pullwise Server Agent Notes
 
+## Python Dependency Audit
+
+CI runs pip-audit . against project dependencies. Keep the cryptography range on a fixed line that excludes the August 2026 vulnerable 48/49 releases; do not lower it below 50.0.0 unless the advisory state is intentionally re-evaluated and CI audit still passes.
+
 ## Worker Host Platform
 
 Pullwise worker installs target Ubuntu 22.04 hosts. Installer generation and
