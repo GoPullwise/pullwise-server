@@ -67,10 +67,45 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
             )
             completed = subprocess.run(
                 ["node", str(runner)],
-                check=True,
+                check=False,
                 capture_output=True,
                 encoding="utf-8",
             )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(expected, json.loads(completed.stdout))
+
+    def test_public_derivation_has_python_node_projection_parity(self) -> None:
+        benchmark, policy, sample_set = bound_minimal_documents(self.contract)
+        expected = self.contract.derive_release_gate_evaluation(
+            benchmark, policy, sample_set
+        )
+        with tempfile.TemporaryDirectory(prefix="release-sample-parity-") as scratch:
+            root = Path(scratch)
+            facade = root / "facade.mjs"
+            runner = root / "runner.mjs"
+            facade.write_bytes(self.npm_wrapper)
+            runner.write_text(
+                "\n".join(
+                    (
+                        f"import * as facade from {json.dumps(facade.as_uri())};",
+                        "const inputs = " + json.dumps(
+                            [benchmark, policy, sample_set],
+                            separators=(",", ":"),
+                        ) + ";",
+                        "const value = await facade."
+                        "deriveReleaseGateEvaluation(...inputs);",
+                        "process.stdout.write(JSON.stringify(value));",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["node", str(runner)],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+            )
+        self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertEqual(expected, json.loads(completed.stdout))
 
     def test_sample_set_is_a_closed_public_included_excluded_union(self) -> None:
@@ -103,6 +138,21 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
                 "release-gate-sample-set/v1", negative["document"]
             )
         self.assertEqual(negative["expected_code"], raised.exception.code)
+
+    def test_report_schema_exactly_binds_typed_sample_set(self) -> None:
+        schema = self.contract.schema("release-gate-report/v1")
+        self.assertIn("sample_set_ref", schema["required"])
+        self.assertIn("sample_set_digest", schema["required"])
+        self.assertEqual(
+            "release-gate-sample-set/v1",
+            schema["properties"]["sample_set_ref"][
+                "x-pullwise-content-schema-id"
+            ],
+        )
+        self.assertEqual(
+            "^[0-9a-f]{64}$",
+            schema["properties"]["sample_set_digest"]["pattern"],
+        )
 
     def test_sample_identity_and_document_digest_are_deterministic(self) -> None:
         golden = self.contract.fixture(

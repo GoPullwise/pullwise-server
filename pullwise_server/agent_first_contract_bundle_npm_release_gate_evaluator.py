@@ -23,7 +23,7 @@ export async function deriveReleaseGateEvaluation(
     "RELEASE_POLICY_ORGANIZATION_MISMATCH",
     "$.organization_id",
   );
-  verifyReleaseGatePolicyBinding(checkedPolicy, checkedBenchmark);
+  releaseVerifyPolicyBenchmarkBinding(checkedPolicy, checkedBenchmark);
   releaseRequireRef(
     checkedSampleSet.benchmark_ref,
     "benchmark-bundle/v1",
@@ -38,7 +38,7 @@ export async function deriveReleaseGateEvaluation(
     "RELEASE_SAMPLE_REF_INVALID",
     "$.policy_ref",
   );
-  releaseRequireBindings(
+  releaseRequireBinding(
     checkedSampleSet,
     checkedPolicy,
     [
@@ -55,7 +55,7 @@ export async function deriveReleaseGateEvaluation(
     "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
     "$.policy_digest",
   );
-  releaseRequireBindings(
+  releaseRequireBinding(
     checkedSampleSet,
     checkedBenchmark,
     ["package", ...RELEASE_POLICY_BENCHMARK_FIELDS],
