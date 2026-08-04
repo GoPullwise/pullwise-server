@@ -40,6 +40,17 @@ export async function deriveReleaseGateEvaluation(
   );
   releaseRequireBinding(
     checkedSampleSet,
+    checkedBenchmark,
+    ["package", ...RELEASE_POLICY_BENCHMARK_FIELDS],
+    "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+  );
+  releaseRequire(
+    checkedSampleSet.benchmark_digest === checkedBenchmark.bundle_digest,
+    "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+    "$.benchmark_digest",
+  );
+  releaseRequireBinding(
+    checkedSampleSet,
     checkedPolicy,
     [
       "package", "candidate_build_id", "candidate_digest",
@@ -54,17 +65,6 @@ export async function deriveReleaseGateEvaluation(
     checkedSampleSet.policy_digest === checkedPolicy.policy_digest,
     "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
     "$.policy_digest",
-  );
-  releaseRequireBinding(
-    checkedSampleSet,
-    checkedBenchmark,
-    ["package", ...RELEASE_POLICY_BENCHMARK_FIELDS],
-    "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
-  );
-  releaseRequire(
-    checkedSampleSet.benchmark_digest === checkedBenchmark.bundle_digest,
-    "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
-    "$.benchmark_digest",
   );
   const allowedProfiles = new Set(
     checkedPolicy.profile_budgets.map((item) => item.profile_id),

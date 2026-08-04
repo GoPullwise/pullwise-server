@@ -39,6 +39,18 @@ def derive_release_gate_evaluation(
     )
     _release_require_bindings(
         checked_sample_set,
+        checked_benchmark,
+        ("package",) + _RELEASE_POLICY_BENCHMARK_FIELDS,
+        "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+    )
+    _release_require(
+        checked_sample_set["benchmark_digest"]
+        == checked_benchmark["bundle_digest"],
+        "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
+        "$.benchmark_digest",
+    )
+    _release_require_bindings(
+        checked_sample_set,
         checked_policy,
         (
             "package", "candidate_build_id", "candidate_digest",
@@ -53,18 +65,6 @@ def derive_release_gate_evaluation(
         checked_sample_set["policy_digest"] == checked_policy["policy_digest"],
         "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
         "$.policy_digest",
-    )
-    _release_require_bindings(
-        checked_sample_set,
-        checked_benchmark,
-        ("package",) + _RELEASE_POLICY_BENCHMARK_FIELDS,
-        "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
-    )
-    _release_require(
-        checked_sample_set["benchmark_digest"]
-        == checked_benchmark["bundle_digest"],
-        "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
-        "$.benchmark_digest",
     )
     allowed_profiles = {
         item["profile_id"] for item in checked_policy["profile_budgets"]
