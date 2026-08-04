@@ -338,39 +338,6 @@ function releaseValidateRelativeResults(value) {
   });
 }
 
-function releaseValidateProfileResults(report, policy) {
-  report.profile_results.forEach((result, index) => {
-    if (result.status === "INDETERMINATE") return;
-    const budget = policy.profile_budgets[index];
-    const passed = result.wall_ms <= budget.wall_ms &&
-      result.token_count <= budget.token_limit &&
-      result.cost_microusd <= budget.cost_microusd;
-    releaseRequire(
-      result.status === (passed ? "PASS" : "FAIL"),
-      "RELEASE_EVALUATOR_STATUS_INVALID",
-      `$.profile_results[${index}].status`,
-    );
-  });
-}
-
-function releaseValidateSampleInventory(report, benchmark) {
-  const taskCount = benchmark.known_gold_task_count +
-    benchmark.unknown_families.reduce(
-      (total, item) => total + item.task_count,
-      0,
-    );
-  const expected = taskCount * benchmark.repeats_per_task;
-  const reasons = new Set(report.indeterminate_reason_codes);
-  const valid = reasons.has("SAMPLE_INSUFFICIENT") ===
-      (report.raw_sample_count !== expected) &&
-    reasons.has("ZERO_DENOMINATOR") === (report.valid_sample_count === 0);
-  releaseRequire(
-    valid,
-    "RELEASE_EVALUATOR_SAMPLE_INVALID",
-    "$.indeterminate_reason_codes",
-  );
-}
-
 const RELEASE_EVALUATION_FIELDS = Object.freeze([
   "indeterminate_reason_codes",
   "raw_sample_count",

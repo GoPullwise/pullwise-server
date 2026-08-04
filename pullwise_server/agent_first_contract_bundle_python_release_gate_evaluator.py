@@ -379,47 +379,6 @@ def _release_validate_relative_results(value: dict[str, object]) -> None:
         )
 
 
-def _release_validate_profile_results(
-    report: dict[str, object], policy: dict[str, object]
-) -> None:
-    for index, (result, budget) in enumerate(
-        zip(report["profile_results"], policy["profile_budgets"])
-    ):
-        if result["status"] == "INDETERMINATE":
-            continue
-        passed = (
-            result["wall_ms"] <= budget["wall_ms"]
-            and result["token_count"] <= budget["token_limit"]
-            and result["cost_microusd"] <= budget["cost_microusd"]
-        )
-        _release_require(
-            result["status"] == ("PASS" if passed else "FAIL"),
-            "RELEASE_EVALUATOR_STATUS_INVALID",
-            f"$.profile_results[{index}].status",
-        )
-
-
-def _release_validate_sample_inventory(
-    report: dict[str, object], benchmark: dict[str, object]
-) -> None:
-    expected = (
-        benchmark["known_gold_task_count"]
-        + sum(item["task_count"] for item in benchmark["unknown_families"])
-    ) * benchmark["repeats_per_task"]
-    reasons = set(report["indeterminate_reason_codes"])
-    valid = (
-        ("SAMPLE_INSUFFICIENT" in reasons)
-        == (report["raw_sample_count"] != expected)
-        and ("ZERO_DENOMINATOR" in reasons)
-        == (report["valid_sample_count"] == 0)
-    )
-    _release_require(
-        valid,
-        "RELEASE_EVALUATOR_SAMPLE_INVALID",
-        "$.indeterminate_reason_codes",
-    )
-
-
 _RELEASE_EVALUATION_FIELDS = (
     "indeterminate_reason_codes",
     "raw_sample_count",
