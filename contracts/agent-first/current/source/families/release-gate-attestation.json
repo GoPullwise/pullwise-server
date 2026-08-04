@@ -134,10 +134,10 @@
         "report_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333",
           "content_schema_id": "release-gate-report/v1",
-          "sha256": "f0f7f5cfa9aa80aec01fc7f727ed7f803d526ad0dea472f79a554d8b6348536f",
+          "sha256": "9822f80ba1d1559af9e003a61f51864f99c1f393b7ac4224711e66fa3d8ac588",
           "size_bytes": 7025, "media_type": "application/json", "encoding": "utf-8"
         },
-        "report_digest": "8ee64de0b5a300964e5c7f62ba8b070b051b1de7c9a87f7be1b389204095b6da",
+        "report_digest": "f645af6deef89e67ad19bb1be963383528acb8941f3c87b7c958d176bc29a3d3",
         "attested_verdict": "PASS",
         "attested_exit_code": 0,
         "organization_id": "org_acme",
@@ -145,10 +145,10 @@
         "signer_id": "principal_release_operator",
         "key_id": "key_release_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "HUQ5Zw1uyAz93igavXUQhzJrMH8QGxFcyBf_G4Iot-FDEC9Z1RZe_QjUds9l1TJdm4LRvNOaMPLAbkF9I4U1Bw",
+        "signature": "1L9KKzOfGenF1QGjMm-1ZE6-h4Zhderzy5DnyQGka1SRxC1hxWzWXEOOK9zNtcA7pFDlJ4TVhOXX7b0Hyrv0Cg",
         "issued_at": "2026-07-23T01:00:00.000Z",
         "expires_at": "2026-07-30T01:00:00.000Z",
-        "attestation_digest": "d5ba1a340531b4446d76032e1752811eaed3d5fdc2d1aa054579ac57fa04ba64"
+        "attestation_digest": "b5da92446298cc3169c036c05f0798bbb4632c19fb9b57ed3184a2c79017c5b8"
       },
       "expected_code": null
     },
@@ -182,10 +182,10 @@
         "report_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333",
           "content_schema_id": "release-gate-report/v1",
-          "sha256": "f0f7f5cfa9aa80aec01fc7f727ed7f803d526ad0dea472f79a554d8b6348536f",
+          "sha256": "9822f80ba1d1559af9e003a61f51864f99c1f393b7ac4224711e66fa3d8ac588",
           "size_bytes": 7025, "media_type": "application/json", "encoding": "utf-8"
         },
-        "report_digest": "8ee64de0b5a300964e5c7f62ba8b070b051b1de7c9a87f7be1b389204095b6da",
+        "report_digest": "f645af6deef89e67ad19bb1be963383528acb8941f3c87b7c958d176bc29a3d3",
         "attested_verdict": "PASS",
         "attested_exit_code": 0,
         "organization_id": "org_acme",
@@ -193,10 +193,10 @@
         "signer_id": "principal_release_operator",
         "key_id": "key_release_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "HUQ5Zw1uyAz93igavXUQhzJrMH8QGxFcyBf_G4Iot-FDEC9Z1RZe_QjUds9l1TJdm4LRvNOaMPLAbkF9I4U1Bw",
+        "signature": "1L9KKzOfGenF1QGjMm-1ZE6-h4Zhderzy5DnyQGka1SRxC1hxWzWXEOOK9zNtcA7pFDlJ4TVhOXX7b0Hyrv0Cg",
         "issued_at": "2026-07-23T01:00:00.000Z",
         "expires_at": "2026-07-30T01:00:00.000Z",
-        "attestation_digest": "d5ba1a340531b4446d76032e1752811eaed3d5fdc2d1aa054579ac57fa04ba64"
+        "attestation_digest": "b5da92446298cc3169c036c05f0798bbb4632c19fb9b57ed3184a2c79017c5b8"
       },
       "expected_code": null
     },
@@ -230,10 +230,10 @@
         "report_ref": {
           "schema_id": "content-ref/v1", "artifact_id": "art_33333333333333333333333333333333",
           "content_schema_id": "release-gate-report/v1",
-          "sha256": "f0f7f5cfa9aa80aec01fc7f727ed7f803d526ad0dea472f79a554d8b6348536f",
+          "sha256": "9822f80ba1d1559af9e003a61f51864f99c1f393b7ac4224711e66fa3d8ac588",
           "size_bytes": 7025, "media_type": "application/json", "encoding": "utf-8"
         },
-        "report_digest": "8ee64de0b5a300964e5c7f62ba8b070b051b1de7c9a87f7be1b389204095b6da",
+        "report_digest": "f645af6deef89e67ad19bb1be963383528acb8941f3c87b7c958d176bc29a3d3",
         "attested_verdict": "PASS",
         "attested_exit_code": 0,
         "organization_id": "org_acme",
@@ -241,10 +241,10 @@
         "signer_id": "principal_release_operator",
         "key_id": "key_release_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "2FXwafyYeXtr0vdMxCmJg3ke9mcrt-c670ccKFQguaLfrT5oM7X3PahWu6A3YNFwsvdy44n7n9Eyy48DSOCdBg",
+        "signature": "zb1yGs3k0oiYWiOZbs9Xiz0LW1qouiJ92qFKi1Z7ZBMIEerKfGY94wOVmF3JypOl4pqqNyfkwMgUq1R0Cm18Dw",
         "issued_at": "2026-07-23T01:00:00.000Z",
         "expires_at": "2026-07-31T01:00:00.000Z",
-        "attestation_digest": "9c5c6b1b157249001f54a392ef2978b4b783f49601993fefe687b93f4989e66e"
+        "attestation_digest": "08b1d9c63c10172a441396b34da9fa0077c525bf26432396ba0f4b95566c79c1"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

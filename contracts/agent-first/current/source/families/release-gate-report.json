@@ -319,10 +319,10 @@
         "signer_id": "principal_ci_evidence_producer",
         "key_id": "key_ci_evidence_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "b0mbFCnU3Wxkclls-2LxZrGkBp2jUB2EjVicCTlkcfs3mdeu5XLx8frpqWmIz_IGlCVK_2ffEMRJS72cEq0ADQ",
+        "signature": "tzhdt4zm0RUNeagDx0BbN0iILt2OAXuDk0tz8K2-O9y7gKiq3UIAT69TXziShy04wFCwoPXDra_8ptBjGPMxBg",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "8ee64de0b5a300964e5c7f62ba8b070b051b1de7c9a87f7be1b389204095b6da"
+        "report_digest": "f645af6deef89e67ad19bb1be963383528acb8941f3c87b7c958d176bc29a3d3"
       },
       "expected_code": null
     },
@@ -424,10 +424,10 @@
         "signer_id": "principal_ci_evidence_producer",
         "key_id": "key_ci_evidence_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "b0mbFCnU3Wxkclls-2LxZrGkBp2jUB2EjVicCTlkcfs3mdeu5XLx8frpqWmIz_IGlCVK_2ffEMRJS72cEq0ADQ",
+        "signature": "tzhdt4zm0RUNeagDx0BbN0iILt2OAXuDk0tz8K2-O9y7gKiq3UIAT69TXziShy04wFCwoPXDra_8ptBjGPMxBg",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "8ee64de0b5a300964e5c7f62ba8b070b051b1de7c9a87f7be1b389204095b6da"
+        "report_digest": "f645af6deef89e67ad19bb1be963383528acb8941f3c87b7c958d176bc29a3d3"
       },
       "expected_code": null
     },
@@ -503,10 +503,10 @@
         "signer_id": "principal_ci_evidence_producer",
         "key_id": "key_ci_evidence_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "Ukc5X74OXcvrjllq3BvcrFaSwrSna8nV8BivGx1ZrzzFjluQqop1Fzgl2CVqIwzxpW0Nie6t_yTucnNW1L6wCw",
+        "signature": "hYkjwbNC9wgSU2NmTE0Y9WrcDVDs_omk9LKxsgLPnJNaV6DwvNArmZZDDccqdcP2qydQf8_LSsJJvzLi2CfZAw",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "d5e020759bd1a6c19b5aa5c809426baebbb7dbb2765f311535101f981654e7b5"
+        "report_digest": "980b9a2959ce92a158af1ddd47e655b7d3aeb2bbeb98eba9b283e728eff5fdc1"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -582,10 +582,10 @@
         "signer_id": "principal_ci_evidence_producer",
         "key_id": "key_ci_evidence_2026_01",
         "signature_algorithm": "Ed25519",
-        "signature": "mahRdqxf3EsrGZg9Gkoh8gGwaxSjyNeWYn8qa4VJu0GZM5yqfAg1da0GIVHUqJ_0CuuHsetrWwmRyS2y28H_Dg",
+        "signature": "CBAbizMdTtwe5Jgkb8NQk8TiZ42OC4xpCh7GnavrDNsEqlwLLnZkBt2n1FymemGPKQmnyoRBh39UCvvV_bqhDw",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "df2afb7d343425139d3f337b1b3d2387741d1bceddfb396975a57b6f039cf58c"
+        "report_digest": "2c6c51bd1be9dfc03abc5af60bc6faffc5879febfc14b05db007eb3cd2c6b6a7"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }
