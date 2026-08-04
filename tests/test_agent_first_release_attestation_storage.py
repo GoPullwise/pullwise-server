@@ -37,6 +37,9 @@ from pullwise_server.agent_first_release_trust import (
 from pullwise_server.agent_first_release_trust_migrations import (
     install_current_release_trust_tables,
 )
+from tests.release_gate_sample_set_support import (
+    coherent_bootstrap_documents,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -228,10 +231,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         return release_principal, release_key
 
     def _documents(self) -> tuple[dict[str, object], ...]:
-        package = self.contract.package_tuple()
-        benchmark = deepcopy(
-            self.contract.fixture("benchmark_bundle_golden_current")["document"]
+        cached = getattr(self.__class__, "_cached_documents", None)
+        if cached is not None:
+            return deepcopy(cached)
+        benchmark, policy, sample_set = coherent_bootstrap_documents(
+            self.contract
         )
+        package = self.contract.package_tuple()
         benchmark["package"] = package
         benchmark = _seal_signed(
             self.contract,
@@ -242,9 +248,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             BENCHMARK_SEED,
         )
 
-        policy = deepcopy(
-            self.contract.fixture("release_gate_policy_golden_bootstrap")["document"]
-        )
+        policy = deepcopy(policy)
         policy["package"] = package
         policy["benchmark_digest"] = benchmark["bundle_digest"]
         policy["benchmark_ref"] = _content_ref(
@@ -271,6 +275,36 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             RELEASE_SEED,
         )
 
+        sample_set = deepcopy(sample_set)
+        for field in (
+            "package", "candidate_build_id", "candidate_digest",
+            "release_mode", "stable_package", "stable_candidate_digest",
+            "stable_control_plane_digest", "benchmark_digest",
+            "benchmark_version", "task_inventory_digest",
+            "oracle_rubric_digest", "environment_image_digest",
+            "control_plane_digest", "evaluation_runtime_digest",
+            "statistical_implementation_version", "organization_id",
+        ):
+            sample_set[field] = deepcopy(policy[field])
+        sample_set["benchmark_ref"] = _content_ref(
+            self.contract,
+            sample_set["benchmark_ref"],
+            "benchmark-bundle/v1",
+            benchmark,
+        )
+        sample_set["policy_digest"] = policy["policy_digest"]
+        sample_set["policy_ref"] = _content_ref(
+            self.contract,
+            sample_set["policy_ref"],
+            "release-gate-policy/v1",
+            policy,
+        )
+        sample_set.pop("sample_set_digest")
+        sample_set = self.contract.seal_document(
+            "release-gate-sample-set/v1",
+            sample_set,
+        )
+
         report = deepcopy(
             self.contract.fixture("release_gate_report_golden_bootstrap_pass")["document"]
         )
@@ -290,6 +324,23 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         report["policy_ref"] = _content_ref(
             self.contract, report["policy_ref"], "release-gate-policy/v1", policy
         )
+        report["sample_set_digest"] = sample_set["sample_set_digest"]
+        report["sample_set_ref"] = _content_ref(
+            self.contract,
+            report["sample_set_ref"],
+            "release-gate-sample-set/v1",
+            sample_set,
+        )
+        report.update(
+            self.contract.derive_release_gate_evaluation(
+                benchmark,
+                policy,
+                sample_set,
+            )
+        )
+        report["completed_at"] = sample_set["completed_at"]
+        report["signer_role"] = sample_set["producer_role"]
+        report["signer_id"] = sample_set["producer_id"]
         report = _seal_signed(
             self.contract,
             "release-gate-report/v1",
@@ -324,11 +375,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             attestation,
             RELEASE_SEED,
         )
-        return benchmark, policy, report, attestation
+        documents = (benchmark, policy, sample_set, report, attestation)
+        self.__class__._cached_documents = deepcopy(documents)
+        return documents
 
     def test_signed_inputs_must_be_frozen_before_report_persistence(self) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             contract=self.contract,
@@ -336,17 +389,21 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
-            attestor.attest_and_store(benchmark, policy, report, attestation)
+            attestor.attest_and_store(
+                benchmark, policy, sample_set, report, attestation
+            )
 
         self.assertEqual(
             self._row_counts(
                 (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
             ),
-            (0, 0, 0, 0),
+            (0, 0, 0, 0, 0),
         )
 
         attestor.freeze_inputs(benchmark, policy)
-        stored = attestor.attest_and_store(benchmark, policy, report, attestation)
+        stored = attestor.attest_and_store(
+            benchmark, policy, sample_set, report, attestation
+        )
 
         self.assertEqual(stored.verdict, "PASS")
         self.assertEqual(stored.exit_code, 0)
@@ -355,7 +412,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self,
     ) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         report.pop("signature")
         attestor = AgentFirstReleaseAttestor(
             self.connect,
@@ -365,18 +422,20 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         attestor.freeze_inputs(benchmark, policy)
 
         with self.assertRaisesRegex(RuntimeError, 'AUTHORITY_INPUT_UNTRUSTED'):
-            attestor.attest_and_store(benchmark, policy, report, attestation)
+            attestor.attest_and_store(
+                benchmark, policy, sample_set, report, attestation
+            )
 
         self.assertEqual(
             self._row_counts(
                 (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
             ),
-            (1, 1, 0, 0),
+            (1, 1, 0, 0, 0),
         )
 
     def test_report_must_be_active_at_the_common_verification_time(self) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             contract=self.contract,
@@ -415,12 +474,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
                     attestor.attest_and_store(
                         benchmark,
                         policy,
+                        sample_set,
                         inactive_report,
                         attestation,
                     )
 
         self.assertEqual(
-            (1, 1, 0, 0),
+            (1, 1, 0, 0, 0),
             self._row_counts(
                 (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
             ),
@@ -430,7 +490,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self,
     ) -> None:
         self._authorities()
-        benchmark, policy, _, _ = self._documents()
+        benchmark, policy, _, _, _ = self._documents()
         policy["expires_at"] = "2026-07-31T00:00:00.001Z"
         policy.pop("signature")
         policy.pop("policy_digest")
@@ -459,14 +519,14 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
         self.assertEqual(
             self._row_counts(CURRENT_RELEASE_EVALUATOR_TABLES),
-            (0, 0, 0),
+            (0, 0, 0, 0),
         )
 
     def test_input_freeze_accepts_a_policy_valid_for_exactly_thirty_days(
         self,
     ) -> None:
         self._authorities()
-        benchmark, policy, _, _ = self._documents()
+        benchmark, policy, _, _, _ = self._documents()
         policy["expires_at"] = "2026-07-31T00:00:00.000Z"
         policy = _seal_signed(
             self.contract,
@@ -486,12 +546,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
         self.assertEqual(
             self._row_counts(CURRENT_RELEASE_EVALUATOR_TABLES),
-            (1, 1, 0),
+            (1, 1, 0, 0),
         )
 
     def test_input_freeze_rejects_cross_org_or_same_principal_signers(self) -> None:
         self._authorities()
-        benchmark, policy, _, _ = self._documents()
+        benchmark, policy, _, _, _ = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             contract=self.contract,
@@ -546,12 +606,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
         self.assertEqual(
             self._row_counts(CURRENT_RELEASE_EVALUATOR_TABLES),
-            (0, 0, 0),
+            (0, 0, 0, 0),
         )
 
     def test_attestation_rejects_the_benchmark_owner_as_final_signer(self) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             contract=self.contract,
@@ -599,6 +659,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
                 attestor.attest_and_store(
                     benchmark,
                     policy,
+                    sample_set,
                     report,
                     attestation,
                 )
@@ -607,12 +668,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
             self._row_counts(
                 (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
             ),
-            (0, 0, 0, 0),
+            (0, 0, 0, 0, 0),
         )
 
     def test_verified_pass_attestation_is_append_only_and_reloads(self) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             trust=self.trust,
@@ -620,9 +681,15 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         )
 
         attestor.freeze_inputs(benchmark, policy)
-        first = attestor.attest_and_store(benchmark, policy, report, attestation)
+        first = attestor.attest_and_store(
+            benchmark, policy, sample_set, report, attestation
+        )
         replay = attestor.attest_and_store(
-            deepcopy(benchmark), deepcopy(policy), deepcopy(report), deepcopy(attestation)
+            deepcopy(benchmark),
+            deepcopy(policy),
+            deepcopy(sample_set),
+            deepcopy(report),
+            deepcopy(attestation),
         )
         loaded = attestor.load_attestation(attestation["attestation_id"])
 
@@ -640,7 +707,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
     def test_report_signer_must_be_a_distinct_third_party(self) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             trust=self.trust,
@@ -701,12 +768,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
                         attestor.attest_and_store(
                             benchmark,
                             policy,
+                            sample_set,
                             report,
                             attestation,
                         )
 
         self.assertEqual(
-            (1, 1, 0, 0),
+            (1, 1, 0, 0, 0),
             self._row_counts(
                 (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
             ),
@@ -714,7 +782,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
     def test_report_signer_must_match_the_release_organization(self) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect,
             trust=self.trust,
@@ -763,12 +831,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
                 attestor.attest_and_store(
                     benchmark,
                     policy,
+                    sample_set,
                     report,
                     attestation,
                 )
 
         self.assertEqual(
-            (1, 1, 0, 0),
+            (1, 1, 0, 0, 0),
             self._row_counts(
                 (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
             ),
@@ -778,7 +847,7 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self,
     ) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestation["signature"] = (
             "A" if attestation["signature"][0] != "A" else "B"
         ) + attestation["signature"][1:]
@@ -791,10 +860,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "AUTHORITY_INPUT_UNTRUSTED"):
-            attestor.attest_and_store(benchmark, policy, report, attestation)
+            attestor.attest_and_store(
+                benchmark, policy, sample_set, report, attestation
+            )
 
         self.assertEqual(
-            (0, 0, 0, 0),
+            (0, 0, 0, 0, 0),
             self._row_counts(
                 (*CURRENT_RELEASE_EVALUATOR_TABLES, *CURRENT_RELEASE_ATTESTATION_TABLES)
             ),
@@ -802,12 +873,14 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
     def test_same_attestation_id_with_different_valid_document_conflicts(self) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect, trust=self.trust, contract=self.contract
         )
         attestor.freeze_inputs(benchmark, policy)
-        attestor.attest_and_store(benchmark, policy, report, attestation)
+        attestor.attest_and_store(
+            benchmark, policy, sample_set, report, attestation
+        )
         collision = deepcopy(attestation)
         collision["expires_at"] = "2026-07-29T01:00:00.000Z"
         collision = _seal_signed(
@@ -820,7 +893,9 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "IDEMPOTENCY_CONFLICT"):
-            attestor.attest_and_store(benchmark, policy, report, collision)
+            attestor.attest_and_store(
+                benchmark, policy, sample_set, report, collision
+            )
 
         with closing(self.connect()) as connection:
             count = connection.execute(
@@ -832,12 +907,14 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self,
     ) -> None:
         self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect, trust=self.trust, contract=self.contract
         )
         attestor.freeze_inputs(benchmark, policy)
-        attestor.attest_and_store(benchmark, policy, report, attestation)
+        attestor.attest_and_store(
+            benchmark, policy, sample_set, report, attestation
+        )
         table = CURRENT_RELEASE_ATTESTATION_TABLES[0]
         with closing(self.connect()) as connection:
             with self.assertRaises(sqlite3.IntegrityError):
@@ -856,13 +933,13 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
         self,
     ) -> None:
         release_principal, release_key = self._authorities()
-        benchmark, policy, report, attestation = self._documents()
+        benchmark, policy, sample_set, report, attestation = self._documents()
         attestor = AgentFirstReleaseAttestor(
             self.connect, trust=self.trust, contract=self.contract
         )
         attestor.freeze_inputs(benchmark, policy)
         stored = attestor.attest_and_store(
-            benchmark, policy, report, attestation
+            benchmark, policy, sample_set, report, attestation
         )
         revocation = deepcopy(
             self.contract.fixture("release_key_revocation_golden_superseded")[

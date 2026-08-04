@@ -32,6 +32,7 @@ from .agent_first_release_trust import (
 class StoredReleaseAttestation:
     benchmark_bytes: bytes
     policy_bytes: bytes
+    sample_set_bytes: bytes
     report_bytes: bytes
     attestation_bytes: bytes
     verdict: str
@@ -90,6 +91,7 @@ class AgentFirstReleaseAttestor:
         return StoredReleaseAttestation(
             evaluation.benchmark_bytes,
             evaluation.policy_bytes,
+            evaluation.sample_set_bytes,
             evaluation.report_bytes,
             stored.attestation_bytes,
             evaluation.verdict,
@@ -169,6 +171,7 @@ class AgentFirstReleaseAttestor:
         self,
         benchmark_bundle: object,
         policy: object,
+        sample_set: object,
         report: object,
         attestation: object,
     ) -> StoredReleaseAttestation:
@@ -195,6 +198,7 @@ class AgentFirstReleaseAttestor:
         evaluation = self._evaluator.evaluate_and_store(
             benchmark_bundle,
             policy,
+            sample_set,
             report,
         )
         if evaluation.verdict != "PASS" or evaluation.exit_code != 0:
@@ -222,6 +226,7 @@ class AgentFirstReleaseAttestor:
         try:
             benchmark = json.loads(evaluation.benchmark_bytes)
             policy = json.loads(evaluation.policy_bytes)
+            sample_set = json.loads(evaluation.sample_set_bytes)
             report = json.loads(evaluation.report_bytes)
             attestation = json.loads(stored.attestation_bytes)
             checked = self._contract.verify_release_gate_attestation_context(
@@ -243,6 +248,8 @@ class AgentFirstReleaseAttestor:
             metadata_matches = (
                 evaluation.verdict == "PASS"
                 and evaluation.exit_code == 0
+                and sample_set["sample_set_digest"]
+                == report["sample_set_digest"]
                 and benchmark_signature.organization_id
                 == policy_signature.organization_id
                 == report_signature.organization_id
