@@ -86,13 +86,95 @@ export async function deriveReleaseGateEvaluation(
     const reason = item.infrastructure_reason_code;
     reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
   }
+  const reasons = new Set(
+    checkedSampleSet.samples.flatMap((item) => item.evidence_issue_codes),
+  );
+  if (!releaseInventoryComplete(
+    checkedSampleSet.samples,
+    checkedBenchmark,
+    "CANDIDATE",
+  )) reasons.add("SAMPLE_INSUFFICIENT");
+  const candidateMetrics = releaseCohortMetrics(
+    checkedSampleSet.samples,
+    "CANDIDATE",
+  );
+  const metricNames = checkedPolicy.absolute_gates.map(
+    (item) => item.gate_id.replace(/^absolute_/, ""),
+  );
+  if (
+    candidateSamples.length === 0 ||
+    metricNames.some((name) => candidateMetrics[name] === null) ||
+    checkedPolicy.profile_budgets.some(
+      (budget) => !(budget.profile_id in candidateMetrics.profile_maxima),
+    )
+  ) reasons.add("ZERO_DENOMINATOR");
+  const absoluteResults = checkedPolicy.absolute_gates.map((gate, index) => {
+    const observed = reasons.size === 0
+      ? candidateMetrics[metricNames[index]] : null;
+    const status = observed === null
+      ? "INDETERMINATE"
+      : releaseCompare(gate.comparator, observed, gate.threshold)
+        ? "PASS" : "FAIL";
+    return {
+      gate_id: gate.gate_id,
+      comparator: gate.comparator,
+      threshold: gate.threshold,
+      observed_value: observed,
+      status,
+    };
+  });
+  const relativeResults = checkedPolicy.relative_gates.map((gate) => ({
+    gate_id: gate.gate_id,
+    applicability: gate.applicability,
+    max_regression_bps: gate.max_regression_bps,
+    observed_regression_bps: null,
+    status: gate.applicability === "NOT_APPLICABLE"
+      ? "NOT_APPLICABLE" : "INDETERMINATE",
+  }));
+  const profileResults = checkedPolicy.profile_budgets.map((budget) => {
+    const measurements = candidateMetrics.profile_maxima[budget.profile_id];
+    if (reasons.size > 0 || measurements === undefined) {
+      return {
+        profile_id: budget.profile_id,
+        wall_ms: null,
+        token_count: null,
+        cost_microusd: null,
+        status: "INDETERMINATE",
+      };
+    }
+    const passed = measurements.wall_ms <= budget.wall_ms &&
+      measurements.token_count <= budget.token_limit &&
+      measurements.cost_microusd <= budget.cost_microusd;
+    return {
+      profile_id: budget.profile_id,
+      ...measurements,
+      status: passed ? "PASS" : "FAIL",
+    };
+  });
+  const statuses = [
+    ...absoluteResults.map((item) => item.status),
+    ...relativeResults
+      .filter((item) => item.status !== "NOT_APPLICABLE")
+      .map((item) => item.status),
+    ...profileResults.map((item) => item.status),
+  ];
+  const verdict = statuses.includes("FAIL")
+    ? "FAIL"
+    : statuses.includes("INDETERMINATE")
+      ? "INDETERMINATE" : "PASS";
   return {
+    indeterminate_reason_codes: [...reasons].sort(),
     raw_sample_count: candidateSamples.length,
     valid_sample_count: candidateSamples.length - excluded.length,
     excluded_sample_count: excluded.length,
     excluded_reason_counts: [...reasonCounts].sort(
       ([left], [right]) => left < right ? -1 : left > right ? 1 : 0,
     ).map(([reason_code, count]) => ({reason_code, count})),
+    absolute_results: absoluteResults,
+    relative_results: relativeResults,
+    profile_results: profileResults,
+    verdict,
+    exit_code: {PASS: 0, FAIL: 1, INDETERMINATE: 2}[verdict],
   };
 }
 

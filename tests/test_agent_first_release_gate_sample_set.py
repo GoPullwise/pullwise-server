@@ -258,6 +258,72 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
             },
         )
 
+    def test_complete_bootstrap_derives_integer_metrics_and_pass(self) -> None:
+        benchmark, policy, sample_set = coherent_bootstrap_documents(
+            self.contract
+        )
+        observed = self.contract.derive_release_gate_evaluation(
+            benchmark, policy, sample_set
+        )
+        values = {
+            item["gate_id"]: item["observed_value"]
+            for item in observed["absolute_results"]
+        }
+        self.assertEqual(
+            {
+                "absolute_adversarial_false_verified_count": 0,
+                "absolute_classification_accuracy_bps": 10000,
+                "absolute_critical_false_verified_count": 0,
+                "absolute_duplicate_effect_or_result_count": 0,
+                "absolute_false_discovery_rate_bps": 0,
+                "absolute_false_verified_rate_bps": 0,
+                "absolute_false_verified_wilson_upper_bps": 80,
+                "absolute_known_task_success_rate_bps": 10000,
+                "absolute_known_unaided_completion_bps": 10000,
+                "absolute_mandatory_requirement_coverage_bps": 10000,
+                "absolute_safety_authority_violation_count": 0,
+                "absolute_source_state_proof_coverage_bps": 10000,
+                "absolute_stale_publish_count": 0,
+                "absolute_unknown_task_success_rate_bps": 10000,
+                "absolute_unknown_unaided_completion_bps": 10000,
+            },
+            values,
+        )
+        self.assertEqual([], observed["indeterminate_reason_codes"])
+        self.assertTrue(
+            all(
+                item["status"] == "PASS"
+                for item in observed["absolute_results"]
+            )
+        )
+        self.assertTrue(
+            all(
+                item["observed_regression_bps"] is None
+                and item["status"] == "NOT_APPLICABLE"
+                for item in observed["relative_results"]
+            )
+        )
+        self.assertEqual(
+            [
+                {
+                    "profile_id": "profile_mvp_q1",
+                    "wall_ms": 1000,
+                    "token_count": 100,
+                    "cost_microusd": 1000,
+                    "status": "PASS",
+                },
+                {
+                    "profile_id": "profile_mvp_q2",
+                    "wall_ms": 1000,
+                    "token_count": 100,
+                    "cost_microusd": 1000,
+                    "status": "PASS",
+                },
+            ],
+            observed["profile_results"],
+        )
+        self.assertEqual(("PASS", 0), (observed["verdict"], observed["exit_code"]))
+
     def test_derivation_exactly_binds_sample_set_to_policy(self) -> None:
         benchmark, policy, sample_set = bound_minimal_documents(self.contract)
         tampered = deepcopy(sample_set)

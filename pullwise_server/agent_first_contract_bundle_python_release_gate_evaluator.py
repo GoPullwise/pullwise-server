@@ -89,7 +89,114 @@ def derive_release_gate_evaluation(
     for item in excluded:
         reason = item["infrastructure_reason_code"]
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    reasons = {
+        code
+        for item in checked_sample_set["samples"]
+        for code in item["evidence_issue_codes"]
+    }
+    if not _release_inventory_complete(
+        checked_sample_set["samples"], checked_benchmark, "CANDIDATE"
+    ):
+        reasons.add("SAMPLE_INSUFFICIENT")
+    candidate_metrics = _release_cohort_metrics(
+        checked_sample_set["samples"], "CANDIDATE"
+    )
+    metric_names = [
+        item["gate_id"].removeprefix("absolute_")
+        for item in checked_policy["absolute_gates"]
+    ]
+    if (
+        not candidate_samples
+        or any(candidate_metrics[name] is None for name in metric_names)
+        or any(
+            budget["profile_id"] not in candidate_metrics["profile_maxima"]
+            for budget in checked_policy["profile_budgets"]
+        )
+    ):
+        reasons.add("ZERO_DENOMINATOR")
+    absolute_results = []
+    for gate, metric_name in zip(
+        checked_policy["absolute_gates"], metric_names
+    ):
+        observed = None if reasons else candidate_metrics[metric_name]
+        status = (
+            "INDETERMINATE"
+            if observed is None
+            else "PASS"
+            if _release_compare(
+                gate["comparator"], observed, gate["threshold"]
+            )
+            else "FAIL"
+        )
+        absolute_results.append(
+            {
+                "gate_id": gate["gate_id"],
+                "comparator": gate["comparator"],
+                "threshold": gate["threshold"],
+                "observed_value": observed,
+                "status": status,
+            }
+        )
+    relative_results = [
+        {
+            "gate_id": gate["gate_id"],
+            "applicability": gate["applicability"],
+            "max_regression_bps": gate["max_regression_bps"],
+            "observed_regression_bps": None,
+            "status": (
+                "NOT_APPLICABLE"
+                if gate["applicability"] == "NOT_APPLICABLE"
+                else "INDETERMINATE"
+            ),
+        }
+        for gate in checked_policy["relative_gates"]
+    ]
+    profile_results = []
+    for budget in checked_policy["profile_budgets"]:
+        measurements = candidate_metrics["profile_maxima"].get(
+            budget["profile_id"]
+        )
+        if reasons or measurements is None:
+            profile_results.append(
+                {
+                    "profile_id": budget["profile_id"],
+                    "wall_ms": None,
+                    "token_count": None,
+                    "cost_microusd": None,
+                    "status": "INDETERMINATE",
+                }
+            )
+            continue
+        passed = (
+            measurements["wall_ms"] <= budget["wall_ms"]
+            and measurements["token_count"] <= budget["token_limit"]
+            and measurements["cost_microusd"] <= budget["cost_microusd"]
+        )
+        profile_results.append(
+            {
+                "profile_id": budget["profile_id"],
+                **measurements,
+                "status": "PASS" if passed else "FAIL",
+            }
+        )
+    statuses = [
+        *(item["status"] for item in absolute_results),
+        *(
+            item["status"]
+            for item in relative_results
+            if item["status"] != "NOT_APPLICABLE"
+        ),
+        *(item["status"] for item in profile_results),
+    ]
+    verdict = (
+        "FAIL"
+        if "FAIL" in statuses
+        else "INDETERMINATE"
+        if "INDETERMINATE" in statuses
+        else "PASS"
+    )
     return {
+        "indeterminate_reason_codes": sorted(reasons),
         "raw_sample_count": len(candidate_samples),
         "valid_sample_count": len(candidate_samples) - len(excluded),
         "excluded_sample_count": len(excluded),
@@ -97,6 +204,11 @@ def derive_release_gate_evaluation(
             {"reason_code": reason, "count": reason_counts[reason]}
             for reason in sorted(reason_counts)
         ],
+        "absolute_results": absolute_results,
+        "relative_results": relative_results,
+        "profile_results": profile_results,
+        "verdict": verdict,
+        "exit_code": {"PASS": 0, "FAIL": 1, "INDETERMINATE": 2}[verdict],
     }
 
 
