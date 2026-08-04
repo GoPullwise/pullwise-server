@@ -15,6 +15,7 @@ from pullwise_server import db
 from pullwise_server._generated_agent_task_contract import (
     canonical_document_bytes,
     canonical_validated_bytes,
+    derive_release_gate_evaluation,
     fixture,
     package_tuple,
     seal_document,
@@ -50,8 +51,16 @@ def _content_ref(
 
 
 def _current_documents() -> tuple[dict[str, object], ...]:
+    sample_set = deepcopy(
+        fixture("release_gate_sample_set_golden_bootstrap_included")[
+            "document"
+        ]
+    )
     benchmark = deepcopy(fixture("benchmark_bundle_golden_current")["document"])
     benchmark["package"] = package_tuple()
+    benchmark["task_inventory_digest"] = sample_set[
+        "task_inventory_digest"
+    ]
     benchmark.pop("bundle_digest")
     benchmark = seal_document("benchmark-bundle/v1", benchmark)
 
@@ -63,6 +72,16 @@ def _current_documents() -> tuple[dict[str, object], ...]:
         "benchmark-bundle/v1",
         benchmark,
     )
+    for field in (
+        "benchmark_version",
+        "task_inventory_digest",
+        "oracle_rubric_digest",
+        "environment_image_digest",
+        "control_plane_digest",
+        "evaluation_runtime_digest",
+        "statistical_implementation_version",
+    ):
+        policy[field] = benchmark[field]
     policy["candidate_digest"] = _release_digest(
         "pullwise:candidate-digest:v1",
         {
@@ -82,6 +101,41 @@ def _current_documents() -> tuple[dict[str, object], ...]:
     )
     policy.pop("policy_digest")
     policy = seal_document("release-gate-policy/v1", policy)
+
+    sample_set["package"] = package_tuple()
+    for field in (
+        "candidate_build_id",
+        "candidate_digest",
+        "release_mode",
+        "stable_package",
+        "stable_candidate_digest",
+        "stable_control_plane_digest",
+        "benchmark_version",
+        "task_inventory_digest",
+        "oracle_rubric_digest",
+        "environment_image_digest",
+        "control_plane_digest",
+        "evaluation_runtime_digest",
+        "statistical_implementation_version",
+        "organization_id",
+    ):
+        sample_set[field] = deepcopy(policy[field])
+    sample_set["benchmark_ref"] = _content_ref(
+        sample_set["benchmark_ref"],
+        "benchmark-bundle/v1",
+        benchmark,
+    )
+    sample_set["benchmark_digest"] = benchmark["bundle_digest"]
+    sample_set["policy_ref"] = _content_ref(
+        sample_set["policy_ref"],
+        "release-gate-policy/v1",
+        policy,
+    )
+    sample_set["policy_digest"] = policy["policy_digest"]
+    sample_set.pop("sample_set_digest")
+    sample_set = seal_document(
+        "release-gate-sample-set/v1", sample_set
+    )
 
     report = deepcopy(
         fixture("release_gate_report_golden_bootstrap_pass")["document"]
@@ -118,9 +172,21 @@ def _current_documents() -> tuple[dict[str, object], ...]:
         "release-gate-policy/v1",
         policy,
     )
+    report["sample_set_ref"] = _content_ref(
+        report["sample_set_ref"],
+        "release-gate-sample-set/v1",
+        sample_set,
+    )
+    report["sample_set_digest"] = sample_set["sample_set_digest"]
+    report.update(
+        derive_release_gate_evaluation(benchmark, policy, sample_set)
+    )
+    report["completed_at"] = sample_set["completed_at"]
+    report["signer_role"] = sample_set["producer_role"]
+    report["signer_id"] = sample_set["producer_id"]
     report.pop("report_digest")
     report = seal_document("release-gate-report/v1", report)
-    return benchmark, policy, report
+    return benchmark, policy, sample_set, report
 
 
 class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
@@ -145,10 +211,15 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
         return connection
 
     def test_evaluate_and_store_persists_an_exact_verified_evaluation(self) -> None:
-        benchmark, policy, report = _current_documents()
+        benchmark, policy, sample_set, report = _current_documents()
 
         self.evaluator.freeze_inputs(benchmark, policy)
-        stored = self.evaluator.evaluate_and_store(benchmark, policy, report)
+        stored = self.evaluator.evaluate_and_store(
+            benchmark,
+            policy,
+            sample_set,
+            report,
+        )
 
         self.assertEqual("PASS", stored.verdict)
         self.assertEqual(0, stored.exit_code)
@@ -159,6 +230,12 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
         self.assertEqual(
             canonical_validated_bytes("release-gate-policy/v1", policy),
             stored.policy_bytes,
+        )
+        self.assertEqual(
+            canonical_validated_bytes(
+                "release-gate-sample-set/v1", sample_set
+            ),
+            stored.sample_set_bytes,
         )
         self.assertEqual(
             canonical_validated_bytes("release-gate-report/v1", report),
@@ -173,7 +250,7 @@ class AgentFirstReleaseEvaluatorStorageTest(unittest.TestCase):
                 connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in CURRENT_RELEASE_EVALUATOR_TABLES
             )
-        self.assertEqual((1, 1, 1), counts)
+        self.assertEqual((1, 1, 1, 1), counts)
 
     def test_verified_read_rejects_corrupt_domain_digest_metadata(self) -> None:
         benchmark, policy, report = _current_documents()

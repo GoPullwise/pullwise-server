@@ -10,6 +10,9 @@ import sqlite3
 from typing import Callable, Iterator, Mapping
 
 from ._generated_agent_task_contract import PACKAGE_TUPLE
+from .agent_first_release_evaluator_store_sql import (
+    LOAD_RELEASE_EVALUATION_SQL,
+)
 
 
 FaultInjector = Callable[[str], None]
@@ -30,6 +33,8 @@ RELEASE_EVALUATOR_FAULT_POINTS = (
     "after_benchmark",
     "before_policy",
     "after_policy",
+    "before_sample_set",
+    "after_sample_set",
     "before_report",
     "after_report",
 )
@@ -51,6 +56,7 @@ class StoredReleaseInputRows:
 class StoredReleaseEvaluationRows:
     benchmark_bytes: bytes
     policy_bytes: bytes
+    sample_set_bytes: bytes
     report_bytes: bytes
     verdict: str
     exit_code: int
@@ -323,12 +329,17 @@ class ReleaseEvaluatorStore:
         benchmark_bytes: bytes,
         policy: Mapping[str, object],
         policy_bytes: bytes,
+        sample_set: Mapping[str, object],
+        sample_set_bytes: bytes,
         report: Mapping[str, object],
         report_bytes: bytes,
         verdict: str,
         exit_code: int,
     ) -> StoredReleaseEvaluationRows:
         package_values = self._package_values()
+        sample_set_sha256, sample_set_size = self._document_values(
+            sample_set_bytes
+        )
         report_sha256, report_size = self._document_values(report_bytes)
         input_rows = self._input_rows(
             benchmark=benchmark,
@@ -336,15 +347,49 @@ class ReleaseEvaluatorStore:
             policy=policy,
             policy_bytes=policy_bytes,
         )
-        report_columns = (
-            "report_digest",
-            "report_id",
+        sample_set_columns = (
+            "sample_set_digest",
+            "sample_set_id",
             "benchmark_digest",
             "policy_digest",
             "benchmark_ref_sha256",
             "benchmark_ref_size_bytes",
             "policy_ref_sha256",
             "policy_ref_size_bytes",
+            "document_sha256",
+            "size_bytes",
+            "package_identity",
+            "package_version",
+            "package_content_sha256",
+            "package_root_sha256",
+            "document_bytes",
+        )
+        sample_set_values = (
+            sample_set["sample_set_digest"],
+            sample_set["sample_set_id"],
+            sample_set["benchmark_digest"],
+            sample_set["policy_digest"],
+            sample_set["benchmark_ref"]["sha256"],
+            sample_set["benchmark_ref"]["size_bytes"],
+            sample_set["policy_ref"]["sha256"],
+            sample_set["policy_ref"]["size_bytes"],
+            sample_set_sha256,
+            sample_set_size,
+            *package_values,
+            sample_set_bytes,
+        )
+        report_columns = (
+            "report_digest",
+            "report_id",
+            "benchmark_digest",
+            "policy_digest",
+            "sample_set_digest",
+            "benchmark_ref_sha256",
+            "benchmark_ref_size_bytes",
+            "policy_ref_sha256",
+            "policy_ref_size_bytes",
+            "sample_set_ref_sha256",
+            "sample_set_ref_size_bytes",
             "verdict",
             "exit_code",
             "document_sha256",
@@ -360,10 +405,13 @@ class ReleaseEvaluatorStore:
             report["report_id"],
             report["benchmark_digest"],
             report["policy_digest"],
+            report["sample_set_digest"],
             report["benchmark_ref"]["sha256"],
             report["benchmark_ref"]["size_bytes"],
             report["policy_ref"]["sha256"],
             report["policy_ref"]["size_bytes"],
+            report["sample_set_ref"]["sha256"],
+            report["sample_set_ref"]["size_bytes"],
             verdict,
             exit_code,
             report_sha256,
@@ -378,6 +426,18 @@ class ReleaseEvaluatorStore:
                 raise ReleaseEvaluatorStoreError("RELEASE_EVALUATION_NOT_FOUND")
             if presence != (True, True):
                 raise ReleaseEvaluatorStoreError("AUTHORITY_STORAGE_CORRUPT")
+            self._fault("before_sample_set")
+            self._insert_or_match(
+                connection,
+                table="agent_current_release_gate_sample_sets",
+                digest_column="sample_set_digest",
+                digest=str(sample_set["sample_set_digest"]),
+                id_column="sample_set_id",
+                document_id=str(sample_set["sample_set_id"]),
+                columns=sample_set_columns,
+                values=sample_set_values,
+            )
+            self._fault("after_sample_set")
             self._fault("before_report")
             self._insert_or_match(
                 connection,
@@ -394,6 +454,7 @@ class ReleaseEvaluatorStore:
         return StoredReleaseEvaluationRows(
             benchmark_bytes,
             policy_bytes,
+            sample_set_bytes,
             report_bytes,
             verdict,
             exit_code,

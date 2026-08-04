@@ -30,6 +30,7 @@ class StoredReleaseInputs:
 class StoredReleaseEvaluation:
     benchmark_bytes: bytes
     policy_bytes: bytes
+    sample_set_bytes: bytes
     report_bytes: bytes
     verdict: str
     exit_code: int
@@ -74,6 +75,7 @@ class AgentFirstReleaseEvaluator:
         return StoredReleaseEvaluation(
             benchmark_bytes=stored.benchmark_bytes,
             policy_bytes=stored.policy_bytes,
+            sample_set_bytes=stored.sample_set_bytes,
             report_bytes=stored.report_bytes,
             verdict=stored.verdict,
             exit_code=stored.exit_code,
@@ -122,17 +124,26 @@ class AgentFirstReleaseEvaluator:
         self,
         benchmark_bundle: object,
         policy: object,
+        sample_set: object,
         report: object,
     ) -> StoredReleaseEvaluation:
-        for document in (benchmark_bundle, policy, report):
+        for document in (benchmark_bundle, policy, sample_set, report):
             self._require_current_package(document)
         try:
-            result = self._contract.evaluate_release_gate(benchmark_bundle, policy, report)
+            result = self._contract.evaluate_release_gate(
+                benchmark_bundle,
+                policy,
+                sample_set,
+                report,
+            )
             benchmark_bytes = self._contract.canonical_validated_bytes(
                 "benchmark-bundle/v1", benchmark_bundle
             )
             policy_bytes = self._contract.canonical_validated_bytes(
                 "release-gate-policy/v1", policy
+            )
+            sample_set_bytes = self._contract.canonical_validated_bytes(
+                "release-gate-sample-set/v1", sample_set
             )
             report_bytes = self._contract.canonical_validated_bytes(
                 "release-gate-report/v1", report
@@ -146,6 +157,7 @@ class AgentFirstReleaseEvaluator:
             raise AuthorityError("CONTRACT_DOCUMENT_INVALID") from None
         assert isinstance(benchmark_bundle, dict)
         assert isinstance(policy, dict)
+        assert isinstance(sample_set, dict)
         assert isinstance(report, dict)
         try:
             stored = self._store.store_evaluation(
@@ -153,6 +165,8 @@ class AgentFirstReleaseEvaluator:
                 benchmark_bytes=benchmark_bytes,
                 policy=policy,
                 policy_bytes=policy_bytes,
+                sample_set=sample_set,
+                sample_set_bytes=sample_set_bytes,
                 report=report,
                 report_bytes=report_bytes,
                 verdict=str(result["verdict"]),
@@ -172,18 +186,28 @@ class AgentFirstReleaseEvaluator:
         try:
             benchmark = json.loads(stored.benchmark_bytes)
             policy = json.loads(stored.policy_bytes)
+            sample_set = json.loads(stored.sample_set_bytes)
             report = json.loads(stored.report_bytes)
-            for document in (benchmark, policy, report):
+            for document in (benchmark, policy, sample_set, report):
                 self._require_current_package(document)
-            result = self._contract.evaluate_release_gate(benchmark, policy, report)
+            result = self._contract.evaluate_release_gate(
+                benchmark,
+                policy,
+                sample_set,
+                report,
+            )
             canonical = (
                 self._contract.canonical_validated_bytes("benchmark-bundle/v1", benchmark),
                 self._contract.canonical_validated_bytes("release-gate-policy/v1", policy),
+                self._contract.canonical_validated_bytes(
+                    "release-gate-sample-set/v1", sample_set
+                ),
                 self._contract.canonical_validated_bytes("release-gate-report/v1", report),
             )
             if canonical != (
                 stored.benchmark_bytes,
                 stored.policy_bytes,
+                stored.sample_set_bytes,
                 stored.report_bytes,
             ):
                 raise ValueError("stored document is not canonical")
