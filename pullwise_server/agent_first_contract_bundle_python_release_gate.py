@@ -408,7 +408,7 @@ def _release_require_bindings(
         )
 
 
-def verify_release_gate_report_context(
+def _verify_release_gate_report_context_aggregate(
     report: object,
     benchmark_bundle: object,
     policy: object,

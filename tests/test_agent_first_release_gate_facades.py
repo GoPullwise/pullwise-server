@@ -13,6 +13,7 @@ from pullwise_server.agent_first_contract_bundle_npm import render_npm_wrapper
 from pullwise_server.agent_first_contract_bundle_python import render_python_wrapper
 from pullwise_server.agent_first_contract_bundle_source import canonical_bytes
 from tests.release_gate_facade_support import stable_release_gate_documents
+from tests.release_gate_sample_set_support import bound_minimal_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,7 @@ FAMILY_ROOT = ROOT / "contracts/agent-first/current/source/families"
 FAMILY_IDS = (
     "benchmark-bundle",
     "release-gate-policy",
+    "release-gate-sample-set",
     "release-gate-report",
     "release-gate-attestation",
 )
@@ -64,15 +66,20 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         cls.npm_bytes = render_npm_wrapper(*render_args)
 
     def test_report_context_rejects_caller_selected_absolute_status(self) -> None:
-        benchmark = self.document("benchmark_bundle_golden_current")
-        policy = self.document("release_gate_policy_golden_bootstrap")
-        report = self.document("release_gate_report_golden_bootstrap_pass")
-        report["absolute_results"][0]["observed_value"] = 1
+        benchmark, policy, sample_set, report = bound_minimal_report(
+            self.python
+        )
+        result = report["absolute_results"][0]
+        result["observed_value"] = result["threshold"]
+        result["status"] = "PASS"
         report = self.reseal(
             "release-gate-report/v1", "report_digest", report
         )
         operations = [
-            {"kind": "report", "documents": [report, benchmark, policy]}
+            {
+                "kind": "report",
+                "documents": [report, benchmark, policy, sample_set],
+            }
         ]
 
         python_results = self.python_results(operations)
@@ -83,8 +90,8 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
             {
                 "ok": False,
                 "code": "CONTRACT_DOCUMENT_INVALID",
-                "detail": "RELEASE_EVALUATOR_STATUS_INVALID",
-                "path": "$.absolute_results[0].status",
+                "detail": "RELEASE_REPORT_EVALUATION_INVALID",
+                "path": "$.absolute_results",
             },
             python_results[0],
         )
@@ -102,8 +109,12 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         for filename in (
             "agent_first_contract_bundle_python_release_gate.py",
             "agent_first_contract_bundle_python_release_gate_evaluator.py",
+            "agent_first_contract_bundle_python_release_gate_sample_set.py",
+            "agent_first_contract_bundle_python_release_gate_statistics.py",
             "agent_first_contract_bundle_npm_release_gate.py",
             "agent_first_contract_bundle_npm_release_gate_evaluator.py",
+            "agent_first_contract_bundle_npm_release_gate_sample_set.py",
+            "agent_first_contract_bundle_npm_release_gate_statistics.py",
         ):
             lines = (ROOT / "pullwise_server" / filename).read_text(
                 encoding="utf-8"
@@ -231,15 +242,18 @@ class AgentFirstReleaseGateFacadesTest(unittest.TestCase):
         )
 
     def test_report_context_rejects_cross_organization_evidence(self) -> None:
-        benchmark = self.document("benchmark_bundle_golden_current")
-        policy = self.document("release_gate_policy_golden_bootstrap")
-        report = self.document("release_gate_report_golden_bootstrap_pass")
+        benchmark, policy, sample_set, report = bound_minimal_report(
+            self.python
+        )
         report["organization_id"] = "org_other"
         report = self.reseal(
             "release-gate-report/v1", "report_digest", report
         )
         operations = [
-            {"kind": "report", "documents": [report, benchmark, policy]}
+            {
+                "kind": "report",
+                "documents": [report, benchmark, policy, sample_set],
+            }
         ]
 
         python_results = self.python_results(operations)

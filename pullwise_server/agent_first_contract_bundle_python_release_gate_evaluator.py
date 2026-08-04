@@ -66,6 +66,33 @@ def derive_release_gate_evaluation(
         "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
         "$.benchmark_digest",
     )
+    completed_at = _timestamp_millis(checked_sample_set["completed_at"])
+    _release_require(
+        completed_at is not None
+        and max(
+            _timestamp_millis(checked_benchmark["issued_at"]),
+            _timestamp_millis(checked_policy["issued_at"]),
+        )
+        <= completed_at
+        <= min(
+            _timestamp_millis(checked_benchmark["expires_at"]),
+            _timestamp_millis(checked_policy["expires_at"]),
+        ),
+        "RELEASE_SAMPLE_TIME_INVALID",
+        "$.completed_at",
+    )
+    _release_require(
+        len(
+            {
+                checked_benchmark["signer_id"],
+                checked_policy["signer_id"],
+                checked_sample_set["producer_id"],
+            }
+        )
+        == 3,
+        "RELEASE_SAMPLE_PRODUCER_INVALID",
+        "$.producer_id",
+    )
     candidate_samples = [
         item
         for item in checked_sample_set["samples"]
@@ -382,13 +409,109 @@ def _release_validate_sample_inventory(
     )
 
 
+_RELEASE_EVALUATION_FIELDS = (
+    "indeterminate_reason_codes",
+    "raw_sample_count",
+    "valid_sample_count",
+    "excluded_sample_count",
+    "excluded_reason_counts",
+    "absolute_results",
+    "relative_results",
+    "profile_results",
+    "verdict",
+    "exit_code",
+)
+
+
+def verify_release_gate_report_context(
+    report: object,
+    benchmark_bundle: object,
+    policy: object,
+    sample_set: object,
+) -> dict[str, object]:
+    expected_evaluation = derive_release_gate_evaluation(
+        benchmark_bundle, policy, sample_set
+    )
+    checked_report = verify_document_digest("release-gate-report/v1", report)
+    checked_benchmark = verify_document_digest(
+        "benchmark-bundle/v1", benchmark_bundle
+    )
+    checked_policy = verify_document_digest("release-gate-policy/v1", policy)
+    checked_sample_set = verify_document_digest(
+        "release-gate-sample-set/v1", sample_set
+    )
+    _release_require(
+        checked_report["organization_id"]
+        == checked_policy["organization_id"]
+        == checked_benchmark["organization_id"]
+        == checked_sample_set["organization_id"],
+        "RELEASE_REPORT_ORGANIZATION_MISMATCH",
+        "$.organization_id",
+    )
+    for field, schema_id, document in (
+        ("benchmark_ref", "benchmark-bundle/v1", checked_benchmark),
+        ("policy_ref", "release-gate-policy/v1", checked_policy),
+        ("sample_set_ref", "release-gate-sample-set/v1", checked_sample_set),
+    ):
+        _release_require_ref(
+            checked_report[field],
+            schema_id,
+            document,
+            "RELEASE_REPORT_REF_INVALID",
+            f"$.{field}",
+        )
+    _release_require_bindings(
+        checked_report,
+        checked_policy,
+        _RELEASE_REPORT_BINDING_FIELDS,
+        "RELEASE_REPORT_BINDING_INVALID",
+    )
+    _release_require_bindings(
+        checked_report,
+        checked_sample_set,
+        (
+            "package", "candidate_build_id", "candidate_digest",
+            "release_mode", "stable_package", "stable_candidate_digest",
+            "stable_control_plane_digest", "benchmark_ref",
+            "benchmark_digest", "policy_ref", "policy_digest",
+            *_RELEASE_POLICY_BENCHMARK_FIELDS, "organization_id",
+        ),
+        "RELEASE_REPORT_BINDING_INVALID",
+    )
+    _release_require(
+        checked_report["sample_set_digest"]
+        == checked_sample_set["sample_set_digest"],
+        "RELEASE_REPORT_BINDING_INVALID",
+        "$.sample_set_digest",
+    )
+    _release_require(
+        checked_report["completed_at"] == checked_sample_set["completed_at"]
+        and checked_report["signer_role"]
+        == checked_sample_set["producer_role"]
+        and checked_report["signer_id"] == checked_sample_set["producer_id"],
+        "RELEASE_REPORT_PRODUCER_BINDING_INVALID",
+        "$.completed_at",
+    )
+    actual_evaluation = {
+        field: checked_report[field] for field in _RELEASE_EVALUATION_FIELDS
+    }
+    _release_require_equal(
+        actual_evaluation,
+        expected_evaluation,
+        "RELEASE_REPORT_EVALUATION_INVALID",
+        "$.absolute_results",
+    )
+    return checked_report
+
+
 def evaluate_release_gate(
     benchmark_bundle: object,
     policy: object,
+    sample_set: object,
     report: object,
 ) -> dict[str, object]:
     checked = verify_release_gate_report_context(
-        report, benchmark_bundle, policy
+        report, benchmark_bundle, policy, sample_set
     )
     return {
         "verdict": checked["verdict"],

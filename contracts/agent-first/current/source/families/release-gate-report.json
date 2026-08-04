@@ -13,6 +13,7 @@
       "x-pullwise-semantics": {
         "document_rules": ["release_gate_report"],
         "contextual_helpers": [
+          "derive_release_gate_evaluation",
           "evaluate_release_gate",
           "verify_release_gate_report_context"
         ],
@@ -252,6 +253,14 @@
           "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
         "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
+        "sample_set_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "release-gate-sample-set/v1",
+          "sha256": "5372efc9c528b89e625256c920c30f9181b8976e37680ab5768eca879637214e",
+          "size_bytes": 3171, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "sample_set_digest": "b52d450b96e7a71a8e7a4a169eaf05478b6c645fc3b14bb987df3aeda2710ed9",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -313,7 +322,7 @@
         "signature": "b0mbFCnU3Wxkclls-2LxZrGkBp2jUB2EjVicCTlkcfs3mdeu5XLx8frpqWmIz_IGlCVK_2ffEMRJS72cEq0ADQ",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "ce286ba0c3e4cd4e0d89bd8c782cb7286fe9eb619b95b8299ea263f4f7b68400"
+        "report_digest": "8ee64de0b5a300964e5c7f62ba8b070b051b1de7c9a87f7be1b389204095b6da"
       },
       "expected_code": null
     },
@@ -349,6 +358,14 @@
           "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
         "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
+        "sample_set_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "release-gate-sample-set/v1",
+          "sha256": "5372efc9c528b89e625256c920c30f9181b8976e37680ab5768eca879637214e",
+          "size_bytes": 3171, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "sample_set_digest": "b52d450b96e7a71a8e7a4a169eaf05478b6c645fc3b14bb987df3aeda2710ed9",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -410,7 +427,7 @@
         "signature": "b0mbFCnU3Wxkclls-2LxZrGkBp2jUB2EjVicCTlkcfs3mdeu5XLx8frpqWmIz_IGlCVK_2ffEMRJS72cEq0ADQ",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "ce286ba0c3e4cd4e0d89bd8c782cb7286fe9eb619b95b8299ea263f4f7b68400"
+        "report_digest": "8ee64de0b5a300964e5c7f62ba8b070b051b1de7c9a87f7be1b389204095b6da"
       },
       "expected_code": null
     },
@@ -446,6 +463,14 @@
           "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
         "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
+        "sample_set_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "release-gate-sample-set/v1",
+          "sha256": "5372efc9c528b89e625256c920c30f9181b8976e37680ab5768eca879637214e",
+          "size_bytes": 3171, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "sample_set_digest": "b52d450b96e7a71a8e7a4a169eaf05478b6c645fc3b14bb987df3aeda2710ed9",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -481,7 +506,7 @@
         "signature": "Ukc5X74OXcvrjllq3BvcrFaSwrSna8nV8BivGx1ZrzzFjluQqop1Fzgl2CVqIwzxpW0Nie6t_yTucnNW1L6wCw",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "389842b98765eac008cacf499a26b032d6746d2c63dececf37ead6faee90a9b8"
+        "report_digest": "d5e020759bd1a6c19b5aa5c809426baebbb7dbb2765f311535101f981654e7b5"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     },
@@ -517,6 +542,14 @@
           "size_bytes": 6016, "media_type": "application/json", "encoding": "utf-8"
         },
         "policy_digest": "cb850fe98ddcbb2859bd2a19afdd360e01c67c189708d8ff6c2d9ba4324b6dfa",
+        "sample_set_ref": {
+          "schema_id": "content-ref/v1",
+          "artifact_id": "art_33333333333333333333333333333333",
+          "content_schema_id": "release-gate-sample-set/v1",
+          "sha256": "5372efc9c528b89e625256c920c30f9181b8976e37680ab5768eca879637214e",
+          "size_bytes": 3171, "media_type": "application/json", "encoding": "utf-8"
+        },
+        "sample_set_digest": "b52d450b96e7a71a8e7a4a169eaf05478b6c645fc3b14bb987df3aeda2710ed9",
         "benchmark_version": "benchmark-2026-07-23",
         "task_inventory_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "oracle_rubric_digest": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -552,7 +585,7 @@
         "signature": "mahRdqxf3EsrGZg9Gkoh8gGwaxSjyNeWYn8qa4VJu0GZM5yqfAg1da0GIVHUqJ_0CuuHsetrWwmRyS2y28H_Dg",
         "issued_at": "2026-07-23T00:30:00.000Z",
         "expires_at": "2026-07-30T00:30:00.000Z",
-        "report_digest": "f3c59b47d3918ce8a814bac5609bee4f2dbf9a4b6c2a7b084d3a04615c0223d0"
+        "report_digest": "df2afb7d343425139d3f337b1b3d2387741d1bceddfb396975a57b6f039cf58c"
       },
       "expected_code": "CONTRACT_DOCUMENT_INVALID"
     }

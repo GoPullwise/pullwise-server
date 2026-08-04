@@ -143,6 +143,7 @@ DOCUMENT_RULE_IDS = frozenset(
 )
 CONTEXTUAL_HELPER_IDS = frozenset(
     {
+        "derive_release_gate_evaluation",
         "evaluate_release_gate",
         "evaluate_success_gate",
         "evaluate_terminalization_gate",

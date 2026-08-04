@@ -11,6 +11,7 @@ import unittest
 from pullwise_server.agent_first_contract_bundle import build_bundle
 from tests.release_gate_sample_set_support import (
     bound_minimal_documents,
+    bound_minimal_report,
     coherent_bootstrap_documents,
     coherent_stable_documents,
 )
@@ -152,6 +153,27 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
         self.assertEqual(
             "^[0-9a-f]{64}$",
             schema["properties"]["sample_set_digest"]["pattern"],
+        )
+        self.assertIn(
+            "derive_release_gate_evaluation",
+            schema["x-pullwise-semantics"]["contextual_helpers"],
+        )
+
+    def test_report_context_rederives_exact_sample_projection(self) -> None:
+        benchmark, policy, sample_set, report = bound_minimal_report(
+            self.contract
+        )
+        self.assertEqual(
+            report,
+            self.contract.verify_release_gate_report_context(
+                report, benchmark, policy, sample_set
+            ),
+        )
+        self.assertEqual(
+            {"verdict": "INDETERMINATE", "exit_code": 2},
+            self.contract.evaluate_release_gate(
+                benchmark, policy, sample_set, report
+            ),
         )
 
     def test_sample_identity_and_document_digest_are_deterministic(self) -> None:
@@ -431,6 +453,36 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
             "RELEASE_SAMPLE_EXCLUSION_REASON_INVALID",
             raised.exception.detail,
         )
+
+    def test_sample_producer_and_completion_time_are_policy_bound(self) -> None:
+        benchmark, policy, sample_set = bound_minimal_documents(self.contract)
+        cases = (
+            (
+                "completed_at",
+                "2026-08-01T00:00:00.000Z",
+                "RELEASE_SAMPLE_TIME_INVALID",
+            ),
+            (
+                "producer_id",
+                policy["signer_id"],
+                "RELEASE_SAMPLE_PRODUCER_INVALID",
+            ),
+        )
+        for field, value, expected_detail in cases:
+            with self.subTest(field=field):
+                tampered = deepcopy(sample_set)
+                tampered.pop("sample_set_digest")
+                tampered[field] = value
+                tampered = self.contract.seal_document(
+                    "release-gate-sample-set/v1", tampered
+                )
+                with self.assertRaises(
+                    self.contract.ContractValidationError
+                ) as raised:
+                    self.contract.derive_release_gate_evaluation(
+                        benchmark, policy, tampered
+                    )
+                self.assertEqual(expected_detail, raised.exception.detail)
 
 
 if __name__ == "__main__":

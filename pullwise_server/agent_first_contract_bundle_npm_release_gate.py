@@ -357,7 +357,7 @@ export async function verifyReleaseGatePolicyContext(policy, benchmarkBundle) {
   releaseVerifyPolicyBenchmarkBinding(checked, benchmark);
   return checked;
 }
-export async function verifyReleaseGateReportContext(
+async function verifyReleaseGateReportContextAggregate(
   report, benchmarkBundle, policy,
 ) {
   const checked = await verifyDocumentDigest("release-gate-report/v1", report);

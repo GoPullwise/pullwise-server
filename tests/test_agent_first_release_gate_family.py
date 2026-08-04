@@ -58,9 +58,12 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
         expected_targets = {
             "benchmark-bundle/v1": set(),
             "release-gate-policy/v1": {"benchmark-bundle/v1"},
+            "release-gate-sample-set/v1": {
+                "benchmark-bundle/v1", "release-gate-policy/v1"
+            },
             "release-gate-report/v1": {
-                "benchmark-bundle/v1",
-                "release-gate-policy/v1",
+                "benchmark-bundle/v1", "release-gate-policy/v1",
+                "release-gate-sample-set/v1",
             },
             "release-gate-attestation/v1": {
                 "release-gate-policy/v1",
@@ -403,7 +406,7 @@ class AgentFirstReleaseGateFamilyTest(unittest.TestCase):
             {
                 "document_rules": ["release_gate_report"],
                 "contextual_helpers": [
-                    "evaluate_release_gate",
+                    "derive_release_gate_evaluation", "evaluate_release_gate",
                     "verify_release_gate_report_context",
                 ],
                 "signature_contract": {

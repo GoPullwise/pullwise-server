@@ -66,6 +66,29 @@ export async function deriveReleaseGateEvaluation(
     "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
     "$.benchmark_digest",
   );
+  const completedAt = releaseTimestampMillis(checkedSampleSet.completed_at);
+  releaseRequire(
+    completedAt !== null &&
+      completedAt >= Math.max(
+        releaseTimestampMillis(checkedBenchmark.issued_at),
+        releaseTimestampMillis(checkedPolicy.issued_at),
+      ) &&
+      completedAt <= Math.min(
+        releaseTimestampMillis(checkedBenchmark.expires_at),
+        releaseTimestampMillis(checkedPolicy.expires_at),
+      ),
+    "RELEASE_SAMPLE_TIME_INVALID",
+    "$.completed_at",
+  );
+  releaseRequire(
+    new Set([
+      checkedBenchmark.signer_id,
+      checkedPolicy.signer_id,
+      checkedSampleSet.producer_id,
+    ]).size === 3,
+    "RELEASE_SAMPLE_PRODUCER_INVALID",
+    "$.producer_id",
+  );
   const candidateSamples = checkedSampleSet.samples.filter(
     (item) => item.cohort === "CANDIDATE",
   );
@@ -338,11 +361,119 @@ function releaseValidateSampleInventory(report, benchmark) {
   );
 }
 
-export async function evaluateReleaseGate(benchmarkBundle, policy, report) {
+const RELEASE_EVALUATION_FIELDS = Object.freeze([
+  "indeterminate_reason_codes",
+  "raw_sample_count",
+  "valid_sample_count",
+  "excluded_sample_count",
+  "excluded_reason_counts",
+  "absolute_results",
+  "relative_results",
+  "profile_results",
+  "verdict",
+  "exit_code",
+]);
+
+export async function verifyReleaseGateReportContext(
+  report,
+  benchmarkBundle,
+  policy,
+  sampleSet,
+) {
+  const expectedEvaluation = await deriveReleaseGateEvaluation(
+    benchmarkBundle,
+    policy,
+    sampleSet,
+  );
+  const checked = await verifyDocumentDigest("release-gate-report/v1", report);
+  const benchmark = await verifyDocumentDigest(
+    "benchmark-bundle/v1",
+    benchmarkBundle,
+  );
+  const policyValue = await verifyDocumentDigest(
+    "release-gate-policy/v1",
+    policy,
+  );
+  const sampleSetValue = await verifyDocumentDigest(
+    "release-gate-sample-set/v1",
+    sampleSet,
+  );
+  releaseRequire(
+    checked.organization_id === policyValue.organization_id &&
+      checked.organization_id === benchmark.organization_id &&
+      checked.organization_id === sampleSetValue.organization_id,
+    "RELEASE_REPORT_ORGANIZATION_MISMATCH",
+    "$.organization_id",
+  );
+  for (const [field, schemaId, document] of [
+    ["benchmark_ref", "benchmark-bundle/v1", benchmark],
+    ["policy_ref", "release-gate-policy/v1", policyValue],
+    ["sample_set_ref", "release-gate-sample-set/v1", sampleSetValue],
+  ]) {
+    releaseRequireRef(
+      checked[field],
+      schemaId,
+      document,
+      "RELEASE_REPORT_REF_INVALID",
+      "$." + field,
+    );
+  }
+  releaseRequireBinding(
+    checked,
+    policyValue,
+    [
+      ...RELEASE_REPORT_POLICY_FIELDS.slice(0, 7),
+      "benchmark_ref",
+      ...RELEASE_REPORT_POLICY_FIELDS.slice(7),
+    ],
+    "RELEASE_REPORT_BINDING_INVALID",
+  );
+  releaseRequireBinding(
+    checked,
+    sampleSetValue,
+    [
+      "package", "candidate_build_id", "candidate_digest",
+      "release_mode", "stable_package", "stable_candidate_digest",
+      "stable_control_plane_digest", "benchmark_ref",
+      "benchmark_digest", "policy_ref", "policy_digest",
+      ...RELEASE_POLICY_BENCHMARK_FIELDS, "organization_id",
+    ],
+    "RELEASE_REPORT_BINDING_INVALID",
+  );
+  releaseRequire(
+    checked.sample_set_digest === sampleSetValue.sample_set_digest,
+    "RELEASE_REPORT_BINDING_INVALID",
+    "$.sample_set_digest",
+  );
+  releaseRequire(
+    checked.completed_at === sampleSetValue.completed_at &&
+      checked.signer_role === sampleSetValue.producer_role &&
+      checked.signer_id === sampleSetValue.producer_id,
+    "RELEASE_REPORT_PRODUCER_BINDING_INVALID",
+    "$.completed_at",
+  );
+  const actualEvaluation = Object.fromEntries(
+    RELEASE_EVALUATION_FIELDS.map((field) => [field, checked[field]]),
+  );
+  releaseRequire(
+    releaseSame(actualEvaluation, expectedEvaluation),
+    "RELEASE_REPORT_EVALUATION_INVALID",
+    "$.absolute_results",
+  );
+  return checked;
+}
+
+export async function evaluateReleaseGate(
+  benchmarkBundle,
+  policy,
+  sampleSet,
+  report,
+) {
   const checked = await verifyReleaseGateReportContext(
     report,
     benchmarkBundle,
     policy,
+    sampleSet,
   );
   return {verdict: checked.verdict, exit_code: checked.exit_code};
 }
