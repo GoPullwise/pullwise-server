@@ -61,6 +61,7 @@ _DOCUMENT_RULE_HANDLERS = {
     "release_gate_attestation": _rule_release_gate_attestation,
     "release_gate_policy": _rule_release_gate_policy,
     "release_gate_report": _rule_release_gate_report,
+    "release_gate_sample_set": _rule_release_gate_sample_set,
     "release_key_revocation": _rule_release_key_revocation,
     "risk_ceiling_current_mvp": _task_control_rule_policy_mvp,
     "root_and_origin_sets_sorted_unique": _task_control_rule_policy_roots,

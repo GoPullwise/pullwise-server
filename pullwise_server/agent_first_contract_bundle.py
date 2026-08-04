@@ -83,6 +83,7 @@ REQUIRED_FAMILIES = (
     "release-trust-authority",
     "benchmark-bundle",
     "release-gate-policy",
+    "release-gate-sample-set",
     "release-gate-report",
     "release-gate-attestation",
 )

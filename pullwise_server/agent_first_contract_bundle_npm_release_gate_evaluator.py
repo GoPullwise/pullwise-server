@@ -4,6 +4,17 @@ from __future__ import annotations
 
 
 NPM_RELEASE_GATE_EVALUATOR = r'''
+export async function deriveReleaseGateEvaluation(
+  benchmarkBundle,
+  policy,
+  sampleSet,
+) {
+  await verifyDocumentDigest("benchmark-bundle/v1", benchmarkBundle);
+  await verifyDocumentDigest("release-gate-policy/v1", policy);
+  await verifyDocumentDigest("release-gate-sample-set/v1", sampleSet);
+  return {};
+}
+
 function releaseCompare(comparator, observed, threshold) {
   return {
     EQ: observed === threshold,
@@ -134,6 +145,7 @@ export async function evaluateReleaseGate(benchmarkBundle, policy, report) {
 }
 
 export const evaluate_release_gate = evaluateReleaseGate;
+export const derive_release_gate_evaluation = deriveReleaseGateEvaluation;
 '''
 
 

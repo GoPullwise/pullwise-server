@@ -96,6 +96,7 @@ DOCUMENT_RULE_IDS = frozenset(
         "release_gate_policy",
         "release_gate_attestation",
         "release_gate_report",
+        "release_gate_sample_set",
         "release_key_revocation",
         "risk_ceiling_current_mvp",
         "root_and_origin_sets_sorted_unique",
