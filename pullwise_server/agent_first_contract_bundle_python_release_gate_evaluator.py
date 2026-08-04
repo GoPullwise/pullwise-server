@@ -39,6 +39,23 @@ def derive_release_gate_evaluation(
     )
     _release_require_bindings(
         checked_sample_set,
+        checked_policy,
+        (
+            "package", "candidate_build_id", "candidate_digest",
+            "release_mode", "stable_package", "stable_candidate_digest",
+            "stable_control_plane_digest", "benchmark_ref",
+            "benchmark_digest", *_RELEASE_POLICY_BENCHMARK_FIELDS,
+            "organization_id",
+        ),
+        "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
+    )
+    _release_require(
+        checked_sample_set["policy_digest"] == checked_policy["policy_digest"],
+        "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
+        "$.policy_digest",
+    )
+    _release_require_bindings(
+        checked_sample_set,
         checked_benchmark,
         ("package",) + _RELEASE_POLICY_BENCHMARK_FIELDS,
         "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
@@ -59,6 +76,15 @@ def derive_release_gate_evaluation(
         for item in candidate_samples
         if item["disposition"] == "EXCLUDED"
     ]
+    allowed_reasons = set(checked_policy["infrastructure_reason_codes"])
+    _release_require(
+        all(
+            item["infrastructure_reason_code"] in allowed_reasons
+            for item in excluded
+        ),
+        "RELEASE_SAMPLE_EXCLUSION_REASON_INVALID",
+        "$.samples",
+    )
     reason_counts: dict[str, int] = {}
     for item in excluded:
         reason = item["infrastructure_reason_code"]

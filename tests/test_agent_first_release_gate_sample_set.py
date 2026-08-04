@@ -9,7 +9,10 @@ from types import ModuleType
 import unittest
 
 from pullwise_server.agent_first_contract_bundle import build_bundle
-from tests.release_gate_sample_set_support import coherent_bootstrap_documents
+from tests.release_gate_sample_set_support import (
+    bound_minimal_documents,
+    coherent_bootstrap_documents,
+)
 
 
 SOURCE_ROOT = (
@@ -151,6 +154,65 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
                     raised.exception.detail,
                 )
 
+    def test_sample_kind_requires_matching_unknown_family(self) -> None:
+        golden = self.contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
+        tampered = deepcopy(golden)
+        tampered.pop("sample_set_digest")
+        tampered["samples"][0]["task_kind"] = "UNKNOWN"
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.seal_document(
+                "release-gate-sample-set/v1", tampered
+            )
+        self.assertEqual(
+            "RELEASE_SAMPLE_TASK_KIND_INVALID",
+            raised.exception.detail,
+        )
+
+    def test_expected_failure_is_only_for_classification_tasks(self) -> None:
+        golden = self.contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
+        tampered = deepcopy(golden)
+        tampered.pop("sample_set_digest")
+        tampered["samples"][0]["expected_failure_outcome"] = "BLOCKED"
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.seal_document(
+                "release-gate-sample-set/v1", tampered
+            )
+        self.assertEqual(
+            "RELEASE_SAMPLE_EXPECTED_OUTCOME_INVALID",
+            raised.exception.detail,
+        )
+
+    def test_observation_numerators_cannot_exceed_declared_facts(self) -> None:
+        golden = self.contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
+        cases = (
+            ("reported_oracle_in_scope_finding_count", 2),
+            ("covered_mandatory_requirement_count", 2),
+            ("covered_source_state_proof_count", 2),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                tampered = deepcopy(golden)
+                tampered.pop("sample_set_digest")
+                tampered["samples"][0]["observation"][field] = value
+                with self.assertRaises(
+                    self.contract.ContractValidationError
+                ) as raised:
+                    self.contract.seal_document(
+                        "release-gate-sample-set/v1", tampered
+                    )
+                self.assertEqual(
+                    "RELEASE_SAMPLE_OBSERVATION_INVALID",
+                    raised.exception.detail,
+                )
+
     def test_derivation_rejects_sample_set_not_bound_to_benchmark(self) -> None:
         benchmark = self.contract.fixture(
             "benchmark_bundle_golden_current"
@@ -194,6 +256,45 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
                     "excluded_reason_counts",
                 )
             },
+        )
+
+    def test_derivation_exactly_binds_sample_set_to_policy(self) -> None:
+        benchmark, policy, sample_set = bound_minimal_documents(self.contract)
+        tampered = deepcopy(sample_set)
+        tampered.pop("sample_set_digest")
+        tampered["policy_digest"] = "0" * 64
+        tampered = self.contract.seal_document(
+            "release-gate-sample-set/v1", tampered
+        )
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.derive_release_gate_evaluation(
+                benchmark, policy, tampered
+            )
+        self.assertEqual(
+            "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
+            raised.exception.detail,
+        )
+
+    def test_derivation_rejects_unapproved_exclusion_reason(self) -> None:
+        benchmark, policy, sample_set = bound_minimal_documents(self.contract)
+        tampered = deepcopy(sample_set)
+        tampered.pop("sample_set_digest")
+        sample = tampered["samples"][0]
+        sample["disposition"] = "EXCLUDED"
+        sample["infrastructure_reason_code"] = "INFRA_NOT_APPROVED"
+        sample["observation"] = None
+        tampered = self.contract.seal_document(
+            "release-gate-sample-set/v1", tampered
+        )
+
+        with self.assertRaises(self.contract.ContractValidationError) as raised:
+            self.contract.derive_release_gate_evaluation(
+                benchmark, policy, tampered
+            )
+        self.assertEqual(
+            "RELEASE_SAMPLE_EXCLUSION_REASON_INVALID",
+            raised.exception.detail,
         )
 
 

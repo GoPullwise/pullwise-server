@@ -217,4 +217,81 @@ def coherent_bootstrap_documents(contract):
     return benchmark, policy, sample_set
 
 
-__all__ = ["coherent_bootstrap_documents"]
+def bound_minimal_documents(contract):
+    sample_set = deepcopy(
+        contract.fixture(
+            "release_gate_sample_set_golden_bootstrap_included"
+        )["document"]
+    )
+    benchmark = deepcopy(
+        contract.fixture("benchmark_bundle_golden_current")["document"]
+    )
+    benchmark.pop("bundle_digest")
+    benchmark["task_inventory_digest"] = sample_set[
+        "task_inventory_digest"
+    ]
+    benchmark = contract.seal_document("benchmark-bundle/v1", benchmark)
+
+    policy = deepcopy(
+        contract.fixture("release_gate_policy_golden_bootstrap")["document"]
+    )
+    policy.pop("policy_digest")
+    policy["benchmark_ref"] = _content_ref(
+        contract, policy["benchmark_ref"], benchmark
+    )
+    policy["benchmark_digest"] = benchmark["bundle_digest"]
+    policy["task_inventory_digest"] = benchmark["task_inventory_digest"]
+    policy["candidate_digest"] = _digest(
+        contract,
+        "pullwise:candidate-digest:v1",
+        {
+            field: policy[field]
+            for field in (
+                "package",
+                "candidate_build_id",
+                "control_plane_digest",
+                "evaluation_runtime_digest",
+                "benchmark_ref",
+                "benchmark_digest",
+                "threshold_table_digest",
+                "profile_budget_digest",
+                "canary_plan_digest",
+            )
+        },
+    )
+    policy = contract.seal_document("release-gate-policy/v1", policy)
+
+    sample_set.pop("sample_set_digest")
+    for field in (
+        "package",
+        "candidate_build_id",
+        "candidate_digest",
+        "release_mode",
+        "stable_package",
+        "stable_candidate_digest",
+        "stable_control_plane_digest",
+        "benchmark_version",
+        "task_inventory_digest",
+        "oracle_rubric_digest",
+        "environment_image_digest",
+        "control_plane_digest",
+        "evaluation_runtime_digest",
+        "statistical_implementation_version",
+        "organization_id",
+    ):
+        sample_set[field] = policy[field]
+    sample_set["benchmark_ref"] = _content_ref(
+        contract, sample_set["benchmark_ref"], benchmark
+    )
+    sample_set["benchmark_digest"] = benchmark["bundle_digest"]
+    sample_set["policy_ref"] = _content_ref(
+        contract, sample_set["policy_ref"], policy
+    )
+    sample_set["policy_digest"] = policy["policy_digest"]
+    sample_set = contract.seal_document(
+        "release-gate-sample-set/v1", sample_set
+    )
+    return benchmark, policy, sample_set
+
+
+__all__ = ["bound_minimal_documents", "coherent_bootstrap_documents"]

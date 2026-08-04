@@ -39,12 +39,47 @@ function ruleReleaseGateSampleSet(value) {
   );
   const tasks = new Map();
   samples.forEach((sample, index) => {
+    releaseRequire(
+      (sample.task_kind === "KNOWN") ===
+        (sample.unknown_family_id === null),
+      "RELEASE_SAMPLE_TASK_KIND_INVALID",
+      "$.samples[" + index + "]",
+    );
+    const classificationTask = sample.case_category ===
+      "ENVIRONMENT_OR_CAPABILITY_FAILURE";
+    releaseRequire(
+      classificationTask === (sample.expected_failure_outcome !== null),
+      "RELEASE_SAMPLE_EXPECTED_OUTCOME_INVALID",
+      "$.samples[" + index + "]",
+    );
     if (sample.disposition === "INCLUDED") {
       const complete = sample.evidence_issue_codes.length === 0;
       releaseRequire(
         (sample.observation !== null) === complete,
         "RELEASE_SAMPLE_EVIDENCE_INVALID",
         "$.samples[" + index + "]",
+      );
+    }
+    if (sample.observation !== null) {
+      const observation = sample.observation;
+      const bounds = [
+        [
+          observation.reported_oracle_in_scope_finding_count,
+          sample.oracle_in_scope_finding_count,
+        ],
+        [
+          observation.covered_mandatory_requirement_count,
+          observation.mandatory_requirement_count,
+        ],
+        [
+          observation.covered_source_state_proof_count,
+          observation.source_state_proof_count,
+        ],
+      ];
+      releaseRequire(
+        bounds.every(([numerator, denominator]) => numerator <= denominator),
+        "RELEASE_SAMPLE_OBSERVATION_INVALID",
+        "$.samples[" + index + "].observation",
       );
     }
     const identity = Object.fromEntries(

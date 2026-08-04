@@ -40,6 +40,23 @@ export async function deriveReleaseGateEvaluation(
   );
   releaseRequireBindings(
     checkedSampleSet,
+    checkedPolicy,
+    [
+      "package", "candidate_build_id", "candidate_digest",
+      "release_mode", "stable_package", "stable_candidate_digest",
+      "stable_control_plane_digest", "benchmark_ref",
+      "benchmark_digest", ...RELEASE_POLICY_BENCHMARK_FIELDS,
+      "organization_id",
+    ],
+    "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
+  );
+  releaseRequire(
+    checkedSampleSet.policy_digest === checkedPolicy.policy_digest,
+    "RELEASE_SAMPLE_POLICY_BINDING_INVALID",
+    "$.policy_digest",
+  );
+  releaseRequireBindings(
+    checkedSampleSet,
     checkedBenchmark,
     ["package", ...RELEASE_POLICY_BENCHMARK_FIELDS],
     "RELEASE_SAMPLE_BENCHMARK_BINDING_INVALID",
@@ -54,6 +71,15 @@ export async function deriveReleaseGateEvaluation(
   );
   const excluded = candidateSamples.filter(
     (item) => item.disposition === "EXCLUDED",
+  );
+  releaseRequire(
+    excluded.every(
+      (item) => checkedPolicy.infrastructure_reason_codes.includes(
+        item.infrastructure_reason_code,
+      ),
+    ),
+    "RELEASE_SAMPLE_EXCLUSION_REASON_INVALID",
+    "$.samples",
   );
   const reasonCounts = new Map();
   for (const item of excluded) {

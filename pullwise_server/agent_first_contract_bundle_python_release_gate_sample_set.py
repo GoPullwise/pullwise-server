@@ -39,12 +39,49 @@ def _rule_release_gate_sample_set(value: dict[str, object]) -> None:
     )
     tasks: dict[str, dict[str, object]] = {}
     for index, sample in enumerate(samples):
+        _release_require(
+            (sample["task_kind"] == "KNOWN")
+            == (sample["unknown_family_id"] is None),
+            "RELEASE_SAMPLE_TASK_KIND_INVALID",
+            f"$.samples[{index}]",
+        )
+        classification_task = (
+            sample["case_category"]
+            == "ENVIRONMENT_OR_CAPABILITY_FAILURE"
+        )
+        _release_require(
+            classification_task
+            == (sample["expected_failure_outcome"] is not None),
+            "RELEASE_SAMPLE_EXPECTED_OUTCOME_INVALID",
+            f"$.samples[{index}]",
+        )
         if sample["disposition"] == "INCLUDED":
             complete = not sample["evidence_issue_codes"]
             _release_require(
                 (sample["observation"] is not None) == complete,
                 "RELEASE_SAMPLE_EVIDENCE_INVALID",
                 f"$.samples[{index}]",
+            )
+        observation = sample["observation"]
+        if observation is not None:
+            bounds = (
+                (
+                    observation["reported_oracle_in_scope_finding_count"],
+                    sample["oracle_in_scope_finding_count"],
+                ),
+                (
+                    observation["covered_mandatory_requirement_count"],
+                    observation["mandatory_requirement_count"],
+                ),
+                (
+                    observation["covered_source_state_proof_count"],
+                    observation["source_state_proof_count"],
+                ),
+            )
+            _release_require(
+                all(numerator <= denominator for numerator, denominator in bounds),
+                "RELEASE_SAMPLE_OBSERVATION_INVALID",
+                f"$.samples[{index}].observation",
             )
         identity = {
             field: sample[field] for field in ("cohort", "task_id", "seed")
