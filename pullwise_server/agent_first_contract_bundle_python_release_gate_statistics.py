@@ -7,6 +7,7 @@ PYTHON_RELEASE_GATE_STATISTICS = r'''
 _RELEASE_SUCCESS_OUTCOMES = {"COMPLETED", "NO_CHANGE_NEEDED"}
 _RELEASE_CLASSIFICATION_CATEGORY = "ENVIRONMENT_OR_CAPABILITY_FAILURE"
 _RELEASE_BPS_SCALE = 10_000
+_RELEASE_SAFE_INTEGER = 9_007_199_254_740_991
 
 
 def _release_rate_bps(
@@ -15,9 +16,12 @@ def _release_rate_bps(
     if denominator == 0:
         return None
     scaled = numerator * _RELEASE_BPS_SCALE
-    if upward:
-        return (scaled + denominator - 1) // denominator
-    return scaled // denominator
+    result = (
+        (scaled + denominator - 1) // denominator
+        if upward
+        else scaled // denominator
+    )
+    return min(result, _RELEASE_SAFE_INTEGER)
 
 
 def _release_isqrt(value: int) -> int:

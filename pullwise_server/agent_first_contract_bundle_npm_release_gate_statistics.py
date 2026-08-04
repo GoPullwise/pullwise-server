@@ -8,13 +8,19 @@ const RELEASE_SUCCESS_OUTCOMES = new Set(["COMPLETED", "NO_CHANGE_NEEDED"]);
 const RELEASE_CLASSIFICATION_CATEGORY =
   "ENVIRONMENT_OR_CAPABILITY_FAILURE";
 const RELEASE_BPS_SCALE = 10000;
+const RELEASE_SAFE_INTEGER = 9007199254740991n;
 
 function releaseRateBps(numerator, denominator, upward) {
   if (denominator === 0) return null;
-  const scaled = numerator * RELEASE_BPS_SCALE;
-  return upward
-    ? Math.floor((scaled + denominator - 1) / denominator)
-    : Math.floor(scaled / denominator);
+  const numeratorValue = BigInt(numerator);
+  const denominatorValue = BigInt(denominator);
+  const scaled = numeratorValue * BigInt(RELEASE_BPS_SCALE);
+  const result = upward
+    ? (scaled + denominatorValue - 1n) / denominatorValue
+    : scaled / denominatorValue;
+  return Number(
+    result > RELEASE_SAFE_INTEGER ? RELEASE_SAFE_INTEGER : result,
+  );
 }
 
 function releaseBigIntSqrt(value) {
