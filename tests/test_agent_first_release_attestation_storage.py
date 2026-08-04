@@ -407,6 +407,12 @@ class AgentFirstReleaseAttestationStorageTest(unittest.TestCase):
 
         self.assertEqual(stored.verdict, "PASS")
         self.assertEqual(stored.exit_code, 0)
+        self.assertEqual(
+            stored.sample_set_bytes,
+            self.contract.canonical_validated_bytes(
+                "release-gate-sample-set/v1", sample_set
+            ),
+        )
 
     def test_unsigned_report_is_rejected_before_evaluation_or_attestation_write(
         self,

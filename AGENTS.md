@@ -769,15 +769,17 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
   principal, baseline/canary runtime state, external evidence, production
   HTTP/auth, Worker-loop activation, D24, deployment, or canary is implied.
 - Durable release-evaluator storage is Server-only and current-package-only.
-  `db.initialize()` installs exactly three normalized append-only tables for
-  benchmark bundles, release-gate policies, and release-gate reports. Before a
-  report can be persisted, one `BEGIN IMMEDIATE` transaction must insert or
-  exactly replay the canonical benchmark/policy pair. The later report
-  transaction must require that exact pair and may insert or replay only the
+  `db.initialize()` installs exactly four normalized append-only tables for
+  benchmark bundles, release-gate policies, release-gate sample sets, and
+  release-gate reports. Before a report can be persisted, one
+  `BEGIN IMMEDIATE` transaction must insert or exactly replay the canonical
+  benchmark/policy pair. The later evaluation transaction must require that
+  exact pair and atomically insert or replay the exact-bound sample set and
   report; it must never backfill missing inputs. Input-stage faults roll back
-  both frozen rows, while report-stage faults preserve the already-frozen pair.
-  A freeze is fresh only when neither row exists and is an exact replay only
-  when both rows match. Any one-sided pair state is
+  both frozen rows, while evaluation-stage faults preserve the already-frozen
+  pair and roll back both sample set and report. A freeze is fresh only when
+  neither row exists and is an exact replay only when both rows match. Any
+  one-sided pair state is
   `AUTHORITY_RELOAD_REQUIRED`; neither freeze nor report persistence may repair
   or reinterpret it as caller input.
 - Keep each document's domain-separated digest distinct from the SHA-256 of
