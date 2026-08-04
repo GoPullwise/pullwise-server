@@ -217,6 +217,81 @@ def coherent_bootstrap_documents(contract):
     return benchmark, policy, sample_set
 
 
+def coherent_stable_documents(contract):
+    benchmark, policy, sample_set = coherent_bootstrap_documents(contract)
+    policy = deepcopy(policy)
+    policy.pop("policy_digest")
+    policy["release_mode"] = "STABLE"
+    policy["stable_package"] = deepcopy(policy["package"])
+    policy["stable_candidate_digest"] = "9" * 64
+    policy["stable_control_plane_digest"] = policy["control_plane_digest"]
+    for gate in policy["relative_gates"]:
+        gate["applicability"] = "REQUIRED"
+    policy["threshold_table_digest"] = _digest(
+        contract,
+        "pullwise:release-threshold-table:v1",
+        {
+            "absolute_gates": policy["absolute_gates"],
+            "relative_gates": policy["relative_gates"],
+            "infrastructure_reason_codes": policy[
+                "infrastructure_reason_codes"
+            ],
+        },
+    )
+    policy["candidate_digest"] = _digest(
+        contract,
+        "pullwise:candidate-digest:v1",
+        {
+            field: policy[field]
+            for field in (
+                "package",
+                "candidate_build_id",
+                "control_plane_digest",
+                "evaluation_runtime_digest",
+                "benchmark_ref",
+                "benchmark_digest",
+                "threshold_table_digest",
+                "profile_budget_digest",
+                "canary_plan_digest",
+            )
+        },
+    )
+    policy = contract.seal_document("release-gate-policy/v1", policy)
+
+    sample_set = deepcopy(sample_set)
+    sample_set.pop("sample_set_digest")
+    for field in (
+        "candidate_digest",
+        "release_mode",
+        "stable_package",
+        "stable_candidate_digest",
+        "stable_control_plane_digest",
+    ):
+        sample_set[field] = policy[field]
+    sample_set["policy_ref"] = _content_ref(
+        contract, sample_set["policy_ref"], policy
+    )
+    sample_set["policy_digest"] = policy["policy_digest"]
+    stable_samples = []
+    for candidate in sample_set["samples"]:
+        stable = deepcopy(candidate)
+        stable["cohort"] = "STABLE"
+        stable["sample_id"] = "sample_" + _digest(
+            contract,
+            "pullwise:release-gate-sample-identity:v1",
+            {
+                field: stable[field]
+                for field in ("cohort", "task_id", "seed")
+            },
+        )
+        stable_samples.append(stable)
+    sample_set["samples"].extend(stable_samples)
+    sample_set = contract.seal_document(
+        "release-gate-sample-set/v1", sample_set
+    )
+    return benchmark, policy, sample_set
+
+
 def bound_minimal_documents(contract):
     sample_set = deepcopy(
         contract.fixture(
@@ -294,4 +369,8 @@ def bound_minimal_documents(contract):
     return benchmark, policy, sample_set
 
 
-__all__ = ["bound_minimal_documents", "coherent_bootstrap_documents"]
+__all__ = [
+    "bound_minimal_documents",
+    "coherent_bootstrap_documents",
+    "coherent_stable_documents",
+]

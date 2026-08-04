@@ -238,6 +238,56 @@ function releaseCohortMetrics(samples, cohort) {
     profile_maxima: profileMaxima,
   };
 }
+
+function releaseRelativeRegressionBps(gateId, candidate, stable) {
+  const metricByGate = {
+    relative_classification_accuracy_drop_bps:
+      "classification_accuracy_bps",
+    relative_false_discovery_increase_bps:
+      "false_discovery_rate_bps",
+    relative_false_verified_regression_bps:
+      "false_verified_rate_bps",
+    relative_known_task_success_drop_bps:
+      "known_task_success_rate_bps",
+    relative_known_unaided_completion_drop_bps:
+      "known_unaided_completion_bps",
+    relative_unknown_task_success_drop_bps:
+      "unknown_task_success_rate_bps",
+    relative_unknown_unaided_completion_drop_bps:
+      "unknown_unaided_completion_bps",
+  };
+  if ([
+    "relative_wall_time_increase_bps",
+    "relative_cost_increase_bps",
+  ].includes(gateId)) {
+    const metric = gateId === "relative_wall_time_increase_bps"
+      ? "p95_wall_ms" : "p95_cost_microusd";
+    const candidateValue = candidate[metric];
+    const stableValue = stable[metric];
+    if (candidateValue === null || stableValue === null || stableValue === 0) {
+      return null;
+    }
+    return releaseRateBps(
+      Math.max(0, candidateValue - stableValue),
+      stableValue,
+      true,
+    );
+  }
+  const metric = metricByGate[gateId];
+  const candidateValue = candidate[metric];
+  const stableValue = stable[metric];
+  if (candidateValue === null || stableValue === null) return null;
+  const badDirection = [
+    "relative_false_discovery_increase_bps",
+    "relative_false_verified_regression_bps",
+  ].includes(gateId);
+  return Math.max(
+    0,
+    badDirection
+      ? candidateValue - stableValue
+      : stableValue - candidateValue,
+  );
+}
 '''
 
 

@@ -98,6 +98,28 @@ export async function deriveReleaseGateEvaluation(
     checkedSampleSet.samples,
     "CANDIDATE",
   );
+  let stableMetrics = null;
+  if (checkedPolicy.release_mode === "STABLE") {
+    const key = (item) => item.task_id + String.fromCharCode(0) + item.seed;
+    const candidateKeys = checkedSampleSet.samples
+      .filter((item) => item.cohort === "CANDIDATE")
+      .map(key);
+    const stableKeys = checkedSampleSet.samples
+      .filter((item) => item.cohort === "STABLE")
+      .map(key);
+    if (
+      !releaseSame(candidateKeys, stableKeys) ||
+      !releaseInventoryComplete(
+        checkedSampleSet.samples,
+        checkedBenchmark,
+        "STABLE",
+      )
+    ) reasons.add("BASELINE_INCOMPARABLE");
+    stableMetrics = releaseCohortMetrics(
+      checkedSampleSet.samples,
+      "STABLE",
+    );
+  }
   const metricNames = checkedPolicy.absolute_gates.map(
     (item) => item.gate_id.replace(/^absolute_/, ""),
   );
@@ -123,14 +145,32 @@ export async function deriveReleaseGateEvaluation(
       status,
     };
   });
-  const relativeResults = checkedPolicy.relative_gates.map((gate) => ({
-    gate_id: gate.gate_id,
-    applicability: gate.applicability,
-    max_regression_bps: gate.max_regression_bps,
-    observed_regression_bps: null,
-    status: gate.applicability === "NOT_APPLICABLE"
-      ? "NOT_APPLICABLE" : "INDETERMINATE",
-  }));
+  const relativeResults = checkedPolicy.relative_gates.map((gate) => {
+    let observed = null;
+    let status = "NOT_APPLICABLE";
+    if (gate.applicability === "REQUIRED") {
+      observed = reasons.size > 0 || stableMetrics === null
+        ? null
+        : releaseRelativeRegressionBps(
+          gate.gate_id,
+          candidateMetrics,
+          stableMetrics,
+        );
+      if (observed === null) {
+        reasons.add("BASELINE_INCOMPARABLE");
+        status = "INDETERMINATE";
+      } else {
+        status = observed <= gate.max_regression_bps ? "PASS" : "FAIL";
+      }
+    }
+    return {
+      gate_id: gate.gate_id,
+      applicability: gate.applicability,
+      max_regression_bps: gate.max_regression_bps,
+      observed_regression_bps: observed,
+      status,
+    };
+  });
   const profileResults = checkedPolicy.profile_budgets.map((budget) => {
     const measurements = candidateMetrics.profile_maxima[budget.profile_id];
     if (reasons.size > 0 || measurements === undefined) {

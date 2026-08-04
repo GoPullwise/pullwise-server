@@ -288,6 +288,62 @@ def _release_cohort_metrics(
         ),
         "profile_maxima": profile_maxima,
     }
+
+
+def _release_relative_regression_bps(
+    gate_id: str,
+    candidate: dict[str, object],
+    stable: dict[str, object],
+) -> int | None:
+    metric_by_gate = {
+        "relative_classification_accuracy_drop_bps":
+            "classification_accuracy_bps",
+        "relative_false_discovery_increase_bps":
+            "false_discovery_rate_bps",
+        "relative_false_verified_regression_bps":
+            "false_verified_rate_bps",
+        "relative_known_task_success_drop_bps":
+            "known_task_success_rate_bps",
+        "relative_known_unaided_completion_drop_bps":
+            "known_unaided_completion_bps",
+        "relative_unknown_task_success_drop_bps":
+            "unknown_task_success_rate_bps",
+        "relative_unknown_unaided_completion_drop_bps":
+            "unknown_unaided_completion_bps",
+    }
+    if gate_id in {
+        "relative_wall_time_increase_bps",
+        "relative_cost_increase_bps",
+    }:
+        metric = (
+            "p95_wall_ms"
+            if gate_id == "relative_wall_time_increase_bps"
+            else "p95_cost_microusd"
+        )
+        candidate_value = candidate[metric]
+        stable_value = stable[metric]
+        if candidate_value is None or stable_value in {None, 0}:
+            return None
+        return _release_rate_bps(
+            max(0, candidate_value - stable_value),
+            stable_value,
+            upward=True,
+        )
+    metric = metric_by_gate[gate_id]
+    candidate_value = candidate[metric]
+    stable_value = stable[metric]
+    if candidate_value is None or stable_value is None:
+        return None
+    bad_direction = gate_id in {
+        "relative_false_discovery_increase_bps",
+        "relative_false_verified_regression_bps",
+    }
+    difference = (
+        candidate_value - stable_value
+        if bad_direction
+        else stable_value - candidate_value
+    )
+    return max(0, difference)
 '''
 
 

@@ -101,6 +101,28 @@ def derive_release_gate_evaluation(
     candidate_metrics = _release_cohort_metrics(
         checked_sample_set["samples"], "CANDIDATE"
     )
+    stable_metrics = None
+    if checked_policy["release_mode"] == "STABLE":
+        candidate_keys = {
+            (item["task_id"], item["seed"])
+            for item in checked_sample_set["samples"]
+            if item["cohort"] == "CANDIDATE"
+        }
+        stable_keys = {
+            (item["task_id"], item["seed"])
+            for item in checked_sample_set["samples"]
+            if item["cohort"] == "STABLE"
+        }
+        if (
+            candidate_keys != stable_keys
+            or not _release_inventory_complete(
+                checked_sample_set["samples"], checked_benchmark, "STABLE"
+            )
+        ):
+            reasons.add("BASELINE_INCOMPARABLE")
+        stable_metrics = _release_cohort_metrics(
+            checked_sample_set["samples"], "STABLE"
+        )
     metric_names = [
         item["gate_id"].removeprefix("absolute_")
         for item in checked_policy["absolute_gates"]
@@ -137,20 +159,37 @@ def derive_release_gate_evaluation(
                 "status": status,
             }
         )
-    relative_results = [
-        {
-            "gate_id": gate["gate_id"],
-            "applicability": gate["applicability"],
-            "max_regression_bps": gate["max_regression_bps"],
-            "observed_regression_bps": None,
-            "status": (
-                "NOT_APPLICABLE"
-                if gate["applicability"] == "NOT_APPLICABLE"
-                else "INDETERMINATE"
-            ),
-        }
-        for gate in checked_policy["relative_gates"]
-    ]
+    relative_results = []
+    for gate in checked_policy["relative_gates"]:
+        if gate["applicability"] == "NOT_APPLICABLE":
+            observed_regression = None
+            relative_status = "NOT_APPLICABLE"
+        else:
+            observed_regression = (
+                None
+                if reasons or stable_metrics is None
+                else _release_relative_regression_bps(
+                    gate["gate_id"], candidate_metrics, stable_metrics
+                )
+            )
+            if observed_regression is None:
+                reasons.add("BASELINE_INCOMPARABLE")
+                relative_status = "INDETERMINATE"
+            else:
+                relative_status = (
+                    "PASS"
+                    if observed_regression <= gate["max_regression_bps"]
+                    else "FAIL"
+                )
+        relative_results.append(
+            {
+                "gate_id": gate["gate_id"],
+                "applicability": gate["applicability"],
+                "max_regression_bps": gate["max_regression_bps"],
+                "observed_regression_bps": observed_regression,
+                "status": relative_status,
+            }
+        )
     profile_results = []
     for budget in checked_policy["profile_budgets"]:
         measurements = candidate_metrics["profile_maxima"].get(

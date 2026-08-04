@@ -12,6 +12,7 @@ from pullwise_server.agent_first_contract_bundle import build_bundle
 from tests.release_gate_sample_set_support import (
     bound_minimal_documents,
     coherent_bootstrap_documents,
+    coherent_stable_documents,
 )
 
 
@@ -322,6 +323,24 @@ class AgentFirstReleaseGateSampleSetTest(unittest.TestCase):
             ],
             observed["profile_results"],
         )
+        self.assertEqual(("PASS", 0), (observed["verdict"], observed["exit_code"]))
+
+    def test_stable_equal_cohorts_derive_zero_relative_regression(self) -> None:
+        benchmark, policy, sample_set = coherent_stable_documents(
+            self.contract
+        )
+        observed = self.contract.derive_release_gate_evaluation(
+            benchmark, policy, sample_set
+        )
+
+        self.assertTrue(
+            all(
+                item["observed_regression_bps"] == 0
+                and item["status"] == "PASS"
+                for item in observed["relative_results"]
+            )
+        )
+        self.assertEqual([], observed["indeterminate_reason_codes"])
         self.assertEqual(("PASS", 0), (observed["verdict"], observed["exit_code"]))
 
     def test_derivation_exactly_binds_sample_set_to_policy(self) -> None:
