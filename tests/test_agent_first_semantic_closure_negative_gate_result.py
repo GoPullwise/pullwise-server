@@ -25,6 +25,7 @@ OWNED_RULE_IDS = frozenset(
         "release_gate_attestation",
         "release_gate_policy",
         "release_gate_report",
+        "release_gate_sample_set",
         "release_key_revocation",
         "release_principal",
         "release_signing_key",
@@ -144,6 +145,14 @@ def build_gate_result_negative_cases(
                 "release_gate_report_negative_exit_verdict_mismatch"
             ),
             failure("RELEASE_REPORT_VERDICT_INVALID", "$.exit_code"),
+        ),
+        case(
+            "release_gate_sample_set",
+            "release_gate_sample_set_negative_excluded_without_reason",
+            harness.fixture_document(
+                "release_gate_sample_set_negative_excluded_without_reason"
+            ),
+            failure("RELEASE_SAMPLE_ID_INVALID", "$.samples[0].sample_id"),
         ),
         case(
             "release_gate_attestation",

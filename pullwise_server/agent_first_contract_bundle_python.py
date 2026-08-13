@@ -33,9 +33,11 @@ _TEMPLATE = '''"""Generated from the Server-owned Agent-First bundle; do not edi
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import re
+import threading
 import unicodedata
 
 PACKAGE_IDENTITY = @@IDENTITY@@
@@ -45,6 +47,11 @@ CONTENT_SHA256 = @@CONTENT@@
 PACKAGE_TUPLE = (PACKAGE_IDENTITY, PACKAGE_VERSION, CONTENT_SHA256, ROOT_SHA256)
 BUNDLE_BASE64 = @@PAYLOAD@@
 SAFE_INTEGER = (1 << 53) - 1
+_BUNDLE_CACHE_LOCK = threading.Lock()
+_BUNDLE_BYTES_CACHE: bytes | None = None
+_BUNDLE_CACHE: dict[str, object] | None = None
+_DOCUMENT_INDEX_CACHE: dict[str, dict[str, dict[str, object]]] | None = None
+_IDENTITY_KEYS = {"schemas": "$id", "fixtures": "fixture_id"}
 
 
 class ContractValidationError(ValueError):
@@ -96,16 +103,43 @@ def canonical_document_sha256(value: object) -> str:
     return hashlib.sha256(canonical_document_bytes(value)).hexdigest()
 
 
+def _bundle_state() -> tuple[
+    bytes,
+    dict[str, object],
+    dict[str, dict[str, dict[str, object]]],
+]:
+    global _BUNDLE_BYTES_CACHE, _BUNDLE_CACHE, _DOCUMENT_INDEX_CACHE
+    if _BUNDLE_CACHE is None:
+        with _BUNDLE_CACHE_LOCK:
+            if _BUNDLE_CACHE is None:
+                decoded = base64.b64decode(BUNDLE_BASE64, validate=True)
+                parsed = json.loads(decoded.decode("utf-8"))
+                indexes: dict[str, dict[str, dict[str, object]]] = {
+                    collection: {} for collection in _IDENTITY_KEYS
+                }
+                for family in parsed["families"]:
+                    for collection, identity_key in _IDENTITY_KEYS.items():
+                        for document in family[collection]:
+                            indexes[collection][document[identity_key]] = document
+                _BUNDLE_BYTES_CACHE = decoded
+                _BUNDLE_CACHE = parsed
+                _DOCUMENT_INDEX_CACHE = indexes
+    assert _BUNDLE_BYTES_CACHE is not None
+    assert _BUNDLE_CACHE is not None
+    assert _DOCUMENT_INDEX_CACHE is not None
+    return _BUNDLE_BYTES_CACHE, _BUNDLE_CACHE, _DOCUMENT_INDEX_CACHE
+
+
 def bundle_bytes() -> bytes:
-    return base64.b64decode(BUNDLE_BASE64, validate=True)
+    return _bundle_state()[0]
 
 
 def bundle() -> dict[str, object]:
-    return json.loads(bundle_bytes().decode("utf-8"))
+    return copy.deepcopy(_bundle_state()[1])
 
 
 def root_manifest() -> dict[str, object]:
-    return bundle()["root_manifest"]
+    return copy.deepcopy(_bundle_state()[1]["root_manifest"])
 
 
 def root_manifest_bytes() -> bytes:
@@ -122,16 +156,29 @@ def package_tuple() -> dict[str, object]:
     }
 
 
+def _find_cached(
+    collection: str,
+    identity_key: str,
+    identity: str,
+) -> dict[str, object]:
+    if _IDENTITY_KEYS.get(collection) != identity_key:
+        raise KeyError(identity)
+    try:
+        return _bundle_state()[2][collection][identity]
+    except KeyError as exc:
+        raise KeyError(identity) from exc
+
+
 def _find(collection: str, identity_key: str, identity: str) -> dict[str, object]:
-    for family in bundle()["families"]:
-        for document in family[collection]:
-            if document[identity_key] == identity:
-                return json.loads(canonical_document_bytes(document).decode("utf-8"))
-    raise KeyError(identity)
+    return copy.deepcopy(_find_cached(collection, identity_key, identity))
 
 
 def schema(schema_id: str) -> dict[str, object]:
     return _find("schemas", "$id", schema_id)
+
+
+def _schema(schema_id: str) -> dict[str, object]:
+    return _find_cached("schemas", "$id", schema_id)
 
 
 def schema_bytes(schema_id: str) -> bytes:
@@ -161,7 +208,7 @@ def _validate_node(rule: dict[str, object], value: object, path: str) -> None:
     if "oneOf" in rule:
         _validate_one_of(rule["oneOf"], value, path)
     if "$ref" in rule:
-        _validate_node(schema(rule["$ref"]), value, path)
+        _validate_node(_schema(rule["$ref"]), value, path)
         _validate_reference_annotations(rule, value, path)
         return
     if "const" in rule and not _json_equal(value, rule["const"]):
@@ -224,7 +271,7 @@ def validate_document(schema_id: str, value: object) -> dict[str, object]:
     if _schema_role(schema_id) != "public_document":
         _fail("CONTRACT_INTERNAL_CONSTRAINT", schema_id)
     detached = json.loads(canonical_document_bytes(value).decode("utf-8"))
-    _validate_node(schema(schema_id), detached, "$")
+    _validate_node(_schema(schema_id), detached, "$")
     _validate_semantics(schema_id, detached)
     return detached
 
@@ -234,7 +281,7 @@ def canonical_validated_bytes(schema_id: str, value: object) -> bytes:
 
 
 def _digest_spec(schema_id: str) -> tuple[str, str]:
-    spec = schema(schema_id).get("x-pullwise-digest")
+    spec = _schema(schema_id).get("x-pullwise-digest")
     if not isinstance(spec, dict):
         _fail("CONTRACT_DIGEST_UNDECLARED", schema_id)
     field, domain = spec.get("field"), spec.get("domain")
@@ -274,7 +321,7 @@ def verify_document_digest(
 
 
 def signature_message(schema_id: str, complete_value: object) -> bytes:
-    semantics = schema(schema_id).get("x-pullwise-semantics")
+    semantics = _schema(schema_id).get("x-pullwise-semantics")
     contract = (
         semantics.get("signature_contract")
         if isinstance(semantics, dict)

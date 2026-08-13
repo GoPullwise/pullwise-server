@@ -53,14 +53,13 @@ from .agent_first_contract_bundle_python_verification import PYTHON_VERIFICATION
 
 PYTHON_SEMANTICS_BASE = r'''
 def _public_error_code(detail: str, explicit: str | None) -> str:
-    document = json.loads(base64.b64decode(BUNDLE_BASE64).decode("utf-8"))
-    codes = {
-        entry["code"]
-        for family in document["families"]
-        for item in family["fixtures"]
-        if item["fixture_id"] == "error_golden_current_registry"
-        for entry in item["document"]["entries"]
-    }
+    try:
+        registry = _find_cached(
+            "fixtures", "fixture_id", "error_golden_current_registry"
+        )
+    except KeyError:
+        return "CONTRACT_DOCUMENT_INVALID"
+    codes = {entry["code"] for entry in registry["document"]["entries"]}
     candidate = explicit or detail
     return candidate if candidate in codes else "CONTRACT_DOCUMENT_INVALID"
 
