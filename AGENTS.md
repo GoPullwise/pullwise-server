@@ -963,6 +963,7 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 ## Agent-First Generated Artifact Semantics
 
 - Generated Agent-First publication artifacts are exact-byte test fixtures. Keep contracts/agent-first/current/published/*.json, generated/agent-task-contract-npm/index.js, generated/agent-task-contract-npm/package.json, and pullwise_server/_generated_agent_task_contract.py pinned to LF line endings; CRLF working-tree rewrites make write_generated(..., check=True) and wrapper lock tests fail.
+- The generated NPM facade must cache decoded bundle bytes and the parsed bundle object. Schema/$ref lookup must not decode and parse the embedded bundle for every validation call; expose byte copies and a deeply frozen parsed cache so public helpers remain mutation-isolated; keep the direct repeated-helper regression in tests/test_agent_first_contract_bundle_npm_ordering.py.
 
 ## Agent-First Result, Debug, And Transport Semantics
 

@@ -10,6 +10,8 @@ export const BUNDLE_BASE64 = "eyJmYW1pbGllcyI6W3siZmFtaWx5X2lkIjoiY29yZSIsImZpeH
 const SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+let bundleBytesCache;
+let bundleCache;
 
 export class ContractValidationError extends Error {
   constructor(code, detail, path) {
@@ -56,13 +58,39 @@ export function canonicalDocumentBytes(value) {
   return encoder.encode(canonicalString(canonicalValue(value)));
 }
 
+function cachedBundleBytes() {
+  if (bundleBytesCache === undefined) {
+    const decoded = atob(BUNDLE_BASE64);
+    bundleBytesCache = Uint8Array.from(
+      decoded, (character) => character.charCodeAt(0),
+    );
+  }
+  return bundleBytesCache;
+}
+
 export function bundleBytes() {
-  const decoded = atob(BUNDLE_BASE64);
-  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  return cachedBundleBytes().slice();
+}
+
+function freezeBundle(value) {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) freezeBundle(child);
+  }
+  return value;
+}
+
+function cachedBundle() {
+  if (bundleCache === undefined) {
+    bundleCache = freezeBundle(
+      JSON.parse(decoder.decode(cachedBundleBytes())),
+    );
+  }
+  return bundleCache;
 }
 
 export function bundle() {
-  return JSON.parse(decoder.decode(bundleBytes()));
+  return cachedBundle();
 }
 
 export function rootManifest() {

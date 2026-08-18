@@ -7,6 +7,7 @@ import tempfile
 import types
 import unittest
 
+from pullwise_server.agent_first_contract_bundle import build_bundle
 from pullwise_server.agent_first_contract_bundle_npm import render_npm_wrapper
 from pullwise_server.agent_first_contract_bundle_python import render_python_wrapper
 from pullwise_server.agent_first_contract_bundle_source import (
@@ -120,6 +121,29 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
             payload,
         )
 
+        real_bundle = build_bundle(
+            Path(__file__).resolve().parents[1]
+            / "contracts"
+            / "agent-first"
+            / "current"
+            / "source"
+        )
+        cls.real_npm_wrapper = real_bundle.npm_wrapper
+        cls.real_entry = next(
+            fixture["document"]
+            for family in real_bundle.document["families"]
+            for fixture in family["fixtures"]
+            if fixture["fixture_id"]
+            == "requirements_negative_derived_mandatory_without_rationale"
+        ).copy()
+        cls.real_entry["rationale"] = "Required to preserve the accepted objective."
+        cls.real_ledger = next(
+            fixture["document"]
+            for family in real_bundle.document["families"]
+            for fixture in family["fixtures"]
+            if fixture["fixture_id"] == "requirements_golden_ledger"
+        )
+
     @staticmethod
     def _empty_schema(schema_id: str) -> dict[str, object]:
         return {
@@ -146,6 +170,85 @@ class AgentFirstContractBundleNpmOrderingTest(unittest.TestCase):
         )
         self.assertEqual("post_reference_dag", python_result["stage"])
         self.assertEqual(python_result["stage"], node_result["stage"])
+
+    def test_requirement_ingest_does_not_reparse_bundle_for_each_schema_ref(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="contract-bundle-cache-") as scratch:
+            scratch_path = Path(scratch)
+            facade_path = scratch_path / "facade.mjs"
+            runner_path = scratch_path / "runner.mjs"
+            facade_path.write_bytes(self.real_npm_wrapper)
+            runner_path.write_text(
+                "\n".join(
+                    (
+                        f"import * as facade from {json.dumps(facade_path.as_uri())};",
+                        f"const entry = {json.dumps(self.real_entry, ensure_ascii=False)};",
+                        f"const ledger = {json.dumps(self.real_ledger, ensure_ascii=False)};",
+                        "const results = [];",
+                        "for (let index = 0; index < 4; index += 1) {",
+                        "  const result = facade.validateRequirementEntryIngest(entry, ledger);",
+                        "  results.push({ledger_version: result.ledger_version, requirement_id: result.requirement_id});",
+                        "}",
+                        "process.stdout.write(JSON.stringify(results));",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            try:
+                completed = subprocess.run(
+                    ["node", str(runner_path)],
+                    check=True,
+                    capture_output=True,
+                    encoding="utf-8",
+                    timeout=5,
+                )
+            except subprocess.TimeoutExpired as error:
+                self.fail(f"Node contract helper exceeded 5-second budget: {error}")
+        self.assertEqual(
+            [
+                {
+                    "ledger_version": 2,
+                    "requirement_id": "req_derived_5555555555555555555555555555555555555555555555555555555555555555",
+            }
+            ] * 4,
+            json.loads(completed.stdout),
+        )
+
+    def test_public_cached_bundle_values_are_isolated_from_caller_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="contract-bundle-isolation-") as scratch:
+            scratch_path = Path(scratch)
+            facade_path = scratch_path / "facade.mjs"
+            runner_path = scratch_path / "runner.mjs"
+            facade_path.write_bytes(self.real_npm_wrapper)
+            runner_path.write_text(
+                "\n".join(
+                    (
+                        f"import * as facade from {json.dumps(facade_path.as_uri())};",
+                        "const parsed = facade.bundle();",
+                        "const originalByte = facade.bundleBytes()[0];",
+                        "const byteView = facade.bundleBytes();",
+                        "byteView[0] ^= 1;",
+                        "const byteIsolated = facade.bundleBytes()[0] === originalByte;",
+                        "const originalIdentity = parsed.package_identity;",
+                        "try { parsed.package_identity = 'tampered'; } catch {}",
+                        "const objectIsolated = facade.bundle().package_identity === originalIdentity;",
+                        "byteView[0] = originalByte;",
+                        "try { parsed.package_identity = originalIdentity; } catch {}",
+                        "process.stdout.write(JSON.stringify({byteIsolated, objectIsolated}));",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["node", str(runner_path)],
+                check=True,
+                capture_output=True,
+                encoding="utf-8",
+                timeout=5,
+            )
+        self.assertEqual(
+            {"byteIsolated": True, "objectIsolated": True},
+            json.loads(completed.stdout),
+        )
 
     def _python_result(self) -> dict[str, object]:
         root = self.python_facade.root_manifest()
