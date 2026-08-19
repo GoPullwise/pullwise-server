@@ -1,0 +1,264 @@
+{
+  "schema_id": "pullwise-review-registry/v1",
+  "contract_version": "pullwise-review/v1",
+  "registries": {
+    "scan_state": [
+      "QUEUED",
+      "RUNNING",
+      "FINALIZING",
+      "CANCEL_REQUESTED",
+      "COMPLETED",
+      "PARTIAL",
+      "FAILED",
+      "CANCELLED"
+    ],
+    "progress_stage": [
+      "QUEUED",
+      "PREPARING",
+      "REVIEWING",
+      "VALIDATING",
+      "FINALIZING"
+    ],
+    "attempt_state": [
+      "PENDING",
+      "CLAIMED",
+      "PREPARING",
+      "RUNNING",
+      "VALIDATING",
+      "PUBLISHING",
+      "SUCCEEDED",
+      "RETRYABLE_FAILED",
+      "PERMANENT_FAILED",
+      "TIMED_OUT",
+      "CANCELLED",
+      "SUPERSEDED"
+    ],
+    "lease_state": [
+      "ACTIVE",
+      "EXPIRED",
+      "REVOKED",
+      "RELEASED"
+    ],
+    "candidate_kind": [
+      "RESULT",
+      "FAILURE_REPORT",
+      "CANCEL_ACK"
+    ],
+    "candidate_disposition": [
+      "RECEIVED",
+      "ACCEPTED",
+      "DUPLICATE",
+      "RETRY_SCHEDULED",
+      "REJECTED_STALE",
+      "REJECTED_INVALID",
+      "CONFLICT"
+    ],
+    "terminal_outcome": [
+      "COMPLETED",
+      "PARTIAL",
+      "FAILED",
+      "CANCELLED"
+    ],
+    "event_type": [
+      "ATTEMPT_STARTED",
+      "SOURCE_READY",
+      "INSTRUCTIONS_READY",
+      "MODEL_STARTED",
+      "MODEL_COMPLETED",
+      "VALIDATION_STARTED",
+      "VALIDATION_COMPLETED",
+      "PUBLICATION_STARTED",
+      "HEARTBEAT",
+      "CANCEL_OBSERVED",
+      "ATTEMPT_FAILED"
+    ],
+    "coverage_state": [
+      "REVIEWED",
+      "SKIPPED",
+      "UNAVAILABLE"
+    ],
+    "finding_category": [
+      "CORRECTNESS",
+      "SECURITY",
+      "RELIABILITY",
+      "PERFORMANCE",
+      "DATA_INTEGRITY",
+      "AUTHORIZATION",
+      "CONCURRENCY",
+      "API_CONTRACT",
+      "TEST_GAP"
+    ],
+    "severity": [
+      "CRITICAL",
+      "HIGH",
+      "MEDIUM",
+      "LOW"
+    ],
+    "validation_status": [
+      "VALIDATED",
+      "UNVALIDATED",
+      "COUNTEREXAMPLE_REJECTED"
+    ],
+    "artifact_kind": [
+      "REPORT",
+      "COVERAGE",
+      "RESTRICTED_DEBUG",
+      "AUDIT"
+    ],
+    "artifact_visibility": [
+      "PUBLIC",
+      "ADMIN",
+      "RESTRICTED"
+    ],
+    "artifact_state": [
+      "PREPARED",
+      "UPLOADED",
+      "COMMITTED",
+      "ABORTED"
+    ],
+    "source_kind": [
+      "GITHUB_REPOSITORY_SNAPSHOT"
+    ],
+    "runtime_qualification_state": [
+      "UNQUALIFIED",
+      "PASS",
+      "FAIL",
+      "INDETERMINATE",
+      "QUARANTINED"
+    ],
+    "retry_class": [
+      "NEVER",
+      "POLICY",
+      "TRANSIENT"
+    ],
+    "issue_status": [
+      "OPEN",
+      "FIXED",
+      "SNOOZED"
+    ],
+    "issue_actor_class": [
+      "SYSTEM",
+      "USER",
+      "ADMIN"
+    ],
+    "outbox_topic": [
+      "PUBLIC_SCAN",
+      "ADMIN_SCAN",
+      "FINDING_TO_ISSUE"
+    ],
+    "outbox_state": [
+      "PENDING",
+      "LEASED",
+      "DONE",
+      "DEAD"
+    ],
+    "reasoning_effort": [
+      "LOW",
+      "MEDIUM",
+      "HIGH",
+      "XHIGH"
+    ],
+    "error_domain": [
+      "REQUEST",
+      "AUTH",
+      "SOURCE",
+      "BUDGET",
+      "LIFECYCLE",
+      "LEASE",
+      "EVENT",
+      "CANDIDATE",
+      "VALIDATION",
+      "ARTIFACT",
+      "PROVIDER",
+      "STORAGE",
+      "INTERNAL"
+    ],
+    "error_code": [
+      "REQUEST_INVALID",
+      "AUTH_REQUIRED",
+      "AUTH_DENIED",
+      "RESOURCE_NOT_FOUND",
+      "REPOSITORY_NOT_AUTHORIZED",
+      "SOURCE_REF_NOT_FOUND",
+      "SOURCE_TOO_LARGE",
+      "SOURCE_UNSAFE",
+      "BUDGET_UNAVAILABLE",
+      "IDEMPOTENCY_CONFLICT",
+      "STATE_CONFLICT",
+      "VERSION_CONFLICT",
+      "WORKER_NOT_ATTESTED",
+      "LEASE_STALE",
+      "LEASE_EXPIRED",
+      "EVENT_SEQUENCE_CONFLICT",
+      "EVENT_DIGEST_CONFLICT",
+      "CANDIDATE_CONFLICT",
+      "TERMINAL_ALREADY_COMMITTED",
+      "CANDIDATE_INVALID",
+      "MODEL_OUTPUT_INVALID",
+      "EVIDENCE_INVALID",
+      "COVERAGE_INVALID",
+      "ARTIFACT_INVALID",
+      "ARTIFACT_NOT_COMMITTED",
+      "PROVIDER_UNAVAILABLE",
+      "LOCK_UNAVAILABLE",
+      "INTERNAL_ERROR"
+    ],
+    "coverage_gap_reason": [
+      "EXCLUDED_BY_POLICY",
+      "UNSUPPORTED_CONTENT",
+      "CONTEXT_BUDGET_EXCEEDED",
+      "VALIDATION_UNAVAILABLE",
+      "SOURCE_UNREADABLE",
+      "INSTRUCTION_CONFLICT",
+      "CANCELLED",
+      "RUNTIME_FAILURE"
+    ],
+    "cancellation_reason": [
+      "USER_REQUEST",
+      "DEADLINE_EXCEEDED",
+      "LEASE_LOST",
+      "WORKER_SHUTDOWN",
+      "POLICY_REVOKED"
+    ],
+    "model_finish_reason": [
+      "STOP",
+      "LENGTH",
+      "INTERRUPTED",
+      "ERROR"
+    ],
+    "event_validation_outcome": [
+      "VALIDATED",
+      "REJECTED"
+    ]
+  },
+  "http_status_by_error_code": {
+    "REQUEST_INVALID": 400,
+    "AUTH_REQUIRED": 401,
+    "AUTH_DENIED": 403,
+    "RESOURCE_NOT_FOUND": 404,
+    "REPOSITORY_NOT_AUTHORIZED": 403,
+    "SOURCE_REF_NOT_FOUND": 422,
+    "SOURCE_TOO_LARGE": 422,
+    "SOURCE_UNSAFE": 422,
+    "BUDGET_UNAVAILABLE": 429,
+    "IDEMPOTENCY_CONFLICT": 409,
+    "STATE_CONFLICT": 409,
+    "VERSION_CONFLICT": 409,
+    "WORKER_NOT_ATTESTED": 403,
+    "LEASE_STALE": 409,
+    "LEASE_EXPIRED": 409,
+    "EVENT_SEQUENCE_CONFLICT": 409,
+    "EVENT_DIGEST_CONFLICT": 409,
+    "CANDIDATE_CONFLICT": 409,
+    "TERMINAL_ALREADY_COMMITTED": 409,
+    "CANDIDATE_INVALID": 422,
+    "MODEL_OUTPUT_INVALID": 422,
+    "EVIDENCE_INVALID": 422,
+    "COVERAGE_INVALID": 422,
+    "ARTIFACT_INVALID": 422,
+    "ARTIFACT_NOT_COMMITTED": 409,
+    "PROVIDER_UNAVAILABLE": 503,
+    "LOCK_UNAVAILABLE": 503,
+    "INTERNAL_ERROR": 500
+  }
+}
