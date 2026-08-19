@@ -1,0 +1,1595 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Pullwise Reviewer API",
+    "version": "pullwise-review/v1",
+    "description": "Exact public, Worker, and Admin route/status contract. All JSON objects are closed and resolve from the manifest-bound shared schema."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Public"
+    },
+    {
+      "name": "Worker"
+    },
+    {
+      "name": "Admin"
+    }
+  ],
+  "paths": {
+    "/api/v1/repositories/{repository_id}/scans/preflight": {
+      "post": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "preflightScan",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepositoryId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/CreateScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved immutable source and budget feasibility; no database or artifact write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PreflightResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/repositories/{repository_id}/scans": {
+      "post": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "createScan",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepositoryId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/CreateScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact request replay",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "true"
+                }
+              },
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicScan"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "New scan accepted",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "false"
+                }
+              },
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicScan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/BudgetUnavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "getScan",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScanId"
+          },
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current complete public projection",
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicScan"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match matched; empty body"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/cancel": {
+      "post": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "cancelScan",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScanId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact repeat or scan was already terminal",
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicScan"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Cancellation fence committed",
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicScan"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/findings": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "listFindings",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScanId"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stable ordinal page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/artifacts/{artifact_id}": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "downloadArtifact",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScanId"
+          },
+          {
+            "$ref": "#/components/parameters/ArtifactId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized exact artifact bytes",
+            "headers": {
+              "Content-Digest": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^sha-256=:[A-Za-z0-9+/]{43}=:$"
+                }
+              },
+              "Content-Length": {
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/issues": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "listIssues",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RepositoryIdQuery"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stable issue page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/issues/{issue_id}": {
+      "get": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "getIssue",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IssueId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public issue projection",
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicIssue"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/issues/{issue_id}/status": {
+      "patch": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "updateIssueStatus",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IssueId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SingleIssueStatus"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated issue",
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicIssue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/issues/status": {
+      "patch": {
+        "tags": [
+          "Public"
+        ],
+        "operationId": "updateIssueStatusBatch",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/UpdateIssueStatusCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "All updated issues in request order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "items": {
+                    "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicIssue"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/internal/reviewer/attempts/claim": {
+      "post": {
+        "tags": [
+          "Worker"
+        ],
+        "operationId": "claimReviewAttempt",
+        "security": [
+          {
+            "WorkerBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ReviewClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One fenced attempt grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ReviewAttemptGrant"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No eligible attempt; empty body"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/internal/reviewer/attempts/{attempt_id}/heartbeat": {
+      "post": {
+        "tags": [
+          "Worker"
+        ],
+        "operationId": "heartbeatReviewAttempt",
+        "security": [
+          {
+            "WorkerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AttemptId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/LeaseHeartbeat"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Extended lease and cancellation observation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/LeaseHeartbeatResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/internal/reviewer/attempts/{attempt_id}/events": {
+      "post": {
+        "tags": [
+          "Worker"
+        ],
+        "operationId": "appendReviewEvent",
+        "security": [
+          {
+            "WorkerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AttemptId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ReviewEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact event replay",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "true"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ReviewEvent"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "New dense event accepted",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "false"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ReviewEvent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/internal/reviewer/attempts/{attempt_id}/result-candidates": {
+      "post": {
+        "tags": [
+          "Worker"
+        ],
+        "operationId": "submitResultCandidate",
+        "security": [
+          {
+            "WorkerBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AttemptId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ResultCandidate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact candidate replay",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "true"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/CandidateDisposition"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "First candidate persisted and disposed",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "false"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/CandidateDisposition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/internal/reviewer/artifacts/prepare": {
+      "post": {
+        "tags": [
+          "Worker"
+        ],
+        "operationId": "prepareReviewArtifact",
+        "security": [
+          {
+            "WorkerBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PrepareArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact descriptor replay",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "true"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PrepareArtifactResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "New attempt-bound upload capability",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "const": "false"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PrepareArtifactResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/internal/reviewer/artifacts/commit": {
+      "post": {
+        "tags": [
+          "Worker"
+        ],
+        "operationId": "commitReviewArtifact",
+        "security": [
+          {
+            "WorkerBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/CommitArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Descriptor committed or exactly replayed",
+            "headers": {
+              "Idempotent-Replay": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactCommitResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/admin/v1/reviewer/policy": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "getReviewerPolicy",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current versioned policy",
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "putReviewerPolicy",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ReviewerPolicy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated versioned policy",
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/admin/v1/reviewer/runtime-tuples": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "listRuntimeTuples",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Qualified, unqualified, failed, indeterminate, and quarantined tuples",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeTuplePage"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/admin/v1/reviewer/scans/{scan_id}/diagnostics": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "operationId": "getReviewerDiagnostics",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScanId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted private diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/AdminDiagnostics"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "pullwise_session",
+        "description": "Authenticated Pullwise session; tenant and user are server-derived."
+      },
+      "WorkerBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque-worker-token",
+        "description": "Worker registration credential; Worker identity is server-derived."
+      }
+    },
+    "parameters": {
+      "RepositoryId": {
+        "name": "repository_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "RepositoryIdQuery": {
+        "name": "repository_id",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "ScanId": {
+        "name": "scan_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "AttemptId": {
+        "name": "attempt_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "IssueId": {
+        "name": "issue_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "ArtifactId": {
+        "name": "artifact_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\"[1-9][0-9]*\"$"
+        },
+        "description": "Quoted current lifecycle/version integer."
+      },
+      "IfNoneMatch": {
+        "name": "If-None-Match",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      }
+    },
+    "schemas": {
+      "FindingPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_id",
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "schema_id": {
+            "const": "pullwise-finding-page/v1"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/Finding"
+            }
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "IssuePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_id",
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "schema_id": {
+            "const": "pullwise-issue-page/v1"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/PublicIssue"
+            }
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RuntimeTuplePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_id",
+          "items"
+        ],
+        "properties": {
+          "schema_id": {
+            "const": "pullwise-runtime-tuple-page/v1"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/RuntimeTuple"
+            }
+          }
+        }
+      },
+      "SingleIssueStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_id",
+          "target_status",
+          "expected_issue_version"
+        ],
+        "properties": {
+          "schema_id": {
+            "const": "pullwise-single-issue-status/v1"
+          },
+          "target_status": {
+            "enum": [
+              "OPEN",
+              "FIXED",
+              "SNOOZED"
+            ]
+          },
+          "expected_issue_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ArtifactCommitResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_id",
+          "artifact_id",
+          "state",
+          "digest",
+          "committed_at"
+        ],
+        "properties": {
+          "schema_id": {
+            "const": "pullwise-artifact-commit-result/v1"
+          },
+          "artifact_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "state": {
+            "const": "COMMITTED"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "committed_at": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+          }
+        }
+      },
+      "PolicyEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_id",
+          "policy"
+        ],
+        "properties": {
+          "schema_id": {
+            "const": "pullwise-reviewer-policy-envelope/v1"
+          },
+          "policy": {
+            "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ReviewerPolicy"
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "REQUEST_INVALID",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "AUTH_REQUIRED",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "AUTH_DENIED, REPOSITORY_NOT_AUTHORIZED, or WORKER_NOT_ATTESTED",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "RESOURCE_NOT_FOUND; cross-tenant resources are hidden as not found where documented",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Idempotency, lifecycle, lease, event, candidate, terminal, artifact, or version conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "Source, schema, model output, evidence, coverage, candidate, or artifact validation failure",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "BudgetUnavailable": {
+        "description": "BUDGET_UNAVAILABLE",
+        "headers": {
+          "Retry-After": {
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "PROVIDER_UNAVAILABLE or LOCK_UNAVAILABLE",
+        "headers": {
+          "Retry-After": {
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "INTERNAL_ERROR; response is redacted and request_id-correlated",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "./shared/schemas/pullwise-review.schema.json#/$defs/ApiError"
+            }
+          }
+        }
+      }
+    }
+  }
+}

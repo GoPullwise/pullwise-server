@@ -1,0 +1,64 @@
+{
+  "schema_id": "pullwise-review-fixture-set/v1",
+  "contract_version": "pullwise-review/v1",
+  "fixtures": [
+    {
+      "id": "VALID-MINIMAL-SCAN",
+      "path": "fixtures/valid/minimal-scan.json",
+      "valid": true,
+      "definition": "CreateScanRequest"
+    },
+    {
+      "id": "VALID-FULL-CANDIDATE",
+      "path": "fixtures/valid/full-result-candidate.json",
+      "valid": true,
+      "definition": "ResultCandidate"
+    },
+    {
+      "id": "VALID-ISSUE-STATUS",
+      "path": "fixtures/valid/issue-status-command.json",
+      "valid": true,
+      "definition": "UpdateIssueStatusCommand"
+    },
+    {
+      "id": "CONTRACT-UNKNOWN-ENUM",
+      "path": "fixtures/invalid/unknown-enum.json",
+      "valid": false,
+      "definition": "CreateScanRequest",
+      "error_code": "REQUEST_INVALID",
+      "writes": 0
+    },
+    {
+      "id": "CONTRACT-EXTRA-TENANT",
+      "path": "fixtures/invalid/client-tenant-field.json",
+      "valid": false,
+      "definition": "CreateScanRequest",
+      "error_code": "REQUEST_INVALID",
+      "writes": 0
+    },
+    {
+      "id": "CONTRACT-PATH-TRAVERSAL",
+      "path": "fixtures/invalid/path-traversal.json",
+      "valid": false,
+      "definition": "Finding",
+      "error_code": "EVIDENCE_INVALID",
+      "writes": 0
+    },
+    {
+      "id": "CONTRACT-FLOAT",
+      "path": "fixtures/invalid/float-confidence.json",
+      "valid": false,
+      "definition": "Finding",
+      "error_code": "REQUEST_INVALID",
+      "writes": 0
+    },
+    {
+      "id": "CONTRACT-DUPLICATE-KEY",
+      "path": "fixtures/invalid/duplicate-json-key.raw",
+      "valid": false,
+      "definition": "CreateScanRequest",
+      "error_code": "REQUEST_INVALID",
+      "writes": 0
+    }
+  ]
+}

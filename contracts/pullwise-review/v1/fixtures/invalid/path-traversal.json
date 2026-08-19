@@ -1,0 +1,22 @@
+{
+  "schema_id": "pullwise-finding/v1",
+  "finding_id": "11111111-1111-4111-8111-111111111111",
+  "ordinal": 0,
+  "fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "title": "Authorization check is missing",
+  "category": "AUTHORIZATION",
+  "severity": "HIGH",
+  "confidence_bps": 9500,
+  "evidence": {
+    "path": "../secrets.txt",
+    "start_byte": 10,
+    "end_byte": 40,
+    "content_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "evidence_text": "def update_issue(request):",
+  "explanation": "The mutation does not verify repository ownership.",
+  "impact": "A user could modify another repository's issue.",
+  "remediation": "Authorize the repository before loading or mutating the issue.",
+  "rule_id": "AUTHZ-001",
+  "validation_status": "VALIDATED"
+}

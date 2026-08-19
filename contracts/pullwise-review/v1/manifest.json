@@ -1,0 +1,60 @@
+{
+  "schema_id": "pullwise-review-manifest/v1",
+  "contract_version": "pullwise-review/v1",
+  "canonicalization": "pullwise-canonical-json/v1",
+  "files": {
+    "canonical-json-v1.md": {
+      "sha256": "46f7aaad5261291caa4452de3c622f7cf8a57b9ad41bfb58eb30826de9d8a0cf",
+      "size_bytes": 1886
+    },
+    "fixtures/fixture-set.json": {
+      "sha256": "353314490e1bdd6bebb7abbb58152a5a8cd0294e99b02fdf75293af44436d15f",
+      "size_bytes": 1719
+    },
+    "fixtures/invalid/client-tenant-field.json": {
+      "sha256": "7c76191a5f632675a9590fe3997e00c2f29512f26641e66120a81147a9cc7e83",
+      "size_bytes": 292
+    },
+    "fixtures/invalid/duplicate-json-key.raw": {
+      "sha256": "53689ae16293846ba5248a1c20044624c3b3808938cea7e982c7d403cf09088a",
+      "size_bytes": 225
+    },
+    "fixtures/invalid/float-confidence.json": {
+      "sha256": "bc6225e5152088d2cc0c5254667d6bc55609e938582931a5a1a5319035279668",
+      "size_bytes": 843
+    },
+    "fixtures/invalid/path-traversal.json": {
+      "sha256": "680c3b793aa6786b5cb0dc2664413dc7c10e3a51f55dc2fd7a38d92bec6a9f2f",
+      "size_bytes": 846
+    },
+    "fixtures/invalid/unknown-enum.json": {
+      "sha256": "8eda42406c81e5392826aa0be8cb411b2efd689d0e8eb584fdb55641f55001b2",
+      "size_bytes": 249
+    },
+    "fixtures/valid/full-result-candidate.json": {
+      "sha256": "8d8244527f5e9c152ff76e44428f929819a0bc55a1eeee5f828753f79b06e722",
+      "size_bytes": 2246
+    },
+    "fixtures/valid/issue-status-command.json": {
+      "sha256": "dd1851e67dd4eb6bbf3ada29a33d3b70cc49389ad22edcde9e3eda1713afc593",
+      "size_bytes": 209
+    },
+    "fixtures/valid/minimal-scan.json": {
+      "sha256": "bb3b9a1830c101bb0bce5183fe5ccad8739b18cfcbad5d6c84d9ffb8e2a23e3e",
+      "size_bytes": 260
+    },
+    "openapi.json": {
+      "sha256": "c5ddecfc85493ced176a66502dab743f0e0e5a88861853025a42827e4df15b0f",
+      "size_bytes": 41891
+    },
+    "registry.json": {
+      "sha256": "27eb9c5892506fc0ffba055fddfc8199adf674a3451c459a72c7687b397a8e34",
+      "size_bytes": 5472
+    },
+    "shared/schemas/pullwise-review.schema.json": {
+      "sha256": "39dd603502669542b9e16b30d60522796794014307ae0335b2f892d551f0c6dd",
+      "size_bytes": 80741
+    }
+  },
+  "manifest_digest": "sha256:71428f4dc199e7cbdbe99b64cbdeff03686cda59eb08e84f22224822f5a8167e"
+}

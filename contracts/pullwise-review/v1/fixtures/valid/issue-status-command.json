@@ -1,0 +1,10 @@
+{
+  "schema_id": "pullwise-update-issue-status/v1",
+  "updates": [
+    {
+      "issue_id": "77777777-7777-4777-8777-777777777777",
+      "target_status": "FIXED",
+      "expected_issue_version": 3
+    }
+  ]
+}
