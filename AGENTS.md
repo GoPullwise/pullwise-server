@@ -19,7 +19,6 @@ it must not govern new Reviewer implementation. Unrelated repository security,
 deployment, frontend, and testing rules remain binding unless they conflict with
 the current Reviewer authority.
 <!-- PULLWISE_REVIEWER_CURRENT_AUTHORITY_END -->
-
 <!-- PULLWISE_REVIEWER_TARGET_START -->
 ## Pullwise Reviewer Target — Node.js + Pi Coding Agent
 
