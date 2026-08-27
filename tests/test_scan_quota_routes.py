@@ -382,18 +382,20 @@ class ScanQuotaRoutesTest(unittest.TestCase):
                     second_reserved.set()
             return result
 
+        db.ensure_initialized()
         with patch.object(app.quota, "reserve_scan_quota", side_effect=pausing_reserve):
             first_thread = threading.Thread(target=app.PullwiseHandler.route, args=(first, "POST"))
             second_thread = threading.Thread(target=app.PullwiseHandler.route, args=(second, "POST"))
-            first_thread.start()
-            self.assertTrue(first_reserved.wait(5), "first scan request did not reach quota reservation")
-            second_thread.start()
             try:
+                first_thread.start()
+                self.assertTrue(first_reserved.wait(5), "first scan request did not reach quota reservation")
+                second_thread.start()
                 self.assertTrue(second_reserved.wait(5), "second scan request did not reach quota deduplication")
             finally:
                 release_first.set()
-            first_thread.join(5)
-            second_thread.join(5)
+                for thread in (first_thread, second_thread):
+                    if thread.ident is not None:
+                        thread.join(5)
 
         self.assertFalse(first_thread.is_alive())
         self.assertFalse(second_thread.is_alive())
