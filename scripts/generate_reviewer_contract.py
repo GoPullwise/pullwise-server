@@ -2,12 +2,12 @@
 """Deterministically generate the pullwise-review/v1 contract consumers.
 
 Reads ONLY the frozen manifest (``contracts/pullwise-review/v1/manifest.json``)
-and exactly the files it references, then emits the self-contained Python and
-npm consumers for ``pullwise-review/v1``.  Every embedded value is serialized
+and exactly the files it references, then emits the self-contained npm ESM
+consumer for ``pullwise-review/v1``.  Every embedded value is serialized
 canonically (sorted keys, compact separators), so two clean runs produce
 byte-identical output.  No timestamp, absolute path, or environment value is
-ever embedded.  The write set of card R1-03 names the four generated files;
-``schema.json`` in the npm package is a byte copy of the manifest-bound shared
+ever embedded.  The R1-PI-03 output is exactly three npm files; ``schema.json``
+is a byte copy of the manifest-bound shared
 JSON Schema so npm consumers validate against the same closed schema.
 """
 
@@ -28,7 +28,6 @@ from pullwise_server.reviewer.canonical import canonical_sha256  # noqa: E402
 MANIFEST_FILENAME = "manifest.json"
 DEFAULT_CONTRACT_DIR = _REPO_ROOT / "contracts" / "pullwise-review" / "v1"
 OUTPUT_RELATIVE_PATHS = (
-    "reviewer-contract-python/reviewer_contract.py",
     "reviewer-contract-npm/package.json",
     "reviewer-contract-npm/index.js",
     "reviewer-contract-npm/schema.json",
@@ -46,28 +45,8 @@ def _json_blob(value) -> str:
     )
 
 
-def _py_scalar(value) -> str:
-    """JSON scalar -> a valid Python source literal."""
-    return _json_blob(value)
-
-
-def _py_json(value) -> str:
-    """JSON value -> Python expression `json.loads('<json blob>')`.
-
-    Required because JSON booleans/null are not valid Python literals; the blob
-    is embedded as an escaped string literal and decoded at import time.
-    """
-    return "json.loads(" + json.dumps(_json_blob(value)) + ")"
-
-
 def read_frozen_contract(contract_dir: Path) -> tuple[dict, dict[str, bytes]]:
-    """Read the manifest and the exact bytes of every file it references.
-
-    Only ``manifest.json`` is read directly; every other byte the generator
-    embeds comes from a file the manifest lists, verified byte-for-byte against
-    the manifest's declared SHA-256 and size.  The canonical manifest digest is
-    recomputed and must match the declared one.
-    """
+    """Read and verify the manifest plus every exact file it references."""
     manifest_path = Path(contract_dir) / MANIFEST_FILENAME
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("schema_id") != "pullwise-review-manifest/v1":
@@ -102,173 +81,11 @@ def read_frozen_contract(contract_dir: Path) -> tuple[dict, dict[str, bytes]]:
 
 
 # ---------------------------------------------------------------------------
-# Generated Python consumer template.  The module is stdlib-only; the keyword
-# subset matches the full inventory the frozen schema actually uses ($ref
-# internal, oneOf, type, const, enum, pattern, min/maxLength, min/maximum,
-# min/maxItems, items, required, properties, additionalProperties).
-# ---------------------------------------------------------------------------
-
-PYTHON_CONSUMER_TEMPLATE = """\
-\"\"\"Pullwise reviewer contract consumer - Python (generated).
-
-Deterministically generated from the frozen pullwise-review/v1 manifest by
-scripts/generate_reviewer_contract.py.  Build output: manual edits fail
-scripts/check_reviewer_contract.py.  Regenerate with::
-
-    python scripts/generate_reviewer_contract.py --out generated
-
-Self-contained (stdlib only): exposes the closed registries, the HTTP status
-mapping, the manifest binding, and the shared JSON Schema, plus closed-object
-validators.  Strict JSON decoding and canonicalization are the caller's
-transport boundary (pullwise-canonical-json/v1); the validators operate on
-already-decoded instances.
-\"\"\"
-
-from __future__ import annotations
-
-import json
-import re
-from typing import Any
-
-CONTRACT_VERSION = @@CONTRACT_VERSION@@
-CANONICALIZATION = @@CANONICALIZATION@@
-MANIFEST_DIGEST = @@MANIFEST_DIGEST@@
-FILES = @@FILES@@
-REGISTRIES = @@REGISTRIES@@
-HTTP_STATUS_BY_ERROR_CODE = @@HTTP_STATUS@@
-SCHEMA = @@SCHEMA@@
-CANONICALIZATION_SPEC = @@CANONICAL_SPEC@@
-
-
-def _tn(value: Any) -> str:
-    \"\"\"JSON type name of a decoded instance.\"\"\"
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, int):
-        return "integer"
-    if isinstance(value, float):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return "unknown"
-
-
-def _validate(node, instance, path, errors, root) -> None:
-    \"\"\"Append (json_path, message) violations of instance against node.\"\"\"
-    ref = node.get("$ref")
-    if ref is not None:
-        if not ref.startswith("#/$defs/"):
-            errors.append((path, f"unsupported external $ref {ref}"))
-            return
-        target = ref[len("#/$defs/"):]
-        if target not in root["$defs"]:
-            errors.append((path, f"unresolved $ref {ref}"))
-            return
-        _validate(root["$defs"][target], instance, path, errors, root)
-        return
-
-    if "oneOf" in node:
-        matches = 0
-        for index, branch in enumerate(node["oneOf"]):
-            branch_errors: list = []
-            _validate(branch, instance, f"{path}#oneOf[{index}]", branch_errors, root)
-            if not branch_errors:
-                matches += 1
-        if matches != 1:
-            errors.append((path, f"oneOf requires exactly one match, got {matches}"))
-        return
-
-    if "type" in node:
-        actual = _tn(instance)
-        want = node["type"]
-        ok = actual in ("integer", "number") if want == "number" else actual == want
-        if not ok:
-            errors.append((path, f"expected type {want}, got {actual}"))
-            return
-
-    if "const" in node and instance != node["const"]:
-        errors.append((path, f"expected const {node['const']!r}, got {instance!r}"))
-    if "enum" in node and instance not in node["enum"]:
-        errors.append((path, f"value {instance!r} not in enum {node['enum']}"))
-    if "pattern" in node and isinstance(instance, str):
-        if re.fullmatch(node["pattern"], instance) is None:
-            errors.append((path, f"value {instance!r} does not match pattern {node['pattern']}"))
-    if "minLength" in node and isinstance(instance, str) and len(instance) < node["minLength"]:
-        errors.append((path, f"len {len(instance)} < minLength {node['minLength']}"))
-    if "maxLength" in node and isinstance(instance, str) and len(instance) > node["maxLength"]:
-        errors.append((path, f"len {len(instance)} > maxLength {node['maxLength']}"))
-    if "minimum" in node and isinstance(instance, (int, float)) and instance < node["minimum"]:
-        errors.append((path, f"{instance} < minimum {node['minimum']}"))
-    if "maximum" in node and isinstance(instance, (int, float)) and instance > node["maximum"]:
-        errors.append((path, f"{instance} > maximum {node['maximum']}"))
-
-    if isinstance(instance, dict):
-        if "required" in node:
-            for name in node["required"]:
-                if name not in instance:
-                    errors.append((path, f"missing required property {name!r}"))
-        if "properties" in node:
-            for name, prop_schema in node["properties"].items():
-                if name in instance:
-                    _validate(prop_schema, instance[name], f"{path}.{name}", errors, root)
-            if node.get("additionalProperties") is False:
-                for key in instance:
-                    if key not in node["properties"]:
-                        errors.append((path, f"additional property {key!r} is not permitted"))
-
-    if isinstance(instance, list) and "items" in node:
-        if "minItems" in node and len(instance) < node["minItems"]:
-            errors.append((path, f"len {len(instance)} < minItems {node['minItems']}"))
-        if "maxItems" in node and len(instance) > node["maxItems"]:
-            errors.append((path, f"len {len(instance)} > maxItems {node['maxItems']}"))
-        for index, item in enumerate(instance):
-            _validate(node["items"], item, f"{path}[{index}]", errors, root)
-
-
-def validate_definition(definition: str, instance: Any) -> list:
-    \"\"\"Return (json_path, message) violations against a $defs definition.\"\"\"
-    if definition not in SCHEMA["$defs"]:
-        return [("$defs", f"unknown definition {definition}")]
-    errors: list = []
-    _validate(SCHEMA["$defs"][definition], instance, "$", errors, SCHEMA)
-    return errors
-
-
-def validate_document(instance: Any) -> list:
-    \"\"\"Return violations against the Document root definition.\"\"\"
-    return validate_definition("Document", instance)
-
-
-def classify_error_code(errors: list) -> str:
-    \"\"\"Map violations to REQUEST_INVALID or EVIDENCE_INVALID.
-
-    A violation rooted at the Finding evidence path is EVIDENCE_INVALID; every
-    other validation failure is REQUEST_INVALID.
-    \"\"\"
-    for path, _message in errors:
-        if (
-            path == "$.evidence.path"
-            or path.startswith("$.evidence.path.")
-            or path.startswith("$.evidence.path#")
-        ):
-            return "EVIDENCE_INVALID"
-    return "REQUEST_INVALID"
-"""
-
-
-# ---------------------------------------------------------------------------
-# Generated npm consumer template.  CommonJS, dependency-free.  SCHEMA is loaded
-# from ./schema.json (a byte copy of the manifest-bound shared JSON Schema).
+# Generated npm consumer template.  ESM, dependency-free.  SCHEMA is loaded from
+# ./schema.json (a byte copy of the manifest-bound shared JSON Schema).
 # ---------------------------------------------------------------------------
 
 NPM_INDEX_TEMPLATE = """\
-'use strict';
 /* Pullwise reviewer contract consumer - npm (generated).
  *
  * Deterministically generated from the frozen pullwise-review/v1 manifest by
@@ -277,21 +94,22 @@ NPM_INDEX_TEMPLATE = """\
  *
  *     python scripts/generate_reviewer_contract.py --out generated
  *
- * Dependency-free CommonJS.  Exposes the same closed registries, HTTP status
- * mapping, and closed-object validators as the generated Python consumer;
- * SCHEMA is loaded from ./schema.json.  The keyword subset matches the frozen
+ * Dependency-free ESM with named exports only.  Exposes the closed registries,
+ * HTTP status mapping, and closed-object validators; SCHEMA is loaded from
+ * ./schema.json.  The keyword subset matches the frozen
  * schema's full inventory ($ref internal, oneOf, type, const, enum, pattern,
  * min/maxLength, min/maximum, min/maxItems, items, required, properties,
  * additionalProperties).  Strict decoding is the caller's boundary.
  */
-const SCHEMA = require('./schema.json');
+import SCHEMA_VALUE from './schema.json' with { type: 'json' };
 
-const CONTRACT_VERSION = @@CONTRACT_VERSION@@;
-const CANONICALIZATION = @@CANONICALIZATION@@;
-const MANIFEST_DIGEST = @@MANIFEST_DIGEST@@;
-const FILES = @@FILES@@;
-const REGISTRIES = @@REGISTRIES@@;
-const HTTP_STATUS_BY_ERROR_CODE = @@HTTP_STATUS@@;
+export const CONTRACT_VERSION = @@CONTRACT_VERSION@@;
+export const CANONICALIZATION = @@CANONICALIZATION@@;
+export const MANIFEST_DIGEST = @@MANIFEST_DIGEST@@;
+export const FILES = @@FILES@@;
+export const REGISTRIES = @@REGISTRIES@@;
+export const HTTP_STATUS_BY_ERROR_CODE = @@HTTP_STATUS@@;
+export const SCHEMA = SCHEMA_VALUE;
 
 function tn(value) {
   if (value === null) return 'null';
@@ -379,18 +197,18 @@ function validate(node, instance, path, errors, root) {
   }
 }
 
-function validateDefinition(definition, instance) {
+export function validateDefinition(definition, instance) {
   if (!has(SCHEMA.$defs, definition)) return [['$defs', 'unknown definition ' + definition]];
   const errors = [];
   validate(SCHEMA.$defs[definition], instance, '$', errors, SCHEMA);
   return errors;
 }
 
-function validateDocument(instance) {
+export function validateDocument(instance) {
   return validateDefinition('Document', instance);
 }
 
-function classifyErrorCode(errors) {
+export function classifyErrorCode(errors) {
   for (const entry of errors) {
     const p = entry[0];
     if (p === '$.evidence.path' || p.startsWith('$.evidence.path.') || p.startsWith('$.evidence.path#')) {
@@ -399,19 +217,6 @@ function classifyErrorCode(errors) {
   }
   return 'REQUEST_INVALID';
 }
-
-module.exports = {
-  CONTRACT_VERSION,
-  CANONICALIZATION,
-  MANIFEST_DIGEST,
-  FILES,
-  REGISTRIES,
-  HTTP_STATUS_BY_ERROR_CODE,
-  SCHEMA,
-  validateDefinition,
-  validateDocument,
-  classifyErrorCode,
-};
 """
 
 
@@ -427,19 +232,6 @@ def build_outputs(contract_dir: Path) -> dict[str, bytes]:
             raise RuntimeError(f"manifest does not reference {required}")
 
     registry = json.loads(files["registry.json"].decode("utf-8"))
-    schema = json.loads(files["shared/schemas/pullwise-review.schema.json"].decode("utf-8"))
-    canonical_spec = files["canonical-json-v1.md"].decode("utf-8")
-
-    py_replacements = {
-        "@@CONTRACT_VERSION@@": _py_scalar(manifest["contract_version"]),
-        "@@CANONICALIZATION@@": _py_scalar(manifest["canonicalization"]),
-        "@@MANIFEST_DIGEST@@": _py_scalar(manifest["manifest_digest"]),
-        "@@FILES@@": _py_json(manifest["files"]),
-        "@@REGISTRIES@@": _py_json(registry["registries"]),
-        "@@HTTP_STATUS@@": _py_json(registry["http_status_by_error_code"]),
-        "@@SCHEMA@@": _py_json(schema),
-        "@@CANONICAL_SPEC@@": _py_scalar(canonical_spec),
-    }
     js_replacements = {
         "@@CONTRACT_VERSION@@": _json_blob(manifest["contract_version"]),
         "@@CANONICALIZATION@@": _json_blob(manifest["canonicalization"]),
@@ -449,10 +241,7 @@ def build_outputs(contract_dir: Path) -> dict[str, bytes]:
         "@@HTTP_STATUS@@": _json_blob(registry["http_status_by_error_code"]),
     }
 
-    python_text = PYTHON_CONSUMER_TEMPLATE
     index_text = NPM_INDEX_TEMPLATE
-    for token, value in py_replacements.items():
-        python_text = python_text.replace(token, value)
     for token, value in js_replacements.items():
         index_text = index_text.replace(token, value)
 
@@ -460,7 +249,9 @@ def build_outputs(contract_dir: Path) -> dict[str, bytes]:
         "name": "pullwise-review-contract",
         "version": "1.0.0",
         "description": "Deterministic npm contract consumer for pullwise-review/v1 (generated; do not edit).",
-        "main": "index.js",
+        "type": "module",
+        "exports": "./index.js",
+        "files": ["index.js", "schema.json"],
         "private": True,
         "license": "UNLICENSED",
         "contract": {
@@ -472,7 +263,6 @@ def build_outputs(contract_dir: Path) -> dict[str, bytes]:
     }
 
     return {
-        "reviewer-contract-python/reviewer_contract.py": python_text.encode("utf-8"),
         "reviewer-contract-npm/package.json": _json_blob(package_json).encode("utf-8") + b"\n",
         "reviewer-contract-npm/index.js": index_text.encode("utf-8"),
         "reviewer-contract-npm/schema.json": files["shared/schemas/pullwise-review.schema.json"],
@@ -517,7 +307,7 @@ def generate(contract_dir: Path, out: Path, report: Path | None = None) -> dict[
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="generate_reviewer_contract.py",
-        description="Deterministically generate the pullwise-review/v1 contract consumers.",
+        description="Deterministically generate the npm-only ESM pullwise-review/v1 consumer.",
     )
     parser.add_argument(
         "--contract-dir",
@@ -529,7 +319,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--out",
         type=Path,
         required=True,
-        help="directory to receive reviewer-contract-python/ and reviewer-contract-npm/",
+        help="directory to receive the three files under reviewer-contract-npm/",
     )
     parser.add_argument(
         "--report",

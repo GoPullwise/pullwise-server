@@ -1,11 +1,12 @@
 #!/usr/bin/env python
-"""Verify the committed pullwise-review contract consumers are pristine.
+"""Verify the committed npm pullwise-review contract consumer is pristine.
 
-Regenerates the Python and npm consumers from the frozen manifest and compares
+Regenerates exactly the three npm outputs from the frozen manifest and compares
 them byte-for-byte (after CRLF normalization, so the check is robust to
-core.autocrlf) against the files committed under ``--generated``.  Any manual
-edit to a generated file fails with exit 1; operational failures (unreadable
-manifest, missing generator) exit 2; a fully pristine generation exits 0.
+core.autocrlf) against the files committed under ``--generated``.  A missing or
+manually edited npm file fails with exit 1; operational failures (unreadable
+manifest, missing generator) exit 2; a fully pristine generation exits 0.  The
+historical generated Python consumer is deliberately outside this target.
 
 Usage:
     python scripts/check_reviewer_contract.py [--generated DIR] [--contract-dir DIR]
@@ -22,6 +23,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 GENERATOR_PATH = _REPO_ROOT / "scripts" / "generate_reviewer_contract.py"
 DEFAULT_GENERATED = _REPO_ROOT / "generated"
 DEFAULT_CONTRACT_DIR = _REPO_ROOT / "contracts" / "pullwise-review" / "v1"
+NPM_OUTPUT_DIRECTORY = "reviewer-contract-npm"
 
 EXIT_OK = 0
 EXIT_MISMATCH = 1
@@ -48,6 +50,15 @@ def check(generated: Path, contract_dir: Path) -> list[str]:
     gen = _load_generator()
     outputs = gen.build_outputs(contract_dir)
     problems: list[str] = []
+    expected_paths = set(outputs)
+    npm_root = Path(generated) / NPM_OUTPUT_DIRECTORY
+    actual_paths = {
+        path.relative_to(generated).as_posix()
+        for path in npm_root.rglob("*")
+        if path.is_file()
+    } if npm_root.is_dir() else set()
+    for relative_path in sorted(actual_paths - expected_paths):
+        problems.append(f"unexpected generated npm file: {relative_path}")
     for relative_path, expected in sorted(outputs.items()):
         target = Path(generated) / relative_path
         if not target.is_file():
@@ -63,13 +74,13 @@ def check(generated: Path, contract_dir: Path) -> list[str]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check_reviewer_contract.py",
-        description="Verify committed pullwise-review consumers match a fresh generation.",
+        description="Verify the committed npm pullwise-review consumer matches a fresh generation.",
     )
     parser.add_argument(
         "--generated",
         type=Path,
         default=DEFAULT_GENERATED,
-        help="directory holding reviewer-contract-python/ and reviewer-contract-npm/",
+        help="directory holding reviewer-contract-npm/",
     )
     parser.add_argument(
         "--contract-dir",
@@ -91,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         for problem in problems:
             print(problem, file=sys.stderr)
         return EXIT_MISMATCH
-    print("ok: generated consumers match the frozen manifest")
+    print("ok: generated npm consumer matches the frozen manifest")
     return EXIT_OK
 
 
