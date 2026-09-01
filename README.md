@@ -956,6 +956,15 @@ result is written to that run's `report.json`. Press Ctrl+C to stop the entire
 process tree, fix the reported issue, and run the same command again for the
 next debug cycle.
 
+With `--hold`, the runner opens Web and Admin through loopback-only fake-login
+callback URLs. Web lands on `/dashboard/overview`; Admin lands on `/workers`
+with the same fake account authorized as an administrator. The report preserves
+the raw service addresses under `urls` and records the browser-ready addresses
+under `entryUrls`. Add `--no-open-browser` for headless or agent-driven runs.
+Opening the raw Web/Admin service address in a fresh browser intentionally does
+not bypass login; production and non-loopback authentication behavior is
+unchanged.
+
 By default the Worker starts with an empty isolated Pi profile root, so the
 report records full AI review completion as not exercised. Pass
 `--profile-root <existing-profile-directory>` to expose existing host-local Pi

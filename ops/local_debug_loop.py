@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from local_debug_browser import local_browser_entry_urls, open_local_browser_entries
 
 @dataclass(frozen=True)
 class RuntimeConfig:
@@ -120,10 +121,7 @@ def worker_process_specs(config: RuntimeConfig, node: str, worker_id: str, token
 def public_runtime_state(specs: list[ProcessSpec], worker_id: str) -> dict:
     return {
         "workerId": worker_id,
-        "processes": [
-            {"name": spec.name, "cwd": str(spec.cwd), "argv": list(spec.argv)}
-            for spec in specs
-        ],
+        "processes": [{"name": spec.name, "cwd": str(spec.cwd), "argv": list(spec.argv)} for spec in specs],
     }
 
 
@@ -312,8 +310,8 @@ def run(args: argparse.Namespace) -> int:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_root = server_root / ".pullwise" / "local-debug" / "runs" / f"{stamp}-{os.getpid()}"
     profile_root = Path(args.profile_root).resolve() if args.profile_root else run_root / "worker-profiles"
-    config = RuntimeConfig(workspace, run_root, args.server_port, args.web_port, args.admin_port,
-                           args.admin_email, profile_root)
+    config = RuntimeConfig(workspace, run_root, args.server_port, args.web_port, args.admin_port, args.admin_email, profile_root)
+    entry_urls = local_browser_entry_urls(config)
     assert_workspace(config)
     assert_ports_free(config)
     run_root.mkdir(parents=True)
@@ -361,11 +359,14 @@ def run(args: argparse.Namespace) -> int:
             "status": smoke["status"],
             "runRoot": str(run_root),
             "urls": {"server": config.server_url, "web": config.web_url, "admin": config.admin_url},
+            "entryUrls": entry_urls,
             "runtime": public_runtime_state(specs + worker_specs, worker_id),
             "smoke": smoke,
         }
         write_report(report_path, report)
         print(json.dumps(report, ensure_ascii=False), flush=True)
+        if args.hold and not args.no_open_browser:
+            open_local_browser_entries(entry_urls)
         if args.hold:
             while all(process.poll() is None for process in processes):
                 time.sleep(1)
@@ -374,8 +375,7 @@ def run(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as exc:
-        report = {"schemaVersion": "pullwise-local-debug-report/v1", "status": "fail", "error": str(exc),
-                  "runRoot": str(run_root)}
+        report = {"schemaVersion": "pullwise-local-debug-report/v1", "status": "fail", "error": str(exc), "runRoot": str(run_root)}
         write_report(report_path, report)
         print(json.dumps(report, ensure_ascii=False), file=sys.stderr, flush=True)
         return 1
@@ -392,6 +392,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile-root", help="Existing Pi profile root; secrets remain in that directory.")
     parser.add_argument("--startup-timeout", type=float, default=30.0)
     parser.add_argument("--hold", action="store_true", help="Keep all four projects running until interrupted.")
+    parser.add_argument("--no-open-browser", action="store_true", help="Do not open authenticated Web/Admin tabs.")
     return parser.parse_args()
 
 

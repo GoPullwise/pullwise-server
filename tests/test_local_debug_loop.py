@@ -4,10 +4,12 @@ import importlib.util
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from pathlib import Path
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "ops" / "local_debug_loop.py"
+sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("pullwise_local_debug_loop", MODULE_PATH)
 assert SPEC and SPEC.loader
 local_debug = importlib.util.module_from_spec(SPEC)
@@ -48,6 +50,48 @@ class FakeApi:
 
 
 class LocalDebugLoopTest(unittest.TestCase):
+    def test_browser_entries_bootstrap_fake_login_for_web_and_admin(self) -> None:
+        config = local_debug.RuntimeConfig(
+            workspace=Path("F:/Pullwise"),
+            run_root=Path("F:/Pullwise/pullwise-server/.pullwise/local-debug/run"),
+            server_port=18080,
+            web_port=15173,
+            admin_port=15174,
+        )
+
+        entries = local_debug.local_browser_entry_urls(config)
+        opened: list[str] = []
+        result = local_debug.open_local_browser_entries(
+            entries,
+            lambda url: opened.append(url) or True,
+        )
+
+        self.assertEqual(opened, [entries["web"], entries["admin"]])
+        self.assertEqual(result, {"web": True, "admin": True})
+        expected_redirects = {
+            "web": "http://127.0.0.1:15173/dashboard/overview",
+            "admin": "http://127.0.0.1:15174/workers",
+        }
+        for name, entry_url in entries.items():
+            parsed = urllib.parse.urlparse(entry_url)
+            self.assertEqual(parsed.scheme, "http")
+            self.assertEqual(parsed.netloc, "127.0.0.1:18080")
+            self.assertEqual(parsed.path, "/auth/github/callback")
+            self.assertEqual(urllib.parse.parse_qs(parsed.query), {"redirectTo": [expected_redirects[name]]})
+
+    def test_browser_open_failure_keeps_the_local_environment_usable(self) -> None:
+        entries = {"web": "http://example.test/web", "admin": "http://example.test/admin"}
+        attempted: list[str] = []
+
+        def unavailable(url: str) -> bool:
+            attempted.append(url)
+            raise OSError("no desktop browser")
+
+        result = local_debug.open_local_browser_entries(entries, unavailable)
+
+        self.assertEqual(attempted, [entries["web"], entries["admin"]])
+        self.assertEqual(result, {"web": False, "admin": False})
+
     def test_process_plan_starts_distinct_loopback_services_and_both_worker_processes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)

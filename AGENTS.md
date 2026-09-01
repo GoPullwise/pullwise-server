@@ -86,6 +86,11 @@ must not govern target implementation.
   completed AI review unless the Worker has a real Pi credential catalog plus
   an explicit persisted runtime selection and the scan reaches a terminal
   review result.
+- `--hold` opens Web and Admin through the existing loopback-only local GitHub
+  callback so the browser receives the fake session cookie before landing on
+  Dashboard/Workers. Keep raw service URLs unauthenticated in a fresh browser;
+  never add a Web/Admin production-code login bypass. `--no-open-browser`
+  disables only automatic tab opening, and `entryUrls` remain in the report.
 
 # Pullwise Server Agent Notes
 
