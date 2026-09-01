@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -91,6 +92,61 @@ class LocalDebugLoopTest(unittest.TestCase):
 
         self.assertEqual(attempted, [entries["web"], entries["admin"]])
         self.assertEqual(result, {"web": False, "admin": False})
+
+    def test_replaces_orphaned_children_from_the_previous_matching_run_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runs_root = Path(temporary)
+            run_root = runs_root / "20260901T092030Z-20440"
+            run_root.mkdir()
+            urls = {
+                "server": "http://127.0.0.1:18080",
+                "web": "http://127.0.0.1:15173",
+                "admin": "http://127.0.0.1:15174",
+            }
+            (run_root / "report.json").write_text(json.dumps({"urls": urls}), encoding="utf-8")
+            records = [
+                local_debug.RuntimeProcess(22108, 20440, "python -m pullwise_server --port 18080"),
+                local_debug.RuntimeProcess(4120, 20440, "cmd /c npm run dev -- --port 15174"),
+                local_debug.RuntimeProcess(15928, 20440, "cmd /c npm run dev -- --port 15173"),
+                local_debug.RuntimeProcess(20248, 20440, "node src/main.ts watch"),
+                local_debug.RuntimeProcess(21668, 20440, "node src/main.ts serve"),
+                local_debug.RuntimeProcess(99999, 20440, "python -m http.server 18080"),
+            ]
+            terminated: list[int] = []
+
+            replaced = local_debug.replace_previous_local_runtime(
+                runs_root,
+                urls,
+                process_records=lambda: records,
+                terminate_tree=terminated.append,
+            )
+
+            self.assertEqual(replaced, 20440)
+            self.assertEqual(set(terminated), {22108, 4120, 15928, 20248, 21668})
+
+    def test_replaces_a_live_matching_supervisor_as_one_process_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runs_root = Path(temporary)
+            run_root = runs_root / "20260901T092030Z-20440"
+            run_root.mkdir()
+            urls = {
+                "server": "http://127.0.0.1:18080",
+                "web": "http://127.0.0.1:15173",
+                "admin": "http://127.0.0.1:15174",
+            }
+            (run_root / "report.json").write_text(json.dumps({"urls": urls}), encoding="utf-8")
+            records = [local_debug.RuntimeProcess(20440, 100, "python ops/local_debug_loop.py --hold")]
+            terminated: list[int] = []
+
+            replaced = local_debug.replace_previous_local_runtime(
+                runs_root,
+                urls,
+                process_records=lambda: records,
+                terminate_tree=terminated.append,
+            )
+
+            self.assertEqual(replaced, 20440)
+            self.assertEqual(terminated, [20440])
 
     def test_process_plan_starts_distinct_loopback_services_and_both_worker_processes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

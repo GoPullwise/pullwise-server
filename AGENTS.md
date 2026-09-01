@@ -91,6 +91,11 @@ must not govern target implementation.
   Dashboard/Workers. Keep raw service URLs unauthenticated in a fresh browser;
   never add a Web/Admin production-code login bypass. `--no-open-browser`
   disables only automatic tab opening, and `entryUrls` remain in the report.
+- Before port validation, replace only a prior run whose report binds the same
+  Server/Web/Admin URLs. A live `local_debug_loop.py` supervisor may be
+  terminated as one tree; orphan children may be terminated only when their
+  parent PID and Server/Vite/Watcher/Service command shapes match that report.
+  Never terminate an unknown process merely because it owns a requested port.
 
 # Pullwise Server Agent Notes
 

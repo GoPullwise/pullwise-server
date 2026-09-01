@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from local_debug_browser import local_browser_entry_urls, open_local_browser_entries
-
+from local_debug_runtime import RuntimeProcess, replace_previous_local_runtime
 @dataclass(frozen=True)
 class RuntimeConfig:
     workspace: Path
@@ -57,7 +57,6 @@ class ProcessSpec:
 class Api(Protocol):
     def visit(self, path: str) -> None: ...
     def request(self, method: str, path: str, body: object = None) -> dict: ...
-
 
 def initial_process_specs(config: RuntimeConfig, python: str, npm: str) -> list[ProcessSpec]:
     origins = f"{config.web_url},{config.admin_url}"
@@ -312,6 +311,7 @@ def run(args: argparse.Namespace) -> int:
     profile_root = Path(args.profile_root).resolve() if args.profile_root else run_root / "worker-profiles"
     config = RuntimeConfig(workspace, run_root, args.server_port, args.web_port, args.admin_port, args.admin_email, profile_root)
     entry_urls = local_browser_entry_urls(config)
+    replace_previous_local_runtime(server_root / ".pullwise" / "local-debug" / "runs", {"server": config.server_url, "web": config.web_url, "admin": config.admin_url})
     assert_workspace(config)
     assert_ports_free(config)
     run_root.mkdir(parents=True)

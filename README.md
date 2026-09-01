@@ -948,6 +948,12 @@ unrelated process:
   --server-port 18080 --web-port 15173 --admin-port 15174 --hold
 ```
 
+Before binding its ports, the runner searches prior run reports for the same
+three service URLs. It terminates a still-running matching supervisor tree, or
+verified orphaned Server/Web/Admin/Worker children from that supervisor, then
+starts cleanly. It never kills an unknown port owner; unrelated occupancy still
+fails closed with `local debug port ... is already in use`.
+
 The runner uses a fresh SQLite database and isolated runtime directories under
 `.pullwise/local-debug/runs/`. It verifies health, local GitHub login,
 repository authorization and sync, scan preflight, scan create/cancel, Admin
