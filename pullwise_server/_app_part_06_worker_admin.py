@@ -3,6 +3,8 @@ from __future__ import annotations
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 from . import _app_part_05_worker_results as _previous_app_part
+from . import worker_runtime_catalog
+from . import worker_node_installer
 from ._app_imports import import_compat_globals as _import_compat_globals
 
 _import_compat_globals(vars(_previous_app_part), globals())
@@ -54,8 +56,21 @@ def worker_version_compatible(worker: dict) -> bool:
 
 
 def worker_record_provider_chain(worker: dict) -> list[str]:
+    catalog_providers = [
+        item["provider"]
+        for item in worker_runtime_catalog.available_models(
+            worker.get("runtime_catalog"),
+            include_credentials=False,
+        )
+    ]
+    if catalog_providers:
+        return list(dict.fromkeys(catalog_providers))
     decoded = decoded_worker_json_payload(worker.get("provider_chain"), list)
-    return worker_provider_chain(decoded or worker.get("provider_chain") or worker.get("provider") or worker.get("providerChain"))
+    raw = decoded or worker.get("provider_chain") or worker.get("providerChain")
+    if raw:
+        return worker_provider_chain(raw)
+    provider = public_issue_text(worker.get("provider")).lower()
+    return [] if provider in {"", "unconfigured"} else worker_provider_chain(provider)
 
 
 def worker_record_ready_providers(worker: dict) -> list[str]:
@@ -73,8 +88,11 @@ def worker_record_ready_providers(worker: dict) -> list[str]:
 
 
 def worker_supported_provider(worker: dict) -> bool:
-    provider_chain = worker_record_provider_chain(worker)
-    return any(provider in WORKER_INSTALL_PROVIDERS for provider in provider_chain)
+    if worker_runtime_catalog.selection_from_worker(worker) is not None:
+        return True
+    if worker_runtime_catalog.normalize_runtime_catalog(worker.get("runtime_catalog")) is not None:
+        return False
+    return bool(worker_record_provider_chain(worker))
 
 
 def computed_worker_status(worker: dict, *, timestamp: int | None = None) -> str:
@@ -204,7 +222,7 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         "worker_id": public_issue_text(worker.get("worker_id")),
         "name": public_issue_text(worker.get("name")) or public_issue_text(worker.get("worker_id")),
         "scope": worker_scope,
-        "provider": public_issue_text(worker.get("provider")) or (provider_chain[0] if provider_chain else "codex"),
+        "provider": public_issue_text(worker.get("provider")) or (provider_chain[0] if provider_chain else "unconfigured"),
         "providerChain": provider_chain,
         "readyProviders": ready_providers,
         "enabled": bool(worker.get("enabled")),
@@ -219,6 +237,16 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
         "deleted_at": pull_request_timestamp(worker.get("deleted_at")),
     }
     if admin:
+        runtime_catalog = worker_runtime_catalog.public_runtime_catalog(worker.get("runtime_catalog"))
+        if runtime_catalog is not None:
+            payload["runtimeCatalog"] = runtime_catalog
+        payload["availableModels"] = worker_runtime_catalog.available_models(
+            worker.get("runtime_catalog"),
+            include_credentials=True,
+        )
+        runtime_selection = worker_runtime_catalog.selection_from_worker(worker)
+        if runtime_selection is not None:
+            payload["runtimeSelection"] = runtime_selection
         payload["hostname"] = public_issue_text(worker.get("hostname"))
         payload["last_error"] = clean_scan_error(worker.get("last_error"))
         payload["doctor_status"] = public_issue_text(worker.get("doctor_status"))
@@ -242,6 +270,22 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
             if machine_metrics:
                 payload["machineMetrics"] = machine_metrics
     return payload
+
+
+def fleet_available_review_models(workers: list[dict]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for worker in workers:
+        for item in worker_runtime_catalog.available_models(
+            worker.get("runtime_catalog"),
+            include_credentials=False,
+        ):
+            identity = (item["provider"], item["model"])
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(item)
+    return sorted(result, key=lambda item: (item["provider"], item["model"]))
 
 
 LOG_STREAM_LOCK = threading.RLock()
@@ -609,7 +653,7 @@ def worker_safe_service_id(worker_id: object) -> str:
 def worker_release_package(version: str) -> str:
     return (
         "https://github.com/GoPullwise/pullwise-worker/releases/download/"
-        f"v{version}/pullwise_worker-{version}-py3-none-any.whl"
+        f"v{version}/pullwise-worker-{version}.tgz"
     )
 
 
@@ -902,15 +946,8 @@ def default_worker_package(version: object = None) -> str:
     return worker_release_package(selected_version)
 
 
-WORKER_INSTALL_PROVIDERS = ("codex",)
-CODEX_CLI_INSTALLER_URL = "https://chatgpt.com/codex/install.sh"
 def default_worker_provider_chain() -> list[str]:
-    providers: list[str] = []
-    for plan in billing.PLAN_IDS:
-        provider = billing.review_agent_provider(plan)
-        if provider in WORKER_INSTALL_PROVIDERS and provider not in providers:
-            providers.append(provider)
-    return providers
+    return []
 
 
 def worker_provider_chain(value: object = None, *, strict: bool = False) -> list[str]:
@@ -922,15 +959,11 @@ def worker_provider_chain(value: object = None, *, strict: bool = False) -> list
         raw_items = default_worker_provider_chain()
     else:
         raw_items = []
-    providers: list[str] = []
-    for item in raw_items:
-        provider = public_issue_text(item).lower()
-        if provider in WORKER_INSTALL_PROVIDERS and provider not in providers:
-            providers.append(provider)
+    providers = db.normalize_provider_list(raw_items)
     if providers:
         return providers
     if strict:
-        raise ValueError("providerChain must include codex.")
+        raise ValueError("providerChain is invalid.")
     return default_worker_provider_chain()
 
 
@@ -951,12 +984,7 @@ def request_bool(value: object, *, default: bool) -> bool:
     return default
 
 
-def worker_codex_install_options(body: object = None) -> dict:
-    del body
-    return {"release": "latest", "use_latest": True}
-
-
-def worker_create_payload(worker: dict, *, codex_install_options: dict | None = None) -> dict:
+def worker_create_payload(worker: dict) -> dict:
     public = worker_public_payload(worker, admin=True)
     token = public_issue_text(worker.get("worker_token"))
     server_url = (
@@ -977,9 +1005,11 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
     provider_chain_text = ",".join(provider_chain)
     safe_worker_id = worker_safe_service_id(public["worker_id"])
     service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"
-    service_log_dir = f"/var/log/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/log/pullwise-worker"
     worker_runtime_root = f"{service_home}/workers/{safe_worker_id or 'worker'}"
-    del codex_install_options
+    service_user = f"pullwise-worker-{safe_worker_id}" if safe_worker_id else "pullwise-worker"
+    bin_path = f"/usr/local/bin/pullwise-worker-{safe_worker_id}" if safe_worker_id else "/usr/local/bin/pullwise-worker"
+    env_file = f"/etc/pullwise-worker/{safe_worker_id}/worker.env" if safe_worker_id else "/etc/pullwise-worker/worker.env"
+    profile_root = f"{worker_runtime_root}/pi-profiles"
     install_command = worker_install_command(
         install_url=install_url,
         server_url=server_url,
@@ -1001,36 +1031,29 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
         "PULLWISE_LOCAL_SERVER_URL": local_server_url,
         "PULLWISE_WORKER_ID": public["worker_id"],
         "PULLWISE_WORKER_TOKEN": token,
-        "PULLWISE_PROVIDER": provider_chain[0],
-        "PULLWISE_PROVIDER_CHAIN": provider_chain_text,
         "PULLWISE_CHECKOUT_ROOT": f"{service_home}/checkouts",
         "PULLWISE_WORKER_ROOT": worker_runtime_root,
-        "PULLWISE_LOG_DIR": service_log_dir,
+        "PULLWISE_PI_PROFILE_ROOT": profile_root,
+        "PULLWISE_WORKER_STATE_ROOT": f"{worker_runtime_root}/state",
         "PULLWISE_WORKER_PACKAGE": worker_package,
         "PULLWISE_SERVICE_HOME": service_home,
-        "PULLWISE_ACTIVE_READINESS_CHECK_SECONDS": "60",
-        "PULLWISE_DEGRADED_READINESS_CHECK_SECONDS": "600",
-        "PULLWISE_WORKER_POLL_JITTER_SECONDS": "2",
-        "PULLWISE_WORKER_MAX_BACKOFF_SECONDS": "60",
-        "PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS": "3600",
-        "PULLWISE_RETAIN_FAILED_CHECKOUT_SECONDS": "0",
-        "PULLWISE_MAX_CHECKOUT_BYTES": "21474836480",
-        "PULLWISE_LOG_RETENTION_SECONDS": "1209600",
-        "PULLWISE_MAX_LOG_BYTES": "1073741824",
-        "PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES": "10485760",
     }
-    if "codex" in provider_chain:
-        suggested_env.update(
-            {
-                "PULLWISE_CODEX_COMMAND": f"{worker_runtime_root}/.local/bin/codex",
-                "PULLWISE_CODEX_RELEASE": "latest",
-                "PULLWISE_CODEX_INSTALLER_URL": CODEX_CLI_INSTALLER_URL,
-                "PULLWISE_CODEX_HOME": f"{worker_runtime_root}/codex-home",
-                "PULLWISE_CODEX_SQLITE_HOME": f"{worker_runtime_root}/codex-sqlite",
-                "PULLWISE_CODEX_MODEL": "gpt-5.5",
-            }
-        )
     script_hash = worker_install_script_sha256()
+    add_profile_command = (
+        "read -rp 'Credential id: ' PULLWISE_CREDENTIAL_ID; "
+        "read -rp 'Provider id: ' PULLWISE_PROVIDER_ID; "
+        "read -rp 'Account label: ' PULLWISE_CREDENTIAL_LABEL; "
+        f"sudo -u {shell_quote(service_user)} env "
+        f"PULLWISE_PI_PROFILE_ROOT={shell_quote(profile_root)} "
+        f"{shell_quote(bin_path)} profile add "
+        '"--id" "$PULLWISE_CREDENTIAL_ID" '
+        '"--provider" "$PULLWISE_PROVIDER_ID" '
+        '"--label" "$PULLWISE_CREDENTIAL_LABEL"'
+    )
+    sync_catalog_command = (
+        f"sudo -u {shell_quote(service_user)} sh -lc "
+        f"{shell_quote(f'. {env_file}; exec {bin_path} sync')}"
+    )
     return {
         **public,
         "worker_id": public["worker_id"],
@@ -1044,6 +1067,23 @@ def worker_create_payload(worker: dict, *, codex_install_options: dict | None = 
             "script_sha256": script_hash,
         },
         "suggested_env": suggested_env,
+        "configuration": {
+            "secretsStoredOnWorker": True,
+            "profileRoot": profile_root,
+            "selectionOwner": "pullwise-server",
+        },
+        "configuration_commands": [
+            {
+                "key": "add_runtime_profile",
+                "title": "Add provider account or API key",
+                "command": add_profile_command,
+            },
+            {
+                "key": "sync_runtime_catalog",
+                "title": "Sync available providers and models",
+                "command": sync_catalog_command,
+            },
+        ],
     }
 
 
@@ -1056,6 +1096,7 @@ def worker_install_command(
     worker_package: str,
     provider_chain: str,
 ) -> str:
+    del provider_chain
     script_hash = worker_install_script_sha256()
     return (
         "read -rsp 'Pullwise worker token: ' PULLWISE_WORKER_TOKEN; echo; "
@@ -1068,8 +1109,7 @@ def worker_install_command(
         f"--server {shell_quote(server_url)} "
         f"--worker-id {shell_quote(worker_id)} "
         f"--worker-name {shell_quote(worker_name)} "
-        f"--package {shell_quote(worker_package)} "
-        f"--provider-chain {shell_quote(provider_chain)}"
+        f"--package {shell_quote(worker_package)}"
     )
 
 def shell_quote(value: object) -> str:
@@ -1084,686 +1124,7 @@ def worker_install_script_sha256() -> str:
 
 
 def worker_install_script() -> str:
-    script = r"""#!/usr/bin/env bash
-set -euo pipefail
-
-SERVICE_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-SERVER_URL=""
-WORKER_ID=""
-WORKER_TOKEN=""
-WORKER_NAME="pullwise-worker"
-PROVIDER="codex"
-PROVIDER_CHAIN=""
-WORKER_PACKAGE=""
-CODEX_COMMAND="${PULLWISE_CODEX_COMMAND:-}"
-CODEX_RELEASE="${PULLWISE_CODEX_RELEASE:-latest}"
-CODEX_INSTALLER_URL="${PULLWISE_CODEX_INSTALLER_URL:-__CODEX_CLI_INSTALLER_URL__}"
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --server) SERVER_URL="${2:-}"; shift 2 ;;
-    --worker-id) WORKER_ID="${2:-}"; shift 2 ;;
-    --worker-token-file) WORKER_TOKEN="$(cat "${2:-}")"; shift 2 ;;
-    --worker-name) WORKER_NAME="${2:-}"; shift 2 ;;
-    --max-concurrent-jobs) shift 2 ;;
-    --provider) PROVIDER="${2:-codex}"; shift 2 ;;
-    --provider-chain) PROVIDER_CHAIN="${2:-}"; shift 2 ;;
-    --package) WORKER_PACKAGE="${2:-}"; shift 2 ;;
-    --codex-release|--codex-version) CODEX_RELEASE="${2:-}"; shift 2 ;;
-    --codex-latest) CODEX_RELEASE="latest"; shift ;;
-    *) echo "unknown argument: $1" >&2; exit 2 ;;
-  esac
-done
-
-if [ -z "$WORKER_TOKEN" ] && [ -n "${PULLWISE_WORKER_TOKEN:-}" ]; then
-  WORKER_TOKEN="$PULLWISE_WORKER_TOKEN"
-fi
-
-if [ -z "$SERVER_URL" ] || [ -z "$WORKER_ID" ] || [ -z "$WORKER_TOKEN" ]; then
-  echo "missing --server, --worker-id, or worker token env/file" >&2
-  exit 2
-fi
-
-case "$(uname -s)" in Linux) ;; *) echo "Pullwise worker installer requires Linux" >&2; exit 1 ;; esac
-case "$(uname -m)" in x86_64|aarch64|arm64) ;; *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;; esac
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Run as root so the installer can create service users and systemd units." >&2
-  exit 1
-fi
-
-read_os_value() {
-  local key="$1"
-  local os_file="${PULLWISE_WORKER_OS_RELEASE_FILE:-/etc/os-release}"
-  local line value
-  [ -f "$os_file" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      *=*)
-        if [ "${line%%=*}" = "$key" ]; then
-          value="${line#*=}"
-          value="${value%\"}"
-          value="${value#\"}"
-          printf '%s' "$value"
-          return 0
-        fi
-        ;;
-    esac
-  done < "$os_file"
-}
-is_ubuntu_2204_or_newer() {
-  [ "$(read_os_value ID)" = "ubuntu" ] || return 1
-  local version major minor
-  version="$(read_os_value VERSION_ID)"
-  major="${version%%.*}"
-  if [ "$version" = "$major" ]; then
-    minor=0
-  else
-    minor="${version#*.}"
-    minor="${minor%%.*}"
-  fi
-  case "$major" in ""|*[!0-9]*) return 1 ;; esac
-  case "$minor" in ""|*[!0-9]*) return 1 ;; esac
-  [ $((10#$major)) -gt 22 ] || { [ $((10#$major)) -eq 22 ] && [ $((10#$minor)) -ge 4 ]; }
-}
-auto_install_enabled() {
-  case "${PULLWISE_WORKER_AUTO_INSTALL_DEPS:-1}" in
-    0|false|FALSE|no|NO|off|OFF) return 1 ;;
-    *) return 0 ;;
-  esac
-}
-apt_get_bin() {
-  if [ -n "${PULLWISE_WORKER_APT_GET_BIN:-}" ]; then
-    printf '%s' "$PULLWISE_WORKER_APT_GET_BIN"
-    return 0
-  fi
-  command -v apt-get 2>/dev/null
-}
-install_ubuntu_packages() {
-  local packages=("$@")
-  [ "${#packages[@]}" -gt 0 ] || return 0
-  auto_install_enabled || {
-    echo "Missing dependencies: ${packages[*]}. Dependency auto-install is disabled by PULLWISE_WORKER_AUTO_INSTALL_DEPS." >&2
-    exit 1
-  }
-  is_ubuntu_2204_or_newer || {
-    echo "Missing dependencies: ${packages[*]}. Automatic dependency installation is supported on Ubuntu 22.04 or newer Linux hosts." >&2
-    exit 1
-  }
-  local apt_get
-  apt_get="$(apt_get_bin)"
-  [ -n "$apt_get" ] || {
-    echo "Missing dependencies: ${packages[*]}. apt-get is required for Ubuntu dependency installation." >&2
-    exit 1
-  }
-  echo "Installing Ubuntu packages: ${packages[*]}"
-  DEBIAN_FRONTEND=noninteractive "$apt_get" update
-  DEBIAN_FRONTEND=noninteractive "$apt_get" install -y --no-install-recommends "${packages[@]}"
-}
-ensure_command_available() {
-  local label="$1"
-  local command_name="$2"
-  shift 2
-  if command -v "$command_name" >/dev/null 2>&1; then
-    return 0
-  fi
-  install_ubuntu_packages "$@"
-  command -v "$command_name" >/dev/null 2>&1 || {
-    echo "$label is still unavailable after installing: $*" >&2
-    exit 1
-  }
-}
-python_venv_available() {
-  python3.10 -c 'import ensurepip, venv; ensurepip.version()' >/dev/null 2>&1
-}
-ensure_python_runtime() {
-  if ! command -v python3.10 >/dev/null 2>&1 || ! python3.10 -m pip --version >/dev/null 2>&1 || ! python_venv_available; then
-    install_ubuntu_packages python3.10 python3.10-venv python3-pip
-  fi
-  command -v python3.10 >/dev/null 2>&1 || {
-    echo "python3.10 is still unavailable after installing Ubuntu packages." >&2
-    exit 1
-  }
-  python3.10 -m pip --version >/dev/null 2>&1 || {
-    echo "python3.10 pip is still unavailable after installing Ubuntu packages." >&2
-    exit 1
-  }
-  python_venv_available || {
-    echo "python3.10 venv/ensurepip is still unavailable after installing Ubuntu packages." >&2
-    exit 1
-  }
-  python3.10 - <<'PY'
-import sys
-if sys.version_info < (3, 10):
-    raise SystemExit("Pullwise worker requires Python 3.10 or newer.")
-PY
-  PYTHON_BIN="$(python3.10 -c 'import sys; print(sys.executable)')"
-}
-ensure_command_available "sha256sum" sha256sum coreutils
-ensure_command_available "bwrap" bwrap bubblewrap
-safe_worker_id() {
-  local raw safe digest prefix
-  raw="$1"
-  safe="$(printf '%s' "$raw" | tr -c 'A-Za-z0-9_-' '-')"
-  if [ "${#safe}" -le 48 ]; then
-    printf '%s\n' "$safe"
-    return 0
-  fi
-  digest="$(printf '%s' "$raw" | sha256sum)"
-  digest="${digest%% *}"
-  digest="$(printf '%s' "$digest" | cut -c1-10)"
-  prefix="$(printf '%s' "$safe" | cut -c1-37)"
-  printf '%s-%s\n' "$prefix" "$digest"
-}
-service_user_name() {
-  local prefix digest
-  prefix="$(printf '%s' "$1" | tr 'A-Z_' 'a-z-' | tr -cd 'a-z0-9-' | cut -c1-10)"
-  if [ -z "$prefix" ]; then
-    prefix="worker"
-  fi
-  digest="$(printf '%s' "$1" | sha256sum)"
-  digest="${digest%% *}"
-  digest="$(printf '%s' "$digest" | cut -c1-10)"
-  printf 'pw-worker-%s-%s\n' "$prefix" "$digest"
-}
-SAFE_WORKER_ID="$(safe_worker_id "$WORKER_ID")"
-if [ -z "$SAFE_WORKER_ID" ]; then
-  echo "worker id does not contain any safe service-name characters" >&2
-  exit 2
-fi
-SERVICE_USER="$(service_user_name "$SAFE_WORKER_ID")"
-BASE_CONFIG_DIR="/etc/pullwise-worker"
-BASE_DATA_DIR="/var/lib/pullwise-worker"
-BASE_LOG_DIR="/var/log/pullwise-worker"
-SERVICE_NAME="pullwise-worker-$SAFE_WORKER_ID"
-WATCHER_SERVICE_NAME="$SERVICE_NAME-watcher"
-CONFIG_DIR="$BASE_CONFIG_DIR/$SAFE_WORKER_ID"
-ENV_FILE="$CONFIG_DIR/worker.env"
-AUTH_COMMANDS_FILE="$CONFIG_DIR/auth-commands.txt"
-BIN_PATH="/usr/local/bin/$SERVICE_NAME"
-DATA_DIR="$BASE_DATA_DIR/$SAFE_WORKER_ID"
-CHECKOUT_ROOT="$DATA_DIR/checkouts"
-WORKER_RUNTIME_ROOT="$DATA_DIR/workers/$SAFE_WORKER_ID"
-WORKER_VENV="$WORKER_RUNTIME_ROOT/.venv"
-LOG_DIR="$BASE_LOG_DIR/$SAFE_WORKER_ID"
-SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-WATCHER_SERVICE_FILE="/etc/systemd/system/$WATCHER_SERVICE_NAME.service"
-LOGROTATE_FILE="/etc/logrotate.d/$SERVICE_NAME"
-UNINSTALL_MARKER_FILE="/run/$SERVICE_NAME/uninstall-requested"
-INSTALL_COMPLETED=0
-WATCHER_STARTED=0
-ROLLBACK_ENABLED=0
-HAD_SERVICE_USER=0
-HAD_CONFIG_DIR=0
-HAD_DATA_DIR=0
-HAD_LOG_DIR=0
-HAD_BIN_PATH=0
-HAD_SERVICE_FILE=0
-HAD_WATCHER_SERVICE_FILE=0
-HAD_LOGROTATE_FILE=0
-id "$SERVICE_USER" >/dev/null 2>&1 && HAD_SERVICE_USER=1
-[ -e "$CONFIG_DIR" ] && HAD_CONFIG_DIR=1
-[ -e "$DATA_DIR" ] && HAD_DATA_DIR=1
-[ -e "$LOG_DIR" ] && HAD_LOG_DIR=1
-[ -e "$BIN_PATH" ] && HAD_BIN_PATH=1
-[ -e "$SERVICE_FILE" ] && HAD_SERVICE_FILE=1
-[ -e "$WATCHER_SERVICE_FILE" ] && HAD_WATCHER_SERVICE_FILE=1
-[ -e "$LOGROTATE_FILE" ] && HAD_LOGROTATE_FILE=1
-rollback_dir() {
-  local path="$1"
-  local base="$2"
-  local existed="$3"
-  [ "$existed" = "0" ] || return 0
-  [ -n "$path" ] || return 0
-  case "$path" in
-    "$base"/*) rm -rf -- "$path" >/dev/null 2>&1 || true ;;
-    *) echo "Refusing to roll back unexpected directory: $path" >&2 ;;
-  esac
-}
-rollback_file() {
-  local path="$1"
-  local base="$2"
-  local existed="$3"
-  [ "$existed" = "0" ] || return 0
-  [ -n "$path" ] || return 0
-  case "$path" in
-    "$base"/*) rm -f -- "$path" >/dev/null 2>&1 || true ;;
-    *) echo "Refusing to roll back unexpected file: $path" >&2 ;;
-  esac
-}
-rollback_failed_install() {
-  local status=$?
-  trap - EXIT
-  if [ "$status" -eq 0 ] || [ "$INSTALL_COMPLETED" = "1" ] || [ "$ROLLBACK_ENABLED" != "1" ]; then
-    exit "$status"
-  fi
-  if [ "${PULLWISE_KEEP_FAILED_INSTALL:-}" = "1" ]; then
-    echo "Pullwise worker install failed; preserving partial instance because PULLWISE_KEEP_FAILED_INSTALL=1." >&2
-    exit "$status"
-  fi
-  if [ "$WATCHER_STARTED" = "1" ]; then
-    echo "Pullwise worker install failed after watcher start; preserving instance so the watcher remains the lifecycle owner." >&2
-    exit "$status"
-  fi
-  echo "Pullwise worker install failed; rolling back partial instance $SAFE_WORKER_ID." >&2
-  if [ "$HAD_SERVICE_FILE" = "0" ]; then
-    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-    systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  fi
-  if [ "$HAD_WATCHER_SERVICE_FILE" = "0" ]; then
-    systemctl stop "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
-    systemctl disable "$WATCHER_SERVICE_NAME" >/dev/null 2>&1 || true
-  fi
-  rollback_file "$SERVICE_FILE" "/etc/systemd/system" "$HAD_SERVICE_FILE"
-  rollback_file "$WATCHER_SERVICE_FILE" "/etc/systemd/system" "$HAD_WATCHER_SERVICE_FILE"
-  rollback_file "$LOGROTATE_FILE" "/etc/logrotate.d" "$HAD_LOGROTATE_FILE"
-  rollback_file "$BIN_PATH" "/usr/local/bin" "$HAD_BIN_PATH"
-  rollback_dir "$CONFIG_DIR" "$BASE_CONFIG_DIR" "$HAD_CONFIG_DIR"
-  rollback_dir "$DATA_DIR" "$BASE_DATA_DIR" "$HAD_DATA_DIR"
-  rollback_dir "$LOG_DIR" "$BASE_LOG_DIR" "$HAD_LOG_DIR"
-  if [ "$HAD_SERVICE_USER" = "0" ]; then
-    userdel "$SERVICE_USER" >/dev/null 2>&1 || true
-  fi
-  systemctl daemon-reload >/dev/null 2>&1 || true
-  exit "$status"
-}
-trap rollback_failed_install EXIT
-if [ -z "$WORKER_PACKAGE" ]; then
-  WORKER_PACKAGE="${PULLWISE_WORKER_PACKAGE:-}"
-fi
-if [ -z "$WORKER_PACKAGE" ]; then
-  WORKER_PACKAGE="__DEFAULT_WORKER_PACKAGE__"
-fi
-normalize_provider_chain() {
-  local raw="${1:-}"
-  local next=""
-  local item
-  raw="${raw//[[:space:]]/}"
-  IFS=',' read -ra items <<< "$raw"
-  for item in "${items[@]}"; do
-    case "$item" in
-      codex)
-        case ",$next," in *",$item,"*) ;; *) next="${next:+$next,}$item" ;; esac
-        ;;
-    esac
-  done
-  printf '%s\n' "$next"
-}
-provider_chain_has() {
-  case ",$PROVIDER_CHAIN," in *",$1,"*) return 0 ;; *) return 1 ;; esac
-}
-if [ -z "$PROVIDER_CHAIN" ]; then
-  PROVIDER_CHAIN="${PULLWISE_PROVIDER_CHAIN:-}"
-fi
-PROVIDER_CHAIN="$(normalize_provider_chain "$PROVIDER_CHAIN")"
-if [ -z "$PROVIDER_CHAIN" ]; then
-  echo "provider chain is required; install from the admin-generated command." >&2
-  exit 2
-fi
-PROVIDER="${PROVIDER_CHAIN%%,*}"
-CODEX_HOME="$WORKER_RUNTIME_ROOT/codex-home"
-CODEX_SQLITE_HOME="$WORKER_RUNTIME_ROOT/codex-sqlite"
-SERVICE_TOOL_PATH="$WORKER_VENV/bin:$WORKER_RUNTIME_ROOT/.local/bin:$WORKER_RUNTIME_ROOT/.codex/bin:$CODEX_HOME/bin:$SERVICE_PATH"
-XDG_CONFIG_HOME="$WORKER_RUNTIME_ROOT/.config"
-XDG_CACHE_HOME="$WORKER_RUNTIME_ROOT/.cache"
-XDG_DATA_HOME="$WORKER_RUNTIME_ROOT/.local/share"
-
-run_as_service_user() {
-  (
-    cd "$WORKER_RUNTIME_ROOT"
-    if command -v runuser >/dev/null 2>&1; then
-      runuser -u "$SERVICE_USER" -- env HOME="$WORKER_RUNTIME_ROOT" USERPROFILE="$WORKER_RUNTIME_ROOT" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
-    elif command -v sudo >/dev/null 2>&1; then
-      sudo -u "$SERVICE_USER" env HOME="$WORKER_RUNTIME_ROOT" USERPROFILE="$WORKER_RUNTIME_ROOT" CODEX_HOME="$CODEX_HOME" CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH="$SERVICE_TOOL_PATH" "$@"
-    else
-      echo "missing runuser or sudo; cannot validate worker service user runtime" >&2
-      return 127
-    fi
-  )
-}
-service_user_auth_command() {
-  local command_line=""
-  local part
-  for part in "$@"; do
-    command_line="${command_line:+$command_line }$(printf '%q' "$part")"
-  done
-  printf 'sudo -u %q env HOME=%q USERPROFILE=%q CODEX_HOME=%q CODEX_SQLITE_HOME=%q XDG_CONFIG_HOME=%q XDG_CACHE_HOME=%q XDG_DATA_HOME=%q PATH=%q sh -lc %q\n' \
-    "$SERVICE_USER" "$WORKER_RUNTIME_ROOT" "$WORKER_RUNTIME_ROOT" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$SERVICE_TOOL_PATH" "cd \"\$HOME\" && exec $command_line"
-}
-scoped_command_path() {
-  local fallback_one="${1:-}"
-  local fallback_two="${2:-}"
-  if [ -n "$fallback_one" ] && [ -x "$fallback_one" ]; then
-    printf '%s\n' "$fallback_one"
-  elif [ -n "$fallback_two" ] && [ -x "$fallback_two" ]; then
-    printf '%s\n' "$fallback_two"
-  else
-    return 1
-  fi
-}
-ensure_scoped_command_path() {
-  local command_path="${1:-}"
-  local label="${2:-provider}"
-  local resolved_root resolved_command
-  [ -n "$command_path" ] || return 0
-  resolved_root="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$WORKER_RUNTIME_ROOT")"
-  resolved_command="$("${PYTHON_BIN:-python3.10}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$command_path")"
-  case "$resolved_command/" in
-    "$resolved_root"/*) ;;
-    *)
-      echo "$label command must be inside worker root $WORKER_RUNTIME_ROOT: $command_path" >&2
-      exit 1
-      ;;
-  esac
-}
-validate_codex_release() {
-  local release="${1:-latest}"
-  case "$release" in
-    rust-v*) release="${release#rust-v}" ;;
-    v*) release="${release#v}" ;;
-  esac
-  if [ "$release" = "latest" ]; then
-    return 0
-  fi
-  if ! printf '%s\n' "$release" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)(\.[0-9]+)?)?$'; then
-    echo "Invalid Codex release version: ${1:-}. Expected latest or x.y.z[-alpha[.N]|-beta[.N]]." >&2
-    exit 2
-  fi
-}
-ensure_codex_cli() {
-  local release="${CODEX_RELEASE:-latest}"
-  local installer_path codex_install_dir
-  validate_codex_release "$release"
-  if [ -z "$CODEX_COMMAND" ]; then
-    CODEX_COMMAND="$(scoped_command_path "$WORKER_RUNTIME_ROOT/.local/bin/codex" "$CODEX_HOME/bin/codex" || true)"
-  fi
-  if [ -z "$CODEX_COMMAND" ]; then
-    CODEX_COMMAND="$WORKER_RUNTIME_ROOT/.local/bin/codex"
-  fi
-  ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
-  if [ "${CODEX_COMMAND##*/}" != "codex" ]; then
-    echo "Codex command path must end with /codex so the official installer can create it: $CODEX_COMMAND" >&2
-    exit 1
-  fi
-  codex_install_dir="${CODEX_COMMAND%/*}"
-  install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$codex_install_dir"
-  installer_path="$(mktemp)"
-  trap 'rm -f "$installer_path"' RETURN
-  curl -fsSL "$CODEX_INSTALLER_URL" -o "$installer_path"
-  chmod 0755 "$installer_path"
-  echo "Installing Codex CLI release $release into $codex_install_dir"
-  if ! run_as_service_user env CODEX_RELEASE="$release" CODEX_INSTALL_DIR="$codex_install_dir" CODEX_NON_INTERACTIVE=1 "$installer_path" --release "$release"; then
-    echo "Codex CLI standalone installer failed for release $release." >&2
-    echo "Installer: $CODEX_INSTALLER_URL" >&2
-    exit 1
-  fi
-  [ -x "$CODEX_COMMAND" ] || {
-    echo "Codex CLI install completed but $CODEX_COMMAND was not created." >&2
-    exit 1
-  }
-  if ! run_as_service_user "$CODEX_COMMAND" --version; then
-    echo "Codex CLI was installed but its version probe failed: $CODEX_COMMAND" >&2
-    exit 1
-  fi
-}
-ensure_python_runtime
-ensure_command_available "git" git git
-ensure_command_available "curl" curl curl
-ensure_command_available "getent" getent libc-bin
-ensure_command_available "install" install coreutils
-ensure_command_available "runuser" runuser util-linux
-ensure_command_available "systemctl" systemctl systemd
-ensure_command_available "tar" tar tar
-ensure_command_available "useradd" useradd passwd
-ensure_command_available "userdel" userdel passwd
-ROLLBACK_ENABLED=1
-if id "$SERVICE_USER" >/dev/null 2>&1; then
-  existing_home="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
-  if [ "$existing_home" != "$WORKER_RUNTIME_ROOT" ] && [ "$existing_home" != "$DATA_DIR" ]; then
-    echo "service user $SERVICE_USER already exists with home $existing_home; expected $WORKER_RUNTIME_ROOT" >&2
-    exit 1
-  fi
-else
-  useradd --system --home "$WORKER_RUNTIME_ROOT" --shell /usr/sbin/nologin "$SERVICE_USER"
-fi
-install -d -m 0755 -o root -g root "$BASE_CONFIG_DIR"
-install -d -m 0755 -o root -g root "$BASE_DATA_DIR" "$BASE_LOG_DIR"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR" "$DATA_DIR" "$CHECKOUT_ROOT" "$WORKER_RUNTIME_ROOT" "$LOG_DIR" "$CODEX_HOME" "$CODEX_SQLITE_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$WORKER_RUNTIME_ROOT/.local" "$WORKER_RUNTIME_ROOT/.local/bin" "$WORKER_RUNTIME_ROOT/.codex" "$WORKER_RUNTIME_ROOT/.codex/bin" "$CODEX_HOME/bin"
-if [ ! -f "$CODEX_HOME/config.toml" ]; then
-  install -m 0640 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$CODEX_HOME/config.toml"
-fi
-
-run_as_service_user "$PYTHON_BIN" -m venv "$WORKER_VENV"
-PYTHON_BIN="$WORKER_VENV/bin/python"
-
-if provider_chain_has codex; then
-  ensure_codex_cli
-  ensure_scoped_command_path "$CODEX_COMMAND" "Codex"
-fi
-run_as_service_user "$PYTHON_BIN" -m pip install --upgrade --force-reinstall --no-cache-dir "$WORKER_PACKAGE"
-
-write_env_value() {
-  local key="$1"
-  local value="$2"
-  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
-    echo "environment value for $key must be single-line" >&2
-    exit 2
-  fi
-  printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-}
-write_optional_env_value() {
-  local key="$1"
-  local value="${2:-}"
-  [ -n "$value" ] || return 0
-  write_env_value "$key" "$value"
-}
-codex_device_auth_command() {
-  service_user_auth_command "$BIN_PATH" codex-login
-}
-write_auth_commands() {
-  {
-    echo "Pullwise worker manual authorization commands"
-    echo "Worker: $WORKER_NAME ($WORKER_ID)"
-    echo "Home: $DATA_DIR"
-    echo "Provider chain: $PROVIDER_CHAIN"
-    if provider_chain_has codex; then
-      echo "Codex device login:"
-      codex_device_auth_command
-    fi
-  } > "$AUTH_COMMANDS_FILE"
-  chown root:"$SERVICE_USER" "$AUTH_COMMANDS_FILE"
-  chmod 0640 "$AUTH_COMMANDS_FILE"
-}
-print_auth_commands() {
-  echo
-  echo "Authorization commands saved to $AUTH_COMMANDS_FILE"
-  echo
-}
-run_default_auth_commands() {
-  provider_chain_has codex || return 0
-  local auth_command
-  auth_command="$(codex_device_auth_command)"
-  echo "Starting Codex device login. The same command is saved in $AUTH_COMMANDS_FILE."
-  if ! eval "$auth_command"; then
-    echo "Codex device login did not complete. Re-run the saved command to authorize later." >&2
-  fi
-}
-
-: > "$ENV_FILE"
-write_env_value PULLWISE_SERVER_URL "$SERVER_URL"
-write_env_value PULLWISE_WORKER_ID "$WORKER_ID"
-write_env_value PULLWISE_WORKER_TOKEN "$WORKER_TOKEN"
-write_env_value PULLWISE_PROVIDER "$PROVIDER"
-write_env_value PULLWISE_PROVIDER_CHAIN "$PROVIDER_CHAIN"
-write_env_value PULLWISE_CHECKOUT_ROOT "$CHECKOUT_ROOT"
-write_env_value PULLWISE_LOG_DIR "$LOG_DIR"
-write_env_value PULLWISE_WORKER_PACKAGE "$WORKER_PACKAGE"
-if provider_chain_has codex; then
-  write_optional_env_value PULLWISE_CODEX_COMMAND "$CODEX_COMMAND"
-  write_optional_env_value PULLWISE_CODEX_RELEASE "$CODEX_RELEASE"
-  write_env_value PULLWISE_CODEX_INSTALLER_URL "$CODEX_INSTALLER_URL"
-  write_env_value PULLWISE_CODEX_HOME "$CODEX_HOME"
-  write_env_value PULLWISE_CODEX_SQLITE_HOME "$CODEX_SQLITE_HOME"
-  write_env_value PULLWISE_CODEX_MODEL "${PULLWISE_CODEX_MODEL:-gpt-5.5}"
-fi
-write_env_value PULLWISE_PYTHON_BIN "$PYTHON_BIN"
-write_env_value PULLWISE_SERVICE_PATH "$SERVICE_PATH"
-write_env_value PULLWISE_SERVICE_USER "$SERVICE_USER"
-write_env_value PULLWISE_SERVICE_HOME "$DATA_DIR"
-write_env_value PULLWISE_WORKER_ROOT "$WORKER_RUNTIME_ROOT"
-write_env_value PULLWISE_WORKER_VENV "$WORKER_VENV"
-write_env_value PULLWISE_SERVICE_NAME "$SERVICE_NAME"
-write_env_value PULLWISE_SERVICE_FILE "$SERVICE_FILE"
-write_env_value PULLWISE_LIFECYCLE_WATCHER_ENABLED "1"
-write_env_value PULLWISE_WATCHER_SERVICE_NAME "$WATCHER_SERVICE_NAME"
-write_env_value PULLWISE_WATCHER_SERVICE_FILE "$WATCHER_SERVICE_FILE"
-write_env_value PULLWISE_WATCHER_POLL_SECONDS "5"
-write_env_value PULLWISE_WORKER_ENV_FILE "$ENV_FILE"
-write_env_value PULLWISE_WORKER_ENV_BACKUP_FILE "$ENV_FILE.bak"
-write_env_value PULLWISE_WORKER_BIN_PATH "$BIN_PATH"
-write_env_value PULLWISE_LOGROTATE_FILE "$LOGROTATE_FILE"
-write_env_value PULLWISE_REMOTE_UNINSTALL_FINALIZER "1"
-write_env_value PULLWISE_UNINSTALL_MARKER_FILE "$UNINSTALL_MARKER_FILE"
-write_env_value PULLWISE_ACTIVE_READINESS_CHECK_SECONDS "60"
-write_env_value PULLWISE_DEGRADED_READINESS_CHECK_SECONDS "600"
-write_env_value PULLWISE_WORKER_POLL_JITTER_SECONDS "2"
-write_env_value PULLWISE_WORKER_MAX_BACKOFF_SECONDS "60"
-write_env_value PULLWISE_WORKER_CLEANUP_INTERVAL_SECONDS "3600"
-write_env_value PULLWISE_RETAIN_FAILED_CHECKOUT_SECONDS "0"
-write_env_value PULLWISE_MAX_CHECKOUT_BYTES "21474836480"
-write_env_value PULLWISE_LOG_RETENTION_SECONDS "1209600"
-write_env_value PULLWISE_MAX_LOG_BYTES "1073741824"
-write_env_value PULLWISE_SCAN_SUMMARY_LOG_MAX_BYTES "10485760"
-chown root:"$SERVICE_USER" "$ENV_FILE"
-chmod 0640 "$ENV_FILE"
-write_auth_commands
-
-cat > "$BIN_PATH" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-load_worker_env() {
-  local env_file="\$1"
-  local key value
-  [ -f "\$env_file" ] || return 0
-  while IFS="=" read -r key value || [ -n "\$key" ]; do
-    [[ -z "\$key" || "\$key" == \\#* ]] && continue
-    [[ "\$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    export "\$key=\$value"
-  done < "\$env_file"
-}
-load_worker_env "\${PULLWISE_WORKER_ENV_FILE:-$ENV_FILE}"
-SERVICE_HOME="\${PULLWISE_SERVICE_HOME:-/var/lib/pullwise-worker}"
-WORKER_ROOT="\${PULLWISE_WORKER_ROOT:-\$SERVICE_HOME/workers/\${PULLWISE_WORKER_ID:-worker}}"
-export HOME="\$WORKER_ROOT"
-export USERPROFILE="\$WORKER_ROOT"
-export CODEX_HOME="\${PULLWISE_CODEX_HOME:-\$WORKER_ROOT/codex-home}"
-export CODEX_SQLITE_HOME="\${PULLWISE_CODEX_SQLITE_HOME:-\$WORKER_ROOT/codex-sqlite}"
-export XDG_CONFIG_HOME="\$WORKER_ROOT/.config"
-export XDG_CACHE_HOME="\$WORKER_ROOT/.cache"
-export XDG_DATA_HOME="\$WORKER_ROOT/.local/share"
-SERVICE_PATH="\${PULLWISE_SERVICE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-export PATH="\$WORKER_ROOT/.venv/bin:\$WORKER_ROOT/.local/bin:\$WORKER_ROOT/.codex/bin:\$CODEX_HOME/bin:\$SERVICE_PATH"
-PYTHON_BIN="\${PULLWISE_PYTHON_BIN:-\$WORKER_ROOT/.venv/bin/python}"
-exec "\$PYTHON_BIN" -m pullwise_worker.main "\$@"
-EOF
-chmod 0755 "$BIN_PATH"
-
-cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=Pullwise Worker $WORKER_NAME
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
-
-[Service]
-Type=simple
-User=$SERVICE_USER
-Group=$SERVICE_USER
-WorkingDirectory=$WORKER_RUNTIME_ROOT
-EnvironmentFile=$ENV_FILE
-Environment=PATH=$SERVICE_TOOL_PATH
-Environment=HOME=$WORKER_RUNTIME_ROOT
-Environment=USERPROFILE=$WORKER_RUNTIME_ROOT
-Environment=CODEX_HOME=$CODEX_HOME
-Environment=CODEX_SQLITE_HOME=$CODEX_SQLITE_HOME
-Environment=XDG_CONFIG_HOME=$XDG_CONFIG_HOME
-Environment=XDG_CACHE_HOME=$XDG_CACHE_HOME
-Environment=XDG_DATA_HOME=$XDG_DATA_HOME
-ExecStart=$BIN_PATH run
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=$DATA_DIR $LOG_DIR
-RuntimeDirectory=$SERVICE_NAME
-RuntimeDirectoryMode=0750
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > "$WATCHER_SERVICE_FILE" <<EOF
-[Unit]
-Description=Pullwise Worker Watcher $WORKER_NAME
-After=network-online.target
-Wants=network-online.target
-Before=$SERVICE_NAME.service
-StartLimitIntervalSec=300
-StartLimitBurst=5
-
-[Service]
-Type=simple
-WorkingDirectory=/
-EnvironmentFile=$ENV_FILE
-ExecStart=$BIN_PATH watch
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=false
-RuntimeDirectory=$WATCHER_SERVICE_NAME
-RuntimeDirectoryMode=0750
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > "$LOGROTATE_FILE" <<EOF
-$LOG_DIR/*.log {
-  daily
-  rotate 14
-  compress
-  missingok
-  notifempty
-  create 0640 $SERVICE_USER $SERVICE_USER
-}
-EOF
-
-systemctl daemon-reload
-print_auth_commands
-run_default_auth_commands
-if ! run_as_service_user env PULLWISE_DOCTOR_REQUIRE_SYSTEMD_ACTIVE=0 "$BIN_PATH" doctor; then
-  echo "Pullwise worker doctor failed before service start; rolling back install." >&2
-  exit 1
-fi
-systemctl enable "$WATCHER_SERVICE_NAME" >/dev/null
-systemctl restart "$WATCHER_SERVICE_NAME"
-WATCHER_STARTED=1
-systemctl enable "$SERVICE_NAME" >/dev/null
-systemctl restart "$SERVICE_NAME"
-INSTALL_COMPLETED=1
-echo "Pullwise worker installed as $WORKER_NAME ($WORKER_ID)."
-echo "Systemd service: $SERVICE_NAME"
-echo "Watcher service: $WATCHER_SERVICE_NAME"
-echo "Worker home: $DATA_DIR"
-"""
-    return (
-        script.replace("__DEFAULT_WORKER_PACKAGE__", default_worker_package())
-        .replace("__CODEX_CLI_INSTALLER_URL__", CODEX_CLI_INSTALLER_URL)
-        .replace("\r\n", "\n")
-    )
-
-
+    return worker_node_installer.render()
 def worker_test_payload(worker: dict) -> dict:
     token_used_at = pull_request_timestamp(worker.get("token_last_used_at"))
     checks = {

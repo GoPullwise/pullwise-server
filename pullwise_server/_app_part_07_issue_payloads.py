@@ -67,6 +67,7 @@ def scan_system_status_payload(*, admin: bool = False) -> dict:
         "queuedJobs": queued_jobs,
         "degradedWorkerCount": len(degraded),
         "offlineWorkerCount": len(offline),
+        "availableReviewModels": fleet_available_review_models(worker_records),
     }
     if uninstalling_workers:
         payload["administratorWorkerUninstallCount"] = uninstalling_workers

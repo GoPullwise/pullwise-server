@@ -10,6 +10,7 @@ import time
 import zipfile
 
 from .agent_first_current_http import handle_agent_first_current_post
+from . import worker_runtime_catalog
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -231,14 +232,24 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
             if estimate_error:
                 errors.append(estimate_error)
 
-    codex_app_server = body.get("codex_app_server")
-    if not isinstance(codex_app_server, dict):
-        errors.append("codex_app_server must be an object")
-        codex_app_server = {}
-    if not public_issue_text(codex_app_server.get("status")):
-        errors.append("codex_app_server.status is required")
-    if public_issue_text(codex_app_server.get("transport")) not in {"stdio", "unix"}:
-        errors.append("codex_app_server.transport must be stdio or unix")
+    if body.get("runtime_catalog") is not None:
+        agent_session = body.get("agent_session")
+        if not isinstance(agent_session, dict):
+            errors.append("agent_session must be an object")
+            agent_session = {}
+        if public_issue_text(agent_session.get("status")) not in {"idle", "ready", "running"}:
+            errors.append("agent_session.status is invalid")
+        if public_issue_text(agent_session.get("transport")) != "embedded":
+            errors.append("agent_session.transport must be embedded")
+    else:
+        codex_app_server = body.get("codex_app_server")
+        if not isinstance(codex_app_server, dict):
+            errors.append("codex_app_server must be an object")
+            codex_app_server = {}
+        if not public_issue_text(codex_app_server.get("status")):
+            errors.append("codex_app_server.status is required")
+        if public_issue_text(codex_app_server.get("transport")) not in {"stdio", "unix"}:
+            errors.append("codex_app_server.transport must be stdio or unix")
 
     return "; ".join(errors[:12]) if errors else None
 
@@ -304,13 +315,15 @@ def worker_v1_lease_validation_error(body: dict) -> str | None:
     if not isinstance(capabilities, dict):
         errors.append("capabilities must be an object")
         capabilities = {}
-    for field_name in (
+    pi_runtime = capabilities.get("pi_agent_session") is True
+    required_capabilities = (
         "full_repo_scan",
-        "codex_app_server",
-        "isolated_codex_home",
+        "pi_agent_session" if pi_runtime else "codex_app_server",
+        "isolated_pi_profiles" if pi_runtime else "isolated_codex_home",
         "progress_events",
         "cancellation",
-    ):
+    )
+    for field_name in required_capabilities:
         if capabilities.get(field_name) is not True:
             errors.append(f"capabilities.{field_name} must be true")
 
@@ -3022,17 +3035,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def handle_admin_worker_create(self, session: dict, body: dict) -> None:
         try:
             provider_chain = worker_provider_chain(
-                body.get("providerChain"),
-                strict=("providerChain" in body),
+                None,
             )
-            codex_install_options = worker_codex_install_options(body) if "codex" in provider_chain else None
         except ValueError as exc:
             self.audit_worker_action(session, "create_worker", success=False, error=str(exc))
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         worker = db.create_worker(
             {
                 "name": public_issue_text(body.get("name")) or "Worker",
-                "provider": provider_chain[0],
+                "provider": "unconfigured",
                 "provider_chain": provider_chain,
                 "region": public_issue_text(body.get("region")),
                 "version": public_issue_text(body.get("version")),
@@ -3050,7 +3061,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "region": worker.get("region"),
             },
         )
-        return self.json(worker_create_payload(worker, codex_install_options=codex_install_options), HTTPStatus.CREATED)
+        return self.json(worker_create_payload(worker), HTTPStatus.CREATED)
 
     def handle_admin_worker_release(self, session: dict, body: dict) -> None:
         raw_version = body.get("version")
@@ -3163,7 +3174,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, "Request body must be a JSON object.")
         if len(segments) == 3 and segments[:2] == ["admin", "workers"]:
             worker_id = clean_github_access_text(segments[2]) or ""
-            if not db.get_worker(worker_id, worker_scope=db.WORKER_SCOPE_SHARED):
+            worker_record = db.get_worker(worker_id, worker_scope=db.WORKER_SCOPE_SHARED)
+            if not worker_record:
                 self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error="Worker not found.")
                 return self.error(HTTPStatus.NOT_FOUND, "Worker not found.")
             changed = {
@@ -3178,6 +3190,22 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
                     return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+            if "runtimeSelection" in body:
+                try:
+                    selection = worker_runtime_catalog.normalize_runtime_selection(
+                        body.get("runtimeSelection"),
+                        worker_record.get("runtime_catalog"),
+                    )
+                except ValueError as exc:
+                    self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
+                    return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+                changed.update(
+                    {
+                        "selected_credential_id": selection["credential_id"],
+                        "selected_provider": selection["provider"],
+                        "selected_model": selection["model"],
+                    }
+                )
             worker = db.update_worker(
                 worker_id,
                 changed,
@@ -3402,7 +3430,31 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 f"Worker is not ready to claim jobs: {worker_status}.",
             )
-        ready_providers = worker_record_ready_providers(worker_record)
+        runtime_selection_public = worker_runtime_catalog.selection_from_worker(worker_record)
+        runtime_catalog_present = worker_runtime_catalog.normalize_runtime_catalog(
+            worker_record.get("runtime_catalog")
+        ) is not None
+        if runtime_catalog_present and runtime_selection_public is None:
+            return self.json(
+                {
+                    "lease": None,
+                    "retry_after_seconds": 30,
+                    "job": None,
+                    "reason": "runtime_selection_required",
+                }
+            )
+        runtime_selection = None
+        if runtime_selection_public is not None:
+            runtime_selection = {
+                "credential_id": runtime_selection_public["credentialId"],
+                "provider": runtime_selection_public["provider"],
+                "model": runtime_selection_public["model"],
+            }
+        ready_providers = (
+            [runtime_selection["provider"]]
+            if runtime_selection is not None
+            else worker_record_ready_providers(worker_record)
+        )
         if not ready_providers:
             return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
         try:
@@ -3420,7 +3472,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not job:
             return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
         try:
-            payload = scan_job_payload(job, include_clone_token=True)
+            payload = scan_job_payload(
+                job,
+                include_clone_token=True,
+                runtime_selection=runtime_selection,
+            )
         except github_auth.GitHubError as exc:
             failure_timestamp = now()
             db.fail_interrupted_scan_job(
@@ -3504,7 +3560,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not platform_os or platform_os not in {"linux", "posix"}:
             return self.error(HTTPStatus.BAD_REQUEST, "Worker runtime platform must be Linux/POSIX.")
         try:
-            registered = db.register_worker_protocol({**body, "timestamp": now()})
+            normalized_catalog = None
+            if "runtime_catalog" in worker:
+                normalized_catalog = worker_runtime_catalog.normalize_runtime_catalog(
+                    worker.get("runtime_catalog"),
+                    strict=True,
+                )
+            normalized_worker = dict(worker)
+            if normalized_catalog is not None:
+                normalized_worker["runtime_catalog"] = normalized_catalog
+            registered = db.register_worker_protocol(
+                {**body, "worker": normalized_worker, "timestamp": now()}
+            )
+            if normalized_catalog is not None:
+                SCAN_SYSTEM_STATUS_CACHE.clear()
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         return self.json(
@@ -3873,6 +3942,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             "codex_quota": body.get("codexQuota") if "codexQuota" in body else body.get("codex_quota"),
             "timestamp": heartbeat_timestamp,
         }
+        if "runtime_catalog" in body:
+            try:
+                heartbeat_record["runtime_catalog"] = worker_runtime_catalog.normalize_runtime_catalog(
+                    body.get("runtime_catalog"),
+                    strict=True,
+                )
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         heartbeat_progress_context = None
         heartbeat_progress_record = None
         heartbeat_scan_job_progress = None
@@ -3962,6 +4039,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             apply_recovered_scan_jobs_locked(recovered_jobs)
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if "runtime_catalog" in heartbeat_record:
+            SCAN_SYSTEM_STATUS_CACHE.clear()
         if worker_codex_quota_payload(record) is not None:
             db.mark_running_worker_quota_refresh_telemetry(
                 worker_id,

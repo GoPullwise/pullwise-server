@@ -1108,7 +1108,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertFalse(attempted)
 
-    def test_admin_worker_create_rejects_empty_provider_chain(self) -> None:
+    def test_admin_worker_create_defers_provider_selection_until_catalog_sync(self) -> None:
         handler = RouteHarness(
             "/admin/workers",
             {"name": "No provider", "providerChain": ["bad"]},
@@ -1116,8 +1116,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(handler, "POST")
 
-        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("providerChain", handler.payload["message"])
+        self.assertEqual(handler.status, HTTPStatus.CREATED)
+        self.assertEqual(handler.payload["worker"]["provider"], "unconfigured")
+        self.assertEqual(handler.payload["worker"]["providerChain"], [])
 
     def test_worker_heartbeat_persists_machine_metrics_for_admin_detail(self) -> None:
         payload, token = self.create_worker()
@@ -1459,22 +1460,14 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         safe_worker_id = app.worker_safe_service_id(handler.payload["worker_id"])
         self.assertTrue(worker_root.endswith(f"/workers/{safe_worker_id}"))
         self.assertEqual(
-            handler.payload["suggested_env"]["PULLWISE_CODEX_COMMAND"],
-            f"{worker_root}/.local/bin/codex",
+            handler.payload["suggested_env"]["PULLWISE_PI_PROFILE_ROOT"],
+            f"{worker_root}/pi-profiles",
         )
         self.assertEqual(
-            handler.payload["suggested_env"]["PULLWISE_CODEX_INSTALLER_URL"],
-            "https://chatgpt.com/codex/install.sh",
+            handler.payload["suggested_env"]["PULLWISE_WORKER_STATE_ROOT"],
+            f"{worker_root}/state",
         )
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_HOME"], f"{worker_root}/codex-home")
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_SQLITE_HOME"], f"{worker_root}/codex-sqlite")
-        self.assertNotIn("PULLWISE_CODEX_REASONING_EFFORT", handler.payload["suggested_env"])
-        self.assertNotIn("PULLWISE_CODEX_TIMEOUT_SECONDS", handler.payload["suggested_env"])
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "latest")
-        self.assertNotIn("PULLWISE_CODEX_USE_LATEST", handler.payload["suggested_env"])
-        self.assertNotIn("--codex-release", handler.payload["install_commands"]["standard"])
-        self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_AGE_SECONDS", handler.payload["suggested_env"])
-        self.assertNotIn("PULLWISE_CODEX_APP_SERVER_MAX_TURNS", handler.payload["suggested_env"])
+        self.assertFalse(any(key.startswith("PULLWISE_CODEX") for key in handler.payload["suggested_env"]))
 
     def test_admin_worker_create_ignores_codex_cli_release_inputs(self) -> None:
         handler = RouteHarness(
@@ -1492,9 +1485,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.CREATED)
-        self.assertEqual(handler.payload["suggested_env"]["PULLWISE_CODEX_RELEASE"], "latest")
-        self.assertNotIn("PULLWISE_CODEX_USE_LATEST", handler.payload["suggested_env"])
-        self.assertNotIn("--codex-release", handler.payload["install_commands"]["standard"])
+        self.assertEqual(handler.payload["worker"]["provider"], "unconfigured")
+        self.assertFalse(any(key.startswith("PULLWISE_CODEX") for key in handler.payload["suggested_env"]))
 
     def test_install_worker_script_omits_retired_local_policy_env(self) -> None:
         script = app.worker_install_script()
@@ -1531,8 +1523,8 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["providerChain"], ["codex"])
-        self.assertEqual(handler.payload["defaults"]["providerChain"], ["codex"])
+        self.assertEqual(handler.payload["providerChain"], [])
+        self.assertEqual(handler.payload["defaults"]["providerChain"], [])
         self.assertEqual(handler.payload["workerVersion"], app.DEFAULT_WORKER_PACKAGE_VERSION)
 
     def test_admin_worker_defaults_refresh_bypasses_cached_latest_release(self) -> None:

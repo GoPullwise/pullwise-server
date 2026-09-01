@@ -104,11 +104,14 @@ def review_job_repository_payload(job: dict) -> dict:
     return {key: value for key, value in payload.items() if value not in {"", None}}
 
 
-def review_job_model_profile(agent_config: dict) -> dict:
+def review_job_model_profile(agent_config: dict, runtime_selection: dict | None = None) -> dict:
     codex = agent_config.get("codex") if isinstance(agent_config.get("codex"), dict) else {}
     effort = public_issue_text(codex.get("reasoningEffort")) or "medium"
+    selected = runtime_selection if isinstance(runtime_selection, dict) else {}
     return {
-        "default_model": public_issue_text(codex.get("model")),
+        "provider": public_issue_text(selected.get("provider") or agent_config.get("provider")),
+        "credential_id": public_issue_text(selected.get("credential_id")),
+        "default_model": public_issue_text(selected.get("model") or codex.get("model")),
         "core_effort": effort,
         "reviewer_effort": effort,
         "validator_effort": effort,
@@ -365,7 +368,12 @@ def scan_job_attempt_run_id(job: dict) -> str:
     return f"run_{job_id}_attempt_{attempt}"
 
 
-def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
+def scan_job_payload(
+    job: dict,
+    *,
+    include_clone_token: bool = False,
+    runtime_selection: dict | None = None,
+) -> dict:
     scan = db.get_user_scan_snapshot(
         public_issue_text(job.get("user_id")),
         public_issue_text(job.get("scan_id")),
@@ -402,6 +410,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     if job_provider_chain:
         agent_config = dict(agent_config)
         agent_config["provider"] = job_provider_chain[0]
+    if runtime_selection:
+        agent_config = dict(agent_config)
+        agent_config["provider"] = public_issue_text(runtime_selection.get("provider"))
     payload["agentConfig"] = agent_config
     repository_limits = repository_scan_limits_payload(plan)
     payload["repositoryLimits"] = repository_limits
@@ -409,7 +420,9 @@ def scan_job_payload(job: dict, *, include_clone_token: bool = False) -> dict:
     payload["review_output_language"] = language["code"]
     payload["review_output_language_label"] = language["label"]
     payload["repository"] = review_job_repository_payload(job)
-    payload["model_profile"] = review_job_model_profile(agent_config)
+    if runtime_selection:
+        payload["runtime_selection"] = dict(runtime_selection)
+    payload["model_profile"] = review_job_model_profile(agent_config, runtime_selection)
     payload["review_request"] = review_job_review_request_payload(agent_config, repository_limits, language)
     if include_clone_token:
         payload["clone_token"] = installation_clone_token_payload(job)

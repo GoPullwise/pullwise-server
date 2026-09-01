@@ -26,6 +26,7 @@ from .agent_first_release_trust_migrations import (
 from .agent_first_release_attestation_migrations import (
     install_current_release_attestation_tables,
 )
+from . import worker_runtime_catalog
 
 
 _LOCK = threading.Lock()
@@ -271,6 +272,11 @@ def initialize() -> None:
                     worker_platform TEXT,
                     registration_json TEXT,
                     registered_at INTEGER,
+                    runtime_catalog TEXT,
+                    runtime_catalog_updated_at INTEGER,
+                    selected_credential_id TEXT,
+                    selected_provider TEXT,
+                    selected_model TEXT,
                     status TEXT NOT NULL DEFAULT 'online',
                     first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     last_heartbeat_at INTEGER,
@@ -310,6 +316,11 @@ def initialize() -> None:
                 ("workers", "worker_platform", "TEXT"),
                 ("workers", "registration_json", "TEXT"),
                 ("workers", "registered_at", "INTEGER"),
+                ("workers", "runtime_catalog", "TEXT"),
+                ("workers", "runtime_catalog_updated_at", "INTEGER"),
+                ("workers", "selected_credential_id", "TEXT"),
+                ("workers", "selected_provider", "TEXT"),
+                ("workers", "selected_model", "TEXT"),
                 ("workers", "last_heartbeat_at", "INTEGER"),
             ):
                 ensure_column(connection, table, column, definition)
@@ -1016,6 +1027,11 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
         "worker_platform",
         "registration_json",
         "registered_at",
+        "runtime_catalog",
+        "runtime_catalog_updated_at",
+        "selected_credential_id",
+        "selected_provider",
+        "selected_model",
         "status",
         "first_seen_at",
         "last_heartbeat_at",
@@ -1066,6 +1082,11 @@ def normalize_workers_schema(connection: sqlite3.Connection) -> None:
             worker_platform TEXT,
             registration_json TEXT,
             registered_at INTEGER,
+            runtime_catalog TEXT,
+            runtime_catalog_updated_at INTEGER,
+            selected_credential_id TEXT,
+            selected_provider TEXT,
+            selected_model TEXT,
             status TEXT NOT NULL DEFAULT 'online',
             first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
             last_heartbeat_at INTEGER,
@@ -1579,7 +1600,6 @@ def worker_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-WORKER_PROVIDER_VALUES = {"codex"}
 WORKER_SCOPE_SHARED = "shared"
 WORKER_SCOPE_VALUES = {WORKER_SCOPE_SHARED}
 
@@ -1611,7 +1631,13 @@ def normalize_provider_list(value: Any) -> list[str]:
     providers: list[str] = []
     for item in raw_items:
         provider = str(item or "").strip().lower()
-        if provider in WORKER_PROVIDER_VALUES and provider not in providers:
+        provider_is_safe = (
+            bool(provider)
+            and len(provider) <= 60
+            and provider[0].isalnum()
+            and all(character.isalnum() or character in "._-" for character in provider)
+        )
+        if provider_is_safe and provider not in providers:
             providers.append(provider)
     return providers
 
@@ -1983,6 +2009,9 @@ def update_worker(
         "provider_chain": "provider_chain",
         "region": "region",
         "version": "version",
+        "selected_credential_id": "selected_credential_id",
+        "selected_provider": "selected_provider",
+        "selected_model": "selected_model",
     }
     assignments = []
     values: list[Any] = []
@@ -2281,6 +2310,7 @@ def _upsert_worker_heartbeat_locked(connection: sqlite3.Connection, record: dict
     provider_chain = provider_list_json(record.get("provider_chain"), fallback=[provider])
     ready_providers = heartbeat_ready_providers_json(record)
     codex_quota_text = worker_codex_quota_json(record.get("codex_quota"))
+    runtime_catalog_text = worker_runtime_catalog.runtime_catalog_json(record.get("runtime_catalog"))
     machine_metrics = record.get("machine_metrics")
     machine_metrics_history = record.get("machine_metrics_history")
     machine_metrics_text = (
@@ -2299,9 +2329,10 @@ def _upsert_worker_heartbeat_locked(connection: sqlite3.Connection, record: dict
             worker_id, name, version, provider, provider_chain, enabled, running_jobs,
             hostname, region, last_error, status, first_seen_at, last_heartbeat_at,
             created_at, updated_at, doctor_status, codex_ready, ready_providers,
-            codex_quota, systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history
+            codex_quota, systemd_active, doctor_checked_at, machine_metrics, machine_metrics_history,
+            runtime_catalog, runtime_catalog_updated_at
         )
-        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(worker_id) DO UPDATE SET
             version = excluded.version,
             provider = excluded.provider,
@@ -2318,6 +2349,8 @@ def _upsert_worker_heartbeat_locked(connection: sqlite3.Connection, record: dict
             doctor_checked_at = COALESCE(excluded.doctor_checked_at, workers.doctor_checked_at),
             machine_metrics = COALESCE(excluded.machine_metrics, workers.machine_metrics),
             machine_metrics_history = COALESCE(excluded.machine_metrics_history, workers.machine_metrics_history),
+            runtime_catalog = COALESCE(excluded.runtime_catalog, workers.runtime_catalog),
+            runtime_catalog_updated_at = COALESCE(excluded.runtime_catalog_updated_at, workers.runtime_catalog_updated_at),
             status = CASE WHEN workers.enabled = 0 THEN 'disabled' ELSE 'online' END,
             last_heartbeat_at = excluded.last_heartbeat_at,
             updated_at = excluded.updated_at
@@ -2344,6 +2377,8 @@ def _upsert_worker_heartbeat_locked(connection: sqlite3.Connection, record: dict
             record.get("doctor_checked_at"),
             machine_metrics_text,
             machine_metrics_history_text,
+            runtime_catalog_text,
+            timestamp if runtime_catalog_text is not None else None,
         ),
     )
     row = row_to_dict(connection.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,)).fetchone()) or {}
@@ -2370,6 +2405,10 @@ def register_worker_protocol(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("protocol_version is required")
     timestamp = int(record.get("timestamp") or time.time())
     capabilities = worker.get("capabilities") if isinstance(worker.get("capabilities"), dict) else {}
+    runtime_catalog_value = worker.get("runtime_catalog")
+    if runtime_catalog_value is None:
+        runtime_catalog_value = capabilities.get("runtime_catalog")
+    runtime_catalog_text = worker_runtime_catalog.runtime_catalog_json(runtime_catalog_value)
     isolation = worker.get("isolation") if isinstance(worker.get("isolation"), dict) else {}
     platform = worker.get("platform") if isinstance(worker.get("platform"), dict) else {}
     registration_text = json.dumps(to_jsonable(record), ensure_ascii=False, sort_keys=True)
@@ -2391,6 +2430,8 @@ def register_worker_protocol(record: dict[str, Any]) -> dict[str, Any]:
                     worker_isolation = ?,
                     worker_platform = ?,
                     registration_json = ?,
+                    runtime_catalog = COALESCE(?, runtime_catalog),
+                    runtime_catalog_updated_at = CASE WHEN ? IS NULL THEN runtime_catalog_updated_at ELSE ? END,
                     registered_at = COALESCE(registered_at, ?),
                     updated_at = ?
                 WHERE worker_id = ?
@@ -2404,6 +2445,9 @@ def register_worker_protocol(record: dict[str, Any]) -> dict[str, Any]:
                     isolation_text,
                     platform_text,
                     registration_text,
+                    runtime_catalog_text,
+                    runtime_catalog_text,
+                    timestamp,
                     timestamp,
                     timestamp,
                     worker_id,
@@ -5487,7 +5531,7 @@ def claim_next_scan_job(
     current_time = int(timestamp if timestamp is not None else time.time())
     timeout_at = current_time + max(60, int(lease_seconds))
     ready_provider_set = set(normalize_provider_list(ready_providers)) if ready_providers is not None else None
-    if ready_provider_set is not None and "codex" not in ready_provider_set:
+    if ready_provider_set is not None and not ready_provider_set:
         return None
     with closing(connect()) as connection:
         connection.row_factory = sqlite3.Row

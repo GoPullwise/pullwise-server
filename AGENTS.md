@@ -44,6 +44,34 @@ generated-consumer rule in this file is historical cleanup evidence only and
 must not govern target implementation.
 <!-- PULLWISE_REVIEWER_TARGET_END -->
 
+## Current Pi Worker runtime catalog
+
+- Reuse the authenticated `review-worker-protocol/v1` registration, heartbeat,
+  and lease routes for Pi Workers. Worker `runtime_catalog` uses schema
+  `pullwise-pi-runtime-catalog/v1`.
+- Catalogs contain credential metadata and provider/model availability only.
+  Reject unknown fields so API keys, bearer tokens, OAuth secrets, and other
+  credential material cannot enter Server storage.
+- Persist the catalog plus the exact selected credential/provider/model on the
+  Worker row. Admin `runtimeSelection` must reference an exact catalog entry;
+  leases copy that selection verbatim into `runtime_selection` and
+  `model_profile`.
+- Public status exposes only the de-identified provider/model union as
+  `availableReviewModels`. Credential ids and account labels are Admin-only.
+- A cataloged Worker without a valid persisted selection cannot claim a job;
+  never choose a provider/model automatically.
+- Worker creation is provider-agnostic and returns the Node tarball installer
+  plus host-local profile/sync commands. The active installer uses Node
+  22.23.1/npm only, loops until the operator declines another profile, starts
+  the Watcher before the Worker service, and contains no Python/Codex path.
+- The Watcher owns v1 registration/heartbeat. The Worker execution service owns
+  one lease, checkout, Pi invocation, artifact uploads, and result submit, but
+  never writes Server-owned fleet state directly.
+- The existing v1 result envelope accepts `pi_agent_session` as the engine.
+  Completed Pi runs retain the five standard artifact kinds; failed/cancelled
+  runs retain the three terminal diagnostic kinds. Do not create a parallel
+  result-ingest path.
+
 # Pullwise Server Agent Notes
 
 ## Python Dependency Audit
