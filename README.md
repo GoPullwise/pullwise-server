@@ -929,6 +929,40 @@ PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS=true
 
 Use local GitHub mocks only when testing frontend wiring without real GitHub.
 
+### Four-project agent debug loop
+
+From `pullwise-server`, the local debug runner starts Server, Web, Admin, and
+the Worker's Watcher plus execution service, waits for every process, and runs
+the user/admin control-plane smoke flow:
+
+```powershell
+.\.venv\Scripts\python.exe ops\local_debug_loop.py --hold
+```
+
+The defaults are Server `8080`, Web `5173`, and Admin `5174`. If another local
+app already owns a port, choose explicit alternatives rather than stopping an
+unrelated process:
+
+```powershell
+.\.venv\Scripts\python.exe ops\local_debug_loop.py `
+  --server-port 18080 --web-port 15173 --admin-port 15174 --hold
+```
+
+The runner uses a fresh SQLite database and isolated runtime directories under
+`.pullwise/local-debug/runs/`. It verifies health, local GitHub login,
+repository authorization and sync, scan preflight, scan create/cancel, Admin
+authorization, Worker registration, and Admin system status. The structured
+result is written to that run's `report.json`. Press Ctrl+C to stop the entire
+process tree, fix the reported issue, and run the same command again for the
+next debug cycle.
+
+By default the Worker starts with an empty isolated Pi profile root, so the
+report records full AI review completion as not exercised. Pass
+`--profile-root <existing-profile-directory>` to expose existing host-local Pi
+profile metadata without copying secrets. A real completed review still
+requires an explicit Admin runtime selection and usable provider credentials;
+the local runner never selects a provider/model automatically.
+
 ## Frontend Contract
 
 Implemented endpoints:

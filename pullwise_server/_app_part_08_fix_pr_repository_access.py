@@ -359,6 +359,20 @@ def repository_branch_payload(github_access: dict | None, repo_meta: dict) -> di
 
 
 def scan_branch_is_available(github_access: dict | None, repo_meta: dict, branch: str) -> bool:
+    if (
+        isinstance(github_access, dict)
+        and github_access.get("mode") == "local"
+        and local_github_mocks_enabled()
+    ):
+        available = {github_auth.clean_branch_name(repo_meta.get("defaultBranch")) or "main"}
+        raw_branches = repo_meta.get("branches")
+        if isinstance(raw_branches, list):
+            available.update(
+                clean_branch
+                for item in raw_branches
+                if (clean_branch := github_auth.clean_branch_name(item))
+            )
+        return branch in available
     payload = repository_branch_payload(github_access, repo_meta)
     return branch in set(payload["branches"])
 

@@ -1233,6 +1233,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             user = USERS.get(session["userId"])
             if not user:
                 return self.error(HTTPStatus.UNAUTHORIZED, "Sign in before syncing repositories.")
+            github_access = user.get("githubRepositoryAccess")
             if installation_id or github_identity_id:
                 if not installation_id:
                     return self.error(HTTPStatus.BAD_REQUEST, "installationId is required for scoped repository sync.")
@@ -1241,6 +1242,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     installation_id,
                     github_identity_id=github_identity_id,
                 )
+                payload = self.repositories_payload(refresh=False)
+            elif (
+                isinstance(github_access, dict)
+                and github_access.get("mode") == "local"
+                and local_github_mocks_enabled(self)
+            ):
+                with STATE_LOCK:
+                    current_user = USERS.get(session["userId"])
+                    current_access = current_user.get("githubRepositoryAccess") if current_user else None
+                    if not isinstance(current_access, dict) or current_access.get("mode") != "local":
+                        return self.error(HTTPStatus.CONFLICT, "Local repository authorization changed during sync.")
+                    current_access["repositoriesNeedSync"] = False
+                    current_access["syncedAt"] = now()
+                    mark_state_dirty()
                 payload = self.repositories_payload(refresh=False)
             else:
                 payload = self.repositories_payload(

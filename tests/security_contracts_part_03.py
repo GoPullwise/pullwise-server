@@ -582,6 +582,96 @@ class SecurityContractsPart03Test(SecurityContractsBase):
         app.PullwiseHandler.route(handler, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.UNAUTHORIZED)
+    def test_repository_sync_without_authorization_preserves_the_connect_prompt(self) -> None:
+        app.USERS["usr_1"]["githubRepositoryAccess"] = None
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness("/repositories/sync", cookie="pw_session=ses_1")
+
+        app.PullwiseHandler.route(handler, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["needsAuthorization"])
+        self.assertEqual(handler.payload["items"], [])
+    def test_local_mock_repository_sync_returns_seeded_repositories_without_github_app_api(self) -> None:
+        app.USERS["usr_1"]["providers"] = ["github"]
+        app.USERS["usr_1"]["githubRepositoryAccess"] = {
+            "mode": "local",
+            "scope": "all",
+            "authorizedAt": app.now(),
+            "installationId": "dev_installation_1",
+            "repositories": [repo["fullName"] for repo in app.REPOSITORIES],
+            "repositoryItems": [dict(repo) for repo in app.REPOSITORIES],
+            "repositoriesNeedSync": True,
+        }
+        app.SESSIONS = {
+            "ses_1": {
+                "id": "ses_1",
+                "userId": "usr_1",
+                "createdAt": app.now(),
+                "expiresAt": app.now() + 3600,
+            }
+        }
+        handler = RouteHarness(
+            "/repositories/sync",
+            cookie="pw_session=ses_1",
+            headers={"Host": "localhost:8080"},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PULLWISE_ENABLE_LOCAL_GITHUB_MOCKS": "true",
+                "PULLWISE_MODE": "local",
+                "PULLWISE_APP_URL": "http://localhost:5173",
+                "PULLWISE_ADMIN_APP_URL": "http://localhost:5174",
+                "PULLWISE_API_BASE_URL": "http://localhost:8080",
+                "PULLWISE_ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:5174",
+            },
+            clear=True,
+        ):
+            app.PullwiseHandler.route(handler, "POST")
+            scan = RouteHarness(
+                "/scans",
+                {
+                    "repoId": handler.payload["items"][0]["repoId"],
+                    "branch": "main",
+                    "requestId": app.make_id("req_local_mock_scan"),
+                },
+                cookie="pw_session=ses_1",
+                headers={"Host": "localhost:8080"},
+            )
+            app.PullwiseHandler.route(scan, "POST")
+            invalid_branch_scan = RouteHarness(
+                "/scans",
+                {
+                    "repoId": handler.payload["items"][0]["repoId"],
+                    "branch": "feature/not-seeded",
+                    "requestId": app.make_id("req_local_mock_invalid_branch"),
+                },
+                cookie="pw_session=ses_1",
+                headers={"Host": "localhost:8080"},
+            )
+            app.PullwiseHandler.route(invalid_branch_scan, "POST")
+
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertFalse(handler.payload["needsAuthorization"])
+        self.assertFalse(handler.payload["repositoriesNeedSync"])
+        self.assertEqual(
+            [repo["fullName"] for repo in handler.payload["items"]],
+            [repo["fullName"] for repo in app.REPOSITORIES],
+        )
+        self.assertFalse(app.USERS["usr_1"]["githubRepositoryAccess"]["repositoriesNeedSync"])
+        self.assertEqual(scan.status, HTTPStatus.CREATED)
+        self.assertEqual(scan.payload["branch"], "main")
+        self.assertEqual(invalid_branch_scan.status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(invalid_branch_scan.payload["code"], "BRANCH_NOT_AVAILABLE")
     def test_github_repository_authorize_rejects_private_app_slug_for_user_installs(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"

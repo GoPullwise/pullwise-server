@@ -72,6 +72,21 @@ must not govern target implementation.
   runs retain the three terminal diagnostic kinds. Do not create a parallel
   result-ingest path.
 
+## Four-project local debug loop
+
+- Use `ops/local_debug_loop.py` from this repository to start Server, Web,
+  Admin, and the Worker's Watcher/service together. It owns only the child
+  processes it starts, uses a fresh database, and writes a redacted
+  `pullwise-local-debug-report/v1` under `.pullwise/local-debug/runs/`.
+- Explicit local GitHub mocks remain loopback-only. Their repository sync must
+  clear `repositoriesNeedSync` and return the seeded repository items without
+  requiring GitHub App API credentials. Local scan branch validation accepts
+  only the seeded/default branches and must not call GitHub.
+- The local plumbing smoke flow creates and cancels a scan. Do not report a
+  completed AI review unless the Worker has a real Pi credential catalog plus
+  an explicit persisted runtime selection and the scan reaches a terminal
+  review result.
+
 # Pullwise Server Agent Notes
 
 ## Python Dependency Audit
