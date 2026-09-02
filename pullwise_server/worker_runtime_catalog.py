@@ -141,40 +141,45 @@ def available_models(value: object, *, include_credentials: bool) -> list[dict[s
     return result
 
 
-def normalize_runtime_selection(value: object, catalog_value: object) -> dict[str, str]:
-    if not isinstance(value, dict) or set(value) != {"credentialId", "provider", "model"}:
-        raise ValueError("runtimeSelection must contain exactly credentialId, provider, and model")
-    selection = {
-        "credential_id": _text(value.get("credentialId"), max_length=128),
-        "provider": _text(value.get("provider"), max_length=60).lower(),
-        "model": _text(value.get("model"), max_length=200),
-    }
-    catalog = normalize_runtime_catalog(catalog_value, strict=True)
-    for credential in (catalog or {}).get("credentials", []):
-        if (
-            credential["credential_id"] == selection["credential_id"]
-            and credential["provider"] == selection["provider"]
-            and any(model["id"] == selection["model"] for model in credential["models"])
-        ):
-            return selection
-    raise ValueError("runtimeSelection must reference an available credential/provider/model")
+def normalize_runtime_selections(value: object) -> list[dict[str, str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("runtime selections must be an array")
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("runtime selection must be an object")
+        provider = _text(item.get("provider"), max_length=60).lower()
+        model = _text(item.get("model"), max_length=200)
+        if not _PROVIDER.fullmatch(provider) or not _MODEL.fullmatch(model):
+            raise ValueError("runtime selection provider or model is invalid")
+        identity = (provider, model)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        normalized.append({"provider": provider, "model": model})
+    return normalized
 
 
-def selection_from_worker(worker: dict[str, Any]) -> dict[str, str] | None:
-    credential_id = str(worker.get("selected_credential_id") or "").strip()
-    provider = str(worker.get("selected_provider") or "").strip()
-    model = str(worker.get("selected_model") or "").strip()
-    if not credential_id or not provider or not model:
-        return None
-    try:
-        selection = normalize_runtime_selection(
-            {"credentialId": credential_id, "provider": provider, "model": model},
-            worker.get("runtime_catalog"),
-        )
-    except ValueError:
-        return None
-    return {
-        "credentialId": selection["credential_id"],
-        "provider": selection["provider"],
-        "model": selection["model"],
-    }
+def routable_selections(value: object) -> list[dict[str, str]]:
+    catalog = normalize_runtime_catalog(value)
+    if catalog is None:
+        return []
+    matches: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for credential in catalog["credentials"]:
+        for model in credential["models"]:
+            identity = (credential["provider"], model["id"])
+            matches.setdefault(identity, []).append(
+                {
+                    "credential_id": credential["credential_id"],
+                    "provider": credential["provider"],
+                    "model": model["id"],
+                }
+            )
+    return [
+        selections[0]
+        for identity, selections in sorted(matches.items())
+        if len(selections) == 1
+    ]

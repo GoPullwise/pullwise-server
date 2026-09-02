@@ -88,7 +88,7 @@ def worker_record_ready_providers(worker: dict) -> list[str]:
 
 
 def worker_supported_provider(worker: dict) -> bool:
-    if worker_runtime_catalog.selection_from_worker(worker) is not None:
+    if worker_runtime_catalog.routable_selections(worker.get("runtime_catalog")):
         return True
     if worker_runtime_catalog.normalize_runtime_catalog(worker.get("runtime_catalog")) is not None:
         return False
@@ -244,9 +244,6 @@ def worker_public_payload(worker: dict, *, admin: bool = False, include_machine_
             worker.get("runtime_catalog"),
             include_credentials=True,
         )
-        runtime_selection = worker_runtime_catalog.selection_from_worker(worker)
-        if runtime_selection is not None:
-            payload["runtimeSelection"] = runtime_selection
         payload["hostname"] = public_issue_text(worker.get("hostname"))
         payload["last_error"] = clean_scan_error(worker.get("last_error"))
         payload["doctor_status"] = public_issue_text(worker.get("doctor_status"))

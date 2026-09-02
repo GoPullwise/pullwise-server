@@ -457,6 +457,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "doctor_status": "ok",
                 "codex_ready": 1,
                 "ready_providers": ["codex"],
+                "runtime_catalog": {
+                    "schema_id": "pullwise-pi-runtime-catalog/v1",
+                    "credentials": [
+                        {
+                            "credential_id": "openai_default",
+                            "label": "OpenAI default",
+                            "provider": "openai",
+                            "auth_type": "api_key",
+                            "models": [{"id": "gpt-5.5", "name": "GPT-5.5"}],
+                        }
+                    ],
+                },
                 "timestamp": app.now(),
             }
         )
@@ -696,7 +708,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
-        job = db.claim_next_scan_job("wk_1", ready_providers=["codex"], recover_before_claim=False)
+        job = db.claim_next_scan_job("wk_1", recover_before_claim=False)
         self.assertIsNotNone(job)
         run_id = app.scan_job_run_id(job)
         artifact = protocol_artifact_item(
@@ -832,7 +844,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
-        job = db.claim_next_scan_job("wk_1", ready_providers=["codex"], recover_before_claim=False)
+        job = db.claim_next_scan_job("wk_1", recover_before_claim=False)
         self.assertIsNotNone(job)
         run_id = app.scan_job_run_id(job)
         manifest = protocol_artifact_manifest(run_id, "failed")
@@ -1090,10 +1102,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(claimed["repository"]["owner"], "acme")
         self.assertEqual(claimed["repository"]["name"], "api")
         self.assertEqual(claimed["repository"]["commit_sha"], "abc1234")
-        self.assertEqual(claimed["model_profile"]["default_model"], claimed["agentConfig"]["codex"]["model"])
-        self.assertEqual(claimed["model_profile"]["core_effort"], claimed["agentConfig"]["codex"]["reasoningEffort"])
-        self.assertNotIn("cli", claimed["agentConfig"]["codex"])
-        self.assertNotIn("command", claimed["agentConfig"]["codex"])
+        self.assertEqual(claimed["model_profile"]["default_model"], claimed["agentConfig"]["model"])
+        self.assertEqual(claimed["model_profile"]["core_effort"], claimed["agentConfig"]["thinkingLevel"])
+        self.assertNotIn("codex", claimed["agentConfig"])
         self.assertEqual(claimed["model_profile"]["non_core_effort"], "medium")
         self.assertEqual(claimed["review_request"]["mode"], "full_repo")
         self.assertEqual(claimed["review_request"]["profile"], "standard")
@@ -2747,6 +2758,18 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "doctor_status": "ok",
                 "codex_ready": 1,
                 "ready_providers": ["codex"],
+                "runtime_catalog": {
+                    "schema_id": "pullwise-pi-runtime-catalog/v1",
+                    "credentials": [
+                        {
+                            "credential_id": "openai_default",
+                            "label": "OpenAI default",
+                            "provider": "openai",
+                            "auth_type": "api_key",
+                            "models": [{"id": "gpt-5.5", "name": "GPT-5.5"}],
+                        }
+                    ],
+                },
                 "timestamp": app.now(),
             }
         )
@@ -2770,6 +2793,10 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "created_at": app.now(),
                 "user_id": user_id,
                 "max_attempts": 2,
+                "runtime_provider": "openai",
+                "runtime_model": "gpt-5.5",
+                "runtime_thinking_level": "medium",
+                "runtime_policy_version": 4,
             }
         )
 
@@ -3295,13 +3322,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(scan_public["repo"], "acme/api")
         self.assertEqual(scan_public["commit"], "abc123")
         agent_config = payload["agentConfig"]
-        codex_config = agent_config["codex"]
         review_worker_config = agent_config["reviewWorker"]
         repository_limits = payload["repositoryLimits"]
-        self.assertNotIn("cli", codex_config)
-        self.assertNotIn("command", codex_config)
-        self.assertEqual(payload["model_profile"]["default_model"], codex_config["model"])
-        self.assertEqual(payload["model_profile"]["core_effort"], codex_config["reasoningEffort"])
+        self.assertNotIn("codex", agent_config)
+        self.assertEqual(payload["model_profile"]["default_model"], agent_config["model"])
+        self.assertEqual(payload["model_profile"]["core_effort"], agent_config["thinkingLevel"])
         self.assertEqual(payload["model_profile"]["non_core_effort"], "medium")
         self.assertEqual(payload["review_request"]["budget"]["max_wall_time_seconds"], review_worker_config["scanDeadlineSeconds"])
         self.assertGreater(payload["review_request"]["budget"]["max_estimated_input_tokens"], 0)
@@ -3348,8 +3373,8 @@ class WorkerPullRoutesTest(unittest.TestCase):
 
         self.assertEqual(payload["repositoryLimits"]["maxFiles"], expected_limits["maxFiles"])
         self.assertEqual(payload["repositoryLimits"]["maxBytes"], expected_limits["maxBytes"])
-        self.assertEqual(payload["model_profile"]["core_effort"], "xhigh")
-        self.assertEqual(payload["model_profile"]["validator_effort"], "xhigh")
+        self.assertEqual(payload["model_profile"]["core_effort"], "high")
+        self.assertEqual(payload["model_profile"]["validator_effort"], "high")
         self.assertEqual(payload["model_profile"]["non_core_effort"], "medium")
         self.assertEqual(payload["review_request"]["policy"]["turn_timeout_seconds"], expected_worker["turnTimeoutSeconds"])
         self.assertEqual(payload["review_request"]["policy"]["reviewer_concurrency"], expected_worker["reviewerConcurrency"])
@@ -6960,7 +6985,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 scan_id=f"sc_concurrent_upload_{index}",
                 user_id="usr_1",
             )
-            job = db.claim_next_scan_job(worker_id, ready_providers=["codex"], recover_before_claim=False)
+            job = db.claim_next_scan_job(worker_id, recover_before_claim=False)
             self.assertIsNotNone(job)
             claimed_jobs.append(job)
 

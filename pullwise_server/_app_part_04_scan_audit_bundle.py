@@ -25,48 +25,21 @@ def public_scan_agent_reasoning_effort(value: object) -> str:
 
 def public_scan_agent_provider(value: object) -> str:
     provider = public_scan_agent_text(value).lower()
-    return provider if provider == "codex" else ""
+    return provider if re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,59}", provider) else ""
 
 
 def public_scan_agent_config(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
-    raw_agent = source.get("agent") if isinstance(source.get("agent"), dict) else {}
-    provider = public_scan_agent_provider(source.get("provider") or raw_agent.get("cli"))
+    provider = public_scan_agent_provider(source.get("provider"))
     if not provider:
         return {}
-    cli = public_scan_agent_text(source.get("cli") or raw_agent.get("command") or raw_agent.get("cli"))
-    model = public_scan_agent_text(source.get("model") or raw_agent.get("model"))
-    reasoning_effort = public_scan_agent_reasoning_effort(
-        source.get("reasoningEffort")
-        or raw_agent.get("reasoningEffort")
-    )
-    payload = {
+    model = public_scan_agent_text(source.get("model"))
+    thinking_level = public_scan_agent_reasoning_effort(source.get("thinkingLevel"))
+    return {
         "provider": provider,
-        "agent": {
-            "cli": provider,
-            "command": cli,
-            "model": model,
-            "reasoningEffort": reasoning_effort,
-        },
-        "cli": cli,
         "model": model,
-        "reasoningEffort": reasoning_effort,
+        "thinkingLevel": thinking_level,
     }
-    raw_provider = source.get("codex") if isinstance(source.get("codex"), dict) else {}
-    provider_payload = {}
-    command = public_scan_agent_text(raw_provider.get("command") or raw_provider.get("cli"))
-    provider_model = public_scan_agent_text(raw_provider.get("model"))
-    provider_effort = public_scan_agent_reasoning_effort(raw_provider.get("reasoningEffort"))
-    if command:
-        provider_payload["cli"] = command
-        provider_payload["command"] = command
-    if provider_model:
-        provider_payload["model"] = provider_model
-    if provider_effort:
-        provider_payload["reasoningEffort"] = provider_effort
-    if provider_payload:
-        payload["codex"] = provider_payload
-    return payload
 
 
 def public_scan_progress_log(value: object) -> dict:

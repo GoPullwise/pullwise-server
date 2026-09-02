@@ -404,6 +404,10 @@ def initialize() -> None:
                     logs_summary TEXT,
                     review_output_language TEXT,
                     provider_chain TEXT,
+                    runtime_provider TEXT,
+                    runtime_model TEXT,
+                    runtime_thinking_level TEXT,
+                    runtime_policy_version INTEGER NOT NULL DEFAULT 4,
                     last_attempt_id TEXT,
                     cancel_requested_at INTEGER,
                     cancel_reason TEXT,
@@ -413,6 +417,15 @@ def initialize() -> None:
             )
             ensure_column(connection, "scan_jobs", "review_output_language", "TEXT")
             ensure_column(connection, "scan_jobs", "provider_chain", "TEXT")
+            ensure_column(connection, "scan_jobs", "runtime_provider", "TEXT")
+            ensure_column(connection, "scan_jobs", "runtime_model", "TEXT")
+            ensure_column(connection, "scan_jobs", "runtime_thinking_level", "TEXT")
+            ensure_column(
+                connection,
+                "scan_jobs",
+                "runtime_policy_version",
+                "INTEGER NOT NULL DEFAULT 4",
+            )
             ensure_column(connection, "scan_jobs", "last_attempt_id", "TEXT")
             ensure_column(connection, "scan_jobs", "worker_scope", "TEXT NOT NULL DEFAULT 'shared'")
             ensure_column(connection, "scan_jobs", "worker_owner_user_id", "TEXT")
@@ -438,6 +451,15 @@ def initialize() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable_scope
                 ON scan_jobs(status, worker_scope, user_id, created_at, job_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scan_jobs_claimable_runtime
+                ON scan_jobs(
+                    status, worker_scope, runtime_provider, runtime_model,
+                    created_at, job_id
+                )
                 """
             )
 
@@ -3812,10 +3834,12 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     user_id, worker_scope, worker_owner_user_id,
                     repo_id, github_repo_id, installation_id, clone_url,
                     progress_phase, progress, progress_message, logs_summary,
-                    review_output_language, provider_chain
+                    review_output_language, provider_chain,
+                    runtime_provider, runtime_model, runtime_thinking_level,
+                    runtime_policy_version
                 )
                 VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(scan_id) DO NOTHING
                 """,
                 (
@@ -3836,6 +3860,10 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
                     record.get("clone_url"),
                     record.get("review_output_language"),
                     provider_chain,
+                    record.get("runtime_provider"),
+                    record.get("runtime_model"),
+                    record.get("runtime_thinking_level"),
+                    int(record.get("runtime_policy_version") or 4),
                 ),
             )
             connection.execute("DELETE FROM scan_job_attempts WHERE job_id = ?", (job_id,))
@@ -5518,7 +5546,7 @@ def claim_next_scan_job(
     *,
     lease_seconds: int = 3600,
     worker_heartbeat_timeout_seconds: int = 120,
-    ready_providers: list[str] | None = None,
+    runtime_selections: list[dict[str, str]] | None = None,
     timestamp: int | None = None,
     recover_before_claim: bool = True,
     create_review_run: bool = False,
@@ -5530,9 +5558,23 @@ def claim_next_scan_job(
         raise ValueError("worker_id is required")
     current_time = int(timestamp if timestamp is not None else time.time())
     timeout_at = current_time + max(60, int(lease_seconds))
-    ready_provider_set = set(normalize_provider_list(ready_providers)) if ready_providers is not None else None
-    if ready_provider_set is not None and not ready_provider_set:
+    normalized_selections = worker_runtime_catalog.normalize_runtime_selections(runtime_selections)
+    if runtime_selections is not None and not normalized_selections:
         return None
+    runtime_filter = ""
+    query_params: list[object] = [worker_id]
+    if runtime_selections is not None:
+        runtime_filter = """
+                  AND EXISTS (
+                      SELECT 1
+                      FROM json_each(?) route
+                      WHERE json_extract(route.value, '$.provider') = queued.runtime_provider
+                        AND json_extract(route.value, '$.model') = queued.runtime_model
+                  )
+        """
+        query_params.append(
+            json.dumps(normalized_selections, ensure_ascii=False, sort_keys=True)
+        )
     with closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("BEGIN IMMEDIATE")
@@ -5550,7 +5592,7 @@ def claim_next_scan_job(
                 _fail_stale_worker_jobs_locked(connection, current_time, offline_after)
                 _fail_exhausted_queued_jobs_locked(connection, current_time)
             row = connection.execute(
-                """
+                f"""
                 SELECT queued.job_id
                 FROM scan_jobs queued
                 WHERE queued.status = 'queued'
@@ -5570,11 +5612,12 @@ def claim_next_scan_job(
                       LIMIT 1
                   )
                   AND COALESCE(NULLIF(queued.worker_scope, ''), 'shared') = 'shared'
+                  {runtime_filter}
                 ORDER BY queued.created_at ASC, queued.job_id ASC
                 LIMIT 1
                 """
                 ,
-                (worker_id,),
+                tuple(query_params),
             ).fetchone()
             if not row:
                 connection.commit()

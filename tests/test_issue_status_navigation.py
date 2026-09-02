@@ -51,6 +51,18 @@ class IssueStatusNavigationTest(unittest.TestCase):
                 "doctor_status": "ok",
                 "codex_ready": 1,
                 "ready_providers": ["codex"],
+                "runtime_catalog": {
+                    "schema_id": "pullwise-pi-runtime-catalog/v1",
+                    "credentials": [
+                        {
+                            "credential_id": "openai_default",
+                            "label": "OpenAI default",
+                            "provider": "openai",
+                            "auth_type": "api_key",
+                            "models": [{"id": "gpt-5.5", "name": "GPT-5.5"}],
+                        }
+                    ],
+                },
                 "timestamp": app.now(),
             }
         )

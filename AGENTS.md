@@ -1,24 +1,3 @@
-<!-- PULLWISE_REVIEWER_CURRENT_AUTHORITY_START -->
-## Pullwise Reviewer — Current Implementation Authority
-
-For every new Pullwise Reviewer implementation task, the only entry point is
-[Pullwise Reviewer — Current Implementation Authority](https://app.notion.com/p/3b4e5c88f85f8128bd39dac3a7679c4a).
-Follow its [current implementation specification](https://app.notion.com/p/3b4e5c88f85f818e933ecf3864c97469),
-[live implementation cards](https://app.notion.com/p/b79ceacfedcd4d34a0d619c1790066c4), and
-[Code Authorization Registry](https://app.notion.com/p/760a1698a86b404083662eeb1b637f64).
-
-Before any card, read [00A](https://app.notion.com/p/3b5e5c88f85f81bc840ace8b8a65962e), [00B](https://app.notion.com/p/3b5e5c88f85f81aeaeaef4621d211126),
-[00C](https://app.notion.com/p/3b5e5c88f85f81d89deef714c8b23eeb), [00D](https://app.notion.com/p/3b8e5c88f85f814d8296c6c60541946d) whenever a named asset is required,
-and [Page 19](https://app.notion.com/p/3b4e5c88f85f8192a488f6db72fa116b). Only an exact live card authorization plus a PASS
-running gate permits tracked writes. Never self-authorize a card or treat
-documentation status as code authority.
-
-All later Reviewer protocol, runtime, phase, fanout, generated-package, and
-production-cutover guidance is retained only as current-state cleanup evidence;
-it must not govern new Reviewer implementation. Unrelated repository security,
-deployment, frontend, and testing rules remain binding unless they conflict with
-the current Reviewer authority.
-<!-- PULLWISE_REVIEWER_CURRENT_AUTHORITY_END -->
 <!-- PULLWISE_REVIEWER_TARGET_START -->
 ## Pullwise Reviewer Target — Node.js + Pi Coding Agent
 
@@ -28,8 +7,9 @@ Node.js/TypeScript on Node `>=22.19.0`, embedding
 `AgentSession`.
 
 This is a clean break. Do not add or preserve a Codex SDK or CLI, `CODEX_HOME`,
-a Python Worker runtime, compatibility or shadow adapters, dual runtimes,
-provider routing, or automatic provider/model fallback. Pi is not a sandbox:
+a Python Worker runtime, compatibility or shadow adapters, dual runtimes, or
+automatic provider/model fallback. Server plan policy resolves one exact
+provider/model/thinking level against each Worker's advertised catalog. Pi is not a sandbox:
 the Worker supervisor must enforce operating-system containment, process-tree
 ownership, cancellation, cleanup, and late-publication fencing.
 
@@ -52,14 +32,17 @@ must not govern target implementation.
 - Catalogs contain credential metadata and provider/model availability only.
   Reject unknown fields so API keys, bearer tokens, OAuth secrets, and other
   credential material cannot enter Server storage.
-- Persist the catalog plus the exact selected credential/provider/model on the
-  Worker row. Admin `runtimeSelection` must reference an exact catalog entry;
-  leases copy that selection verbatim into `runtime_selection` and
-  `model_profile`.
+- Subscription plans own one global provider/model/thinking-level tuple.
+  Snapshot that tuple when a scan job is created. During lease, match the
+  requesting Worker's catalog, resolve the unique credential for that
+  provider/model pair, and copy the exact selection into `runtime_selection`
+  and `model_profile`.
 - Public status exposes only the de-identified provider/model union as
   `availableReviewModels`. Credential ids and account labels are Admin-only.
-- A cataloged Worker without a valid persisted selection cannot claim a job;
-  never choose a provider/model automatically.
+- A cataloged Worker may advertise many providers and models. It claims only
+  the oldest queued job compatible with one uniquely resolvable catalog route;
+  an ambiguous provider/model pair is not routable. Never fall back to another
+  plan tuple.
 - Worker creation is provider-agnostic and returns the Node tarball installer
   plus host-local profile/sync commands. The active installer uses Node
   22.23.1/npm only, loops until the operator declines another profile, starts

@@ -2029,10 +2029,60 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         self.assertEqual(denied.status, HTTPStatus.FORBIDDEN)
 
+    def test_admin_plan_runtime_policy_accepts_provider_model_and_thinking_level(self) -> None:
+        update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/pro",
+            {
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "thinkingLevel": "medium",
+            },
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(update, "PATCH")
+
+        self.assertEqual(update.status, HTTPStatus.OK, update.payload)
+        self.assertEqual(
+            update.payload["agentConfig"],
+            {
+                "plan": "pro",
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "thinkingLevel": "medium",
+                "reviewWorker": {
+                    "reviewerConcurrency": 2,
+                    "turnTimeoutSeconds": 3600,
+                    "scanDeadlineSeconds": 14400,
+                },
+            },
+        )
+
+        stored = app.billing.review_agent_config("pro")
+        self.assertEqual(stored["provider"], "deepseek")
+        self.assertEqual(stored["model"], "deepseek-chat")
+        self.assertEqual(stored["thinkingLevel"], "medium")
+        self.assertNotIn("codex", stored)
+        self.assertNotIn("reasoningEffort", stored)
+
+    def test_admin_plan_runtime_policy_rejects_invalid_thinking_level(self) -> None:
+        update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/pro",
+            {
+                "provider": "openai",
+                "model": "gpt-5.5",
+                "thinkingLevel": "xhigh",
+            },
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(update, "PATCH")
+
+        self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("thinkingLevel", update.payload["message"])
+
     def test_admin_plan_agent_config_rejects_invalid_values(self) -> None:
         update = RouteHarness(
             "/admin/subscription-plans/agent-configs/pro",
-            {"provider": "bad", "codex": {"reasoningEffort": "extreme"}},
+            {"provider": "Bad Provider", "model": "model", "thinkingLevel": "medium"},
             cookie=self.admin_cookie,
         )
         app.PullwiseHandler.route(update, "PATCH")
@@ -2040,66 +2090,15 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
         self.assertIn("provider", update.payload["message"])
 
-    def test_admin_plan_agent_config_exposes_model_reasoning_capabilities(self) -> None:
+    def test_admin_plan_agent_config_exposes_thinking_level_capabilities(self) -> None:
         handler = RouteHarness("/admin/subscription-plans/agent-configs", cookie=self.admin_cookie)
         app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        policy = handler.payload["capabilities"]["codex"]["reasoningEffort"]
-        self.assertEqual(policy["defaultOptions"], ["low", "medium", "high", "xhigh"])
         self.assertEqual(
-            policy["modelFamilies"],
-            [
-                {
-                    "modelPrefix": "gpt-5.6",
-                    "options": ["low", "medium", "high", "xhigh", "max", "ultra"],
-                }
-            ],
+            handler.payload["capabilities"]["runtimePolicy"]["thinkingLevels"],
+            ["low", "medium", "high"],
         )
-
-    def test_admin_plan_agent_config_accepts_gpt_5_6_max_and_ultra(self) -> None:
-        for effort in ("max", "ultra"):
-            with self.subTest(effort=effort):
-                update = RouteHarness(
-                    "/admin/subscription-plans/agent-configs/pro",
-                    {"codex": {"model": "gpt-5.6-sol", "reasoningEffort": effort}},
-                    cookie=self.admin_cookie,
-                )
-                app.PullwiseHandler.route(update, "PATCH")
-
-                self.assertEqual(update.status, HTTPStatus.OK)
-                self.assertEqual(update.payload["agentConfig"]["codex"]["reasoningEffort"], effort)
-
-    def test_admin_plan_agent_config_rejects_gpt_5_5_max_and_ultra(self) -> None:
-        for effort in ("max", "ultra"):
-            with self.subTest(effort=effort):
-                update = RouteHarness(
-                    "/admin/subscription-plans/agent-configs/pro",
-                    {"codex": {"model": "gpt-5.5", "reasoningEffort": effort}},
-                    cookie=self.admin_cookie,
-                )
-                app.PullwiseHandler.route(update, "PATCH")
-
-                self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
-                self.assertIn("not supported by model gpt-5.5", update.payload["message"])
-
-    def test_admin_plan_agent_config_model_family_policy_is_data_driven(self) -> None:
-        future_policy = (
-            {
-                "modelPrefix": "gpt-5.7",
-                "options": ("low", "medium", "deep"),
-            },
-        )
-        with patch.object(app.billing, "REVIEW_AGENT_EFFORT_MODEL_FAMILIES", future_policy):
-            update = RouteHarness(
-                "/admin/subscription-plans/agent-configs/pro",
-                {"codex": {"model": "gpt-5.7-orbit", "reasoningEffort": "deep"}},
-                cookie=self.admin_cookie,
-            )
-            app.PullwiseHandler.route(update, "PATCH")
-
-            self.assertEqual(update.status, HTTPStatus.OK)
-            self.assertEqual(update.payload["agentConfig"]["codex"]["reasoningEffort"], "deep")
 
     def test_admin_plan_agent_config_keeps_only_canonical_review_worker_policy(self) -> None:
         update = RouteHarness(
@@ -2148,7 +2147,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             app.billing.default_review_agent_review_worker_config("free"),
         )
         stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
-        self.assertEqual(stored["version"], 3)
+        self.assertEqual(stored["version"], 4)
         self.assertEqual(stored["plans"]["pro"]["reviewWorker"], expected_pro_policy)
         self.assertNotIn("reviewerMaxTurnsPerScan", stored["plans"]["pro"]["reviewWorker"])
         self.assertNotIn("bundleLimit", stored["plans"]["pro"]["reviewWorker"])
@@ -2159,8 +2158,9 @@ class WorkerAdminRoutesTest(unittest.TestCase):
                 "version": 1,
                 "plans": {
                     "free": {
-                        "provider": "bad",
-                        "codex": {"cli": "codex", "model": "gpt-free", "reasoningEffort": "high"},
+                        "provider": "bad provider",
+                        "model": "gpt-free",
+                        "thinkingLevel": "high",
                     },
                     "pro": {"provider": ""},
                     "max": {"provider": None},
@@ -2175,20 +2175,20 @@ class WorkerAdminRoutesTest(unittest.TestCase):
 
         for handler in (admin, docs):
             self.assertEqual(handler.status, HTTPStatus.OK)
-            self.assertEqual(handler.payload["agentConfigs"]["free"]["provider"], "codex")
-            self.assertEqual(handler.payload["agentConfigs"]["pro"]["provider"], "codex")
-            self.assertEqual(handler.payload["agentConfigs"]["max"]["provider"], "codex")
+            self.assertEqual(handler.payload["agentConfigs"]["free"]["provider"], "openai")
+            self.assertEqual(handler.payload["agentConfigs"]["pro"]["provider"], "openai")
+            self.assertEqual(handler.payload["agentConfigs"]["max"]["provider"], "openai")
             self.assertNotIn("providerChain", handler.payload["agentConfigs"]["free"])
-            self.assertEqual(handler.payload["agentConfigs"]["free"]["codex"]["model"], "gpt-free")
-            self.assertNotIn("cli", handler.payload["agentConfigs"]["free"]["codex"])
-            self.assertNotIn("command", handler.payload["agentConfigs"]["free"]["codex"])
+            self.assertEqual(handler.payload["agentConfigs"]["free"]["model"], "gpt-free")
+            self.assertEqual(handler.payload["agentConfigs"]["free"]["thinkingLevel"], "high")
+            self.assertNotIn("codex", handler.payload["agentConfigs"]["free"])
 
         stored = db.load_state_item(app.billing.REVIEW_AGENT_CONFIG_STATE_KEY)
-        self.assertEqual(stored["plans"]["free"]["provider"], "codex")
-        self.assertEqual(stored["plans"]["pro"]["provider"], "codex")
-        self.assertEqual(stored["plans"]["max"]["provider"], "codex")
-        self.assertNotIn("cli", stored["plans"]["free"]["codex"])
-        self.assertNotIn("command", stored["plans"]["free"]["codex"])
+        self.assertEqual(stored["version"], 4)
+        self.assertEqual(stored["plans"]["free"]["provider"], "openai")
+        self.assertEqual(stored["plans"]["pro"]["provider"], "openai")
+        self.assertEqual(stored["plans"]["max"]["provider"], "openai")
+        self.assertNotIn("codex", stored["plans"]["free"])
 
     def test_admin_review_calibration_routes_are_retired(self) -> None:
         denied = RouteHarness(

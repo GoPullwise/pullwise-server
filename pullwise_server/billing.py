@@ -4,6 +4,7 @@ import os
 import hashlib
 import hmac
 import math
+import re
 import time
 import copy
 from decimal import Decimal, InvalidOperation
@@ -30,16 +31,11 @@ PAID_PLAN_CHANGE_STATUSES = {"active", "trialing", "canceling"}
 CREEM_CHECKOUT_REQUEST_ID_WINDOW_SECONDS = 10 * 60
 CREEM_PRO_ENTITLEMENT_STATUSES = PAID_PLAN_ENTITLEMENT_STATUSES
 CREEM_UPDATE_BEHAVIORS = {"proration-charge-immediately", "proration-none"}
-REVIEW_CODEX_MODEL_DEFAULT = "gpt-5.5"
-REVIEW_AGENT_EFFORT_DEFAULTS = {"free": "medium", "pro": "medium", "max": "xhigh"}
-REVIEW_AGENT_PROVIDERS = ("codex",)
-REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS = ("low", "medium", "high", "xhigh")
-REVIEW_AGENT_EFFORT_MODEL_FAMILIES = (
-    {
-        "modelPrefix": "gpt-5.6",
-        "options": (*REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS, "max", "ultra"),
-    },
-)
+REVIEW_AGENT_PROVIDER_DEFAULT = "openai"
+REVIEW_AGENT_MODEL_DEFAULT = "gpt-5.5"
+REVIEW_AGENT_THINKING_LEVELS = ("low", "medium", "high")
+REVIEW_AGENT_THINKING_DEFAULTS = {"free": "low", "pro": "medium", "max": "high"}
+REVIEW_AGENT_PROVIDER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,59}$")
 REVIEW_AGENT_REVIEW_WORKER_DEFAULTS_BY_PLAN = {
     "free": {
         "reviewerConcurrency": 2,
@@ -93,51 +89,23 @@ def clean_review_agent_config_text(value: object) -> str:
 
 def clean_review_agent_provider(value: object) -> str:
     provider = clean_review_agent_config_text(value).lower()
-    return provider if provider in REVIEW_AGENT_PROVIDERS else ""
-
-
-def review_agent_effort_options(model: object) -> tuple[str, ...]:
-    normalized_model = clean_review_agent_config_text(model).lower()
-    matching_families = [
-        family
-        for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES
-        if normalized_model == str(family["modelPrefix"]).lower()
-        or normalized_model.startswith(str(family["modelPrefix"]).lower() + "-")
-    ]
-    if matching_families:
-        family = max(matching_families, key=lambda item: len(str(item["modelPrefix"])))
-        return tuple(family["options"])
-    return REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS
+    return provider if REVIEW_AGENT_PROVIDER_PATTERN.fullmatch(provider) else ""
 
 
 def review_agent_capabilities() -> dict:
     return {
-        "codex": {
-            "reasoningEffort": {
-                "source": "server-fallback",
-                "defaultOptions": list(REVIEW_AGENT_EFFORT_DEFAULT_OPTIONS),
-                "models": [],
-                "modelFamilies": [
-                    {
-                        "modelPrefix": family["modelPrefix"],
-                        "options": list(family["options"]),
-                    }
-                    for family in REVIEW_AGENT_EFFORT_MODEL_FAMILIES
-                ],
-            }
+        "runtimePolicy": {
+            "thinkingLevels": list(REVIEW_AGENT_THINKING_LEVELS),
         }
     }
 
 
-def clean_review_agent_effort(value: object, default: str, *, model: object) -> str:
-    effort = clean_review_agent_config_text(value).lower()
-    options = review_agent_effort_options(model)
-    if effort in options:
-        return effort
+def clean_review_agent_thinking_level(value: object, default: str) -> str:
+    level = clean_review_agent_config_text(value).lower()
+    if level in REVIEW_AGENT_THINKING_LEVELS:
+        return level
     normalized_default = clean_review_agent_config_text(default).lower()
-    if normalized_default in options:
-        return normalized_default
-    return "medium" if "medium" in options else options[0]
+    return normalized_default if normalized_default in REVIEW_AGENT_THINKING_LEVELS else "medium"
 
 
 def clean_review_agent_config_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
@@ -153,8 +121,8 @@ def clean_review_agent_provider_required(value: object, *, strict: bool = True) 
     if provider:
         return provider
     if strict:
-        raise ValueError("provider must be codex.")
-    return "codex"
+        raise ValueError("provider must be a lowercase provider identifier.")
+    return REVIEW_AGENT_PROVIDER_DEFAULT
 
 
 def default_review_agent_review_worker_config(plan: str) -> dict:
@@ -164,37 +132,19 @@ def default_review_agent_review_worker_config(plan: str) -> dict:
 
 def default_review_agent_plan_config(plan: str) -> dict:
     normalized_plan = normalize_plan(plan, default="free")
-    effort = REVIEW_AGENT_EFFORT_DEFAULTS[normalized_plan]
     return {
-        "provider": "codex",
-        "codex": {
-            "model": REVIEW_CODEX_MODEL_DEFAULT,
-            "reasoningEffort": effort,
-        },
+        "provider": REVIEW_AGENT_PROVIDER_DEFAULT,
+        "model": REVIEW_AGENT_MODEL_DEFAULT,
+        "thinkingLevel": REVIEW_AGENT_THINKING_DEFAULTS[normalized_plan],
         "reviewWorker": default_review_agent_review_worker_config(normalized_plan),
     }
 
 
 def default_review_agent_config_state() -> dict:
     return {
-        "version": 3,
+        "version": 4,
         "plans": {plan: default_review_agent_plan_config(plan) for plan in PLAN_IDS},
     }
-
-
-def normalize_review_agent_provider_config(provider: str, value: object, defaults: dict) -> dict:
-    source = value if isinstance(value, dict) else {}
-    result = copy.deepcopy(defaults)
-    model = clean_review_agent_config_text(source.get("model"))
-    if model:
-        result["model"] = model
-    effort = clean_review_agent_effort(
-        source.get("reasoningEffort"),
-        result["reasoningEffort"],
-        model=result["model"],
-    )
-    result["reasoningEffort"] = effort
-    return result
 
 
 def normalize_review_agent_review_worker_config(value: object, defaults: dict) -> dict:
@@ -224,9 +174,16 @@ def normalize_review_agent_plan_config(plan: str, value: object) -> dict:
     defaults = default_review_agent_plan_config(plan)
     source = value if isinstance(value, dict) else {}
     result = copy.deepcopy(defaults)
-    if "provider" in source:
-        result["provider"] = clean_review_agent_provider_required(source.get("provider"), strict=False)
-    result["codex"] = normalize_review_agent_provider_config("codex", source.get("codex"), defaults["codex"])
+    provider = clean_review_agent_provider(source.get("provider"))
+    if provider:
+        result["provider"] = provider
+    model = clean_review_agent_config_text(source.get("model"))
+    if model:
+        result["model"] = model
+    result["thinkingLevel"] = clean_review_agent_thinking_level(
+        source.get("thinkingLevel"),
+        defaults["thinkingLevel"],
+    )
     result["reviewWorker"] = normalize_review_agent_review_worker_config(
         source.get("reviewWorker"),
         defaults["reviewWorker"],
@@ -238,7 +195,7 @@ def normalize_review_agent_config_state(value: object) -> dict:
     source = value if isinstance(value, dict) else {}
     plans = source.get("plans") if isinstance(source.get("plans"), dict) else {}
     return {
-        "version": 3,
+        "version": 4,
         "plans": {
             plan: normalize_review_agent_plan_config(plan, plans.get(plan))
             for plan in PLAN_IDS
@@ -258,21 +215,18 @@ def review_agent_provider(plan: str) -> str:
     return review_agent_config_state()["plans"][normalize_plan(plan, default="free")]["provider"]
 
 
-def review_reasoning_effort(plan: str) -> str:
-    return review_agent_config_state()["plans"][normalize_plan(plan, default="free")]["codex"]["reasoningEffort"]
+def review_thinking_level(plan: str) -> str:
+    return review_agent_config_state()["plans"][normalize_plan(plan, default="free")]["thinkingLevel"]
 
 
 def review_agent_config(plan: str) -> dict:
     normalized_plan = normalize_plan(plan, default="free")
     configured = review_agent_config_state()["plans"][normalized_plan]
-    codex_config = configured["codex"]
     return {
         "plan": normalized_plan,
         "provider": configured["provider"],
-        "codex": {
-            "model": codex_config["model"],
-            "reasoningEffort": codex_config["reasoningEffort"],
-        },
+        "model": configured["model"],
+        "thinkingLevel": configured["thinkingLevel"],
         "reviewWorker": copy.deepcopy(configured["reviewWorker"]),
     }
 
@@ -304,38 +258,26 @@ def update_review_agent_config(plan: str, payload: dict) -> dict:
         raise ValueError("Unknown subscription plan.")
     if not isinstance(payload, dict):
         raise ValueError("Plan agent config update must be a JSON object.")
-    if "providerChain" in payload or "provider_chain" in payload:
-        raise ValueError("provider is required; providerChain is not supported.")
-    for provider in REVIEW_AGENT_PROVIDERS:
-        provider_payload = payload.get(provider)
-        if isinstance(provider_payload, dict) and "reasoning_effort" in provider_payload:
-            raise ValueError(f"{provider}.reasoningEffort is required; reasoning_effort is not supported.")
+    legacy_fields = {"providerChain", "provider_chain", "codex", "reasoningEffort", "reasoning_effort"}
+    unsupported = sorted(legacy_fields.intersection(payload))
+    if unsupported:
+        raise ValueError(f"Unsupported legacy plan runtime fields: {', '.join(unsupported)}.")
     state = review_agent_config_state()
     current = copy.deepcopy(state["plans"][normalized_plan])
     if "provider" in payload:
         current["provider"] = clean_review_agent_provider_required(payload.get("provider"))
-    for provider in REVIEW_AGENT_PROVIDERS:
-        if provider in payload:
-            provider_payload = payload[provider]
-            if isinstance(provider_payload, dict) and "reasoningEffort" in provider_payload:
-                requested_model = (
-                    clean_review_agent_config_text(provider_payload.get("model"))
-                    or current[provider]["model"]
-                )
-                requested_effort = clean_review_agent_config_text(
-                    provider_payload.get("reasoningEffort")
-                ).lower()
-                supported_efforts = review_agent_effort_options(requested_model)
-                if requested_effort not in supported_efforts:
-                    raise ValueError(
-                        f"{provider}.reasoningEffort {requested_effort or '(empty)'} is not supported "
-                        f"by model {requested_model}. Supported values: {', '.join(supported_efforts)}."
-                    )
-            current[provider] = normalize_review_agent_provider_config(
-                provider,
-                provider_payload,
-                current[provider],
+    if "model" in payload:
+        model = clean_review_agent_config_text(payload.get("model"))
+        if not model:
+            raise ValueError("model must be a non-empty model identifier.")
+        current["model"] = model
+    if "thinkingLevel" in payload:
+        level = clean_review_agent_config_text(payload.get("thinkingLevel")).lower()
+        if level not in REVIEW_AGENT_THINKING_LEVELS:
+            raise ValueError(
+                f"thinkingLevel must be one of: {', '.join(REVIEW_AGENT_THINKING_LEVELS)}."
             )
+        current["thinkingLevel"] = level
     if "reviewWorker" in payload:
         current["reviewWorker"] = normalize_review_agent_review_worker_config(
             payload.get("reviewWorker"),

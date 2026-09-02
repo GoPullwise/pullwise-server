@@ -3206,21 +3206,18 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
                     return self.error(HTTPStatus.BAD_REQUEST, str(exc))
             if "runtimeSelection" in body:
-                try:
-                    selection = worker_runtime_catalog.normalize_runtime_selection(
-                        body.get("runtimeSelection"),
-                        worker_record.get("runtime_catalog"),
-                    )
-                except ValueError as exc:
-                    self.audit_worker_action(session, "update_worker", worker_id=worker_id, success=False, error=str(exc))
-                    return self.error(HTTPStatus.BAD_REQUEST, str(exc))
-                changed.update(
-                    {
-                        "selected_credential_id": selection["credential_id"],
-                        "selected_provider": selection["provider"],
-                        "selected_model": selection["model"],
-                    }
+                message = (
+                    "runtimeSelection is retired; configure provider, model, and "
+                    "thinkingLevel on the subscription plan."
                 )
+                self.audit_worker_action(
+                    session,
+                    "update_worker",
+                    worker_id=worker_id,
+                    success=False,
+                    error=message,
+                )
+                return self.error(HTTPStatus.BAD_REQUEST, message)
             worker = db.update_worker(
                 worker_id,
                 changed,
@@ -3243,8 +3240,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 changed_fields={
                     "plan": agent_config["plan"],
                     "provider": agent_config["provider"],
-                    "model": agent_config["codex"]["model"],
-                    "reasoningEffort": agent_config["codex"]["reasoningEffort"],
+                    "model": agent_config["model"],
+                    "thinkingLevel": agent_config["thinkingLevel"],
                     "reviewWorker": agent_config.get("reviewWorker"),
                 },
             )
@@ -3445,39 +3442,24 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 f"Worker is not ready to claim jobs: {worker_status}.",
             )
-        runtime_selection_public = worker_runtime_catalog.selection_from_worker(worker_record)
-        runtime_catalog_present = worker_runtime_catalog.normalize_runtime_catalog(
+        runtime_selections = worker_runtime_catalog.routable_selections(
             worker_record.get("runtime_catalog")
-        ) is not None
-        if runtime_catalog_present and runtime_selection_public is None:
+        )
+        if not runtime_selections:
             return self.json(
                 {
                     "lease": None,
                     "retry_after_seconds": 30,
                     "job": None,
-                    "reason": "runtime_selection_required",
+                    "reason": "runtime_catalog_has_no_unique_routes",
                 }
             )
-        runtime_selection = None
-        if runtime_selection_public is not None:
-            runtime_selection = {
-                "credential_id": runtime_selection_public["credentialId"],
-                "provider": runtime_selection_public["provider"],
-                "model": runtime_selection_public["model"],
-            }
-        ready_providers = (
-            [runtime_selection["provider"]]
-            if runtime_selection is not None
-            else worker_record_ready_providers(worker_record)
-        )
-        if not ready_providers:
-            return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
         try:
             job = db.claim_next_scan_job(
                 worker_id,
                 lease_seconds=system_config.scan_job_lease_seconds(),
                 worker_heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds(),
-                ready_providers=ready_providers,
+                runtime_selections=runtime_selections,
                 recover_before_claim=False,
                 create_review_run=True,
                 protocol_version=WORKER_PROTOCOL_VERSION,
@@ -3486,6 +3468,23 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if not job:
             return self.json({"lease": None, "retry_after_seconds": 10, "job": None})
+        runtime_key = (
+            public_issue_text(job.get("runtime_provider")),
+            public_issue_text(job.get("runtime_model")),
+        )
+        runtime_selection = next(
+            (
+                {
+                    **selection,
+                    "thinking_level": public_issue_text(job.get("runtime_thinking_level")),
+                }
+                for selection in runtime_selections
+                if (selection["provider"], selection["model"]) == runtime_key
+            ),
+            None,
+        )
+        if runtime_selection is None:
+            raise RuntimeError("claimed job runtime selection is not present in the worker catalog")
         try:
             payload = scan_job_payload(
                 job,
@@ -3941,7 +3940,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         heartbeat_record = {
             "worker_id": worker_id,
             "version": public_issue_text(body.get("version")) or public_issue_text(worker_record.get("version")),
-            "provider": public_issue_text(body.get("provider")) or "codex",
+            "provider": (
+                public_issue_text(body.get("provider"))
+                or public_issue_text(worker_record.get("provider"))
+                or "unconfigured"
+            ),
             "provider_chain": body.get("providerChain") or body.get("provider_chain"),
             "running_jobs": requested_running_jobs,
             "hostname": public_issue_text(body.get("hostname")),

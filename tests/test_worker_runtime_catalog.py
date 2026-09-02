@@ -37,6 +37,11 @@ RUNTIME_CATALOG = {
     ],
 }
 
+OPENAI_ONLY_CATALOG = {
+    "schema_id": "pullwise-pi-runtime-catalog/v1",
+    "credentials": [RUNTIME_CATALOG["credentials"][1]],
+}
+
 
 class WorkerRuntimeCatalogTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -143,7 +148,7 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
         app.PullwiseHandler.route(handler, "POST")
         return handler
 
-    def test_registration_catalog_selection_and_public_union_are_persisted(self) -> None:
+    def test_registration_catalog_and_public_union_are_persisted(self) -> None:
         worker_id, token = self.create_worker()
         registration = self.register(worker_id, token, RUNTIME_CATALOG)
         self.assertEqual(registration.status, HTTPStatus.OK, registration.payload)
@@ -154,29 +159,16 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
         app.PullwiseHandler.route(detail, "GET")
         worker = detail.payload["worker"]
         self.assertEqual(worker["runtimeCatalog"]["schemaId"], "pullwise-pi-runtime-catalog/v1")
+        self.assertNotIn("runtimeSelection", worker)
         self.assertEqual(
             [(item["provider"], item["model"]) for item in worker["availableModels"]],
             [("anthropic", "claude-sonnet-4-5"), ("openai", "gpt-5.1")],
         )
 
-        selection = {
-            "credentialId": "anthropic_primary",
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-5",
-        }
-        update = RouteHarness(
-            f"/admin/workers/{worker_id}",
-            {"runtimeSelection": selection},
-            cookie=self.admin_cookie,
-        )
-        app.PullwiseHandler.route(update, "PATCH")
-        self.assertEqual(update.status, HTTPStatus.OK, update.payload)
-        self.assertEqual(update.payload["worker"]["runtimeSelection"], selection)
-
         stored = db.get_worker(worker_id)
-        self.assertEqual(stored["selected_credential_id"], "anthropic_primary")
-        self.assertEqual(stored["selected_provider"], "anthropic")
-        self.assertEqual(stored["selected_model"], "claude-sonnet-4-5")
+        self.assertIsNone(stored["selected_credential_id"])
+        self.assertIsNone(stored["selected_provider"])
+        self.assertIsNone(stored["selected_model"])
         self.assertEqual(json.loads(stored["runtime_catalog"]), RUNTIME_CATALOG)
 
         status = RouteHarness("/status/system", cookie=self.user_cookie)
@@ -212,7 +204,159 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
         app.PullwiseHandler.route(invalid, "PATCH")
         self.assertEqual(invalid.status, HTTPStatus.BAD_REQUEST)
 
-    def test_lease_carries_the_exact_persisted_runtime_selection(self) -> None:
+    def test_lease_resolves_the_plan_runtime_from_the_worker_catalog(self) -> None:
+        worker_id, token = self.create_worker()
+        self.assertEqual(self.register(worker_id, token, RUNTIME_CATALOG).status, HTTPStatus.OK)
+        self.assertEqual(self.heartbeat(worker_id, token, RUNTIME_CATALOG).status, HTTPStatus.OK)
+
+        plan_update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/free",
+            {
+                "provider": "openai",
+                "model": "gpt-5.1",
+                "thinkingLevel": "high",
+            },
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(plan_update, "PATCH")
+        self.assertEqual(plan_update.status, HTTPStatus.OK, plan_update.payload)
+
+        timestamp = app.now()
+        scan = {
+            "id": "sc_plan_runtime",
+            "repo": "acme/api",
+            "branch": "main",
+            "commit": "pending",
+            "status": "queued",
+            "userId": "usr_user",
+            "createdAt": timestamp,
+            "queuedAt": timestamp,
+            "progress": 0,
+            "phase": None,
+            "issues": {},
+        }
+        app.SCANS = [scan]
+        created = app.create_scan_job_for_scan(scan)
+        self.assertEqual(created["runtime_provider"], "openai")
+        self.assertEqual(created["runtime_model"], "gpt-5.1")
+        self.assertEqual(created["runtime_thinking_level"], "high")
+        changed_policy = RouteHarness(
+            "/admin/subscription-plans/agent-configs/free",
+            {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-5",
+                "thinkingLevel": "low",
+            },
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(changed_policy, "PATCH")
+        self.assertEqual(changed_policy.status, HTTPStatus.OK)
+
+        lease = RouteHarness(
+            f"/v1/workers/{worker_id}/lease",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "capacity": {
+                    "available_job_slots": 1,
+                    "active_jobs": 0,
+                    "maintains_local_queue": False,
+                    "local_queue_depth": 0,
+                },
+                "capabilities": {
+                    "full_repo_scan": True,
+                    "pi_agent_session": True,
+                    "isolated_pi_profiles": True,
+                    "progress_events": True,
+                    "cancellation": True,
+                    "intent_test_validation": True,
+                },
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK, lease.payload)
+        self.assertEqual(
+            lease.payload["job"]["runtime_selection"],
+            {
+                "credential_id": "openai_team",
+                "provider": "openai",
+                "model": "gpt-5.1",
+                "thinking_level": "high",
+            },
+        )
+        self.assertEqual(lease.payload["job"]["model_profile"]["provider"], "openai")
+        self.assertEqual(lease.payload["job"]["model_profile"]["default_model"], "gpt-5.1")
+        self.assertEqual(lease.payload["job"]["model_profile"]["thinking_level"], "high")
+
+    def test_worker_skips_an_older_incompatible_job_and_claims_the_oldest_compatible_job(self) -> None:
+        worker_id, token = self.create_worker()
+        self.assertEqual(self.register(worker_id, token, OPENAI_ONLY_CATALOG).status, HTTPStatus.OK)
+        self.assertEqual(self.heartbeat(worker_id, token, OPENAI_ONLY_CATALOG).status, HTTPStatus.OK)
+
+        def set_policy(provider: str, model: str, thinking_level: str) -> None:
+            update = RouteHarness(
+                "/admin/subscription-plans/agent-configs/free",
+                {
+                    "provider": provider,
+                    "model": model,
+                    "thinkingLevel": thinking_level,
+                },
+                cookie=self.admin_cookie,
+            )
+            app.PullwiseHandler.route(update, "PATCH")
+            self.assertEqual(update.status, HTTPStatus.OK, update.payload)
+
+        def queue(scan_id: str, created_at: int) -> dict:
+            scan = {
+                "id": scan_id,
+                "repo": f"acme/{scan_id}",
+                "branch": "main",
+                "commit": "pending",
+                "status": "queued",
+                "userId": "usr_user",
+                "createdAt": created_at,
+                "queuedAt": created_at,
+                "progress": 0,
+                "phase": None,
+                "issues": {},
+            }
+            app.SCANS.append(scan)
+            return app.create_scan_job_for_scan(scan)
+
+        set_policy("anthropic", "claude-sonnet-4-5", "low")
+        incompatible = queue("sc_incompatible_older", 100)
+        set_policy("openai", "gpt-5.1", "medium")
+        compatible = queue("sc_compatible_newer", 200)
+
+        lease = RouteHarness(
+            f"/v1/workers/{worker_id}/lease",
+            {
+                "protocol_version": "review-worker-protocol/v1",
+                "capacity": {
+                    "available_job_slots": 1,
+                    "active_jobs": 0,
+                    "maintains_local_queue": False,
+                    "local_queue_depth": 0,
+                },
+                "capabilities": {
+                    "full_repo_scan": True,
+                    "pi_agent_session": True,
+                    "isolated_pi_profiles": True,
+                    "progress_events": True,
+                    "cancellation": True,
+                    "intent_test_validation": True,
+                },
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        app.PullwiseHandler.route(lease, "POST")
+
+        self.assertEqual(lease.status, HTTPStatus.OK, lease.payload)
+        self.assertEqual(lease.payload["job"]["job_id"], compatible["job_id"])
+        self.assertEqual(db.get_scan_job(incompatible["job_id"])["status"], "queued")
+
+    def test_per_worker_runtime_selection_is_rejected_and_plan_policy_is_used(self) -> None:
         worker_id, token = self.create_worker()
         self.assertEqual(self.register(worker_id, token, RUNTIME_CATALOG).status, HTTPStatus.OK)
         self.assertEqual(self.heartbeat(worker_id, token, RUNTIME_CATALOG).status, HTTPStatus.OK)
@@ -227,7 +371,19 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
             cookie=self.admin_cookie,
         )
         app.PullwiseHandler.route(update, "PATCH")
-        self.assertEqual(update.status, HTTPStatus.OK)
+        self.assertEqual(update.status, HTTPStatus.BAD_REQUEST)
+        self.assertIn("retired", update.payload["message"])
+        plan_update = RouteHarness(
+            "/admin/subscription-plans/agent-configs/free",
+            {
+                "provider": "openai",
+                "model": "gpt-5.1",
+                "thinkingLevel": "low",
+            },
+            cookie=self.admin_cookie,
+        )
+        app.PullwiseHandler.route(plan_update, "PATCH")
+        self.assertEqual(plan_update.status, HTTPStatus.OK)
 
         timestamp = app.now()
         scan = {
@@ -272,6 +428,7 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
             "credential_id": "openai_team",
             "provider": "openai",
             "model": "gpt-5.1",
+            "thinking_level": "low",
         })
         self.assertEqual(lease.payload["job"]["model_profile"]["provider"], "openai")
         self.assertEqual(lease.payload["job"]["model_profile"]["default_model"], "gpt-5.1")
@@ -294,7 +451,7 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
         }
         app.SCANS = [scan]
         app.create_scan_job_for_scan(scan)
-        job = db.claim_next_scan_job(worker_id, ready_providers=["openai"], create_review_run=True)
+        job = db.claim_next_scan_job(worker_id, create_review_run=True)
         self.assertIsNotNone(job)
         run_id = app.scan_job_attempt_run_id(job)
         lease_id = str(job.get("lease_id") or f"lease_{job['job_id']}")

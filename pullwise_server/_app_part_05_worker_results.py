@@ -51,6 +51,7 @@ def create_scan_job_for_scan(scan: dict) -> dict:
     user_id = str(scan.get("userId") or "").strip()
     user = USERS.get(user_id) if user_id else None
     plan = quota.effective_user_plan(user)
+    runtime_policy = billing.review_agent_config(plan)
     job = db.create_scan_job(
         {
             "job_id": make_id("job"),
@@ -66,7 +67,11 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "installation_id": scan.get("installationId"),
             "clone_url": scan.get("cloneUrl"),
             "review_output_language": clean_review_output_language(scan.get("reviewOutputLanguage")),
-            "provider_chain": [billing.review_agent_provider(plan)],
+            "provider_chain": [runtime_policy["provider"]],
+            "runtime_provider": runtime_policy["provider"],
+            "runtime_model": runtime_policy["model"],
+            "runtime_thinking_level": runtime_policy["thinkingLevel"],
+            "runtime_policy_version": 4,
         }
     )
     scan["jobId"] = job.get("job_id")
@@ -105,13 +110,13 @@ def review_job_repository_payload(job: dict) -> dict:
 
 
 def review_job_model_profile(agent_config: dict, runtime_selection: dict | None = None) -> dict:
-    codex = agent_config.get("codex") if isinstance(agent_config.get("codex"), dict) else {}
-    effort = public_issue_text(codex.get("reasoningEffort")) or "medium"
+    effort = public_issue_text(agent_config.get("thinkingLevel")) or "medium"
     selected = runtime_selection if isinstance(runtime_selection, dict) else {}
     return {
         "provider": public_issue_text(selected.get("provider") or agent_config.get("provider")),
         "credential_id": public_issue_text(selected.get("credential_id")),
-        "default_model": public_issue_text(selected.get("model") or codex.get("model")),
+        "default_model": public_issue_text(selected.get("model") or agent_config.get("model")),
+        "thinking_level": effort,
         "core_effort": effort,
         "reviewer_effort": effort,
         "validator_effort": effort,
@@ -406,12 +411,14 @@ def scan_job_payload(
     }
     plan = worker_plan_for_job(job, scan)
     agent_config = billing.review_agent_config(plan)
-    job_provider_chain = db.normalize_provider_list(job.get("provider_chain"))
-    if job_provider_chain:
-        agent_config = dict(agent_config)
-        agent_config["provider"] = job_provider_chain[0]
+    agent_config = dict(agent_config)
+    agent_config["provider"] = public_issue_text(job.get("runtime_provider")) or agent_config["provider"]
+    agent_config["model"] = public_issue_text(job.get("runtime_model")) or agent_config["model"]
+    agent_config["thinkingLevel"] = (
+        public_issue_text(job.get("runtime_thinking_level"))
+        or agent_config["thinkingLevel"]
+    )
     if runtime_selection:
-        agent_config = dict(agent_config)
         agent_config["provider"] = public_issue_text(runtime_selection.get("provider"))
     payload["agentConfig"] = agent_config
     repository_limits = repository_scan_limits_payload(plan)
