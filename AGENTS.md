@@ -26,6 +26,54 @@ must not govern target implementation.
 
 ## Current Pi Worker runtime catalog
 
+- Pullwise Model Gateway is a separate `pullwise-model-gateway` process in this
+  repository. It must not import or open the Server business DB. It owns the
+  encrypted secret store, upstream credential injection, official-origin route
+  adapters, limits, streaming/cancellation, and body-free audit JSONL.
+- Server stores only Provider Connection metadata/validated model ids and an
+  opaque `secret_ref`; immutable Profile Set revisions/routes; Worker Pools and
+  membership desired revisions; de-secreted observations; bootstrap hashes; and
+  Gateway grant JTI/hash/scope/generation/expiry/revocation. Never add provider
+  secret or usable token plaintext to SQLite.
+- Admin Provider Connection writes go through the fixed HTTPS write-only secret
+  broker. Supported official origins are OpenAI `api.openai.com`, DeepSeek
+  `api.deepseek.com`, and MiniMax `api.minimax.io`/`api.minimaxi.com`; do not add
+  arbitrary endpoint, path, header, or proxy support.
+- Profile routes use stable `route_id`, Pi provider `pullwise-gateway`, a unique
+  enabled model alias per revision, one exact upstream model, and the
+  intersection of configured allowlist with Gateway-validated model discovery.
+- Treat that intersection as a live fail-closed gate: profile issuance,
+  introspection, readiness, lease eligibility, and route resolution all require
+  every desired route's provider status, adapter, secret version, and validated
+  model catalog to remain compatible. A rotation candidate must cover every
+  active Profile/Pool/member route model before staging.
+- A Pool/member desired revision plus matching Worker observation and current
+  non-revoked Gateway grant is required before lease. Immediate rollouts update
+  every membership; rollout waves update only explicit Worker ids. Both rotate
+  the Pool Gateway-token generation and revoke older grants.
+- Worker control-plane and Gateway credentials are different audiences. Worker
+  profile/trust pulls require the matching Worker token; Gateway access tokens
+  are Ed25519-signed, five-minute by default, Worker/Profile/revision/digest/
+  route scoped, and checked through authenticated live introspection.
+- Provider rotation is staged write -> validate/model discovery -> canary ->
+  atomic promote -> explicit previous-version retirement. Normal removal blocks
+  active Profile/Pool/member dependencies and requires confirmation that the
+  upstream credential was revoked; emergency revoke stops route resolution
+  immediately.
+- If a candidate secret was written but validation or metadata persistence
+  fails, attempt retirement immediately. A failed compensation must create a
+  non-secret `model_gateway_secret_cleanup_tasks` record and surface a sanitized
+  failure; retry only through the authenticated empty-body Admin cleanup route.
+- Batch Pool creation uses one transaction to create independent Worker ids,
+  membership, and ten-minute single-use bootstrap hashes. The exchange returns
+  one Worker control-plane token once; installer input must use environment,
+  never URL or argv.
+- Focused Gateway tests are `tests/test_model_gateway_*.py` plus
+  `tests/test_worker_profile_observations.py`. Run the full `python -m pytest`
+  suite before completion.
+- `tests/test_model_gateway_end_to_end.py` is the safe TLS loopback plumbing
+  smoke: it uses a fake provider adapter and temporary secrets, so it proves
+  Server/Gateway/Worker boundaries but never claims real-provider review readiness.
 - Reuse the authenticated `review-worker-protocol/v1` registration, heartbeat,
   and lease routes for Pi Workers. Worker `runtime_catalog` uses schema
   `pullwise-pi-runtime-catalog/v1`.
@@ -43,10 +91,10 @@ must not govern target implementation.
   the oldest queued job compatible with one uniquely resolvable catalog route;
   an ambiguous provider/model pair is not routable. Never fall back to another
   plan tuple.
-- Worker creation is provider-agnostic and returns the Node tarball installer
-  plus host-local profile/sync commands. The active installer uses Node
-  22.23.1/npm only, loops until the operator declines another profile, starts
-  the Watcher before the Worker service, and contains no Python/Codex path.
+- Worker creation is provider-agnostic. Batch creation under a Worker Pool
+  returns distinct short-lived bootstrap tokens; the Node 22.23.1/npm installer
+  exchanges one token, starts the Watcher before the Worker service, and never
+  prompts for or stores an upstream provider credential.
 - The Watcher owns v1 registration/heartbeat. The Worker execution service owns
   one lease, checkout, Pi invocation, artifact uploads, and result submit, but
   never writes Server-owned fleet state directly.
@@ -66,9 +114,9 @@ must not govern target implementation.
   requiring GitHub App API credentials. Local scan branch validation accepts
   only the seeded/default branches and must not call GitHub.
 - The local plumbing smoke flow creates and cancels a scan. Do not report a
-  completed AI review unless the Worker has a real Pi credential catalog plus
-  an explicit persisted runtime selection and the scan reaches a terminal
-  review result.
+  completed AI review unless the Worker has a reconciled managed Gateway
+  profile/catalog, a current Worker-specific Gateway grant, and the scan reaches
+  a terminal review result.
 - `--hold` opens Web and Admin through the existing loopback-only local GitHub
   callback so the browser receives the fake session cookie before landing on
   Dashboard/Workers. Keep raw service URLs unauthenticated in a fresh browser;

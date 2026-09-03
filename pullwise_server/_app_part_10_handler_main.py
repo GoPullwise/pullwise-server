@@ -10,7 +10,7 @@ import time
 import zipfile
 
 from .agent_first_current_http import handle_agent_first_current_post
-from . import worker_runtime_catalog
+from . import model_gateway_http_routes, worker_profile_state, worker_runtime_catalog
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -1188,6 +1188,22 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if path == "/webhooks/creem":
             return self.handle_creem_webhook()
         body = self.read_json()
+        if model_gateway_http_routes.handle_internal_post(
+            self,
+            path=path,
+            body=body,
+            presented_token=bearer_token(self),
+            timestamp=now(),
+        ):
+            return
+        if model_gateway_http_routes.handle_worker_bootstrap_post(
+            self,
+            path=path,
+            body=body,
+            presented_token=bearer_token(self),
+            timestamp=now(),
+        ):
+            return
         if segments[:2] == ["v1", "agent-first"]:
             session = self.current_session()
             user = USERS.get(session["userId"]) if session else None
@@ -2920,6 +2936,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(system_config.admin_payload())
         if segments == ["admin", "subscription-plans", "agent-configs"]:
             return self.json(billing.review_agent_configs_admin_payload())
+        if model_gateway_http_routes.handle_admin_get(self, segments):
+            return
         if segments == ["admin", "review-calibration"]:
             return self.error(HTTPStatus.GONE, "Review calibration has been retired; Codex full-repository review is the only worker review path.")
         if segments == ["admin", "workers", "defaults"]:
@@ -2998,6 +3016,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         if segments == ["admin", "review-calibration", "labels"]:
             return self.error(HTTPStatus.GONE, "Review calibration labels have been retired; use Codex review worker outcomes.")
+        if model_gateway_http_routes.handle_admin_post(
+            self,
+            segments=segments,
+            body=body,
+            actor_user_id=session["userId"],
+            request_id=request_id_from_handler(self),
+        ):
+            return
         if segments == ["admin", "workers", "releases"]:
             return self.handle_admin_worker_release(session, body)
         if segments == ["admin", "workers"]:
@@ -3408,6 +3434,14 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "agent-configs":
             worker_id = clean_github_access_text(segments[2]) or ""
             return self.handle_worker_v1_agent_configs({**body, "worker_id": worker_id}, worker_record)
+        if model_gateway_http_routes.handle_worker_profile_post(
+            self,
+            segments=segments,
+            body=body,
+            worker_record=worker_record,
+            worker_id_matches=self.authenticated_worker_id_matches,
+        ):
+            return
         if len(segments) == 4 and segments[:2] == ["v1", "workers"] and segments[3] == "lease":
             worker_id = clean_github_access_text(segments[2]) or ""
             return self.handle_worker_v1_lease(worker_id, {**body, "worker_id": worker_id}, worker_record)
@@ -3441,6 +3475,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.error(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 f"Worker is not ready to claim jobs: {worker_status}.",
+            )
+        profile_managed, profile_ready, profile_reason = worker_profile_state.worker_model_profile_readiness(
+            db.connect,
+            worker_id=worker_id,
+            timestamp=lease_timestamp,
+        )
+        if profile_managed and not profile_ready:
+            return self.json(
+                {
+                    "lease": None,
+                    "retry_after_seconds": 15,
+                    "job": None,
+                    "reason": f"model_profile_not_ready:{profile_reason}",
+                }
             )
         runtime_selections = worker_runtime_catalog.routable_selections(
             worker_record.get("runtime_catalog")
@@ -3574,6 +3622,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not platform_os or platform_os not in {"linux", "posix"}:
             return self.error(HTTPStatus.BAD_REQUEST, "Worker runtime platform must be Linux/POSIX.")
         try:
+            registration_timestamp = now()
             normalized_catalog = None
             if "runtime_catalog" in worker:
                 normalized_catalog = worker_runtime_catalog.normalize_runtime_catalog(
@@ -3583,9 +3632,20 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             normalized_worker = dict(worker)
             if normalized_catalog is not None:
                 normalized_worker["runtime_catalog"] = normalized_catalog
+            normalized_profile_state = None
+            if "profile_state" in worker:
+                normalized_profile_state = worker_profile_state.validate_worker_profile_observation(
+                    db.connect,
+                    worker_id=worker_id,
+                    value=worker.get("profile_state"),
+                    observed_at=registration_timestamp,
+                )
+                normalized_worker["profile_state"] = dict(worker["profile_state"])
             registered = db.register_worker_protocol(
-                {**body, "worker": normalized_worker, "timestamp": now()}
+                {**body, "worker": normalized_worker, "timestamp": registration_timestamp}
             )
+            if normalized_profile_state is not None:
+                worker_profile_state.store_worker_profile_observation(db.connect, normalized_profile_state)
             if normalized_catalog is not None:
                 SCAN_SYSTEM_STATUS_CACHE.clear()
         except ValueError as exc:
@@ -3968,6 +4028,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 )
             except ValueError as exc:
                 return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        normalized_profile_state = None
+        if "profile_state" in body:
+            try:
+                normalized_profile_state = worker_profile_state.validate_worker_profile_observation(
+                    db.connect,
+                    worker_id=worker_id,
+                    value=body.get("profile_state"),
+                    observed_at=heartbeat_timestamp,
+                )
+            except ValueError as exc:
+                return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         heartbeat_progress_context = None
         heartbeat_progress_record = None
         heartbeat_scan_job_progress = None
@@ -4057,6 +4128,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             apply_recovered_scan_jobs_locked(recovered_jobs)
         except ValueError as exc:
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
+        if normalized_profile_state is not None:
+            worker_profile_state.store_worker_profile_observation(db.connect, normalized_profile_state)
         if "runtime_catalog" in heartbeat_record:
             SCAN_SYSTEM_STATUS_CACHE.clear()
         if worker_codex_quota_payload(record) is not None:

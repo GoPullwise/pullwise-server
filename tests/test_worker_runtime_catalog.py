@@ -73,7 +73,12 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
         )
         app.PullwiseHandler.route(handler, "POST")
         self.assertEqual(handler.status, HTTPStatus.CREATED)
-        self.assertTrue(handler.payload["configuration"]["secretsStoredOnWorker"])
+        self.assertFalse(handler.payload["configuration"]["secretsStoredOnWorker"])
+        self.assertEqual(handler.payload["configuration"]["profileMode"], "server-managed")
+        self.assertEqual(
+            handler.payload["configuration"]["upstreamSecretsOwner"],
+            "pullwise-model-gateway",
+        )
         self.assertEqual(handler.payload["worker"]["provider"], "unconfigured")
         self.assertEqual(handler.payload["worker"]["providerChain"], [])
         self.assertIn("PULLWISE_PI_PROFILE_ROOT", handler.payload["suggested_env"])
@@ -83,9 +88,11 @@ class WorkerRuntimeCatalogTest(unittest.TestCase):
         )
         self.assertEqual(
             [item["key"] for item in handler.payload["configuration_commands"]],
-            ["add_runtime_profile", "sync_runtime_catalog"],
+            ["sync_managed_profile"],
         )
         self.assertNotIn(handler.payload["worker_token"], json.dumps(handler.payload["configuration_commands"]))
+        self.assertNotIn("profile add", json.dumps(handler.payload))
+        self.assertNotIn("pi auth login", json.dumps(handler.payload))
         return handler.payload["worker_id"], handler.payload["worker_token"]
 
     def register(self, worker_id: str, token: str, catalog: dict) -> RouteHarness:

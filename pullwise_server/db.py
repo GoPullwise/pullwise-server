@@ -27,6 +27,7 @@ from .agent_first_release_attestation_migrations import (
     install_current_release_attestation_tables,
 )
 from . import worker_runtime_catalog
+from .model_gateway_migrations import install_model_gateway_tables
 
 
 _LOCK = threading.Lock()
@@ -945,6 +946,7 @@ def initialize() -> None:
             install_current_release_evaluator_tables(connection)
             install_current_release_trust_tables(connection)
             install_current_release_attestation_tables(connection)
+            install_model_gateway_tables(connection)
 
 
 def ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:

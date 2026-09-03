@@ -17,8 +17,6 @@ class NodeWorkerInstallerTest(unittest.TestCase):
         for required in (
             'NODE_VERSION="22.23.1"',
             'install --prefix "$APP_ROOT" --omit=dev --ignore-scripts',
-            "profile add",
-            "Add another provider account or API key?",
             "pullwise-worker-watcher-",
             "ExecStart=__BIN_PATH__ watch",
             "ExecStart=__BIN_PATH__ serve",
@@ -29,6 +27,9 @@ class NodeWorkerInstallerTest(unittest.TestCase):
             "safe_worker_id() {",
             'getent passwd "$SERVICE_USER"',
             "Existing service user has a different home",
+            "Profiles are managed by Pullwise Model Gateway",
+            "PULLWISE_WORKER_BOOTSTRAP_TOKEN",
+            '"$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/src/main.ts" bootstrap',
         ):
             self.assertIn(required, script)
         for forbidden in (
@@ -38,6 +39,10 @@ class NodeWorkerInstallerTest(unittest.TestCase):
             "CODEX_HOME",
             "PULLWISE_CODEX",
             "openai-codex",
+            "profile add",
+            "pi auth login",
+            "Add another provider account or API key?",
+            "--bootstrap-token",
         ):
             self.assertNotIn(forbidden, script)
         bash = shutil.which("bash")

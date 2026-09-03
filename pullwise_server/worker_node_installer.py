@@ -11,6 +11,7 @@ WORKER_ID=""
 WORKER_NAME="Pullwise Worker"
 WORKER_PACKAGE=""
 WORKER_TOKEN="${PULLWISE_WORKER_TOKEN:-}"
+BOOTSTRAP_TOKEN="${PULLWISE_WORKER_BOOTSTRAP_TOKEN:-}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -26,7 +27,14 @@ done
 [ -n "$SERVER_URL" ] || { echo "--server is required" >&2; exit 2; }
 [ -n "$WORKER_ID" ] || { echo "--worker-id is required" >&2; exit 2; }
 [ -n "$WORKER_PACKAGE" ] || { echo "--package is required" >&2; exit 2; }
-[ -n "$WORKER_TOKEN" ] || { echo "PULLWISE_WORKER_TOKEN is required" >&2; exit 2; }
+if [ -n "$WORKER_TOKEN" ] && [ -n "$BOOTSTRAP_TOKEN" ]; then
+  echo "Set only one of PULLWISE_WORKER_TOKEN or PULLWISE_WORKER_BOOTSTRAP_TOKEN." >&2
+  exit 2
+fi
+[ -n "$WORKER_TOKEN" ] || [ -n "$BOOTSTRAP_TOKEN" ] || {
+  echo "PULLWISE_WORKER_TOKEN or PULLWISE_WORKER_BOOTSTRAP_TOKEN is required" >&2
+  exit 2
+}
 case "$SERVER_URL" in http://*|https://*) ;; *) echo "--server must be HTTP(S)" >&2; exit 2 ;; esac
 case "$WORKER_ID" in *[!A-Za-z0-9_-]*|'') echo "worker id is unsafe" >&2; exit 2 ;; esac
 
@@ -68,7 +76,6 @@ fi
 
 command -v curl >/dev/null 2>&1 || { apt-get update; apt-get install -y curl ca-certificates xz-utils; }
 command -v sha256sum >/dev/null 2>&1 || { apt-get update; apt-get install -y coreutils; }
-command -v runuser >/dev/null 2>&1 || { apt-get update; apt-get install -y util-linux; }
 command -v git >/dev/null 2>&1 || { apt-get update; apt-get install -y git; }
 
 case "$(uname -m)" in
@@ -109,6 +116,17 @@ PACKAGE_FILE="${WORKER_PACKAGE##*/}"
 WORKER_VERSION="${PACKAGE_FILE#pullwise-worker-}"
 WORKER_VERSION="${WORKER_VERSION%.tgz}"
 case "$WORKER_VERSION" in ""|*[!0-9.]*) echo "Worker package filename has no valid version." >&2; exit 1 ;; esac
+
+if [ -z "$WORKER_TOKEN" ]; then
+  WORKER_TOKEN="$(
+    PULLWISE_SERVER_URL="$SERVER_URL" \
+    PULLWISE_WORKER_ID="$WORKER_ID" \
+    PULLWISE_WORKER_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN" \
+    "$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/src/main.ts" bootstrap
+  )"
+  case "$WORKER_TOKEN" in pww_*) ;; *) echo "Worker bootstrap exchange failed." >&2; exit 1 ;; esac
+fi
+unset BOOTSTRAP_TOKEN PULLWISE_WORKER_BOOTSTRAP_TOKEN
 
 cat >"$ENV_FILE" <<EOF
 PULLWISE_SERVER_URL=$SERVER_URL
@@ -192,28 +210,9 @@ sed -i \
   -e "s|__WATCHER_SERVICE__|$WATCHER_SERVICE|g" \
   "$WORKER_UNIT"
 
-while :; do
-  printf 'Add another provider account or API key? [y/N] '
-  read -r ADD_PROFILE
-  case "$ADD_PROFILE" in y|Y|yes|YES) ;; *) break ;; esac
-  read -rp 'Credential id: ' CREDENTIAL_ID
-  read -rp 'Provider id: ' PROVIDER_ID
-  read -rp 'Account label: ' ACCOUNT_LABEL
-  read -rp 'Auth type [api_key/oauth/subscription]: ' AUTH_TYPE
-  AUTH_TYPE="${AUTH_TYPE:-api_key}"
-  runuser -u "$SERVICE_USER" -- env \
-    PULLWISE_PI_PROFILE_ROOT="$PROFILE_ROOT" \
-    PATH="$APP_ROOT/node_modules/.bin:$NODE_ROOT/bin:/usr/bin:/bin" \
-    "$BIN_PATH" profile add --id "$CREDENTIAL_ID" --provider "$PROVIDER_ID" --label "$ACCOUNT_LABEL" --auth-type "$AUTH_TYPE"
-  runuser -u "$SERVICE_USER" -- env \
-    PI_CODING_AGENT_DIR="$PROFILE_ROOT/profiles/$CREDENTIAL_ID" \
-    PATH="$APP_ROOT/node_modules/.bin:$NODE_ROOT/bin:/usr/bin:/bin" \
-    "$APP_ROOT/node_modules/.bin/pi" auth login --provider "$PROVIDER_ID"
-done
-
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$RUNTIME_ROOT"
 systemctl daemon-reload
 systemctl enable --now "$WATCHER_SERVICE"
 systemctl enable --now "$WORKER_SERVICE"
-echo "Installed $WORKER_NAME ($WORKER_ID). Configure a runtime in Admin after the catalog heartbeat arrives."
+echo "Installed $WORKER_NAME ($WORKER_ID). Profiles are managed by Pullwise Model Gateway."
 '''

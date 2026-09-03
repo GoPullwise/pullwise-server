@@ -1036,17 +1036,6 @@ def worker_create_payload(worker: dict) -> dict:
         "PULLWISE_SERVICE_HOME": service_home,
     }
     script_hash = worker_install_script_sha256()
-    add_profile_command = (
-        "read -rp 'Credential id: ' PULLWISE_CREDENTIAL_ID; "
-        "read -rp 'Provider id: ' PULLWISE_PROVIDER_ID; "
-        "read -rp 'Account label: ' PULLWISE_CREDENTIAL_LABEL; "
-        f"sudo -u {shell_quote(service_user)} env "
-        f"PULLWISE_PI_PROFILE_ROOT={shell_quote(profile_root)} "
-        f"{shell_quote(bin_path)} profile add "
-        '"--id" "$PULLWISE_CREDENTIAL_ID" '
-        '"--provider" "$PULLWISE_PROVIDER_ID" '
-        '"--label" "$PULLWISE_CREDENTIAL_LABEL"'
-    )
     sync_catalog_command = (
         f"sudo -u {shell_quote(service_user)} sh -lc "
         f"{shell_quote(f'. {env_file}; exec {bin_path} sync')}"
@@ -1065,19 +1054,16 @@ def worker_create_payload(worker: dict) -> dict:
         },
         "suggested_env": suggested_env,
         "configuration": {
-            "secretsStoredOnWorker": True,
+            "secretsStoredOnWorker": False,
             "profileRoot": profile_root,
             "selectionOwner": "pullwise-server",
+            "profileMode": "server-managed",
+            "upstreamSecretsOwner": "pullwise-model-gateway",
         },
         "configuration_commands": [
             {
-                "key": "add_runtime_profile",
-                "title": "Add provider account or API key",
-                "command": add_profile_command,
-            },
-            {
-                "key": "sync_runtime_catalog",
-                "title": "Sync available providers and models",
+                "key": "sync_managed_profile",
+                "title": "Pull and apply assigned Profile Set",
                 "command": sync_catalog_command,
             },
         ],
