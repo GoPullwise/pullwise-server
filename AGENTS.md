@@ -42,6 +42,18 @@ must not govern target implementation.
 - Profile routes use stable `route_id`, Pi provider `pullwise-gateway`, a unique
   enabled model alias per revision, one exact upstream model, and the
   intersection of configured allowlist with Gateway-validated model discovery.
+- Published manifest routes include `upstream_provider`, derived from the
+  Provider Connection in the same publication transaction. Admin publish inputs
+  do not author that field. Publish a new Profile Set revision after upgrading
+  older manifests so Workers can load signed native Pi model metadata.
+- Keep model request differences in Pi's native capability metadata. The
+  Gateway's configured API transport forwards the resulting request; do not
+  add provider-specific role, token-field, or thinking rewrites in Python.
+- Gateway output limits reserve a request's ceiling while it runs, then settle
+  once from valid upstream completion usage after a successful response. Missing
+  or invalid usage retains the full reservation. A late response from an old
+  minute must never refund a new minute's counters. SSE usage inspection must
+  stay bounded and must not persist prompts or response bodies.
 - Treat that intersection as a live fail-closed gate: profile issuance,
   introspection, readiness, lease eligibility, and route resolution all require
   every desired route's provider status, adapter, secret version, and validated
@@ -133,6 +145,20 @@ must not govern target implementation.
 ## Python Dependency Audit
 
 CI runs pip-audit . against project dependencies. Keep the cryptography range on a fixed line that excludes the August 2026 vulnerable 48/49 releases; do not lower it below 50.0.0 unless the advisory state is intentionally re-evaluated and CI audit still passes.
+
+## SQLite test connection lifetime
+
+- Wrap test-owned SQLite connections in `contextlib.closing`; a connection's
+  context manager commits or rolls back but does not close the file handle.
+  Keep a nested transaction context when writes must commit. Close connections
+  created in helper threads before deleting temporary databases on Windows.
+
+## Current CI target check
+
+- `scripts/check_current_reviewer_authority.py` validates the leading current
+  Node/Pi target block. It must not require a retired external-authority prefix
+  or Notion URLs. Current user instructions, repository rules, code and tests
+  govern development; the matching regression is test_current_reviewer_ci_target.
 
 ## Worker Host Platform
 

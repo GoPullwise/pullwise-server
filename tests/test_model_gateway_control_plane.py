@@ -212,6 +212,7 @@ class ModelGatewayControlPlaneTest(unittest.TestCase):
         self.assertEqual(published["revision"], 1)
         self.assertEqual(published["status"], "published")
         self.assertRegex(published["manifestDigest"], r"^[0-9a-f]{64}$")
+        self.assertEqual(published["manifest"]["routes"][0]["upstream_provider"], "openai")
         self.assertEqual(
             published["manifest"],
             {
@@ -220,6 +221,7 @@ class ModelGatewayControlPlaneTest(unittest.TestCase):
                 "revision": 1,
                 "routes": [
                     {
+                        "upstream_provider": "openai",
                         "route_id": "gpt-primary",
                         "provider_connection_id": "openai-production",
                         "provider": "pullwise-gateway",
@@ -234,13 +236,15 @@ class ModelGatewayControlPlaneTest(unittest.TestCase):
         serialized = json.dumps(published, sort_keys=True)
         self.assertNotIn("provider-secret-not-for-manifest", serialized)
         self.assertNotIn("secret_ref", serialized)
+        editable_route = {key: value for key, value in published["manifest"]["routes"][0].items()
+                          if key != "upstream_provider"}
         duplicate_alias = {
             "profile_set_id": "reviewer-production",
             "display_name": "Reviewer production",
             "routes": [
-                {**published["manifest"]["routes"][0]},
+                {**editable_route},
                 {
-                    **published["manifest"]["routes"][0],
+                    **editable_route,
                     "route_id": "gpt-secondary",
                 },
             ],

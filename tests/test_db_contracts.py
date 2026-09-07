@@ -882,7 +882,7 @@ class DatabaseContractsTest(unittest.TestCase):
                         release_selection.set()
                         return
                     try:
-                        with sqlite3.connect(db_path, timeout=0) as connection:
+                        with closing(sqlite3.connect(db_path, timeout=0)) as connection, connection:
                             connection.execute("PRAGMA busy_timeout=0")
                             connection.execute(
                                 """

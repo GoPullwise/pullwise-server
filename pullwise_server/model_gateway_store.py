@@ -177,10 +177,10 @@ class ModelGatewayStore:
             placeholders = ",".join("?" for _ in routes)
             connection_ids = [str(route["provider_connection_id"]) for route in routes]
             available = {
-                str(row["provider_connection_id"]): set(json.loads(row["validated_models_json"]))
+                str(row["provider_connection_id"]): dict(row)
                 for row in connection.execute(
                     f"""
-                    SELECT provider_connection_id, validated_models_json
+                    SELECT provider_connection_id, provider, validated_models_json
                     FROM provider_connections
                     WHERE status = 'configured'
                       AND provider_connection_id IN ({placeholders})
@@ -192,7 +192,7 @@ class ModelGatewayStore:
             if missing:
                 raise ValueError(f"provider connection is unavailable: {missing[0]}")
             for route in routes:
-                models = available[str(route["provider_connection_id"])]
+                models = set(json.loads(available[str(route["provider_connection_id"])]["validated_models_json"]))
                 if route["upstream_model"] not in models:
                     raise ValueError(f"upstream model is unavailable: {route['upstream_model']}")
             current = connection.execute(
@@ -204,7 +204,10 @@ class ModelGatewayStore:
                 "schema_id": "pullwise-model-profile-set/v1",
                 "profile_set_id": profile_set_id,
                 "revision": revision,
-                "routes": routes,
+                "routes": [
+                    {**route, "upstream_provider": available[str(route["provider_connection_id"])]["provider"]}
+                    for route in routes
+                ],
             }
             manifest_json = json.dumps(
                 manifest,

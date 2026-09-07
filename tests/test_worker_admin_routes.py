@@ -8,6 +8,7 @@ import re
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
@@ -1858,7 +1859,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
             plan="repository",
             limit=10,
         )
-        with db.connect() as connection:
+        with closing(db.connect()) as connection:
             with connection:
                 connection.execute("UPDATE quota_buckets SET used = 3, reserved = 1 WHERE id = ?", (user_bucket["id"],))
                 connection.execute("UPDATE quota_buckets SET used = 2 WHERE id = ?", (repository_bucket["id"],))
@@ -1921,7 +1922,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertEqual(db.list_review_run_events(run_id), [])
         self.assertIsNone(db.get_review_run_artifact(run_id, "art_worker_log"))
         self.assertFalse(artifact_path.exists())
-        with db.connect() as connection:
+        with closing(db.connect()) as connection:
             remaining_buckets = connection.execute(
                 "SELECT id FROM quota_buckets WHERE id IN (?, ?) ORDER BY id",
                 (user_bucket["id"], repository_bucket["id"]),
@@ -1998,7 +1999,7 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         stored_artifact = db.get_review_run_artifact(run_id, "art_legacy_log")
         artifact_path = Path(db.review_artifact_content_file_path(stored_artifact) or "")
         self.assertTrue(artifact_path.exists())
-        with db.connect() as connection:
+        with closing(db.connect()) as connection:
             with connection:
                 connection.execute(
                     "UPDATE scan_jobs SET user_id = '' WHERE job_id = ?",

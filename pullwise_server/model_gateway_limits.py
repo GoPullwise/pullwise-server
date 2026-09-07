@@ -48,7 +48,7 @@ class GatewayLimiter:
         self._route_active: dict[str, int] = {}
 
     @contextmanager
-    def acquire(self, *, worker_id: str, route_id: str, output_tokens: int) -> Iterator[None]:
+    def acquire(self, *, worker_id: str, route_id: str, output_tokens: int) -> Iterator[Callable[[int], None]]:
         with self._lock:
             window = int(self._clock() // 60)
             if window != self._window:
@@ -84,8 +84,23 @@ class GatewayLimiter:
             self._route_output_tokens[route_id] = route_tokens + output_tokens
             self._worker_active[worker_id] = worker_active + 1
             self._route_active[route_id] = route_active + 1
+        settled = False
+
+        def settle(actual_output_tokens: int) -> None:
+            nonlocal settled
+            if type(actual_output_tokens) is not int or not 0 <= actual_output_tokens <= 1_000_000_000:
+                raise ValueError("actual output token usage is invalid")
+            with self._lock:
+                if settled:
+                    return
+                settled = True
+                if window != self._window:
+                    return
+                adjustment = actual_output_tokens - output_tokens
+                self._worker_output_tokens[worker_id] += adjustment
+                self._route_output_tokens[route_id] += adjustment
         try:
-            yield
+            yield settle
         finally:
             with self._lock:
                 self._decrement(self._worker_active, worker_id)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from copy import deepcopy
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -36,6 +37,32 @@ class FakeModelResponse(FakeStreamingResponse):
 
 
 class ModelGatewayAdapterTest(unittest.TestCase):
+    def test_gateway_preserves_the_model_sdk_payload_without_rewriting_messages(self) -> None:
+        route = GatewayRoute(
+            route_id="flash", profile_set_id="live", profile_revision=1,
+            manifest_digest="a" * 64, model_alias="flash",
+            provider_connection_id="deepseek", upstream_provider="deepseek",
+            adapter="openai-completions", endpoint_origin="https://api.deepseek.com",
+            upstream_model="deepseek-v4-flash", secret_ref="provider/deepseek/key", secret_version="v1",
+        )
+        request = {
+            "model": "deepseek-v4-flash", "stream": True,
+            "max_tokens": 16384, "reasoning_effort": "low", "thinking": {"type": "enabled"},
+            "messages": [
+                {"role": "system", "content": "Review read-only."},
+                {"role": "user", "content": "Review this repository."},
+                {"role": "assistant", "content": "", "reasoning_content": "provider-owned-context",
+                 "tool_calls": [{"id": "call1", "type": "function", "function": {"name": "repo_ls", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "call1", "content": "a.ts"},
+            ],
+        }
+        original = deepcopy(request)
+        with patch("pullwise_server.model_gateway_adapters.requests.post", return_value=FakeStreamingResponse()) as post:
+            list(OpenAICompletionsAdapter().stream(route, b"test-key", request))
+        sent = post.call_args.kwargs["json"]
+        self.assertEqual(sent, original)
+        self.assertEqual(request, original)
+
     def test_connection_validation_uses_bounded_fixed_models_probe(self) -> None:
         response = FakeModelResponse()
         with patch(
