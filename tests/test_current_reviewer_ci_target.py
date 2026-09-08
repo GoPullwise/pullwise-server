@@ -17,6 +17,25 @@ TARGET = TEXT[:TEXT.index(END) + len(END)] + "\n"
 
 
 class CurrentReviewerCiTargetTest(unittest.TestCase):
+    def test_ci_provisions_the_worker_used_by_gateway_integration(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        # The real TLS integration executes ../pullwise-worker/src/main.ts.
+        # A full developer workspace must not hide a missing CI prerequisite.
+        self.assertIn("working-directory: pullwise-server", workflow)
+        self.assertIn("path: pullwise-server", workflow)
+        worker_checkout = workflow.index("repository: GoPullwise/pullwise-worker")
+        node_setup = workflow.index("uses: actions/setup-node@v4")
+        worker_install = workflow.index("run: npm ci --ignore-scripts")
+        test_run = workflow.index("run: python -m pytest")
+        self.assertIn("path: pullwise-worker", workflow[worker_checkout:node_setup])
+        self.assertIn("persist-credentials: false", workflow[worker_checkout:node_setup])
+        self.assertRegex(workflow[worker_checkout:node_setup], r"ref: [a-f0-9]{40}")
+        self.assertIn('node-version: "22.23.1"', workflow[node_setup:worker_install])
+        self.assertIn("working-directory: pullwise-worker", workflow[node_setup:worker_install])
+        self.assertLess(worker_checkout, node_setup)
+        self.assertLess(node_setup, worker_install)
+        self.assertLess(worker_install, test_run)
+
     def invoke(self, script: Path):
         result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=10)
         return result.returncode, json.loads(result.stdout)

@@ -759,6 +759,15 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 
 ## CI Test Harness Notes
 
+- Server CI must check out Server and the exact tested Worker revision into
+  sibling `pullwise-server` / `pullwise-worker` directories, provision Node
+  22.23.1, and install the Worker's locked graph with scripts disabled before
+  pytest. The Gateway TLS integration invokes the actual Node Worker; a local
+  four-repository checkout does not prove standalone CI has that prerequisite.
+- Gateway app test master-key fixtures must set mode 0600 explicitly. A normal
+  POSIX umask creates 0644 files; preserve the production permission rejection
+  and exercise the fixture under umask 022 on Linux.
+
 - `tests/test_agent_first_source_fixture_global_gate.py` runs one large generated
   Node fixture process that can exceed ten minutes even when its semantic
   sub-gates are green. Keep the test's internal subprocess timeout at 1,800

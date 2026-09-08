@@ -15,11 +15,20 @@ from pullwise_server.model_gateway_secrets import EncryptedFileSecretStore
 
 
 class ModelGatewayAppTest(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "requires POSIX file permissions")
+    def test_gateway_fixture_works_under_standard_posix_umask(self) -> None:
+        previous_umask = os.umask(0o022)
+        try:
+            self.test_closed_runtime_config_builds_standalone_gateway_application()
+        finally:
+            os.umask(previous_umask)
+
     def test_closed_runtime_config_builds_standalone_gateway_application(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             master_key_path = root / "secret-store.key"
             master_key_path.write_bytes(bytes(range(32)))
+            master_key_path.chmod(0o600)
             secret_root = root / "secrets"
             stored = EncryptedFileSecretStore(
                 root=secret_root,
