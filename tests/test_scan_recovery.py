@@ -992,7 +992,7 @@ class ScanRecoveryTest(unittest.TestCase):
             scan_id="sc_reserved_core_failed",
             request_id="req_reserved_core_failed",
             status="running",
-            phase="repo_map",
+            phase="review",
             timestamp=timestamp,
         )
         job = db.create_scan_job(
@@ -1016,7 +1016,7 @@ class ScanRecoveryTest(unittest.TestCase):
                 connection.execute(
                     """
                     UPDATE scan_jobs
-                    SET progress_phase = 'repo_map',
+                    SET progress_phase = 'review',
                         progress = 60,
                         completed_at = ?,
                         error = 'timed_out'

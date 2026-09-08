@@ -53,6 +53,7 @@ class FakeAdapter:
         route: GatewayRoute,
         secret: bytes,
         request: dict[str, object],
+        *, cancellation=None,
     ) -> dict[str, object]:
         self.calls.append((route, secret, request))
         return {
@@ -66,6 +67,7 @@ class FakeAdapter:
         route: GatewayRoute,
         secret: bytes,
         request: dict[str, object],
+        *, cancellation=None,
     ):
         self.calls.append((route, secret, request))
         yield b'data: {"id":"chunk-1"}\n\n'

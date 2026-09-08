@@ -13,13 +13,14 @@ from pullwise_server.model_gateway_runtime import GatewayRoute
 
 
 class FakeStreamingResponse:
+    status = 200
     status_code = 200
     headers = {"Content-Type": "text/event-stream"}
 
     def __init__(self) -> None:
         self.closed = False
 
-    def iter_content(self, chunk_size: int):
+    def iter_bytes(self, chunk_size: int):
         self.chunk_size = chunk_size
         yield b'data: {"id":"chunk-1"}\n\n'
         yield b"data: [DONE]\n\n"
@@ -57,9 +58,9 @@ class ModelGatewayAdapterTest(unittest.TestCase):
             ],
         }
         original = deepcopy(request)
-        with patch("pullwise_server.model_gateway_adapters.requests.post", return_value=FakeStreamingResponse()) as post:
+        with patch("pullwise_server.model_gateway_adapters.open_upstream", return_value=FakeStreamingResponse()) as post:
             list(OpenAICompletionsAdapter().stream(route, b"test-key", request))
-        sent = post.call_args.kwargs["json"]
+        sent = post.call_args.kwargs["payload"]
         self.assertEqual(sent, original)
         self.assertEqual(request, original)
 
@@ -108,7 +109,7 @@ class ModelGatewayAdapterTest(unittest.TestCase):
         )
         response = FakeStreamingResponse()
         with patch(
-            "pullwise_server.model_gateway_adapters.requests.post",
+            "pullwise_server.model_gateway_adapters.open_upstream",
             return_value=response,
         ) as post:
             chunks = list(
@@ -135,12 +136,12 @@ class ModelGatewayAdapterTest(unittest.TestCase):
                 "Content-Type": "application/json",
             },
         )
-        self.assertFalse(kwargs["allow_redirects"])
-        self.assertTrue(kwargs["stream"])
+        self.assertEqual(kwargs["timeout_seconds"], 30)
+        self.assertIsNone(kwargs["cancellation"])
 
         deepseek_response = FakeStreamingResponse()
         with patch(
-            "pullwise_server.model_gateway_adapters.requests.post",
+            "pullwise_server.model_gateway_adapters.open_upstream",
             return_value=deepseek_response,
         ) as deepseek_post:
             list(

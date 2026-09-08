@@ -29,10 +29,11 @@ class NodeWorkerInstallerTest(unittest.TestCase):
             "Existing service user has a different home",
             "Profiles are managed by Pullwise Model Gateway",
             "PULLWISE_WORKER_BOOTSTRAP_TOKEN",
-            '"$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/src/main.ts" bootstrap',
+            '"$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/dist/main.js" bootstrap',
         ):
             self.assertIn(required, script)
         for forbidden in (
+            'chown -R "$SERVICE_USER":"$SERVICE_USER" "$RUNTIME_ROOT"',
             "python",
             "pip ",
             ".venv",
@@ -45,6 +46,12 @@ class NodeWorkerInstallerTest(unittest.TestCase):
             "--bootstrap-token",
         ):
             self.assertNotIn(forbidden, script)
+        self.assertIn('SERVICE_USER="pww-', script)
+        self.assertIn('PULLWISE_MANAGED_HOST=1', script)
+        watcher_unit = script.split('cat >"$WATCHER_UNIT"')[1].split('EOF\nsed -i')[0]
+        self.assertIn('User=root', watcher_unit)
+        self.assertNotIn('ProtectSystem=strict', watcher_unit)
+        self.assertIn('ln -s "$INITIAL_APP" "$APP_ROOT"', script)
         bash = shutil.which("bash")
         if bash:
             probe = subprocess.run([bash, "--version"], capture_output=True, check=False)

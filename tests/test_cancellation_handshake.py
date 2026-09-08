@@ -438,7 +438,7 @@ class CancellationHandshakeTest(unittest.TestCase):
         db.update_scan_job_progress(
             job["job_id"],
             {
-                "phase": "repo_map",
+                "phase": "review",
                 "progress": 45,
                 "message": "core repository map completed",
                 "started_at": app.now(),
@@ -474,7 +474,7 @@ class CancellationHandshakeTest(unittest.TestCase):
         scan = self.create_quota_scan("sc_cancel_historical_core")
         job = self.lease()
         with patch.object(app, "finalize_scan_quota_for_job", return_value={}):
-            core = self.event(job, "phase_completed", 1, phase="repo_map")
+            core = self.event(job, "phase_completed", 1, phase="review")
             cleanup = self.event(
                 job,
                 "phase_completed",
@@ -514,7 +514,7 @@ class CancellationHandshakeTest(unittest.TestCase):
         job = self.lease()
         with patch.object(app, "finalize_scan_quota_for_job", return_value={}):
             self.assertEqual(
-                self.event(job, "phase_completed", 1, phase="repo_map").status,
+                self.event(job, "phase_completed", 1, phase="review").status,
                 HTTPStatus.OK,
             )
             self.assertEqual(
@@ -550,7 +550,7 @@ class CancellationHandshakeTest(unittest.TestCase):
         job = self.lease()
         core_steps = [
             {
-                "id": "repo_map",
+                "id": "review",
                 "status": "completed",
                 "percent": 100,
             }
@@ -703,10 +703,10 @@ class CancellationHandshakeTest(unittest.TestCase):
         audit_fields = audit_result_fields([], execution_status="cancelled")
         audit_fields["reviewWorkerProtocol"]["progress_final"].update(
             {
-                "current_phase": "reviewer_fanout",
+                "current_phase": "review",
                 "steps": [
                     {
-                        "id": "reviewer_fanout",
+                        "id": "review",
                         "status": "completed",
                         "percent": 100,
                     }
@@ -772,7 +772,7 @@ class CancellationHandshakeTest(unittest.TestCase):
         db.update_scan_job_progress(
             job["job_id"],
             {
-                "phase": "repo_map",
+                "phase": "review",
                 "progress": 45,
                 "message": "core work persisted before cancellation timeout",
                 "started_at": app.now(),

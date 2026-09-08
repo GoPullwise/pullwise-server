@@ -22,6 +22,7 @@ from .model_gateway_provider_rotation import ProviderRotationService
 from .model_gateway_provider_removal import ProviderRemovalService
 from .model_gateway_secret_cleanup import SecretCleanupCoordinator
 from .model_gateway_wave_rollout import WorkerPoolWaveRollout
+from . import system_config
 
 
 class SecretBrokerUnavailable(RuntimeError):
@@ -186,7 +187,8 @@ def bind_worker_to_pool(
 
 
 def admin_snapshot(*, connect_factory: ConnectFactory) -> dict[str, object]:
-    return admin_model_gateway_snapshot(connect_factory, timestamp=int(time.time()))
+    return admin_model_gateway_snapshot(connect_factory, timestamp=int(time.time()),
+        heartbeat_timeout_seconds=system_config.worker_heartbeat_timeout_seconds())
 
 
 def retry_pending_secret_cleanup(*, connect_factory: ConnectFactory) -> dict[str, int]:

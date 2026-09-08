@@ -13,10 +13,10 @@ class UsageAdapter:
     def __init__(self, usage: object) -> None:
         self.usage = usage
 
-    def complete(self, *_args):
+    def complete(self, *_args, **_kwargs):
         return {"choices": [], "usage": self.usage}
 
-    def stream(self, *_args):
+    def stream(self, *_args, **_kwargs):
         wire = b'data: {"choices":[]}\r\n\r\n' + b'data: ' + json.dumps({"usage": self.usage}).encode() + b'\r\n\r\ndata: [DONE]\r\n\r\n'
         for index in range(0, len(wire), 7):
             yield wire[index:index + 7]

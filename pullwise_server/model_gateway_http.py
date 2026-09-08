@@ -5,12 +5,13 @@ import re
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Iterable, Mapping, Protocol
+from typing import Callable, Iterable, Mapping, Protocol
 from urllib.parse import unquote, urlsplit
 
 from .model_gateway_runtime import GatewayRequestError, GatewayStreamingResponse
 from .model_gateway_secret_broker import SecretBrokerError
 from .model_gateway_token_codec import GatewayTokenError
+from .model_gateway_client_connection import ClientConnection
 
 
 COMPLETION_PATH = re.compile(
@@ -102,6 +103,7 @@ class ModelGatewayHttpApplication:
         path: str,
         headers: Mapping[str, str],
         body: bytes,
+        is_disconnected: Callable[[], bool] | None = None,
     ) -> HttpResult | HttpStreamingResult:
         parsed_path = urlsplit(path)
         if parsed_path.query or parsed_path.fragment:
@@ -147,6 +149,7 @@ class ModelGatewayHttpApplication:
                 profile_revision=int(revision_text),
                 bearer_token=_bearer(headers),
                 payload=payload,
+                **({"is_disconnected": is_disconnected} if is_disconnected is not None else {}),
             )
             if isinstance(response, GatewayStreamingResponse):
                 return HttpStreamingResult(
@@ -163,7 +166,7 @@ class ModelGatewayHttpApplication:
         except GatewayTokenError as exc:
             return _error(HTTPStatus.UNAUTHORIZED, exc.code)
         except GatewayRequestError as exc:
-            return _error(HTTPStatus.BAD_REQUEST, exc.code)
+            return _error(exc.http_status, exc.code)
         except Exception:
             return _error(HTTPStatus.BAD_GATEWAY, "GATEWAY_UPSTREAM_FAILED")
 
@@ -177,6 +180,7 @@ def make_handler(application: ModelGatewayHttpApplication) -> type[BaseHTTPReque
             self._handle("POST")
 
         def _handle(self, method: str) -> None:
+            client = ClientConnection(self.connection)
             raw_length = self.headers.get("Content-Length", "0")
             try:
                 length = int(raw_length)
@@ -190,20 +194,32 @@ def make_handler(application: ModelGatewayHttpApplication) -> type[BaseHTTPReque
                     path=self.path,
                     headers={key: value for key, value in self.headers.items()},
                     body=self.rfile.read(length) if length else b"",
+                    is_disconnected=client.disconnected,
                 )
             if isinstance(result, HttpStreamingResult):
-                self.send_response(result.status)
-                self.send_header("Content-Type", result.content_type)
-                for key, value in result.headers.items():
-                    self.send_header(key, value)
-                self.end_headers()
                 iterator = iter(result.chunks)
                 try:
+                    with client.lock:
+                        self.send_response(result.status)
+                        self.send_header("Content-Type", result.content_type)
+                        for key, value in result.headers.items():
+                            self.send_header(key, value)
+                        self.end_headers()
                     for chunk in iterator:
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
+                        with client.lock:
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     pass
+                except Exception as error:
+                    code = error.code if isinstance(error, GatewayRequestError) else "GATEWAY_UPSTREAM_FAILED"
+                    try:
+                        with client.lock:
+                            payload = json.dumps({"error": {"code": code, "message": "Model Gateway stream failed."}})
+                            self.wfile.write(f"data: {payload}\n\ndata: [DONE]\n\n".encode("utf-8"))
+                            self.wfile.flush()
+                    except OSError:
+                        pass
                 finally:
                     close = getattr(iterator, "close", None)
                     if callable(close):

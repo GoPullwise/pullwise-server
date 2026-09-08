@@ -54,6 +54,7 @@ class FakeCompletionAdapter:
         route: GatewayRoute,
         secret: bytes,
         request: dict[str, object],
+        *, cancellation=None,
     ) -> dict[str, object]:
         self.calls.append((route, secret, request))
         return {

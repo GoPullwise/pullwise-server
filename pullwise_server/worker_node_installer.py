@@ -37,6 +37,8 @@ fi
 }
 case "$SERVER_URL" in http://*|https://*) ;; *) echo "--server must be HTTP(S)" >&2; exit 2 ;; esac
 case "$WORKER_ID" in *[!A-Za-z0-9_-]*|'') echo "worker id is unsafe" >&2; exit 2 ;; esac
+case "$SERVER_URL" in *[!A-Za-z0-9._:/-]*) echo "server URL is unsafe" >&2; exit 2 ;; esac
+case "$WORKER_TOKEN$BOOTSTRAP_TOKEN" in *[!A-Za-z0-9_-]*) echo "worker token is unsafe" >&2; exit 2 ;; esac
 
 safe_worker_id() {
   local value="$1"
@@ -50,10 +52,11 @@ safe_worker_id() {
 }
 
 SAFE_ID="$(safe_worker_id "$WORKER_ID")"
-SERVICE_USER="pullwise-worker-${SAFE_ID}"
+SERVICE_USER="pww-$(printf '%s' "$WORKER_ID" | sha256sum | cut -c1-24)"
 SERVICE_HOME="/var/lib/pullwise-worker/${SAFE_ID}"
 RUNTIME_ROOT="${SERVICE_HOME}/workers/${SAFE_ID}"
 APP_ROOT="${RUNTIME_ROOT}/app"
+INITIAL_APP="${RUNTIME_ROOT}/versions/initial"
 NODE_ROOT="${RUNTIME_ROOT}/node"
 PROFILE_ROOT="${RUNTIME_ROOT}/pi-profiles"
 STATE_ROOT="${RUNTIME_ROOT}/state"
@@ -65,6 +68,8 @@ WATCHER_SERVICE="pullwise-worker-watcher-${SAFE_ID}"
 WATCHER_UNIT="/etc/systemd/system/${WATCHER_SERVICE}.service"
 WORKER_SERVICE="pullwise-worker-${SAFE_ID}"
 WORKER_UNIT="/etc/systemd/system/${WORKER_SERVICE}.service"
+[ ! -e "$ENV_FILE" ] || { echo "Instance already installed; use its update command." >&2; exit 1; }
+[ ! -e "$SERVICE_HOME" ] && [ ! -L "$SERVICE_HOME" ] || { echo "Instance home already exists; inspect it before installing." >&2; exit 1; }
 
 if [ -r /etc/os-release ]; then
   . /etc/os-release
@@ -93,8 +98,12 @@ if id "$SERVICE_USER" >/dev/null 2>&1; then
 else
   useradd --system --home-dir "$SERVICE_HOME" --create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$RUNTIME_ROOT" "$APP_ROOT" "$PROFILE_ROOT" "$STATE_ROOT" "$CHECKOUT_ROOT"
+install -d -m 0755 -o root -g root /var/lib/pullwise-worker /etc/pullwise-worker
+install -d -m 0750 -o root -g "$SERVICE_USER" "$SERVICE_HOME" "$SERVICE_HOME/workers" "$RUNTIME_ROOT" "$RUNTIME_ROOT/versions" "$INITIAL_APP" "$PROFILE_ROOT"
+install -d -m 0700 -o root -g root "$RUNTIME_ROOT/host-state" "$RUNTIME_ROOT/watcher-home"
+install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_ROOT" "$CHECKOUT_ROOT" "$RUNTIME_ROOT/worker-home"
 install -d -m 0750 -o root -g "$SERVICE_USER" "$CONFIG_DIR"
+ln -s "$INITIAL_APP" "$APP_ROOT"
 
 if [ ! -x "$NODE_ROOT/bin/node" ]; then
   TEMP_DIR="$(mktemp -d)"
@@ -106,23 +115,20 @@ if [ ! -x "$NODE_ROOT/bin/node" ]; then
   (cd "$TEMP_DIR" && grep "  ${ARCHIVE}$" SHASUMS256.txt | sha256sum -c -)
   rm -rf "$NODE_ROOT"
   install -d -m 0755 "$NODE_ROOT"
-  tar -xJf "${TEMP_DIR}/${ARCHIVE}" --strip-components=1 -C "$NODE_ROOT"
+  tar -xJf "${TEMP_DIR}/${ARCHIVE}" --no-same-owner --strip-components=1 -C "$NODE_ROOT"
 fi
 
 "$NODE_ROOT/bin/node" -e 'const [major,minor]=process.versions.node.split(".").map(Number);if(major<22||(major===22&&minor<19))process.exit(1)'
-rm -rf "$APP_ROOT/node_modules" "$APP_ROOT/package-lock.json" "$APP_ROOT/package.json"
+export PATH="$NODE_ROOT/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 "$NODE_ROOT/bin/npm" install --prefix "$APP_ROOT" --omit=dev --ignore-scripts --no-audit --no-fund "$WORKER_PACKAGE"
-PACKAGE_FILE="${WORKER_PACKAGE##*/}"
-WORKER_VERSION="${PACKAGE_FILE#pullwise-worker-}"
-WORKER_VERSION="${WORKER_VERSION%.tgz}"
-case "$WORKER_VERSION" in ""|*[!0-9.]*) echo "Worker package filename has no valid version." >&2; exit 1 ;; esac
+"$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/dist/main.js" self-check
 
 if [ -z "$WORKER_TOKEN" ]; then
   WORKER_TOKEN="$(
     PULLWISE_SERVER_URL="$SERVER_URL" \
     PULLWISE_WORKER_ID="$WORKER_ID" \
     PULLWISE_WORKER_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN" \
-    "$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/src/main.ts" bootstrap
+    "$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/dist/main.js" bootstrap
   )"
   case "$WORKER_TOKEN" in pww_*) ;; *) echo "Worker bootstrap exchange failed." >&2; exit 1 ;; esac
 fi
@@ -132,7 +138,7 @@ cat >"$ENV_FILE" <<EOF
 PULLWISE_SERVER_URL=$SERVER_URL
 PULLWISE_WORKER_ID=$WORKER_ID
 PULLWISE_WORKER_TOKEN=$WORKER_TOKEN
-PULLWISE_WORKER_VERSION=$WORKER_VERSION
+PULLWISE_MANAGED_HOST=1
 PULLWISE_PI_PROFILE_ROOT=$PROFILE_ROOT
 PULLWISE_WORKER_STATE_ROOT=$STATE_ROOT
 PULLWISE_CHECKOUT_ROOT=$CHECKOUT_ROOT
@@ -146,7 +152,7 @@ cat >"$BIN_PATH" <<EOF
 set -a
 . "$ENV_FILE"
 set +a
-exec "$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/src/main.ts" "\$@"
+exec "$NODE_ROOT/bin/node" "$APP_ROOT/node_modules/pullwise-worker/dist/main.js" "\$@"
 EOF
 chmod 0755 "$BIN_PATH"
 
@@ -158,16 +164,17 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=__SERVICE_USER__
+User=root
 Group=__SERVICE_USER__
+UMask=0027
+Environment=HOME=__RUNTIME_ROOT__/watcher-home
 EnvironmentFile=__ENV_FILE__
 ExecStart=__BIN_PATH__ watch
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=__RUNTIME_ROOT__
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target
@@ -189,6 +196,8 @@ Wants=network-online.target __WATCHER_SERVICE__.service
 Type=simple
 User=__SERVICE_USER__
 Group=__SERVICE_USER__
+UMask=0077
+Environment=HOME=__RUNTIME_ROOT__/worker-home
 EnvironmentFile=__ENV_FILE__
 ExecStart=__BIN_PATH__ serve
 Restart=on-failure
@@ -196,7 +205,9 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=__RUNTIME_ROOT__ __CHECKOUT_ROOT__
+ReadWritePaths=__RUNTIME_ROOT__/state __RUNTIME_ROOT__/worker-home __CHECKOUT_ROOT__
+KillMode=control-group
+TimeoutStopSec=90
 
 [Install]
 WantedBy=multi-user.target
@@ -210,7 +221,6 @@ sed -i \
   -e "s|__WATCHER_SERVICE__|$WATCHER_SERVICE|g" \
   "$WORKER_UNIT"
 
-chown -R "$SERVICE_USER":"$SERVICE_USER" "$RUNTIME_ROOT"
 systemctl daemon-reload
 systemctl enable --now "$WATCHER_SERVICE"
 systemctl enable --now "$WORKER_SERVICE"

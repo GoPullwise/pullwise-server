@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from contextlib import closing
 from unittest.mock import patch
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from pullwise_server import app, db, model_gateway_api
 from pullwise_server.model_gateway_control_plane import ModelGatewayControlPlane
 from pullwise_server.model_gateway_tokens import GatewayTokenAuthority
+from pullwise_server.model_gateway_snapshot import admin_model_gateway_snapshot
 from pullwise_server.worker_profile_state import get_worker_profile_observation
 from pullwise_server.worker_profile_state import worker_model_profile_readiness
 from tests.db_template import install_initialized_db_template, start_fast_sqlite_connections
@@ -199,12 +201,34 @@ class WorkerProfileObservationTest(unittest.TestCase):
             ),
             (True, True, "ready"),
         )
+        self.assertEqual(admin_model_gateway_snapshot(db.connect, timestamp=app.now())["workerPools"][0]["readyMemberCount"], 1)
+        for field, invalid in (
+            ("status", "revoked"), ("adapter", "unsupported"), ("secret_ref", ""), ("secret_version", ""),
+            ("validated_models_json", "[]"), ("validated_models_json", "not-json"), ("validated_models_json", "{}"),
+            ("validated_models_json", '["gpt-5.5", 3]'),
+        ):
+            with self.subTest(unavailable_field=field, value=invalid):
+                with closing(db.connect()) as connection, connection:
+                    original = connection.execute(f"SELECT {field} FROM provider_connections WHERE provider_connection_id='openai-production'").fetchone()[0]
+                    connection.execute(f"UPDATE provider_connections SET {field}=? WHERE provider_connection_id='openai-production'", (invalid,))
+                try:
+                    self.assertFalse(worker_model_profile_readiness(db.connect, worker_id=worker["worker_id"], timestamp=app.now())[1])
+                    self.assertEqual(admin_model_gateway_snapshot(db.connect, timestamp=app.now())["workerPools"][0]["readyMemberCount"], 0)
+                finally:
+                    with closing(db.connect()) as connection, connection:
+                        connection.execute(f"UPDATE provider_connections SET {field}=? WHERE provider_connection_id='openai-production'", (original,))
+        with closing(db.connect()) as connection, connection:
+            connection.execute("UPDATE workers SET last_heartbeat_at=? WHERE worker_id=?", (app.now() - 121, worker["worker_id"]))
+        self.assertEqual(admin_model_gateway_snapshot(db.connect, timestamp=app.now())["workerPools"][0]["readyMemberCount"], 0)
+        with closing(db.connect()) as connection, connection:
+            connection.execute("UPDATE workers SET last_heartbeat_at=? WHERE worker_id=?", (app.now(), worker["worker_id"]))
         model_gateway_api.rotate_worker_pool_gateway_tokens(
             connect_factory=db.connect,
             actor_user_id="usr_admin",
             request_id="req_rotate",
             worker_pool_id="reviewers-primary",
         )
+        self.assertEqual(admin_model_gateway_snapshot(db.connect, timestamp=app.now())["workerPools"][0]["readyMemberCount"], 0)
         self.assertEqual(
             worker_model_profile_readiness(
                 db.connect,

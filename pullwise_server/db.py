@@ -5,6 +5,7 @@ import binascii
 import datetime
 import hashlib
 import json
+import re
 import math
 import os
 import secrets
@@ -366,6 +367,7 @@ def initialize() -> None:
                 """
             )
             ensure_column(connection, "worker_commands", "telemetry_received_at", "INTEGER")
+            ensure_column(connection, "worker_commands", "payload_json", "TEXT NOT NULL DEFAULT '{}'")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_worker_commands_worker_status
@@ -1804,7 +1806,7 @@ def worker_codex_quota_json(value: Any) -> str | None:
             payload["credits"] = credits_payload
     return json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True)
 
-WORKER_LIFECYCLE_COMMANDS = {"stop", "uninstall"}
+WORKER_LIFECYCLE_COMMANDS = {"stop", "uninstall", "update"}
 WORKER_TELEMETRY_COMMANDS = {"refresh_codex_quota"}
 WORKER_COMMANDS = WORKER_LIFECYCLE_COMMANDS | WORKER_TELEMETRY_COMMANDS
 WORKER_COMMAND_ACTIVE_STATUSES = {"pending", "running"}
@@ -3162,6 +3164,14 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
     if not worker_id:
         raise ValueError("worker_id is required")
     command = normalize_worker_command(record.get("command"))
+    payload = record.get("payload") or {}
+    if command == "update":
+        version = payload.get("version") if isinstance(payload, dict) else None
+        if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+            raise ValueError("Worker update version must be a release version.")
+        payload = {"version": version}
+    else:
+        payload = {}
     timestamp = int(record.get("created_at") or time.time())
     command_id = str(record.get("id") or stable_id("wcmd", f"{worker_id}:{command}:{time.time_ns()}"))
     with _LOCK, closing(connect()) as connection:
@@ -3202,9 +3212,9 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                 """
                 INSERT INTO worker_commands (
                     id, worker_id, command, status, requested_by_user_id,
-                    request_id, created_at, updated_at
+                    request_id, created_at, updated_at, payload_json
                 )
-                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
+                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)
                 """,
                 (
                     command_id,
@@ -3214,9 +3224,10 @@ def create_worker_command(record: dict[str, Any]) -> dict[str, Any] | None:
                     record.get("request_id"),
                     timestamp,
                     timestamp,
+                    json.dumps(payload),
                 ),
             )
-            if command in WORKER_LIFECYCLE_COMMANDS:
+            if command in {"stop", "uninstall"}:
                 connection.execute(
                     """
                     UPDATE workers
@@ -3356,6 +3367,22 @@ def update_worker_command_status(record: dict[str, Any]) -> dict[str, Any] | Non
             existing_status = str(command["status"] or "")
             if existing_status in WORKER_COMMAND_TERMINAL_STATUSES:
                 return row_to_dict(command)
+            if status == "running" and command["command"] == "update":
+                active_run = connection.execute(
+                    "SELECT 1 FROM scan_jobs WHERE claimed_by_worker_id = ? "
+                    "AND status IN ('claimed', 'running', 'uploading_result', 'cancel_requested', 'cancelling') LIMIT 1",
+                    (worker_id,),
+                ).fetchone()
+                if active_run:
+                    raise ValueError("Worker update must wait for the active run to finish.")
+            if status == "succeeded" and command["command"] == "update":
+                target = json.loads(command["payload_json"]).get("version")
+                worker = connection.execute(
+                    "SELECT version, last_heartbeat_at FROM workers WHERE worker_id = ?", (worker_id,)
+                ).fetchone()
+                if (not worker or worker["version"] != target
+                        or int(worker["last_heartbeat_at"] or 0) < int(command["started_at"] or timestamp)):
+                    raise ValueError("Worker update must heartbeat its installed version before succeeding.")
             if (
                 status == "succeeded"
                 and command["command"] == "refresh_codex_quota"
@@ -5586,6 +5613,12 @@ def claim_next_scan_job(
                 (worker_id,),
             ).fetchone()
             if worker and (int(worker["enabled"] or 0) == 0 or worker["deleted_at"] is not None):
+                connection.commit()
+                return None
+            if connection.execute(
+                "SELECT 1 FROM worker_commands WHERE worker_id = ? AND command = 'update' "
+                "AND status IN ('pending', 'running') LIMIT 1", (worker_id,)
+            ).fetchone():
                 connection.commit()
                 return None
             offline_after = max(60, int(worker_heartbeat_timeout_seconds or 120))

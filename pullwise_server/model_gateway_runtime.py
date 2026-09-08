@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Callable, Iterable, Iterator, Mapping, Protocol
 from urllib.parse import urlsplit, urlunsplit
@@ -10,6 +11,7 @@ from .model_gateway_token_codec import GatewayTokenVerifier
 from .model_gateway_limits import GatewayLimitExceeded, GatewayLimiter
 from .model_gateway_endpoints import OFFICIAL_PROVIDER_ORIGINS
 from .model_gateway_usage import CompletionStreamUsage, reported_output_tokens
+from .model_gateway_streaming import ActiveResponses, ManagedResponse, RequestCancellation
 
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -50,9 +52,10 @@ MAX_STREAM_BYTES = 64 * 1024 * 1024
 
 
 class GatewayRequestError(ValueError):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, http_status: int = 400) -> None:
         super().__init__(code)
         self.code = code
+        self.http_status = http_status
 
 
 class SecretStore(Protocol):
@@ -65,6 +68,7 @@ class GatewayAdapter(Protocol):
         route: "GatewayRoute",
         secret: bytes,
         request: dict[str, object],
+        *, cancellation: RequestCancellation | None = None,
     ) -> dict[str, object]: ...
 
     def stream(
@@ -72,6 +76,7 @@ class GatewayAdapter(Protocol):
         route: "GatewayRoute",
         secret: bytes,
         request: dict[str, object],
+        *, cancellation: RequestCancellation | None = None,
     ) -> Iterator[bytes]: ...
 
 
@@ -209,6 +214,7 @@ class ModelGatewayRuntime:
         self._request_id_factory = request_id_factory
         self._clock = clock
         self._limiter = limiter
+        self._active_responses = ActiveResponses()
 
     def chat_completions(
         self,
@@ -218,6 +224,7 @@ class ModelGatewayRuntime:
         profile_revision: int,
         bearer_token: str,
         payload: object,
+        is_disconnected: Callable[[], bool] | None = None,
     ) -> dict[str, object] | GatewayStreamingResponse:
         worker = _safe_id(worker_id, "gateway_request_worker")
         profile_set = _safe_id(profile_set_id, "gateway_request_profile_set")
@@ -271,35 +278,17 @@ class ModelGatewayRuntime:
         )
         request_id = _safe_id(self._request_id_factory(), "gateway_request_id")
         started_at = self._clock()
+        managed = self._managed_response(request_id=request_id, worker_id=worker, route=route,
+            payload=payload, started_at=started_at, output_tokens=output_tokens,
+            streaming=streaming, is_disconnected=is_disconnected)
         if streaming:
-            return self._streaming_response(
-                request_id=request_id,
-                worker_id=worker,
-                route=route,
-                payload=payload,
-                started_at=started_at,
-                output_tokens=output_tokens,
-            )
-        try:
-            with self._limiter.acquire(worker_id=worker, route_id=route.route_id, output_tokens=output_tokens) as settle:
-                secret = self._secret_store.read_version(route.secret_ref, route.secret_version)
-                upstream_request = {**payload, "model": route.upstream_model}
-                response = self._adapters[route.adapter].complete(route, secret, upstream_request)
-                if not isinstance(response, dict):
-                    raise GatewayRequestError("GATEWAY_UPSTREAM_RESPONSE_INVALID")
-                actual_output = reported_output_tokens(response)
-                if actual_output is not None:
-                    settle(actual_output)
-        except GatewayLimitExceeded as exc:
-            self._audit_sink(self._audit_event(request_id, worker, route, started_at, "limited"))
-            raise GatewayRequestError(exc.code) from exc
-        except BaseException:
-            self._audit_sink(self._audit_event(request_id, worker, route, started_at, "failed"))
-            raise
-        self._audit_sink(self._audit_event(request_id, worker, route, started_at, "succeeded"))
-        return response
+            return GatewayStreamingResponse(chunks=managed)
+        responses = list(managed)
+        if not responses:
+            raise GatewayRequestError("GATEWAY_REQUEST_CANCELLED", http_status=499)
+        return responses[0]
 
-    def _streaming_response(
+    def _managed_response(
         self,
         *,
         request_id: str,
@@ -308,43 +297,58 @@ class ModelGatewayRuntime:
         payload: dict[str, object],
         started_at: float,
         output_tokens: int,
-    ) -> GatewayStreamingResponse:
-        def chunks() -> Iterator[bytes]:
+        streaming: bool,
+        is_disconnected: Callable[[], bool] | None,
+    ) -> ManagedResponse:
+        self._active_responses.prune_disconnected(worker_id, route.route_id)
+        reservation = ExitStack()
+        try:
+            settle = reservation.enter_context(self._limiter.acquire(
+                worker_id=worker_id, route_id=route.route_id, output_tokens=output_tokens))
+        except GatewayLimitExceeded as exc:
+            self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, "limited"))
+            raise GatewayRequestError(exc.code, http_status=429) from exc
+        actual_output: int | None = None
+
+        def produce(cancellation: RequestCancellation):
+            nonlocal actual_output
+            secret = self._secret_store.read_version(route.secret_ref, route.secret_version)
+            upstream_request = {**payload, "model": route.upstream_model}
+            if not streaming:
+                response = self._adapters[route.adapter].complete(route, secret, upstream_request, cancellation=cancellation)
+                if not isinstance(response, dict):
+                    raise GatewayRequestError("GATEWAY_UPSTREAM_RESPONSE_INVALID")
+                actual_output = reported_output_tokens(response)
+                yield response
+                return
             total = 0
             usage = CompletionStreamUsage()
-            try:
-                with self._limiter.acquire(
-                    worker_id=worker_id,
-                    route_id=route.route_id,
-                    output_tokens=output_tokens,
-                ) as settle:
-                    secret = self._secret_store.read_version(route.secret_ref, route.secret_version)
-                    upstream_request = {**payload, "model": route.upstream_model, "stream": True}
-                    for chunk in self._adapters[route.adapter].stream(route, secret, upstream_request):
-                        if not isinstance(chunk, bytes):
-                            raise GatewayRequestError("GATEWAY_UPSTREAM_STREAM_INVALID")
-                        if not chunk:
-                            continue
-                        total += len(chunk)
-                        if total > MAX_STREAM_BYTES:
-                            raise GatewayRequestError("GATEWAY_UPSTREAM_STREAM_TOO_LARGE")
-                        usage.feed(chunk)
-                        yield chunk
-                    if usage.output_tokens is not None:
-                        settle(usage.output_tokens)
-            except GeneratorExit:
-                self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, "cancelled"))
-                raise
-            except GatewayLimitExceeded as exc:
-                self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, "limited"))
-                raise GatewayRequestError(exc.code) from exc
-            except BaseException:
-                self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, "failed"))
-                raise
-            else:
-                self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, "succeeded"))
+            for chunk in self._adapters[route.adapter].stream(route, secret, upstream_request, cancellation=cancellation):
+                if cancellation.is_set():
+                    return
+                if not isinstance(chunk, bytes):
+                    raise GatewayRequestError("GATEWAY_UPSTREAM_STREAM_INVALID")
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_STREAM_BYTES:
+                    raise GatewayRequestError("GATEWAY_UPSTREAM_STREAM_TOO_LARGE")
+                usage.feed(chunk)
+                yield chunk
+            actual_output = usage.output_tokens
 
-        return GatewayStreamingResponse(chunks=chunks())
+        def finish(outcome: str) -> None:
+            try:
+                if outcome == "succeeded" and actual_output is not None:
+                    settle(actual_output)
+            finally:
+                reservation.close()
+                self._active_responses.remove(worker_id, route.route_id, response)
+                self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, outcome))
+
+        response = ManagedResponse(producer=produce, finish=finish, is_disconnected=is_disconnected)
+        self._active_responses.add(worker_id, route.route_id, response)
+        return response
 
     def _audit_event(
         self,

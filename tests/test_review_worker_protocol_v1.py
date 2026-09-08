@@ -164,15 +164,17 @@ def required_terminal_manifest() -> list[dict]:
 
 class ReviewWorkerProtocolV1Test(unittest.TestCase):
     def test_quota_consumes_only_when_core_review_phase_starts(self) -> None:
-        consuming = {
+        consuming = {"review"}
+        non_consuming = {
+            "preparing",
+            "publishing",
+            "failure_handling",
             "repo_map",
             "risk_routing",
             "reviewer_fanout",
             "clustering_and_voting",
             "validator_disproof",
             "final_report_json",
-        }
-        non_consuming = {
             "prepare_workspace",
             "start_codex_app_server",
             "initialize_codex_connection",
@@ -211,7 +213,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         )
         self.assertTrue(
             app.worker_result_should_finalize_quota(
-                {"progress_phase": "risk_routing"},
+                {"progress_phase": "review"},
                 body_with_phase("failure_handling"),
                 status="partial_completed",
             )
@@ -219,12 +221,12 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
         self.assertTrue(
             app.worker_result_should_finalize_quota(
                 {"progress_phase": "prepare_workspace"},
-                body_with_phase("repo_map"),
+                body_with_phase("review"),
                 status="partial_completed",
             )
         )
 
-    def test_completed_result_consumes_quota_only_with_billable_phase_evidence(self) -> None:
+    def test_result_phase_hint_recognizes_current_pi_review_evidence(self) -> None:
         def body_with_progress(current_phase: str, steps: list[dict] | None = None) -> dict:
             return {
                 "reviewWorkerProtocol": {
@@ -249,7 +251,7 @@ class ReviewWorkerProtocolV1Test(unittest.TestCase):
                 {"progress_phase": "cleanup_active_job"},
                 body_with_progress(
                     "cleanup_active_job",
-                    [{"id": "reviewer_fanout", "status": "completed", "percent": 100}],
+                    [{"id": "review", "status": "completed", "percent": 100}],
                 ),
                 status="done",
             )

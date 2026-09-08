@@ -296,7 +296,7 @@ class ScanLeaseMaintenanceTest(unittest.TestCase):
         db.update_scan_job_progress(
             job["job_id"],
             {
-                "phase": "repo_map",
+                "phase": "review",
                 "progress": 45,
                 "message": "mapping repository",
                 "started_at": claimed_at,
@@ -305,7 +305,7 @@ class ScanLeaseMaintenanceTest(unittest.TestCase):
         scan.update(
             {
                 "status": "running",
-                "phase": "repo_map",
+                "phase": "review",
                 "jobId": job["job_id"],
                 "runId": app.scan_job_run_id(job),
             }

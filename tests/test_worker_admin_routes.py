@@ -225,16 +225,17 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         self.assertTrue(handler.payload["hasMore"])
         self.assertEqual(len(handler.payload["workers"]), 1)
 
-    def test_admin_workers_hide_created_worker_until_first_heartbeat(self) -> None:
+    def test_registry_includes_new_workers_before_they_contribute_to_fleet_capacity(self) -> None:
         payload, token = self.create_worker()
         worker_id = payload["worker_id"]
         self.assertIsNone(db.get_worker(worker_id)["last_heartbeat_at"])
 
-        hidden = RouteHarness("/admin/workers", cookie=self.admin_cookie)
-        app.PullwiseHandler.route(hidden, "GET")
-        self.assertEqual(hidden.status, HTTPStatus.OK)
-        self.assertEqual(hidden.payload["workers"], [])
-        self.assertEqual(hidden.payload["total"], 0)
+        pending = RouteHarness("/admin/workers", cookie=self.admin_cookie)
+        app.PullwiseHandler.route(pending, "GET")
+        self.assertEqual(pending.status, HTTPStatus.OK)
+        self.assertEqual(pending.payload["workers"][0]["worker_id"], worker_id)
+        self.assertEqual(pending.payload["workers"][0]["status"], "offline")
+        self.assertEqual(pending.payload["total"], 1)
 
         status = RouteHarness("/admin/status", cookie=self.admin_cookie)
         app.PullwiseHandler.route(status, "GET")

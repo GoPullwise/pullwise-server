@@ -26,6 +26,29 @@ must not govern target implementation.
 
 ## Current Pi Worker runtime catalog
 
+- A stored result can precede its public snapshot/quota projection. Do not show
+  a terminal result with an active snapshot or reserved quota. Warm read repair
+  must reload the reconciled snapshots in one batch before responding; otherwise
+  a previously captured snapshot drops failure/preflight/refund evidence.
+
+- Persist instance update commands with only the validated release version in
+  payload_json; derive the package URL from the official release repository.
+  The claim transaction excludes active update commands, but keeps the Worker
+  enabled so its current attempt can renew credentials. Starting an update
+  requires no active run; completion requires a target-version heartbeat.
+- The Node installer keeps executable ancestors root-owned and uses a bounded
+  hashed Linux account name. Extract Node with `--no-same-owner`; archive UIDs
+  must not become owners of code executed by the root Watcher. The Unix-root
+  regression in test_installer_archive_ownership exercises the rendered tar command.
+  Watcher is root with the paired Worker group;
+  the execution service writes only state/checkouts/worker-home. Host commands
+  remain pollable with a disabled token. A succeeded uninstall ACK can be
+  replayed only through its matching authenticated command-status endpoint.
+- Disabling new leases must not block the owned attempt's terminal artifact and
+  result publication during host stop/uninstall. Accept those two v1 routes
+  with the disabled Worker token while retaining attempt ownership, checksum,
+  cancellation-state and late-publication checks; do not allow new lease/events.
+
 - Pullwise Model Gateway is a separate `pullwise-model-gateway` process in this
   repository. It must not import or open the Server business DB. It owns the
   encrypted secret store, upstream credential injection, official-origin route
@@ -116,6 +139,19 @@ must not govern target implementation.
   result-ingest path.
 
 ## Four-project local debug loop
+
+- Pi flow acceptance must inspect `scan_jobs.started_at`, live progress, and
+  final account/repository quota state in addition to terminal result artifacts.
+  Pi emits `run_started` for preparing and `phase_started` for review/publishing.
+  Only `review` is a billable running phase. Terminal ingest uses the same durable
+  reconciliation as recovery: completion consumes, pre-review failure/cancel
+  releases, and recorded core work remains consumed across later phases/replay.
+- Gateway fleet readiness must agree with the lease gate after grant revocation,
+  token-generation rotation, provider unavailability, and heartbeat expiry.
+  A profile observation's unexpired timestamp alone is insufficient readiness.
+- Verify exact source excerpts survive Worker finding serialization, the public
+  issue projection, and exported issue Markdown. Worker `evidence[].text` and
+  public `evidence[].summary` currently require explicit contract alignment.
 
 - Use `ops/local_debug_loop.py` from this repository to start Server, Web,
   Admin, and the Worker's Watcher/service together. It owns only the child
@@ -642,13 +678,12 @@ quota to workspace quota.
   value for all subscription plans and resets by UTC calendar month. Do not
   derive repository quota period, bucket plan, or limit from the requesting
   user billing cycle or subscription plan.
-- A scan reserves both account and repository quota before queueing. Reserved
-  quota becomes consumed only after a v1.2 core review phase starts, currently
-  `repo_map`, `risk_routing`, `reviewer_fanout`, `clustering_and_voting`,
-  `validator_disproof`, or `final_report_json`; do not use the legacy `ai`
-  phase as a quota-consumption trigger. Release the reservation when a worker
-  never reaches a billable core review phase. Keep idempotency and rollback
-  paths aligned with both bucket ids.
+- A scan reserves both account and repository quota before queueing. Pi's
+  `review` phase consumes both reservations; preparing, publishing, and retired
+  semantic-phase names do not. A valid completed result also settles consumption
+  at terminal ingest, including when optional intermediate events were absent.
+  Release pre-review failure/cancellation reservations, preserve validated
+  refundable failures, and keep replay aligned with both bucket ids.
 - Billable-phase evidence and refundable-reservation rollback must be derived
   from durable job/run/event storage, not only the process-local scan mirror,
   so cold-memory restart paths consume or refund both quota buckets correctly.

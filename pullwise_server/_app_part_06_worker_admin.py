@@ -153,6 +153,9 @@ def worker_command_payload(command: dict | None, *, admin: bool = False) -> dict
     if admin:
         payload["requested_by_user_id"] = public_issue_text(command.get("requested_by_user_id"))
         payload["request_id"] = public_issue_text(command.get("request_id"))
+    if command.get("command") == "update":
+        version = normalize_worker_release_version(json.loads(command.get("payload_json") or "{}").get("version"))
+        payload["payload"] = {"version": version, "package_url": worker_release_package(version)}
     return payload
 
 
@@ -1003,7 +1006,7 @@ def worker_create_payload(worker: dict) -> dict:
     safe_worker_id = worker_safe_service_id(public["worker_id"])
     service_home = f"/var/lib/pullwise-worker/{safe_worker_id}" if safe_worker_id else "/var/lib/pullwise-worker"
     worker_runtime_root = f"{service_home}/workers/{safe_worker_id or 'worker'}"
-    service_user = f"pullwise-worker-{safe_worker_id}" if safe_worker_id else "pullwise-worker"
+    service_user = f"pww-{hashlib.sha256(public['worker_id'].encode('utf-8')).hexdigest()[:24]}"
     bin_path = f"/usr/local/bin/pullwise-worker-{safe_worker_id}" if safe_worker_id else "/usr/local/bin/pullwise-worker"
     env_file = f"/etc/pullwise-worker/{safe_worker_id}/worker.env" if safe_worker_id else "/etc/pullwise-worker/worker.env"
     profile_root = f"{worker_runtime_root}/pi-profiles"
@@ -1037,7 +1040,7 @@ def worker_create_payload(worker: dict) -> dict:
     }
     script_hash = worker_install_script_sha256()
     sync_catalog_command = (
-        f"sudo -u {shell_quote(service_user)} sh -lc "
+        f"sudo -g {shell_quote(service_user)} sh -lc "
         f"{shell_quote(f'. {env_file}; exec {bin_path} sync')}"
     )
     return {
@@ -1123,6 +1126,4 @@ def worker_test_payload(worker: dict) -> dict:
         "noRecentError": not bool(clean_scan_error(worker.get("last_error"))),
     }
     return {"ok": all(checks.values()), "checks": checks}
-
-
 

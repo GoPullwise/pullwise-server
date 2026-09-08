@@ -1058,6 +1058,15 @@ def scan_snapshot_with_job_state(scan: dict, job: dict) -> dict:
         "WORKER_PROTOCOL_INVALID",
         "WORKER_ARTIFACT_INVALID",
     } and bool(clean_scan_error(hydrated.get("error")))
+    terminal_statuses = {"done", "failed", "cancelled", "partial_completed"}
+    if (status in terminal_statuses and job.get("result_checksum") and not preserve_snapshot_error
+            and (hydrated.get("status") not in terminal_statuses or hydrated.get("quotaState") == "reserved")):
+        # Receiving a result precedes publishing its snapshot and settling reservations.
+        # Keep one coherent public state until that projection has completed.
+        hydrated.update(status="running", phase="publishing", progress=min(public_scan_progress(hydrated.get("progress")), 99))
+        for key in ("completedAt", "durationMs", "errorCode", "error"):
+            hydrated.pop(key, None)
+        return hydrated
     update = {
         "jobId": public_issue_text(job.get("job_id")) or hydrated.get("jobId"),
         "status": status,
@@ -1159,13 +1168,15 @@ def hydrate_scan_jobs_for_read(jobs: list[dict]) -> list[dict]:
     }
     with STATE_LOCK:
         hydrated = []
+        reconciled_snapshot_ids = set()
         for job in jobs:
             scan_id = public_issue_text(job.get("scan_id"))
             snapshot = snapshot_lookup.get(scan_id)
             if snapshot is not None:
                 memory_scan = indexed_memory_scans.get(scan_id)
                 if memory_scan is not None:
-                    reconcile_scan_job_state_locked(memory_scan, job_lookup=job_lookup, result_lookup=result_lookup)
+                    if reconcile_scan_job_state_locked(memory_scan, job_lookup=job_lookup, result_lookup=result_lookup):
+                        reconciled_snapshot_ids.add(scan_id)
                 hydrated.append(scan_snapshot_with_job_state(snapshot, job))
                 continue
             scan = indexed_memory_scans.get(scan_id)
@@ -1175,6 +1186,11 @@ def hydrate_scan_jobs_for_read(jobs: list[dict]) -> list[dict]:
                 continue
             reconcile_scan_job_state_locked(scan, job_lookup=job_lookup, result_lookup=result_lookup)
             hydrated.append(scan)
+        if reconciled_snapshot_ids:
+            refreshed = {public_issue_text(scan.get("id")): scan
+                         for scan in db.list_scan_snapshots_for_scan_ids(reconciled_snapshot_ids)}
+            hydrated = [scan_snapshot_with_job_state(refreshed[scan["id"]], job_lookup[("scan", scan["id"])])
+                        if scan.get("id") in refreshed else scan for scan in hydrated]
         return hydrated
 
 

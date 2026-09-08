@@ -154,6 +154,18 @@ class ScanQuotaRoutesTest(unittest.TestCase):
         self.assertEqual(first.payload["repoUsage"]["period"], app.quota.current_period())
         self.assertEqual(first.payload["repoUsage"]["resetAt"], app.quota.reset_at_for_period(first.payload["repoUsage"]["period"]))
 
+    def test_repository_list_exposes_the_authenticated_plan_checkout_limits(self) -> None:
+        cookie = seed_user("usr_a", "ses_a")
+        config = database_config(plans__free__maxRepoFiles=7, plans__free__maxRepoBytes=4096)
+        with patch("pullwise_server.system_config.config", return_value=config):
+            for route in ("/repositories", "/repositories?limit=1"):
+                handler = RouteHarness(cookie=cookie, path=route)
+                app.PullwiseHandler.route(handler, "GET")
+                self.assertEqual(handler.status, HTTPStatus.OK, handler.payload)
+                limits = handler.payload.get("repositoryLimits", {})
+                self.assertEqual(limits.get("maxFiles"), 7)
+                self.assertEqual(limits.get("maxBytes"), 4096)
+
     def test_private_worker_management_routes_are_not_available(self) -> None:
         cookie = seed_user("usr_a", "ses_a", installation_id="111", repo_id="123")
 

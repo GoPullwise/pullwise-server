@@ -2517,13 +2517,15 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
         user = USERS.get(session["userId"])
         user_quota = quota.quota_payload_for_user(user) if user else None
+        account_policy = {"userQuota": user_quota,
+            "repositoryLimits": repository_scan_limits_payload(user_quota["plan"]) if user_quota else None}
         github_access = user.get("githubRepositoryAccess") if user else None
         bound_existing_access = False
         pending = bool(github_repository_authorization_pending(user))
         if pending:
             if not refresh:
                 payload = pending_repositories_payload()
-                payload["userQuota"] = user_quota
+                payload.update(account_policy)
                 return payload
             github_access = (
                 bind_pending_selected_github_identity_access(user)
@@ -2535,7 +2537,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 bound_existing_access = True
             else:
                 payload = pending_repositories_payload()
-                payload["userQuota"] = user_quota
+                payload.update(account_policy)
                 return payload
 
         if github_access and not github_repository_access_authorized_for_user(user, github_access):
@@ -2546,7 +2548,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             github_access = try_bind_existing_github_repository_access(user)
             bound_existing_access = bool(github_access)
         if not github_access:
-            return {"items": [], "repositories": [], "needsAuthorization": True, "userQuota": user_quota}
+            return {"items": [], "repositories": [], "needsAuthorization": True, **account_policy}
 
         if refresh and not bound_existing_access and github_access.get("mode") == "github-app":
             refreshed_access = try_bind_existing_github_repository_access(user, force_refresh=True)
@@ -2556,13 +2558,13 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
         if not github_repository_access_connected(github_access):
             payload = unavailable_repositories_payload(github_access)
-            payload["userQuota"] = user_quota
+            payload.update(account_policy)
             return payload
         if repository_list_params_active(params):
             payload = paginated_repository_items_for_response(user, github_access, params or {})
             payload.update(
                 {
-                    "userQuota": user_quota,
+                    **account_policy,
                     "needsAuthorization": False,
                     "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
                     "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
@@ -2579,7 +2581,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return {
             "items": repository_items,
             "repositories": repository_items,
-            "userQuota": user_quota,
+            **account_policy,
             "needsAuthorization": False,
             "installationId": clean_github_access_text(github_access.get("installationId"), allow_int=True),
             "installationIds": clean_github_access_text_list(github_access.get("installationIds"), allow_int=True),
@@ -2948,7 +2950,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             page = db.list_workers_page(
                 limit=limit,
                 offset=offset,
-                activated_only=True,
+                activated_only=False,
                 worker_scope=db.WORKER_SCOPE_SHARED,
             )
             worker_records = annotate_worker_runtime_payloads(page["items"], include_latest_commands=True)
@@ -3135,6 +3137,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         action_names = {
             "uninstall": "delete_worker_service",
             "stop": "stop_worker_service",
+            "update": "update_worker_service",
             "refresh_codex_quota": "refresh_worker_codex_quota",
         }
         action_name = action_names.get(requested_command, "worker_command")
@@ -3148,6 +3151,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             self.audit_worker_action(session, action_name, worker_id=worker_id, success=False, error=str(exc))
             return self.error(HTTPStatus.BAD_REQUEST, str(exc))
         action_name = action_names[command]
+        update_version = normalize_worker_release_version(body.get("version")) if command == "update" else ""
+        if command == "update" and not update_version:
+            return self.error(HTTPStatus.BAD_REQUEST, "Worker update version must be a release version.")
         if command == "refresh_codex_quota":
             worker_status = computed_worker_status(worker_record)
             if worker_status not in {"idle", "busy", "degraded"}:
@@ -3160,6 +3166,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 {
                     "worker_id": worker_id,
                     "command": command,
+                    "payload": {"version": update_version} if command == "update" else {},
                     "requested_by_user_id": session.get("userId"),
                     "request_id": request_id_from_handler(self),
                     "created_at": now(),
@@ -3380,14 +3387,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
     def worker_record_disabled(self, worker_record: dict) -> bool:
         return int(worker_record.get("enabled") or 0) != 1 or worker_record.get("deleted_at") is not None
 
-    def disabled_worker_command_route_allowed(self, segments: list[str], worker_id: str) -> bool:
+    def disabled_worker_command_route_allowed(self, segments: list[str], worker_id: str, *, completion_replay: bool = False) -> bool:
         if segments == ["worker", "commands", "poll"]:
             command = db.get_next_worker_command(worker_id)
         elif len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status":
             command = db.get_worker_command(clean_github_access_text(segments[2]) or "", worker_id=worker_id)
         else:
             command = None
-        return bool(command and public_issue_text(command.get("status")).lower() in db.WORKER_COMMAND_ACTIVE_STATUSES)
+        return bool(command and (
+            public_issue_text(command.get("status")).lower() in db.WORKER_COMMAND_ACTIVE_STATUSES
+            or (completion_replay and command.get("command") == "uninstall" and command.get("status") == "succeeded")
+        ))
 
     def handle_worker_post(self, segments: list[str], body: dict) -> None:
         if segments == ["worker", "heartbeat"] or segments == ["worker", "agent-configs"] or (
@@ -3398,7 +3408,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             segments == ["worker", "commands", "poll"]
             or (len(segments) == 4 and segments[:2] == ["worker", "commands"] and segments[3] == "status")
         )
-        worker_record = self.require_worker(allow_disabled=command_control_route, include_deleted=False)
+        completion_replay = (len(segments) == 4 and segments[:2] == ["worker", "commands"]
+                             and segments[3] == "status" and isinstance(body, dict) and body.get("status") == "succeeded")
+        worker_record = self.require_worker(allow_disabled=command_control_route, include_deleted=completion_replay)
         if not worker_record:
             return
         if not isinstance(body, dict):
@@ -3407,7 +3419,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             worker_id = clean_github_access_text(body.get("worker_id")) or ""
             if not self.authenticated_worker_id_matches(worker_record, worker_id):
                 return self.error(HTTPStatus.FORBIDDEN, "Worker token does not match worker_id.")
-            if not self.disabled_worker_command_route_allowed(segments, worker_id):
+            if not self.disabled_worker_command_route_allowed(segments, worker_id, completion_replay=completion_replay):
                 return self.error(HTTPStatus.UNAUTHORIZED, "A valid worker token is required.")
         if segments == ["worker", "commands", "poll"]:
             return self.handle_worker_command_poll(body, worker_record)
@@ -3418,7 +3430,10 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_worker_v1_post(self, segments: list[str], body: dict) -> None:
-        worker_record = self.require_worker(update_last_used=False)
+        terminal_publication = (len(segments) == 4 and segments[:2] == ["v1", "review-runs"]
+                                and segments[3] in {"artifacts", "result"})
+        # Stop/uninstall disables new work before SIGTERM. The owned attempt must still finish publication.
+        worker_record = self.require_worker(update_last_used=False, allow_disabled=terminal_publication)
         if not worker_record:
             return
         if not isinstance(body, dict):

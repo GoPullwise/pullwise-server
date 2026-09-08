@@ -8,6 +8,8 @@ import requests
 
 from .model_gateway_runtime import GatewayRoute
 from .model_gateway_endpoints import OFFICIAL_PROVIDER_ORIGINS
+from .model_gateway_streaming import RequestCancellation
+from .model_gateway_upstream_transport import open_upstream, UpstreamTransportError
 
 
 MAX_UPSTREAM_RESPONSE_BYTES = 10 * 1024 * 1024
@@ -103,8 +105,9 @@ class OpenAICompletionsAdapter:
         route: GatewayRoute,
         secret: bytes,
         request: dict[str, object],
+        *, cancellation: RequestCancellation | None = None,
     ) -> dict[str, object]:
-        response = self._request(route, secret, request)
+        response = self._request(route, secret, request, cancellation)
         content_length = response.headers.get("Content-Length")
         if content_length:
             try:
@@ -117,7 +120,7 @@ class OpenAICompletionsAdapter:
         chunks: list[bytes] = []
         size = 0
         try:
-            for chunk in response.iter_content(chunk_size=64 * 1024):
+            for chunk in response.iter_bytes(64 * 1024):
                 size += len(chunk)
                 if size > MAX_UPSTREAM_RESPONSE_BYTES:
                     raise UpstreamAdapterError("upstream response is too large")
@@ -137,15 +140,16 @@ class OpenAICompletionsAdapter:
         route: GatewayRoute,
         secret: bytes,
         request: dict[str, object],
+        *, cancellation: RequestCancellation | None = None,
     ):
-        response = self._request(route, secret, request)
+        response = self._request(route, secret, request, cancellation)
         media_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
         if media_type != "text/event-stream":
             response.close()
             raise UpstreamAdapterError("upstream stream content type is invalid")
         total = 0
         try:
-            for chunk in response.iter_content(chunk_size=64 * 1024):
+            for chunk in response.iter_bytes(64 * 1024):
                 if not isinstance(chunk, bytes):
                     raise UpstreamAdapterError("upstream stream is invalid")
                 if not chunk:
@@ -162,6 +166,7 @@ class OpenAICompletionsAdapter:
         route: GatewayRoute,
         secret: bytes,
         request: dict[str, object],
+        cancellation: RequestCancellation | None,
     ):
         try:
             credential = secret.decode("utf-8")
@@ -169,20 +174,19 @@ class OpenAICompletionsAdapter:
             raise UpstreamAdapterError("upstream credential is invalid") from exc
         try:
             completion_path = "/chat/completions" if route.upstream_provider == "deepseek" else "/v1/chat/completions"
-            response = requests.post(
+            response = open_upstream(
                 f"{route.endpoint_origin}{completion_path}",
                 headers={
                     "Authorization": f"Bearer {credential}",
                     "Content-Type": "application/json",
                 },
-                json=request,
-                timeout=self._timeout_seconds,
-                allow_redirects=False,
-                stream=True,
+                payload=request,
+                timeout_seconds=self._timeout_seconds,
+                cancellation=cancellation,
             )
-        except requests.RequestException as exc:
+        except UpstreamTransportError as exc:
             raise UpstreamAdapterError("upstream request failed") from exc
-        if response.status_code < 200 or response.status_code >= 300:
+        if response.status < 200 or response.status >= 300:
             response.close()
             raise UpstreamAdapterError("upstream request failed")
         return response

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import base64
 import gzip
@@ -5580,9 +5580,9 @@ class WorkerPullRoutesTest(unittest.TestCase):
                 "sequence": 2,
                 "timestamp": "2026-07-01T10:21:00Z",
                 "event_type": "phase_started",
-                "phase": "repo_map",
+                "phase": "review",
                 "severity": "info",
-                "message": "Repository map started.",
+                "message": "Pi review started.",
                 "progress": {"overall_percent": 20.0, "current_phase_percent": 0, "status": "running"},
                 "data": {},
             },
@@ -5595,11 +5595,11 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 0)
         payload = app.scan_payload(app.SCANS[0])
         self.assertEqual(payload["quotaState"], "consumed")
-        self.assertEqual(payload["quotaConsumeTrigger"], "phase_repo_map")
+        self.assertEqual(payload["quotaConsumeTrigger"], "phase_review")
         self.assertEqual(payload["billingUsage"]["used"], 1)
         self.assertEqual(payload["billingUsage"]["reserved"], 0)
 
-    def test_worker_repo_map_progress_consumes_reserved_scan_quota(self) -> None:
+    def test_worker_review_progress_consumes_reserved_scan_quota(self) -> None:
         user = {"id": "usr_1", "name": "Owner", "providers": []}
         app.USERS = {"usr_1": user}
         repository = db.upsert_repository(
@@ -5649,7 +5649,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 0)
         self.assertEqual(app.quota.quota_payload_for_user(user)["reserved"], 1)
 
-        progress = self.v1_event(job, phase="repo_map", progress=50, event_type="phase_started")
+        progress = self.v1_event(job, phase="review", progress=50, event_type="phase_started")
 
         self.assertEqual(progress.status, HTTPStatus.OK)
         self.assertEqual(app.quota.quota_payload_for_user(user)["used"], 1)

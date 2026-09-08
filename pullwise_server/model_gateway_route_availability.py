@@ -1,9 +1,29 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 
 from .model_gateway_store import ConnectFactory
+
+
+PROVIDER_ROUTE_AVAILABLE_SQL = """
+    pc.provider_connection_id IS NOT NULL
+    AND pc.status IN ('configured', 'rotation_staged', 'rotation_promoted')
+    AND pc.adapter = pr.api
+    AND COALESCE(pc.secret_ref, '') != ''
+    AND COALESCE(pc.secret_version, '') != ''
+    AND json_type(CASE WHEN json_valid(pc.validated_models_json)
+                      THEN pc.validated_models_json ELSE 'null' END) = 'array'
+    AND NOT EXISTS (
+        SELECT 1 FROM json_each(CASE WHEN json_valid(pc.validated_models_json)
+                                   THEN pc.validated_models_json ELSE '[]' END) AS invalid_model
+        WHERE invalid_model.type != 'text' OR trim(invalid_model.value) = ''
+    )
+    AND EXISTS (
+        SELECT 1 FROM json_each(CASE WHEN json_valid(pc.validated_models_json)
+                                   THEN pc.validated_models_json ELSE '[]' END) AS model
+        WHERE model.type = 'text' AND model.value = pr.upstream_model
+    )
+"""
 
 
 def worker_assignment_routes_available(
@@ -14,11 +34,10 @@ def worker_assignment_routes_available(
     connection = connect_factory()
     connection.row_factory = sqlite3.Row
     try:
-        rows = connection.execute(
-            """
-            SELECT pr.api, pr.upstream_model, pc.provider_connection_id,
-                   pc.status, pc.adapter, pc.secret_ref, pc.secret_version,
-                   pc.validated_models_json
+        row = connection.execute(
+            f"""
+            SELECT COUNT(*) AS route_count,
+                   MIN(CASE WHEN {PROVIDER_ROUTE_AVAILABLE_SQL} THEN 1 ELSE 0 END) AS available
             FROM worker_pool_memberships AS m
             JOIN worker_pools AS p ON p.worker_pool_id = m.worker_pool_id
             JOIN workers AS w ON w.worker_id = m.worker_id
@@ -38,24 +57,7 @@ def worker_assignment_routes_available(
               AND w.deleted_at IS NULL
             """,
             (worker_id,),
-        ).fetchall()
+        ).fetchone()
     finally:
         connection.close()
-    if not rows:
-        return False
-    for row in rows:
-        try:
-            validated_models = json.loads(row["validated_models_json"])
-        except (TypeError, json.JSONDecodeError):
-            return False
-        if (
-            row["provider_connection_id"] is None
-            or row["status"] not in {"configured", "rotation_staged", "rotation_promoted"}
-            or row["adapter"] != row["api"]
-            or not row["secret_ref"]
-            or not row["secret_version"]
-            or not isinstance(validated_models, list)
-            or row["upstream_model"] not in validated_models
-        ):
-            return False
-    return True
+    return bool(row and row["route_count"] and row["available"])

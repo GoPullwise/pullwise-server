@@ -191,16 +191,7 @@ def refresh_scan_quota_usage_locked(scan: dict, user: dict | None, repository: d
     if repository:
         scan["repoUsage"] = quota.quota_payload_for_repository(repository, user)
 
-WORKER_QUOTA_CONSUMING_PHASES = frozenset(
-    {
-        "repo_map",
-        "risk_routing",
-        "reviewer_fanout",
-        "clustering_and_voting",
-        "validator_disproof",
-        "final_report_json",
-    }
-)
+WORKER_QUOTA_CONSUMING_PHASES = frozenset({"review"})
 
 
 def worker_progress_phase_should_finalize_quota(phase: object) -> bool:
@@ -1142,6 +1133,13 @@ def converge_worker_job_result(
         apply_prepared_worker_job_result_to_state_locked(stored_result, prepared_result)
     quota_rollback = rollback_scan_quota_for_refundable_worker_failure(stored_result, stored_body, status=status)
     review_run = db.finalize_review_run_result(stored_result, stored_body, status=status)
+    terminal_scan = db.get_user_scan_snapshot(
+        public_issue_text(stored_result.get("user_id")),
+        public_issue_text(stored_result.get("scan_id")),
+    )
+    if terminal_scan and terminal_scan.get("quotaState") != "refunded" and not quota_rollback.get("reservationReleased"):
+        with STATE_LOCK:
+            reconcile_terminal_scan_quota_locked(terminal_scan, stored_result, status=status)
     result = {
         "accepted": True,
         "duplicate": duplicate,

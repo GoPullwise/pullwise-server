@@ -4,12 +4,24 @@ import json
 import sqlite3
 
 from .model_gateway_store import ConnectFactory
+from .model_gateway_route_availability import PROVIDER_ROUTE_AVAILABLE_SQL
+
+
+def _validated_models(raw: object) -> list[str]:
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(value, list) or any(not isinstance(model, str) or not model.strip() for model in value):
+        return []
+    return value
 
 
 def admin_model_gateway_snapshot(
     connect_factory: ConnectFactory,
     *,
     timestamp: int,
+    heartbeat_timeout_seconds: int = 120,
 ) -> dict[str, object]:
     connection = connect_factory()
     connection.row_factory = sqlite3.Row
@@ -24,7 +36,7 @@ def admin_model_gateway_snapshot(
                 "status": row["status"],
                 "secretVersion": row["secret_version"],
                 "secretFingerprint": row["secret_fingerprint"],
-                "validatedModels": json.loads(row["validated_models_json"]),
+                "validatedModels": _validated_models(row["validated_models_json"]),
                 "candidateSecretVersion": row["candidate_secret_version"],
                 "candidateSecretFingerprint": row["candidate_secret_fingerprint"],
                 "previousSecretVersion": row["previous_secret_version"],
@@ -85,7 +97,15 @@ def admin_model_gateway_snapshot(
                 "updatedAt": row["updated_at"],
             }
             for row in connection.execute(
-                """
+                f"""
+                WITH route_readiness AS (
+                    SELECT pr.profile_set_id, pr.revision,
+                           MIN(CASE WHEN {PROVIDER_ROUTE_AVAILABLE_SQL} THEN 1 ELSE 0 END) AS available
+                    FROM profile_set_routes AS pr
+                    LEFT JOIN provider_connections AS pc ON pc.provider_connection_id = pr.provider_connection_id
+                    WHERE pr.enabled = 1
+                    GROUP BY pr.profile_set_id, pr.revision
+                )
                 SELECT p.worker_pool_id, p.display_name, p.profile_set_id,
                        p.desired_revision, p.gateway_token_generation, p.status,
                        p.created_at, p.updated_at,
@@ -94,12 +114,21 @@ def admin_model_gateway_snapshot(
                            AS target_member_count,
                        COALESCE(SUM(CASE
                            WHEN w.enabled = 1 AND w.deleted_at IS NULL
+                            AND w.last_heartbeat_at >= ? AND w.doctor_status = 'ok'
+                            AND p.status = 'active' AND mr.status = 'published'
+                            AND rr.available = 1
+                            AND o.worker_pool_id = p.worker_pool_id
                             AND o.applied_revision = m.desired_revision
                             AND o.desired_revision = m.desired_revision
                             AND o.profile_set_id = p.profile_set_id
                             AND o.manifest_digest = mr.manifest_digest
                             AND o.last_apply_result = 'succeeded'
-                            AND o.gateway_token_expires_at > ?
+                            AND g.worker_id = m.worker_id AND g.revoked_at IS NULL
+                            AND g.profile_set_id = p.profile_set_id
+                            AND g.profile_revision = m.desired_revision
+                            AND g.manifest_digest = mr.manifest_digest
+                            AND g.generation = p.gateway_token_generation
+                            AND g.expires_at = o.gateway_token_expires_at AND g.expires_at > ?
                            THEN 1 ELSE 0 END), 0) AS ready_member_count
                 FROM worker_pools AS p
                 JOIN profile_set_revisions AS r
@@ -112,10 +141,12 @@ def admin_model_gateway_snapshot(
                  AND mr.revision = m.desired_revision
                 LEFT JOIN workers AS w ON w.worker_id = m.worker_id
                 LEFT JOIN worker_profile_observations AS o ON o.worker_id = m.worker_id
+                LEFT JOIN gateway_token_grants AS g ON g.jti = o.gateway_token_id
+                LEFT JOIN route_readiness AS rr ON rr.profile_set_id = p.profile_set_id AND rr.revision = m.desired_revision
                 GROUP BY p.worker_pool_id
                 ORDER BY p.worker_pool_id
                 """,
-                (timestamp,),
+                (timestamp - heartbeat_timeout_seconds, timestamp + 30),
             ).fetchall()
         ]
         return {
