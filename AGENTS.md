@@ -26,6 +26,14 @@ must not govern target implementation.
 
 ## Current Pi Worker runtime catalog
 
+- Pool desired revision is a target, not proof that every membership has
+  converged after a wave. Include membership state in immediate-rollout
+  idempotency checks. Validate rotation candidate model dependencies at promote
+  time because Pool/member revisions can change after staging.
+- Route ids are unique within Profile revisions, not globally. Scope Gateway
+  limiter identities accordingly; output admission accounts for aggregate
+  output across every requested choice.
+
 - A stored result can precede its public snapshot/quota projection. Do not show
   a terminal result with an active snapshot or reserved quota. Warm read repair
   must reload the reconciled snapshots in one batch before responding; otherwise
@@ -139,6 +147,27 @@ must not govern target implementation.
   result-ingest path.
 
 ## Four-project local debug loop
+
+- Active v1 heartbeats require a closed execution proof with executor_id,
+  run_id, lease_id and timezone-bearing updated_at. Match Server run/lease
+  ownership; cap renewal at the earlier of proof time + 60 seconds and receipt
+  time + 60 seconds, allowing at most 15 seconds of future clock skew. Missing,
+  stale or expired ownership never renews. Business events never extend leases
+  and expired active events must roll back their event/progress transaction.
+- Queue admission rechecks capacity under BEGIN IMMEDIATE. Persist the scan
+  job and public scan snapshot in that same transaction, then update memory;
+  rejected admission or failed writes compensate the separate quota reservation.
+- Gateway route limits use the Profile plus logical route id across revisions.
+  Request n is an integer from 1 to 128 and reserves the aggregate choice output;
+  an omitted output ceiling is forwarded as max_tokens=16384. Rotation dependency
+  validation and promotion share the write transaction.
+
+- Concurrency probes for queue admission must run distinct request ids through
+  the real route and SQLite write boundary; a sequential full-queue test does
+  not establish that capacity is reserved atomically.
+- A live Watcher heartbeat does not by itself prove the execution process is
+  alive. Test stale persisted busy state separately from an offline Watcher
+  when verifying lease renewal, deadlines, and automatic task recovery.
 
 - Pi flow acceptance must inspect `scan_jobs.started_at`, live progress, and
   final account/repository quota state in addition to terminal result artifacts.

@@ -47,9 +47,8 @@ class ProviderRotationService:
         finally:
             connection.close()
 
-    def _required_models(self, provider_connection_id: str) -> set[str]:
-        with closing(self._connect_factory()) as connection:
-            rows = connection.execute(
+    def _required_models(self, connection: sqlite3.Connection, provider_connection_id: str) -> set[str]:
+        rows = connection.execute(
                 """
                 SELECT DISTINCT pr.upstream_model
                 FROM profile_set_routes AS pr
@@ -72,7 +71,7 @@ class ProviderRotationService:
                   )
                 """,
                 (provider_connection_id,),
-            ).fetchall()
+        ).fetchall()
         return {str(row[0]) for row in rows}
 
     def stage(
@@ -116,11 +115,6 @@ class ProviderRotationService:
                 secret_ref, stored.version, reason="provider_rotation_models_invalid"
             )
             raise RuntimeError("provider rotation validation returned invalid model metadata")
-        if not self._required_models(provider_connection_id).issubset(set(discovered_models)):
-            self._secret_cleanup.retire_or_queue(
-                secret_ref, stored.version, reason="provider_rotation_models_incompatible"
-            )
-            raise ValueError("provider rotation candidate does not cover active route models")
         validated_models_json = json.dumps(sorted(discovered_models), separators=(",", ":"))
         timestamp = int(self._clock())
         with closing(self._connect_factory()) as connection:
@@ -138,6 +132,8 @@ class ProviderRotationService:
                     or fresh["candidate_secret_version"] is not None
                 ):
                     raise ValueError("provider connection changed during rotation")
+                if not self._required_models(connection, provider_connection_id).issubset(set(discovered_models)):
+                    raise ValueError("provider rotation candidate does not cover active route models")
                 connection.execute(
                     """
                     INSERT INTO provider_secret_versions (
@@ -200,6 +196,9 @@ class ProviderRotationService:
                 ).fetchone()
                 if not candidate:
                     raise ValueError("provider rotation candidate metadata is unavailable")
+                candidate_models = set(json.loads(candidate["validated_models_json"]))
+                if not self._required_models(connection, provider_connection_id).issubset(candidate_models):
+                    raise ValueError("provider rotation candidate does not cover active route models")
                 connection.execute(
                     """
                     UPDATE provider_connections

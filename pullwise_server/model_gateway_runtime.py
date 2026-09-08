@@ -247,6 +247,12 @@ class ModelGatewayRuntime:
         output_tokens = output_limits[0] if output_limits else 16_384
         if isinstance(output_tokens, bool) or not isinstance(output_tokens, int) or not 1 <= output_tokens <= 1_000_000:
             raise GatewayRequestError("GATEWAY_OUTPUT_TOKEN_LIMIT_INVALID")
+        choices = payload.get("n", 1)
+        if isinstance(choices, bool) or not isinstance(choices, int) or not 1 <= choices <= 128:
+            raise GatewayRequestError("GATEWAY_CHOICE_COUNT_INVALID")
+        if not output_limits:
+            payload = {**payload, "max_tokens": output_tokens}
+        output_tokens *= choices
         try:
             request_bytes = json.dumps(
                 payload,
@@ -300,11 +306,13 @@ class ModelGatewayRuntime:
         streaming: bool,
         is_disconnected: Callable[[], bool] | None,
     ) -> ManagedResponse:
-        self._active_responses.prune_disconnected(worker_id, route.route_id)
+        # Logical routes share limits across revisions, within their Profile namespace.
+        route_limit_id = json.dumps([route.profile_set_id, route.route_id], separators=(",", ":"))
+        self._active_responses.prune_disconnected(worker_id, route_limit_id)
         reservation = ExitStack()
         try:
             settle = reservation.enter_context(self._limiter.acquire(
-                worker_id=worker_id, route_id=route.route_id, output_tokens=output_tokens))
+                worker_id=worker_id, route_id=route_limit_id, output_tokens=output_tokens))
         except GatewayLimitExceeded as exc:
             self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, "limited"))
             raise GatewayRequestError(exc.code, http_status=429) from exc
@@ -343,11 +351,11 @@ class ModelGatewayRuntime:
                     settle(actual_output)
             finally:
                 reservation.close()
-                self._active_responses.remove(worker_id, route.route_id, response)
+                self._active_responses.remove(worker_id, route_limit_id, response)
                 self._audit_sink(self._audit_event(request_id, worker_id, route, started_at, outcome))
 
         response = ManagedResponse(producer=produce, finish=finish, is_disconnected=is_disconnected)
-        self._active_responses.add(worker_id, route.route_id, response)
+        self._active_responses.add(worker_id, route_limit_id, response)
         return response
 
     def _audit_event(

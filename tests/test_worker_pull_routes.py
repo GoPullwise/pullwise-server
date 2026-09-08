@@ -9,6 +9,7 @@ import os
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timezone
 from contextlib import closing
 import zipfile
 from http import HTTPStatus
@@ -300,6 +301,12 @@ def v1_worker_heartbeat_payload(*, status: str = "idle", run_id: str | None = No
         },
     }
     if active:
+        payload["execution"] = {
+            "executor_id": "test-executor",
+            "run_id": run_id,
+            "lease_id": f"lease_{str(run_id).removeprefix('run_').split('_attempt_')[0]}",
+            "updated_at": datetime.fromtimestamp(app.now(), timezone.utc).isoformat(),
+        }
         payload["progress"] = {
             "run_id": run_id,
             "overall_percent": 12.5,
@@ -6715,7 +6722,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertGreaterEqual(original_timeout_at, timestamp + lease_seconds)
         self.assertLessEqual(original_timeout_at, timestamp + lease_seconds + 1)
 
-        heartbeat_at = original_timeout_at + 100
+        heartbeat_at = original_timeout_at - 10
         with patch("pullwise_server.app.now", return_value=heartbeat_at):
             heartbeat = self.v1_heartbeat(status="busy", run_id=job["run_id"])
         self.assertEqual(heartbeat.status, HTTPStatus.OK)
@@ -6724,7 +6731,7 @@ class WorkerPullRoutesTest(unittest.TestCase):
         self.assertEqual(stored["status"], "running")
         self.assertEqual(stored["claimed_by_worker_id"], "wk_1")
         self.assertGreater(stored["timeout_at"], original_timeout_at)
-        self.assertEqual(stored["timeout_at"], heartbeat_at + lease_seconds)
+        self.assertEqual(stored["timeout_at"], heartbeat_at + 60)
         self.assertEqual(db.recover_expired_scan_jobs(heartbeat_at + 1), [])
         self.assertEqual(db.get_scan_job(job["job_id"])["status"], "running")
 

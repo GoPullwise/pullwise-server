@@ -180,6 +180,12 @@ def worker_v1_heartbeat_validation_error(body: dict) -> str | None:
     elif status in WORKER_V1_ACTIVE_HEARTBEAT_STATUSES:
         if not active_run_id:
             errors.append("active heartbeat active_run_id is required")
+        try:
+            db.worker_execution.proof_timestamp(body.get("execution"))
+            if body["execution"]["run_id"] != active_run_id:
+                errors.append("execution.run_id must match active_run_id")
+        except ValueError as exc:
+            errors.append(str(exc))
         if active_jobs != 1:
             errors.append("active heartbeat concurrency.active_jobs must be 1")
         if available_job_slots != 0:
@@ -1480,7 +1486,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 try:
                     create_scan_job_for_scan(scan)
                     scan_created = True
-                except Exception:
+                except Exception as exc:
                     with STATE_LOCK:
                         forget_memory_scan_locked(scan_id)
                         mark_state_dirty()
@@ -1491,7 +1497,12 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                             request_id=request_id or None,
                             record_ledger=False,
                         )
-                    raise
+                    if isinstance(exc, db.ScanQueueFullError):
+                        scan_error = (HTTPStatus.TOO_MANY_REQUESTS, str(exc))
+                        scan_error_code = "QUEUE_FULL_GLOBAL"
+                        scan = None
+                    else:
+                        raise
 
             if scan_error:
                 scan_logging.log_event(
@@ -3762,11 +3773,6 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                 "progress": progress_value,
                 "message": progress_message,
                 "started_at": pull_request_timestamp(body.get("timestamp")) or progress_log_time,
-                "timeout_at": (
-                    None
-                    if cancellation_handshake_event
-                    else now() + system_config.scan_job_lease_seconds()
-                ),
                 "logs_summary": logs_summary,
                 "status": "cancelling" if cancellation_handshake_event else "running",
             }
@@ -4014,6 +4020,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             codex_ready = public_issue_text(codex_app_server.get("status")) == "ready"
         heartbeat_record = {
             "worker_id": worker_id,
+            "execution": body.get("execution"),
             "version": public_issue_text(body.get("version")) or public_issue_text(worker_record.get("version")),
             "provider": (
                 public_issue_text(body.get("provider"))

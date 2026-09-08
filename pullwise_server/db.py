@@ -28,6 +28,7 @@ from .agent_first_release_attestation_migrations import (
     install_current_release_attestation_tables,
 )
 from . import worker_runtime_catalog
+from . import worker_execution
 from .model_gateway_migrations import install_model_gateway_tables
 
 
@@ -2927,12 +2928,7 @@ def store_review_run_event_and_progress(
                 job_id = str(scan_job_progress.get("job_id") or event.get("job_id") or "").strip()
                 scan_job = None
                 if job_id:
-                    current_time = int(time.time())
-                    raw_timeout_at = scan_job_progress.get("timeout_at")
-                    try:
-                        timeout_at = int(raw_timeout_at) if raw_timeout_at is not None else None
-                    except (TypeError, ValueError):
-                        timeout_at = None
+                    current_time = int(event.get("created_at") or time.time())
                     target_job_status = (
                         "cancelling"
                         if str(scan_job_progress.get("status") or "").strip().lower() == "cancelling"
@@ -2946,14 +2942,10 @@ def store_review_run_event_and_progress(
                             progress_message = ?,
                             status = ?,
                             started_at = COALESCE(started_at, ?),
-                            timeout_at = CASE
-                                WHEN ? IS NULL THEN timeout_at
-                                WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
-                                ELSE timeout_at
-                            END,
                             logs_summary = ?,
                             updated_at = ?
                         WHERE job_id = ?
+                          AND (timeout_at IS NULL OR timeout_at > ?)
                           AND (
                               (? = 'running' AND status IN ('claimed', 'running'))
                               OR (? = 'cancelling' AND status IN ('cancel_requested', 'cancelling'))
@@ -2965,18 +2957,16 @@ def store_review_run_event_and_progress(
                             scan_job_progress.get("message"),
                             target_job_status,
                             int(scan_job_progress.get("started_at") or current_time),
-                            timeout_at,
-                            timeout_at,
-                            timeout_at,
                             scan_job_progress.get("logs_summary"),
                             current_time,
                             job_id,
+                            current_time,
                             target_job_status,
                             target_job_status,
                         ),
                     )
-                    if cursor.rowcount <= 0 and target_job_status == "cancelling":
-                        raise ValueError("Run is no longer accepting cancellation events.")
+                    if cursor.rowcount <= 0:
+                        raise ValueError("Run is no longer accepting progress events.")
                     if cursor.rowcount > 0:
                         scan_job = row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE job_id = ?", (job_id,)).fetchone())
                 stored_event["_scan_job"] = scan_job
@@ -3695,32 +3685,28 @@ def upsert_scan(record: dict[str, Any], *, timestamp: int | None = None) -> dict
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
-            connection.execute(
-                """
-                INSERT INTO scans (scan_id, user_id, job_id, repo, status, created_at, updated_at, payload)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(scan_id) DO UPDATE SET
-                    user_id = excluded.user_id,
-                    job_id = excluded.job_id,
-                    repo = excluded.repo,
-                    status = excluded.status,
-                    created_at = excluded.created_at,
-                    updated_at = excluded.updated_at,
-                    payload = excluded.payload
-                """,
-                (
-                    fields["scan_id"],
-                    fields["user_id"],
-                    fields["job_id"],
-                    fields["repo"],
-                    fields["status"],
-                    fields["created_at"],
-                    fields["updated_at"],
-                    json.dumps(fields["payload"], ensure_ascii=False, allow_nan=False, sort_keys=True),
-                ),
-            )
-            row = connection.execute("SELECT * FROM scans WHERE scan_id = ?", (fields["scan_id"],)).fetchone()
-    return scan_from_row(row)
+            return _upsert_scan_locked(connection, fields)
+
+
+def _upsert_scan_locked(connection: sqlite3.Connection, fields: dict[str, Any]) -> dict[str, Any] | None:
+    connection.execute(
+        """
+        INSERT INTO scans (scan_id, user_id, job_id, repo, status, created_at, updated_at, payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(scan_id) DO UPDATE SET
+            user_id = excluded.user_id,
+            job_id = excluded.job_id,
+            repo = excluded.repo,
+            status = excluded.status,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            payload = excluded.payload
+        """,
+        (fields["scan_id"], fields["user_id"], fields["job_id"], fields["repo"], fields["status"],
+         fields["created_at"], fields["updated_at"],
+         json.dumps(fields["payload"], ensure_ascii=False, allow_nan=False, sort_keys=True)),
+    )
+    return scan_from_row(connection.execute("SELECT * FROM scans WHERE scan_id = ?", (fields["scan_id"],)).fetchone())
 
 
 def get_user_scan_snapshot(user_id: str, scan_id: str) -> dict[str, Any] | None:
@@ -3840,7 +3826,14 @@ def find_user_scan_snapshot_by_request_id(user_id: str, request_id: str) -> dict
     return None
 
 
-def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
+class ScanQueueFullError(ValueError):
+    pass
+
+
+def create_scan_job(
+    record: dict[str, Any], *, max_queued_scans: int | None = None,
+    scan_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     ensure_initialized()
     job_id = str(record.get("job_id") or stable_id("job", record.get("scan_id"))).strip()
     scan_id = str(record.get("scan_id") or "").strip()
@@ -3854,6 +3847,14 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
     with _LOCK, closing(connect()) as connection:
         connection.row_factory = sqlite3.Row
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()
+            if existing:
+                return row_to_dict(existing) or {}
+            if max_queued_scans is not None:
+                queued = connection.execute("SELECT COUNT(*) FROM scan_jobs WHERE status = 'queued'").fetchone()[0]
+                if queued >= max_queued_scans:
+                    raise ScanQueueFullError("The global scan queue is full. Try again after queued scans start.")
             connection.execute(
                 """
                 INSERT INTO scan_jobs (
@@ -3899,6 +3900,11 @@ def create_scan_job(record: dict[str, Any]) -> dict[str, Any]:
             connection.execute("DELETE FROM job_result_artifacts WHERE job_id = ?", (job_id,))
             connection.execute("DELETE FROM job_results WHERE job_id = ?", (job_id,))
             connection.execute("DELETE FROM review_decision_events WHERE job_id = ?", (job_id,))
+            if scan_snapshot is not None:
+                fields = scan_storage_fields({**scan_snapshot, "jobId": job_id})
+                if not fields or fields["scan_id"] != scan_id or fields["user_id"] != record.get("user_id"):
+                    raise ValueError("scan snapshot must match the queued job")
+                _upsert_scan_locked(connection, fields)
             return row_to_dict(connection.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()) or {}
 
 
@@ -4386,7 +4392,7 @@ def record_active_worker_heartbeat(
                 placeholders = ",".join("?" for _ in unique_active_job_ids)
                 rows = connection.execute(
                     f"""
-                    SELECT job_id, status
+                    SELECT job_id, status, attempt, timeout_at
                     FROM scan_jobs
                     WHERE claimed_by_worker_id = ?
                       AND job_id IN ({placeholders})
@@ -4404,6 +4410,11 @@ def record_active_worker_heartbeat(
                     for job_id in unique_active_job_ids
                     if job_id in statuses and statuses.get(job_id) not in accepting_statuses
                 ]
+                execution_deadlines = {
+                    row["job_id"]: worker_execution.lease_deadline(record.get("execution"), dict(row), current_time)
+                    for row in rows
+                }
+                accepting = [job_id for job_id in accepting if execution_deadlines.get(job_id) is not None]
             heartbeat_record = {
                 **record,
                 "running_jobs": 1 if requested_running_jobs and accepting else 0,
@@ -4470,7 +4481,8 @@ def record_active_worker_heartbeat(
                     }
                 )
             if accepting:
-                timeout_at = current_time + max(60, int(lease_seconds or 3600))
+                timeout_at = min(current_time + max(60, int(lease_seconds or 3600)),
+                    *(execution_deadlines[job_id] for job_id in accepting))
                 placeholders = ",".join("?" for _ in accepting)
                 cursor = connection.execute(
                     f"""
@@ -4479,16 +4491,13 @@ def record_active_worker_heartbeat(
                             WHEN status = 'claimed' THEN 'running'
                             ELSE status
                         END,
-                        timeout_at = CASE
-                            WHEN timeout_at IS NULL OR timeout_at < ? THEN ?
-                            ELSE timeout_at
-                        END,
+                        timeout_at = ?,
                         updated_at = ?
                     WHERE claimed_by_worker_id = ?
                       AND status IN ('claimed', 'running', 'uploading_result')
                       AND job_id IN ({placeholders})
                     """,
-                    (timeout_at, timeout_at, current_time, worker_id, *accepting),
+                    (timeout_at, current_time, worker_id, *accepting),
                 )
                 renewed_count = max(0, cursor.rowcount)
             if progress_event is not None and scan_job_progress is not None:
@@ -4500,6 +4509,8 @@ def record_active_worker_heartbeat(
                         progress_timeout_at = int(raw_timeout_at) if raw_timeout_at is not None else None
                     except (TypeError, ValueError):
                         progress_timeout_at = None
+                    if progress_timeout_at is not None:
+                        progress_timeout_at = min(progress_timeout_at, execution_deadlines[progress_job_id])
                     progress_cursor = connection.execute(
                         """
                         UPDATE scan_jobs

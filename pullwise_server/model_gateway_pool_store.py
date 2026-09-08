@@ -265,7 +265,11 @@ class ModelGatewayPoolStore:
             ).fetchone()
             if not pool:
                 raise ValueError("worker pool does not exist")
-            if int(pool["desired_revision"]) == profile_revision:
+            divergent_member = connection.execute(
+                "SELECT 1 FROM worker_pool_memberships WHERE worker_pool_id = ? AND desired_revision != ? LIMIT 1",
+                (worker_pool_id, profile_revision),
+            ).fetchone()
+            if int(pool["desired_revision"]) == profile_revision and not divergent_member:
                 return dict(pool)
             revision = connection.execute(
                 """

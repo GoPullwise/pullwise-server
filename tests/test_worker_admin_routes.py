@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
@@ -155,6 +156,11 @@ class WorkerAdminRoutesTest(unittest.TestCase):
         **overrides: object,
     ) -> RouteHarness:
         active_overrides = {
+            "execution": {
+                "executor_id": "test-executor", "run_id": run_id,
+                "lease_id": f"lease_{run_id.removeprefix('run_').split('_attempt_')[0]}",
+                "updated_at": datetime.fromtimestamp(app.now(), timezone.utc).isoformat(),
+            },
             "status": "busy",
             "active_run_id": run_id,
             "concurrency": {

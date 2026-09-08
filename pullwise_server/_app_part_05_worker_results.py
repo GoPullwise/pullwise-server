@@ -72,12 +72,13 @@ def create_scan_job_for_scan(scan: dict) -> dict:
             "runtime_model": runtime_policy["model"],
             "runtime_thinking_level": runtime_policy["thinkingLevel"],
             "runtime_policy_version": 4,
-        }
+        },
+        max_queued_scans=max_queued_scans_global(),
+        scan_snapshot=scan,
     )
     scan["jobId"] = job.get("job_id")
     with STATE_LOCK:
         remember_scan_snapshot_locked(scan)
-        db.upsert_scan(scan)
     return job
 
 
@@ -1485,10 +1486,10 @@ def worker_protocol_finding_source(finding: dict) -> dict:
     reported_verification_status = public_issue_text(
         finding.get("verificationStatus") or finding.get("verification_status")
     ).lower()
-    if reported_verification_status in ISSUE_VERIFICATION_STATUSES:
-        verification_status = reported_verification_status
-    elif validator_status == "plausible":
+    if validator_status in {"plausible", "unvalidated"}:
         verification_status = "potential_risk"
+    elif reported_verification_status in ISSUE_VERIFICATION_STATUSES:
+        verification_status = reported_verification_status
     elif validator_status in {"confirmed", "validated"}:
         verification_status = (
             "verified"
