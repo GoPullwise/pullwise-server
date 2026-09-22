@@ -218,7 +218,14 @@ class ApiKeyRoutesTest(unittest.TestCase):
 
     def create_api_key(self) -> tuple[str, str]:
         cookie = seed_session()
-        handler = RouteHarness("/api-keys", {"name": "Automation"}, cookie=cookie)
+        handler = RouteHarness(
+            "/api-keys",
+            {
+                "name": "Automation",
+                "scopes": ["repositories:read", "scans:read", "scans:write", "quota:read"],
+            },
+            cookie=cookie,
+        )
 
         app.PullwiseHandler.route(handler, "POST")
 

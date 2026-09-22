@@ -436,15 +436,26 @@ def parse_api_key_restrictions(value: object) -> dict:
     else:
         return {}
     kind = public_issue_text(source.get("kind") or source.get("purpose")).replace("-", "_")
-    if kind != "audit_bundle":
-        return {}
-    restrictions = {"kind": "audit_bundle"}
-    scan_id = public_issue_text(source.get("scanId") or source.get("scan_id"))
-    repo_id = clean_github_access_text(source.get("repoId") or source.get("repo_id"), allow_int=True)
-    if scan_id:
-        restrictions["scanId"] = scan_id
-    if repo_id:
-        restrictions["repoId"] = repo_id
+    if kind == "audit_bundle":
+        restrictions = {"kind": "audit_bundle"}
+        scan_id = public_issue_text(source.get("scanId") or source.get("scan_id"))
+        repo_id = clean_github_access_text(source.get("repoId") or source.get("repo_id"), allow_int=True)
+        if scan_id:
+            restrictions["scanId"] = scan_id
+        if repo_id:
+            restrictions["repoId"] = repo_id
+        return restrictions
+    restrictions = {}
+    for input_key, output_key in (("repositoryIds", "repositoryIds"), ("watchIds", "watchIds")):
+        values = source.get(input_key)
+        if not isinstance(values, list):
+            continue
+        normalized = []
+        for value in values:
+            item = clean_github_access_text(value, allow_int=True)
+            if item and item not in normalized:
+                normalized.append(item)
+        restrictions[output_key] = normalized
     return restrictions
 
 

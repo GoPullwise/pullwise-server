@@ -403,20 +403,24 @@ def request_origin_is_trusted(handler: BaseHTTPRequestHandler) -> bool:
     return False
 
 
-def csrf_origin_check_exempt(path: str, segments: list[str]) -> bool:
-    return (
-        path.startswith("/webhooks/")
-        or external_api_segments(segments) is not None
-        or bool(segments and segments[0] == "worker")
-    )
+def csrf_origin_check_exempt(
+    path: str,
+    segments: list[str],
+    handler: BaseHTTPRequestHandler,
+) -> bool:
+    if path.startswith("/webhooks/") or bool(segments and segments[0] == "worker"):
+        return True
+    if external_api_segments(segments) is not None:
+        return not request_uses_session_cookie(handler)
+    return False
 
 
 def cookie_state_change_needs_origin_check(method: str, path: str, segments: list[str], handler: BaseHTTPRequestHandler) -> bool:
-    if method not in {"POST", "PATCH", "DELETE"}:
+    if method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return False
     if cookie_same_site() != "None":
         return False
-    if csrf_origin_check_exempt(path, segments):
+    if csrf_origin_check_exempt(path, segments, handler):
         return False
     return request_uses_session_cookie(handler)
 

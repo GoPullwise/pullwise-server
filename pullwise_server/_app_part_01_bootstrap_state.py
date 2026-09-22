@@ -112,8 +112,29 @@ DEFAULT_SCAN_ISSUE_RETENTION_SECONDS = 90 * 24 * 60 * 60
 TERMINAL_SCAN_RETENTION_STATUSES = {"done", "failed", "cancelled", "partial_completed", "lost"}
 BILLING_PUBLIC_STATUSES = {"none", "active", "trialing", "canceling", "past_due", "unpaid", "paused", "canceled"}
 API_KEY_PREFIX = "pwk_"
-API_KEY_ALLOWED_SCOPES = {"repositories:read", "scans:read", "scans:write", "quota:read"}
-API_KEY_DEFAULT_SCOPES = ["repositories:read", "scans:read", "scans:write", "quota:read"]
+API_KEY_ALLOWED_SCOPES = {
+    "profile:read",
+    "repositories:read",
+    "repositories:manage",
+    "items:read",
+    "items:write",
+    "sync:write",
+    "watches:read",
+    "watches:write",
+    "usage:read",
+    # Retired scopes remain parseable only while their old routes are being removed.
+    # Product-v1 authorization never maps them to a new capability.
+    "scans:read",
+    "scans:write",
+    "quota:read",
+}
+API_KEY_DEFAULT_SCOPES = [
+    "profile:read",
+    "repositories:read",
+    "items:read",
+    "watches:read",
+    "usage:read",
+]
 WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[/\\]")
 GIT_COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
 SCAN_REQUEST_COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
@@ -1517,5 +1538,3 @@ def recover_expired_scan_leases_once(timestamp: int | None = None) -> int:
     if changed:
         persist_state()
     return changed
-
-

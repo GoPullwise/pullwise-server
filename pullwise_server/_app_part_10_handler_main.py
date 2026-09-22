@@ -10,7 +10,7 @@ import time
 import zipfile
 
 from .agent_first_current_http import handle_agent_first_current_post
-from . import model_gateway_http_routes, worker_profile_state, worker_runtime_catalog
+from . import model_gateway_http_routes, product_api, worker_profile_state, worker_runtime_catalog
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
@@ -877,6 +877,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         if not applies_to_public_rest_api and not applies_to_unauthenticated_worker_probe:
             self._rate_limit_headers = {}
             return False
+        if applies_to_public_rest_api and self.current_session():
+            self._rate_limit_headers = {}
+            return False
         if self.admin_rate_limit_exempt(method, path):
             self._rate_limit_headers = {}
             return False
@@ -954,8 +957,11 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         try:
             self.send_response(HTTPStatus.NO_CONTENT)
             self.send_cors_headers()
-            self.send_header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Pullwise-Api-Key")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type,Authorization,X-Pullwise-Api-Key,If-Match,Idempotency-Key",
+            )
             self.end_headers()
         except _CLIENT_DISCONNECT_EXCEPTIONS:
             logger.debug("Client disconnected while handling OPTIONS %s", self.path)
@@ -965,6 +971,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self.route("POST")
+
+    def do_PUT(self) -> None:
+        self.route("PUT")
 
     def do_PATCH(self) -> None:
         self.route("PATCH")
@@ -991,6 +1000,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
                     return self.handle_get(path, params, segments)
                 if method == "POST":
                     return self.handle_post(path, params, segments)
+                if method == "PUT":
+                    return self.handle_put(segments)
                 if method == "PATCH":
                     return self.handle_patch(segments)
                 if method == "DELETE":
@@ -1191,6 +1202,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_post(self, path: str, params: dict, segments: list[str]) -> None:
+        if path == "/webhooks/github":
+            from .github_webhooks import handle_github_webhook
+            return handle_github_webhook(self)
         if path == "/webhooks/creem":
             return self.handle_creem_webhook()
         body = self.read_json()
@@ -1741,6 +1755,9 @@ class PullwiseHandler(BaseHTTPRequestHandler):
 
     def handle_patch(self, segments: list[str]) -> None:
         body = self.read_json()
+        api_segments = external_api_segments(segments)
+        if api_segments is not None and product_api.handle_patch(self, api_segments, body, USERS):
+            return
         if segments and segments[0] == "admin":
             return self.handle_admin_patch(segments, body)
         if segments == ["issues", "status"]:
@@ -1789,7 +1806,17 @@ class PullwiseHandler(BaseHTTPRequestHandler):
             return self.json(apply_settings_update(session["userId"], body))
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
+    def handle_put(self, segments: list[str]) -> None:
+        body = self.read_json()
+        api_segments = external_api_segments(segments)
+        if api_segments is not None and product_api.handle_put(self, api_segments, body, USERS):
+            return
+        return self.error(HTTPStatus.NOT_FOUND, "Route not found")
+
     def handle_delete(self, segments: list[str]) -> None:
+        api_segments = external_api_segments(segments)
+        if api_segments is not None and product_api.handle_delete(self, api_segments, USERS):
+            return
         if segments == ["worker", "registry"]:
             worker_record = self.require_worker()
             if not worker_record:
@@ -4360,6 +4387,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.json({"ok": True, **result})
 
     def handle_external_api_get(self, segments: list[str], params: dict) -> None:
+        if product_api.handle_get(self, segments, params, USERS):
+            return
         if segments == ["repositories"]:
             context = self.require_api_key_context("repositories:read")
             if not context:
@@ -4457,6 +4486,8 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return self.error(HTTPStatus.NOT_FOUND, "Route not found")
 
     def handle_external_api_post(self, segments: list[str], body: dict) -> None:
+        if product_api.handle_post(self, segments, body, USERS):
+            return
         if len(segments) == 3 and segments[0] == "repositories" and segments[2] == "scans":
             return self.handle_external_api_scan_start(segments[1], body)
         if len(segments) == 4 and segments[0] == "repositories" and segments[2] == "scans" and segments[3] == "stop":
@@ -4653,7 +4684,7 @@ class PullwiseHandler(BaseHTTPRequestHandler):
         return max_body_bytes()
 
     def enforce_body_size_limit(self, method: str, path: str = "", segments: list[str] | None = None) -> None:
-        if method not in {"POST", "PATCH"}:
+        if method not in {"POST", "PUT", "PATCH"}:
             return
         length = self.request_content_length()
         limit = max_body_bytes()
@@ -4845,10 +4876,23 @@ def scan_job_lease_recovery_interval_seconds() -> int:
 class PullwiseThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, fact_sync=None, **kwargs) -> None:
         self.request_queue_size = http_request_queue_size()
         self._last_scan_job_lease_recovery_at = time.monotonic()
+        self._fact_sync = fact_sync
         super().__init__(*args, **kwargs)
+
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        if self._fact_sync is None:
+            return super().serve_forever(poll_interval=poll_interval)
+        stop = threading.Event()
+        worker = threading.Thread(target=self._fact_sync.run_forever, args=(stop,), name="pullwise-fact-sync", daemon=True)
+        worker.start()
+        try:
+            super().serve_forever(poll_interval=poll_interval)
+        finally:
+            stop.set()
+            worker.join(timeout=5)
 
     def service_actions(self) -> None:
         super().service_actions()
@@ -4865,7 +4909,7 @@ class PullwiseThreadingHTTPServer(ThreadingHTTPServer):
         if recovered:
             logger.info("Recovered %s expired scan job lease(s).", recovered)
 
-def main() -> None:
+def main(*, fact_sync=None) -> None:
     load_env_file()
     logging_config.configure_logging(project_root=project_root())
     parser = argparse.ArgumentParser(description="Run the Pullwise local API server.")
@@ -4879,7 +4923,8 @@ def main() -> None:
         logger.info("Recovered %s interrupted scan(s).", recovered_scans)
     cleanup_server_resources_if_due(force=True)
     persist_state()
-    httpd = PullwiseThreadingHTTPServer((args.host, args.port), PullwiseHandler)
+    server_options = {"fact_sync": fact_sync} if fact_sync is not None else {}
+    httpd = PullwiseThreadingHTTPServer((args.host, args.port), PullwiseHandler, **server_options)
     logger.info("Pullwise API listening on http://%s:%s", args.host, args.port)
     logger.info("Press Ctrl+C to stop.")
     try:

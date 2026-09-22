@@ -1,0 +1,548 @@
+openapi: 3.1.0
+info:
+  title: Pullwise PR CI Updates API
+  version: 1.4.0-p1
+  description: Shared REST contract for Web sessions and restricted API keys.
+  x-pullwise-scopes:
+    - profile:read
+    - repositories:read
+    - repositories:manage
+    - items:read
+    - items:write
+    - sync:write
+    - watches:read
+    - watches:write
+    - usage:read
+servers:
+  - url: /
+security:
+  - cookieSession: []
+  - apiKey: []
+paths:
+  /api/v1/me:
+    get:
+      operationId: getCurrentProductUser
+      responses:
+        '200':
+          description: Current user identity and available product modules.
+  /api/v1/items/overview:
+    get:
+      operationId: getProductOverview
+      parameters:
+        - $ref: '#/components/parameters/Module'
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/WatchId'
+        - $ref: '#/components/parameters/View'
+      responses:
+        '200':
+          description: Item counts and source coverage for the authorized scope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Overview' }
+  /api/v1/sources:
+    get:
+      operationId: listSources
+      parameters:
+        - $ref: '#/components/parameters/Module'
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/WatchId'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Authorized source records, including Updates records without Items.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Source' }
+  /api/v1/sources/{sourceId}:
+    get:
+      operationId: getSource
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Current authorized source and its context-specific status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Source' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/items:
+    get:
+      operationId: listItems
+      parameters:
+        - $ref: '#/components/parameters/Module'
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/WatchId'
+        - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Deduplicated current Items for the authorized scope.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Item' }
+  /api/v1/items/{itemId}:
+    get:
+      operationId: getItem
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      responses:
+        '200':
+          description: Current Item, evidence, assessments and handling history.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateItemHandling
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HandlingPatch' }
+      responses:
+        '200':
+          description: Updated handling projection and appended audit event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/repositories:
+    get:
+      operationId: listRepositoryServices
+      responses:
+        '200':
+          description: Authorized repository service configurations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Page' }
+    post:
+      operationId: createRepositoryService
+      responses:
+        '201': { description: Repository service enabled. }
+  /api/v1/repositories/{repositoryId}/service:
+    get:
+      operationId: getRepositoryService
+      parameters:
+        - $ref: '#/components/parameters/RepositoryIdPath'
+      responses:
+        '200': { description: Repository service configuration. }
+    put:
+      operationId: updateRepositoryService
+      parameters:
+        - $ref: '#/components/parameters/RepositoryIdPath'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { description: Repository service updated. }
+  /api/v1/repositories/{repositoryId}/sync:
+    post:
+      operationId: syncRepository
+      description: >
+        Performs bounded GitHub fact synchronization only and never schedules model work.
+        The request body must be an empty object and active jobs are deduplicated.
+      parameters:
+        - $ref: '#/components/parameters/RepositoryIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '202':
+          description: Fact synchronization accepted or reused.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncJob' }
+  /api/v1/watches:
+    get:
+      operationId: listUpdateWatches
+      responses:
+        '200':
+          description: Authorized personal and shared update watches.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Page' }
+    post:
+      operationId: createUpdateWatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WatchInput' }
+      responses:
+        '201': { description: Watch created. }
+  /api/v1/watches/{watchId}:
+    patch:
+      operationId: updateUpdateWatch
+      parameters:
+        - $ref: '#/components/parameters/WatchIdPath'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { description: Watch updated. }
+    delete:
+      operationId: archiveUpdateWatch
+      parameters:
+        - $ref: '#/components/parameters/WatchIdPath'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204': { description: Watch archived; stable control and usage identity retained. }
+  /api/v1/watches/{watchId}/sync:
+    post:
+      operationId: syncWatch
+      description: >
+        Performs bounded GitHub Release fact synchronization only and never schedules model work.
+        New material waits for normal scheduled eligibility review.
+      parameters:
+        - $ref: '#/components/parameters/WatchIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '202':
+          description: Fact synchronization accepted or reused.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncJob' }
+  /api/v1/usage:
+    get:
+      operationId: getProductUsage
+      responses:
+        '200':
+          description: Current account entitlements, successful processing, and owner runtime attempts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usage' }
+  /api/v1/usage/events:
+    get:
+      operationId: listUsageEvents
+      parameters:
+        - $ref: '#/components/parameters/Module'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated successful-processing ledger for the current account.
+  /api/v1/jobs/{jobId}:
+    get:
+      operationId: getRequestedSyncJob
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The authenticated requester's fact-sync job only.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncJob' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: pw_session
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-Pullwise-Api-Key
+  parameters:
+    Module:
+      name: module
+      in: query
+      schema: { type: string, enum: [pr, ci, updates] }
+    RepositoryId:
+      name: repositoryId
+      in: query
+      schema: { type: string }
+    RepositoryIdPath:
+      name: repositoryId
+      in: path
+      required: true
+      schema: { type: string }
+    WatchId:
+      name: watchId
+      in: query
+      schema: { type: string }
+    WatchIdPath:
+      name: watchId
+      in: path
+      required: true
+      schema: { type: string }
+    SourceId:
+      name: sourceId
+      in: path
+      required: true
+      schema: { type: string }
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: string }
+    View:
+      name: view
+      in: query
+      schema: { type: string, enum: [mine, unassigned, waiting, all] }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+  schemas:
+    Page:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, hasMore, requestId]
+      properties:
+        items: { type: array, items: {} }
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+        requestId: { type: string }
+    Coverage:
+      type: object
+      additionalProperties: false
+      required: [state, selectedUnits, rawSourcePartial, limitations]
+      properties:
+        state: { type: string, enum: [complete, partial, unavailable] }
+        totalUnits: { type: [integer, 'null'], minimum: 0 }
+        selectedUnits: { type: integer, minimum: 0 }
+        omittedUnits: { type: [integer, 'null'], minimum: 0 }
+        rawSourcePartial: { type: boolean }
+        selectionRuleVersion: { type: [string, 'null'] }
+        limitations: { type: array, items: { type: string } }
+    SourceContext:
+      type: object
+      additionalProperties: false
+      required: [id, contextVersion, processingStatus, analysisEnabled, contextStale, coverage]
+      properties:
+        id: { type: string }
+        watchId: { type: [string, 'null'] }
+        itemId: { type: [string, 'null'] }
+        contextVersion: { type: integer, minimum: 1 }
+        processingStatus:
+          type: string
+          enum: [rules_only, pending, processing, assessed, analysis_disabled, paused_quota, provider_unavailable, needs_manual, failed, throttled, not_scheduled]
+        pauseReason: { type: [string, 'null'], enum: [processing_quota, owner_provider_budget, global_provider_budget, null] }
+        analysisEnabled: { type: boolean }
+        contextStale: { type: boolean }
+        coverage: { $ref: '#/components/schemas/Coverage' }
+    Source:
+      type: object
+      additionalProperties: false
+      required: [id, type, sourceVersion, sourceRevision, processingMode, completeness, sourceFacts, sourceUrl, updatedAt, lastSyncedAt, contexts]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [pr_state, pr_review_body, pr_review_comment, pr_comment, ci_failure, release] }
+        repositoryId: { type: [string, 'null'] }
+        sourceVersion: { type: string }
+        sourceRevision: { type: integer, minimum: 1 }
+        processingMode: { type: string, enum: [rules_only, model] }
+        completeness: { type: string, enum: [complete, partial, unavailable] }
+        sourceFacts: { type: object }
+        sourceUrl: { type: string, format: uri }
+        updatedAt: { type: string, format: date-time }
+        lastSyncedAt: { type: string, format: date-time }
+        contexts:
+          type: array
+          items: { $ref: '#/components/schemas/SourceContext' }
+    Evidence:
+      type: object
+      additionalProperties: false
+      required: [id, sourceId, sourceVersion, status, text, actionTypes]
+      properties:
+        id: { type: string }
+        sourceId: { type: string }
+        sourceVersion: { type: string }
+        status: { type: string, enum: [available, expired, permission_unavailable] }
+        text: { type: [string, 'null'] }
+        segmentAnchor: { type: [string, 'null'] }
+        actionTypes: { type: array, items: { type: string } }
+    AssessmentBinding:
+      type: object
+      required: [evidenceIds]
+      additionalProperties: true
+      properties:
+        sourceId: { type: string }
+        sourceVersion: { type: string }
+        segmentAnchor: { type: string }
+        windowId: { type: string }
+        changeUnitId: { type: string }
+        contextVersion: { type: integer, minimum: 1 }
+        evidenceIds: { type: array, uniqueItems: true, items: { type: string } }
+    Assessment:
+      type: object
+      additionalProperties: false
+      required: [id, sourceId, sourceVersion, evidenceIds, questionVersion, extractorVersion, model, contextHash, evaluatedContextVersion, publishContextVersion, dependencies, bindings, answers, usage, status]
+      properties:
+        id: { type: string }
+        sourceId: { type: string }
+        sourceVersion: { type: string }
+        evidenceIds: { type: array, uniqueItems: true, items: { type: string } }
+        questionVersion: { type: string }
+        extractorVersion: { type: string }
+        model: { type: string }
+        contextHash: { type: string }
+        evaluatedContextVersion: { type: integer, minimum: 1 }
+        publishContextVersion: { type: integer, minimum: 1 }
+        dependencies: { type: array, items: { type: object } }
+        bindings:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/AssessmentBinding' }
+        answers: { type: object }
+        usage: { type: object }
+        status: { type: string, enum: [succeeded] }
+    Item:
+      type: object
+      additionalProperties: false
+      required: [id, module, unit, itemVersion, sources, actionTypes, evidence, assessments, lifecycle, attentionState, handling, revision]
+      properties:
+        id: { type: string }
+        module: { type: string, enum: [pr, ci, updates] }
+        repositoryId: { type: [string, 'null'] }
+        watchId: { type: [string, 'null'] }
+        unit:
+          type: object
+          additionalProperties: false
+          required: [type, externalId]
+          properties:
+            type: { type: string, enum: [pr_thread, pr_comment, pr_review_body, pr_review_request, ci_job, update_release] }
+            externalId: { type: string }
+        itemVersion: { type: integer, minimum: 1 }
+        sources: { type: array, items: { type: object } }
+        actionTypes: { type: array, items: { type: string, enum: [change_requested, reply_needed, review_requested, optional_suggestion, confirm_next_step, investigate_failure, review_update] } }
+        evidence: { type: array, items: { $ref: '#/components/schemas/Evidence' } }
+        assessments: { type: array, items: { $ref: '#/components/schemas/Assessment' } }
+        lifecycle: { type: string, enum: [active, source_closed, source_deleted, superseded] }
+        attentionState: { type: string, enum: [needs_action, waiting, optional, needs_confirmation, closed] }
+        recoveryStatus: { type: string, enum: [unknown, not_observed, verified] }
+        closureReason: { type: [string, 'null'] }
+        handling: { $ref: '#/components/schemas/Handling' }
+        revision: { type: integer, minimum: 1 }
+    Handling:
+      type: object
+      additionalProperties: false
+      required: [disposition, assigneeId, note, feedback, carriedFromItemVersion]
+      properties:
+        disposition: { type: string, enum: [open, done, dismissed] }
+        assigneeId: { type: [string, 'null'] }
+        note: { type: [string, 'null'], maxLength: 2048 }
+        feedback: { type: [string, 'null'], enum: [classification_inaccurate, null] }
+        carriedFromItemVersion: { type: [integer, 'null'], minimum: 1 }
+    HandlingPatch:
+      type: object
+      additionalProperties: false
+      required: [itemVersion]
+      properties:
+        itemVersion: { type: integer, minimum: 1 }
+        disposition: { type: string, enum: [open, done, dismissed] }
+        assigneeId: { type: [string, 'null'] }
+        note: { type: [string, 'null'], maxLength: 2048 }
+        feedback: { type: [string, 'null'], enum: [classification_inaccurate, null] }
+    Overview:
+      type: object
+      additionalProperties: false
+      required: [scope, totalCount, counts, viewCounts, sourceCoverage, lastSyncedAt, requestId]
+      properties:
+        scope: { type: object }
+        totalCount: { type: integer, minimum: 0 }
+        counts: { type: object }
+        viewCounts: { type: object }
+        sourceCoverage: { type: object }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        requestId: { type: string }
+    WatchInput:
+      type: object
+      additionalProperties: false
+      required: [upstream, interests]
+      properties:
+        upstream:
+          type: object
+          additionalProperties: false
+          required: [owner, repository]
+          properties:
+            owner: { type: string }
+            repository: { type: string }
+        targetRepositoryId: { type: [string, 'null'] }
+        interests: { type: array, items: { type: string }, minItems: 1 }
+        includePrerelease: { type: boolean, default: false }
+        analysisEnabled: { type: boolean, default: false }
+        enabled: { type: boolean, default: true }
+    SyncJob:
+      type: object
+      additionalProperties: false
+      required: [id, operation, status, links]
+      properties:
+        id: { type: string }
+        operation: { type: string, enum: [sync_repository, sync_watch] }
+        status: { type: string, enum: [queued, running, retry_wait, succeeded, failed, cancelled] }
+        links: { type: object }
+    Usage:
+      type: object
+      additionalProperties: false
+      required: [service, plan, entitlements, usage, runtimeUsage]
+      properties:
+        service: { const: github_followups }
+        plan: { type: string, enum: [free, pro, max] }
+        entitlements: { type: object }
+        usage: { type: object }
+        runtimeUsage: { type: object }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error, requestId]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, retryable]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            retryable: { type: boolean }
+        requestId: { type: string }
+  responses:
+    NotFound:
+      description: Resource does not exist or is outside the current authorization scope.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Source or Item version conflict.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PreconditionFailed:
+      description: If-Match revision conflict.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
