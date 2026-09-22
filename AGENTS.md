@@ -1,28 +1,260 @@
-<!-- PULLWISE_REVIEWER_TARGET_START -->
-## Pullwise Reviewer Target — Node.js + Pi Coding Agent
+<!-- PULLWISE_PRODUCT_TARGET_START -->
+## Current target — PR / CI / Updates design 1.4
 
-For all new Pullwise Reviewer implementation, the sole Worker target is
-Node.js/TypeScript on Node `>=22.19.0`, embedding
-`@earendil-works/pi-coding-agent`. One active attempt owns one Pi
-`AgentSession`.
+Implement only the PR follow-up, GitHub Actions failure, and upstream Release
+filtering product defined by `../docs/design/pr-ci-updates/README.md` and
+01–07. The old full-repository Reviewer, Agent-first, Worker fleet, and Model
+Gateway rules below are historical cleanup evidence, not implementation
+authority. Do not restore their routes, runtime, entitlements, or contracts.
 
-This is a clean break. Do not add or preserve a Codex SDK or CLI, `CODEX_HOME`,
-a Python Worker runtime, compatibility or shadow adapters, dual runtimes, or
-automatic provider/model fallback. Server plan policy resolves one exact
-provider/model/thinking level against each Worker's advertised catalog. Pi is not a sandbox:
-the Worker supervisor must enforce operating-system containment, process-tree
-ownership, cancellation, cleanup, and late-publication fencing.
+Keep GitHub access read-only. Web and external clients share product-v1 REST;
+GET and manual fact sync never schedule model work. Production Jev remains
+disabled until the P0.5 quality and bounded-transport gates pass. Preserve
+account/session/GitHub authorization, Creem transaction facts, payment history,
+and their security tests while replacing old scan entitlements.
 
-Do not query or poll subscription/account quota windows, percentages, reset
-times, low/exhausted readiness, or refresh-window commands. Preserve immutable
-per-attempt input/output/cache-token usage, cost when reported, timing,
-provider/model identity, and provider-error facts. Product account/repository
-scan quotas are separate business controls and remain in force.
+Use stable `watchScopeKey` for domain identity and charging, `contextHash` for
+semantic cache reuse, and monotonic `contextVersion` plus `ItemVersion` for
+audit. A real A→B→A transition never reuses an earlier ItemVersion. Persist
+multi-source dependencies and fence publication on every source/config/auth
+revision; pending or incomplete assessment must not silently close an item.
+<!-- PULLWISE_PRODUCT_TARGET_END -->
 
-Any later Reviewer-specific Python, Codex, quota-window, runtime, phase, or
-generated-consumer rule in this file is historical cleanup evidence only and
-must not govern target implementation.
-<!-- PULLWISE_REVIEWER_TARGET_END -->
+## Current product-v1 implementation invariants
+
+- Server and Web both target Cloudflare; follow deployment appendix 08 alongside
+  the PR/CI/Updates product design. P3 adapters and P5a continue in parallel with
+  runtime/storage validation. CPython fixtures are not Workers compatibility or
+  deployment evidence. Preserve the shared REST contract and account/Creem data.
+- `github_authorization.py` checks current GitHub account, repository maintenance,
+  App installation and module permissions using a server-resolved credential
+  binding. Only a conclusive denial revokes; HTTP/credential/shape uncertainty
+  does not extend proof validity. Tokens never belong to DTOs, logs or reprs.
+  Shared watch App authority belongs to its target repository, not the public
+  upstream. Include target installation, configuration and billing owner in
+  renewal/fact publication fences and cascade target revocations to its watches.
+- `github_release_reader.py` reads one bounded page per call via injected GET,
+  validates stable repository identity around mutable name routes, and binds
+  pagination to the target and high watermark. GitHub Release has no reliable
+  top-level `updated_at`: use only known `published_at`, never local read time
+  or `created_at` as edit evidence. Old edits may update facts without gaining
+  new analysis eligibility. Page omission/404 never proves deletion; a multi-page
+  scan is not a complete snapshot and the six-hour cadence adds scan latency.
+- `github_transport.py` is the read-only CPython reference: fixed GitHub origin,
+  no redirects/retries, bounded decoded JSON, socket inactivity timeouts, and
+  sanitized failures. It does not prove total slow-stream exit or native
+  Cloudflare I/O. Preserve `GitHubUnavailable.retry_at` through adapter layers;
+  permission retries and `github_read_backoffs` retain retry deadlines across
+  restart. Manual/event/scheduled fact reads share the target's cooldown. Live
+  credential-scope rate coordination, conditional reads and runtime composition
+  remain unimplemented; do not claim production ingestion readiness.
+- `github_ingestion.build_github_fact_sync` explicitly composes PR, CI and
+  Updates readers with `GitHubCredentialResolver` and the permission checker;
+  constructing it performs no I/O and default startup stays unconfigured.
+  Credential callbacks reuse account/identity/installation access metadata;
+  cached `canAccess` selects an identity, never proves maintenance authority.
+  Recheck the chosen identity and installation-access record after issuance,
+  as they may change independently of the account/target rows. Honor known
+  token expiries; existing OAuth storage lacks refresh/expiry lifecycle data.
+- Pass readers the discovery snapshot after the sync transaction's own
+  schedule/stamp writes; otherwise full-snapshot credential fencing rejects
+  legitimate scheduled reads. Do not weaken permission fields to avoid this.
+- PR receipts persist a validated `pull_number` locator only; review/comment
+  bodies and state still come from authoritative refetch. `pr_state.updatedAt`
+  fences stale PR snapshots. REST review pages do not prove an effective formal
+  review or thread resolution: retain raw state and explicit unknown coverage.
+  The open-PR scan does not yet compensate for all missed close events.
+- CI `FactPage.run_states` persist separately in `github_run_states`, under the
+  fact transaction's permission/config/generation fence. Retain each attempt;
+  older timestamps and terminal-to-nonterminal observations cannot regress it.
+  Snapshots contain the current jobs page, not a synthesized complete run.
+  Success never creates a failure source or proves recovery. Direct job events
+  with verified run/attempt identity need no first-page membership assumption.
+  Missing attempt identity still requires explicit membership evidence.
+- Native CI steps without downloaded logs have `unavailable` model evidence.
+  Do not invent log symptoms or infer cross-run identity. Raw run snapshots
+  remain internal; any future REST read must apply current repository authority.
+- Fact sync publishes `product_projection` rule Items via `product_rule_items`
+  in the same fenced transaction as sources/contexts, with no model or usage
+  side effect. Current requests create one Item per GitHub user/team; CI failure
+  creates one per job/attempt. An empty projection never proves withdrawal.
+  Complete request lists can withdraw a request; explicit PR parent closure
+  reconciles related Items while retaining child facts and all dependency fences.
+  Parent reopen creates a new occurrence pending confirmation, never revives done.
+- Rule handling inheritance requires adjacent versions, unchanged action/material
+  and context/config, and complete rule evidence. Audit `handling_carried` with
+  a system actor. Unknown semantic updates keep existing Items pending with
+  expired historical evidence and no current assessment, not a fake new result.
+  Repeated facts preserve ItemVersion/attention time; lastSyncedAt comes from
+  source freshness and must not force a new ItemVersion.
+- `defaultAssigneeId`, handling assigneeId and nextActors.githubId are GitHub
+  identities, not Pullwise user IDs. Match action views to the signed-in
+  account's githubId; manual assignment takes priority. Unverified team
+  membership stays unassigned. Current-version done/dismissed is a handling
+  closure, not GitHub resolution; stale-version handling cannot silently apply.
+- `github_pr_threads` uses fixed read-only GraphQL documents and validates
+  repo/PR/thread/comment/reply identity. Each call advances bounded thread or
+  comment pagination. Optional REST enrichment only joins matching returned
+  comments; missing/partial pages leave unknown, never deleted/resolved.
+  Its continuation cursor is not yet part of the REST scan's persisted cursor.
+- `github_ci_logs` has no default network transport. Its callback must enforce
+  public peers/TLS and a hard deadline; late-result checks alone are not proof
+  of bounded exit. Keep auth only on the GitHub API hop, redact before storage,
+  and cap download at 5 MiB. Select one complete-line tail window at most 20 KiB,
+  preserving line numbers and unknown stage/step; do not label symptoms by regex.
+  Optional CI log mode uses one job per page to bound network work. Changing that
+  reader page size invalidates existing scope-bound cursors and needs an explicit
+  checkpoint transition before live rollout, not an automatic backfill reset.
+
+- Product-v1 Cookie sessions and API keys share one router and DTOs. Reject a
+  request carrying both identities. Cookie writes under `/api/v1` or `/v1`
+  still require the trusted browser Origin check; path aliases never grant a
+  CSRF exemption.
+- Product-v1 scopes are `profile:read`, `repositories:read`,
+  `repositories:manage`, `items:read`, `items:write`, `sync:write`,
+  `watches:read`, `watches:write`, and `usage:read`. Retired scan scopes never
+  authorize a new product operation.
+- `product_store.py` owns new domain persistence. Source and Item publication
+  must fence every source, context, configuration and authorization revision.
+  Reads filter inaccessible or expired source contexts before producing rows or
+  counts; never aggregate globally and hide rows afterward.
+- Publish a successful model result only through
+  `ProductStore.publish_assessment_result`: assessment insert/cache replay,
+  ItemVersion publication, and processing `reserved -> used` must commit in one
+  `BEGIN IMMEDIATE` transaction. Any stale source/context/config/auth/item or
+  reservation mismatch rolls back all three and leaves the reservation intact.
+- Treat assessment answers as semantic cache data, but question bindings and
+  evidence IDs as publication-context data. Every answer key needs one local
+  binding whose evidence IDs exist in the current Item snapshot. Persist the
+  complete public assessment in ItemVersion; cache replay rebinds current
+  context/evidence and appends `assessment_rebound` to reopen prior handling.
+- `analyze_source` jobs freeze source/context/config/auth revisions and the
+  processing reservation when queued. Claim with a random 120-second token in
+  a short SQLite transaction; successful publication must validate that token
+  and every frozen binding inside the same transaction that completes the job.
+  An expired executor cannot publish or consume, and terminal eligibility
+  rejection releases the still-reserved processing unit atomically.
+- Retry an `analyze_source` job in the same generation with persisted
+  `retry_wait`/`next_attempt_at`; claim increments its attempt and attempt 3 is
+  terminal. Only the current unexpired claim token may record failure. A final
+  or non-retryable failure releases the processing reservation atomically;
+  user routes must never reset or create these retries.
+- Enforce analysis queue admission under the same SQLite write transaction:
+  at most 1000 active jobs globally and 100 per billing owner by default.
+  Rejection releases the just-created processing reservation and marks the
+  source context throttled. Claim rotates by durable billing-owner claim order;
+  use SQLite insertion order to break same-second enqueue ties, never random ids.
+- One analysis logical key retains only its newest input. A newer source/context
+  binding supersedes the older active generation and releases its reservation;
+  if the old generation was running, delay successor claim until that lease
+  expires. Re-enqueueing the same input after attempt 3 returns the failed job
+  and releases the redundant reservation instead of resetting attempts.
+- `item_handling_events` are append-only and their effective order is SQLite
+  insertion order (`rowid`), not random UUID order. Consecutive events may share
+  one-second timestamps, so never select the current event with `created_at + id`.
+- Manual sync accepts only an empty object plus `Idempotency-Key` and creates
+  only `sync_repository` or `sync_watch`. Only a server-owned `TrustedTrigger`
+  may create `analyze_source`; GET, handling writes and sync never do so.
+- Freeze each stable processing control's initial-backfill source keys exactly
+  once. Persist both the fixed set and completed subset; restart, disable/
+  enable, API-key rotation, or watch delete/recreate must replay that set and
+  must never select a new page of historical sources.
+- Freeze `processing_controls.eligible_since` on the first valid analysis
+  authorization. Daily discovery admits only authoritative create/change times
+  at or after that boundary or sources in the fixed initial-backfill set.
+  Persist opaque GitHub cursor/high-watermark pairs with exact compare-and-swap;
+  Store must not infer ordering from cursor strings or local first-seen time.
+- `ProductFactSync` is the trusted fact-sync orchestration seam. Its reader and
+  processing-budget resolver are server dependencies, never request fields.
+  `run_due`/`run_scheduled` use persisted 900-second PR/CI and 21600-second
+  Updates schedules; `run_manual` neither reads discovery checkpoints nor
+  establishes eligibility, advances checkpoints, reserves usage, or schedules
+  analysis. `main(fact_sync=...)` / `PullwiseThreadingHTTPServer(fact_sync=...)`
+  can host one background fact worker independently of HTTP requests; default
+  startup leaves it unconfigured until live readers and permission refresh are
+  assembled and validated. Do not claim production GitHub ingestion is running.
+- `/webhooks/github` verifies the raw HMAC and matches persisted App,
+  installation and repository bindings before storing minimal durable receipts.
+  ACK does no GitHub/model I/O. Event processing waits 30 seconds and refetches
+  authority through the reader. Signed installation deletion/suspension and
+  repository removal immediately invalidate matching authorization and jobs.
+- Discovery proofs expire within five minutes and are module-scoped. Refresh
+  them only from trusted authorization checks; public visibility or webhook
+  payload permissions are not proof. Recheck expiry after network reads and
+  budget resolution. The first valid analysis-proof time may initialize
+  `eligible_since` only in trusted discovery, so the stability delay cannot
+  move that boundary past the first eligible event.
+- `ProductFactSync.run_authorization_due` renews proofs independently of the
+  15-minute/6-hour fact schedules, starting 60 seconds before expiry. Inject
+  its checker only as a server dependency. The checker must verify the entire
+  target's module/installation/repository/owner authority, including a shared
+  watch's target repository; public visibility is not an authorization proof.
+  Discovery target snapshots include watch `owner_id` and `target_repository_id`
+  for this purpose. GitHub checker and Releases reader have injectable reference
+  implementations; live credential and target-runtime composition is pending.
+- Permission refresh claims and retry times persist in
+  `discovery_authorization_refreshes`. Network checks run outside SQLite
+  transactions; publication requires the same 120-second claim and unchanged
+  target snapshot. Failed checks retry no sooner than 60 seconds without
+  extending old proof validity. Ordinary renewal preserves auth revision;
+  access transitions increment it and denial cancels analysis reservations.
+  Refresh never reads facts, advances discovery, reserves usage, or admits
+  analysis. Manual sync and GET never invoke the checker.
+- Share durable parent sync generations across manual/event/scheduled reads
+  and watches of the same upstream. Reject superseded responses and older
+  authoritative source times; reject duplicate source IDs within one page.
+  Unknown timestamps do not gain automatic eligibility. Page omission is
+  never evidence of deletion. Context-only changes are not new-source
+  discovery and remain stale until the separate bounded refresh path exists.
+  Manual content edits mark the new version pending without clearing an
+  existing context-stale flag or creating another reservation/job.
+- Use `ProductStore.atomic()` to compose admission: facts commit first, then
+  checkpoint CAS, fixed backfill, reservation and job admission commit together.
+  Never perform network I/O inside it. Queue rejection commits visible
+  throttling and releases the reservation; unexpected admission faults retain
+  facts but roll back checkpoint and quota changes. Released reservations may
+  re-enter the current billing period; reserved/consumed rows retain theirs.
+- Discovery configuration epochs survive watch recreation independently of
+  public watch revision. Configuration writes fence existing contexts and
+  cancel unstarted jobs. Preserve the original running lease deadline through
+  every successor, including queued successors and revoked jobs. Same-input
+  discovery generations inherit the persisted attempt count; authorization or
+  configuration revision changes cannot buy three new attempts.
+- CI recovery remains unknown unless `ci_triage.verified_successor` receives a
+  verified job identity proof; later-run recovery additionally requires an
+  explicit verified lineage proof. Job name, workflow display name or SHA alone
+  is insufficient.
+- Use Jev for semantic choices whenever the decision depends on natural-language
+  meaning: PR intent/blocking language, CI log symptoms, and Updates relevance
+  plus migration/deprecation/breaking/security signals. Code may select bounded
+  complete evidence units using versioned deterministic rules, but keywords
+  must never directly emit those classifications or action labels. Keep hard
+  rules only for verifiable GitHub facts, CI stage metadata, identity/lineage,
+  permissions, dates, counts, state projection and answer-combination tables.
+- Offline `typesafe_client.py` validates request/response contracts only. Do
+  not claim SDK/runtime or model-quality readiness until the fixed SDK import,
+  loopback bounded-exit and real evaluation gates pass.
+- The current model ID is exactly `jev-1.13.0`. Reject `jev-latest` and any
+  unvalidated alternative at request construction; a future model change must
+  first update the fixed evaluation baseline and versioned templates.
+- Jev input is text-only. `state` may be a string, a JSON object whose leaves
+  are text, or an array of text values; reject numeric/boolean/null/binary
+  leaves, image/audio/video fields, and media data URLs. Keep IDs, revisions,
+  authorization, evidence bindings and billing facts in local store metadata.
+- The observed Jev account limit is 1,200 requests/minute and 250,000 input
+  tokens/second. Keep Pullwise's conservative single-key admission at global
+  concurrency 2, 60 actual attempts/rolling minute, and 6 per billing owner;
+  retries count. Use key rotation for credential lifecycle, not load striping
+  or usage-limit circumvention.
+- Use `$42 / billion input tokens` = `$0.042 / million input tokens` as the
+  current Jev cost baseline. Choose the required global monthly attempt limit
+  from measured input-token distributions and an explicit budget; never derive
+  a spending budget from the much higher provider RPM ceiling.
+- The old scan/finding/fix/Reviewer/Worker/Gateway/Agent-first implementation
+  is scheduled for deletion, not compatibility. Do not add adapters, fallback,
+  dual routes or shims while removing it. Preserve only account/session/GitHub
+  authorization, API-key security, Creem transaction facts/payment history,
+  and other explicitly retained infrastructure.
 
 ## Current Pi Worker runtime catalog
 
@@ -220,10 +452,10 @@ CI runs pip-audit . against project dependencies. Keep the cryptography range on
 
 ## Current CI target check
 
-- `scripts/check_current_reviewer_authority.py` validates the leading current
-  Node/Pi target block. It must not require a retired external-authority prefix
-  or Notion URLs. Current user instructions, repository rules, code and tests
-  govern development; the matching regression is test_current_reviewer_ci_target.
+- CI uses current repository instructions, code, and tests directly. Do not
+  restore a hash-pinned Reviewer authority script or Notion/external-authority
+  gate. `test_product_ci_target.py` protects the retained pytest, pip-check,
+  dependency-audit, and shell validation lanes during the 1.4 transition.
 
 ## Worker Host Platform
 

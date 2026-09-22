@@ -1,0 +1,659 @@
+# PR / CI / Updates 1.4 implementation status
+
+Last updated: 2026-09-22. This file records implementation evidence; it does
+not replace `../../docs/design/pr-ci-updates/README.md`, its 01–07 contracts,
+or the Cloudflare deployment appendix 08.
+
+## P0 baseline
+
+The four repositories were clean before implementation started. Recovery
+anchors and remotes were recorded before any local project removal:
+
+| Repository | Baseline HEAD | Recovery remote |
+| --- | --- | --- |
+| pullwise-server | `0122367e27e42aafec54a5094e153cab63509c7f` | `https://github.com/GoPullwise/pullwise-server.git` |
+| pullwise-web | `f5b1b2fb755aeb015ecb0edc4c5a12bec7731f9a` | `https://github.com/GoPullwise/pullwise-web.git` |
+| pullwise-admin | `0760a8a0e66c2a964bab6151da758f7c8145be17` | `https://github.com/GoPullwise/pullwise-admin.git` |
+| pullwise-worker | `d26fdffda93833b7dd1bd41d415adab4a856182b` | `https://github.com/GoPullwise/pullwise-worker.git` |
+
+Only ignored local state was present: Server virtualenv/cache/log/CodeGraph
+data, Web/Admin `node_modules`/build/log data, and Worker `node_modules`/build/
+temporary data. No tracked or untracked user changes were present. The user has
+authorized eventual deletion of the two local Admin/Worker directories and
+will delete the corresponding GitHub repositories manually. No remote deletion,
+deployment, production worker shutdown, credential change, or production data
+operation is authorized.
+
+The leading Server and Web `AGENTS.md` target blocks now mark the old Reviewer,
+Worker fleet, Agent-first, and Model Gateway rules as historical cleanup
+evidence. Their remaining references are still present until P4/P6 dependency
+removal is verified.
+
+Protected baseline command:
+
+```text
+D:\Python313\python.exe -m pytest \
+  tests/test_github_auth_contracts.py \
+  tests/test_billing_contracts.py tests/test_billing_routes.py \
+  tests/test_billing_webhooks.py tests/test_security_contracts.py \
+  tests/test_api_security_extensions.py -q
+```
+
+Result: `299 passed, 41 subtests passed`. This is evidence on Python 3.13 only.
+The repository's `.venv` points at a missing/broken Python 3.10.12 installation
+and fails during interpreter startup with `ModuleNotFoundError: encodings`.
+Therefore target Python 3.10 runtime, SDK import, and full CI remain unverified.
+No dependency was installed to work around this gate.
+
+The retired hash-pinned Reviewer authority gates were removed from Server and
+Web CI after the target blocks changed. Server retains pytest, pip check,
+dependency audit and shell checks. Web retains lint, tests, build, production
+audit and Cloudflare worker syntax checks. Current Web `npm run check` result:
+46 files / 607 tests passed, lint passed, and the production build completed.
+
+The read-only `legacy_product_inventory` fixture now counts protected account,
+session, GitHub-state and billing-event collections plus active scan jobs,
+reserved scan units and reservation-ledger rows without creating or mutating
+legacy tables. It provides the settlement gate for eventual old-path removal.
+
+P0 remains incomplete: the 1440px/390px light/dark non-Dashboard screenshot
+baseline is not yet captured.
+Admin/Worker must not be removed before Server/Web no longer depend on them and
+the old active scan/reservation path is accounted for.
+
+## P0.5 offline rule evidence
+
+Implemented without a model key or network dependency:
+
+- stable personal/shared `watchScopeKey` identity independent of public watch ID;
+- normalized-interest `contextHash` reuse with monotonic audit
+  `contextVersion`, including A→B→A;
+- monotonic ItemVersion snapshots that include every source revision and never
+  reuse an earlier occurrence after a real transition;
+- adjacent, unique action-signature handling inheritance only; context changes,
+  ambiguous matches, and new rule actions reopen handling;
+- empty-body formal `CHANGES_REQUESTED` as a rule action;
+- pending assessment keeps an existing item visible as `needs_confirmation`
+  without advancing its attention timestamp;
+- Updates same-unit joint projection, conflict-to-confirmation, and partial
+  coverage that does not infer negative release-wide signals;
+- SQLite watch/control persistence across delete/recreate and restart;
+- atomic owner/global rolling and UTC-month provider-attempt admission with a
+  mandatory global monthly limit and idempotent attempt IDs;
+- atomic successful-processing reservation/consume/release with idempotent
+  charge keys, module totals, restart persistence, and last-slot contention;
+- separate manual fact-sync jobs and analysis jobs; manual sync can only create
+  `sync_repository`/`sync_watch`, while analysis requires a server-owned
+  `TrustedTrigger` enum and active logical jobs are deduplicated;
+- a P1 `openapi/product-v1.yaml` list/overview/source/Item/handling/watch/sync/
+  usage contract shared by cookie sessions and API keys. It deliberately omits
+  user model-submission routes and unimplemented P5b endpoints;
+- append-only Item handling events with actor/itemVersion, optional note,
+  classification feedback, and simultaneous current-item/current-revision CAS;
+- source-context publication fences for context, configuration and authorization
+  revisions, including permission freshness/accessibility checks before an Item
+  snapshot can become current;
+- shared Cookie/API-key product routes for watches, sources, Items, overview,
+  handling, usage, profile and sync-job status; dual identity is rejected,
+  Cookie writes retain Origin checks, resource restrictions are enforced, and
+  repeated reads/manual sync do not create analysis jobs;
+- offline GitHub source normalization for PR review bodies/comments, CI failed
+  job attempts/windows and Releases, with GitHub write operations absent;
+- deterministic bounded Release-unit selection that never truncates a unit,
+  reports partial/unavailable coverage, and makes no negative inference about
+  omitted material;
+- conditional CI successor projection that accepts only explicit verified job
+  identity and, across runs, explicit lineage evidence; common names or SHAs
+  alone remain unknown;
+- versioned Jev question builders for all six PR semantic choices, nine CI
+  symptoms per evidence window, and five Updates judgments per change unit.
+  Candidate keyword ranking does not emit classifications or action labels;
+- current-scope API keys default to read-only product scopes; RepositoryService
+  and watch capacity use atomic SQLite last-slot admission, and Cookie/API-key
+  writes share user-scoped idempotency records across transport aliases;
+- initial backfill persists one fixed bounded source set plus its completed
+  subset under the stable processing-control key. Restart and watch recreation
+  replay the same set instead of expanding into later historical pages;
+- processing eligibility now freezes the first authoritative `eligible_since`
+  across restart and watch recreation. Discovery eligibility accepts only
+  authoritative create/change times at or after that boundary or membership in
+  the fixed backfill set; opaque cursor/high-watermark checkpoints advance by
+  exact CAS and survive restart without lexical ordering guesses;
+- immutable assessment storage caches only succeeded results by billing domain,
+  SourceVersion, `contextHash`, question/extractor/model and complete input hash;
+  audit-only `contextVersion` changes may rebind a result, while discarded
+  responses never enter the reusable cache;
+- every published assessment now persists a complete public projection with
+  source/version, dependencies, question bindings, current evidence IDs,
+  evaluated/publish context versions, answers and usage. Bindings must exactly
+  cover answer keys and reference current snapshot evidence. Semantic cache
+  replay reuses the assessment id while rebinding current context/evidence and
+  appends `assessment_rebound` so prior handling is not revived;
+- `publish_assessment_result` commits the validated assessment, current
+  ItemVersion and successful-processing consumption atomically; stale source or
+  publication fences roll back the assessment/Item writes and keep the original
+  reservation. The focused success/rollback regressions both pass.
+- trusted `analyze_source` execution now freezes source/context/config/auth and
+  reservation bindings at enqueue, claims/reclaims with a random expiring token,
+  and validates the token plus every binding inside the atomic assessment/Item/
+  usage publication transaction. Expired executors cannot publish or consume;
+  disabled, stale, unauthorized, or invalid-reservation jobs become terminal and
+  release an active reservation in the claim transaction. Existing pre-claim
+  product-v1 job tables receive the required nullable claim/binding columns at
+  initialization.
+- retryable failures persist `retry_wait` and `next_attempt_at` on the same job;
+  claims before that time are rejected, attempt 3 is terminal, and final or
+  non-retryable failure atomically releases the processing reservation. A stale
+  claim token cannot alter a reclaimed job's retry state.
+- analysis enqueue now enforces the default global 1000/per-billing-owner 100
+  active-job limits atomically; rejection releases the new reservation and
+  exposes throttled source status. Claims rotate across billing owners using a
+  durable order with insertion-order tie breaking.
+- a newer source/context binding supersedes the older active generation and
+  releases its reservation. A successor to a running generation cannot claim
+  before the old lease expires, while a failed attempt-3 input cannot create a
+  fresh generation or retain a redundant reservation.
+- Item handling current-state projection now uses append insertion order rather
+  than random UUID order, eliminating same-second session/API-key update races.
+- strict local Jev request/response validation for fixed model, exact question
+  keys, enums, probabilities, confidence, usage, duplicate JSON keys and byte
+  bounds. State is text-only (string, recursively textual JSON object, or text
+  array) and rejects media/binary/non-text leaves. The SDK transport itself is
+  not installed or enabled.
+
+The current model is pinned exactly to `jev-1.13.0`; request construction
+rejects `jev-latest` and other unvalidated model identifiers. Focused validation:
+`tests/test_typesafe_client_contracts.py` reports 7 passed and 18 subtests.
+The fixed-backfill restart/recreation regression also passes independently.
+
+The supplied Jev account limit is 1,200 requests/minute and 250,000 input
+tokens/second. Pullwise remains capped at one credential, concurrency 2, 60
+actual attempts/rolling minute globally and 6 per billing owner. This leaves
+roughly 20x request-rate headroom; retries consume the same admission budget.
+No API-key pool or per-IP capacity assumption is used.
+
+The current published Jev input price is `$42 / billion tokens`, equivalent to
+`$0.042 / million tokens` (`$0.000042 / thousand tokens`). This is a cost
+baseline, not permission to spend: the mandatory global monthly attempt limit
+remains unset until P0.5 measures actual average/p95 input tokens and chooses an
+explicit deployment budget. Output is not included in this input-price figure.
+
+Exact 14-file current-target verification (PowerShell, from `pullwise-server`):
+
+```powershell
+D:\Python313\python.exe -m pytest `
+  tests/test_product_domain_contracts.py `
+  tests/test_product_store_contracts.py `
+  tests/test_product_jobs_contracts.py `
+  tests/test_product_openapi_contract.py `
+  tests/test_product_ci_target.py `
+  tests/test_legacy_product_inventory.py `
+  tests/test_product_api_security.py `
+  tests/test_product_api_routes.py `
+  tests/test_product_entitlements.py `
+  tests/test_github_source_contracts.py `
+  tests/test_update_filter_contracts.py `
+  tests/test_ci_triage_contracts.py `
+  tests/test_typesafe_client_contracts.py `
+  tests/test_jev_questions.py -q
+```
+
+Current result after trusted analysis claim/publication wiring:
+`115 passed, 24 subtests passed` in 252.89 seconds. The handling ordering
+regression also passed once and then five consecutive focused reruns. An earlier
+current-target run plus protected API-key, CSRF/security, GitHub authorization and
+Creem billing suites produced `392 passed, 50 subtests passed` in 351.17
+seconds. These are Python 3.13 engineering fixtures, not target-runtime, Jev quality,
+GitHub field-coverage, transport-exit, token-cost, or user-benefit evidence.
+
+Remote CI review on 2026-09-21 found no run for the uncommitted product-v1
+changes. The latest `main` run for baseline HEAD
+`0122367e27e42aafec54a5094e153cab63509c7f` failed on 2026-09-08 in two
+retired Pi/Worker publication tests (`test_pi_result_publication.py`), after
+1,431 tests passed. That historical failure does not exercise the new job
+executor, but full target-runtime CI remains unverified until these changes are
+committed and run by the current workflow.
+
+## Trusted discovery integration slice — 2026-09-21
+
+Added `product_discovery.py`, `github_webhooks.py` and
+`tests/test_product_discovery_contracts.py`. The HTTP receiver is wired to
+`/webhooks/github`; the executable orchestration uses injected server-owned
+read-only fact readers and budget resolvers. It imports no model transport.
+`main(fact_sync=...)` and `PullwiseThreadingHTTPServer(fact_sync=...)` can host
+one background fact worker; a real loopback-server test proves normal scheduling
+works without any HTTP request. Default startup has no live reader configured.
+
+Implemented and exercised against temporary SQLite databases:
+
+- raw-byte HMAC, event/action allowlists, durable App/delivery deduplication,
+  stored installation/repository binding and minimal identifier-only receipts;
+- 30-second event stability/refetch and persistent normal schedule cadence
+  (PR/CI 15 minutes, Updates 6 hours); manual sync does not advance that clock;
+- facts committed before eligibility/admission, with shared parent read
+  generations and authoritative-time checks preventing stale responses from
+  replacing newer snapshots; conflicting IDs in one page are rejected;
+- stable eligibility, fixed initial-backfill selection, exact discovery CAS,
+  and atomic reservation/queue admission through `ProductStore.atomic()`;
+- old/pagination-late sources remain `not_scheduled`; new eligible versions
+  reserve once; duplicates, concurrency, restart and watch recreation retain
+  the same control, cursor and billing identities;
+- expired or revoked authorization blocks ingestion/admission; signed
+  installation deletion/suspension or repository removal hides existing
+  contexts and cancels jobs; configuration writes also fence pending work;
+- queue rejection keeps facts and commits throttling with released usage;
+  unexpected admission failure rolls back quota/checkpoint but retains facts;
+- all consecutive coalescings retain the first running lease deadline;
+  same-input generations carry attempt counts across authorization/configuration
+  changes; watch configuration epochs do not regress when public IDs change;
+- released queue-rejection reservations can re-enter the current billing
+  period without changing active or consumed reservations from earlier periods;
+- CI normalization now retains `completedAt` and the actual `timed_out`
+  conclusion, allowing authoritative-time eligibility without local first-seen
+  inference. PR/CI/Updates scheduling fixtures all exercise the same pipeline.
+
+Test-first evidence: the initial 11 integration tests failed on the missing
+authorization/ingestion seam. Subsequent focused red tests exposed watch
+configuration regression after recreation, queued work after disabling analysis,
+missing webhook routing, CI timeout omission, authorization expiry during read,
+the first-event stability boundary, cross-period reservation, duplicate-page
+charge binding, signed revocation, repeated coalescing lease loss, and attempt
+reset through authorization revisions, missing background-loop assembly, and
+manual edits retaining an obsolete assessed status/clearing context staleness.
+The final suite contains 33 passing
+integration tests.
+
+Final verification on `D:/Python313/python.exe`:
+
+- The exact 14-file command above: **115 passed, 24 subtests passed in 23.33s**.
+- `tests/test_product_discovery_contracts.py`: **33 passed in 8.79s**.
+- `tests/test_product_discovery_contracts.py tests/test_security_contracts.py
+  tests/test_api_security_extensions.py tests/test_github_auth_contracts.py
+  tests/test_billing_webhooks.py`: **245 passed, 31 subtests passed in 24.41s**.
+- Changed Python modules/tests passed `py_compile`; `git diff --check` passed
+  with the existing LF-to-CRLF warnings.
+
+The default temporary directory/cache encountered Windows access errors in one
+run. Successful final commands set `TEMP` and `TMP` to
+`F:/Pullwise/.test-tmp/discovery` and pytest cache directories under
+`F:/Pullwise/.test-tmp`. No interpreter, dependency or permission installation
+was used. Python 3.10 remains unverified.
+
+An additional broad run including the historical `test_api_key_routes.py`
+reported **10 failed, 249 passed, 31 subtests passed**. The failures expect
+retired scan repository DTOs/scan operations or the old flat `message` error
+shape. They remain unresolved and are not included in the green current-target
+claim; neither their assertions nor the existing API-key changes were removed
+to manufacture a pass. Current product API-key/session/security tests pass.
+
+Remote CI was rechecked with `gh run list` and `gh run view`: the latest run is
+still [34212039198](https://github.com/GoPullwise/pullwise-server/actions/runs/34212039198),
+failed at the test step on unchanged baseline HEAD `0122367`. No run covers
+these uncommitted changes. Fetching the old failed log timed out during TLS;
+the earlier historical failure diagnosis above is not a new log-validation claim.
+
+Boundary: this is an offline trusted-ingestion integration slice, not a live
+GitHub or model rollout. `read_page`, actual permission-proof refresh and the
+live adapter composition are still required for production fact sync; the
+server-owned background-loop assembly is tested with an injected reader.
+The seam consumes locally normalized authoritative-reader fixtures; no
+actual GitHub field-coverage result is claimed. Context refresh remains a
+separate bounded/cooldown path; discovery refuses to disguise it as new source
+work. Real log transport, complete three-module source loops, source-to-Item
+rule projection and live permission coverage remain P3 work. Production Jev
+is disabled, and no SDK, key, paid model call, deployment or production change
+was made.
+
+## Independent permission renewal slice (2026-09-21)
+
+The next integration prerequisite is implemented: permission proofs expire in
+at most five minutes, so they cannot depend on the 15-minute PR/CI or six-hour
+Updates fact schedule. `ProductFactSync` now accepts a server-owned
+`refresh_authorization` checker and runs `run_authorization_due` before event
+and scheduled fact processing. The default checker remains unconfigured.
+
+- Renewal starts 60 seconds before expiry. Durable per-control claims use a
+  random token and a 120-second lease; failures retain a 60-second retry delay
+  across restart. Network I/O runs outside SQLite write transactions.
+- A typed `DiscoveryAuthorizationProof` validates fresh observation time,
+  strict boolean/integer fields and the five-minute maximum lifetime. A late
+  result cannot publish after lease expiry, target/configuration changes,
+  another proof update or signed installation revocation.
+- Ordinary renewal preserves authorization revision and the original analysis
+  authorization boundary. A verified access transition increments the revision;
+  denial hides source contexts, cancels queued/running analysis and releases
+  reservations through the existing atomic store path.
+- The checker receives the watch owner and target-repository scope as well as
+  module/installation/upstream/billing bindings. It must verify all relevant
+  authority; public repository visibility alone is insufficient.
+- Renewal does not read source facts, change discovery checkpoints/backfill,
+  establish processing eligibility, reserve processing or enqueue analysis.
+  GET and manual sync never invoke the checker. One failed target does not
+  prevent later permission targets from being checked.
+
+Test-first evidence: nine initial permission tests failed on the absent proof
+type/renewal entrypoint; all then passed. An additional owner-scope test failed
+on the missing `owner_id` before adding the scope fields. The suite now has
+48 discovery tests (15 added), including concurrent workers using separate
+SQLite connections, expired lease reclamation, restart/backoff, invalid proof
+boundaries, revocation and archive races. The real HTTP-server background-loop
+test now starts with expired authority and verifies renewal precedes fact sync.
+
+Final verification used `D:/Python313/python.exe`, with `TEMP` and `TMP` set to
+`F:/Pullwise/.test-tmp/discovery` and pytest cache under `F:/Pullwise/.test-tmp`:
+
+- The 14-file current-target command above plus
+  `tests/test_product_discovery_contracts.py tests/test_security_contracts.py
+  tests/test_api_security_extensions.py tests/test_github_auth_contracts.py
+  tests/test_billing_webhooks.py`: **375 passed, 60 subtests passed in 58.83s**.
+- `py_compile` passed for `product_discovery.py`, `product_store.py` and
+  `test_product_discovery_contracts.py`; `git diff --check` passed.
+- `gh run list` and `gh run view 34212039198` still show the old baseline
+  `0122367` failing at the test step. No remote run covers this working tree.
+  Python 3.10 remains unverified. Previously recorded old API failures were
+  not modified or included in the green current-target claim.
+
+This completes the renewal scheduling prerequisite only. Actual read-only
+GitHub permission checks, credentials-to-checker composition, live readers and
+field-coverage verification remain pending; the injected test checker is not
+evidence of live GitHub authorization. Production Jev remains disabled. No
+dependencies were installed, credentials used, deployment made or remote
+changes published.
+
+## P3 GitHub reference adapters and deployment design (2026-09-22)
+
+The main delivery remains PR / CI / Updates through the shared REST contract
+and P5a source/evidence/handling views. Cloudflare deployment is now explicit
+for both Server and Web in design appendix
+[`08-cloudflare-deployment.md`](../../docs/design/pr-ci-updates/08-cloudflare-deployment.md).
+It defines runtime/storage candidates and CF0-CF3 validation alongside P3/P5a;
+it does not freeze an untested runtime or block injected-adapter development.
+
+This slice adds executable read-only adapters, tested against HTTP response
+fixtures, without configuring default live startup:
+
+- `GitHubRESTTransport` restricts requests to GitHub GET, rejects redirects and
+  credential-bearing paths, bounds decoded JSON to 1 MiB, closes responses and
+  sanitizes errors. It has socket inactivity timeouts, not a proven overall
+  slow-stream deadline. No internal retry or model transport is present.
+- `GitHubAuthorizationChecker` binds the current GitHub user to a server-owned
+  account credential, verifies maintain/admin and App installation/module
+  permissions, and checks shared watch target authority plus public upstream
+  visibility. HTTP errors and malformed/uncertain checks never become positive
+  proof. Resolver tokens are omitted from dataclass reprs. The checker preserves
+  rate-limit retry time without exposing upstream exception messages.
+- `GitHubReleaseReader.read_page` resolves stable repository ID, reads one page
+  and rechecks the mutable repository name route. It validates scope-bound
+  cursors and official next-page links, including `/repositories/{id}/releases`
+  canonical links for the same verified ID. One call has at most three GETs;
+  no artificial whole-scan page cap traps the persisted cursor.
+- Releases have no reliable top-level `updated_at`. The reader uses known
+  `published_at` only, ignores unverified edit fields and never treats local
+  read time as authoritative change time. Old edits can update facts without
+  new analysis eligibility. Missing pages/404 never infer deletion. Pages are
+  not a complete snapshot; the current six-hour cadence implies a potentially
+  long full scan for large upstreams.
+- GitHub `Retry-After`/rate-reset metadata now survives permission refresh and
+  event retry persistence. Fact-read cooldowns in `github_read_backoffs` apply
+  across manual, event and scheduled paths and restarts. One unavailable due
+  target no longer aborts later targets. These are per-target cooldowns, not a
+  claim of completed account/installation-wide rate coordination.
+
+Independent review found and repaired two integration defects. Actual public
+GitHub pagination for `cli/cli` used the canonical ID route rather than the
+name route; the reader now accepts that exact same-ID form and still rejects
+other origins/repositories. Shared watch target-service installation/config
+changes originally fenced renewal snapshots only: late facts and existing
+analysis contexts could still use the old authority. The target-service
+identity/revision now participates in the watch configuration stamp; service
+writes cascade context invalidation and cancellation. Installation replacement
+also invalidates the old proof and hides sources immediately. Running lease
+deadlines and attempts survive cancellation; only independent fresh renewal can
+restore access. Signed target-installation revocation covers shared watches
+without requiring an App on the public upstream.
+
+Test-first evidence includes missing-adapter import failures, three failing
+retry/failure-isolation cases, a real canonical-pagination fixture failure,
+shared-target mismatch cases, and five second-pass race/cancellation failures.
+All corresponding focused tests passed after implementation. Composition tests
+use the actual transport/checker/reader with HTTP fixtures and SQLite discovery:
+expired proof renewal precedes fact sync, manual release edits do not refresh
+permission or establish eligibility, and transport retry time persists through
+the checker. They are integration evidence, not live credential/runtime proof.
+
+Verification command: the 19-file previous renewal regression plus
+`tests/test_github_transport_contracts.py`,
+`tests/test_github_authorization_contracts.py`,
+`tests/test_github_release_reader_contracts.py`,
+`tests/test_shared_watch_authorization_fence.py` and
+`tests/test_github_ingestion_contracts.py`, using `D:/Python313/python.exe`,
+`TEMP=TMP=F:/Pullwise/.test-tmp/discovery`, `-q -p no:cacheprovider`.
+
+Final result: **463 passed, 111 subtests passed in 66.75s** (88 additional
+tests compared with the previous 375-test renewal regression). All changed
+Python modules and new/changed tests passed `py_compile`; `git diff --check`
+passed with the existing LF-to-CRLF warnings. The workspace-root design files
+are outside the separate project Git repositories; their local links, trailing
+whitespace and conflict markers were checked separately.
+
+`gh run list` and `gh run view 34212039198` were rechecked: the latest Server
+run is still [the failed old baseline](https://github.com/GoPullwise/pullwise-server/actions/runs/34212039198)
+at `0122367`, with failure in the test step. No remote run covers these local
+changes. The broken Python 3.10 environment remains unverified; the passing
+count above is a current-target regression on Python 3.13, not the full
+historical suite or a Cloudflare-runtime result.
+
+Remaining P3 work includes server credential/account-to-binding composition,
+PR/CI readers and log transport, source-to-Item rule projection, conditional
+reads and credential-scope rate scheduling, and actual GitHub field/permission
+coverage. Cloudflare CF1/CF2, Python/SDK runtime compatibility and P5a Web remain
+separate unfinished mainline slices. No dependency was installed, Jev invoked,
+credentials provisioned, remote change published or deployment performed.
+
+## P3 PR/CI readers, native run state and credential composition (2026-09-22)
+
+Parallel implementation continued the same PR / CI / Updates mainline and
+shared REST target. No Web business logic, SDK, Cloudflare resources or default
+live startup was changed in this slice.
+
+- `GitHubPRReader` supports PR state, review bodies, PR discussion comments and
+  inline review comments through bounded REST pages and event refetch. A cursor
+  retains the open-PR page and collection position; canonical same-repository
+  Link URLs are checked. Repository identity is verified around mutable name
+  routes, and child pages refetch the parent before applying its closed state.
+  One call emits at most 100 sources with at most four GETs.
+- PR delivery receipts now carry a validated numeric `pull_number`, because a
+  review/global PR identifier alone cannot locate every REST endpoint. It is a
+  locator, not an authority claim. Existing receipts survive the nullable-column
+  schema upgrade; no old payload body is reconstructed. PR state now uses its
+  authoritative `updatedAt` to reject an older snapshot reopening a closed PR.
+- `GitHubCIReader` reads run/attempt/jobs/steps, traverses attempt history and
+  paginates jobs. Success and other nonfailure states travel in
+  `FactPage.run_states`, not synthetic failure sources. Normal calls use at most
+  five GETs; job events use five when their attempt is known, or at most six for
+  bounded membership verification when the job API omits it.
+- `github_run_states` preserves native state per repository/run/attempt under
+  the same authority/config/generation-fenced fact transaction. Older upstream
+  times and same-attempt terminal-to-nonterminal regressions are rejected.
+  Each snapshot identifies its current jobs-page coverage; a last page does
+  not manufacture a complete run or an execution recovery relation.
+- `GitHubCredentialResolver` composes existing account/identity/installation
+  access helpers through server-owned callbacks. It verifies owner and target
+  identity, chooses the bound GitHub identity, and checks known token expiry.
+  Issuance completion rechecks target, account, selected identity and installation
+  access because unlink/revoke can occur independently. Exceptions/reprs do not
+  expose tokens, and GitHub retry deadlines are retained. Reader token access
+  requires an already valid proof and never invokes the permission checker.
+- `build_github_fact_sync` now assembles all three readers and that resolver
+  with the checker, rejects mismatched App IDs and unsupported modules, and
+  performs no I/O during construction. An integration failure exposed that the
+  scheduled path passed a snapshot preceding its own next-schedule write; it
+  now passes the post-write snapshot rather than weakening credential fencing.
+
+Independent review reproduced two further defects and both were fixed with
+red/green tests: a completed CI attempt could regress to in-progress at the
+same authoritative second, and a direct job event with known attempt could
+retry indefinitely when its job was outside page one. Known-attempt events now
+use the verified direct job plus matching attempt response as a partial snapshot.
+
+Test-first evidence includes absent-reader/resolver/factory failures, missing
+native-run persistence, missing PR locator/upgrade handling, closed-parent
+projection, expired or revoked credentials during issuance, and the integration
+and review failures above. Three-module composition tests verify that existing
+proofs permit manual fact reads without permission refresh, budget resolution or model
+jobs; CI success persistence remains separate from failure classification.
+
+Verification: the previous 24-file 463-test command plus
+`tests/test_github_pr_reader_contracts.py`, `tests/test_github_ci_reader_contracts.py`,
+`tests/test_github_credentials_contracts.py`, `tests/test_ci_run_persistence_contracts.py`
+and `tests/test_pr_delivery_contracts.py`, using `D:/Python313/python.exe`,
+`TEMP=TMP=F:/Pullwise/.test-tmp/discovery`, and `-q -p no:cacheprovider`.
+
+Final result: **569 passed, 123 subtests passed in 59.08s**, adding 106 tests
+over the previous 463-test slice. Changed modules and tests passed `py_compile`;
+`git diff --check` passed with the existing LF-to-CRLF warnings. The latest
+remote Server CI still reports failure at baseline `0122367` in
+[run 34212039198](https://github.com/GoPullwise/pullwise-server/actions/runs/34212039198);
+no remote run covers these local changes. This is Python 3.13 fixture/integration
+evidence, not Python 3.10, Cloudflare runtime, full historical-suite or live
+GitHub/model coverage evidence.
+
+Explicit remaining P3 limits: PR thread IDs/resolved/outdated still require
+GraphQL verification; paged historical reviews do not establish the currently
+effective formal review, so raw `CHANGES_REQUESTED` is not promoted to a verified
+action. The open-PR scan cannot yet compensate for every missed close event.
+CI logs are not downloaded, evidence remains unavailable and no symptom or
+cross-run recovery is inferred. Job events without attempt identity can still
+need normal scheduled scanning beyond the bounded first membership page.
+Collection-by-collection PR and attempt/job CI scanning adds latency at the
+15-minute cadence; it is not a complete snapshot per invocation.
+
+Account callbacks are implemented and explicitly composable, but default app
+startup has not been given production credential bindings. Existing OAuth
+identity storage does not persist expiry/refresh-token lifecycle data. Full
+credential-scope rate coordination and conditional requests, source-to-Item
+rule projection, P5a Web, and Cloudflare CF1/CF2 remain unfinished. No dependency
+installation, model call, real credential use, deployment or remote publication
+was performed.
+
+## P3 rule Items, evidence adapters and REST handling loop (2026-09-22)
+
+The Server now composes source persistence with deterministic Item publication.
+This advances the P5a product loop rather than adding only ingestion scaffolding:
+an actual fact-sync fixture produces a CI Item visible through the shared REST
+API, PATCH marks it done, and subsequent list/overview reads remove it from
+action views without a model call or processing charge. Web UI migration is
+still pending; no browser or Cloudflare completion claim is implied.
+
+- `product_projection.project_rule_source` maps explicit CI failure/timed_out,
+  current review-request users/teams, and explicitly verified effective formal
+  Request changes into stable rule units. Empty bodies do not erase a verified
+  formal request. Unknown historical reviews and unclassified Updates do not
+  create invented Items. Each projection carries an action signature and its
+  rule-evidence completeness; it does no network/store/model work.
+- `product_rule_items.publish_rule_items` runs inside the fact transaction,
+  reuses context/unit identity, publishes through existing source/context fences,
+  and retains distinct requested actors. Unchanged polls retain ItemVersion and
+  attention time. Adjacent complete, materially unchanged actions can carry
+  handling through an explicit system audit event. Withdrawal and A-to-B-to-A
+  requests reopen appropriately; changed evidence cannot silently inherit done.
+  Valid identical semantic snapshots are revalidated and retained; changed or
+  uncertain semantic material retains the existing Item pending confirmation
+  with expired historical evidence and no false current assessment.
+- `reconcile_pr_items` handles explicit parent closure after each fact page in
+  the same transaction. It retains child facts, adds parent authority to Item
+  dependencies and fences all participating contexts. Late old-open child facts
+  do not reopen a known closed PR or churn versions on repeated polls. Explicit
+  parent reopening only reopens Items that parent had closed, with a new version
+  and pending confirmation, never by restoring an old done record. Other PRs and
+  inaccessible/expired parent evidence are not guessed from.
+- REST read projection now applies current-version done/dismissed as handling
+  closures while preserving native GitHub lifecycle. It does not reuse stale
+  handling across versions. `mine` uses GitHub IDs, as required by design 03;
+  Pullwise billing/account IDs are not interchangeable. Manual assignee takes
+  priority, and unverified team membership remains unassigned. lastSyncedAt uses
+  the oldest participating source's latest sync time, independent of ItemVersion
+  and attentionUpdatedAt.
+- `github_pr_threads` provides two fixed read-only GraphQL queries and bounded
+  opaque continuation across both thread and comment pages. It validates stable
+  repository/PR identity, comment database identity, reply association and cycles.
+  Optional `GitHubPRReader.thread_reader` enrichment joins only actual matching
+  comments; partial or missing pages remain unknown and never imply deletion.
+- `github_ci_logs` provides an injected single-job log boundary: GitHub-only
+  initial authorization, restricted credential-free download redirects, 5 MiB
+  streaming bound, sanitized failures and known-pattern local redaction. It
+  selects at most one complete-line 20 KiB tail window with stable line numbers,
+  versioned selection and unknown stage/step. It does not infer symptoms.
+  Optional `GitHubCIReader.log_reader` preserves failure facts on unavailable
+  evidence and propagates rate limits. Log-enabled mode uses one job per page;
+  the composition factory accepts optional CI logs and PR thread dependencies.
+
+Test-first evidence covers the absent modules; wrong handling closure/view-ID
+semantics; actual fact-sync to REST Item creation; source freshness without
+version churn; same-input semantic retention; expired historical evidence;
+request withdrawal/carry/ABA; explicit parent close/reopen; cross-thread reply
+cycles; secret redaction and line numbers; credential-free redirects; and optional
+reader/factory wiring. Independent review reported no additional confirmed P0/P1
+and requested the late-child-after-parent-close scenario, which was covered by
+both helper and fact-sync integration tests.
+
+Final verification used the previous 29-file command plus
+`tests/test_product_projection_contracts.py`, `tests/test_product_rule_items_contracts.py`,
+`tests/test_github_ci_logs_contracts.py` and `tests/test_github_pr_threads_contracts.py`:
+**706 passed, 123 subtests passed in 56.31s**, adding 137 tests. Interpreter:
+`D:/Python313/python.exe`; `TEMP=TMP=F:/Pullwise/.test-tmp/discovery`;
+`-q -p no:cacheprovider`. All changed Python modules/tests passed `py_compile`;
+`git diff --check` passed with the existing LF-to-CRLF warnings. Latest remote
+Server CI remains [run 34212039198](https://github.com/GoPullwise/pullwise-server/actions/runs/34212039198)
+on old `0122367`, failed; it does not cover this working tree.
+
+Explicit remaining boundaries: GraphQL has an injected query callback, and its
+continuation is not yet integrated into the REST scan's persistent cursor;
+enrichment only covers the returned matching comments. Effective formal-review
+history verification, thread-level semantic aggregation and missed-close
+discovery still need completion. Log transport has no default network executor;
+cooperative deadline checks cannot interrupt a blocked callback, so public-peer
+DNS/TLS enforcement and actual hard total exit remain platform gates. Known
+pattern redaction is not a promise of complete secret removal. Enabling one-job
+log pages changes cursor scope; live rollout needs an explicit safe checkpoint
+transition without resetting backfill/usage. Assignee membership validation and
+team resolution, credential lifecycle/rate coordination, model gates, P5a Web
+and Cloudflare CF1/CF2 remain unfinished. No new dependency, real credential,
+Jev call, deployment or remote publication was used.
+
+## Explicit no-go gates
+
+- Cloudflare production ingestion: **NO-GO** until the selected runtime,
+  persistent transaction authority, credentials and scheduled execution have
+  been validated. This does not block P3 injected adapters or P5a product work.
+
+- Jev production calls: **NO-GO**. No authorized key, no fixed SDK install/import
+  verification, no slow-stream/oversize-body bounded-exit proof, and no real
+  PR/CI/Updates quality evaluation.
+- General CI cross-run recovery: **NO-GO**. No actual job/matrix identity and
+  lineage coverage study has been completed; unsupported relations must remain
+  `unknown`.
+- Updates automated quality claim: **NO-GO**. The joint-answer and partial-
+  coverage rules are implemented only as deterministic skeletons; no real model
+  precision/recall/coverage gate has passed.
+- P5b matrices/full timeline: **DEFERRED** until paired usability testing proves
+  a location-time benefit over P5a lists and labels.
+
+## Next implementation slice
+
+1. Complete the blocked P0 visual baselines when browser tooling is authorized.
+2. Finish RepositoryService and watch mutation/idempotency endpoints, source
+   assessment persistence, and the scheduled eligibility/cooldown state machine.
+3. Finish P3 coverage after the rule-Item/evidence slice: persistent GraphQL
+   scan and effective-review verification, missed-close discovery, thread-level
+   semantic projection, hard-bounded live log transport, credential lifecycle/
+   rate coordination and actual field/permission coverage. Advance Cloudflare
+   CF1/CF2 alongside P5a, using appendix 08; keep Jev production disabled.
+4. Replace Dashboard with P5a list/evidence/handling views using product-v1.
+5. Remove the entire old scan/finding/fix/Reviewer/Worker/Gateway/Agent-first
+   dependency closure and its tests/config/routes. Old physical scan tables may
+   exist only for settlement/backup dry-run and must not be read by the new
+   product; no compatibility adapter or dual runtime is an accepted endpoint.
+6. After Server/Web no longer depend on them, remove local Admin and Worker
+   directories using the recorded recovery commits. Remote deletion remains a
+   manual user action.
