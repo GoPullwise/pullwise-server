@@ -91,6 +91,13 @@ failure release ledger/bucket and mark the job failed in one batch. Attempt
 spend remains. These paths passed local SQLite and workerd/D1 restart probes;
 no real scheduler or provider call uses them yet.
 
+The adapter now also confirms an active charge key in a guarded D1 batch
+before returning its existing reservation, and atomically reopens a released
+charge key with a new reservation for the same owner/module. Replays cannot
+increment reserved usage. This matches the local reference's charge-key
+identity for this slice; scheduling generation and cancellation interactions
+remain unconnected.
+
 The command builders now live in Server `cloudflare_d1_mapping.py`, with
 `cloudflare_account_adapter.py` providing async snapshot reads and one D1
 `batch()` call per guarded write. The isolated probe packages the same Server

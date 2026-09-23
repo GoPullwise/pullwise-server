@@ -83,3 +83,24 @@ def test_async_claim_failure_retains_attempt_spend_and_releases_terminal_reserva
         assert db.execute("SELECT state FROM background_jobs").fetchone()[0] == "failed"
         assert db.execute("SELECT state FROM processing_usage_ledger").fetchone()[0] == "released"
         assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 1
+
+
+def test_async_reservation_reuses_active_charge_and_reopens_released_charge(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    adapter = D1AnalysisTransactions(binding)
+    original = fixture.store.get_background_job(job["id"])["reservationId"]
+    reused = asyncio.run(adapter.reserve_processing_unit(owner_id="owner", charge_key="charge",
+        reservation_id="ignored", module="pr", now=fixture.now))
+    assert reused == {"chargeKey": "charge", "reservationId": original, "state": "reserved", "reused": True}
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 1
+    fixture.store.finish_processing_unit(original, succeeded=False)
+    reopened = asyncio.run(adapter.reserve_processing_unit(owner_id="owner", charge_key="charge",
+        reservation_id="new-reservation", module="pr", now=fixture.now))
+    assert reopened == {"chargeKey": "charge", "reservationId": "new-reservation", "state": "reserved", "reused": False}
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 1
+    with pytest.raises(ValueError, match="CHARGE_KEY_CONFLICT"):
+        asyncio.run(adapter.reserve_processing_unit(owner_id="owner", charge_key="charge",
+            reservation_id="another", module="ci", now=fixture.now))

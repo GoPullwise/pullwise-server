@@ -15,6 +15,41 @@ class D1AnalysisTransactions:
     def __init__(self, binding: Any) -> None:
         self.binding = binding
 
+    async def reserve_processing_unit(self, *, owner_id: str, charge_key: str,
+                                      reservation_id: str, module: str, now: int) -> dict:
+        existing = await self.binding.prepare("""SELECT reservation_id,billing_owner_id,
+            period,module,state FROM processing_usage_ledger WHERE charge_key=?""").bind(charge_key).first()
+        account = await self.binding.prepare("""SELECT u.value AS snapshot,
+            authority.revision AS account_revision,authority.period AS period
+            FROM account_entitlement_authority authority
+            JOIN app_state a ON a.name='users'
+            JOIN json_each(a.payload) u ON u.key=authority.owner_id
+            WHERE authority.owner_id=?""").bind(owner_id).first()
+        if not account:
+            raise ValueError("persisted reservation account is missing")
+        if existing:
+            if (existing["billing_owner_id"] != owner_id or existing["module"] != module
+                    or (existing["state"] in {"reserved", "consumed"}
+                        and existing["period"] != account["period"])):
+                raise ValueError("CHARGE_KEY_CONFLICT")
+            if existing["state"] in {"reserved", "consumed"}:
+                await execute_d1_batch(self.binding, mapping.confirm_existing_reservation(
+                    charge_key=charge_key, reservation_id=existing["reservation_id"],
+                    owner_id=owner_id, period=existing["period"], module=module,
+                    state=existing["state"]))
+                return {"chargeKey": charge_key, "reservationId": existing["reservation_id"],
+                        "state": existing["state"], "reused": True}
+            commands = mapping.reserve_released_processing_unit(owner_id=owner_id,
+                account_snapshot=account["snapshot"], account_revision=account["account_revision"],
+                charge_key=charge_key, reservation_id=reservation_id, module=module, now=now)
+        else:
+            commands = mapping.reserve_first_processing_unit(owner_id=owner_id,
+                account_snapshot=account["snapshot"], account_revision=account["account_revision"],
+                charge_key=charge_key, reservation_id=reservation_id, module=module, now=now)
+        await execute_d1_batch(self.binding, commands)
+        return {"chargeKey": charge_key, "reservationId": reservation_id,
+                "state": "reserved", "reused": False}
+
     async def reserve_first_processing_unit(self, *, owner_id: str, charge_key: str,
                                             reservation_id: str, module: str, now: int) -> Any:
         account = await self.binding.prepare("""SELECT u.value AS snapshot,

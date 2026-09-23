@@ -140,6 +140,9 @@ The driver now checks account-cycle owner attempt limits through Server tests,
 first reservation, retry deadline, terminal release and replay after a real
 restart. Fresh local Worker cold start can exceed 20 seconds; the driver uses
 a 90-second request timeout. None of these results is remote validation.
+It also checks active charge-key reuse and a released key's guarded
+re-reservation. One local restart exited with a workerd disconnected error;
+a subsequent restart with the same persisted D1 passed the replay check.
 
 The synthetic fixture generator now copies Server-owned D1 mapping, async
 batch/account adapter and pure entitlement-rule modules into an ignored local

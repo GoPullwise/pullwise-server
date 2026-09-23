@@ -1023,7 +1023,18 @@ Fresh local Python Worker startup exceeded the old 20-second probe timeout,
 so the probe driver now allows 90 seconds; warm requests stayed fast. The
 process was stopped. This is not remote Cloudflare validation, a full async
 ProductStore, or CF2. Real Creem, scheduling, REST, source-only/cache replay,
-charge-key reuse and revocation/cancellation remain open.
+charge-key generation and revocation/cancellation remain open.
+
+Charge-key continuation: active reserved/consumed keys now receive a guarded
+read confirmation and return their original reservation; a released key can
+reserve again with a new ID for the same owner/module, updating the current
+bucket limit without clearing counts. Unit tests covered duplicate calls and
+owner/module conflict; the local workerd driver covered active reuse,
+terminal release, reopened reservation and replay. One workerd restart
+attempt exited with a local runtime disconnected error before readiness;
+restarting again against the same persisted directory passed
+`verify_server_mapping.py --after-restart`. This is a local runtime anomaly,
+not a remote CI result or a CF2 pass.
 
 After this slice, the broader selected Server regression reported **764 passed,
 84 subtests** with Python 3.13 and workspace TEMP/TMP. Server CI remained at

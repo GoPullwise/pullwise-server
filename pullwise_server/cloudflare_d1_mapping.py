@@ -239,6 +239,53 @@ def reserve_first_processing_unit(*, owner_id, account_snapshot, account_revisio
     ]
 
 
+def reserve_released_processing_unit(*, owner_id, account_snapshot, account_revision,
+                                     charge_key, reservation_id, module, now):
+    """Reopen an already released charge key under the current owner period."""
+    if (not all(isinstance(value, str) and value for value in
+                (owner_id, charge_key, reservation_id)) or module not in {"pr", "ci", "updates"}):
+        raise ValueError("invalid processing reservation identity")
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority,processing_usage_ledger ledger
+            WHERE a.name='users' AND u.key=? AND u.value=?
+            AND authority.owner_id=? AND authority.revision=? AND authority.dirty=0
+            AND authority.period_start<=? AND authority.valid_until>?
+            AND ledger.charge_key=? AND ledger.billing_owner_id=?
+            AND ledger.module=? AND ledger.state='released')""",
+            (owner_id, account_snapshot, owner_id, account_revision, now, now,
+             charge_key, owner_id, module)),
+        ("""INSERT INTO processing_usage_buckets
+            (billing_owner_id,period,metric,used,reserved,limit_value,updated_at)
+            SELECT owner_id,period,'intelligent_processing',0,0,monthly_processing_limit,?
+            FROM account_entitlement_authority WHERE owner_id=?
+            ON CONFLICT(billing_owner_id,period,metric) DO UPDATE SET
+            limit_value=excluded.limit_value,updated_at=excluded.updated_at""", (now, owner_id)), _changed(),
+        ("""UPDATE processing_usage_buckets SET reserved=reserved+1,updated_at=?
+            WHERE billing_owner_id=? AND period=(SELECT period FROM account_entitlement_authority WHERE owner_id=?)
+            AND metric='intelligent_processing' AND used+reserved<limit_value""",
+            (now, owner_id, owner_id)), _changed(),
+        ("""UPDATE processing_usage_ledger SET reservation_id=?,period=(SELECT period
+            FROM account_entitlement_authority WHERE owner_id=?),state='reserved',
+            reserved_at=?,finished_at=NULL
+            WHERE charge_key=? AND billing_owner_id=? AND module=? AND state='released'""",
+            (reservation_id, owner_id, now, charge_key, owner_id, module)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def confirm_existing_reservation(*, charge_key, reservation_id, owner_id, period, module, state):
+    """Fence an idempotent active-charge read at a D1 transaction boundary."""
+    if state not in {"reserved", "consumed"}:
+        raise ValueError("only active charges can be confirmed")
+    return [
+        _check("""EXISTS(SELECT 1 FROM processing_usage_ledger WHERE charge_key=?
+            AND reservation_id=? AND billing_owner_id=? AND period=? AND module=? AND state=?)""",
+            (charge_key, reservation_id, owner_id, period, module, state)),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
 def _job_binding(job_id, now):
     return _check("""EXISTS(SELECT 1 FROM background_jobs j
         JOIN source_records s ON s.source_id=j.source_id

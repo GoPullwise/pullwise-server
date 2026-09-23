@@ -46,6 +46,11 @@ revision; pending or incomplete assessment must not silently close an item.
   persists the deadline or atomically releases reservation and job state.
   Replay/released charge keys, full job scheduling, source-only/cache replay
   and all cancellation/revocation paths still need mapping.
+- D1 reservation reuse must confirm an active charge key under one batch
+  before returning its prior reservation. A released charge key may reopen
+  with a new reservation only for the same owner/module, while updating the
+  current period bucket without resetting usage. Both paths remain local
+  mapping evidence until the real scheduler is connected.
 - The real Creem handler mutates in-memory users, billingEvents and pending
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this

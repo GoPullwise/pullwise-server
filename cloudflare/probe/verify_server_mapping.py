@@ -43,6 +43,8 @@ def main():
     assert state["secondReservation"] == state["encryptedToken"] == 1, state
     assert call("reset")[0] == 200
     assert call("claim")[0] == 200
+    status, reuse = call("reserve-charge")
+    assert status == 200 and reuse["reservation"]["reused"] is True, reuse
     assert call("retry-claim")[0] == 200
     state = call("state", "GET")[1]
     assert state["jobState"] == "retry_wait" and state["jobAttempt"] == 1, state
@@ -54,6 +56,12 @@ def main():
     state = call("state", "GET")[1]
     assert state["jobState"] == "failed" and state["jobAttempt"] == 2, state
     assert state["reserved"] == state["used"] == 0 and state["attempts"] == 2, state
+    status, reopened = call("reserve-charge")
+    assert status == 200 and reopened["reservation"]["reused"] is False, reopened
+    status, reuse = call("reserve-charge")
+    assert status == 200 and reuse["reservation"]["reused"] is True, reuse
+    state = call("state", "GET")[1]
+    assert state["chargeReservationId"] == "reopened-reservation" and state["reserved"] == 1, state
     for fault in ("edit-parent", "change-account", "break-reservation"):
         assert call("reset")[0] == 200
         assert call("claim")[0] == 200

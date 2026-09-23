@@ -461,3 +461,23 @@ def test_d1_attempt_three_is_terminal_even_when_failure_is_retryable(tmp_path):
         assert tuple(db.execute("SELECT state,attempt,next_attempt_at FROM background_jobs").fetchone()) == ("failed", 3, None)
         assert db.execute("SELECT state FROM processing_usage_ledger").fetchone()[0] == "released"
         assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 3
+
+
+def test_d1_released_charge_key_can_reserve_again_once_without_losing_usage(tmp_path):
+    m = mapping()
+    f, job, frozen = seed(tmp_path / "domain.db")
+    reservation_id = f.store.get_background_job(job["id"])["reservationId"]
+    f.store.finish_processing_unit(reservation_id, succeeded=False)
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
+    args = dict(owner_id="owner", account_snapshot=frozen, account_revision=1,
+        charge_key="charge", reservation_id="replacement", module="pr", now=f.now)
+    execute(f.store, m.reserve_released_processing_unit(**args))
+    with closing(f.store.connect()) as db:
+        row = db.execute("SELECT reservation_id,state,period FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()
+        assert tuple(row) == ("replacement", "reserved", entitlements_for_user(json.loads(frozen), timestamp=f.now)["period"])
+        assert tuple(db.execute("SELECT used,reserved FROM processing_usage_buckets").fetchone()) == (0, 1)
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.reserve_released_processing_unit(**args))
+    with closing(f.store.connect()) as db:
+        assert tuple(db.execute("SELECT used,reserved FROM processing_usage_buckets").fetchone()) == (0, 1)

@@ -53,6 +53,7 @@ class Default(WorkerEntrypoint):
                 (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved,
                 (SELECT limit_value FROM processing_usage_buckets LIMIT 1) AS limitValue,
                 (SELECT COUNT(*) FROM processing_usage_ledger WHERE charge_key='probe-second') AS secondReservation,
+                (SELECT reservation_id FROM processing_usage_ledger WHERE charge_key='charge') AS chargeReservationId,
                 (SELECT json_extract(value,'$.githubAccessToken.__encrypted')='pullwise-state-secret-v1'
                     FROM app_state,json_each(payload) WHERE name='users' AND key='owner') AS encryptedToken,
                 (SELECT COUNT(*) FROM provider_attempts) AS attempts,
@@ -168,6 +169,14 @@ class Default(WorkerEntrypoint):
                     owner_id='owner', charge_key='probe-second', reservation_id='probe-second-reservation',
                     module='ci', now=DATA['claim']['now'])
                 return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'reserve-charge':
+            try:
+                result = await D1AnalysisTransactions(self.env.DB).reserve_processing_unit(
+                    owner_id='owner', charge_key='charge', reservation_id='reopened-reservation',
+                    module='pr', now=DATA['claim']['now'])
+                return Response.json({'committed': True, 'reservation': result})
             except Exception:
                 return Response.json({'committed': False}, status=409)
         elif name in {'retry-claim', 'terminal-claim'}:
