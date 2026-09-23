@@ -17,7 +17,7 @@ def main():
         publish = publication_args(f, job, frozen)
         claim = claim_args(f, job, frozen)
         f.source("3", "Queued source")
-        names = ["watch_controls", "update_watches", "processing_controls",
+        names = ["repository_services", "watch_controls", "update_watches", "processing_controls",
                  "discovery_targets", "billing_public_catalog",
                  "source_records", "source_versions", "source_contexts", "assessments",
                  "source_assessment_publications", "items", "item_versions", "provider_attempts",
@@ -48,6 +48,7 @@ def main():
                      "creem_signature", "creem_event_rules", "cloudflare_webhook_receipts",
                      "cloudflare_creem_handler", "cloudflare_source_read",
                      "cloudflare_watch_adapter",
+                     "cloudflare_repository_adapter",
                      "cloudflare_session_adapter",
                      "cloudflare_oauth_state_adapter",
                      "cloudflare_billing_catalog_write", "product_public_catalog_rules",

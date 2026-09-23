@@ -30,6 +30,14 @@ synthetic product entities bound to configured IDs and uses a fresh
 `.wrangler/server-map-catalog-verified-state`; no real
 Creem product, secret, price configuration or remote resource is used.
 
+The finite `/server-map/repository-create`, `/repository-disable`, and
+`/repository-state` routes exercise the trusted RepositoryService D1 mapping
+with synthetic owner, repository, Job and reservation rows. The local
+`server-map-repository-state` run confirmed create, queued cancellation and
+reservation release, analysis-off Source fence, stale revision rejection, and
+the same state after a real workerd restart. These routes are probe-only; no
+real GitHub installation or repository write HTTP endpoint is enabled.
+
 This is a **local experiment, not the Server deployment or a production adapter**.
 The user approved the isolated validation dependencies in this session. No real
 GitHub/Jev credentials, model requests, remote D1 resources, deployments, DNS

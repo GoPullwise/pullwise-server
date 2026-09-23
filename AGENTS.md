@@ -190,6 +190,14 @@ revision; pending or incomplete assessment must not silently close an item.
   or the repository service to remain active under that owner, in the same
   read snapshot. Member sync resource authorization remains unmapped and must
   fail closed. Job GET is read-only and does not schedule, renew or charge.
+  `cloudflare_repository_adapter.D1RepositoryTransactions.put_service` is a
+  trusted local-only command, not an HTTP repository write. Its D1 batch
+  rechecks the owner's entitlement, active repository count, revision and
+  queued reservations, then updates the service, releases queued processing
+  reservations and advances PR/CI Source configuration fences atomically.
+  Running leases retain their state but cannot publish against the new fence.
+  A real caller still needs current GitHub App repository authorization and
+  shared-watch parent propagation before this command can be mounted.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

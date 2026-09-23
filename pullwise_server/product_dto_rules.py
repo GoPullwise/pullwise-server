@@ -25,6 +25,20 @@ def watch_dto(row: Mapping[str, object]) -> dict:
     }
 
 
+def repository_service_dto(row: Mapping[str, object]) -> dict:
+    return {"repositoryId": row["repository_id"],
+        "installationId": row["installation_id"],
+        "billingOwnerId": row["billing_owner_id"],
+        "enabled": bool(row["enabled"]),
+        "modules": json.loads(row["modules_json"]),
+        "analysisEnabled": json.loads(row["analysis_enabled_json"]),
+        "allowMemberSync": bool(row["allow_member_sync"]),
+        "defaultAssigneeId": row["default_assignee_id"],
+        "priorityOrder": int(row["priority_order"]),
+        "status": row["status"],
+        "revision": int(row["revision"])}
+
+
 def iso_timestamp(value: int) -> str:
     return datetime.fromtimestamp(value, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 

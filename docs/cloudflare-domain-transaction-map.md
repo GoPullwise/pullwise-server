@@ -501,6 +501,17 @@ a plan upgrades; projection alone does not alter existing bucket limits.
 
 ## Scope still requiring adaptation
 
+The trusted `D1RepositoryTransactions.put_service` command now covers the
+RepositoryService owner/capacity/revision write boundary. It rechecks the exact
+storage account and service revision in one D1 batch, along with active owner
+capacity, queued Job reservation integrity and bucket balance. The batch
+releases matching queued PR/CI reservations, cancels those Jobs, and advances
+repository discovery-target and Source-context configuration fences. Running
+leases remain and cannot publish their old configuration. A malformed ledger
+rolls back the entire service revision. SQLite tests and a synthetic local
+workerd restart probe cover this path. It is unmounted pending GitHub App
+authority binding and shared-watch parent propagation; it is not CF2 evidence.
+
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.
 - Source-only and cached publication, thread membership CAS for projections

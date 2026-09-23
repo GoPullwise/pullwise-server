@@ -14,6 +14,7 @@ from .product_dto_rules import (
     iso_timestamp as _iso_timestamp,
     source_context_dto, source_record_dto, watch_dto,
     handling_event_dto, item_read_dto, item_dependencies_current,
+    repository_service_dto,
 )
 from .update_filter import project_saved_updates
 from .product_usage_events import parse_usage_events_query, usage_events_page
@@ -3780,19 +3781,7 @@ class ProductStore:
 
     @staticmethod
     def _repository_service_dto(row: sqlite3.Row) -> dict:
-        return {
-            "repositoryId": row["repository_id"],
-            "installationId": row["installation_id"],
-            "billingOwnerId": row["billing_owner_id"],
-            "enabled": bool(row["enabled"]),
-            "modules": json.loads(row["modules_json"]),
-            "analysisEnabled": json.loads(row["analysis_enabled_json"]),
-            "allowMemberSync": bool(row["allow_member_sync"]),
-            "defaultAssigneeId": row["default_assignee_id"],
-            "priorityOrder": int(row["priority_order"]),
-            "status": row["status"],
-            "revision": int(row["revision"]),
-        }
+        return repository_service_dto(row)
 
     @staticmethod
     def _assessment_dto(row: sqlite3.Row) -> dict:

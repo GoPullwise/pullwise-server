@@ -52,6 +52,7 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
         from pullwise_server.cloudflare_source_read import D1SourceReads
         from pullwise_server.cloudflare_watch_adapter import D1WatchTransactions
+        from pullwise_server.cloudflare_repository_adapter import D1RepositoryTransactions
         from pullwise_server.cloudflare_session_adapter import D1SessionTransactions
         from pullwise_server.cloudflare_oauth_state_adapter import D1OAuthStates
         from pullwise_server.cloudflare_billing_catalog_write import D1BillingCatalogTransactions
@@ -85,6 +86,16 @@ class Default(WorkerEntrypoint):
                 (SELECT accessible FROM source_contexts WHERE source_id='1') AS firstAccessible,
                 (SELECT context_version FROM source_contexts WHERE source_id='1') AS firstContextVersion,
                 (SELECT context_stale FROM source_contexts WHERE source_id='1') AS firstContextStale''').first()
+            return Response.json(row)
+        if request.method == 'GET' and name == 'repository-state':
+            row = await self.env.DB.prepare('''SELECT
+                (SELECT revision FROM repository_services WHERE repository_id='repo') AS revision,
+                (SELECT state FROM background_jobs LIMIT 1) AS jobState,
+                (SELECT state FROM processing_usage_ledger WHERE charge_key='charge') AS chargeState,
+                (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved,
+                (SELECT configuration_revision FROM source_contexts WHERE source_id='1') AS config,
+                (SELECT analysis_enabled FROM source_contexts WHERE source_id='1') AS analysis,
+                (SELECT COUNT(*) FROM provider_attempts) AS attempts''').first()
             return Response.json(row)
         if request.method == 'GET' and name == 'source-read':
             try:
@@ -131,6 +142,18 @@ class Default(WorkerEntrypoint):
                     WHERE name='billingEvents') AS originalPaymentFactPreserved''').first())
         if request.method != 'POST':
             return Response('Not found', status=404)
+        if name in {'repository-create', 'repository-disable'}:
+            try:
+                result = await D1RepositoryTransactions(self.env.DB).put_service(
+                    repository_id='repo', installation_id='inst-1', owner_id='owner',
+                    expected_revision=0 if name == 'repository-create' else 1,
+                    enabled=True, modules={'pr': True, 'ci': False},
+                    analysis_enabled={'pr': name == 'repository-create', 'ci': False},
+                    allow_member_sync=False, default_assignee_id=None,
+                    priority_order=0, now=DATA['claim']['now'])
+                return Response.json(result)
+            except Exception:
+                return Response.json({'error': 'repository rejected'}, status=409)
         if name == 'watch-create':
             try:
                 watch = await D1WatchTransactions(self.env.DB).create_public_watch(

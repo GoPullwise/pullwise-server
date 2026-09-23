@@ -2035,3 +2035,21 @@ The current Server CI target selection including pure Billing projection and
 candidate `/billing` passes **706 tests, 68 subtests** locally. Web's latest
 `npm run check` remains **616 tests** plus lint/build, with the 390px browser
 check described above. The remote Server CI has not run these unpushed edits.
+
+## Trusted RepositoryService D1 command (2026-09-24 continuation)
+
+`D1RepositoryTransactions.put_service` now shares the SQLite repository DTO
+and puts owner snapshot, active repository capacity, expected revision, queued
+analysis reservation integrity, service mutation, queued Job cancellation,
+reservation release, and PR/CI Source configuration fences in one D1 batch.
+Running Jobs keep their lease; their publication must fail on the advanced
+Source configuration. The smallest queued-release test failed first, then five
+focused tests passed, including capacity race, running lease and rollback on
+missing reservation. Synthetic local workerd/D1 passed create, disable,
+reservation release, stale replay rejection and real process restart in
+`server-map-repository-state`. No provider attempt or model work occurred.
+The command is not mounted on HTTP: real installation/repository authority,
+shared-watch parent propagation and manual sync scheduling remain open.
+Server/Web have not been pushed, so remote CI does not cover this change.
+The updated Server CI target selection passes **722 tests, 68 subtests**
+locally; `sync_server_modules.py --check` and `git diff --check` also pass.
