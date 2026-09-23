@@ -1110,6 +1110,43 @@ class ProductStore:
                 raise ValueError("REVISION_MISMATCH")
             updated = connection.execute("SELECT * FROM update_watches WHERE id = ?", (row["id"],)).fetchone()
             self._invalidate_discovery_configuration(connection, resource_kind="watch", resource_id=row["id"])
+            waiting = connection.execute(
+                """SELECT j.* FROM background_jobs j
+                   WHERE j.job_type='analyze_source'
+                     AND j.state IN ('queued','retry_wait')
+                     AND EXISTS (SELECT 1 FROM source_contexts sc
+                         WHERE sc.watch_id=? AND sc.source_id=j.source_id
+                           AND sc.context_id=j.context_id)""",
+                (row["id"],),
+            ).fetchall()
+            for job in waiting:
+                if job["reservation_id"]:
+                    reservation = connection.execute(
+                        "SELECT * FROM processing_usage_ledger WHERE reservation_id=?",
+                        (job["reservation_id"],),
+                    ).fetchone()
+                    if reservation is not None:
+                        self._release_processing_reservation(connection, reservation, now=now)
+                connection.execute(
+                    """UPDATE background_jobs SET state='cancelled',claim_token=NULL,
+                           claimed_until=NULL,updated_at=? WHERE id=?""",
+                    (now, job["id"]),
+                )
+            connection.execute(
+                """UPDATE source_contexts SET
+                       configuration_revision=COALESCE((
+                           SELECT configuration_epoch FROM discovery_targets
+                           WHERE resource_kind='watch' AND resource_id=?),?),
+                       analysis_enabled=?,
+                       context_stale=CASE WHEN context_version!=? THEN 1 ELSE context_stale END,
+                       context_version=?,
+                       processing_status=CASE WHEN ?=0 THEN 'analysis_disabled'
+                                              ELSE processing_status END,
+                       updated_at=? WHERE watch_id=? AND billing_owner_id=?""",
+                (row["id"], updated["revision"], int(bool(next_enabled and next_analysis)),
+                 context_version, context_version, int(bool(next_enabled and next_analysis)),
+                 now, row["id"], row["billing_owner_id"]),
+            )
         return self._watch_dto(updated)
 
     def list_watches_for_billing_owner(self, billing_owner_id: str) -> list[dict]:

@@ -208,6 +208,36 @@ The SQLite reference archive path now mirrors the domain cascade within one
 new authorization revision after archive; the discovery fixture renews proof
 monotonically. D1 and SQLite still need target-runtime request-auth composition
 before the product DELETE route can be exposed.
+
+Trusted public-watch update now has a separate finite D1 batch. It checks the
+persisted owner snapshot, current watch/control revisions and active limit
+when enabling; updates semantic contextVersion only when interests change;
+increments watch configuration revision; cancels queued/retry_wait analysis
+Jobs with atomic ledger/bucket release; and updates watch-linked context and
+discovery fences. Running Jobs keep their claim/attempt but cannot publish
+under the new fence. SQLite `ProductStore.update_watch` now cascades to linked
+contexts even when no discovery target was recorded. The isolated local
+workerd probe passed A→B→A, queued release and restart under
+`server-map-watch-update-state`. The product PATCH route remains unmounted.
+
+The independent candidate now mounts PATCH and DELETE only for an owner's
+public watch. Preflight reads current Cookie/API-key, stored user and watch
+in one batch; the mutation passes that proof into the D1 write batch, which
+rechecks the exact session/key and account snapshot with revision/limit and
+domain guards. A revoked key between batches rolls back update/archive.
+Cookie writes with SameSite=None require a trusted Origin before body read;
+DELETE reads no body and returns 204. Local workerd/D1 exercised PATCH ETag,
+stale If-Match, untrusted Origin and DELETE before and after process restart
+under `server-http-watch-patch-state`. One cold-start timeout and a transient
+local ProxyWorker connection loss occurred; retry after readiness passed.
+Private/shared watch mutations and public create remain unmounted.
+The next synthetic HTTP fixture bound the queued analysis Job and one Source
+context to the first watch. Two watch-only PATCH/DELETE runs separated by a
+real process restart passed in `server-http-watch-cascade-state`. Read-only
+local D1 inspection found zero active watches, zero reserved units, cancelled
+sync Job, inaccessible Source context, zero provider attempts and NULL API-key
+last-used. The old Source lease expired during earlier cold-start trials; this
+watch-only proof does not claim a full Source/Item HTTP rerun.
 The isolated local workerd probe also published a synthetic primary assessment
 depending on a secondary watch context; archiving that watch withdrew the
 assessment in the same D1 state. It passed after a real restart in

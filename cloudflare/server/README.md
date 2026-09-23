@@ -6,6 +6,8 @@ authenticated `GET /api/v1/me`, `GET /api/v1/usage`, `GET /api/v1/watches`,
 `GET /api/v1/sources` and `GET /api/v1/sources/{id}`, and
 `GET /api/v1/items`, `GET /api/v1/items/{id}`, `GET /api/v1/items/overview` and
 `PATCH /api/v1/items/{id}` for handling, and
+`PATCH /api/v1/watches/{id}` and `DELETE /api/v1/watches/{id}` for owner public
+watch configuration/archive, and
 `GET /api/v1/jobs/{id}` for requester-owned manual sync status, and
 `POST /webhooks/creem`; other routes return 404 until the shared product-v1 REST
 contract has been adapted. It has no probe/reset route,
@@ -42,9 +44,13 @@ revision together while rechecking identity and all dependencies. Overview
 combines principal, Source and Item SELECTs in one D1 snapshot before counting.
 Job GET rechecks identity and current watch/repository-service ownership with
 the row and excludes `analyze_source`.
+Public watch PATCH/DELETE recheck Cookie/API-key, stored user, owner, resource
+restriction and revision in the read snapshot and guarded write batch. They
+do not enqueue analysis. Private/shared watch writes and public-watch creation
+are still unported.
 Successful Item/watch detail and handling responses include revision `ETag`
 for the shared If-Match contract.
-When `PULLWISE_COOKIE_SAME_SITE=None`, Cookie Item PATCH requires an Origin or
+When `PULLWISE_COOKIE_SAME_SITE=None`, Cookie Item/watch writes require an Origin or
 Referer matching `PULLWISE_ALLOWED_ORIGINS` or `PULLWISE_APP_URL` before the
 request body is read. The local probe used synthetic loopback values.
 `/health` checks that the D1 tables required by the currently routed HTTP
@@ -67,19 +73,22 @@ if (-not (Test-Path cloudflare/server/python_modules)) {
 $env:TEMP='F:/Pullwise/.test-tmp/discovery'
 $env:TMP=$env:TEMP
 D:/Python313/python.exe cloudflare/server/export_local_fixture.py
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js d1 execute pullwise-cf1-local-only --config cloudflare/server/wrangler.jsonc --local --persist-to cloudflare/server/.wrangler/server-http-etag-state --file cloudflare/server/.wrangler/local-seed.sql
+node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js d1 execute pullwise-cf1-local-only --config cloudflare/server/wrangler.jsonc --local --persist-to cloudflare/server/.wrangler/server-http-watch-cascade-state --file cloudflare/server/.wrangler/local-seed.sql
 ```
 
 Start the Worker with **synthetic** test values and run its local HTTP driver:
 
 ```powershell
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js dev --config cloudflare/server/wrangler.jsonc --local --ip 127.0.0.1 --port 8797 --persist-to cloudflare/server/.wrangler/server-http-etag-state --var='PULLWISE_CREEM_WEBHOOK_SECRET:synthetic-secret' --var='PULLWISE_CREEM_PRODUCT_IDS_JSON:{}'
-D:/Python313/python.exe cloudflare/server/verify_local_http.py
+node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js dev --config cloudflare/server/wrangler.jsonc --local --ip 127.0.0.1 --port 8797 --persist-to cloudflare/server/.wrangler/server-http-watch-cascade-state --var='PULLWISE_CREEM_WEBHOOK_SECRET:synthetic-secret' --var='PULLWISE_CREEM_PRODUCT_IDS_JSON:{}' --var='PULLWISE_COOKIE_SAME_SITE:None' --var='PULLWISE_ALLOWED_ORIGINS:http://127.0.0.1:5173'
+D:/Python313/python.exe cloudflare/server/verify_local_http.py --watch-only --delete-watch --same-site-none
 ```
 
 Stop Wrangler and restart it with the same local persist directory, then run
-the HTTP driver again. A local read-only D1 query should still show two active
-watches, revision 3, `dirty=0`, `last_used_at=NULL` and zero provider attempts.
+the watch-only driver again; the two runs archive the two synthetic watches.
+Read-only D1 inspection should find zero active watches, `reserved=0`, a
+cancelled synthetic sync Job, revoked Source context, no provider attempt and
+no API-key last-used write. Use a fresh ignored state directory before repeating the
+two-run sequence.
 The fixture exporter
 opens only temporary synthetic SQLite
 data; it never opens an account database. Preserve existing `.wrangler` state
@@ -87,7 +96,8 @@ directories as local evidence.
 
 ## Remaining gates
 
-- Repository, watch mutations/detail, visualization, sync and other
+- Repository, public-watch creation, private/shared watch mutations,
+  visualization, sync and other
   product-v1 REST paths are not routed yet. Session issuance, OAuth/App
   lifecycle, API-key management and complete authorization still need D1
   adaptation. Web and external clients must share the eventual Server REST.

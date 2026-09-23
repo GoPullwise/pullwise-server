@@ -63,7 +63,9 @@ class Default(WorkerEntrypoint):
                 (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved,
                 (SELECT state FROM processing_usage_ledger WHERE charge_key='charge') AS chargeState,
                 (SELECT state FROM background_jobs LIMIT 1) AS jobState,
-                (SELECT accessible FROM source_contexts WHERE source_id='1') AS firstAccessible''').first()
+                (SELECT accessible FROM source_contexts WHERE source_id='1') AS firstAccessible,
+                (SELECT context_version FROM source_contexts WHERE source_id='1') AS firstContextVersion,
+                (SELECT context_stale FROM source_contexts WHERE source_id='1') AS firstContextStale''').first()
             return Response.json(row)
         if request.method == 'GET' and name == 'source-read':
             try:
@@ -119,6 +121,24 @@ class Default(WorkerEntrypoint):
                 return Response.json(watch)
             except Exception:
                 return Response.json({'error': 'watch create rejected'}, status=409)
+        if name in {'watch-update-queued', 'watch-update-a'}:
+            row = await self.env.DB.prepare("""SELECT id,revision FROM update_watches
+                WHERE upstream_repository_id='github:101' AND archived_at IS NULL""").first()
+            if not row:
+                return Response.json({'error': 'watch missing'}, status=409)
+            if name == 'watch-update-queued':
+                await self.env.DB.prepare("UPDATE source_contexts SET watch_id=? WHERE source_id='1'").bind(row['id']).run()
+                changes = {'interests': ['database'], 'analysisEnabled': False}
+            else:
+                changes = {'interests': ['OAuth']}
+            try:
+                watch = await D1WatchTransactions(self.env.DB).update_public_watch(
+                    owner_id='owner', watch_id=row['id'],
+                    expected_revision=row['revision'], changes=changes,
+                    now=DATA['claim']['now'])
+                return Response.json(watch)
+            except Exception:
+                return Response.json({'error': 'watch update rejected'}, status=409)
         if name == 'archive-secondary-watch':
             row = await self.env.DB.prepare("""SELECT id FROM update_watches
                 WHERE upstream_repository_id='github:101' AND archived_at IS NULL""").first()

@@ -167,3 +167,94 @@ def test_sqlite_archive_matches_d1_job_and_reservation_cascade(tmp_path):
         assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
         assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
         assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 0
+
+
+def test_d1_watch_update_preserves_scope_and_monotonic_semantic_version(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    adapter = D1WatchTransactions(D1ShapedSQLite(fixture.store))
+    original = asyncio.run(adapter.create_public_watch(owner_id="owner",
+        resolved_public_repository_id="github:101", interests=["OAuth"],
+        enabled=True, analysis_enabled=False, now=fixture.now))
+    changed = asyncio.run(adapter.update_public_watch(owner_id="owner",
+        watch_id=original["id"], expected_revision=original["revision"],
+        changes={"interests": ["database"], "analysisEnabled": True},
+        now=fixture.now))
+    restored = asyncio.run(adapter.update_public_watch(owner_id="owner",
+        watch_id=original["id"], expected_revision=changed["revision"],
+        changes={"interests": ["OAuth"]}, now=fixture.now))
+    assert [original["contextVersion"], changed["contextVersion"],
+            restored["contextVersion"]] == [1, 2, 3]
+    assert restored["watchScopeKey"] == original["watchScopeKey"]
+    assert restored["contextHash"] == original["contextHash"]
+    assert restored["analysisEnabled"] is True
+    assert restored == fixture.store.get_watch(original["id"])
+
+
+def test_d1_analysis_toggle_changes_revision_without_semantic_version(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    adapter = D1WatchTransactions(D1ShapedSQLite(fixture.store))
+    original = asyncio.run(adapter.create_public_watch(owner_id="owner",
+        resolved_public_repository_id="github:101", interests=["OAuth"],
+        enabled=True, analysis_enabled=True, now=fixture.now))
+    disabled = asyncio.run(adapter.update_public_watch(owner_id="owner",
+        watch_id=original["id"], expected_revision=original["revision"],
+        changes={"analysisEnabled": False}, now=fixture.now))
+    assert disabled["revision"] == original["revision"] + 1
+    assert disabled["contextVersion"] == original["contextVersion"]
+    assert disabled["contextHash"] == original["contextHash"]
+
+
+def test_watch_update_disables_queued_analysis_and_releases_reservation(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1WatchTransactions(D1ShapedSQLite(fixture.store))
+    watch = asyncio.run(adapter.create_public_watch(owner_id="owner",
+        resolved_public_repository_id="github:101", interests=["OAuth"],
+        enabled=True, analysis_enabled=True, now=fixture.now))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'", (watch["id"],))
+    changed = asyncio.run(adapter.update_public_watch(owner_id="owner",
+        watch_id=watch["id"], expected_revision=watch["revision"],
+        changes={"analysisEnabled": False}, now=fixture.now))
+    assert changed["contextVersion"] == watch["contextVersion"]
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 0
+        assert tuple(db.execute("SELECT configuration_revision,analysis_enabled FROM source_contexts WHERE source_id='1'").fetchone()) == (2, 0)
+
+
+def test_watch_semantic_update_fences_running_job_without_refunding_attempt(tmp_path):
+    fixture, job, frozen = seed(tmp_path / "domain.db")
+    adapter = D1WatchTransactions(D1ShapedSQLite(fixture.store))
+    watch = asyncio.run(adapter.create_public_watch(owner_id="owner",
+        resolved_public_repository_id="github:101", interests=["OAuth"],
+        enabled=True, analysis_enabled=True, now=fixture.now))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'", (watch["id"],))
+    publication = publication_args(fixture, job, frozen)
+    execute(fixture.store, mapping().claim(**claim_args(fixture, job, frozen)))
+    changed = asyncio.run(adapter.update_public_watch(owner_id="owner",
+        watch_id=watch["id"], expected_revision=watch["revision"],
+        changes={"interests": ["database"]}, now=fixture.now))
+    assert changed["contextVersion"] == 2
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(fixture.store, mapping().publication(**publication))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "running"
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 1
+        assert tuple(db.execute("SELECT context_version,context_stale FROM source_contexts WHERE source_id='1'").fetchone()) == (2, 1)
+
+
+def test_sqlite_watch_update_matches_d1_queued_cancellation(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=True)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'", (watch["id"],))
+    fixture.store.update_watch(watch["id"], expected_revision=watch["revision"],
+        analysis_enabled=False)
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 0
+        assert tuple(db.execute("SELECT configuration_revision,analysis_enabled FROM source_contexts WHERE source_id='1'").fetchone()) == (2, 0)

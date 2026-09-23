@@ -31,6 +31,8 @@ TABLES = (
     "item_handling_events",
     "background_jobs",
     "repository_services",
+    "processing_controls",
+    "discovery_targets",
 )
 
 
@@ -52,6 +54,9 @@ def main() -> None:
         fixture.store.create_watch(owner_id="owner", target_repository_id=None,
             upstream_repository_id="github:102", billing_owner_id="owner",
             interests=["database"], enabled=True, analysis_enabled=False)
+        with fixture.store._immediate() as db:
+            db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'",
+                (first_watch["id"],))
         item = fixture.store.create_item(context_id="repo:repo:pr",
             unit_type="pr_thread", unit_key="thread-local-http")
         sources = [dict(sourceId=source_id, sourceVersion=record["sourceVersion"],

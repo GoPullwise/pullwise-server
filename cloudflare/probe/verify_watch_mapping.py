@@ -20,6 +20,16 @@ def main():
     assert status == 200 and watch["contextVersion"] == 1, watch
     assert watch["watchScopeKey"] and watch["analysisEnabled"] is False, watch
     assert call("watch-create")[0] == 409
+    status, changed = call("watch-update-queued")
+    assert status == 200 and changed["contextVersion"] == 2, changed
+    status, updated_state = call("watch-state", "GET")
+    assert status == 200 and updated_state["reserved"] == 0, updated_state
+    assert updated_state["jobState"] == "cancelled" and updated_state["firstContextStale"] == 1, updated_state
+    status, restored = call("watch-update-a")
+    assert status == 200 and restored["contextVersion"] == 3, restored
+    assert restored["contextHash"] == watch["contextHash"], restored
+    assert call("reset")[0] == 200
+    assert call("watch-create")[0] == 200
     assert call("watch-archive-queued")[0] == 200
     status, cancelled = call("watch-state", "GET")
     assert status == 200 and cancelled["active"] == 0, cancelled

@@ -16,6 +16,7 @@ from .product_dto_rules import watch_dto
 from .cloudflare_source_read import D1SourceReads
 from .cloudflare_item_read import D1ItemReads
 from .cloudflare_item_handling import D1ItemHandling
+from .cloudflare_watch_adapter import D1WatchTransactions
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
 
@@ -502,3 +503,109 @@ async def patch_item(*, binding: Any, item_id: str, headers: Mapping[str, object
         return error(412, "REVISION_MISMATCH", "Item or authority changed.")
     return await read_product(binding=binding, path=f"/api/v1/items/{item_id}",
                               headers=headers, now=now)
+
+
+async def patch_watch(*, binding: Any, watch_id: str,
+                      headers: Mapping[str, object], body: object,
+                      now: int) -> tuple[int, dict]:
+    request_id = _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"
+
+    def error(status: int, code: str, message: str) -> tuple[int, dict]:
+        return status, {"error": {"code": code, "message": message,
+                                  "retryable": False}, "requestId": request_id}
+
+    try:
+        user, restrictions = await _principal(binding, headers, scope="watches:write", now=now)
+    except ProductReadAuthError as failure:
+        return error(failure.status, failure.code, failure.message)
+    if (not isinstance(body, dict) or not body
+            or set(body) - {"interests", "enabled", "analysisEnabled",
+                            "includePrerelease", "priorityOrder"}):
+        return error(400, "INVALID_REQUEST", "Invalid watch fields.")
+    raw_revision = _header(headers, "If-Match")
+    if not raw_revision:
+        return error(428, "PRECONDITION_REQUIRED", "If-Match is required.")
+    revision_text = raw_revision.strip().strip('"')
+    if not revision_text.isdigit() or int(revision_text) < 1:
+        return error(400, "INVALID_REQUEST", "If-Match must contain a valid revision")
+    expected_revision = int(revision_text)
+    proof: dict = {}
+    auth, validate = _resource_auth_snapshot(binding, headers, user,
+        restrictions, now, "watches:write", proof)
+    result = await binding.batch([*auth, binding.prepare("""SELECT id,revision,
+        target_repository_id FROM update_watches WHERE id=?
+        AND billing_owner_id=? AND archived_at IS NULL""").bind(watch_id, user["id"])])
+    try:
+        validate([part.results for part in result[:len(auth)]])
+    except ProductReadAuthError as failure:
+        return error(failure.status, failure.code, failure.message)
+    rows = result[-1].results
+    watch = rows[0] if len(rows) == 1 else None
+    allowed_ids = restrictions.get("watchIds") if restrictions else None
+    if (watch is None or watch["target_repository_id"] is not None
+            or (restrictions and (not isinstance(allowed_ids, list)
+                or watch_id not in allowed_ids))):
+        return error(404, "NOT_FOUND", "Watch was not found.")
+    if int(watch["revision"]) != expected_revision:
+        return error(412, "REVISION_MISMATCH", "Watch revision is stale.")
+    try:
+        updated = await D1WatchTransactions(binding).update_public_watch(
+            owner_id=user["id"], watch_id=watch_id,
+            expected_revision=expected_revision, changes=body, now=now, proof=proof)
+    except ValueError as failure:
+        code = str(failure)
+        if code == "WATCH_LIMIT_REACHED":
+            return error(402, code, "Active watch limit reached.")
+        return error(400, "INVALID_REQUEST", code)
+    except Exception:
+        return error(412, "REVISION_MISMATCH", "Watch or authority changed.")
+    return 200, updated
+
+
+async def delete_watch(*, binding: Any, watch_id: str,
+                       headers: Mapping[str, object], now: int) -> tuple[int, dict]:
+    request_id = _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"
+
+    def error(status: int, code: str, message: str) -> tuple[int, dict]:
+        return status, {"error": {"code": code, "message": message,
+                                  "retryable": False}, "requestId": request_id}
+
+    try:
+        user, restrictions = await _principal(binding, headers, scope="watches:write", now=now)
+    except ProductReadAuthError as failure:
+        return error(failure.status, failure.code, failure.message)
+    raw_revision = _header(headers, "If-Match")
+    if not raw_revision:
+        return error(428, "PRECONDITION_REQUIRED", "If-Match is required.")
+    revision_text = raw_revision.strip().strip('"')
+    if not revision_text.isdigit() or int(revision_text) < 1:
+        return error(400, "INVALID_REQUEST", "If-Match must contain a valid revision")
+    expected_revision = int(revision_text)
+    proof: dict = {}
+    auth, validate = _resource_auth_snapshot(binding, headers, user,
+        restrictions, now, "watches:write", proof)
+    result = await binding.batch([*auth, binding.prepare("""SELECT id,revision,
+        target_repository_id FROM update_watches WHERE id=?
+        AND billing_owner_id=? AND archived_at IS NULL""").bind(watch_id, user["id"])])
+    try:
+        validate([part.results for part in result[:len(auth)]])
+    except ProductReadAuthError as failure:
+        return error(failure.status, failure.code, failure.message)
+    rows = result[-1].results
+    watch = rows[0] if len(rows) == 1 else None
+    allowed_ids = restrictions.get("watchIds") if restrictions else None
+    if (watch is None or watch["target_repository_id"] is not None
+            or (restrictions and (not isinstance(allowed_ids, list)
+                or watch_id not in allowed_ids))):
+        return error(404, "NOT_FOUND", "Watch was not found.")
+    if int(watch["revision"]) != expected_revision:
+        return error(412, "REVISION_MISMATCH", "Watch revision is stale.")
+    try:
+        await D1WatchTransactions(binding).archive_watch(owner_id=user["id"],
+            watch_id=watch_id, expected_revision=expected_revision,
+            now=now, proof=proof)
+    except ValueError as failure:
+        return error(400, "INVALID_REQUEST", str(failure))
+    except Exception:
+        return error(412, "REVISION_MISMATCH", "Watch or authority changed.")
+    return 204, {}

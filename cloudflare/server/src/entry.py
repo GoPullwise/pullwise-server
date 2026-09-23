@@ -48,6 +48,8 @@ class Default(WorkerEntrypoint):
                 getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
                 if value.strip() and value.strip() != "*"},
         )
+        if status == 204:
+            return Response(None, status=status)
         response_headers = None
         if (status == 200 and isinstance(payload, dict)
                 and type(payload.get("revision")) is int

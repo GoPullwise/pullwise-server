@@ -182,13 +182,30 @@ revision; pending or incomplete assessment must not silently close an item.
   readers aligned. `D1WatchTransactions.archive_watch` maps a trusted local
   batch for archival, context/target revocation, active Job cancellation and
   reserved-usage release. It checks bucket consistency and leaves provider
-  attempts spent; a late result cannot publish. Product `DELETE /watches`
-  remains unmounted until request/account authorization is composed.
+  attempts spent; a late result cannot publish. Candidate product
+  `DELETE /watches/{id}` now binds Cookie/API-key scope and resource
+  restrictions inside the read and write batches for owner public watches.
+  Private/shared watch deletion remains unmapped.
   SQLite `ProductStore.archive_watch` now performs the same context/target
   revocation, active Job cancellation and reservation release inside its
   immediate transaction. A recreated stable watch scope must renew GitHub
   proof with an authorization revision above the archive revision; stale
   pre-archive proof must not restore access.
+  `D1WatchTransactions.update_public_watch` also backs candidate product
+  `PATCH /watches/{id}` for owner public watches only. Its
+  batch CASes owner account/watch/control and active limit when enabling,
+  advances semantic contextVersion only for changed interests, cancels queued
+  analysis with reservation release, and fences running claims without
+  refunding attempts. SQLite `ProductStore.update_watch` cascades to linked
+  contexts/jobs even when no discovery target exists. The HTTP PATCH/DELETE
+  paths recheck credential and user snapshots inside the write batch; a key
+  revoked after preflight rolls back. Analysis-off alone is
+  config-only and preserves saved historical judgments for reads/handling.
+  The synthetic local HTTP fixture now binds the queued analysis Job and one
+  Source context to the first watch. Candidate DELETE must atomically leave
+  `reserved=0`, cancel that Job, revoke the context, and keep provider attempts
+  and API-key last-used unchanged; the second watch remains deletable after a
+  real process restart.
   Candidate Cookie Item PATCH must enforce a trusted Origin or Referer when
   `PULLWISE_COOKIE_SAME_SITE=None`, before reading the body or touching D1.
   The Worker reads `PULLWISE_ALLOWED_ORIGINS`/`PULLWISE_APP_URL`; absent trust
@@ -212,7 +229,7 @@ revision; pending or incomplete assessment must not silently close an item.
   product rows. Usage bucket, ledger and owner-cycle attempts share one
   read-only batch. The candidate does not update API-key
   last-used metadata on every GET; define a bounded policy before migration.
-  Its read-only health checks presence of the 19 D1 tables required by
+  Its read-only health checks presence of the 21 D1 tables required by
   currently routed endpoints; it is not a full schema/migration readiness gate.
   Its Wrangler config has no cron/public route, uses a synthetic `remote: false`
   D1 ID, and must not be deployed. Sync exact Server modules into its ignored

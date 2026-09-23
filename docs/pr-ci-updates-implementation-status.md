@@ -1767,3 +1767,48 @@ The expanded selection now includes `test_source_assessment_persistence.py`
 to protect design 02's saved historical judgment behavior and passes **659
 tests, 68 subtests** after the SQLite archive cascade. This remains local
 Python 3.13 evidence only.
+
+## Public watch update transaction groundwork (2026-09-23 continuation)
+
+`D1WatchTransactions.update_public_watch` now handles trusted public-watch
+configuration changes without a product route. Initial missing-method tests
+failed first. D1/SQLite mapping tests cover A→B→A interests with monotonic
+contextVersion, analysis-only config revision, queued reservation release,
+and a running Job whose late publication is rejected while its attempt stays
+spent. SQLite `ProductStore.update_watch` was also changed to cascade to
+watch-linked contexts and queued Jobs when no discovery target exists; a
+failing parity test preceded that fix. Focused watch/ProductStore/discovery
+verification passed **97 tests, 5 subtests**. The isolated local workerd/D1
+driver passed A→B→A, queued release and restart under fresh
+`server-map-watch-update-state`; port 8796 was stopped. Public upstream
+resolution, request authorization, product PATCH, full account runtime and
+remote CF2 remain open.
+
+## Candidate public-watch PATCH and DELETE (2026-09-23 continuation)
+
+The local Server Worker now routes owner public-watch PATCH and DELETE. The
+initial route tests failed at 404; focused Cloudflare HTTP/product/watch
+tests passed **52 tests** after composition. API-key revocation immediately
+before each write batch rolls back. PATCH requires If-Match and emits revision
+ETag; DELETE requires If-Match, reads no body, atomically cancels linked work
+and returns 204. Cookie writes honor SameSite=None trusted Origin. The real
+local workerd/D1 watch-only driver passed valid/stale PATCH, untrusted Origin,
+DELETE and process restart in `server-http-watch-patch-state`. Its first full
+driver run timed out during local cold start, and one retry hit a transient
+ProxyWorker connection loss; watch-only retries passed after readiness. The
+fixture's short Source auth lease expired during this delay, so the full
+Source/Item HTTP driver was not claimed for this state. No remote Cloudflare,
+cron, live GitHub, production credentials or Jev were enabled. Public create,
+private/shared watch writes and full account lifecycle remain open.
+The latest current-target Server selection after the candidate public-watch
+routes passes **670 tests, 68 subtests** locally. The latest visible remote
+Server CI is still run 35848982912 at the older origin commit; it fails before
+tests at retired Worker checkout because these local changes have not been
+pushed. Web Actions remain empty and its `output/` directory is untouched.
+The refreshed synthetic HTTP fixture linked its first watch to the queued
+analysis Job and a Source context. Two watch-only DELETE runs separated by a
+real restart passed in `server-http-watch-cascade-state`. Direct read-only
+inspection of that local D1 file found `(active watches, reserved,
+sync-job state, Source accessible, provider attempts, API-key last-used)` =
+`(0, 0, cancelled, 0, 0, NULL)`. The full HTTP driver was not re-claimed on
+this state after its short Source authorization lease expired.

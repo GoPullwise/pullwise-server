@@ -5,6 +5,7 @@ import hmac
 import json
 import sqlite3
 from contextlib import closing
+import pytest
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
 from test_cloudflare_account_adapter import D1ShapedSQLite
@@ -117,6 +118,16 @@ def test_health_rejects_missing_repository_service_table_for_job_reads(tmp_path)
     with fixture.store._immediate() as db:
         db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
         db.execute("DROP TABLE repository_services")
+    status, payload = _get_health(D1ShapedSQLite(fixture.store))
+    assert status == 503 and payload["ok"] is False
+
+
+@pytest.mark.parametrize("table", ["processing_controls", "discovery_targets"])
+def test_health_rejects_missing_watch_write_table(tmp_path, table):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    with fixture.store._immediate() as db:
+        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        db.execute(f'DROP TABLE "{table}"')
     status, payload = _get_health(D1ShapedSQLite(fixture.store))
     assert status == 503 and payload["ok"] is False
 

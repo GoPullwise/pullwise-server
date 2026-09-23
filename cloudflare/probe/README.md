@@ -3,10 +3,11 @@
 The Server mapping has a separate synthetic `verify_watch_mapping.py` driver.
 After regenerating `src/server_fixture.py` with `PYTHONPATH` set to the Server
 root, run local workerd on port 8796 with a fresh
-`.wrangler/server-map-watch-history-state`, then run the driver. Stop and restart
+`.wrangler/server-map-watch-update-state`, then run the driver. Stop and restart
 workerd with the same state and run `verify_watch_mapping.py --after-restart`.
 It exercises trusted public-watch D1 creation, archive cancellation and
-reserved-usage release, plus retention of a saved judgment after a config-only
+reserved-usage release, public-watch config A→B→A update and queued release,
+plus retention of a saved judgment after a config-only
 analysis-off change and withdrawal after archiving its secondary watch. It
 never calls GitHub or Jev. The
 probe config has no cron trigger.

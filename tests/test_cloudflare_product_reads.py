@@ -199,6 +199,127 @@ def test_watch_detail_matches_store_and_hides_out_of_scope_watch(tmp_path):
         {"Authorization": f"Bearer {TOKEN}"}, fixture.now)[0] == 404
 
 
+def test_public_watch_patch_uses_if_match_and_never_enqueues_analysis(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write",))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    body = json.dumps({"interests": ["database"], "analysisEnabled": True}).encode()
+
+    async def read_body():
+        return body
+
+    async def patch(revision, headers=None):
+        return await handle_http_request(method="PATCH",
+            path=f"/api/v1/watches/{watch['id']}",
+            headers={"Cookie": "pw_session=session-local", "If-Match": str(revision),
+                     "Content-Length": str(len(body)), **(headers or {})},
+            read_body=read_body, binding=binding, creem_secret="",
+            configured_products={}, now=fixture.now)
+
+    status, updated = asyncio.run(patch(watch["revision"]))
+    assert status == 200 and updated["contextVersion"] == 2
+    assert updated["analysisEnabled"] is True
+    assert asyncio.run(patch(watch["revision"]))[0] == 412
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='analyze_source'").fetchone()[0] == 1
+
+
+def test_public_watch_patch_rolls_back_when_api_key_revoked_before_write(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write",))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE api_keys SET revoked_at=? WHERE id='key-local'", (fixture.now,))
+
+    binding.before_batch = revoke_before_write
+    body = b'{"analysisEnabled":true}'
+
+    async def read_body():
+        return body
+
+    status, payload = asyncio.run(handle_http_request(method="PATCH",
+        path=f"/api/v1/watches/{watch['id']}",
+        headers={"Authorization": f"Bearer {TOKEN}", "If-Match": "1",
+                 "Content-Length": str(len(body))}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+    assert status == 412 and payload["error"]["code"] == "REVISION_MISMATCH"
+    assert fixture.store.get_watch(watch["id"])["analysisEnabled"] is False
+    assert fixture.store.get_watch(watch["id"])["revision"] == 1
+
+
+def test_public_watch_delete_revokes_linked_context_and_releases_job(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write",))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'", (watch["id"],))
+    binding = D1ShapedSQLite(fixture.store)
+
+    async def no_body():
+        raise AssertionError("DELETE must not read request body")
+
+    status, payload = asyncio.run(handle_http_request(method="DELETE",
+        path=f"/api/v1/watches/{watch['id']}",
+        headers={"Cookie": "pw_session=session-local", "If-Match": str(watch["revision"])},
+        read_body=no_body, binding=binding, creem_secret="",
+        configured_products={}, now=fixture.now))
+    assert status == 204 and payload == {}
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT accessible FROM source_contexts WHERE source_id='1'").fetchone()[0] == 0
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 0
+
+
+def test_public_watch_delete_rolls_back_after_key_revocation(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write",))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'", (watch["id"],))
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE api_keys SET revoked_at=? WHERE id='key-local'", (fixture.now,))
+
+    binding.before_batch = revoke_before_write
+
+    async def no_body():
+        raise AssertionError("DELETE must not read body")
+
+    status, payload = asyncio.run(handle_http_request(method="DELETE",
+        path=f"/api/v1/watches/{watch['id']}",
+        headers={"Authorization": f"Bearer {TOKEN}", "If-Match": "1"},
+        read_body=no_body, binding=binding, creem_secret="",
+        configured_products={}, now=fixture.now))
+    assert status == 412 and payload["error"]["code"] == "REVISION_MISMATCH"
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT archived_at FROM update_watches WHERE id=?", (watch["id"],)).fetchone()[0] is None
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "queued"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 1
+
+
 def test_source_read_rechecks_api_key_in_the_source_snapshot(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     _seed_auth(fixture, scopes=("items:read",))
