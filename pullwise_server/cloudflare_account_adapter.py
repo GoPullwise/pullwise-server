@@ -66,6 +66,21 @@ class D1AccountTransactions:
             expected_events_json=events, next_events_json=next_events_json,
             expected_pending_json=pending, next_pending_json=next_pending_json, now=now))
 
+    async def apply_webhook_receipt(self, *, receipt_event_id: str, owner_id: str,
+                                    expected_revision: int, next_account_json: str,
+                                    next_events_json: str, next_pending_json: str,
+                                    now: int) -> Any:
+        account = await self._snapshot(owner_id)
+        events = await self._state_snapshot("billingEvents")
+        pending = await self._state_snapshot("billingPendingUpdates")
+        commands = mapping.apply_webhook_receipt(
+            receipt_event_id=receipt_event_id, owner_id=owner_id,
+            expected_revision=expected_revision, account_snapshot=account,
+            next_account_json=next_account_json, expected_events_json=events,
+            next_events_json=next_events_json, expected_pending_json=pending,
+            next_pending_json=next_pending_json, now=now)
+        return await execute_d1_batch(self.binding, commands)
+
     async def refresh_account_entitlement(self, *, owner_id: str,
                                           expected_revision: int, now: int) -> Any:
         snapshot = await self._snapshot(owner_id)

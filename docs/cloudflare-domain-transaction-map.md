@@ -98,6 +98,23 @@ increment reserved usage. This matches the local reference's charge-key
 identity for this slice; scheduling generation and cancellation interactions
 remain unconnected.
 
+The next local boundary adds a verified webhook receipt table. The isolated
+Worker reads actual raw HTTP bytes and a signature header, uses the same pure
+HMAC check as the local billing module, and persists a normalized synthetic
+update before acknowledging. Duplicate identical bytes keep one receipt;
+invalid signatures and same-ID conflicting bytes cannot overwrite it.
+Applying a pending receipt marks it applied in the same D1 batch as the
+trusted user, billingEvents, billingPendingUpdates and owner-revision change.
+This is local protocol evidence only: the real Creem mapper, secret binding,
+checkout lifecycle and receipt retention are not wired into the Worker.
+
+A first-generation enqueue command now freezes the current source/context
+revisions and trusted trigger into a queued job. It computes global and owner
+active queue caps inside the batch. A denied admission releases the new
+reservation and marks the context throttled in that same batch. Generation
+reuse, supersession, cancellation/revocation, stale eligibility and due-job
+selection still require target-runtime mapping.
+
 The command builders now live in Server `cloudflare_d1_mapping.py`, with
 `cloudflare_account_adapter.py` providing async snapshot reads and one D1
 `batch()` call per guarded write. The isolated probe packages the same Server

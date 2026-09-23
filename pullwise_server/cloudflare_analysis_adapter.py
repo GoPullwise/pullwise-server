@@ -65,6 +65,20 @@ class D1AnalysisTransactions:
             charge_key=charge_key, reservation_id=reservation_id, module=module, now=now)
         return await execute_d1_batch(self.binding, commands)
 
+    async def enqueue_first_analysis_job(self, *, job_id: str, logical_key: str,
+                                         source_id: str, context_id: str,
+                                         reservation_id: str, trigger: str, now: int,
+                                         global_active_limit: int,
+                                         owner_active_limit: int) -> dict:
+        commands = mapping.enqueue_first_analysis_job(
+            job_id=job_id, logical_key=logical_key, source_id=source_id,
+            context_id=context_id, reservation_id=reservation_id,
+            trigger=trigger, now=now, global_active_limit=global_active_limit,
+            owner_active_limit=owner_active_limit)
+        await execute_d1_batch(self.binding, commands)
+        row = await self.binding.prepare("SELECT id FROM background_jobs WHERE id=?").bind(job_id).first()
+        return {"rejected": row is None}
+
     async def claim(self, *, job_id: str, token: str, now: int,
                     global_monthly_limit: int, owner_rolling_limit: int,
                     global_rolling_limit: int) -> Any:

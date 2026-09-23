@@ -999,6 +999,33 @@ REST/proxy cases on local Workers. Full source-result production orchestration,
 real provider quality/bounded-exit and live-ingestion readiness remain separate
 gates; P5b remains deferred.
 
+## D1 signed receipt and first enqueue continuation (2026-09-23)
+
+The local Worker now reads raw HTTP request bytes and a signature header for
+a synthetic Creem event. Server `billing.py` and Worker code share the same
+pure HMAC verifier. An accepted normalized update is stored as a D1 receipt
+before ACK; exact duplicates retain one record, invalid signatures and
+same-ID changed bodies reject. Applying a pending receipt atomically writes
+the trusted account/event/pending state, increments the owner revision and
+marks the receipt applied. Tests cover rollback on missing receipt and replay.
+The real Creem mapper/handler, production secret binding, payment lifecycle,
+encrypted account codec and receipt retention are still not connected.
+
+Added a first-generation trusted analysis enqueue command. It validates
+source/context, current permission/entitlement and reservation, then freezes
+revisions in a queued job. Owner/global active caps are computed inside the
+same D1 batch. Cap denial creates no job and atomically releases the new
+reservation and marks the context throttled. Local SQLite and workerd/D1
+admission/denial plus restart replay passed. It does not handle existing
+logical-key generations, supersession, stale-admission release or due-job
+selection; the real scheduler remains unwired.
+
+Targeted Server verification for D1 mapping/adapters and billing contracts,
+routes and webhooks reported **145 passed, 15 subtests**. Server remote CI still
+shows run 35824307016 failing at the retired Gateway Worker checkout before
+tests; this local commit is not pushed. Web remains unchanged with only its
+untracked `output/` screenshots.
+
 ## D1 owner-cycle budget, reservation and failure continuation (2026-09-23)
 
 Added `period_start` to the local entitlement authority. The owner monthly

@@ -481,3 +481,23 @@ def test_d1_released_charge_key_can_reserve_again_once_without_losing_usage(tmp_
         execute(f.store, m.reserve_released_processing_unit(**args))
     with closing(f.store.connect()) as db:
         assert tuple(db.execute("SELECT used,reserved FROM processing_usage_buckets").fetchone()) == (0, 1)
+
+
+@pytest.mark.parametrize("owner_limit,admitted", [(2, True), (1, False)])
+def test_d1_first_analysis_enqueue_enforces_owner_cap_and_releases_rejection(tmp_path, owner_limit, admitted):
+    m = mapping()
+    f, _, frozen = seed(tmp_path / "domain.db")
+    f.source("3", "New source")
+    execute(f.store, m.reserve_first_processing_unit(owner_id="owner", account_snapshot=frozen,
+        account_revision=1, charge_key="third-charge", reservation_id="third-reservation",
+        module="pr", now=f.now))
+    execute(f.store, m.enqueue_first_analysis_job(job_id="job-third",
+        logical_key="analyze_source:third", source_id="3", context_id="repo:repo:pr",
+        reservation_id="third-reservation", trigger="scheduled_discovery", now=f.now,
+        global_active_limit=2, owner_active_limit=owner_limit))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE id='job-third'").fetchone()[0] == int(admitted)
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='third-charge'").fetchone()[0] == ("reserved" if admitted else "released")
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == (2 if admitted else 1)
+        if not admitted:
+            assert db.execute("SELECT processing_status FROM source_contexts WHERE source_id='3'").fetchone()[0] == "throttled"

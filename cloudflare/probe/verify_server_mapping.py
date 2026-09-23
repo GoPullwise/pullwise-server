@@ -1,20 +1,32 @@
 """Local D1 test driver. No SQL/fixture upload or external-provider requests."""
 import argparse
+import hashlib
+import hmac
 import json
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 
 
-def call(path, method="POST"):
+WEBHOOK_SECRET = b"synthetic-webhook-secret"
+WEBHOOK_RAW = b'{"id":"evt-local","eventType":"subscription.paid"}'
+
+
+def call(path, method="POST", *, raw_body=None, headers=None):
     request = urllib.request.Request("http://127.0.0.1:8796/server-map/" + path, method=method,
-                                     data=b"{}" if method == "POST" else None)
+                                     data=(raw_body if raw_body is not None else b"{}") if method == "POST" else None,
+                                     headers=headers or {})
     try:
         # A fresh local Python Worker/D1 import can cold-start slowly.
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=90) as response:
             return response.status, json.load(response)
     except urllib.error.HTTPError as response:
         return response.code, json.load(response)
+
+
+def webhook(path="webhook-receipt", *, raw=WEBHOOK_RAW, valid=True):
+    signature = hmac.new(WEBHOOK_SECRET, raw, hashlib.sha256).hexdigest() if valid else "bad"
+    return call(path, raw_body=raw, headers={"creem-signature": signature})
 
 
 def main():
@@ -26,6 +38,8 @@ def main():
         assert status == 200 and state["used"] == 1 and state["attempts"] == 1 and state["results"] == 1, state
         assert state["accountRevision"] == 4 and state["accountDirty"] == 0, state
         assert state["eventA"] == state["eventB"] == state["originalPaymentFactPreserved"] == 1, state
+        assert state["webhookReceipts"] == 1, state
+        assert webhook()[0] == 200
         assert call("publish")[0] == 409
         print("Server mapping restart/replay passed on local D1")
         return
@@ -41,6 +55,15 @@ def main():
     state = call("state", "GET")[1]
     assert state["reserved"] == 2 and state["limitValue"] == 5000, state
     assert state["secondReservation"] == state["encryptedToken"] == 1, state
+    assert call("enqueue-first")[1] == {"rejected": False}
+    state = call("state", "GET")[1]
+    assert state["jobCount"] == 2 and state["reserved"] == 2, state
+    assert call("reset")[0] == 200
+    assert call("reserve-first")[0] == 200
+    assert call("enqueue-denied")[1] == {"rejected": True}
+    state = call("state", "GET")[1]
+    assert state["jobCount"] == 1 and state["reserved"] == 1, state
+    assert state["secondLedgerState"] == "released" and state["thirdSourceStatus"] == "throttled", state
     assert call("reset")[0] == 200
     assert call("claim")[0] == 200
     status, reuse = call("reserve-charge")
@@ -98,6 +121,13 @@ def main():
     assert call("claim-reconciled")[0] == 200
     assert call("publish-reconciled")[0] == 200
     assert call("reset")[0] == 200
+    assert webhook()[0] == 200
+    assert call("webhook-apply")[0] == 200
+    assert call("webhook-apply")[0] == 409
+    state = call("state", "GET")[1]
+    assert state["webhookReceipts"] == state["appliedReceipts"] == 1, state
+    assert state["accountRevision"] == 2 and state["accountDirty"] == 1, state
+    assert call("reset")[0] == 200
     assert call("event-a")[0] == 200
     assert call("event-a")[0] == 409
     assert call("claim")[0] == 409
@@ -112,6 +142,11 @@ def main():
     state = call("state", "GET")[1]
     assert state["accountRevision"] == 4 and state["accountDirty"] == 0
     assert state["eventA"] == state["eventB"] == state["originalPaymentFactPreserved"] == 1
+    assert webhook(valid=False)[0] == 409
+    assert webhook()[0] == 200
+    assert webhook()[0] == 200
+    assert webhook("webhook-conflict", raw=b'{"id":"evt-local","eventType":"subscription.canceled"}')[0] == 409
+    assert call("state", "GET")[1]["webhookReceipts"] == 1
     print("Actual Server schema: combined claim/budget, payment-fact revision fencing and atomic publication passed on local D1")
 
 

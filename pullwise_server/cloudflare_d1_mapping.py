@@ -20,6 +20,14 @@ def schema():
         ("""CREATE TABLE IF NOT EXISTS d1_claim_authority(
             job_id TEXT PRIMARY KEY, account_revision INTEGER NOT NULL CHECK(account_revision>=1)
         )""", ()),
+        ("""CREATE TABLE IF NOT EXISTS billing_webhook_receipts(
+            event_id TEXT PRIMARY KEY, raw_sha256 TEXT NOT NULL,
+            update_json TEXT NOT NULL, received_at INTEGER NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('pending','applied'))
+        )""", ()),
+        ("""CREATE TABLE IF NOT EXISTS d1_enqueue_decision(
+            job_id TEXT PRIMARY KEY, admit INTEGER NOT NULL CHECK(admit IN (0,1))
+        )""", ()),
     ]
 
 
@@ -77,6 +85,24 @@ def _json_path(identifier):
     if not isinstance(identifier, str) or not identifier:
         raise ValueError("non-empty account/event identity required")
     return '$.' + json.dumps(identifier, ensure_ascii=False)
+
+
+def record_billing_webhook_receipt(*, event_id, raw_sha256, update_json, now):
+    """Store one already verified and mapped Creem update before HTTP ACK."""
+    update = json.loads(update_json)
+    if (not isinstance(event_id, str) or not event_id
+            or not isinstance(raw_sha256, str) or len(raw_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in raw_sha256)
+            or not isinstance(update, dict) or update.get("eventId") != event_id):
+        raise ValueError("invalid mapped webhook receipt")
+    return [
+        ("""INSERT OR IGNORE INTO billing_webhook_receipts
+            (event_id,raw_sha256,update_json,received_at,state)
+            VALUES (?,?,?,?,'pending')""", (event_id, raw_sha256, update_json, now)),
+        _check("""EXISTS(SELECT 1 FROM billing_webhook_receipts WHERE event_id=?
+            AND raw_sha256=? AND update_json=?)""", (event_id, raw_sha256, update_json)),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
 
 
 def stage_account_write(*, owner_id, expected_revision, account_snapshot,
@@ -151,6 +177,31 @@ def stage_billing_reconciliation(*, owner_id, expected_revision, account_snapsho
             (next_pending_json, now, expected_pending_json)), _changed(),
         ("""UPDATE account_entitlement_authority SET revision=revision+1,dirty=1,valid_until=?
             WHERE owner_id=? AND revision=?""", (now, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def apply_webhook_receipt(*, receipt_event_id, owner_id, expected_revision,
+                          account_snapshot, next_account_json, expected_events_json,
+                          next_events_json, expected_pending_json, next_pending_json, now):
+    """Settle a pending verified receipt with its trusted billing state change."""
+    before_events = json.loads(expected_events_json)
+    after_events = json.loads(next_events_json)
+    if (not isinstance(receipt_event_id, str) or not receipt_event_id
+            or not isinstance(before_events, dict) or not isinstance(after_events, dict)
+            or receipt_event_id in before_events or receipt_event_id not in after_events):
+        raise ValueError("receipt must add its billing event record")
+    state_commands = stage_billing_reconciliation(
+        owner_id=owner_id, expected_revision=expected_revision,
+        account_snapshot=account_snapshot, next_account_json=next_account_json,
+        expected_events_json=expected_events_json, next_events_json=next_events_json,
+        expected_pending_json=expected_pending_json, next_pending_json=next_pending_json, now=now)
+    return [
+        _check("""EXISTS(SELECT 1 FROM billing_webhook_receipts
+            WHERE event_id=? AND state='pending')""", (receipt_event_id,)),
+        *state_commands[:-1],
+        ("""UPDATE billing_webhook_receipts SET state='applied'
+            WHERE event_id=? AND state='pending'""", (receipt_event_id,)), _changed(),
         ("DELETE FROM d1_command_guard", ()),
     ]
 
@@ -282,6 +333,73 @@ def confirm_existing_reservation(*, charge_key, reservation_id, owner_id, period
         _check("""EXISTS(SELECT 1 FROM processing_usage_ledger WHERE charge_key=?
             AND reservation_id=? AND billing_owner_id=? AND period=? AND module=? AND state=?)""",
             (charge_key, reservation_id, owner_id, period, module, state)),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def enqueue_first_analysis_job(*, job_id, logical_key, source_id, context_id,
+                               reservation_id, trigger, now,
+                               global_active_limit, owner_active_limit):
+    """First generation only: queue within caps or release/throttle atomically."""
+    if (not all(isinstance(value, str) and value for value in
+                (job_id, logical_key, source_id, context_id, reservation_id))
+            or trigger not in {"github_event", "scheduled_discovery", "initial_backfill", "context_refresh"}
+            or any(type(value) is not int or value < 1 for value in
+                   (global_active_limit, owner_active_limit))):
+        raise ValueError("invalid trusted analysis enqueue")
+    admitted = "EXISTS(SELECT 1 FROM d1_enqueue_decision WHERE job_id=? AND admit=1)"
+    return [
+        _check("""EXISTS(SELECT 1 FROM source_records s
+            JOIN source_contexts c ON c.source_id=s.source_id
+            JOIN processing_usage_ledger ledger ON ledger.reservation_id=?
+            JOIN account_entitlement_authority authority ON authority.owner_id=c.billing_owner_id
+            WHERE s.source_id=? AND c.context_id=? AND s.processing_mode='model'
+            AND s.lifecycle='active' AND s.latest_version IS NOT NULL
+            AND c.accessible=1 AND c.analysis_enabled=1 AND c.context_stale=0
+            AND c.authorization_valid_until>=? AND ledger.state='reserved'
+            AND ledger.billing_owner_id=c.billing_owner_id AND ledger.period=authority.period
+            AND authority.dirty=0 AND authority.period_start<=? AND authority.valid_until>?)""",
+            (reservation_id, source_id, context_id, now, now, now)),
+        _check("""NOT EXISTS(SELECT 1 FROM background_jobs
+            WHERE id=? OR logical_key=?)""", (job_id, logical_key)),
+        ("""INSERT INTO d1_enqueue_decision(job_id,admit)
+            SELECT ?,CASE WHEN
+                (SELECT COUNT(*) FROM background_jobs WHERE job_type='analyze_source'
+                    AND state IN ('queued','running','retry_wait'))<?
+                AND (SELECT COUNT(*) FROM background_jobs WHERE job_type='analyze_source'
+                    AND billing_owner_id=c.billing_owner_id
+                    AND state IN ('queued','running','retry_wait'))<?
+                THEN 1 ELSE 0 END
+            FROM source_contexts c WHERE c.source_id=? AND c.context_id=?""",
+            (job_id, global_active_limit, owner_active_limit, source_id, context_id)), _changed(),
+        ("""INSERT INTO background_jobs
+            (id,job_type,logical_key,generation,trusted_trigger,requester_id,
+             billing_owner_id,source_id,context_id,reservation_id,source_revision,
+             source_version_id,context_version,configuration_revision,authorization_revision,
+             state,attempt,next_attempt_at,created_at,updated_at)
+            SELECT ?,'analyze_source',?,1,?,NULL,c.billing_owner_id,s.source_id,c.context_id,?,
+                s.source_revision,s.latest_version,c.context_version,c.configuration_revision,
+                c.authorization_revision,'queued',0,NULL,?,?
+            FROM source_records s JOIN source_contexts c ON c.source_id=s.source_id
+            WHERE s.source_id=? AND c.context_id=? AND
+                EXISTS(SELECT 1 FROM d1_enqueue_decision WHERE job_id=? AND admit=1)""",
+            (job_id, logical_key, trigger, reservation_id, now, now, source_id, context_id, job_id)),
+        _check("changes()=1 OR NOT " + admitted, (job_id,)),
+        ("""UPDATE processing_usage_buckets SET reserved=reserved-1,updated_at=?
+            WHERE (billing_owner_id,period)=(SELECT billing_owner_id,period
+                FROM processing_usage_ledger WHERE reservation_id=?)
+            AND metric='intelligent_processing' AND reserved>=1
+            AND EXISTS(SELECT 1 FROM d1_enqueue_decision WHERE job_id=? AND admit=0)""",
+            (now, reservation_id, job_id)), _check("changes()=1 OR " + admitted, (job_id,)),
+        ("""UPDATE processing_usage_ledger SET state='released',finished_at=?
+            WHERE reservation_id=? AND state='reserved'
+            AND EXISTS(SELECT 1 FROM d1_enqueue_decision WHERE job_id=? AND admit=0)""",
+            (now, reservation_id, job_id)), _check("changes()=1 OR " + admitted, (job_id,)),
+        ("""UPDATE source_contexts SET processing_status='throttled',updated_at=?
+            WHERE source_id=? AND context_id=?
+            AND EXISTS(SELECT 1 FROM d1_enqueue_decision WHERE job_id=? AND admit=0)""",
+            (now, source_id, context_id, job_id)), _check("changes()=1 OR " + admitted, (job_id,)),
+        ("DELETE FROM d1_enqueue_decision WHERE job_id=?", (job_id,)), _changed(),
         ("DELETE FROM d1_command_guard", ()),
     ]
 

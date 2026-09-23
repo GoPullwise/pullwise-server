@@ -104,3 +104,20 @@ def test_async_reservation_reuses_active_charge_and_reopens_released_charge(tmp_
     with pytest.raises(ValueError, match="CHARGE_KEY_CONFLICT"):
         asyncio.run(adapter.reserve_processing_unit(owner_id="owner", charge_key="charge",
             reservation_id="another", module="ci", now=fixture.now))
+
+
+def test_async_enqueue_reports_cap_rejection_after_atomic_reservation_release(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    fixture.source("3", "New source")
+    binding = D1ShapedSQLite(fixture.store)
+    adapter = D1AnalysisTransactions(binding)
+    asyncio.run(adapter.reserve_processing_unit(owner_id="owner", charge_key="third",
+        reservation_id="third-reservation", module="pr", now=fixture.now))
+    result = asyncio.run(adapter.enqueue_first_analysis_job(job_id="job-third",
+        logical_key="analyze_source:third", source_id="3", context_id="repo:repo:pr",
+        reservation_id="third-reservation", trigger="scheduled_discovery", now=fixture.now,
+        global_active_limit=1000, owner_active_limit=1))
+    assert result == {"rejected": True}
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='third'").fetchone()[0] == "released"
+        assert db.execute("SELECT COUNT(*) FROM background_jobs").fetchone()[0] == 1

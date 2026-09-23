@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import hashlib
-import hmac
 import math
 import re
 import time
@@ -13,6 +12,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from . import db, system_config
+from .creem_signature import timing_safe_hex_equal, verify_creem_signature
 
 
 class BillingConfigurationError(RuntimeError):
@@ -884,18 +884,7 @@ def creem_api_base_url() -> str:
 
 
 def verify_creem_webhook(raw_body: bytes, signature: str | None) -> bool:
-    secret = env("PULLWISE_CREEM_WEBHOOK_SECRET")
-    if not secret or not signature:
-        return False
-    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    return timing_safe_hex_equal(expected, signature.strip())
-
-
-def timing_safe_hex_equal(expected: str, actual: str) -> bool:
-    try:
-        return hmac.compare_digest(bytes.fromhex(expected), bytes.fromhex(actual))
-    except ValueError:
-        return False
+    return verify_creem_signature(raw_body, signature, env("PULLWISE_CREEM_WEBHOOK_SECRET"))
 
 
 def dict_payload(value: object) -> dict:

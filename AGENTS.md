@@ -51,6 +51,17 @@ revision; pending or incomplete assessment must not silently close an item.
   with a new reservation only for the same owner/module, while updating the
   current period bucket without resetting usage. Both paths remain local
   mapping evidence until the real scheduler is connected.
+- The Server-owned local D1 webhook receipt verifies the raw request bytes
+  with the same Creem HMAC helper as `billing.py`, then stores a normalized
+  trusted update before ACK. Applying that receipt marks it applied in the
+  same batch as users, billingEvents, pending updates and owner revision.
+  The probe uses a synthetic secret and update; real Creem mapping/key binding
+  and receipt retention remain unconnected.
+- First-generation D1 analysis enqueue computes owner/global active caps in
+  one batch. On cap rejection, it releases the new reservation and marks the
+  source context throttled without creating a job. Existing-generation reuse,
+  supersession, stale-admission release and due-job selection still need
+  mapping before a real Cloudflare scheduler can run.
 - The real Creem handler mutates in-memory users, billingEvents and pending
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this

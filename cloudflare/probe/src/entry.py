@@ -45,6 +45,7 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_d1_batch import execute_d1_batch
         from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
         from pullwise_server.cloudflare_analysis_adapter import D1AnalysisTransactions
+        from pullwise_server.cloudflare_webhook_receipts import D1WebhookReceipts
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
         if request.method == 'GET' and name == 'state':
@@ -53,6 +54,11 @@ class Default(WorkerEntrypoint):
                 (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved,
                 (SELECT limit_value FROM processing_usage_buckets LIMIT 1) AS limitValue,
                 (SELECT COUNT(*) FROM processing_usage_ledger WHERE charge_key='probe-second') AS secondReservation,
+                (SELECT COUNT(*) FROM billing_webhook_receipts) AS webhookReceipts,
+                (SELECT COUNT(*) FROM billing_webhook_receipts WHERE state='applied') AS appliedReceipts,
+                (SELECT COUNT(*) FROM background_jobs) AS jobCount,
+                (SELECT state FROM processing_usage_ledger WHERE charge_key='probe-second') AS secondLedgerState,
+                (SELECT processing_status FROM source_contexts WHERE source_id='3') AS thirdSourceStatus,
                 (SELECT reservation_id FROM processing_usage_ledger WHERE charge_key='charge') AS chargeReservationId,
                 (SELECT json_extract(value,'$.githubAccessToken.__encrypted')='pullwise-state-secret-v1'
                     FROM app_state,json_each(payload) WHERE name='users' AND key='owner') AS encryptedToken,
@@ -171,12 +177,52 @@ class Default(WorkerEntrypoint):
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)
+        elif name in {'enqueue-first', 'enqueue-denied'}:
+            try:
+                result = await D1AnalysisTransactions(self.env.DB).enqueue_first_analysis_job(
+                    job_id='job-third', logical_key='analyze_source:third', source_id='3',
+                    context_id='repo:repo:pr', reservation_id='probe-second-reservation',
+                    trigger='scheduled_discovery', now=DATA['claim']['now'],
+                    global_active_limit=2, owner_active_limit=1 if name == 'enqueue-denied' else 2)
+                return Response.json(result)
+            except Exception:
+                return Response.json({'error': 'rejected'}, status=409)
         elif name == 'reserve-charge':
             try:
                 result = await D1AnalysisTransactions(self.env.DB).reserve_processing_unit(
                     owner_id='owner', charge_key='charge', reservation_id='reopened-reservation',
                     module='pr', now=DATA['claim']['now'])
                 return Response.json({'committed': True, 'reservation': result})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name in {'webhook-receipt', 'webhook-bad', 'webhook-conflict'}:
+            secret = 'synthetic-webhook-secret'
+            try:
+                length = request.headers.get('content-length')
+                if not length or not length.isdigit() or int(length) > 65536:
+                    return Response.json({'committed': False}, status=413)
+                body = await request.bytes()
+                raw = body if isinstance(body, bytes) else body.to_bytes()
+                if len(raw) > 65536:
+                    return Response.json({'committed': False}, status=413)
+                event = json.loads(raw)
+                if not isinstance(event, dict):
+                    return Response.json({'committed': False}, status=400)
+                await D1WebhookReceipts(self.env.DB).record_signed_update(
+                    raw_body=raw, signature=request.headers.get('creem-signature'),
+                    secret=secret, normalized_update={"eventId": event.get('id'),
+                        "customerId": "synthetic-customer"}, now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'webhook-apply':
+            try:
+                await D1AccountTransactions(self.env.DB).apply_webhook_receipt(
+                    receipt_event_id='evt-local', owner_id='owner', expected_revision=1,
+                    next_account_json=DATA['claim']['account_snapshot'],
+                    next_events_json='{"event_fixture":{"status":"processed"},"evt-local":{"applied":true}}',
+                    next_pending_json='[]', now=DATA['claim']['now'])
+                return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)
         elif name in {'retry-claim', 'terminal-claim'}:
