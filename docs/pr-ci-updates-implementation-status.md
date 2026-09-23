@@ -999,6 +999,37 @@ REST/proxy cases on local Workers. Full source-result production orchestration,
 real provider quality/bounded-exit and live-ingestion readiness remain separate
 gates; P5b remains deferred.
 
+## Persisted-account entitlement projection (2026-09-23 continuation)
+
+The local mapping's initial and refresh commands now derive plan, processing
+limit, anchored monthly period and strict validity from the frozen persisted
+users entry with Server `entitlements_for_user`/`quota_cycle_for_user`. The
+caller no longer passes those fields. The initial batch checks that its
+snapshot still matches app_state.users. `export_d1_server_fixture.py` exports
+the Server-calculated refresh batch for the isolated Worker; no tariff rules
+were copied into the probe. The processing reservation uses that account
+period and limit instead of synthetic `"period"` and 100.
+
+Test first: the changed fixture failed with the old `initialize_account`
+signature, and a missing-persisted-account test failed before the guard was
+added. Final targeted tests: 15 passed, including product entitlements.
+Local workerd/D1 `verify_server_mapping.py` and `--after-restart` passed after
+regenerating the synthetic fixture and actually stopping/restarting Wrangler;
+the process was stopped. These are local tests, not remote validation.
+
+The actual webhook mutates in-memory USERS, BILLING_EVENTS and pending
+updates under STATE_LOCK, then `persist_state` flushes them through
+`db.save_state`/`state_for_storage`. The probe does not execute that handler,
+its encryption, pending/late association or all account writers. An async
+D1 adapter still needs durable accepted-event handling, complete writer
+revision coverage, reservation bucket limit updates on upgrade and the
+remaining ProductStore transaction, REST and scheduled paths. CF2,
+production Jev and live GitHub remain gated.
+
+CI recheck: Server run 35824307016 at 300bffe failed while checking out the
+retired Gateway Worker; tests were skipped. Web Actions list was empty. No
+remote passing check is claimed.
+
 ## D1 account revision and accepted-event boundary (2026-09-23 continuation)
 
 The previous product and probe work was committed in the two independent

@@ -3,7 +3,7 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
-from test_cloudflare_server_mapping import seed, claim_args, publication_args
+from test_cloudflare_server_mapping import seed, claim_args, publication_args, mapping
 
 
 def main():
@@ -11,6 +11,8 @@ def main():
         f, job, frozen = seed(Path(directory) / "synthetic.db")
         publish = publication_args(f, job, frozen)
         claim = claim_args(f, job, frozen)
+        refresh = mapping().refresh_account_entitlement(owner_id="owner", expected_revision=3,
+            account_snapshot=frozen, now=claim["now"])
         names = ["source_records", "source_versions", "source_contexts", "assessments",
                  "source_assessment_publications", "items", "item_versions", "provider_attempts",
                  "processing_usage_buckets", "processing_usage_ledger", "background_jobs",
@@ -30,7 +32,8 @@ def main():
                         .replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1) for row in indexes if row[0] in names]
         output = Path(__file__).parents[1] / "cloudflare/probe/src/server_fixture.py"
         output.write_text("# Generated synthetic fixture; regenerate with tests/export_d1_server_fixture.py\nDATA = "
-            + repr(dict(schemas=schemas, names=names, inserts=inserts, claim=claim, publication=publish)) + "\n", encoding="utf-8")
+            + repr(dict(schemas=schemas, names=names, inserts=inserts, claim=claim,
+                        publication=publish, refresh=refresh)) + "\n", encoding="utf-8")
         print("Generated synthetic Server schema fixture")
 
 

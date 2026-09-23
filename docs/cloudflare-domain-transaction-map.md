@@ -71,6 +71,27 @@ event, change an amount/currency, or manufacture provider confirmation. A
 provider response loss is not exactly-once model execution; attempt spend is
 conservatively retained while successful processing remains charge-key guarded.
 
+## Persisted-account projection boundary
+
+Initial and refresh commands now parse the frozen persisted users entry on the
+Server side and call `entitlements_for_user(user, timestamp=now)`. They accept
+no plan, period, limit or expiry arguments; resetAt is strict validUntil. The
+generated workerd fixture includes the resulting refresh batch, so the
+isolated Worker has no copy of the tariff or monthly-cycle rules. Local tests
+cover paid expiry to free, anchored monthly cycles, an upgrade in the same
+period without clearing used/reserved counts, dirty projection and A-B-A
+revision fencing. This is still a fixture, not an account writer.
+
+The real webhook verifies the signature and delegates to
+`apply_billing_update`. It changes in-memory USERS, BILLING_EVENTS and
+BILLING_PENDING_UPDATES under STATE_LOCK; `persist_state` later writes these
+maps with `db.save_state` and `state_for_storage`. Its pending association,
+late-event audit and encryption need a designed durable boundary before the
+D1 revision commands can protect actual events. The probe does not prove
+durable webhook acknowledgment or account CAS across Worker invocations.
+ProductStore's reservation bucket limit update also needs a D1 command when
+a plan upgrades; projection alone does not alter existing bucket limits.
+
 ## Scope still requiring adaptation
 
 - Full ProductStore async reads and consistent authorization-filtered list/count

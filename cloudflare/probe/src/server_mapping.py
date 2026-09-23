@@ -41,12 +41,32 @@ def _account(job_id, frozen, revision, now):
         AND authority.period=ledger.period)""", (frozen, job_id, revision, now))
 
 
-def initialize_account(*, owner_id, plan, period, monthly_processing_limit, valid_until):
+def _projection(owner_id, account_snapshot, now):
+    # Imported only by the Server-side fixture/adapter. The isolated Worker
+    # executes exported commands and carries no second copy of billing rules.
+    from pullwise_server.entitlements import entitlements_for_user
+
+    user = json.loads(account_snapshot)
+    if not isinstance(user, dict) or user.get("id") != owner_id:
+        raise ValueError("account snapshot does not match owner")
+    entitlement = entitlements_for_user(user, timestamp=now)
+    valid_until = entitlement["resetAt"]
+    if valid_until <= now:
+        raise ValueError("expired entitlement projection")
+    return (entitlement["plan"], entitlement["period"],
+            entitlement["entitlements"]["monthlyProcessingLimit"], valid_until)
+
+
+def initialize_account(*, owner_id, account_snapshot, now):
     """Local synthetic seed after the account has been persisted; no API entrypoint."""
-    return [("""INSERT INTO account_entitlement_authority
+    plan, period, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
+    return [_check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
+        WHERE a.name='users' AND u.key=? AND u.value=?)""", (owner_id, account_snapshot)),
+        ("""INSERT INTO account_entitlement_authority
         (owner_id,revision,plan,period,monthly_processing_limit,valid_until,dirty)
         VALUES (?,1,?,?,?,?,0)""",
-        (owner_id, plan, period, monthly_processing_limit, valid_until))]
+        (owner_id, plan, period, monthly_processing_limit, valid_until)),
+        ("DELETE FROM d1_command_guard", ())]
 
 
 def _json_path(identifier):
@@ -85,13 +105,9 @@ def stage_account_event(*, owner_id, expected_revision, account_snapshot,
     ]
 
 
-def refresh_account_entitlement(*, owner_id, expected_revision, account_snapshot,
-                                plan, period, monthly_processing_limit, valid_until, now):
+def refresh_account_entitlement(*, owner_id, expected_revision, account_snapshot, now):
     """Commit a trusted entitlement calculation over the persisted account."""
-    if (plan not in {"free", "pro", "max"} or not isinstance(period, str) or not period
-            or type(monthly_processing_limit) is not int or monthly_processing_limit < 0
-            or type(valid_until) is not int or valid_until <= now):
-        raise ValueError("invalid entitlement projection")
+    plan, period, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
     return [
         _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
             account_entitlement_authority authority WHERE a.name='users' AND u.key=?

@@ -87,10 +87,7 @@ class Default(WorkerEntrypoint):
                 account_snapshot=current, next_account_json=next_value, event_id=name,
                 event_record_json='{"applied":true}', now=DATA['claim']['now'])
         elif name == 'refresh-account':
-            commands = mapping.refresh_account_entitlement(owner_id='owner', expected_revision=3,
-                account_snapshot=DATA['claim']['account_snapshot'], plan='pro', period='period',
-                monthly_processing_limit=100, valid_until=DATA['claim']['now']+30,
-                now=DATA['claim']['now'])
+            commands = DATA['refresh']
         elif name == 'edit-parent':
             commands = [("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='2'", ())]
         elif name == 'change-account':

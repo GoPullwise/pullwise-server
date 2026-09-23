@@ -22,6 +22,16 @@ revision; pending or incomplete assessment must not silently close an item.
 
 ## Current product-v1 implementation invariants
 
+- Derive the local D1 entitlement projection from the persisted storage-form
+  users entry with `entitlements_for_user` at a fixed timestamp. Use its
+  period, monthlyProcessingLimit and strict resetAt; do not copy plan rules
+  into the Worker. Paid expiry changes to free; upgrades retain period/usage.
+- The real Creem handler mutates in-memory users, billingEvents and pending
+  updates under `STATE_LOCK`; `persist_state` later flushes them through
+  `db.save_state` and `state_for_storage`. The probe event batch is not this
+  path. An async D1 adapter must cover every account writer with revision
+  changes and preserve encrypted fields, pending and late events.
+
 - `pr_followup.reconcile_thread` aggregates saved pr-followup/v3 answers inside
   the fact/result transaction. One verified thread/context has one Item; source
   publication and processing consumption still occur per comment. All six
