@@ -93,6 +93,12 @@ revision; pending or incomplete assessment must not silently close an item.
   in event-created order, one atomic settlement at a time. Account association
   must invoke/retry this trusted path; there is no cron or user route. The real
   key/HTTP handler and every other account writer still need D1 composition.
+  `cloudflare_creem_handler.accept_signed_creem_webhook` now composes the pure
+  Creem parser, verified receipt, persisted-owner match, settlement/parking
+  and dirty entitlement refresh from injected bindings and config. It rejects
+  ambiguous owners and oversized bodies; duplicate delivery can repair a
+  previously failed projection refresh. The isolated `/server-map/*` route
+  exercises only synthetic values; no product webhook route is registered.
   ACK must follow durable receipt persistence, unlike the current HTTP
   response-before-finally flush order.
 - On D1 entitlement refresh, update an existing current-period processing

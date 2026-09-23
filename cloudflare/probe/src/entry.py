@@ -49,6 +49,7 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
         from pullwise_server.cloudflare_analysis_adapter import D1AnalysisTransactions
         from pullwise_server.cloudflare_webhook_receipts import D1WebhookReceipts
+        from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
         from pullwise_server import creem_event_rules
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
@@ -224,6 +225,21 @@ class Default(WorkerEntrypoint):
                 return Response.json({'committed': False}, status=409)
         elif name == 'schedule-enable':
             commands = [("UPDATE probe_server_schedule_enabled SET enabled=1 WHERE id=1", ())]
+        elif name == 'creem-compose':
+            try:
+                length = request.headers.get('content-length')
+                if not length or not length.isdigit() or int(length) > 65536:
+                    return Response.json({'committed': False}, status=413)
+                body = await request.bytes()
+                raw = body if isinstance(body, bytes) else body.to_bytes()
+                result = await accept_signed_creem_webhook(binding=self.env.DB,
+                    raw_body=raw, signature=request.headers.get('creem-signature'),
+                    secret='synthetic-webhook-secret',
+                    configured_products={'pro': ('synthetic-pro',),
+                        'max': ('synthetic-max',)}, now=DATA['claim']['now'])
+                return Response.json(result)
+            except Exception:
+                return Response.json({'committed': False}, status=409)
         elif name in {'webhook-receipt', 'webhook-bad', 'webhook-conflict'}:
             secret = 'synthetic-webhook-secret'
             try:

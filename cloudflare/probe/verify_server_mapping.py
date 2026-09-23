@@ -13,6 +13,10 @@ WEBHOOK_RAW = (b'{"id":"evt-local","eventType":"subscription.canceled",'
                b'"object":{"id":"synthetic-sub","metadata":{"userId":"owner"}}}')
 LATER_WEBHOOK_RAW = (b'{"id":"later","eventType":"subscription.canceled",'
                      b'"object":{"id":"later-sub","customer":{"id":"customer"}}}')
+COMPOSE_WEBHOOK_RAW = (b'{"id":"evt-compose","eventType":"subscription.paid",'
+                       b'"object":{"id":"sub_fixture","status":"active",'
+                       b'"product":{"id":"synthetic-max"},'
+                       b'"metadata":{"userId":"owner","plan":"max"}}}')
 
 
 def call(path, method="POST", *, raw_body=None, headers=None):
@@ -171,6 +175,15 @@ def main():
     state = call("state", "GET")[1]
     assert state["webhookReceipts"] == state["appliedReceipts"] == 1, state
     assert state["accountRevision"] == 2 and state["accountDirty"] == 1, state
+    assert call("reset")[0] == 200
+    status, accepted = webhook("creem-compose", raw=COMPOSE_WEBHOOK_RAW)
+    assert status == 200 and accepted == {"received": True, "state": "applied", "eventId": "evt-compose"}, accepted
+    state = call("state", "GET")[1]
+    assert state["accountRevision"] == 3 and state["accountDirty"] == 0, state
+    assert state["limitValue"] == 25000 and state["appliedReceipts"] == 1, state
+    status, replay = webhook("creem-compose", raw=COMPOSE_WEBHOOK_RAW)
+    assert status == 200 and replay["state"] == "duplicate", replay
+    assert call("state", "GET")[1]["accountRevision"] == 3
     assert call("reset")[0] == 200
     assert call("event-a")[0] == 200
     assert call("event-a")[0] == 409

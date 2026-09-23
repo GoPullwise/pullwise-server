@@ -153,6 +153,11 @@ Do not treat this route as a production Creem endpoint or Server scheduler.
 The synthetic early-event path sends signed bytes through that same route,
 parks the unmatched receipt, links its account, then invokes bounded pending
 reconciliation. It leaves no cron configured and does not use a real secret.
+`/server-map/creem-compose` separately exercises the Server async Creem
+composition with a synthetic paid upgrade: raw bytes and signature enter the
+local Worker, the stored account and receipt settle, and the existing bucket
+limit refreshes without resetting usage. Exact replay does not bump revision.
+This is probe-only and is not a product webhook route.
 After `/server-map/schedule-enable`, the local Wrangler scheduled test URL
 invokes the Server async due-job selector once, then disables that probe flag.
 `wrangler.jsonc` declares no cron; the test URL invokes the handler manually

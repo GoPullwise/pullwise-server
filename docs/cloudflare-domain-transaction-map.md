@@ -62,6 +62,17 @@ as account/event/receipt changes. Replays and concurrent pending writes are
 tested. This is resumable event-driven mapping, not an enabled scheduler or a
 complete account/Creem handler.
 
+The Server package now has an async Creem composition function above these
+transactions. It takes injected raw request bytes, signature, secret, product
+ID bindings, D1 binding and time; applies the existing pure event rules;
+persists the verified receipt; resolves a unique stored owner or parks the
+event; then settles and refreshes the entitlement projection. It rejects
+oversized input and ambiguous owners. If refresh fails after settlement, the
+receipt remains applied with a dirty projection, and exact duplicate delivery
+can finish the refresh without applying payment twice. A synthetic local
+workerd HTTP route exercises this composition. The real Server HTTP route,
+configured secret and production account writes remain unconnected.
+
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching
 user entry and billingEvents entry, increments the owner revision, and marks the

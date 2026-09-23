@@ -1348,3 +1348,26 @@ the retired Worker checkout; Web Actions remain empty. Real Creem HTTP,
 secret binding, every account writer, and automatic
 trusted invocation after account association remain unconnected. No remote
 D1, cron, GitHub or Jev behavior was enabled.
+
+## Injected Creem webhook composition (2026-09-23 continuation)
+
+Added `cloudflare_creem_handler.accept_signed_creem_webhook` as a trusted
+async composition, without registering an HTTP product route. It accepts
+raw bytes, signature, secret, configured product IDs, D1 binding and time;
+enforces the 64 KiB body bound; uses the existing pure Creem normalizer;
+persists the receipt; resolves a unique stored owner or parks an unmatched
+event; settles the owner and refreshes the entitlement projection. An
+ambiguous owner leaves the receipt pending rather than modifying an arbitrary
+account. Exact replay returns duplicate without another account revision.
+If projection refresh fails after receipt settlement, the receipt stays
+applied and dirty; duplicate delivery finishes refresh without reapplying
+payment.
+
+Tests failed first because the composition module did not exist. Expanded
+billing/entitlement/D1 regression: **160 passed, 15 subtests**. The isolated
+local Python Worker `/server-map/creem-compose` path then accepted a synthetic
+signed paid upgrade through the same function, refreshed the existing D1
+bucket limit, and rejected duplicate reapplication in `verify_server_mapping.py`.
+The probe has no cron, uses `remote: false`, and was stopped. Real Creem
+secret binding, checkout/account writer coverage, product HTTP routing,
+actual Cloudflare runtime and migration gates remain open. No push or deploy.
